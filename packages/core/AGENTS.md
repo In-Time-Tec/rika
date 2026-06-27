@@ -11,9 +11,15 @@
 
 | File                          | Purpose                                                               |
 | ----------------------------- | --------------------------------------------------------------------- |
+| `src/config.ts`               | Injectable process configuration service and config errors.           |
+| `src/diagnostics.ts`          | Telemetry-free diagnostics service with live and memory layers.       |
 | `src/example-service.ts`      | Copyable Effect service and typed error example.                      |
 | `src/example-service.test.ts` | Layer replacement test showing live and fake service implementations. |
+| `src/id-generator.ts`         | Live random and deterministic sequence ID service.                    |
 | `src/index.ts`                | Package entrypoint using namespace exports.                           |
+| `src/runtime.ts`              | Runtime/layer assembly helpers for process boundaries.                |
+| `src/test-harness.ts`         | Test helper for running effects with fake core services.              |
+| `src/time.ts`                 | Clock service with live and fixed layers.                             |
 
 ## Current Standards
 
@@ -22,10 +28,12 @@
 - Use `Schema.TaggedErrorClass` for service-boundary errors.
 - Use `Effect.fn("Module.method")` for service methods and workflows.
 - Tests replace services with fake layers using the same `Service` tag.
+- Runtime execution helpers stay at process/test boundaries; package internals return `Effect` values.
 
 ## For AI Agents
 
 - Read `../../docs/effect-module-conventions.md` before adding a service.
+- Read `../../docs/runtime-and-layers.md` before changing base runtime composition.
 - Keep raw adapters out of core service interfaces unless the interface is intentionally an adapter boundary.
 - Do not introduce module-level mutable singleton state.
 
