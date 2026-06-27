@@ -4,7 +4,7 @@ import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
 import { Effect, Layer, Stream } from "effect"
-import { AgentLoop, PermissionPolicy, ToolExecutor, ToolRegistry } from "../src/index"
+import { AgentLoop, ContextResolver, PermissionPolicy, ToolExecutor, ToolRegistry } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_agent_loop")
 const workspaceId = Ids.WorkspaceId.make("workspace_agent_loop")
@@ -29,6 +29,20 @@ const makeLayer = (responses: ReadonlyArray<Provider.FakeResponse>, toolLayer = 
     ThreadProjection.layer,
     Time.fixedLayer(Common.TimestampMillis.make(1_900_000_000_000)),
     IdGenerator.sequenceLayer(1),
+    ContextResolver.fakeLayer({
+      entries: [
+        {
+          kind: "guidance",
+          source: "test",
+          reason: "agent loop test",
+          trusted: false,
+          path: "AGENTS.md",
+          content: "Test guidance",
+        },
+      ],
+      rendered: "<rika_context>Test guidance</rika_context>",
+      total_chars: 41,
+    }),
     toolLayer,
     llmLayer,
   )
@@ -62,6 +76,7 @@ describe("AgentLoop", () => {
       "thread.created",
       "turn.started",
       "message.added",
+      "context.resolved",
       "model.stream.chunk",
       "tool.call.requested",
       "tool.call.completed",
@@ -69,7 +84,10 @@ describe("AgentLoop", () => {
       "message.added",
       "turn.completed",
     ])
-    expect(result.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    expect(result.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(result.events.find((event) => event.type === "context.resolved")).toMatchObject({
+      data: { rendered: "<rika_context>Test guidance</rika_context>" },
+    })
     expect(result.events.find((event) => event.type === "tool.call.completed")).toMatchObject({
       data: { result: { status: "success", output: { echoed: { text: "hello" } } } },
     })
@@ -99,6 +117,7 @@ describe("AgentLoop", () => {
       "thread.created",
       "turn.started",
       "message.added",
+      "context.resolved",
       "model.stream.chunk",
       "message.added",
       "turn.completed",
@@ -157,6 +176,7 @@ describe("AgentLoop", () => {
       "thread.created",
       "turn.started",
       "message.added",
+      "context.resolved",
       "turn.failed",
     ])
     expect(result.events.at(-1)).toMatchObject({ type: "turn.failed", data: { error: { kind: "cancelled" } } })

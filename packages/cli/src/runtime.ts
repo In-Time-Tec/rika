@@ -1,4 +1,4 @@
-import { AgentLoop, ToolExecutor } from "@rika/agent"
+import { AgentLoop, ContextResolver, ToolExecutor } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { OpenAi, Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
@@ -34,6 +34,7 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
 
 type RuntimeError =
   | AgentLoop.RunError
+  | ContextResolver.ContextResolverError
   | Config.ConfigError
   | Database.DatabaseError
   | Execute.ExecuteError
@@ -43,6 +44,7 @@ type RuntimeError =
 const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Migration.MigrationError) return `Rika failed: ${error.message}`
   if (error instanceof FffSearch.FffSearchError) return `Rika failed: ${error.message}`
+  if (error instanceof ContextResolver.ContextResolverError) return `Rika failed: ${error.message}`
   if (error instanceof Config.ConfigError) return `Rika failed: ${error.message}`
   if (error instanceof Database.DatabaseError) return `Rika failed: ${error.message}`
   return Execute.formatError(error)
@@ -67,6 +69,7 @@ export const liveLayer = (
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const llmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(configLayer))
   const toolLayer = BuiltInTools.toolExecutorLayer.pipe(Layer.provideMerge(configLayer))
+  const contextResolverLayer = ContextResolver.layer.pipe(Layer.provideMerge(configLayer))
   const baseLayer = Layer.mergeAll(
     configLayer,
     Output.layer,
@@ -76,6 +79,7 @@ export const liveLayer = (
     ThreadProjection.layer,
     Time.layer,
     IdGenerator.layer,
+    contextResolverLayer,
     toolLayer,
     llmLayer,
   )
@@ -89,6 +93,7 @@ export const liveLayer = (
 export type LiveLayerOutput =
   | AgentLoop.Service
   | Config.Service
+  | ContextResolver.Service
   | Database.Service
   | Execute.Service
   | IdGenerator.Service
@@ -103,6 +108,7 @@ export type LiveLayerOutput =
 
 export type LiveLayerError =
   | Config.ConfigError
+  | ContextResolver.ContextResolverError
   | Database.DatabaseError
   | FffSearch.FffSearchError
   | Migration.MigrationError

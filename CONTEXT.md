@@ -20,6 +20,10 @@ _Avoid_: Prompt, request, run
 A durable output associated with a thread, such as a patch, image, research note, review finding, or shared reference.
 _Avoid_: Attachment, blob, result
 
+**Resolved Context**:
+The deterministic set of guidance files, mentioned files, images, and thread references selected for one turn before model execution. Resolved context is persisted for replay/debugging and rendered as untrusted data, not policy.
+_Avoid_: Prompt stuffing, hidden instructions, implicit context
+
 **Workspace**:
 The filesystem and repository context where a thread is allowed to inspect and modify code.
 _Avoid_: Project, cwd, folder

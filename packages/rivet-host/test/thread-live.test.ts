@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { AgentLoop, ToolExecutor } from "@rika/agent"
+import { AgentLoop, ContextResolver, ToolExecutor } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
@@ -29,6 +29,7 @@ const baseServiceLayer = Layer.mergeAll(
   ThreadProjection.layer,
   Time.fixedLayer(Common.TimestampMillis.make(1_800_000_000_000)),
   IdGenerator.sequenceLayer(1),
+  ContextResolver.emptyLayer,
   ToolExecutor.emptyLayer,
   llmLayer,
 )

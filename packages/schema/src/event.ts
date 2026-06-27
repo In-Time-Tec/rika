@@ -1,6 +1,6 @@
 import { Schema } from "effect"
 import { Artifact } from "./artifact"
-import { Metadata, ProtocolVersion, TimestampMillis } from "./common"
+import { JsonValue, Metadata, ProtocolVersion, TimestampMillis } from "./common"
 import { Envelope } from "./error"
 import { ArtifactId, EventId, MessageId, ThreadId, ToolCallId, TurnId, UserId, WorkspaceId } from "./ids"
 import { Message } from "./message"
@@ -53,6 +53,38 @@ export const ModelStreamChunk = Schema.Struct({
   }),
 }).annotate({ identifier: "Rika.Event.ModelStreamChunk" })
 
+export const ContextEntryKind = Schema.Literals(["guidance", "file", "image", "thread-reference"]).annotate({
+  identifier: "Rika.Event.ContextEntryKind",
+})
+export type ContextEntryKind = typeof ContextEntryKind.Type
+
+export interface ContextEntry extends Schema.Schema.Type<typeof ContextEntry> {}
+export const ContextEntry = Schema.Struct({
+  kind: ContextEntryKind,
+  source: Schema.String,
+  reason: Schema.String,
+  trusted: Schema.Boolean,
+  path: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.String),
+  media_type: Schema.optional(Schema.String),
+  thread_reference: Schema.optional(Schema.String),
+  truncated: Schema.optional(Schema.Boolean),
+  metadata: Schema.optional(Metadata),
+}).annotate({ identifier: "Rika.Event.ContextEntry" })
+
+export interface ContextResolved extends Schema.Schema.Type<typeof ContextResolved> {}
+export const ContextResolved = Schema.Struct({
+  ...fields,
+  turn_id: TurnId,
+  type: Schema.Literal("context.resolved"),
+  data: Schema.Struct({
+    entries: Schema.Array(ContextEntry),
+    rendered: Schema.String,
+    total_chars: Schema.Int,
+    metadata: Schema.optional(JsonValue),
+  }),
+}).annotate({ identifier: "Rika.Event.ContextResolved" })
+
 export interface ToolCallRequested extends Schema.Schema.Type<typeof ToolCallRequested> {}
 export const ToolCallRequested = Schema.Struct({
   ...fields,
@@ -102,6 +134,7 @@ export type Event =
   | TurnStarted
   | MessageAdded
   | ModelStreamChunk
+  | ContextResolved
   | ToolCallRequested
   | ToolCallCompleted
   | ArtifactCreated
@@ -114,6 +147,7 @@ export const Event = Schema.Union([
   TurnStarted,
   MessageAdded,
   ModelStreamChunk,
+  ContextResolved,
   ToolCallRequested,
   ToolCallCompleted,
   ArtifactCreated,

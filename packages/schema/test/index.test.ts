@@ -120,4 +120,32 @@ describe("Rika protocol schemas", () => {
 
     expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
   })
+
+  test("round-trips resolved context events", () => {
+    const event: Event.Event = {
+      id: eventId,
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence: 3,
+      version: 1,
+      created_at: now,
+      type: "context.resolved",
+      data: {
+        entries: [
+          {
+            kind: "guidance",
+            source: "agents-md",
+            reason: "workspace guidance",
+            trusted: false,
+            path: "AGENTS.md",
+            content: "Use tests",
+          },
+        ],
+        rendered: "<rika_context>Use tests</rika_context>",
+        total_chars: 38,
+      },
+    }
+
+    expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
+  })
 })
