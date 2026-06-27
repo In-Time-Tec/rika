@@ -33,6 +33,25 @@
         "typescript": "catalog:",
       },
     },
+    "packages/cli": {
+      "name": "@rika/cli",
+      "version": "0.0.0",
+      "bin": {
+        "rika": "./src/main.ts",
+      },
+      "dependencies": {
+        "@rika/agent": "workspace:*",
+        "@rika/core": "workspace:*",
+        "@rika/llm": "workspace:*",
+        "@rika/persistence": "workspace:*",
+        "@rika/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
     "packages/core": {
       "name": "@rika/core",
       "version": "0.0.0",
@@ -272,6 +291,8 @@
     "@pinojs/redact": ["@pinojs/redact@0.4.0", "", {}, "sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg=="],
 
     "@rika/agent": ["@rika/agent@workspace:packages/agent"],
+
+    "@rika/cli": ["@rika/cli@workspace:packages/cli"],
 
     "@rika/core": ["@rika/core@workspace:packages/core"],
 
