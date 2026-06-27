@@ -16,6 +16,7 @@
 | `src/output.ts`        | Swappable stdout/stderr boundary for process and tests.    |
 | `src/runtime.ts`       | Live layer assembly for the Bun CLI process.               |
 | `src/main.ts`          | `rika` binary entrypoint.                                  |
+| `test/args.test.ts`    | Effect CLI parser contract tests.                          |
 | `test/execute.test.ts` | Fake model smoke tests for streaming JSON and diagnostics. |
 
 ## Current Standards

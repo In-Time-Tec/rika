@@ -66,8 +66,8 @@ describe("CLI execute", () => {
 
     expect(exitCode).toBe(2)
     expect(output.stdout).toEqual([])
-    expect(output.stderr.join("\n")).toContain("Unknown option --bogus")
-    expect(output.stderr.join("\n")).toContain("Usage:")
+    expect(output.stderr.join("\n")).toContain("Unrecognized flag: --bogus")
+    expect(output.stderr.join("\n")).toContain("USAGE")
   })
 
   test("accepts explicit workspace and thread ids", async () => {

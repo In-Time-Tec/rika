@@ -17,6 +17,7 @@
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
+    "@effect/platform-node": "catalog:",
     "@rika/agent": "workspace:*",
     "@rika/core": "workspace:*",
     "@rika/llm": "workspace:*",
