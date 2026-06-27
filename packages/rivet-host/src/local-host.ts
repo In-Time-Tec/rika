@@ -2,6 +2,7 @@ import { AgentLoop, ToolExecutor } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { OpenAi, Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { HashlineFile } from "@rika/tools"
 import { Registry } from "@rivetkit/effect"
 import { Layer } from "effect"
 import { layer as threadActorLayer } from "./thread-live"
@@ -18,6 +19,7 @@ export const endpointFromEnv = (env: Record<string, string | undefined> = proces
 
 const configuredDatabaseLayer = Database.layer.pipe(Layer.provideMerge(Config.layer))
 const configuredLlmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(Config.layer))
+const configuredToolLayer = HashlineFile.toolExecutorLayer.pipe(Layer.provideMerge(Config.layer))
 
 type ServiceLayerOutput =
   | AgentLoop.Service
@@ -41,7 +43,7 @@ const baseServiceLayer = Layer.mergeAll(
   Migration.layer,
   ThreadEventLog.layer,
   ThreadProjection.layer,
-  ToolExecutor.emptyLayer,
+  configuredToolLayer,
   configuredLlmLayer,
 )
 

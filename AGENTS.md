@@ -89,6 +89,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 - `drizzle-orm` and `drizzle-kit`: Typed persistence and migrations behind Effect services.
 - `rivetkit` and `@rivetkit/effect`: Actor runtime and Effect integration.
 - `effect/unstable/ai` and `@effect/ai-openai`: Effect AI contracts and provider implementation. Do not hand-roll provider HTTP/SSE adapters.
+- `@pierre/diffs`: File and edit diff metadata/rendering compatibility for syntax-aware UI surfaces.
 - `@ff-labs/fff-bun`: Default indexed file/path/content search.
 - `ast-grep`: Structural code outline/search support.
 

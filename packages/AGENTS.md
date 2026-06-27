@@ -17,6 +17,7 @@
 | `persistence/` | Drizzle-backed local SQLite adapter services and migrations. See `persistence/AGENTS.md`. |
 | `rivet-host/`  | RivetKit actor definitions and local host assembly. See `rivet-host/AGENTS.md`.           |
 | `schema/`      | Shared schema/protocol package. See `schema/AGENTS.md`.                                   |
+| `tools/`       | Built-in workspace tools and adapters. See `tools/AGENTS.md`.                             |
 
 ## Current Standards
 

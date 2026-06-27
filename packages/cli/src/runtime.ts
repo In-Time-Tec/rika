@@ -2,6 +2,7 @@ import { AgentLoop, ToolExecutor } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { OpenAi, Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { HashlineFile } from "@rika/tools"
 import { Effect, Layer } from "effect"
 import * as Args from "./args"
 import * as Execute from "./execute"
@@ -63,6 +64,7 @@ export const liveLayer = (
   )
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const llmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(configLayer))
+  const toolLayer = HashlineFile.toolExecutorLayer.pipe(Layer.provideMerge(configLayer))
   const baseLayer = Layer.mergeAll(
     configLayer,
     Output.layer,
@@ -72,7 +74,7 @@ export const liveLayer = (
     ThreadProjection.layer,
     Time.layer,
     IdGenerator.layer,
-    ToolExecutor.emptyLayer,
+    toolLayer,
     llmLayer,
   )
 

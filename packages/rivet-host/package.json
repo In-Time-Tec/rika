@@ -21,6 +21,7 @@
     "@rika/llm": "workspace:*",
     "@rika/persistence": "workspace:*",
     "@rika/schema": "workspace:*",
+    "@rika/tools": "workspace:*",
     "@rivetkit/effect": "catalog:",
     "effect": "catalog:",
     "rivetkit": "catalog:"

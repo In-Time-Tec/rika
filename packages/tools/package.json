@@ -1,29 +1,23 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@rika/cli",
+  "name": "@rika/tools",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "rika": "./src/main.ts"
-  },
   "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/main.ts --outdir dist --target bun --format esm",
-    "lint": "bun --cwd ../.. oxlint packages/cli/src packages/cli/test",
+    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
+    "lint": "bun --cwd ../.. oxlint packages/tools/src packages/tools/test",
     "test": "bun test --pass-with-no-tests",
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
-    "@effect/platform-node": "catalog:",
+    "@pierre/diffs": "1.2.11",
     "@rika/agent": "workspace:*",
     "@rika/core": "workspace:*",
-    "@rika/llm": "workspace:*",
-    "@rika/persistence": "workspace:*",
     "@rika/schema": "workspace:*",
-    "@rika/tools": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

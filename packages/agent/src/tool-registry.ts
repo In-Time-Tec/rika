@@ -69,12 +69,14 @@ export const fakeLayer = (
     })),
   )
 
+export const shellDefinitions = (workspaceRoot: string): ReadonlyArray<Definition> => [shellDefinition(workspaceRoot)]
+
 export const shellLayer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
     const values = yield* config.get
-    return yield* Service.pipe(Effect.provide(layerFromDefinitions([shellDefinition(values.workspace_root)])))
+    return yield* Service.pipe(Effect.provide(layerFromDefinitions(shellDefinitions(values.workspace_root))))
   }),
 )
 

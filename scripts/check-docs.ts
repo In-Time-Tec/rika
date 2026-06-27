@@ -13,6 +13,7 @@ const requiredFiles = [
   "packages/AGENTS.md",
   "packages/core/AGENTS.md",
   "packages/persistence/AGENTS.md",
+  "packages/tools/AGENTS.md",
   "packages/schema/AGENTS.md",
 ]
 
