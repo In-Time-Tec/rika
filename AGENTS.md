@@ -14,6 +14,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 | `CONTEXT.md`                        | Domain glossary. Keep implementation details out of this file.                                                      |
 | `docs/RESEARCH.md`                  | Initial research notes for Amp, OpenCode, Pi, Rivet, Drizzle, fff, hashline, semantic search, and ast-grep outline. |
 | `docs/effect-module-conventions.md` | Copyable Effect service/module conventions.                                                                         |
+| `docs/runtime-and-layers.md`        | Runtime/layer assembly conventions and base service list.                                                           |
 | `package.json`                      | Bun workspace, dependency catalog, and root verification scripts.                                                   |
 | `turbo.json`                        | Monorepo task graph for package build, typecheck, and test commands.                                                |
 | `.oxlintrc.json`                    | Root oxlint configuration.                                                                                          |
@@ -47,6 +48,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 - Read `CONTEXT.md` before naming new domain concepts.
 - Read `docs/RESEARCH.md` before changing the architecture or issue stack.
 - Read `docs/effect-module-conventions.md` before adding or changing an Effect service.
+- Read `docs/runtime-and-layers.md` before adding process runtime assembly or base services.
 - When a task matches a project-local skill, read the skill file under `.agents/skills/` before acting.
 - Do not create runtime packages outside the planned Bun/Turbo workspace structure without updating the repo guidance.
 - Do not place product/domain definitions in `AGENTS.md`; put resolved vocabulary in `CONTEXT.md`.

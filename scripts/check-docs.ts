@@ -5,6 +5,7 @@ const requiredFiles = [
   "AGENTS.md",
   "docs/RESEARCH.md",
   "docs/effect-module-conventions.md",
+  "docs/runtime-and-layers.md",
   "package.json",
   "turbo.json",
   ".oxlintrc.json",
