@@ -28,6 +28,10 @@ _Avoid_: Project, cwd, folder
 A named behavior profile that controls model routing, autonomy, reasoning depth, and default tool policy.
 _Avoid_: Model, preset, personality
 
+**Model Provider**:
+A model backend Rika can ask for assistant output through Effect AI provider packages. Agent modes choose a model provider without making threads or tools care which backend answers.
+_Avoid_: Vendor SDK, model client, API wrapper
+
 **Tool**:
 A typed capability the agent may invoke to observe or change the outside world.
 _Avoid_: Function, command, action

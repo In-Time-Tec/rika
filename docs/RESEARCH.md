@@ -37,6 +37,7 @@ Use Pi as the reference for extension-first agent customization:
 ## Runtime Architecture
 
 - Effect is the domain and orchestration language.
+- LLM integration should compose `effect/unstable/ai` and official Effect AI provider packages, starting with `@effect/ai-openai`; Rika should not hand-roll provider HTTP/SSE adapters.
 - Rivet hosts actors from day one.
 - Drizzle stores durable facts and migrations.
 - A thread actor owns hot runtime state for one thread, but Drizzle's append-only event log remains canonical.

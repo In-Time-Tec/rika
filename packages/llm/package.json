@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/llm",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
+    "lint": "bun --cwd ../.. oxlint packages/llm/src packages/llm/test",
+    "test": "bun test --pass-with-no-tests",
+    "typecheck": "bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/ai-openai": "catalog:",
+    "@rika/core": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}
