@@ -25,6 +25,7 @@
       "@effect/platform": "4.0.0-beta.83",
       "@effect/platform-node": "4.0.0-beta.83",
       "@effect/sql-sqlite-bun": "4.0.0-beta.83",
+      "@rivetkit/effect": "2.3.2",
       "@tsconfig/bun": "1.0.9",
       "@types/bun": "1.3.13",
       "@types/node": "24.12.2",
@@ -34,6 +35,7 @@
       "oxlint": "1.60.0",
       "oxlint-tsgolint": "0.21.0",
       "prettier": "3.6.2",
+      "rivetkit": "2.3.2",
       "turbo": "2.8.13",
       "typescript": "5.8.2"
     }
