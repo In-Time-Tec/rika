@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/rivet-host",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
+    "dev": "RIVET_RUN_ENGINE=1 bun run src/main.ts",
+    "lint": "bun --cwd ../.. oxlint packages/rivet-host/src packages/rivet-host/test",
+    "test": "bun test --pass-with-no-tests",
+    "typecheck": "bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@rika/core": "workspace:*",
+    "@rika/persistence": "workspace:*",
+    "@rika/schema": "workspace:*",
+    "@rivetkit/effect": "catalog:",
+    "effect": "catalog:",
+    "rivetkit": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}
