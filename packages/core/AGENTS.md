@@ -9,17 +9,18 @@
 
 ## Key Files
 
-| File                          | Purpose                                                               |
-| ----------------------------- | --------------------------------------------------------------------- |
-| `src/config.ts`               | Injectable process configuration service and config errors.           |
-| `src/diagnostics.ts`          | Telemetry-free diagnostics service with live and memory layers.       |
-| `src/example-service.ts`      | Copyable Effect service and typed error example.                      |
-| `src/example-service.test.ts` | Layer replacement test showing live and fake service implementations. |
-| `src/id-generator.ts`         | Live random and deterministic sequence ID service.                    |
-| `src/index.ts`                | Package entrypoint using namespace exports.                           |
-| `src/runtime.ts`              | Runtime/layer assembly helpers for process boundaries.                |
-| `src/test-harness.ts`         | Test helper for running effects with fake core services.              |
-| `src/time.ts`                 | Clock service with live and fixed layers.                             |
+| File                           | Purpose                                                               |
+| ------------------------------ | --------------------------------------------------------------------- |
+| `src/config.ts`                | Injectable process configuration service and config errors.           |
+| `src/diagnostics.ts`           | Telemetry-free diagnostics service with live and memory layers.       |
+| `src/example-service.ts`       | Copyable Effect service and typed error example.                      |
+| `src/id-generator.ts`          | Live random and deterministic sequence ID service.                    |
+| `src/index.ts`                 | Package entrypoint using namespace exports.                           |
+| `src/runtime.ts`               | Runtime/layer assembly helpers for process boundaries.                |
+| `src/test-harness.ts`          | Test helper for running effects with fake core services.              |
+| `src/time.ts`                  | Clock service with live and fixed layers.                             |
+| `test/example-service.test.ts` | Layer replacement test showing live and fake service implementations. |
+| `test/runtime.test.ts`         | Runtime and base service assembly tests.                              |
 
 ## Current Standards
 
@@ -27,7 +28,7 @@
 - Service modules expose `Interface`, `Service`, and a live `layer` or `defaultLayer`.
 - Use `Schema.TaggedErrorClass` for service-boundary errors.
 - Use `Effect.fn("Module.method")` for service methods and workflows.
-- Tests replace services with fake layers using the same `Service` tag.
+- Tests live under `test/` and replace services with fake layers using the same `Service` tag.
 - Runtime execution helpers stay at process/test boundaries; package internals return `Effect` values.
 
 ## For AI Agents

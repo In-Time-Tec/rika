@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { Artifact, Codec, ErrorEnvelope, Event, Ids, Message, Tool } from "./index"
+import { Artifact, Codec, ErrorEnvelope, Event, Ids, Message, Tool } from "../src/index"
 
 const now = 1_765_000_000_000
 const threadId = Ids.ThreadId.make("thread_1")

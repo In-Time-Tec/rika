@@ -14,7 +14,7 @@ The implementation plan is tracked as stacked GitHub issues in this repository. 
 
 ## Current State
 
-This repository currently contains the monorepo scaffold plus planning and agent guidance. Runtime features land through the numbered issue stack.
+This repository currently contains the monorepo scaffold, shared protocol schemas, core Effect runtime services, and the local SQLite persistence foundation. Runtime features land through the numbered issue stack.
 
 ## Verification
 
@@ -26,4 +26,11 @@ bun run typecheck
 bun run test
 bun run build
 bun run format:check
+```
+
+Persistence migrations live in `packages/persistence/drizzle` and are managed through:
+
+```bash
+bun run db:generate
+bun run db:migrate
 ```

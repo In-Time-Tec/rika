@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
-    "lint": "bun --cwd ../.. oxlint packages/core/src",
+    "lint": "bun --cwd ../.. oxlint packages/core/src packages/core/test",
     "test": "bun test --pass-with-no-tests",
     "typecheck": "bun tsc --noEmit"
   },

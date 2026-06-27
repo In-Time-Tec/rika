@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import { ExampleService } from "./index"
+import { ExampleService } from "../src/index"
 
 const fakeLayer = Layer.succeed(
   ExampleService.Service,

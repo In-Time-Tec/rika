@@ -15,6 +15,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 | `docs/RESEARCH.md`                  | Initial research notes for Amp, OpenCode, Pi, Rivet, Drizzle, fff, hashline, semantic search, and ast-grep outline. |
 | `docs/effect-module-conventions.md` | Copyable Effect service/module conventions.                                                                         |
 | `docs/runtime-and-layers.md`        | Runtime/layer assembly conventions and base service list.                                                           |
+| `docs/persistence.md`               | Drizzle, SQLite, migration, and persistence service boundary rules.                                                 |
 | `package.json`                      | Bun workspace, dependency catalog, and root verification scripts.                                                   |
 | `turbo.json`                        | Monorepo task graph for package build, typecheck, and test commands.                                                |
 | `.oxlintrc.json`                    | Root oxlint configuration.                                                                                          |
@@ -29,6 +30,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 - Use `Effect.fn("Module.method")` for service methods and named workflows.
 - Bind services to named variables in `Effect.gen` before calling methods; do not use nested service yields.
 - Keep infrastructure swappable. Runtime code depends on service interfaces; tests provide in-memory or fake layers.
+- Package tests live under `test/` and mirror the relative `src/` path for the module under test.
 - Use Bun as the runtime/package manager, Turbo for monorepo task orchestration, and oxlint for linting once the scaffold exists.
 - Use Drizzle only behind persistence services. Raw Drizzle handles do not cross into CLI, TUI, LLM, or actor orchestration modules.
 - Treat the append-only event log as canonical durable truth. Projections and actor state are rebuildable.
@@ -49,6 +51,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 - Read `docs/RESEARCH.md` before changing the architecture or issue stack.
 - Read `docs/effect-module-conventions.md` before adding or changing an Effect service.
 - Read `docs/runtime-and-layers.md` before adding process runtime assembly or base services.
+- Read `docs/persistence.md` before changing Drizzle schema, migrations, or persistence services.
 - When a task matches a project-local skill, read the skill file under `.agents/skills/` before acting.
 - Do not create runtime packages outside the planned Bun/Turbo workspace structure without updating the repo guidance.
 - Do not place product/domain definitions in `AGENTS.md`; put resolved vocabulary in `CONTEXT.md`.
@@ -58,6 +61,8 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 ## Testing And Verification
 
 - `bun install`: install workspace dependencies and update `bun.lock`.
+- `bun run db:generate`: generate Drizzle SQL migrations from the persistence schema.
+- `bun run db:migrate`: apply committed Drizzle migrations to the configured local SQLite database.
 - `bun run docs:check`: verify documented scripts and guidance files still exist.
 - `bun run lint`: run oxlint across the repository.
 - `bun run typecheck`: run package type checks through Turbo.

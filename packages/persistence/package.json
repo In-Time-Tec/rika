@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@rika/schema",
+  "name": "@rika/persistence",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -9,15 +9,21 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
-    "lint": "bun --cwd ../.. oxlint packages/schema/src packages/schema/test",
+    "db:generate": "drizzle-kit generate --config=drizzle.config.ts",
+    "db:migrate": "env RIKA_DATA_DIR=../../.rika bun run src/migrate.ts",
+    "lint": "bun --cwd ../.. oxlint packages/persistence/src packages/persistence/test packages/persistence/drizzle.config.ts",
     "test": "bun test --pass-with-no-tests",
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
+    "@rika/core": "workspace:*",
+    "@rika/schema": "workspace:*",
+    "drizzle-orm": "catalog:",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@types/bun": "catalog:",
+    "drizzle-kit": "catalog:",
     "typescript": "catalog:"
   }
 }

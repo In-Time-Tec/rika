@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect } from "effect"
-import { Config, Diagnostics, IdGenerator, Runtime, TestHarness, Time } from "./index"
+import { Config, Diagnostics, IdGenerator, Runtime, TestHarness, Time } from "../src/index"
 
 const config = {
   workspace_root: "/workspace",

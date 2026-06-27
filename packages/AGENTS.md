@@ -9,15 +9,17 @@
 
 ## Subdirectories
 
-| Directory | Purpose                                                                                |
-| --------- | -------------------------------------------------------------------------------------- |
-| `core/`   | Core Effect service examples and future runtime/domain services. See `core/AGENTS.md`. |
-| `schema/` | Shared schema/protocol package. See `schema/AGENTS.md`.                                |
+| Directory      | Purpose                                                                                   |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `core/`        | Core Effect service examples and future runtime/domain services. See `core/AGENTS.md`.    |
+| `persistence/` | Drizzle-backed local SQLite adapter services and migrations. See `persistence/AGENTS.md`. |
+| `schema/`      | Shared schema/protocol package. See `schema/AGENTS.md`.                                   |
 
 ## Current Standards
 
 - Package entrypoints expose module namespaces with `export * as Module from "./module"` when a package has real modules.
 - Each package owns its `package.json`, `tsconfig.json`, and package-local `src/` tree.
+- Package tests live in `test/`, mirroring `src/` paths exactly where possible.
 - Package code must be testable through Effect service/layer substitution instead of global state.
 - Keep package dependencies directed from schema/contracts toward core/runtime; adapter packages should sit behind service interfaces.
 

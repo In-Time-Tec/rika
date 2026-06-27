@@ -1,4 +1,4 @@
-const requiredScripts = ["lint", "typecheck", "test", "build", "format:check"]
+const requiredScripts = ["db:generate", "db:migrate", "lint", "typecheck", "test", "build", "format:check"]
 const requiredFiles = [
   "README.md",
   "CONTEXT.md",
@@ -6,11 +6,13 @@ const requiredFiles = [
   "docs/RESEARCH.md",
   "docs/effect-module-conventions.md",
   "docs/runtime-and-layers.md",
+  "docs/persistence.md",
   "package.json",
   "turbo.json",
   ".oxlintrc.json",
   "packages/AGENTS.md",
   "packages/core/AGENTS.md",
+  "packages/persistence/AGENTS.md",
   "packages/schema/AGENTS.md",
 ]
 

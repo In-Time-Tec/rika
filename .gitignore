@@ -4,8 +4,12 @@ dist/
 build/
 coverage/
 .turbo/
+.rika/
 .env
 .env.*
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

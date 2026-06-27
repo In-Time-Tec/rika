@@ -9,21 +9,23 @@
 
 ## Key Files
 
-| File              | Purpose                                                   |
-| ----------------- | --------------------------------------------------------- |
-| `src/index.ts`    | Package entrypoint for schema/protocol namespace exports. |
-| `src/ids.ts`      | Branded protocol ID schemas and constructors.             |
-| `src/message.ts`  | Message and content-part schemas.                         |
-| `src/event.ts`    | Canonical thread event union and event reference helpers. |
-| `src/tool.ts`     | Tool call/result wire schemas.                            |
-| `src/artifact.ts` | Durable artifact wire schema.                             |
-| `src/error.ts`    | Serializable error envelope schema.                       |
+| File                 | Purpose                                                   |
+| -------------------- | --------------------------------------------------------- |
+| `src/index.ts`       | Package entrypoint for schema/protocol namespace exports. |
+| `src/ids.ts`         | Branded protocol ID schemas and constructors.             |
+| `src/message.ts`     | Message and content-part schemas.                         |
+| `src/event.ts`       | Canonical thread event union and event reference helpers. |
+| `src/tool.ts`        | Tool call/result wire schemas.                            |
+| `src/artifact.ts`    | Durable artifact wire schema.                             |
+| `src/error.ts`       | Serializable error envelope schema.                       |
+| `test/index.test.ts` | Package export and protocol round-trip tests.             |
 
 ## Current Standards
 
 - Keep this package infrastructure-free: no Drizzle, Rivet, model SDK, filesystem mutation, TUI, CLI, or server imports.
 - Use Effect Schema for serializable contracts once issue #4 defines the protocol package.
 - Prefer branded IDs and versioned payload schemas over unstructured objects.
+- Tests live under `test/` and import package source through `../src/index`.
 
 ## For AI Agents
 
