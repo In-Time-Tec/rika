@@ -4,24 +4,28 @@
 
 ## Purpose
 
-Rika is a greenfield Effect-native coding agent system. The repository currently contains planning and guidance only; implementation starts with the stacked GitHub issues.
+Rika is a greenfield Effect-native coding agent system. The repository is a Bun/Turbo monorepo that grows through the stacked GitHub issues.
 
 ## Key Files
 
-| File               | Purpose                                                                                                             |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `README.md`        | Product direction and current repo state.                                                                           |
-| `CONTEXT.md`       | Domain glossary. Keep implementation details out of this file.                                                      |
-| `docs/RESEARCH.md` | Initial research notes for Amp, OpenCode, Pi, Rivet, Drizzle, fff, hashline, semantic search, and ast-grep outline. |
-| `package.json`     | Bun workspace, dependency catalog, and root verification scripts.                                                   |
-| `turbo.json`       | Monorepo task graph for package build, typecheck, and test commands.                                                |
-| `.oxlintrc.json`   | Root oxlint configuration.                                                                                          |
+| File                                | Purpose                                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `README.md`                         | Product direction and current repo state.                                                                           |
+| `CONTEXT.md`                        | Domain glossary. Keep implementation details out of this file.                                                      |
+| `docs/RESEARCH.md`                  | Initial research notes for Amp, OpenCode, Pi, Rivet, Drizzle, fff, hashline, semantic search, and ast-grep outline. |
+| `docs/effect-module-conventions.md` | Copyable Effect service/module conventions.                                                                         |
+| `package.json`                      | Bun workspace, dependency catalog, and root verification scripts.                                                   |
+| `turbo.json`                        | Monorepo task graph for package build, typecheck, and test commands.                                                |
+| `.oxlintrc.json`                    | Root oxlint configuration.                                                                                          |
 
 ## Current Standards
 
 - The product name is Rika. Do not use Orika or resurrect old project assumptions.
 - Keep Rika fully Effect-native: use Effect services, layers, schemas, typed errors, scopes, streams, and fibers instead of ad hoc promises or singletons.
 - Follow OpenCode-style module shape: `export * as Module from "./module"`, an exported `Interface`, a `Context.Service` class, and one or more explicit `Layer` values.
+- Use `Schema.TaggedErrorClass` for errors that cross service boundaries.
+- Use `Effect.fn("Module.method")` for service methods and named workflows.
+- Bind services to named variables in `Effect.gen` before calling methods; do not use nested service yields.
 - Keep infrastructure swappable. Runtime code depends on service interfaces; tests provide in-memory or fake layers.
 - Use Bun as the runtime/package manager, Turbo for monorepo task orchestration, and oxlint for linting once the scaffold exists.
 - Use Drizzle only behind persistence services. Raw Drizzle handles do not cross into CLI, TUI, LLM, or actor orchestration modules.
@@ -41,6 +45,7 @@ Rika is a greenfield Effect-native coding agent system. The repository currently
 
 - Read `CONTEXT.md` before naming new domain concepts.
 - Read `docs/RESEARCH.md` before changing the architecture or issue stack.
+- Read `docs/effect-module-conventions.md` before adding or changing an Effect service.
 - Do not create runtime packages outside the planned Bun/Turbo workspace structure without updating the repo guidance.
 - Do not place product/domain definitions in `AGENTS.md`; put resolved vocabulary in `CONTEXT.md`.
 - Do not bypass Effect with module-level mutable state for services that must be testable.
