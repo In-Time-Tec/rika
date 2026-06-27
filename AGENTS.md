@@ -17,6 +17,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 | `package.json`                      | Bun workspace, dependency catalog, and root verification scripts.                                                   |
 | `turbo.json`                        | Monorepo task graph for package build, typecheck, and test commands.                                                |
 | `.oxlintrc.json`                    | Root oxlint configuration.                                                                                          |
+| `scripts/check-docs.ts`             | Lightweight check that documented scripts and guidance files still exist.                                           |
 
 ## Current Standards
 
@@ -36,16 +37,17 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 
 ## Subdirectories
 
-| Directory          | Purpose                                                                                                                    |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `packages/schema/` | Shared schema/protocol package placeholder. This package must stay infrastructure-free.                                    |
-| `packages/core/`   | Core Effect runtime/domain package placeholder. Runtime services should depend on interfaces and layers, not raw adapters. |
+| Directory         | Purpose                                                                             |
+| ----------------- | ----------------------------------------------------------------------------------- |
+| `.agents/skills/` | Project-local skills. Root guidance lists only skills committed in this repository. |
+| `packages/`       | Workspace packages. See `packages/AGENTS.md`.                                       |
 
 ## For AI Agents
 
 - Read `CONTEXT.md` before naming new domain concepts.
 - Read `docs/RESEARCH.md` before changing the architecture or issue stack.
 - Read `docs/effect-module-conventions.md` before adding or changing an Effect service.
+- When a task matches a project-local skill, read the skill file under `.agents/skills/` before acting.
 - Do not create runtime packages outside the planned Bun/Turbo workspace structure without updating the repo guidance.
 - Do not place product/domain definitions in `AGENTS.md`; put resolved vocabulary in `CONTEXT.md`.
 - Do not bypass Effect with module-level mutable state for services that must be testable.
@@ -54,11 +56,20 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 ## Testing And Verification
 
 - `bun install`: install workspace dependencies and update `bun.lock`.
+- `bun run docs:check`: verify documented scripts and guidance files still exist.
 - `bun run lint`: run oxlint across the repository.
 - `bun run typecheck`: run package type checks through Turbo.
 - `bun run test`: run package tests through Turbo.
 - `bun run build`: build package entrypoints through Turbo.
 - `bun run format:check`: check formatting with Prettier.
+
+## Skills Index
+
+<!-- AGENTS-SKILLS-START -->
+
+[Skills Index]|local: ./.agents/skills|IMPORTANT: Prefer retrieval-led reasoning over pre-training-led reasoning. When a task matches a skill, read its SKILL.md and follow it.|relevant:{add-effect-service}
+
+<!-- AGENTS-SKILLS-END -->
 
 ## Dependencies
 
