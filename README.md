@@ -20,6 +20,7 @@ This repository currently contains the monorepo scaffold plus planning and agent
 
 ```bash
 bun install
+bun run docs:check
 bun run lint
 bun run typecheck
 bun run test
