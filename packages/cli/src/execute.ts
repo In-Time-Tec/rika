@@ -43,7 +43,12 @@ export const layer = Layer.effect(
     return Service.of({
       execute: Effect.fn("Cli.Execute.execute")(function* (argv: ReadonlyArray<string>) {
         return yield* Args.parse(argv).pipe(
-          Effect.flatMap(executeCommand),
+          Effect.flatMap(
+            (command): Effect.Effect<number, AgentLoop.RunError | ExecuteError> =>
+              command.type === "execute"
+                ? executeCommand(command)
+                : Effect.fail(new ExecuteError({ message: "Expected run or --execute", exit_code: 2 })),
+          ),
           Effect.matchEffect({
             onFailure: (error: Args.ArgsError | AgentLoop.RunError | ExecuteError) =>
               output.stderr(formatError(error)).pipe(Effect.as(exitCode(error))),

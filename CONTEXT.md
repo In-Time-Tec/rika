@@ -68,6 +68,10 @@ _Avoid_: Cache, state, snapshot
 The active runtime owner for one thread's orchestration, hot state, model loop, and tool execution queue.
 _Avoid_: Session process, worker, server object
 
+**Interactive Session**:
+A terminal UI run that renders thread events, accepts prompts and command-palette commands, and delegates turns to the agent loop. Interactive sessions are adapters over durable threads, not a separate source of truth.
+_Avoid_: Terminal state, chat UI, REPL transcript
+
 **Remote Control**:
 The API surface that lets external clients, IDEs, CLIs, or SDK users inspect and steer active Rika threads.
 _Avoid_: Webhook, daemon API, RPC

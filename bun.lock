@@ -47,6 +47,7 @@
         "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",
         "@rika/tools": "workspace:*",
+        "@rika/tui": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -133,6 +134,21 @@
         "@pierre/diffs": "1.2.11",
         "@rika/agent": "workspace:*",
         "@rika/core": "workspace:*",
+        "@rika/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/tui": {
+      "name": "@rika/tui",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/agent": "workspace:*",
+        "@rika/core": "workspace:*",
+        "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",
         "effect": "catalog:",
       },
@@ -348,6 +364,8 @@
     "@rika/schema": ["@rika/schema@workspace:packages/schema"],
 
     "@rika/tools": ["@rika/tools@workspace:packages/tools"],
+
+    "@rika/tui": ["@rika/tui@workspace:packages/tui"],
 
     "@rivet-dev/agent-os-core": ["@rivet-dev/agent-os-core@0.1.1", "", { "dependencies": { "@rivet-dev/agent-os-posix": "0.1.0", "@rivet-dev/agent-os-python": "0.1.0", "@secure-exec/core": "^0.2.1", "@secure-exec/nodejs": "^0.2.1", "@secure-exec/v8": "^0.2.1", "croner": "^10.0.1", "long-timeout": "^0.1.1", "secure-exec": "^0.2.1" } }, "sha512-Uw5jr+gUXDY7TDUFqlypjGe1BD2KL9kTHPNo/f1iNS1R+l9IWuvT+FF/MXsLOEkc3fB06OPVu2ZvUuNwp9MpLQ=="],
 

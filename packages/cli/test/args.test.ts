@@ -4,6 +4,12 @@ import { Effect } from "effect"
 import { Args } from "../src/index"
 
 describe("CLI args", () => {
+  test("defaults to interactive mode with no prompt", async () => {
+    const command = await Effect.runPromise(Args.parse([]))
+
+    expect(command).toEqual({ type: "interactive", ephemeral: false })
+  })
+
   test("parses run commands through Effect CLI definitions", async () => {
     const threadId = Ids.ThreadId.make("thread_args_run")
     const command = await Effect.runPromise(
@@ -37,6 +43,28 @@ describe("CLI args", () => {
 
     expect(long).toMatchObject({ type: "execute", prompt: "explain this", mode: "deep", ephemeral: false })
     expect(short).toMatchObject({ type: "execute", prompt: "hello", ephemeral: false })
+  })
+
+  test("parses explicit interactive commands", async () => {
+    const threadId = Ids.ThreadId.make("thread_args_interactive")
+    const command = await Effect.runPromise(
+      Args.parse(["interactive", "--mode", "rush", "--workspace", "/workspace/rika", "--thread", threadId]),
+    )
+
+    expect(command).toEqual({
+      type: "interactive",
+      mode: "rush",
+      workspace_root: "/workspace/rika",
+      thread_id: threadId,
+      ephemeral: false,
+    })
+  })
+
+  test("rejects root prompt text unless --execute is set", async () => {
+    const error = await Effect.runPromise(Args.parse(["hello"]).pipe(Effect.flip))
+
+    expect(error.exit_code).toBe(2)
+    expect(error.message).toContain("Expected run, interactive, or --execute")
   })
 
   test("returns Effect CLI diagnostics for invalid flags", async () => {

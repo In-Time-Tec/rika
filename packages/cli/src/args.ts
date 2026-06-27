@@ -14,7 +14,16 @@ export const ExecuteCommand = Schema.Struct({
   ephemeral: Schema.Boolean,
 }).annotate({ identifier: "Rika.Cli.Args.ExecuteCommand" })
 
-export type Command = ExecuteCommand
+export interface InteractiveCommand extends Schema.Schema.Type<typeof InteractiveCommand> {}
+export const InteractiveCommand = Schema.Struct({
+  type: Schema.Literal("interactive"),
+  mode: Schema.optional(Config.Mode),
+  workspace_root: Schema.optional(Schema.String),
+  thread_id: Schema.optional(Ids.ThreadId),
+  ephemeral: Schema.Boolean,
+}).annotate({ identifier: "Rika.Cli.Args.InteractiveCommand" })
+
+export type Command = ExecuteCommand | InteractiveCommand
 
 export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError", {
   message: Schema.String,
@@ -24,6 +33,8 @@ export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError",
 
 export const usage = [
   "Usage:",
+  "  rika [options]",
+  "  rika interactive [options]",
   "  rika run [options] <prompt>",
   "  rika --execute [options] <prompt>",
   "",
@@ -37,7 +48,7 @@ export const usage = [
 ].join("\n")
 
 export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<string>) {
-  const parsedRef = yield* Ref.make(Option.none<ExecuteCommand>())
+  const parsedRef = yield* Ref.make(Option.none<Command>())
   const rejectedRef = yield* Ref.make(Option.none<ArgsError>())
   const captured = makeCapturedConsole()
   const command = makeCommand(parsedRef, rejectedRef)
@@ -62,14 +73,27 @@ export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<
   return yield* usageError()
 })
 
-const executeConfig = {
+const baseConfig = {
   mode: Flag.choice("mode", ["rush", "smart", "deep"]).pipe(Flag.optional, Flag.withDescription("Select agent mode")),
   workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root for the turn")),
   thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Reuse a durable thread id")),
   ephemeral: Flag.boolean("ephemeral").pipe(Flag.withDescription("Use in-memory persistence for this run")),
+}
+
+const executeConfig = {
+  ...baseConfig,
   prompt: Argument.string("prompt").pipe(
     Argument.variadic({ min: 1 }),
     Argument.withDescription("Prompt text to send to the agent"),
+  ),
+}
+
+const rootConfig = {
+  execute: Flag.boolean("execute").pipe(Flag.withAlias("e"), Flag.withDescription("Run one non-interactive turn")),
+  ...baseConfig,
+  prompt: Argument.string("prompt").pipe(
+    Argument.variadic({ min: 0 }),
+    Argument.withDescription("Prompt text to send to the agent when --execute is set"),
   ),
 }
 
@@ -81,14 +105,18 @@ interface ExecuteInput {
   readonly prompt: ReadonlyArray<string>
 }
 
+interface InteractiveInput {
+  readonly mode: Option.Option<Config.Mode>
+  readonly workspace: Option.Option<string>
+  readonly thread: Option.Option<string>
+  readonly ephemeral: boolean
+}
+
 interface RootInput extends ExecuteInput {
   readonly execute: boolean
 }
 
-const makeCommand = (
-  parsedRef: Ref.Ref<Option.Option<ExecuteCommand>>,
-  rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
-) => {
+const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) => {
   const run = CliCommand.make("run", executeConfig, (input: ExecuteInput) =>
     Ref.set(parsedRef, Option.some(toExecuteCommand(input))),
   ).pipe(
@@ -96,20 +124,28 @@ const makeCommand = (
     CliCommand.withShortDescription("Run one prompt"),
   )
 
-  return CliCommand.make(
-    "rika",
-    {
-      execute: Flag.boolean("execute").pipe(Flag.withAlias("e"), Flag.withDescription("Run one non-interactive turn")),
-      ...executeConfig,
-    },
-    (input: RootInput) =>
-      input.execute
-        ? Ref.set(parsedRef, Option.some(toExecuteCommand(input)))
+  const interactive = CliCommand.make("interactive", baseConfig, (input: InteractiveInput) =>
+    Ref.set(parsedRef, Option.some(toInteractiveCommand(input))),
+  ).pipe(
+    CliCommand.withDescription("Start Rika's interactive terminal UI"),
+    CliCommand.withShortDescription("Start interactive UI"),
+  )
+
+  return CliCommand.make("rika", rootConfig, (input: RootInput) =>
+    input.execute
+      ? input.prompt.length === 0
+        ? Ref.set(
+            rejectedRef,
+            Option.some(new ArgsError({ message: "Prompt is required for --execute", exit_code: 2, usage })),
+          )
+        : Ref.set(parsedRef, Option.some(toExecuteCommand(input)))
+      : input.prompt.length === 0
+        ? Ref.set(parsedRef, Option.some(toInteractiveCommand(input)))
         : Ref.set(
             rejectedRef,
-            Option.some(new ArgsError({ message: "Expected run or --execute", exit_code: 2, usage })),
+            Option.some(new ArgsError({ message: "Expected run, interactive, or --execute", exit_code: 2, usage })),
           ),
-  ).pipe(CliCommand.withDescription("Effect-native coding agent"), CliCommand.withSubcommands([run]))
+  ).pipe(CliCommand.withDescription("Effect-native coding agent"), CliCommand.withSubcommands([run, interactive]))
 }
 
 const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
@@ -119,6 +155,19 @@ const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
   return {
     type: "execute",
     prompt: input.prompt.join(" ").trim(),
+    ephemeral: input.ephemeral,
+    ...(mode === undefined ? {} : { mode }),
+    ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
+    ...(threadId === undefined ? {} : { thread_id: Ids.ThreadId.make(threadId) }),
+  }
+}
+
+const toInteractiveCommand = (input: InteractiveInput): InteractiveCommand => {
+  const mode = Option.getOrUndefined(input.mode)
+  const workspaceRoot = Option.getOrUndefined(input.workspace)
+  const threadId = Option.getOrUndefined(input.thread)
+  return {
+    type: "interactive",
     ephemeral: input.ephemeral,
     ...(mode === undefined ? {} : { mode }),
     ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),

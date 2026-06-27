@@ -15,6 +15,7 @@ const requiredFiles = [
   "packages/persistence/AGENTS.md",
   "packages/tools/AGENTS.md",
   "packages/schema/AGENTS.md",
+  "packages/tui/AGENTS.md",
 ]
 
 const packageJson = await Bun.file("package.json").json()
