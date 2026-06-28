@@ -23,7 +23,28 @@ export const InteractiveCommand = Schema.Struct({
   ephemeral: Schema.Boolean,
 }).annotate({ identifier: "Rika.Cli.Args.InteractiveCommand" })
 
-export type Command = ExecuteCommand | InteractiveCommand
+export const ThreadAction = Schema.Literals([
+  "list",
+  "search",
+  "archive",
+  "unarchive",
+  "share",
+  "reference",
+  "delete",
+]).annotate({ identifier: "Rika.Cli.Args.ThreadAction" })
+export type ThreadAction = typeof ThreadAction.Type
+
+export interface ThreadCommand extends Schema.Schema.Type<typeof ThreadCommand> {}
+export const ThreadCommand = Schema.Struct({
+  type: Schema.Literal("threads"),
+  action: ThreadAction,
+  thread_id: Schema.optional(Ids.ThreadId),
+  query: Schema.optional(Schema.String),
+  include_archived: Schema.optional(Schema.Boolean),
+  limit: Schema.optional(Schema.Int),
+}).annotate({ identifier: "Rika.Cli.Args.ThreadCommand" })
+
+export type Command = ExecuteCommand | InteractiveCommand | ThreadCommand
 
 export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError", {
   message: Schema.String,
@@ -35,6 +56,12 @@ export const usage = [
   "Usage:",
   "  rika [options]",
   "  rika interactive [options]",
+  "  rika threads list [--include-archived] [--limit <n>]",
+  "  rika threads search [--include-archived] [--limit <n>] <query>",
+  "  rika threads archive <thread-id>",
+  "  rika threads unarchive <thread-id>",
+  "  rika threads share <thread-id>",
+  "  rika threads reference <thread-id> [query]",
   "  rika run [options] <prompt>",
   "  rika --execute [options] <prompt>",
   "",
@@ -97,6 +124,28 @@ const rootConfig = {
   ),
 }
 
+const threadListConfig = {
+  includeArchived: Flag.boolean("include-archived").pipe(Flag.withDescription("Include archived threads")),
+  limit: Flag.integer("limit").pipe(Flag.optional, Flag.withDescription("Maximum threads to return")),
+}
+
+const threadSearchConfig = {
+  ...threadListConfig,
+  query: Argument.string("query").pipe(Argument.variadic({ min: 1 }), Argument.withDescription("Search terms")),
+}
+
+const threadIdConfig = {
+  threadId: Argument.string("thread-id").pipe(Argument.withDescription("Thread id")),
+}
+
+const threadReferenceConfig = {
+  ...threadIdConfig,
+  query: Argument.string("query").pipe(
+    Argument.variadic({ min: 0 }),
+    Argument.withDescription("Optional reference query"),
+  ),
+}
+
 interface ExecuteInput {
   readonly mode: Option.Option<Config.Mode>
   readonly workspace: Option.Option<string>
@@ -116,6 +165,23 @@ interface RootInput extends ExecuteInput {
   readonly execute: boolean
 }
 
+interface ThreadListInput {
+  readonly includeArchived: boolean
+  readonly limit: Option.Option<number>
+}
+
+interface ThreadSearchInput extends ThreadListInput {
+  readonly query: ReadonlyArray<string>
+}
+
+interface ThreadIdInput {
+  readonly threadId: string
+}
+
+interface ThreadReferenceInput extends ThreadIdInput {
+  readonly query: ReadonlyArray<string>
+}
+
 const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) => {
   const run = CliCommand.make("run", executeConfig, (input: ExecuteInput) =>
     Ref.set(parsedRef, Option.some(toExecuteCommand(input))),
@@ -131,6 +197,8 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
     CliCommand.withShortDescription("Start interactive UI"),
   )
 
+  const threads = makeThreadsCommand(parsedRef, rejectedRef)
+
   return CliCommand.make("rika", rootConfig, (input: RootInput) =>
     input.execute
       ? input.prompt.length === 0
@@ -145,7 +213,60 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
             rejectedRef,
             Option.some(new ArgsError({ message: "Expected run, interactive, or --execute", exit_code: 2, usage })),
           ),
-  ).pipe(CliCommand.withDescription("Effect-native coding agent"), CliCommand.withSubcommands([run, interactive]))
+  ).pipe(
+    CliCommand.withDescription("Effect-native coding agent"),
+    CliCommand.withSubcommands([run, interactive, threads]),
+  )
+}
+
+const makeThreadsCommand = (
+  parsedRef: Ref.Ref<Option.Option<Command>>,
+  rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
+) => {
+  const list = CliCommand.make("list", threadListConfig, (input: ThreadListInput) =>
+    Ref.set(parsedRef, Option.some(toThreadListCommand(input))),
+  ).pipe(CliCommand.withDescription("List local threads"), CliCommand.withShortDescription("List threads"))
+
+  const search = CliCommand.make("search", threadSearchConfig, (input: ThreadSearchInput) =>
+    Ref.set(parsedRef, Option.some(toThreadSearchCommand(input))),
+  ).pipe(CliCommand.withDescription("Search local threads"), CliCommand.withShortDescription("Search threads"))
+
+  const archive = CliCommand.make("archive", threadIdConfig, (input: ThreadIdInput) =>
+    Ref.set(parsedRef, Option.some(toThreadIdCommand("archive", input))),
+  ).pipe(CliCommand.withDescription("Archive a local thread"), CliCommand.withShortDescription("Archive thread"))
+
+  const unarchive = CliCommand.make("unarchive", threadIdConfig, (input: ThreadIdInput) =>
+    Ref.set(parsedRef, Option.some(toThreadIdCommand("unarchive", input))),
+  ).pipe(CliCommand.withDescription("Unarchive a local thread"), CliCommand.withShortDescription("Unarchive thread"))
+
+  const share = CliCommand.make("share", threadIdConfig, (input: ThreadIdInput) =>
+    Ref.set(parsedRef, Option.some(toThreadIdCommand("share", input))),
+  ).pipe(
+    CliCommand.withDescription("Export a local thread as shareable JSON"),
+    CliCommand.withShortDescription("Share thread"),
+  )
+
+  const reference = CliCommand.make("reference", threadReferenceConfig, (input: ThreadReferenceInput) =>
+    Ref.set(parsedRef, Option.some(toThreadReferenceCommand(input))),
+  ).pipe(
+    CliCommand.withDescription("Render compact context for a referenced thread"),
+    CliCommand.withShortDescription("Reference thread"),
+  )
+
+  const deleteThread = CliCommand.make("delete", threadIdConfig, (input: ThreadIdInput) =>
+    Ref.set(parsedRef, Option.some(toThreadIdCommand("delete", input))),
+  ).pipe(
+    CliCommand.withDescription("Delete a local thread if the backend supports deletion"),
+    CliCommand.withShortDescription("Delete thread"),
+  )
+
+  return CliCommand.make("threads", {}, () =>
+    Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a threads subcommand", exit_code: 2, usage }))),
+  ).pipe(
+    CliCommand.withDescription("Manage local Rika threads"),
+    CliCommand.withShortDescription("Manage threads"),
+    CliCommand.withSubcommands([list, search, archive, unarchive, share, reference, deleteThread]),
+  )
 }
 
 const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
@@ -172,6 +293,46 @@ const toInteractiveCommand = (input: InteractiveInput): InteractiveCommand => {
     ...(mode === undefined ? {} : { mode }),
     ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
     ...(threadId === undefined ? {} : { thread_id: Ids.ThreadId.make(threadId) }),
+  }
+}
+
+const toThreadListCommand = (input: ThreadListInput): ThreadCommand => {
+  const limit = Option.getOrUndefined(input.limit)
+  return {
+    type: "threads",
+    action: "list",
+    ...(input.includeArchived ? { include_archived: true } : {}),
+    ...(limit === undefined ? {} : { limit }),
+  }
+}
+
+const toThreadSearchCommand = (input: ThreadSearchInput): ThreadCommand => {
+  const limit = Option.getOrUndefined(input.limit)
+  return {
+    type: "threads",
+    action: "search",
+    query: input.query.join(" ").trim(),
+    ...(input.includeArchived ? { include_archived: true } : {}),
+    ...(limit === undefined ? {} : { limit }),
+  }
+}
+
+const toThreadIdCommand = (
+  action: Extract<ThreadAction, "archive" | "unarchive" | "share" | "delete">,
+  input: ThreadIdInput,
+): ThreadCommand => ({
+  type: "threads",
+  action,
+  thread_id: Ids.ThreadId.make(input.threadId),
+})
+
+const toThreadReferenceCommand = (input: ThreadReferenceInput): ThreadCommand => {
+  const query = input.query.join(" ").trim()
+  return {
+    type: "threads",
+    action: "reference",
+    thread_id: Ids.ThreadId.make(input.threadId),
+    ...(query.length === 0 ? {} : { query }),
   }
 }
 

@@ -60,6 +60,19 @@ describe("CLI args", () => {
     })
   })
 
+  test("parses thread management commands", async () => {
+    const threadId = Ids.ThreadId.make("thread_args_threads")
+    const list = await Effect.runPromise(Args.parse(["threads", "list", "--include-archived", "--limit", "5"]))
+    const search = await Effect.runPromise(Args.parse(["threads", "search", "auth", "race", "--limit", "3"]))
+    const archive = await Effect.runPromise(Args.parse(["threads", "archive", threadId]))
+    const reference = await Effect.runPromise(Args.parse(["threads", "reference", threadId, "auth", "race"]))
+
+    expect(list).toEqual({ type: "threads", action: "list", include_archived: true, limit: 5 })
+    expect(search).toEqual({ type: "threads", action: "search", query: "auth race", limit: 3 })
+    expect(archive).toEqual({ type: "threads", action: "archive", thread_id: threadId })
+    expect(reference).toEqual({ type: "threads", action: "reference", thread_id: threadId, query: "auth race" })
+  })
+
   test("rejects root prompt text unless --execute is set", async () => {
     const error = await Effect.runPromise(Args.parse(["hello"]).pipe(Effect.flip))
 

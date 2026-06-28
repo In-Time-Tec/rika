@@ -4,8 +4,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Config } from "@rika/core"
 import { Ids } from "@rika/schema"
-import { Effect } from "effect"
-import { ContextResolver } from "../src/index"
+import { Effect, Layer } from "effect"
+import { ContextResolver, ThreadService } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_context")
 const turnId = Ids.TurnId.make("turn_context")
@@ -20,7 +20,26 @@ const configLayer = (workspaceRoot: string) =>
   })
 
 const run = <A, E>(workspaceRoot: string, effect: Effect.Effect<A, E, ContextResolver.Service>) =>
-  Effect.runPromise(effect.pipe(Effect.provide(ContextResolver.layer), Effect.provide(configLayer(workspaceRoot))))
+  Effect.runPromise(
+    effect.pipe(
+      Effect.provide(ContextResolver.layer),
+      Effect.provide(
+        Layer.mergeAll(
+          configLayer(workspaceRoot),
+          ThreadService.fakeLayer({
+            reference: (input) =>
+              Effect.succeed({
+                thread_id: input.thread_id,
+                rendered: `Referenced ${input.thread_id}`,
+                entries: [`Referenced ${input.thread_id}`],
+                total_chars: `Referenced ${input.thread_id}`.length,
+                truncated: false,
+              }),
+          }),
+        ),
+      ),
+    ),
+  )
 
 describe("ContextResolver", () => {
   test("loads workspace AGENTS.md, mentioned files, images, and thread references", async () => {
@@ -46,8 +65,49 @@ describe("ContextResolver", () => {
     expect(entries[3]).toMatchObject({
       kind: "thread-reference",
       thread_reference: "T-12345678-1234-1234-1234-123456789abc",
+      content: "Referenced T-12345678-1234-1234-1234-123456789abc",
     })
     expect(context.rendered).toContain("untrusted-workspace-and-user-content")
+  })
+
+  test("resolves Rika-generated thread ids as thread references", async () => {
+    const root = await tempWorkspace()
+
+    const context = await run(
+      root,
+      ContextResolver.resolveContext({
+        thread_id: threadId,
+        turn_id: turnId,
+        content: "Continue from @thread_context and /threads/thread_context.",
+      }),
+    )
+
+    expect(context.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "thread-reference",
+        thread_reference: "thread_context",
+        content: "Referenced thread_context",
+      }),
+    )
+  })
+
+  test("does not parse thread-looking file mentions as thread references", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "thread_context.ts"), "export const threadContext = true\n")
+    await mkdir(join(root, "thread_context"), { recursive: true })
+    await writeFile(join(root, "thread_context", "file.ts"), "export const file = true\n")
+
+    const context = await run(
+      root,
+      ContextResolver.resolveContext({
+        thread_id: threadId,
+        turn_id: turnId,
+        content: "Read @thread_context.ts and @thread_context/file.ts",
+      }),
+    )
+
+    expect(context.entries.filter((entry) => entry.kind === "thread-reference")).toEqual([])
+    expect(workspaceEntries(context).filter((entry) => entry.kind === "file")).toHaveLength(2)
   })
 
   test("uses AGENT.md or CLAUDE.md fallback when AGENTS.md is absent", async () => {

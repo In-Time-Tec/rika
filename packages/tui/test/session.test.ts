@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { AgentLoop } from "@rika/agent"
-import { Config, IdGenerator } from "@rika/core"
-import { Database, Migration, ThreadEventLog } from "@rika/persistence"
+import { AgentLoop, ThreadService } from "@rika/agent"
+import { Config, IdGenerator, Time } from "@rika/core"
+import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
 import { Effect, Layer, Stream } from "effect"
 import { Renderer, Session, Terminal } from "../src/index"
@@ -37,11 +37,13 @@ const makeLayer = (terminal: Terminal.MemoryTerminal) => {
     Database.memoryLayer,
     Migration.layer,
     ThreadEventLog.layer,
+    ThreadProjection.layer,
+    Time.fixedLayer(Common.TimestampMillis.make(1_970_000_000_000)),
     IdGenerator.sequenceLayer(1),
     Terminal.memoryLayer(terminal),
     fakeAgentLayer,
   )
-  return Session.layer.pipe(Layer.provideMerge(services))
+  return Session.layer.pipe(Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(services))))
 }
 
 describe("TUI session", () => {
@@ -71,7 +73,7 @@ describe("TUI session", () => {
   test("resumes a durable thread by replaying persisted events into the view", async () => {
     const existingThread = Ids.ThreadId.make("thread_existing_tui")
     const terminal: Terminal.MemoryTerminal = {
-      inputs: [`/thread ${existingThread}`, "/exit"],
+      inputs: [`/thread ${existingThread}`, `/share ${existingThread}`, "/exit"],
       frames: [],
       prompts: [],
     }
@@ -79,8 +81,13 @@ describe("TUI session", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         yield* Migration.migrate()
-        yield* ThreadEventLog.append(threadCreated(existingThread, 1))
-        yield* ThreadEventLog.append(messageAdded(existingThread, 2, "old durable message"))
+        for (const event of [
+          threadCreated(existingThread, 1),
+          messageAdded(existingThread, 2, "old durable message"),
+        ]) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
         return yield* Session.run({})
       }).pipe(Effect.provide(makeLayer(terminal))),
     )
@@ -88,6 +95,8 @@ describe("TUI session", () => {
     const frames = terminal.frames.map(Renderer.stripAnsi).join("\n")
     expect(frames).toContain("Resumed thread thread_existing_tui")
     expect(frames).toContain("old durable message")
+    expect(frames).toContain("Thread export JSON")
+    expect(frames).toContain('"thread_id": "thread_existing_tui"')
   })
 })
 

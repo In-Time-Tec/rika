@@ -14,11 +14,13 @@
 | `src/agent-loop.ts`             | Effect service that runs turns and emits persisted events.         |
 | `src/context-resolver.ts`       | AGENTS.md, mention, image, and thread-reference context resolver.  |
 | `src/permission-policy.ts`      | Swappable tool permission decisions for allow/block/modify/fake.   |
+| `src/thread-service.ts`         | Thread lifecycle, search, share/export, and reference service.     |
 | `src/tool-registry.ts`          | Swappable tool definitions and the baseline shell command tool.    |
 | `src/tool-executor.ts`          | Tool execution boundary that applies policy before registry calls. |
 | `src/index.ts`                  | Package namespace exports.                                         |
 | `test/agent-loop.test.ts`       | Fake model/tool orchestration and cancellation tests.              |
 | `test/context-resolver.test.ts` | Guidance, file, image, thread, and frontmatter resolver tests.     |
+| `test/thread-service.test.ts`   | Thread lifecycle, search, share/export, and reference tests.       |
 | `test/tool-executor.test.ts`    | Permission, registry, and shell execution tests.                   |
 
 ## Current Standards

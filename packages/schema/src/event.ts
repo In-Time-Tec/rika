@@ -129,6 +129,13 @@ export const ThreadArchived = Schema.Struct({
   data: Schema.Struct({}),
 }).annotate({ identifier: "Rika.Event.ThreadArchived" })
 
+export interface ThreadUnarchived extends Schema.Schema.Type<typeof ThreadUnarchived> {}
+export const ThreadUnarchived = Schema.Struct({
+  ...fields,
+  type: Schema.Literal("thread.unarchived"),
+  data: Schema.Struct({}),
+}).annotate({ identifier: "Rika.Event.ThreadUnarchived" })
+
 export type Event =
   | ThreadCreated
   | TurnStarted
@@ -141,6 +148,7 @@ export type Event =
   | TurnCompleted
   | TurnFailed
   | ThreadArchived
+  | ThreadUnarchived
 
 export const Event = Schema.Union([
   ThreadCreated,
@@ -154,6 +162,7 @@ export const Event = Schema.Union([
   TurnCompleted,
   TurnFailed,
   ThreadArchived,
+  ThreadUnarchived,
 ]).pipe(Schema.toTaggedUnion("type"), Schema.annotate({ identifier: "Rika.Event" }))
 
 export interface References {

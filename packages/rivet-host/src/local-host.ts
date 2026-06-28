@@ -1,4 +1,4 @@
-import { AgentLoop, ContextResolver, ToolExecutor } from "@rika/agent"
+import { AgentLoop, ContextResolver, ThreadService, ToolExecutor } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { OpenAi, Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
@@ -20,7 +20,16 @@ export const endpointFromEnv = (env: Record<string, string | undefined> = proces
 const configuredDatabaseLayer = Database.layer.pipe(Layer.provideMerge(Config.layer))
 const configuredLlmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(Config.layer))
 const configuredToolLayer = BuiltInTools.toolExecutorLayer.pipe(Layer.provideMerge(Config.layer))
-const configuredContextResolverLayer = ContextResolver.layer.pipe(Layer.provideMerge(Config.layer))
+const storageLayer = Layer.mergeAll(
+  Config.layer,
+  configuredDatabaseLayer,
+  ThreadEventLog.layer,
+  ThreadProjection.layer,
+  Time.layer,
+  IdGenerator.layer,
+)
+const storageAndThreadLayer = ThreadService.layer.pipe(Layer.provideMerge(storageLayer))
+const configuredContextResolverLayer = ContextResolver.layer.pipe(Layer.provide(storageAndThreadLayer))
 
 type ServiceLayerOutput =
   | AgentLoop.Service
@@ -33,6 +42,7 @@ type ServiceLayerOutput =
   | Router.Service
   | ThreadEventLog.Service
   | ThreadProjection.Service
+  | ThreadService.Service
   | Time.Service
   | ToolExecutor.Service
 
@@ -43,13 +53,9 @@ type ServiceLayerError =
   | FffSearch.FffSearchError
 
 const baseServiceLayer = Layer.mergeAll(
-  Time.layer,
-  IdGenerator.layer,
+  storageAndThreadLayer,
   configuredContextResolverLayer,
-  configuredDatabaseLayer,
   Migration.layer,
-  ThreadEventLog.layer,
-  ThreadProjection.layer,
   configuredToolLayer,
   configuredLlmLayer,
 )

@@ -154,6 +154,13 @@ export const applyEventToState = (state: ThreadActorState, event: Event.Event): 
         last_sequence: event.sequence,
         archived: true,
       }
+    case "thread.unarchived":
+      return {
+        ...state,
+        thread_id: event.thread_id,
+        last_sequence: event.sequence,
+        archived: false,
+      }
     default:
       return { ...state, thread_id: event.thread_id, last_sequence: event.sequence }
   }

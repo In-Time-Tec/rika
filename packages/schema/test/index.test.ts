@@ -106,6 +106,30 @@ describe("Rika protocol schemas", () => {
     expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
   })
 
+  test("round-trips thread archive lifecycle events", () => {
+    const archived: Event.Event = {
+      id: Ids.EventId.make("event_archived"),
+      thread_id: threadId,
+      sequence: 2,
+      version: 1,
+      created_at: now,
+      type: "thread.archived",
+      data: {},
+    }
+    const unarchived: Event.Event = {
+      id: Ids.EventId.make("event_unarchived"),
+      thread_id: threadId,
+      sequence: 3,
+      version: 1,
+      created_at: now,
+      type: "thread.unarchived",
+      data: {},
+    }
+
+    expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(archived))).toEqual(archived)
+    expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(unarchived))).toEqual(unarchived)
+  })
+
   test("round-trips model stream chunk events", () => {
     const event: Event.Event = {
       id: eventId,

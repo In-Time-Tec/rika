@@ -14,7 +14,7 @@ The implementation plan is tracked as stacked GitHub issues in this repository. 
 
 ## Current State
 
-This repository currently contains the monorepo scaffold, shared protocol schemas, core Effect runtime services, local SQLite persistence foundation, default built-in tools, agent context resolution, and an initial Amp-like interactive terminal adapter. Runtime features continue to land through the numbered issue stack.
+This repository currently contains the monorepo scaffold, shared protocol schemas, core Effect runtime services, local SQLite persistence foundation, default built-in tools, agent context resolution, thread lifecycle/search/share services, and an initial Amp-like interactive terminal adapter. Runtime features continue to land through the numbered issue stack.
 
 ## Verification
 

@@ -1,7 +1,6 @@
-import { AgentLoop } from "@rika/agent"
+import { AgentLoop, ThreadService } from "@rika/agent"
 import { Config, IdGenerator } from "@rika/core"
-import { Database, ThreadEventLog } from "@rika/persistence"
-import { Event, Ids } from "@rika/schema"
+import { Ids } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import * as Renderer from "./renderer"
 import * as Terminal from "./terminal"
@@ -23,9 +22,8 @@ export type RunError =
   | SessionError
   | AgentLoop.RunError
   | Config.ConfigError
-  | Database.DatabaseError
   | Terminal.TerminalError
-  | ThreadEventLog.ThreadEventLogError
+  | ThreadService.Error
 
 export interface Interface {
   readonly run: (input: RunInput) => Effect.Effect<number, RunError>
@@ -36,10 +34,9 @@ export class Service extends Context.Service<Service, Interface>()("@rika/tui/Se
 interface Dependencies {
   readonly agentLoop: AgentLoop.Interface
   readonly config: Config.Interface
-  readonly database: Database.Interface
-  readonly eventLog: ThreadEventLog.Interface
   readonly idGenerator: IdGenerator.Interface
   readonly terminal: Terminal.Interface
+  readonly threadService: ThreadService.Interface
 }
 
 export const layer = Layer.effect(
@@ -47,11 +44,10 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const agentLoop = yield* AgentLoop.Service
     const config = yield* Config.Service
-    const database = yield* Database.Service
-    const eventLog = yield* ThreadEventLog.Service
     const idGenerator = yield* IdGenerator.Service
     const terminal = yield* Terminal.Service
-    const dependencies: Dependencies = { agentLoop, config, database, eventLog, idGenerator, terminal }
+    const threadService = yield* ThreadService.Service
+    const dependencies: Dependencies = { agentLoop, config, idGenerator, terminal, threadService }
 
     return Service.of({
       run: Effect.fn("Tui.Session.run")(function* (input: RunInput) {
@@ -129,8 +125,25 @@ const handleCommand = (
     if (name === "/help" || name === "/palette")
       return { state: ViewState.withPalette(state), thread_id: threadId, mode, exit: false }
     if (name === "/mode") return modeCommand(state, threadId, mode, argument)
+    if (name === "/threads") {
+      const summaries = yield* dependencies.threadService.list({})
+      return { state: ViewState.withNotice(state, formatSummaries(summaries)), thread_id: threadId, mode, exit: false }
+    }
+    if (name === "/search") {
+      if (argument === undefined || argument.length === 0) {
+        return { state: ViewState.withNotice(state, "Usage: /search <query>"), thread_id: threadId, mode, exit: false }
+      }
+      const results = yield* dependencies.threadService.search({ query: argument })
+      return {
+        state: ViewState.withNotice(state, formatSearchResults(results)),
+        thread_id: threadId,
+        mode,
+        exit: false,
+      }
+    }
     if (name === "/new") {
-      const nextThreadId = Ids.ThreadId.make(yield* dependencies.idGenerator.next("thread"))
+      const summary = yield* dependencies.threadService.create({})
+      const nextThreadId = summary.thread_id
       const next = ViewState.withThread(state, {
         thread_id: nextThreadId,
         events: [],
@@ -148,13 +161,61 @@ const handleCommand = (
         }
       }
       const nextThreadId = Ids.ThreadId.make(argument)
-      const events = yield* readThreadEvents(dependencies, nextThreadId)
+      const record = yield* dependencies.threadService.open({ thread_id: nextThreadId })
       const next = ViewState.withThread(state, {
         thread_id: nextThreadId,
-        events,
+        events: record.events,
         notice: `Resumed thread ${nextThreadId}`,
       })
       return { state: next, thread_id: nextThreadId, mode, exit: false }
+    }
+    if (name === "/archive" || name === "/unarchive") {
+      const target = argument === undefined || argument.length === 0 ? threadId : Ids.ThreadId.make(argument)
+      const summary =
+        name === "/archive"
+          ? yield* dependencies.threadService.archive({ thread_id: target })
+          : yield* dependencies.threadService.unarchive({ thread_id: target })
+      const record = target === threadId ? yield* dependencies.threadService.open({ thread_id: target }) : undefined
+      const nextState =
+        record === undefined
+          ? state
+          : ViewState.withThread(state, {
+              thread_id: target,
+              events: record.events,
+              notice: `${name.slice(1)}d ${target}`,
+            })
+      return {
+        state: ViewState.withNotice(nextState, `${summary.archived ? "Archived" : "Unarchived"} ${target}`),
+        thread_id: threadId,
+        mode,
+        exit: false,
+      }
+    }
+    if (name === "/share") {
+      const target = argument === undefined || argument.length === 0 ? threadId : Ids.ThreadId.make(argument)
+      const exported = yield* dependencies.threadService.share({ thread_id: target })
+      return {
+        state: ViewState.withNotice(state, `Thread export JSON:\n${JSON.stringify(exported, null, 2)}`),
+        thread_id: threadId,
+        mode,
+        exit: false,
+      }
+    }
+    if (name === "/reference") {
+      if (argument === undefined || argument.length === 0) {
+        return {
+          state: ViewState.withNotice(state, "Usage: /reference <thread-id> [query]"),
+          thread_id: threadId,
+          mode,
+          exit: false,
+        }
+      }
+      const [target, query] = splitFirst(argument)
+      const reference = yield* dependencies.threadService.reference({
+        thread_id: Ids.ThreadId.make(target),
+        ...(query === undefined ? {} : { query }),
+      })
+      return { state: ViewState.withNotice(state, reference.rendered), thread_id: threadId, mode, exit: false }
     }
     return {
       state: ViewState.withNotice(state, `Unknown command ${name}. Type /help.`),
@@ -209,13 +270,8 @@ const loadThreadState = (
     return ViewState.initial({ thread_id: threadId, workspace_path: workspacePath, mode, events })
   })
 
-const readThreadEvents = (
-  dependencies: Dependencies,
-  threadId: Ids.ThreadId,
-): Effect.Effect<ReadonlyArray<Event.Event>, RunError> =>
-  dependencies.eventLog
-    .readThread({ thread_id: threadId })
-    .pipe(Effect.provideService(Database.Service, dependencies.database))
+const readThreadEvents = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
+  dependencies.threadService.open({ thread_id: threadId }).pipe(Effect.map((record) => record.events))
 
 const render = (dependencies: Dependencies, state: ViewState.ViewState) =>
   dependencies.terminal.writeFrame(Renderer.render(state))
@@ -224,3 +280,24 @@ const splitCommand = (command: string): readonly [string, string | undefined] =>
   const [name, ...rest] = command.split(/\s+/)
   return [name ?? command, rest.length === 0 ? undefined : rest.join(" ")]
 }
+
+const splitFirst = (value: string): readonly [string, string | undefined] => {
+  const [first, ...rest] = value.split(/\s+/)
+  return [first ?? value, rest.length === 0 ? undefined : rest.join(" ")]
+}
+
+const formatSummaries = (summaries: ReadonlyArray<ThreadService.ThreadRecord["summary"]>) => {
+  if (summaries.length === 0) return "No active threads."
+  return [`Active threads (${summaries.length})`, ...summaries.map(summaryLine)].join("\n")
+}
+
+const formatSearchResults = (results: ReadonlyArray<ThreadService.SearchResult>) => {
+  if (results.length === 0) return "No matching threads."
+  return [
+    `Thread search results (${results.length})`,
+    ...results.map((result) => `${summaryLine(result.summary)} · score ${result.score}`),
+  ].join("\n")
+}
+
+const summaryLine = (summary: ThreadService.ThreadRecord["summary"]) =>
+  `${summary.thread_id}${summary.archived ? " [archived]" : ""}: ${summary.latest_message_text ?? "(no messages)"}`

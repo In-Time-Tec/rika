@@ -39,6 +39,23 @@ describe("ThreadEventLog", () => {
     expect(count).toHaveLength(1)
   })
 
+  test("reads complete history by default and only caps when a limit is provided", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadEventLog.append(threadCreated(1))
+        yield* ThreadEventLog.append(messageAdded(2, "first"))
+        yield* ThreadEventLog.append(messageAdded(3, "second"))
+        const complete = yield* ThreadEventLog.readThread({ thread_id: threadId })
+        const capped = yield* ThreadEventLog.readThread({ thread_id: threadId, limit: 2 })
+        return { complete, capped }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.complete.map((event) => event.sequence)).toEqual([1, 2, 3])
+    expect(result.capped.map((event) => event.sequence)).toEqual([1, 2])
+  })
+
   test("rejects stale sequence attempts explicitly", async () => {
     const error = await Effect.runPromise(
       Effect.gen(function* () {

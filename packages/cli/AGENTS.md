@@ -15,9 +15,11 @@
 | `src/execute.ts`       | Effect service that runs one command and streams NDJSON.    |
 | `src/output.ts`        | Swappable stdout/stderr boundary for process and tests.     |
 | `src/runtime.ts`       | Live layer assembly and routing for the Bun CLI process.    |
+| `src/threads.ts`       | CLI thread lifecycle/search/share command executor.         |
 | `src/main.ts`          | `rika` binary entrypoint.                                   |
 | `test/args.test.ts`    | Effect CLI parser contract tests.                           |
 | `test/execute.test.ts` | Fake model smoke tests for streaming JSON and diagnostics.  |
+| `test/threads.test.ts` | Thread command output tests over memory persistence.        |
 
 ## Current Standards
 

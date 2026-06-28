@@ -191,6 +191,8 @@ const applyEventRow = (database: ProjectionDatabase, event: Event.Event) => {
       return applyTurnStatus(database, event, "failed")
     case "thread.archived":
       return applyThreadArchived(database, event)
+    case "thread.unarchived":
+      return applyThreadUnarchived(database, event)
     default:
       return applySequenceOnly(database, event)
   }
@@ -250,6 +252,15 @@ const applyThreadArchived = (database: ProjectionDatabase, event: Event.ThreadAr
   database.run(sql`
     update thread_projections set
       archived = 1,
+      last_sequence = ${event.sequence},
+      updated_at = ${event.created_at}
+    where thread_id = ${event.thread_id}
+  `)
+
+const applyThreadUnarchived = (database: ProjectionDatabase, event: Event.ThreadUnarchived) =>
+  database.run(sql`
+    update thread_projections set
+      archived = 0,
       last_sequence = ${event.sequence},
       updated_at = ${event.created_at}
     where thread_id = ${event.thread_id}

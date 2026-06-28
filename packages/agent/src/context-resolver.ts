@@ -4,6 +4,7 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { Config } from "@rika/core"
 import { Common, Event, Ids } from "@rika/schema"
 import { Context, Effect, Layer, Schema } from "effect"
+import * as ThreadService from "./thread-service"
 
 const defaultMaxContentChars = 24_000
 const maxEntries = 80
@@ -54,12 +55,13 @@ interface DirectoryEntry {
   readonly isFile: boolean
 }
 
-export const layer: Layer.Layer<Service, never, Config.Service> = Layer.effect(
+export const layer: Layer.Layer<Service, never, Config.Service | ThreadService.Service> = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
+    const threadService = yield* ThreadService.Service
     const values = yield* config.get
-    return makeService(resolve(values.workspace_root), nodeFileSystem)
+    return makeService(resolve(values.workspace_root), nodeFileSystem, threadService)
   }),
 )
 
@@ -81,7 +83,11 @@ export const resolveContext = Effect.fn("ContextResolver.resolve.call")(function
   return yield* resolver.resolve(input)
 })
 
-const makeService = (workspaceRoot: string, fileSystem: FileSystemAdapter): Interface =>
+const makeService = (
+  workspaceRoot: string,
+  fileSystem: FileSystemAdapter,
+  threadService: ThreadService.Interface,
+): Interface =>
   Service.of({
     resolve: Effect.fn("ContextResolver.resolve")(function* (input: ResolveInput) {
       const maxContentChars = clamp(input.max_content_chars ?? defaultMaxContentChars, 2_000, 80_000)
@@ -93,7 +99,13 @@ const makeService = (workspaceRoot: string, fileSystem: FileSystemAdapter): Inte
       ])
 
       const guidanceEntries = yield* resolveGuidanceEntries(fileSystem, workspaceRoot, relevantPaths)
-      const mentionEntries = yield* resolveMentionEntries(fileSystem, workspaceRoot, mentions)
+      const mentionEntries = yield* resolveMentionEntries(
+        fileSystem,
+        workspaceRoot,
+        mentions,
+        threadService,
+        input.content,
+      )
       const entries = dedupeEntries([...guidanceEntries, ...mentionEntries]).slice(0, maxEntries)
       const rendered = renderEntries(entries, maxContentChars)
       return {
@@ -163,13 +175,22 @@ const parseMentions = (content: string): Mentions => {
 
 const threadReferences = (content: string): ReadonlyArray<string> => {
   const values: Array<string> = []
-  for (const match of content.matchAll(
-    /(?:@|\/threads\/)(T-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/g,
-  )) {
-    if (match[1] !== undefined) values.push(match[1])
+  for (const match of content.matchAll(/@([^\s`'"<>()[\]{}]+)/g)) {
+    const value = trimTrailingPunctuation(match[1] ?? "")
+    if (isThreadReferenceId(value)) values.push(value)
+  }
+  for (const match of content.matchAll(/\/threads\/([^\s`'"<>()[\]{}]+)/g)) {
+    const value = trimTrailingPunctuation((match[1] ?? "").split(/[/?#]/)[0] ?? "")
+    if (isThreadReferenceId(value)) values.push(value)
   }
   return uniqueStrings(values)
 }
+
+const isThreadReferenceId = (value: string) => ampThreadId(value) || rikaThreadId(value)
+const ampThreadId = (value: string) =>
+  /^T-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value)
+const rikaThreadId = (value: string) => /^thread_[A-Za-z0-9_-]+$/.test(value)
+const trimTrailingPunctuation = (value: string) => value.replace(/[.,;:!?]+$/, "")
 
 const fileMentions = (content: string): ReadonlyArray<string> => {
   const values: Array<string> = []
@@ -177,7 +198,7 @@ const fileMentions = (content: string): ReadonlyArray<string> => {
     const value = match[1]
     if (value === undefined || value.startsWith("T-")) continue
     if (!looksLikePath(value)) continue
-    values.push(value.replace(/[.,;:!?]+$/, ""))
+    values.push(trimTrailingPunctuation(value))
   }
   return uniqueStrings(values)
 }
@@ -335,6 +356,8 @@ const resolveMentionEntries = (
   fileSystem: FileSystemAdapter,
   workspaceRoot: string,
   mentions: Mentions,
+  threadService: ThreadService.Interface,
+  query: string,
 ): Effect.Effect<ReadonlyArray<Event.ContextEntry>, ContextResolverError> =>
   Effect.gen(function* () {
     const entries: Array<Event.ContextEntry> = []
@@ -374,12 +397,19 @@ const resolveMentionEntries = (
     }
 
     for (const mention of mentions.threads) {
+      const reference = yield* threadService
+        .reference({ thread_id: Ids.ThreadId.make(mention.value), query, max_chars: 2_000 })
+        .pipe(
+          Effect.map((result) => result.rendered),
+          Effect.catch(() => Effect.succeed(undefined)),
+        )
       entries.push({
         kind: "thread-reference",
         source: "thread-mention",
         reason: "user referenced another thread",
         trusted: false,
         thread_reference: mention.value,
+        ...(reference === undefined ? {} : { content: reference }),
       })
     }
 

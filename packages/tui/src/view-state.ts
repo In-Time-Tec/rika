@@ -147,7 +147,7 @@ export const withNotice = (state: ViewState, notice: string): ViewState => ({ ..
 export const withPalette = (state: ViewState): ViewState => ({
   ...state,
   palette_open: true,
-  notice: "Command palette: /mode <rush|smart|deep>, /new, /thread <id>, /help, /exit",
+  notice: "Command palette: /mode, /threads, /search, /new, /thread, /archive, /unarchive, /share, /reference, /exit",
 })
 
 const withoutNotice = (state: ViewState): ViewState => {

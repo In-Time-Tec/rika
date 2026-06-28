@@ -49,12 +49,7 @@ export const layer = Layer.succeed(
     readThread: Effect.fn("ThreadEventLog.readThread")(function* (input: ReadThreadInput) {
       return yield* Database.withDatabaseEffect((database) =>
         Effect.try({
-          try: () =>
-            database
-              .all<PayloadRow>(
-                sql`select payload from thread_events where thread_id = ${input.thread_id} and sequence > ${input.after_sequence ?? 0} order by sequence asc limit ${input.limit ?? 10_000}`,
-              )
-              .map((row) => decodePayload(row.payload)),
+          try: () => readThreadRows(database, input).map((row) => decodePayload(row.payload)),
           catch: (cause) => toError(cause, "readThread"),
         }),
       )
@@ -100,6 +95,18 @@ interface SequenceRow {
 
 const appendEvent = (database: Database.DrizzleDatabase, event: Event.Event) =>
   database.transaction((transaction) => appendEventRow(transaction, event))
+
+const readThreadRows = (database: Database.DrizzleDatabase, input: ReadThreadInput) => {
+  const afterSequence = input.after_sequence ?? 0
+  if (input.limit === undefined) {
+    return database.all<PayloadRow>(
+      sql`select payload from thread_events where thread_id = ${input.thread_id} and sequence > ${afterSequence} order by sequence asc`,
+    )
+  }
+  return database.all<PayloadRow>(
+    sql`select payload from thread_events where thread_id = ${input.thread_id} and sequence > ${afterSequence} order by sequence asc limit ${input.limit}`,
+  )
+}
 
 const appendEventRow = (database: EventLogDatabase, event: Event.Event) => {
   const existing = database.get<PayloadRow>(sql`select payload from thread_events where id = ${event.id}`)

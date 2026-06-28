@@ -31,6 +31,21 @@ describe("ThreadProjection", () => {
     })
   })
 
+  test("projects archive and unarchive events", async () => {
+    const summary = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        for (const event of [...projectionEvents(), archivedEvent(), unarchivedEvent()]) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        return yield* ThreadProjection.getThread(threadId)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(summary).toMatchObject({ thread_id: threadId, archived: false })
+  })
+
   test("rebuilds projections from only the event log", async () => {
     const summaries = await Effect.runPromise(
       Effect.gen(function* () {
@@ -124,3 +139,23 @@ const projectionEvents = (): readonly [
     data: {},
   },
 ]
+
+const archivedEvent = (): Event.ThreadArchived => ({
+  id: Ids.EventId.make("projection_thread_archived"),
+  thread_id: threadId,
+  sequence: 5,
+  version: 1,
+  created_at: 5,
+  type: "thread.archived",
+  data: {},
+})
+
+const unarchivedEvent = (): Event.ThreadUnarchived => ({
+  id: Ids.EventId.make("projection_thread_unarchived"),
+  thread_id: threadId,
+  sequence: 6,
+  version: 1,
+  created_at: 6,
+  type: "thread.unarchived",
+  data: {},
+})
