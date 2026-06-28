@@ -1,7 +1,7 @@
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Common, ErrorEnvelope, Event, Ids, Message, Tool } from "@rika/schema"
+import { Common, ErrorEnvelope, Event, Ide, Ids, Message, Tool } from "@rika/schema"
 import { Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import * as ContextResolver from "./context-resolver"
 import * as SkillRegistry from "./skill-registry"
@@ -15,6 +15,7 @@ export const RunTurnInput = Schema.Struct({
   content: Schema.String,
   mode: Schema.optional(Config.Mode),
   cancelled: Schema.optional(Schema.Boolean),
+  ide_context: Schema.optional(Ide.ContextSnapshot),
 }).annotate({ identifier: "Rika.Agent.AgentLoop.RunTurnInput" })
 
 export interface CancelTurnInput extends Schema.Schema.Type<typeof CancelTurnInput> {}
@@ -218,6 +219,7 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
       turn_id: turnId,
       content: input.content,
       history: [...existingEvents, ...appendedEvents],
+      ...(input.ide_context === undefined ? {} : { ide_context: input.ide_context }),
     })
     yield* append(yield* makeContextResolved(dependencies, input.thread_id, turnId, resolvedContext, sequence + 1))
     const skillSelection = yield* dependencies.skillRegistry.selectForPrompt({ content: input.content })

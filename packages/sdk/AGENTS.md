@@ -5,7 +5,7 @@
 
 ## Purpose
 
-`packages/sdk/` owns the TypeScript client for Rika's remote-control API. It is typed from `@rika/schema` and exposes Effect/Stream-native methods plus a fetch transport.
+`packages/sdk/` owns the TypeScript client for Rika's remote-control API, including IDE integration endpoints. It is typed from `@rika/schema` and exposes Effect/Stream-native methods plus a fetch transport.
 
 ## Key Files
 

@@ -19,6 +19,7 @@
 | `src/artifact.ts`    | Durable artifact wire schema.                             |
 | `src/remote.ts`      | Remote-control API request/response schemas.              |
 | `src/error.ts`       | Serializable error envelope schema.                       |
+| `src/ide.ts`         | IDE client, context, diagnostics, and navigation schemas. |
 | `test/index.test.ts` | Package export and protocol round-trip tests.             |
 
 ## Current Standards

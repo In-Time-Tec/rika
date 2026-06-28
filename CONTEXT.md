@@ -92,6 +92,18 @@ _Avoid_: Session process, worker, server object
 A terminal UI run that renders thread events, accepts prompts and command-palette commands, and delegates turns to the agent loop. Interactive sessions are adapters over durable threads, not a separate source of truth.
 _Avoid_: Terminal state, chat UI, REPL transcript
 
+**IDE Client**:
+An editor-side participant connected to Rika for one or more workspaces. It can supply editor context and receive requests to reveal code without becoming the thread's source of truth.
+_Avoid_: Editor plugin, IDE session, frontend
+
+**IDE Context**:
+The user-visible editor state supplied by an IDE client for a turn, including open workspace roots, active file, selection, and diagnostics.
+_Avoid_: Editor state, workspace snapshot, hidden prompt
+
+**Navigation Request**:
+A request for an IDE client to reveal a file or range for the user. It is advisory UI steering, not a workspace mutation.
+_Avoid_: Open-file command, editor action, jump
+
 **Remote Control**:
 The API surface that lets external clients, IDEs, CLIs, or SDK users inspect and steer active Rika threads.
 _Avoid_: Webhook, daemon API, RPC

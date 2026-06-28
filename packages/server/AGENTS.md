@@ -5,16 +5,16 @@
 
 ## Purpose
 
-`packages/server/` owns Rika's local-first remote control adapter. It exposes HTTP/NDJSON endpoints over shared protocol schemas and delegates all state changes to agent, thread, and artifact services.
+`packages/server/` owns Rika's local-first remote control adapter. It exposes HTTP/NDJSON endpoints over shared protocol schemas and delegates all state changes to agent, thread, artifact, and IDE bridge services.
 
 ## Key Files
 
-| File                          | Purpose                                                             |
-| ----------------------------- | ------------------------------------------------------------------- |
-| `src/remote-control.ts`       | Effect service API for thread, turn, interrupt, and artifact calls. |
-| `src/http-server.ts`          | Bun HTTP adapter for the remote-control service.                    |
-| `src/index.ts`                | Package namespace exports.                                          |
-| `test/remote-control.test.ts` | SDK/server contract tests over local Effect services.               |
+| File                          | Purpose                                                                  |
+| ----------------------------- | ------------------------------------------------------------------------ |
+| `src/remote-control.ts`       | Effect service API for thread, turn, interrupt, artifact, and IDE calls. |
+| `src/http-server.ts`          | Bun HTTP adapter for the remote-control service.                         |
+| `src/index.ts`                | Package namespace exports.                                               |
+| `test/remote-control.test.ts` | SDK/server contract tests over local Effect services.                    |
 
 ## Current Standards
 

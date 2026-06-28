@@ -9,6 +9,7 @@ import {
   ToolExecutor,
 } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
+import { IdeBridge } from "@rika/ide"
 import { OpenAi, Provider, Router } from "@rika/llm"
 import {
   ArtifactStore,
@@ -19,6 +20,7 @@ import {
   ThreadProjection,
 } from "@rika/persistence"
 import { PluginHost, PluginUi, SelfExtension } from "@rika/plugin"
+import { Client } from "@rika/sdk"
 import { HttpServer, RemoteControl } from "@rika/server"
 import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import { Session, Terminal } from "@rika/tui"
@@ -26,6 +28,7 @@ import { Effect, Layer } from "effect"
 import * as Args from "./args"
 import * as Execute from "./execute"
 import * as Extensions from "./extensions"
+import * as Ide from "./ide"
 import * as Mcp from "./mcp"
 import * as Output from "./output"
 import * as Review from "./review"
@@ -64,9 +67,11 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                       ? Extensions.executeCommand(command).pipe(
                           Effect.provide(extensionsLiveLayer(command, input.env, input.cwd)),
                         )
-                      : Server.executeCommand(command).pipe(
-                          Effect.provide(serverLiveLayer(command, input.env, input.cwd)),
-                        )
+                      : command.type === "ide"
+                        ? Ide.executeCommand(command).pipe(Effect.provide(ideLiveLayer(command, input.env, input.cwd)))
+                        : Server.executeCommand(command).pipe(
+                            Effect.provide(serverLiveLayer(command, input.env, input.cwd)),
+                          )
         ).pipe(
           Effect.matchEffect({
             onFailure: (error: RuntimeError) => Output.stderr(formatRuntimeError(error)).pipe(Effect.as(1)),
@@ -87,6 +92,9 @@ type RuntimeError =
   | Execute.ExecuteError
   | Extensions.ExtensionsError
   | FffSearch.FffSearchError
+  | Client.SdkError
+  | Ide.IdeError
+  | IdeBridge.IdeBridgeError
   | Mcp.McpError
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.McpClientError
@@ -112,6 +120,9 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Migration.MigrationError) return `Rika failed: ${error.message}`
   if (error instanceof Extensions.ExtensionsError) return Extensions.formatError(error)
   if (error instanceof FffSearch.FffSearchError) return `Rika failed: ${error.message}`
+  if (error instanceof Client.SdkError) return `Rika failed: ${error.message}`
+  if (error instanceof Ide.IdeError) return Ide.formatError(error)
+  if (error instanceof IdeBridge.IdeBridgeError) return `Rika failed: ${error.message}`
   if (error instanceof Mcp.McpError) return Mcp.formatError(error)
   if (error instanceof McpApprovalStore.McpApprovalStoreError) return `Rika failed: ${error.message}`
   if (error instanceof McpClient.McpClientError) return `Rika failed: ${error.message}`
@@ -452,6 +463,12 @@ export const extensionsLiveLayer = (
   return commandLayer
 }
 
+export const ideLiveLayer = (
+  _command: Args.IdeCommand,
+  _env: Record<string, string | undefined>,
+  _cwd: string,
+): Layer.Layer<IdeLayerOutput, LiveLayerError> => Ide.layer.pipe(Layer.provideMerge(Output.layer))
+
 export const serverLiveLayer = (
   command: Args.ServerCommand,
   env: Record<string, string | undefined>,
@@ -513,6 +530,7 @@ export const serverLiveLayer = (
     toolLayer,
     llmLayer,
     artifactLayer,
+    IdeBridge.layer,
   )
   const remoteLayer = RemoteControl.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
   const httpLayer = HttpServer.layer.pipe(Layer.provideMerge(remoteLayer))
@@ -620,6 +638,8 @@ export type ExtensionsLayerOutput =
   | SelfExtension.Service
   | Time.Service
 
+export type IdeLayerOutput = Output.Service | Ide.Service
+
 export type ServerLayerOutput =
   | AgentLoop.Service
   | ArtifactStore.Service
@@ -627,6 +647,7 @@ export type ServerLayerOutput =
   | ContextResolver.Service
   | Database.Service
   | HttpServer.Service
+  | IdeBridge.Service
   | IdGenerator.Service
   | McpApprovalStore.Service
   | Migration.Service
@@ -648,8 +669,10 @@ export type ServerLayerOutput =
 export type LiveLayerError =
   | Config.ConfigError
   | ContextResolver.ContextResolverError
+  | Client.SdkError
   | Database.DatabaseError
   | FffSearch.FffSearchError
+  | IdeBridge.IdeBridgeError
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.RunError
   | Migration.MigrationError

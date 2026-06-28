@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { Config } from "@rika/core"
-import { Common, Event, Ids } from "@rika/schema"
+import { Common, Event, Ide, Ids } from "@rika/schema"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as ThreadService from "./thread-service"
 
@@ -18,6 +18,7 @@ export const ResolveInput = Schema.Struct({
   turn_id: Ids.TurnId,
   content: Schema.String,
   history: Schema.optional(Schema.Array(Event.Event)),
+  ide_context: Schema.optional(Ide.ContextSnapshot),
   max_content_chars: Schema.optional(Schema.Int),
 }).annotate({ identifier: "Rika.Agent.ContextResolver.ResolveInput" })
 
@@ -106,7 +107,8 @@ const makeService = (
         threadService,
         input.content,
       )
-      const entries = dedupeEntries([...guidanceEntries, ...mentionEntries]).slice(0, maxEntries)
+      const ideEntries = input.ide_context === undefined ? [] : ideContextEntries(input.ide_context)
+      const entries = dedupeEntries([...guidanceEntries, ...mentionEntries, ...ideEntries]).slice(0, maxEntries)
       const rendered = renderEntries(entries, maxContentChars)
       return {
         entries,
@@ -117,6 +119,7 @@ const makeService = (
           image_mentions: mentions.images.length,
           thread_references: mentions.threads.length,
           relevant_paths: relevantPaths.length,
+          ide_context: input.ide_context !== undefined,
           truncated: rendered.length >= maxContentChars,
         },
       }
@@ -415,6 +418,81 @@ const resolveMentionEntries = (
 
     return entries
   })
+
+const ideContextEntries = (context: Ide.ContextSnapshot): ReadonlyArray<Event.ContextEntry> => {
+  const entries: Array<Event.ContextEntry> = []
+  if (context.active_file !== undefined) entries.push(ideActiveFileEntry(context))
+  const diagnostics = context.diagnostics ?? []
+  if (diagnostics.length > 0) entries.push(ideDiagnosticsEntry(context.workspace_roots, diagnostics))
+  return entries
+}
+
+const ideActiveFileEntry = (context: Ide.ContextSnapshot): Event.ContextEntry => {
+  const activeFile = context.active_file
+  if (activeFile === undefined) {
+    return {
+      kind: "file",
+      source: "ide:active-file",
+      reason: "IDE active file context",
+      trusted: false,
+      metadata: { workspace_roots: context.workspace_roots },
+    }
+  }
+  return {
+    kind: "file",
+    source: "ide:active-file",
+    reason: "IDE active file and selection",
+    trusted: false,
+    path: activeFile.path,
+    content: ideActiveFileContent(activeFile),
+    metadata: ideActiveFileMetadata(context),
+  }
+}
+
+const ideActiveFileContent = (activeFile: Ide.ActiveFile) => {
+  const lines: Array<string> = [`Active file: ${activeFile.path}`]
+  if (activeFile.language_id !== undefined) lines.push(`Language: ${activeFile.language_id}`)
+  if (activeFile.selection !== undefined) {
+    lines.push(`Selection: lines ${activeFile.selection.range.start_line}-${activeFile.selection.range.end_line}`)
+    if (activeFile.selection.selected_text !== undefined) lines.push("", activeFile.selection.selected_text)
+  }
+  return lines.join("\n")
+}
+
+const ideActiveFileMetadata = (context: Ide.ContextSnapshot) => {
+  const activeFile = context.active_file
+  return {
+    workspace_roots: context.workspace_roots,
+    ...(activeFile?.language_id === undefined ? {} : { language_id: activeFile.language_id }),
+    ...(activeFile?.selection === undefined
+      ? {}
+      : {
+          selection: {
+            start_line: activeFile.selection.range.start_line,
+            end_line: activeFile.selection.range.end_line,
+          },
+        }),
+    diagnostics: (context.diagnostics ?? []).length,
+  }
+}
+
+const ideDiagnosticsEntry = (
+  workspaceRoots: ReadonlyArray<string>,
+  diagnostics: ReadonlyArray<Ide.Diagnostic>,
+): Event.ContextEntry => ({
+  kind: "file",
+  source: "ide:diagnostics",
+  reason: "IDE diagnostics for open workspace",
+  trusted: false,
+  content: diagnostics.map(formatIdeDiagnostic).join("\n"),
+  metadata: { workspace_roots: workspaceRoots, diagnostics: diagnostics.length },
+})
+
+const formatIdeDiagnostic = (diagnostic: Ide.Diagnostic) => {
+  const range = diagnostic.range === undefined ? "" : `:${diagnostic.range.start_line}-${diagnostic.range.end_line}`
+  const source = diagnostic.source === undefined ? "" : ` [${diagnostic.source}]`
+  return `${diagnostic.path}${range} ${diagnostic.severity}${source}: ${diagnostic.message}`
+}
 
 const expandMention = (
   fileSystem: FileSystemAdapter,

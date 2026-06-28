@@ -16,6 +16,9 @@ export type ArtifactId = typeof ArtifactId.Type
 export const EventId = id("Rika.EventId")
 export type EventId = typeof EventId.Type
 
+export const IdeClientId = id("Rika.IdeClientId")
+export type IdeClientId = typeof IdeClientId.Type
+
 export const MessageId = id("Rika.MessageId")
 export type MessageId = typeof MessageId.Type
 

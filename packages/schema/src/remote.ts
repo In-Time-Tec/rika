@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Kind as ArtifactKind } from "./artifact"
 import { JsonValue, TimestampMillis } from "./common"
 import { Event } from "./event"
+import { ContextSnapshot as IdeContextSnapshot } from "./ide"
 import { ArtifactId, ThreadId, TurnId, UserId, WorkspaceId } from "./ids"
 
 export const AgentMode = Schema.Literals(["rush", "smart", "deep"]).annotate({
@@ -54,6 +55,7 @@ export const StartTurnRequest = Schema.Struct({
   content: Schema.String,
   mode: Schema.optional(AgentMode),
   cancelled: Schema.optional(Schema.Boolean),
+  ide_context: Schema.optional(IdeContextSnapshot),
 }).annotate({ identifier: "Rika.Remote.StartTurnRequest" })
 
 export interface InterruptTurnRequest extends Schema.Schema.Type<typeof InterruptTurnRequest> {}

@@ -13,6 +13,7 @@
 | -------------- | ----------------------------------------------------------------------------------------- |
 | `agent/`       | Agent loop orchestration and minimal tool execution boundary. See `agent/AGENTS.md`.      |
 | `core/`        | Core Effect service examples and future runtime/domain services. See `core/AGENTS.md`.    |
+| `ide/`         | Editor integration seam and mock/reference IDE bridge. See `ide/AGENTS.md`.               |
 | `llm/`         | Provider-neutral LLM contracts and mode routing. See `llm/AGENTS.md`.                     |
 | `persistence/` | Drizzle-backed local SQLite adapter services and migrations. See `persistence/AGENTS.md`. |
 | `plugin/`      | Trusted local TypeScript plugin API and host services. See `plugin/AGENTS.md`.            |

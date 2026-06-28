@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { Artifact, Codec, ErrorEnvelope, Event, Ids, Message, Remote, Tool } from "../src/index"
+import { Artifact, Codec, ErrorEnvelope, Event, Ide, Ids, Message, Remote, Tool } from "../src/index"
 
 const now = 1_765_000_000_000
 const threadId = Ids.ThreadId.make("thread_1")
@@ -240,6 +240,50 @@ describe("Rika protocol schemas", () => {
     expect(Codec.decode(Remote.StreamFrame)(Codec.encode(Remote.StreamFrame)(summaryError(401)))).toEqual(
       summaryError(401),
     )
+  })
+
+  test("round-trips IDE integration payloads", () => {
+    const clientId = Ids.IdeClientId.make("ide_schema_client")
+    const context: Ide.ContextSnapshot = {
+      workspace_roots: ["/workspace/rika"],
+      active_file: {
+        path: "packages/cli/src/runtime.ts",
+        language_id: "typescript",
+        selection: { range: { start_line: 10, end_line: 12 }, selected_text: "const mode = 'smart'" },
+      },
+      diagnostics: [
+        {
+          path: "packages/cli/src/runtime.ts",
+          severity: "warning",
+          message: "Unused symbol",
+          range: { start_line: 11, end_line: 11 },
+          source: "tsserver",
+        },
+      ],
+    }
+    const connect: Ide.ConnectRequest = {
+      client_id: clientId,
+      name: "Mock IDE",
+      workspace_roots: ["/workspace/rika"],
+      capabilities: ["active-context", "diagnostics", "navigation"],
+      initial_context: context,
+    }
+    const start: Remote.StartTurnRequest = {
+      thread_id: threadId,
+      workspace_id: workspaceId,
+      content: "Use the active editor context",
+      ide_context: context,
+    }
+    const openFile: Ide.OpenFileRequest = {
+      path: "packages/cli/src/runtime.ts",
+      range: { start_line: 10, end_line: 12 },
+      reason: "Show the selected code",
+      thread_id: threadId,
+    }
+
+    expect(Codec.decode(Ide.ConnectRequest)(Codec.encode(Ide.ConnectRequest)(connect))).toEqual(connect)
+    expect(Codec.decode(Remote.StartTurnRequest)(Codec.encode(Remote.StartTurnRequest)(start))).toEqual(start)
+    expect(Codec.decode(Ide.OpenFileRequest)(Codec.encode(Ide.OpenFileRequest)(openFile))).toEqual(openFile)
   })
 })
 

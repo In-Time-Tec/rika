@@ -14,6 +14,7 @@
 | `src/args.ts`             | Pure argument parser for interactive and execute/run modes.         |
 | `src/execute.ts`          | Effect service that runs one command and streams NDJSON.            |
 | `src/extensions.ts`       | CLI self-extension commands for skill/plugin creation and rollback. |
+| `src/ide.ts`              | CLI IDE client commands backed by the remote-control SDK.           |
 | `src/mcp.ts`              | CLI MCP server list/approval command executor.                      |
 | `src/output.ts`           | Swappable stdout/stderr boundary for process and tests.             |
 | `src/review.ts`           | CLI review command executor that prints machine-readable JSON.      |
@@ -25,6 +26,7 @@
 | `test/args.test.ts`       | Effect CLI parser contract tests.                                   |
 | `test/execute.test.ts`    | Fake model smoke tests for streaming JSON and diagnostics.          |
 | `test/extensions.test.ts` | Self-extension command output tests over a fake service.            |
+| `test/ide.test.ts`        | IDE command tests over an in-memory SDK transport.                  |
 | `test/mcp.test.ts`        | MCP list/approval command output tests.                             |
 | `test/review.test.ts`     | Review command JSON output tests over a fake review service.        |
 | `test/server.test.ts`     | Remote-control server command output tests.                         |

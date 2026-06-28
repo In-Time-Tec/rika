@@ -43,10 +43,12 @@
         "@effect/platform-node": "catalog:",
         "@rika/agent": "workspace:*",
         "@rika/core": "workspace:*",
+        "@rika/ide": "workspace:*",
         "@rika/llm": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/plugin": "workspace:*",
         "@rika/schema": "workspace:*",
+        "@rika/sdk": "workspace:*",
         "@rika/server": "workspace:*",
         "@rika/tools": "workspace:*",
         "@rika/tui": "workspace:*",
@@ -59,6 +61,18 @@
     },
     "packages/core": {
       "name": "@rika/core",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/ide": {
+      "name": "@rika/ide",
       "version": "0.0.0",
       "dependencies": {
         "@rika/schema": "workspace:*",
@@ -162,6 +176,7 @@
       "dependencies": {
         "@rika/agent": "workspace:*",
         "@rika/core": "workspace:*",
+        "@rika/ide": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",
         "effect": "catalog:",
@@ -407,6 +422,8 @@
     "@rika/cli": ["@rika/cli@workspace:packages/cli"],
 
     "@rika/core": ["@rika/core@workspace:packages/core"],
+
+    "@rika/ide": ["@rika/ide@workspace:packages/ide"],
 
     "@rika/llm": ["@rika/llm@workspace:packages/llm"],
 

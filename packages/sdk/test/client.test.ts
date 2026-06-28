@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { Codec, Common, Event, Ids, Remote } from "@rika/schema"
-import { Effect, Stream } from "effect"
+import { Codec, Common, Event, Ide, Ids, Remote } from "@rika/schema"
+import { Effect, Schema, Stream } from "effect"
 import { Client } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_sdk_client")
 const workspaceId = Ids.WorkspaceId.make("workspace_sdk_client")
 const turnId = Ids.TurnId.make("turn_sdk_client")
 const eventId = Ids.EventId.make("event_sdk_client")
+const ideClientId = Ids.IdeClientId.make("ide_sdk_client")
 const now = Common.TimestampMillis.make(2_000_000_000_001)
 
 describe("SDK client", () => {
@@ -102,5 +103,85 @@ describe("SDK client", () => {
     )
 
     expect(error).toMatchObject({ message: "Workspace denied", operation: "startTurn", status: 403 })
+  })
+
+  test("uses shared schemas for IDE endpoints", async () => {
+    const calls: Array<Client.RequestInput> = []
+    const context: Ide.ContextSnapshot = {
+      workspace_roots: ["/workspace/rika"],
+      active_file: { path: "src/index.ts", selection: { range: { start_line: 1, end_line: 3 } } },
+    }
+    const navigationRequest: Ide.OpenFileRequest = {
+      path: "src/index.ts",
+      range: { start_line: 1, end_line: 3 },
+      reason: "Show file",
+    }
+    const client = Client.make({
+      requestJson: (input) => {
+        calls.push(input)
+        switch (input.path) {
+          case "/v1/ide/connect":
+            return Effect.succeed(
+              Codec.encode(Ide.ConnectResponse)({
+                client_id: ideClientId,
+                connected: true,
+                capabilities: ["active-context", "navigation"],
+              }),
+            )
+          case "/v1/ide/status":
+            return Effect.succeed(
+              Codec.encode(Ide.Status)({
+                connected: true,
+                client_id: ideClientId,
+                capabilities: ["active-context", "navigation"],
+                workspace_roots: ["/workspace/rika"],
+                context,
+              }),
+            )
+          case "/v1/ide/open-file":
+            return Effect.succeed(Codec.encode(Ide.OpenFileResult)({ accepted: true }))
+          case "/v1/ide/navigation-requests":
+            return Effect.succeed(Codec.encode(Schema.Array(Ide.OpenFileRequest))([navigationRequest]))
+        }
+        return Effect.die(`unexpected request ${input.path}`)
+      },
+      streamJson: () => Stream.empty,
+    })
+
+    const connected = await Effect.runPromise(
+      client.connectIde({
+        client_id: ideClientId,
+        workspace_roots: ["/workspace/rika"],
+        capabilities: ["active-context", "navigation"],
+        initial_context: context,
+      }),
+    )
+    const status = await Effect.runPromise(client.ideStatus())
+    const opened = await Effect.runPromise(client.openIdeFile(navigationRequest))
+    const requests = await Effect.runPromise(client.ideNavigationRequests())
+
+    expect(connected).toEqual({
+      client_id: ideClientId,
+      connected: true,
+      capabilities: ["active-context", "navigation"],
+    })
+    expect(status).toMatchObject({ connected: true, client_id: ideClientId, context })
+    expect(opened).toEqual({ accepted: true })
+    expect(requests).toEqual([navigationRequest])
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        path: "/v1/ide/connect",
+        body: {
+          client_id: ideClientId,
+          workspace_roots: ["/workspace/rika"],
+          capabilities: ["active-context", "navigation"],
+          initial_context: context,
+        },
+      },
+      { method: "GET", path: "/v1/ide/status" },
+      { method: "POST", path: "/v1/ide/open-file", body: navigationRequest },
+      { method: "GET", path: "/v1/ide/navigation-requests" },
+    ])
   })
 })

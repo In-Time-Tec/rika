@@ -1,4 +1,4 @@
-import { Artifact, Codec, Event, Ids, Remote } from "@rika/schema"
+import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
 import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect"
 import * as RemoteControl from "./remote-control"
 
@@ -119,6 +119,39 @@ const route = (remote: RemoteControl.Interface, request: Request): Effect.Effect
     if (request.method === "GET" && segments[1] === "artifacts" && segments[2] !== undefined && segments.length === 3) {
       const input = { artifact_id: Ids.ArtifactId.make(decodeURIComponent(segments[2])) }
       return yield* remote.getArtifact(input).pipe(jsonEffect(Artifact.Artifact))
+    }
+
+    if (request.method === "GET" && segments[1] === "ide" && segments[2] === "status" && segments.length === 3) {
+      return yield* remote.ideStatus().pipe(jsonEffect(Ide.Status))
+    }
+
+    if (request.method === "POST" && segments[1] === "ide" && segments[2] === "connect" && segments.length === 3) {
+      const input = yield* decodeBody(request, Ide.ConnectRequest)
+      return yield* remote.connectIde(input).pipe(jsonEffect(Ide.ConnectResponse))
+    }
+
+    if (request.method === "POST" && segments[1] === "ide" && segments[2] === "disconnect" && segments.length === 3) {
+      const input = yield* decodeBody(request, Ide.DisconnectRequest)
+      return yield* remote.disconnectIde(input).pipe(jsonEffect(Ide.Status))
+    }
+
+    if (request.method === "POST" && segments[1] === "ide" && segments[2] === "context" && segments.length === 3) {
+      const input = yield* decodeBody(request, Ide.UpdateContextRequest)
+      return yield* remote.updateIdeContext(input).pipe(jsonEffect(Ide.Status))
+    }
+
+    if (request.method === "POST" && segments[1] === "ide" && segments[2] === "open-file" && segments.length === 3) {
+      const input = yield* decodeBody(request, Ide.OpenFileRequest)
+      return yield* remote.openIdeFile(input).pipe(jsonEffect(Ide.OpenFileResult))
+    }
+
+    if (
+      request.method === "GET" &&
+      segments[1] === "ide" &&
+      segments[2] === "navigation-requests" &&
+      segments.length === 3
+    ) {
+      return yield* remote.ideNavigationRequests().pipe(jsonEffect(Schema.Array(Ide.OpenFileRequest)))
     }
 
     return notFound()

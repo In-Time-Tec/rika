@@ -1,6 +1,7 @@
 export * as Args from "./args"
 export * as Execute from "./execute"
 export * as Extensions from "./extensions"
+export * as Ide from "./ide"
 export * as Mcp from "./mcp"
 export * as Output from "./output"
 export * as Review from "./review"

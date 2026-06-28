@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Ids } from "@rika/schema"
+import { Ide, Ids } from "@rika/schema"
 import { Effect } from "effect"
 import { Args } from "../src/index"
 
@@ -181,6 +181,79 @@ describe("CLI args", () => {
       token: "secret",
       workspace_root: "/workspace/rika",
       ephemeral: true,
+    })
+  })
+
+  test("parses IDE integration commands", async () => {
+    const clientId = Ids.IdeClientId.make("ide_args_client")
+    const connect = await Effect.runPromise(
+      Args.parse([
+        "ide",
+        "connect",
+        "--client",
+        clientId,
+        "--name",
+        "Mock IDE",
+        "--workspace",
+        "/workspace/rika",
+        "--capabilities",
+        "active-context,navigation",
+        "--active-file",
+        "packages/cli/src/runtime.ts",
+        "--start-line",
+        "10",
+        "--end-line",
+        "12",
+        "--selected-text",
+        "const mode = 'smart'",
+        "--server",
+        "http://127.0.0.1:4587",
+        "--token",
+        "secret",
+      ]),
+    )
+    const status = await Effect.runPromise(Args.parse(["ide", "status", "--server", "http://127.0.0.1:4587"]))
+    const disconnect = await Effect.runPromise(Args.parse(["ide", "disconnect", "--client", clientId]))
+    const openFile = await Effect.runPromise(
+      Args.parse([
+        "ide",
+        "open-file",
+        "--path",
+        "packages/cli/src/runtime.ts",
+        "--start-line",
+        "10",
+        "--end-line",
+        "12",
+      ]),
+    )
+
+    const initialContext: Ide.ContextSnapshot = {
+      workspace_roots: ["/workspace/rika"],
+      active_file: {
+        path: "packages/cli/src/runtime.ts",
+        selection: { range: { start_line: 10, end_line: 12 }, selected_text: "const mode = 'smart'" },
+      },
+    }
+    expect(connect).toEqual({
+      type: "ide",
+      action: "connect",
+      client_id: clientId,
+      name: "Mock IDE",
+      workspace_roots: ["/workspace/rika"],
+      capabilities: ["active-context", "navigation"],
+      initial_context: initialContext,
+      server_url: "http://127.0.0.1:4587",
+      token: "secret",
+    })
+    expect(status).toEqual({ type: "ide", action: "status", server_url: "http://127.0.0.1:4587" })
+    expect(disconnect).toEqual({ type: "ide", action: "disconnect", client_id: clientId })
+    expect(openFile).toEqual({
+      type: "ide",
+      action: "open-file",
+      open_file: {
+        path: "packages/cli/src/runtime.ts",
+        range: { start_line: 10, end_line: 12 },
+      },
     })
   })
 

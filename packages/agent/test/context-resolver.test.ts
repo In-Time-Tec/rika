@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Config } from "@rika/core"
-import { Ids } from "@rika/schema"
+import { Ide, Ids } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { ContextResolver, ThreadService } from "../src/index"
 
@@ -89,6 +89,56 @@ describe("ContextResolver", () => {
         content: "Referenced thread_context",
       }),
     )
+  })
+
+  test("renders IDE active file and diagnostics as untrusted resolved context", async () => {
+    const root = await tempWorkspace()
+    const ideContext: Ide.ContextSnapshot = {
+      workspace_roots: [root],
+      active_file: {
+        path: "packages/cli/src/runtime.ts",
+        language_id: "typescript",
+        selection: { range: { start_line: 10, end_line: 12 }, selected_text: "const mode = 'smart'" },
+      },
+      diagnostics: [
+        {
+          path: "packages/cli/src/runtime.ts",
+          severity: "warning",
+          message: "Unused symbol",
+          range: { start_line: 11, end_line: 11 },
+          source: "tsserver",
+        },
+      ],
+    }
+
+    const context = await run(
+      root,
+      ContextResolver.resolveContext({
+        thread_id: threadId,
+        turn_id: turnId,
+        content: "Use the editor context",
+        ide_context: ideContext,
+      }),
+    )
+
+    expect(context.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "file",
+        source: "ide:active-file",
+        trusted: false,
+        path: "packages/cli/src/runtime.ts",
+        content: expect.stringContaining("const mode = 'smart'"),
+      }),
+    )
+    expect(context.entries).toContainEqual(
+      expect.objectContaining({
+        kind: "file",
+        source: "ide:diagnostics",
+        trusted: false,
+        content: expect.stringContaining("warning [tsserver]: Unused symbol"),
+      }),
+    )
+    expect(context.metadata).toMatchObject({ ide_context: true })
   })
 
   test("does not parse thread-looking file mentions as thread references", async () => {

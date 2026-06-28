@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { Config } from "@rika/core"
-import { Ids } from "@rika/schema"
+import { Ide, Ids } from "@rika/schema"
 import { Console, Effect, Option, Ref, Schema } from "effect"
 import { Argument, CliError, Command as CliCommand, Flag } from "effect/unstable/cli"
 
@@ -109,6 +109,25 @@ export const ServerCommand = Schema.Struct({
   ephemeral: Schema.Boolean,
 }).annotate({ identifier: "Rika.Cli.Args.ServerCommand" })
 
+export const IdeAction = Schema.Literals(["status", "connect", "disconnect", "open-file"]).annotate({
+  identifier: "Rika.Cli.Args.IdeAction",
+})
+export type IdeAction = typeof IdeAction.Type
+
+export interface IdeCommand extends Schema.Schema.Type<typeof IdeCommand> {}
+export const IdeCommand = Schema.Struct({
+  type: Schema.Literal("ide"),
+  action: IdeAction,
+  server_url: Schema.optional(Schema.String),
+  token: Schema.optional(Schema.String),
+  client_id: Schema.optional(Ids.IdeClientId),
+  name: Schema.optional(Schema.String),
+  workspace_roots: Schema.optional(Schema.Array(Schema.String)),
+  capabilities: Schema.optional(Schema.Array(Ide.Capability)),
+  initial_context: Schema.optional(Ide.ContextSnapshot),
+  open_file: Schema.optional(Ide.OpenFileRequest),
+}).annotate({ identifier: "Rika.Cli.Args.IdeCommand" })
+
 export type Command =
   | ExecuteCommand
   | InteractiveCommand
@@ -118,6 +137,7 @@ export type Command =
   | ReviewCommand
   | ExtensionCommand
   | ServerCommand
+  | IdeCommand
 
 export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError", {
   message: Schema.String,
@@ -146,6 +166,10 @@ export const usage = [
   "  rika extensions disable-plugin <name> [--reason <text>] [--thread <id>]",
   "  rika extensions rollback-plugin <name> [--reason <text>] [--thread <id>]",
   "  rika server [--host <host>] [--port <n>] [--token <token>] [--workspace <path>] [--ephemeral]",
+  "  rika ide status [--server <url>] [--token <token>]",
+  "  rika ide connect --client <id> [--server <url>] [--token <token>] [--workspace <path>] [--capabilities <csv>]",
+  "  rika ide disconnect --client <id> [--server <url>] [--token <token>]",
+  "  rika ide open-file --path <path> [--start-line <n> --end-line <n>] [--server <url>] [--token <token>]",
   "  rika run [options] <prompt>",
   "  rika --execute [options] <prompt>",
   "",
@@ -280,6 +304,38 @@ const serverConfig = {
   ephemeral: Flag.boolean("ephemeral").pipe(Flag.withDescription("Use in-memory persistence for this server")),
 }
 
+const ideServerConfig = {
+  server: Flag.string("server").pipe(Flag.optional, Flag.withDescription("Remote-control server URL")),
+  token: Flag.string("token").pipe(Flag.optional, Flag.withDescription("Bearer token for the remote-control server")),
+}
+
+const ideConnectConfig = {
+  ...ideServerConfig,
+  client: Flag.string("client").pipe(Flag.withDescription("IDE client id")),
+  name: Flag.string("name").pipe(Flag.optional, Flag.withDescription("IDE client display name")),
+  workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root opened in the IDE")),
+  capabilities: Flag.string("capabilities").pipe(
+    Flag.optional,
+    Flag.withDescription("Comma-separated IDE capabilities"),
+  ),
+  activeFile: Flag.string("active-file").pipe(Flag.optional, Flag.withDescription("Active file path")),
+  startLine: Flag.integer("start-line").pipe(Flag.optional, Flag.withDescription("Selection start line")),
+  endLine: Flag.integer("end-line").pipe(Flag.optional, Flag.withDescription("Selection end line")),
+  selectedText: Flag.string("selected-text").pipe(Flag.optional, Flag.withDescription("Selected text")),
+}
+
+const ideDisconnectConfig = {
+  ...ideServerConfig,
+  client: Flag.string("client").pipe(Flag.withDescription("IDE client id")),
+}
+
+const ideOpenFileConfig = {
+  ...ideServerConfig,
+  path: Flag.string("path").pipe(Flag.withDescription("File path to open in the connected IDE")),
+  startLine: Flag.integer("start-line").pipe(Flag.optional, Flag.withDescription("Start line to reveal")),
+  endLine: Flag.integer("end-line").pipe(Flag.optional, Flag.withDescription("End line to reveal")),
+}
+
 interface ExecuteInput {
   readonly mode: Option.Option<Config.Mode>
   readonly workspace: Option.Option<string>
@@ -362,6 +418,32 @@ interface ServerInput {
   readonly ephemeral: boolean
 }
 
+interface IdeServerInput {
+  readonly server: Option.Option<string>
+  readonly token: Option.Option<string>
+}
+
+interface IdeConnectInput extends IdeServerInput {
+  readonly client: string
+  readonly name: Option.Option<string>
+  readonly workspace: Option.Option<string>
+  readonly capabilities: Option.Option<string>
+  readonly activeFile: Option.Option<string>
+  readonly startLine: Option.Option<number>
+  readonly endLine: Option.Option<number>
+  readonly selectedText: Option.Option<string>
+}
+
+interface IdeDisconnectInput extends IdeServerInput {
+  readonly client: string
+}
+
+interface IdeOpenFileInput extends IdeServerInput {
+  readonly path: string
+  readonly startLine: Option.Option<number>
+  readonly endLine: Option.Option<number>
+}
+
 const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) => {
   const run = CliCommand.make("run", executeConfig, (input: ExecuteInput) =>
     Ref.set(parsedRef, Option.some(toExecuteCommand(input))),
@@ -383,6 +465,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
   const review = makeReviewCommand(parsedRef)
   const extensions = makeExtensionsCommand(parsedRef, rejectedRef)
   const server = makeServerCommand(parsedRef)
+  const ide = makeIdeCommand(parsedRef)
 
   return CliCommand.make("rika", rootConfig, (input: RootInput) =>
     input.execute
@@ -400,7 +483,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
           ),
   ).pipe(
     CliCommand.withDescription("Effect-native coding agent"),
-    CliCommand.withSubcommands([run, interactive, threads, skills, mcp, review, extensions, server]),
+    CliCommand.withSubcommands([run, interactive, threads, skills, mcp, review, extensions, server, ide]),
   )
 }
 
@@ -559,6 +642,30 @@ const makeServerCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
     CliCommand.withShortDescription("Start remote-control server"),
   )
 
+const makeIdeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) => {
+  const status = CliCommand.make("status", ideServerConfig, (input: IdeServerInput) =>
+    Ref.set(parsedRef, Option.some(toIdeStatusCommand(input))),
+  ).pipe(CliCommand.withDescription("Show connected IDE status"), CliCommand.withShortDescription("Show IDE status"))
+
+  const connect = CliCommand.make("connect", ideConnectConfig, (input: IdeConnectInput) =>
+    Ref.set(parsedRef, Option.some(toIdeConnectCommand(input))),
+  ).pipe(CliCommand.withDescription("Connect an IDE client"), CliCommand.withShortDescription("Connect IDE"))
+
+  const disconnect = CliCommand.make("disconnect", ideDisconnectConfig, (input: IdeDisconnectInput) =>
+    Ref.set(parsedRef, Option.some(toIdeDisconnectCommand(input))),
+  ).pipe(CliCommand.withDescription("Disconnect an IDE client"), CliCommand.withShortDescription("Disconnect IDE"))
+
+  const openFile = CliCommand.make("open-file", ideOpenFileConfig, (input: IdeOpenFileInput) =>
+    Ref.set(parsedRef, Option.some(toIdeOpenFileCommand(input))),
+  ).pipe(CliCommand.withDescription("Request IDE file navigation"), CliCommand.withShortDescription("Open file in IDE"))
+
+  return CliCommand.make("ide", {}, () => Ref.set(parsedRef, Option.some(toIdeStatusCommand(emptyIdeInput)))).pipe(
+    CliCommand.withDescription("Connect, inspect, and command IDE clients over the remote-control server"),
+    CliCommand.withShortDescription("Manage IDE connection"),
+    CliCommand.withSubcommands([status, connect, disconnect, openFile]),
+  )
+}
+
 const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
   const mode = Option.getOrUndefined(input.mode)
   const workspaceRoot = Option.getOrUndefined(input.workspace)
@@ -715,6 +822,106 @@ const toServerCommand = (input: ServerInput): ServerCommand => {
     ...(token === undefined ? {} : { token }),
     ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
   }
+}
+
+const emptyIdeInput: IdeServerInput = { server: Option.none(), token: Option.none() }
+
+const toIdeStatusCommand = (input: IdeServerInput): IdeCommand => ({
+  type: "ide",
+  action: "status",
+  ...ideServerOptions(input),
+})
+
+const toIdeConnectCommand = (input: IdeConnectInput): IdeCommand => {
+  const name = Option.getOrUndefined(input.name)
+  const workspaceRoot = Option.getOrUndefined(input.workspace)
+  const activeFile = Option.getOrUndefined(input.activeFile)
+  const startLine = Option.getOrUndefined(input.startLine)
+  const endLine = Option.getOrUndefined(input.endLine)
+  const selectedText = Option.getOrUndefined(input.selectedText)
+  const workspaceRoots = workspaceRoot === undefined ? [] : [workspaceRoot]
+  const initialContext =
+    workspaceRoot === undefined && activeFile === undefined
+      ? undefined
+      : ideContext(workspaceRoots, activeFile, startLine, endLine, selectedText)
+  return {
+    type: "ide",
+    action: "connect",
+    client_id: Ids.IdeClientId.make(input.client),
+    workspace_roots: workspaceRoots,
+    capabilities: parseCapabilities(Option.getOrUndefined(input.capabilities)),
+    ...(name === undefined ? {} : { name }),
+    ...(initialContext === undefined ? {} : { initial_context: initialContext }),
+    ...ideServerOptions(input),
+  }
+}
+
+const toIdeDisconnectCommand = (input: IdeDisconnectInput): IdeCommand => ({
+  type: "ide",
+  action: "disconnect",
+  client_id: Ids.IdeClientId.make(input.client),
+  ...ideServerOptions(input),
+})
+
+const toIdeOpenFileCommand = (input: IdeOpenFileInput): IdeCommand => ({
+  type: "ide",
+  action: "open-file",
+  open_file: {
+    path: input.path,
+    ...lineRange(Option.getOrUndefined(input.startLine), Option.getOrUndefined(input.endLine)),
+  },
+  ...ideServerOptions(input),
+})
+
+const ideServerOptions = (input: IdeServerInput) => {
+  const serverUrl = Option.getOrUndefined(input.server)
+  const token = Option.getOrUndefined(input.token)
+  return {
+    ...(serverUrl === undefined ? {} : { server_url: serverUrl }),
+    ...(token === undefined ? {} : { token }),
+  }
+}
+
+const ideContext = (
+  workspaceRoots: ReadonlyArray<string>,
+  activeFile: string | undefined,
+  startLine: number | undefined,
+  endLine: number | undefined,
+  selectedText: string | undefined,
+): Ide.ContextSnapshot => ({
+  workspace_roots: [...workspaceRoots],
+  ...(activeFile === undefined
+    ? {}
+    : {
+        active_file: {
+          path: activeFile,
+          ...selection(startLine, endLine, selectedText),
+        },
+      }),
+})
+
+const selection = (startLine: number | undefined, endLine: number | undefined, selectedText: string | undefined) => {
+  if (startLine === undefined || endLine === undefined) return {}
+  return {
+    selection: {
+      range: { start_line: startLine, end_line: endLine },
+      ...(selectedText === undefined ? {} : { selected_text: selectedText }),
+    },
+  }
+}
+
+const lineRange = (startLine: number | undefined, endLine: number | undefined) =>
+  startLine === undefined || endLine === undefined ? {} : { range: { start_line: startLine, end_line: endLine } }
+
+const parseCapabilities = (value: string | undefined): ReadonlyArray<Ide.Capability> => {
+  if (value === undefined || value.trim().length === 0) return ["active-context", "diagnostics", "navigation"]
+  return value
+    .split(",")
+    .map((capability) => capability.trim())
+    .filter(
+      (capability): capability is Ide.Capability =>
+        capability === "active-context" || capability === "diagnostics" || capability === "navigation",
+    )
 }
 
 interface CapturedConsole {

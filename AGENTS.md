@@ -16,6 +16,7 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 | `docs/effect-module-conventions.md` | Copyable Effect service/module conventions.                                                                         |
 | `docs/runtime-and-layers.md`        | Runtime/layer assembly conventions and base service list.                                                           |
 | `docs/persistence.md`               | Drizzle, SQLite, migration, and persistence service boundary rules.                                                 |
+| `docs/ide-integration.md`           | Editor adapter boundaries for IDE clients, IDE context, and navigation requests.                                    |
 | `package.json`                      | Bun workspace, dependency catalog, and root verification scripts.                                                   |
 | `turbo.json`                        | Monorepo task graph for package build, typecheck, and test commands.                                                |
 | `.oxlintrc.json`                    | Root oxlint configuration.                                                                                          |

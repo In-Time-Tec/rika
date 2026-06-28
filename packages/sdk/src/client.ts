@@ -1,4 +1,4 @@
-import { Artifact, Codec, Event, Ids, Remote } from "@rika/schema"
+import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
 import { Effect, Schema, Stream } from "effect"
 
 export interface RequestInput {
@@ -36,6 +36,12 @@ export interface Interface {
     input: Remote.ListArtifactsRequest,
   ) => Effect.Effect<ReadonlyArray<Artifact.Artifact>, SdkError>
   readonly getArtifact: (artifactId: Ids.ArtifactId) => Effect.Effect<Artifact.Artifact, SdkError>
+  readonly connectIde: (input: Ide.ConnectRequest) => Effect.Effect<Ide.ConnectResponse, SdkError>
+  readonly disconnectIde: (input: Ide.DisconnectRequest) => Effect.Effect<Ide.Status, SdkError>
+  readonly updateIdeContext: (input: Ide.UpdateContextRequest) => Effect.Effect<Ide.Status, SdkError>
+  readonly ideStatus: () => Effect.Effect<Ide.Status, SdkError>
+  readonly openIdeFile: (input: Ide.OpenFileRequest) => Effect.Effect<Ide.OpenFileResult, SdkError>
+  readonly ideNavigationRequests: () => Effect.Effect<ReadonlyArray<Ide.OpenFileRequest>, SdkError>
 }
 
 const ApiErrorDetails = Schema.Struct({ status: Schema.Int })
@@ -73,6 +79,30 @@ export const make = (transport: Transport): Interface => ({
     transport
       .requestJson({ method: "GET", path: `/v1/artifacts/${encodeURIComponent(artifactId)}` })
       .pipe(Effect.flatMap(decodeEffect(Artifact.Artifact, "getArtifact"))),
+  connectIde: (input: Ide.ConnectRequest) =>
+    transport
+      .requestJson({ method: "POST", path: "/v1/ide/connect", body: Codec.encode(Ide.ConnectRequest)(input) })
+      .pipe(Effect.flatMap(decodeEffect(Ide.ConnectResponse, "connectIde"))),
+  disconnectIde: (input: Ide.DisconnectRequest) =>
+    transport
+      .requestJson({ method: "POST", path: "/v1/ide/disconnect", body: Codec.encode(Ide.DisconnectRequest)(input) })
+      .pipe(Effect.flatMap(decodeEffect(Ide.Status, "disconnectIde"))),
+  updateIdeContext: (input: Ide.UpdateContextRequest) =>
+    transport
+      .requestJson({ method: "POST", path: "/v1/ide/context", body: Codec.encode(Ide.UpdateContextRequest)(input) })
+      .pipe(Effect.flatMap(decodeEffect(Ide.Status, "updateIdeContext"))),
+  ideStatus: () =>
+    transport
+      .requestJson({ method: "GET", path: "/v1/ide/status" })
+      .pipe(Effect.flatMap(decodeEffect(Ide.Status, "ideStatus"))),
+  openIdeFile: (input: Ide.OpenFileRequest) =>
+    transport
+      .requestJson({ method: "POST", path: "/v1/ide/open-file", body: Codec.encode(Ide.OpenFileRequest)(input) })
+      .pipe(Effect.flatMap(decodeEffect(Ide.OpenFileResult, "openIdeFile"))),
+  ideNavigationRequests: () =>
+    transport
+      .requestJson({ method: "GET", path: "/v1/ide/navigation-requests" })
+      .pipe(Effect.flatMap(decodeEffect(Schema.Array(Ide.OpenFileRequest), "ideNavigationRequests"))),
 })
 
 export const fetchTransport = (input: FetchTransportInput): Transport => {
