@@ -47,6 +47,7 @@
         "@rika/persistence": "workspace:*",
         "@rika/plugin": "workspace:*",
         "@rika/schema": "workspace:*",
+        "@rika/server": "workspace:*",
         "@rika/tools": "workspace:*",
         "@rika/tui": "workspace:*",
         "effect": "catalog:",
@@ -139,6 +140,35 @@
         "effect": "catalog:",
       },
       "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/sdk": {
+      "name": "@rika/sdk",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/server": {
+      "name": "@rika/server",
+      "version": "0.0.0",
+      "dependencies": {
+        "@rika/agent": "workspace:*",
+        "@rika/core": "workspace:*",
+        "@rika/persistence": "workspace:*",
+        "@rika/schema": "workspace:*",
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@rika/llm": "workspace:*",
+        "@rika/sdk": "workspace:*",
         "@types/bun": "catalog:",
         "typescript": "catalog:",
       },
@@ -387,6 +417,10 @@
     "@rika/rivet-host": ["@rika/rivet-host@workspace:packages/rivet-host"],
 
     "@rika/schema": ["@rika/schema@workspace:packages/schema"],
+
+    "@rika/sdk": ["@rika/sdk@workspace:packages/sdk"],
+
+    "@rika/server": ["@rika/server@workspace:packages/server"],
 
     "@rika/tools": ["@rika/tools@workspace:packages/tools"],
 

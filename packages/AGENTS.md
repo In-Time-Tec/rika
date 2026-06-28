@@ -18,6 +18,8 @@
 | `plugin/`      | Trusted local TypeScript plugin API and host services. See `plugin/AGENTS.md`.            |
 | `rivet-host/`  | RivetKit actor definitions and local host assembly. See `rivet-host/AGENTS.md`.           |
 | `schema/`      | Shared schema/protocol package. See `schema/AGENTS.md`.                                   |
+| `sdk/`         | TypeScript client for the remote-control API. See `sdk/AGENTS.md`.                        |
+| `server/`      | Local-first HTTP/NDJSON remote-control adapter. See `server/AGENTS.md`.                   |
 | `tools/`       | Built-in workspace tools and adapters. See `tools/AGENTS.md`.                             |
 | `tui/`         | Interactive terminal adapter and Amp-like rendering. See `tui/AGENTS.md`.                 |
 

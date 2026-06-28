@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { Artifact, Codec, ErrorEnvelope, Event, Ids, Message, Tool } from "../src/index"
+import { Artifact, Codec, ErrorEnvelope, Event, Ids, Message, Remote, Tool } from "../src/index"
 
 const now = 1_765_000_000_000
 const threadId = Ids.ThreadId.make("thread_1")
@@ -218,4 +218,31 @@ describe("Rika protocol schemas", () => {
 
     expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
   })
+
+  test("round-trips remote control API payloads", () => {
+    const start: Remote.StartTurnRequest = {
+      thread_id: threadId,
+      workspace_id: workspaceId,
+      content: "Ship remote control",
+      mode: "smart",
+    }
+    const summary: Remote.ThreadSummary = {
+      thread_id: threadId,
+      workspace_id: workspaceId,
+      latest_message_text: "Ship remote control",
+      archived: false,
+      created_at: now,
+      updated_at: now,
+    }
+
+    expect(Codec.decode(Remote.StartTurnRequest)(Codec.encode(Remote.StartTurnRequest)(start))).toEqual(start)
+    expect(Codec.decode(Remote.ThreadSummary)(Codec.encode(Remote.ThreadSummary)(summary))).toEqual(summary)
+    expect(Codec.decode(Remote.StreamFrame)(Codec.encode(Remote.StreamFrame)(summaryError(401)))).toEqual(
+      summaryError(401),
+    )
+  })
+})
+
+const summaryError = (status: number): Remote.ApiError => ({
+  error: { message: "Unauthorized", code: "unauthorized", details: { status } },
 })

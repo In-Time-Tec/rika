@@ -19,6 +19,7 @@ import {
   ThreadProjection,
 } from "@rika/persistence"
 import { PluginHost, PluginUi, SelfExtension } from "@rika/plugin"
+import { HttpServer, RemoteControl } from "@rika/server"
 import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import { Session, Terminal } from "@rika/tui"
 import { Effect, Layer } from "effect"
@@ -28,6 +29,7 @@ import * as Extensions from "./extensions"
 import * as Mcp from "./mcp"
 import * as Output from "./output"
 import * as Review from "./review"
+import * as Server from "./server"
 import * as Skills from "./skills"
 import * as Threads from "./threads"
 
@@ -58,9 +60,13 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                     ? Review.executeCommand(command).pipe(
                         Effect.provide(reviewLiveLayer(command, input.env, input.cwd)),
                       )
-                    : Extensions.executeCommand(command).pipe(
-                        Effect.provide(extensionsLiveLayer(command, input.env, input.cwd)),
-                      )
+                    : command.type === "extensions"
+                      ? Extensions.executeCommand(command).pipe(
+                          Effect.provide(extensionsLiveLayer(command, input.env, input.cwd)),
+                        )
+                      : Server.executeCommand(command).pipe(
+                          Effect.provide(serverLiveLayer(command, input.env, input.cwd)),
+                        )
         ).pipe(
           Effect.matchEffect({
             onFailure: (error: RuntimeError) => Output.stderr(formatRuntimeError(error)).pipe(Effect.as(1)),
@@ -88,6 +94,9 @@ type RuntimeError =
   | PluginHost.RunError
   | Review.ReviewError
   | ReviewService.ReviewServiceError
+  | RemoteControl.RemoteControlError
+  | Server.ServerError
+  | HttpServer.HttpServerError
   | Session.SessionError
   | SelfExtension.SelfExtensionError
   | SkillRegistry.SkillRegistryError
@@ -108,6 +117,9 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof McpClient.McpClientError) return `Rika failed: ${error.message}`
   if (error instanceof Review.ReviewError) return Review.formatError(error)
   if (error instanceof ReviewService.ReviewServiceError) return `Rika failed: ${error.message}`
+  if (error instanceof RemoteControl.RemoteControlError) return `Rika failed: ${error.message}`
+  if (error instanceof Server.ServerError) return Server.formatError(error)
+  if (error instanceof HttpServer.HttpServerError) return `Rika failed: ${error.message}`
   if (error instanceof ArtifactStore.ArtifactStoreError) return `Rika failed: ${error.message}`
   if (error instanceof CheckRegistry.CheckRegistryError) return `Rika failed: ${error.message}`
   if (error instanceof SubagentRuntime.SubagentRuntimeError) return `Rika failed: ${error.message}`
@@ -440,6 +452,75 @@ export const extensionsLiveLayer = (
   return commandLayer
 }
 
+export const serverLiveLayer = (
+  command: Args.ServerCommand,
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Layer.Layer<ServerLayerOutput, LiveLayerError> => {
+  const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
+  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
+  const configLayer = Config.layerFromValues(
+    {
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
+    },
+    env,
+  )
+  const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
+  const timeLayer = Time.layer
+  const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
+  const llmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(configLayer))
+  const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
+  const storageLayer = Layer.mergeAll(
+    configLayer,
+    databaseLayer,
+    artifactLayer,
+    mcpApprovalLayer,
+    Migration.layer,
+    ThreadEventLog.layer,
+    ThreadProjection.layer,
+    timeLayer,
+    IdGenerator.layer,
+  )
+  const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const readOnlyToolLayer = BuiltInTools.readOnlyToolExecutorLayer.pipe(Layer.provideMerge(configLayer))
+  const subagentLayer = SubagentRuntime.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(llmLayer),
+    Layer.provideMerge(readOnlyToolLayer),
+  )
+  const specialtyToolLayer = SpecialtyTools.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(llmLayer),
+  )
+  const toolLayer = BuiltInTools.toolExecutorLayer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(pluginLayer),
+    Layer.provideMerge(specialtyToolLayer),
+    Layer.provideMerge(subagentLayer),
+  )
+  const skillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(configLayer))
+  const storageAndThreadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const contextResolverLayer = ContextResolver.layer.pipe(Layer.provide(storageAndThreadLayer))
+  const baseLayer = Layer.mergeAll(
+    Output.layer,
+    storageAndThreadLayer,
+    contextResolverLayer,
+    skillLayer,
+    toolLayer,
+    llmLayer,
+    artifactLayer,
+  )
+  const remoteLayer = RemoteControl.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
+  const httpLayer = HttpServer.layer.pipe(Layer.provideMerge(remoteLayer))
+  const commandLayer = Server.layer.pipe(Layer.provideMerge(Output.layer), Layer.provideMerge(httpLayer))
+
+  return commandLayer
+}
+
 export type LiveLayerOutput =
   | AgentLoop.Service
   | ArtifactStore.Service
@@ -538,6 +619,31 @@ export type ExtensionsLayerOutput =
   | Output.Service
   | SelfExtension.Service
   | Time.Service
+
+export type ServerLayerOutput =
+  | AgentLoop.Service
+  | ArtifactStore.Service
+  | Config.Service
+  | ContextResolver.Service
+  | Database.Service
+  | HttpServer.Service
+  | IdGenerator.Service
+  | McpApprovalStore.Service
+  | Migration.Service
+  | Output.Service
+  | PluginHost.Service
+  | Provider.Service
+  | RemoteControl.Service
+  | Router.Service
+  | Server.Service
+  | SkillRegistry.Service
+  | SpecialtyTools.Service
+  | SubagentRuntime.Service
+  | ThreadEventLog.Service
+  | ThreadProjection.Service
+  | ThreadService.Service
+  | Time.Service
+  | ToolExecutor.Service
 
 export type LiveLayerError =
   | Config.ConfigError

@@ -5,6 +5,7 @@ export * as ErrorEnvelope from "./error"
 export * as Event from "./event"
 export * as Ids from "./ids"
 export * as Message from "./message"
+export * as Remote from "./remote"
 export * as Tool from "./tool"
 
 export const schemaPackage = "@rika/schema"

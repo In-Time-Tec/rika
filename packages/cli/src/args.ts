@@ -99,6 +99,16 @@ export const ExtensionCommand = Schema.Struct({
   thread_id: Schema.optional(Ids.ThreadId),
 }).annotate({ identifier: "Rika.Cli.Args.ExtensionCommand" })
 
+export interface ServerCommand extends Schema.Schema.Type<typeof ServerCommand> {}
+export const ServerCommand = Schema.Struct({
+  type: Schema.Literal("server"),
+  host: Schema.optional(Schema.String),
+  port: Schema.optional(Schema.Int),
+  token: Schema.optional(Schema.String),
+  workspace_root: Schema.optional(Schema.String),
+  ephemeral: Schema.Boolean,
+}).annotate({ identifier: "Rika.Cli.Args.ServerCommand" })
+
 export type Command =
   | ExecuteCommand
   | InteractiveCommand
@@ -107,6 +117,7 @@ export type Command =
   | McpCommand
   | ReviewCommand
   | ExtensionCommand
+  | ServerCommand
 
 export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError", {
   message: Schema.String,
@@ -134,6 +145,7 @@ export const usage = [
   "  rika extensions enable-plugin <name> --verification <command> [--thread <id>]",
   "  rika extensions disable-plugin <name> [--reason <text>] [--thread <id>]",
   "  rika extensions rollback-plugin <name> [--reason <text>] [--thread <id>]",
+  "  rika server [--host <host>] [--port <n>] [--token <token>] [--workspace <path>] [--ephemeral]",
   "  rika run [options] <prompt>",
   "  rika --execute [options] <prompt>",
   "",
@@ -260,6 +272,14 @@ const extensionDisableConfig = {
   thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Thread id for the artifact")),
 }
 
+const serverConfig = {
+  host: Flag.string("host").pipe(Flag.optional, Flag.withDescription("Host interface for the local server")),
+  port: Flag.integer("port").pipe(Flag.optional, Flag.withDescription("Port for the local server")),
+  token: Flag.string("token").pipe(Flag.optional, Flag.withDescription("Bearer token required for API calls")),
+  workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root for remote turns")),
+  ephemeral: Flag.boolean("ephemeral").pipe(Flag.withDescription("Use in-memory persistence for this server")),
+}
+
 interface ExecuteInput {
   readonly mode: Option.Option<Config.Mode>
   readonly workspace: Option.Option<string>
@@ -334,6 +354,14 @@ interface ExtensionDisableInput {
   readonly thread: Option.Option<string>
 }
 
+interface ServerInput {
+  readonly host: Option.Option<string>
+  readonly port: Option.Option<number>
+  readonly token: Option.Option<string>
+  readonly workspace: Option.Option<string>
+  readonly ephemeral: boolean
+}
+
 const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) => {
   const run = CliCommand.make("run", executeConfig, (input: ExecuteInput) =>
     Ref.set(parsedRef, Option.some(toExecuteCommand(input))),
@@ -354,6 +382,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
   const mcp = makeMcpCommand(parsedRef, rejectedRef)
   const review = makeReviewCommand(parsedRef)
   const extensions = makeExtensionsCommand(parsedRef, rejectedRef)
+  const server = makeServerCommand(parsedRef)
 
   return CliCommand.make("rika", rootConfig, (input: RootInput) =>
     input.execute
@@ -371,7 +400,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
           ),
   ).pipe(
     CliCommand.withDescription("Effect-native coding agent"),
-    CliCommand.withSubcommands([run, interactive, threads, skills, mcp, review, extensions]),
+    CliCommand.withSubcommands([run, interactive, threads, skills, mcp, review, extensions, server]),
   )
 }
 
@@ -522,6 +551,14 @@ const makeExtensionsCommand = (
   )
 }
 
+const makeServerCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
+  CliCommand.make("server", serverConfig, (input: ServerInput) =>
+    Ref.set(parsedRef, Option.some(toServerCommand(input))),
+  ).pipe(
+    CliCommand.withDescription("Start the local Rika remote-control server"),
+    CliCommand.withShortDescription("Start remote-control server"),
+  )
+
 const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
   const mode = Option.getOrUndefined(input.mode)
   const workspaceRoot = Option.getOrUndefined(input.workspace)
@@ -663,6 +700,21 @@ const toExtensionDisablePluginCommand = (
 const threadOption = (thread: Option.Option<string>) => {
   const value = Option.getOrUndefined(thread)
   return value === undefined ? {} : { thread_id: Ids.ThreadId.make(value) }
+}
+
+const toServerCommand = (input: ServerInput): ServerCommand => {
+  const host = Option.getOrUndefined(input.host)
+  const port = Option.getOrUndefined(input.port)
+  const token = Option.getOrUndefined(input.token)
+  const workspaceRoot = Option.getOrUndefined(input.workspace)
+  return {
+    type: "server",
+    ephemeral: input.ephemeral,
+    ...(host === undefined ? {} : { host }),
+    ...(port === undefined ? {} : { port }),
+    ...(token === undefined ? {} : { token }),
+    ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
+  }
 }
 
 interface CapturedConsole {

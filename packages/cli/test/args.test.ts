@@ -158,6 +158,32 @@ describe("CLI args", () => {
     })
   })
 
+  test("parses server commands", async () => {
+    const command = await Effect.runPromise(
+      Args.parse([
+        "server",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "4587",
+        "--token",
+        "secret",
+        "--workspace",
+        "/workspace/rika",
+        "--ephemeral",
+      ]),
+    )
+
+    expect(command).toEqual({
+      type: "server",
+      host: "127.0.0.1",
+      port: 4587,
+      token: "secret",
+      workspace_root: "/workspace/rika",
+      ephemeral: true,
+    })
+  })
+
   test("rejects root prompt text unless --execute is set", async () => {
     const error = await Effect.runPromise(Args.parse(["hello"]).pipe(Effect.flip))
 

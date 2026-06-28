@@ -17,6 +17,7 @@
 | `src/event.ts`       | Canonical thread event union and event reference helpers. |
 | `src/tool.ts`        | Tool call/result wire schemas.                            |
 | `src/artifact.ts`    | Durable artifact wire schema.                             |
+| `src/remote.ts`      | Remote-control API request/response schemas.              |
 | `src/error.ts`       | Serializable error envelope schema.                       |
 | `test/index.test.ts` | Package export and protocol round-trip tests.             |
 

@@ -18,6 +18,7 @@
 | `src/output.ts`           | Swappable stdout/stderr boundary for process and tests.             |
 | `src/review.ts`           | CLI review command executor that prints machine-readable JSON.      |
 | `src/runtime.ts`          | Live layer assembly and routing for the Bun CLI process.            |
+| `src/server.ts`           | CLI command executor for the local remote-control server.           |
 | `src/skills.ts`           | CLI skill list/inspect command executor.                            |
 | `src/threads.ts`          | CLI thread lifecycle/search/share command executor.                 |
 | `src/main.ts`             | `rika` binary entrypoint.                                           |
@@ -26,6 +27,7 @@
 | `test/extensions.test.ts` | Self-extension command output tests over a fake service.            |
 | `test/mcp.test.ts`        | MCP list/approval command output tests.                             |
 | `test/review.test.ts`     | Review command JSON output tests over a fake review service.        |
+| `test/server.test.ts`     | Remote-control server command output tests.                         |
 | `test/skills.test.ts`     | Skill command output tests over fake skill registries.              |
 | `test/threads.test.ts`    | Thread command output tests over memory persistence.                |
 
