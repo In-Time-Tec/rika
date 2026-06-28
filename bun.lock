@@ -151,6 +151,7 @@
         "@pierre/diffs": "1.2.11",
         "@rika/agent": "workspace:*",
         "@rika/core": "workspace:*",
+        "@rika/llm": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/plugin": "workspace:*",
         "@rika/schema": "workspace:*",

@@ -1,9 +1,16 @@
 import { AgentLoop, ContextResolver, SkillRegistry, SubagentRuntime, ThreadService, ToolExecutor } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { OpenAi, Provider, Router } from "@rika/llm"
-import { Database, McpApprovalStore, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import {
+  ArtifactStore,
+  Database,
+  McpApprovalStore,
+  Migration,
+  ThreadEventLog,
+  ThreadProjection,
+} from "@rika/persistence"
 import { PluginHost, PluginUi } from "@rika/plugin"
-import { BuiltInTools, FffSearch, McpClient } from "@rika/tools"
+import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import { Registry } from "@rivetkit/effect"
 import { Layer } from "effect"
 import { layer as threadActorLayer } from "./thread-live"
@@ -20,6 +27,7 @@ export const endpointFromEnv = (env: Record<string, string | undefined> = proces
 
 const configuredDatabaseLayer = Database.layer.pipe(Layer.provideMerge(Config.layer))
 const configuredTimeLayer = Time.layer
+const configuredArtifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
 const configuredMcpApprovalLayer = McpApprovalStore.layer.pipe(
   Layer.provideMerge(configuredDatabaseLayer),
   Layer.provideMerge(configuredTimeLayer),
@@ -33,6 +41,7 @@ const configuredPluginLayer = PluginHost.layer.pipe(
 const storageLayer = Layer.mergeAll(
   Config.layer,
   configuredDatabaseLayer,
+  configuredArtifactLayer,
   configuredMcpApprovalLayer,
   Migration.layer,
   ThreadEventLog.layer,
@@ -49,14 +58,20 @@ const configuredSubagentLayer = SubagentRuntime.layer.pipe(
   Layer.provideMerge(configuredLlmLayer),
   Layer.provideMerge(configuredReadOnlyToolLayer),
 )
+const configuredSpecialtyToolLayer = SpecialtyTools.layer.pipe(
+  Layer.provideMerge(migratedStorageLayer),
+  Layer.provideMerge(configuredLlmLayer),
+)
 const configuredToolLayer = BuiltInTools.toolExecutorLayer.pipe(
   Layer.provideMerge(migratedStorageLayer),
   Layer.provideMerge(configuredPluginLayer),
+  Layer.provideMerge(configuredSpecialtyToolLayer),
   Layer.provideMerge(configuredSubagentLayer),
 )
 
 type ServiceLayerOutput =
   | AgentLoop.Service
+  | ArtifactStore.Service
   | Config.Service
   | ContextResolver.Service
   | Database.Service
@@ -67,6 +82,7 @@ type ServiceLayerOutput =
   | Provider.Service
   | Router.Service
   | SkillRegistry.Service
+  | SpecialtyTools.Service
   | SubagentRuntime.Service
   | ThreadEventLog.Service
   | ThreadProjection.Service

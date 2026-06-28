@@ -3,11 +3,20 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PermissionPolicy, SubagentRuntime, ToolExecutor } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, IdGenerator, Time } from "@rika/core"
+import { ArtifactStore } from "@rika/persistence"
 import { PluginHost } from "@rika/plugin"
 import { Common, Ids, Tool } from "@rika/schema"
 import { Effect, Layer } from "effect"
-import { AstGrepOutline, BuiltInTools, FffSearch, HashlineFile, McpClient, SemanticSearch } from "../src/index"
+import {
+  AstGrepOutline,
+  BuiltInTools,
+  FffSearch,
+  HashlineFile,
+  McpClient,
+  SemanticSearch,
+  SpecialtyTools,
+} from "../src/index"
 
 const tempWorkspace = () => mkdtemp(join(tmpdir(), "rika-fff-"))
 
@@ -43,6 +52,10 @@ const runTool = <A, E>(workspaceRoot: string, effect: Effect.Effect<A, E, ToolEx
     Layer.provideMerge(FffSearch.fakeLayer(fakeFiles)),
     Layer.provideMerge(AstGrepOutline.fakeLayer(outlineRunner)),
     Layer.provideMerge(HashlineFile.layer),
+    Layer.provideMerge(SpecialtyTools.fakeLayer()),
+    Layer.provideMerge(ArtifactStore.fakeLayer()),
+    Layer.provideMerge(IdGenerator.sequenceLayer(1)),
+    Layer.provideMerge(Time.layer),
     Layer.provideMerge(McpClient.emptyLayer),
     Layer.provideMerge(PluginHost.emptyLayer),
     Layer.provideMerge(SubagentRuntime.fakeLayer(() => Effect.succeed({ type: "subagent.batch", runs: [] }))),
@@ -139,6 +152,9 @@ describe("FffSearch", () => {
     expect(names).toEqual([
       "shell.command",
       "task",
+      "oracle",
+      "librarian",
+      "painter",
       "semantic_search",
       "semantic_search.status",
       "fffind",

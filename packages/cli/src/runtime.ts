@@ -19,7 +19,7 @@ import {
   ThreadProjection,
 } from "@rika/persistence"
 import { PluginHost, PluginUi } from "@rika/plugin"
-import { BuiltInTools, FffSearch, McpClient } from "@rika/tools"
+import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import { Session, Terminal } from "@rika/tui"
 import { Effect, Layer } from "effect"
 import * as Args from "./args"
@@ -135,12 +135,14 @@ export const liveLayer = (
   )
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
+  const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const llmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const storageLayer = Layer.mergeAll(
     configLayer,
     databaseLayer,
+    artifactLayer,
     mcpApprovalLayer,
     Migration.layer,
     ThreadEventLog.layer,
@@ -155,9 +157,14 @@ export const liveLayer = (
     Layer.provideMerge(llmLayer),
     Layer.provideMerge(readOnlyToolLayer),
   )
+  const specialtyToolLayer = SpecialtyTools.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(llmLayer),
+  )
   const toolLayer = BuiltInTools.toolExecutorLayer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(pluginLayer),
+    Layer.provideMerge(specialtyToolLayer),
     Layer.provideMerge(subagentLayer),
   )
   const skillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(configLayer))
@@ -216,9 +223,14 @@ export const interactiveLiveLayer = (
     Layer.provideMerge(llmLayer),
     Layer.provideMerge(readOnlyToolLayer),
   )
+  const specialtyToolLayer = SpecialtyTools.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(llmLayer),
+  )
   const toolLayer = BuiltInTools.toolExecutorLayer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(pluginLayer),
+    Layer.provideMerge(specialtyToolLayer),
     Layer.provideMerge(subagentLayer),
   )
   const skillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(configLayer))
@@ -384,6 +396,7 @@ export const reviewLiveLayer = (
 
 export type LiveLayerOutput =
   | AgentLoop.Service
+  | ArtifactStore.Service
   | Config.Service
   | ContextResolver.Service
   | Database.Service
@@ -396,6 +409,7 @@ export type LiveLayerOutput =
   | Provider.Service
   | Router.Service
   | SkillRegistry.Service
+  | SpecialtyTools.Service
   | SubagentRuntime.Service
   | ThreadEventLog.Service
   | ThreadProjection.Service
@@ -419,6 +433,7 @@ export type InteractiveLayerOutput =
   | Router.Service
   | Session.Service
   | SkillRegistry.Service
+  | SpecialtyTools.Service
   | SubagentRuntime.Service
   | Terminal.Service
   | ThreadEventLog.Service

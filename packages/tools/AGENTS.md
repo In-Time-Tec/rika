@@ -18,11 +18,13 @@
 | `src/index.ts`                  | Package namespace exports.                                            |
 | `src/mcp-client.ts`             | MCP client adapter, config loading, tool mapping, and trust gating.   |
 | `src/semantic-search.ts`        | Semantic/hybrid code search service, fake layer, and built-in tool.   |
+| `src/specialty-tools.ts`        | Oracle/librarian/painter-style specialty tool service and artifacts.  |
 | `test/ast-grep-outline.test.ts` | Outline args, caps, path safety, and registry behavior tests.         |
 | `test/fff-search.test.ts`       | fff fake/fallback, pagination, anchors, and registry tests.           |
 | `test/hashline-file.test.ts`    | Hashline anchor, edit validation, and write behavior tests.           |
 | `test/mcp-client.test.ts`       | MCP trust gating, tool filtering, and executor mapping tests.         |
 | `test/semantic-search.test.ts`  | Semantic search fake/live fallback, diagnostics, and tool tests.      |
+| `test/specialty-tools.test.ts`  | Specialty provider substitution, artifacts, and permission tests.     |
 
 ## Current Standards
 
@@ -32,12 +34,13 @@
 - Tool outputs should include structured metadata for future TUI rendering rather than terminal-only strings.
 - Use `semantic_search` first for behavior/concept/data-flow discovery, but keep fff as the exact path/content search fallback.
 - Use `ast_grep_outline` after search has identified candidate files or directories and before broad reads of large source files.
+- Specialty tools persist research/image outputs as artifacts and must remain swappable behind `SpecialtyTools.Service`.
 - Live CLI and Rivet host tool composition goes through `BuiltInTools.toolExecutorLayer` so default search, outline, read, write, edit, and shell tools stay consistent.
 
 ## For AI Agents
 
 - Read `../../docs/effect-module-conventions.md` before adding services.
-- Do not import model providers, Rivet, Drizzle, or CLI/TUI process output here.
+- Do not import model providers, Rivet, Drizzle, or CLI/TUI process output here. Route specialty model use through `@rika/llm` services, not provider SDKs.
 - Keep built-in tool behavior strict: reject stale anchors or ambiguous edits instead of guessing.
 
 ## Testing And Verification

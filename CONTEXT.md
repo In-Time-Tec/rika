@@ -40,6 +40,14 @@ _Avoid_: Vendor SDK, model client, API wrapper
 A typed capability the agent may invoke to observe or change the outside world.
 _Avoid_: Function, command, action
 
+**Specialty Tool**:
+A purpose-built tool for work that should leave the main agent path, such as second-opinion reasoning, external codebase research, or image generation.
+_Avoid_: Provider name, magic model, side channel
+
+**Citation**:
+A durable reference that supports external research output with a source title, repository or URL, and optional file/line or excerpt details.
+_Avoid_: Footnote, source blob, search hit
+
 **Subagent**:
 An isolated agent worker with its own context that performs a bounded task and returns a final result to the parent thread.
 _Avoid_: Worker, child thread, task agent

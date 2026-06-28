@@ -8,6 +8,7 @@ import * as FffSearch from "./fff-search"
 import * as HashlineFile from "./hashline-file"
 import * as McpClient from "./mcp-client"
 import * as SemanticSearch from "./semantic-search"
+import * as SpecialtyTools from "./specialty-tools"
 
 export const registryLayerFromServices: Layer.Layer<
   ToolRegistry.Service,
@@ -19,6 +20,7 @@ export const registryLayerFromServices: Layer.Layer<
   | McpClient.Service
   | PluginHost.Service
   | SemanticSearch.Service
+  | SpecialtyTools.Service
   | SubagentRuntime.Service
 > = Layer.effect(
   ToolRegistry.Service,
@@ -30,11 +32,13 @@ export const registryLayerFromServices: Layer.Layer<
     const hashlineFile = yield* HashlineFile.Service
     const mcpDefinitions = yield* McpClient.toolDefinitions()
     const semanticSearch = yield* SemanticSearch.Service
+    const specialtyTools = yield* SpecialtyTools.Service
     const subagentRuntime = yield* SubagentRuntime.Service
     const pluginDefinitions = yield* PluginHost.toolDefinitions()
     const definitions = [
       ...ToolRegistry.shellDefinitions(values.workspace_root),
       ...SubagentRuntime.toolDefinitions(subagentRuntime),
+      ...SpecialtyTools.toolDefinitions(specialtyTools),
       ...pluginDefinitions,
       ...mcpDefinitions,
       ...SemanticSearch.toolDefinitions(semanticSearch),
@@ -72,7 +76,7 @@ export const readOnlyRegistryLayerFromServices: Layer.Layer<
 export const registryLayer: Layer.Layer<
   ToolRegistry.Service,
   FffSearch.FffSearchError | McpClient.RunError,
-  Config.Service | McpApprovalStore.Service | PluginHost.Service | SubagentRuntime.Service
+  Config.Service | McpApprovalStore.Service | PluginHost.Service | SpecialtyTools.Service | SubagentRuntime.Service
 > = registryLayerFromServices.pipe(
   Layer.provideMerge(SemanticSearch.layer),
   Layer.provideMerge(FffSearch.layer),
@@ -92,7 +96,7 @@ export const readOnlyRegistryLayer: Layer.Layer<ToolRegistry.Service, FffSearch.
 export const toolExecutorLayer: Layer.Layer<
   ToolExecutor.Service,
   FffSearch.FffSearchError | McpClient.RunError,
-  Config.Service | McpApprovalStore.Service | PluginHost.Service | SubagentRuntime.Service
+  Config.Service | McpApprovalStore.Service | PluginHost.Service | SpecialtyTools.Service | SubagentRuntime.Service
 > = PluginHost.toolResultExecutorLayer.pipe(
   Layer.provideMerge(
     ToolExecutor.layer.pipe(Layer.provideMerge(registryLayer), Layer.provideMerge(PluginHost.permissionPolicyLayer)),
