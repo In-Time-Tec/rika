@@ -1,0 +1,166 @@
+{
+  "row": 20,
+  "generated_at": "2026-06-29T05:33:54.044Z",
+  "surface": "Startup & status line",
+  "state": "Empty startup, deep tier visible",
+  "method": {
+    "launcher": "Ghostty.app via open -na and CoreGraphics window-id discovery",
+    "count": 6,
+    "interval_ms": 500,
+    "settle_ms": 3000,
+    "focus_ms": 500,
+    "require_same_dimensions": true,
+    "workspace": "/Users/dallen.pyrah/projects/rika",
+    "out_dir": "docs/parity/screenshots"
+  },
+  "launches": [
+    {
+      "label": "amp",
+      "run_id": "rika-parity-startup-20-1782711207140-amp",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-startup-20-1782711207140-amp' AMP_SKIP_UPDATE_CHECK=1 amp",
+      "ghostty_pid": 34737,
+      "window_id": 33451,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    },
+    {
+      "label": "rika",
+      "run_id": "rika-parity-startup-20-1782711207140-rika",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-startup-20-1782711207140-rika' RIKA_DATA_DIR='/tmp/rika-parity-data-source-20' bun packages/cli/src/main.ts interactive --ephemeral --mode deep",
+      "ghostty_pid": 34801,
+      "window_id": 33459,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    }
+  ],
+  "geometry": {
+    "all_pairs_same_dimensions": true,
+    "amp_dimensions": [
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414"
+    ],
+    "rika_dimensions": [
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414"
+    ],
+    "distinct_amp_dimensions": [
+      "1942x1414"
+    ],
+    "distinct_rika_dimensions": [
+      "1942x1414"
+    ],
+    "distinct_pair_dimensions": [
+      "1942x1414:1942x1414"
+    ]
+  },
+  "captures": [
+    {
+      "frame": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-20-01.png",
+        "sha256": "5816339a2e60eba40a5e9d698e94559e0a3c7f4e500b19cbbd5169b6f3ff7271",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-20-01.png",
+        "sha256": "026c37785e3e36d0ba1d7e2c3f0928d705d07359120e53deca0e6e650d901008",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-20-02.png",
+        "sha256": "345a5c2ec1de7474eae0a9cd97dc3651d050c8466de18b1e2e04b5fcb05dece9",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-20-02.png",
+        "sha256": "dd781a0cbc9127f383e8bf0c7437bcfef26cf3ceca7517a6760b9ea197dc9173",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-20-03.png",
+        "sha256": "ece3981641e950a24d806a8da2d5900da938459c438027b34d3823c68c0c6f98",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-20-03.png",
+        "sha256": "5b49ad3e5d1daa1ee1f50af53e3ec31531eac8034573a5d624e6936408fa2f15",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-20-04.png",
+        "sha256": "21e1f13a3189557d34e046c2661644881d9bdbc973f2ab4f742ba1808469c3fd",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-20-04.png",
+        "sha256": "cdaa5e5658d72a2ef2aecf6af059880c4b532e4680c8af047046d151bdac67e0",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-20-05.png",
+        "sha256": "55bcdb18f21980318178cd203aac2954a29a60db393ff6022b6804a124d506a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-20-05.png",
+        "sha256": "674c0600e6f40870c58ac9d4c54f5b45270d92c8aa22b4c41182e3416071fbd6",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 6,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-20-06.png",
+        "sha256": "a4f6942b0e537321b0ad34a11d67d5650dc15e4412e4997b00d6b67cdad8edb7",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-20-06.png",
+        "sha256": "ad011e7a3f6950dc15024b07a25b307785cbcc2cfd93772009f5fdaadad2e63b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    }
+  ]
+}

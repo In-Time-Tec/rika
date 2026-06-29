@@ -1,0 +1,75 @@
+{
+  "row": 53,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T10:33:00Z",
+  "surface": "CLI mcp help",
+  "state": "MCP --help and -h flags",
+  "commands": {
+    "amp_mcp_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp --help",
+    "amp_mcp_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp -h",
+    "rika_mcp_help_before": "bun packages/cli/src/main.ts mcp --help",
+    "rika_mcp_h_before": "bun packages/cli/src/main.ts mcp -h",
+    "rika_mcp_help_after": "bun packages/cli/src/main.ts mcp --help",
+    "rika_mcp_h_after": "bun packages/cli/src/main.ts mcp -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-help-53.txt docs/parity/metadata/rika-mcp-help-53.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-help-short-53.txt docs/parity/metadata/rika-mcp-help-short-53.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-help-stdout-53.txt docs/parity/metadata/rika-mcp-help-stdout-53.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-help-stderr-53.txt docs/parity/metadata/rika-mcp-help-stderr-53.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_help": 0,
+    "amp_mcp_h": 0,
+    "rika_mcp_help_before": 0,
+    "rika_mcp_h_before": 0,
+    "rika_mcp_help_after": 0,
+    "rika_mcp_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_help": 2156,
+    "amp_mcp_h": 2156,
+    "rika_mcp_help_before": 657,
+    "rika_mcp_h_before": 657,
+    "rika_mcp_help_after": 2156,
+    "rika_mcp_h_after": 2156,
+    "stdout": 2141,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_mcp_help": "2d8c4f9a69e13399ab88dfd5bf78efb76500e41b3e8cb9707ebccefe9245d903",
+    "amp_mcp_h": "2d8c4f9a69e13399ab88dfd5bf78efb76500e41b3e8cb9707ebccefe9245d903",
+    "rika_mcp_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_help_after": "2d8c4f9a69e13399ab88dfd5bf78efb76500e41b3e8cb9707ebccefe9245d903",
+    "rika_mcp_h_after": "2d8c4f9a69e13399ab88dfd5bf78efb76500e41b3e8cb9707ebccefe9245d903"
+  },
+  "artifacts": {
+    "amp_mcp_help": "docs/parity/metadata/amp-mcp-help-53.txt",
+    "amp_mcp_h": "docs/parity/metadata/amp-mcp-help-short-53.txt",
+    "amp_mcp_stdout": "docs/parity/metadata/amp-mcp-help-stdout-53.txt",
+    "amp_mcp_stderr": "docs/parity/metadata/amp-mcp-help-stderr-53.txt",
+    "rika_mcp_help_before": "docs/parity/metadata/rika-mcp-help-53-before.txt",
+    "rika_mcp_h_before": "docs/parity/metadata/rika-mcp-help-short-53-before.txt",
+    "rika_mcp_help_after": "docs/parity/metadata/rika-mcp-help-53.txt",
+    "rika_mcp_h_after": "docs/parity/metadata/rika-mcp-help-short-53.txt",
+    "rika_mcp_stdout": "docs/parity/metadata/rika-mcp-help-stdout-53.txt",
+    "rika_mcp_stderr": "docs/parity/metadata/rika-mcp-help-stderr-53.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 2141,
+    "stderr_bytes": 15,
+    "stdout_sha256": "a827ee16774acfe9d1b0f3425ca5aa75552c21f3d232701a73a5eabb6436575f",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Newton",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp --help and mcp -h combined bytes, exit code, and stdout/stderr split only. MCP subcommand help pages, MCP command behavior, and future Amp help changes remain separate parity work."
+}

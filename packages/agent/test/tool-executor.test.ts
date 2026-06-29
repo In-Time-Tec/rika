@@ -18,13 +18,13 @@ const fakeToolLayer = (
 describe("ToolExecutor", () => {
   test("runs allowed tools through the registry", async () => {
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("fake.echo", { text: "hello" })).pipe(
-        Effect.provide(fakeToolLayer({ "fake.echo": (toolCall) => Effect.succeed({ echoed: toolCall.input }) })),
+      ToolExecutor.execute(call("fake_echo", { text: "hello" })).pipe(
+        Effect.provide(fakeToolLayer({ fake_echo: (toolCall) => Effect.succeed({ echoed: toolCall.input }) })),
       ),
     )
 
     expect(result).toMatchObject({
-      name: "fake.echo",
+      name: "fake_echo",
       status: "success",
       output: { echoed: { text: "hello" } },
       metadata: { permission_mode: "allow-all", permission_action: "allow" },
@@ -34,11 +34,11 @@ describe("ToolExecutor", () => {
   test("asks PermissionPolicy before the registry executes each tool call", async () => {
     const order: Array<string> = []
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("fake.ordered")).pipe(
+      ToolExecutor.execute(call("fake_ordered")).pipe(
         Effect.provide(
           fakeToolLayer(
             {
-              "fake.ordered": () =>
+              fake_ordered: () =>
                 Effect.sync(() => {
                   order.push("registry")
                   return { ok: true }
@@ -62,11 +62,11 @@ describe("ToolExecutor", () => {
   test("reject-and-continue blocks registry execution", async () => {
     let executed = false
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("fake.blocked")).pipe(
+      ToolExecutor.execute(call("fake_blocked")).pipe(
         Effect.provide(
           fakeToolLayer(
             {
-              "fake.blocked": () =>
+              fake_blocked: () =>
                 Effect.sync(() => {
                   executed = true
                   return { should_not: "run" }
@@ -80,20 +80,20 @@ describe("ToolExecutor", () => {
 
     expect(executed).toBe(false)
     expect(result).toMatchObject({
-      name: "fake.blocked",
+      name: "fake_blocked",
       status: "error",
-      error: { kind: "permission", message: "blocked by policy", code: "fake.blocked" },
+      error: { kind: "permission", message: "blocked by policy", code: "fake_blocked" },
       metadata: { permission_mode: "configured", permission_action: "reject-and-continue" },
     })
   })
 
   test("modify changes the input before registry execution", async () => {
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("fake.modify", { original: true })).pipe(
+      ToolExecutor.execute(call("fake_modify", { original: true })).pipe(
         Effect.provide(
           fakeToolLayer(
             {
-              "fake.modify": (toolCall) =>
+              fake_modify: (toolCall) =>
                 Effect.succeed({
                   input: toolCall.input,
                   ...(toolCall.metadata === undefined ? {} : { metadata: toolCall.metadata }),
@@ -114,13 +114,13 @@ describe("ToolExecutor", () => {
 
   test("synthesize returns a policy result without registry execution", async () => {
     let executed = false
-    const toolCall = call("fake.synth")
+    const toolCall = call("fake_synth")
     const result = await Effect.runPromise(
       ToolExecutor.execute(toolCall).pipe(
         Effect.provide(
           fakeToolLayer(
             {
-              "fake.synth": () =>
+              fake_synth: () =>
                 Effect.sync(() => {
                   executed = true
                   return { should_not: "run" }
@@ -152,7 +152,7 @@ describe("ToolExecutor", () => {
   })
 })
 
-describe("shell.command tool", () => {
+describe("shell_command tool", () => {
   const configLayer = Config.layerFromValues({
     workspace_root: process.cwd(),
     data_dir: `${process.cwd()}/.rika-test`,
@@ -162,13 +162,13 @@ describe("shell.command tool", () => {
 
   test("returns capped stdout for successful commands", async () => {
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("shell.command", { command: "printf hello", max_output_bytes: 3 })).pipe(
+      ToolExecutor.execute(call("shell_command", { command: "printf hello", max_output_bytes: 3 })).pipe(
         Effect.provide(layer),
       ),
     )
 
     expect(result).toMatchObject({
-      name: "shell.command",
+      name: "shell_command",
       status: "success",
       output: { exit_code: 0, stdout: "hel", stdout_truncated: true, timed_out: false },
     })
@@ -176,25 +176,25 @@ describe("shell.command tool", () => {
 
   test("returns structured errors for non-zero exits", async () => {
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("shell.command", { command: "echo nope >&2; exit 7" })).pipe(Effect.provide(layer)),
+      ToolExecutor.execute(call("shell_command", { command: "echo nope >&2; exit 7" })).pipe(Effect.provide(layer)),
     )
 
     expect(result).toMatchObject({
-      name: "shell.command",
+      name: "shell_command",
       status: "error",
-      error: { kind: "tool", code: "shell.command", details: { exit_code: 7, stderr: "nope\n" } },
+      error: { kind: "tool", code: "shell_command", details: { exit_code: 7, stderr: "nope\n" } },
     })
   })
 
   test("returns structured timeout errors", async () => {
     const result = await Effect.runPromise(
-      ToolExecutor.execute(call("shell.command", { command: "sleep 1", timeout_ms: 10 })).pipe(Effect.provide(layer)),
+      ToolExecutor.execute(call("shell_command", { command: "sleep 1", timeout_ms: 10 })).pipe(Effect.provide(layer)),
     )
 
     expect(result).toMatchObject({
-      name: "shell.command",
+      name: "shell_command",
       status: "error",
-      error: { kind: "tool", code: "shell.command", retryable: true, details: { timed_out: true } },
+      error: { kind: "tool", code: "shell_command", retryable: true, details: { timed_out: true } },
     })
   })
 })

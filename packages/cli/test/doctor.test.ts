@@ -13,7 +13,7 @@ describe("CLI doctor command", () => {
         RIKA_WORKSPACE_ROOT: "/workspace/rika",
         RIKA_DATA_DIR: "/workspace/rika/.rika-test",
         RIKA_OPENAI_API_KEY: "openai-secret",
-        RIKA_GUARDED_TOOLS: "shell.command",
+        RIKA_GUARDED_TOOLS: "shell_command",
         RIKA_RIVET_HOST: "remote",
         RIKA_RIVET_ENDPOINT: "https://rivet.example.com",
         RIKA_RIVET_TOKEN: "rivet-secret",

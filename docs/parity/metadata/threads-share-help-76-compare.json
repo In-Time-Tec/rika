@@ -1,0 +1,91 @@
+{
+  "row": 76,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T15:26:44Z",
+  "surface": "CLI threads share help",
+  "state": "Threads share --help and -h flags",
+  "commands": {
+    "amp_threads_share_help": "AMP_SKIP_UPDATE_CHECK=1 amp threads share --help",
+    "amp_threads_share_h": "AMP_SKIP_UPDATE_CHECK=1 amp threads share -h",
+    "rika_threads_share_help_before": "bun packages/cli/src/main.ts threads share --help",
+    "rika_threads_share_h_before": "bun packages/cli/src/main.ts threads share -h",
+    "rika_threads_share_help_after": "bun packages/cli/src/main.ts threads share --help",
+    "rika_threads_share_h_after": "bun packages/cli/src/main.ts threads share -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-threads-share-help-76.txt docs/parity/metadata/rika-threads-share-help-76.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-threads-share-help-short-76.txt docs/parity/metadata/rika-threads-share-help-short-76.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-threads-share-help-76-stdout.txt docs/parity/metadata/rika-threads-share-help-76-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-threads-share-help-76-stderr.txt docs/parity/metadata/rika-threads-share-help-76-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-threads-share-help-short-76-stdout.txt docs/parity/metadata/rika-threads-share-help-short-76-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-threads-share-help-short-76-stderr.txt docs/parity/metadata/rika-threads-share-help-short-76-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_threads_share_help": 0,
+    "amp_threads_share_h": 0,
+    "rika_threads_share_help_before": 0,
+    "rika_threads_share_h_before": 0,
+    "rika_threads_share_help_after": 0,
+    "rika_threads_share_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_threads_share_help": 1961,
+    "amp_threads_share_h": 1961,
+    "rika_threads_share_help_before": 644,
+    "rika_threads_share_h_before": 644,
+    "rika_threads_share_help_after": 1961,
+    "rika_threads_share_h_after": 1961,
+    "stdout": 1946,
+    "stderr": 15,
+    "short_stdout": 1946,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_threads_share_help": "165d03de023c982cc29aab224fec9d30538e83e981b0c81cbebe75a201635009",
+    "amp_threads_share_h": "165d03de023c982cc29aab224fec9d30538e83e981b0c81cbebe75a201635009",
+    "rika_threads_share_help_before": "3e4a3356f5cfe8a3c2d2bd3b8352e4309a1a0f56903b31bf17360ab056599450",
+    "rika_threads_share_h_before": "3e4a3356f5cfe8a3c2d2bd3b8352e4309a1a0f56903b31bf17360ab056599450",
+    "rika_threads_share_help_after": "165d03de023c982cc29aab224fec9d30538e83e981b0c81cbebe75a201635009",
+    "rika_threads_share_h_after": "165d03de023c982cc29aab224fec9d30538e83e981b0c81cbebe75a201635009"
+  },
+  "artifacts": {
+    "amp_threads_share_help": "docs/parity/metadata/amp-threads-share-help-76.txt",
+    "amp_threads_share_h": "docs/parity/metadata/amp-threads-share-help-short-76.txt",
+    "amp_threads_share_stdout": "docs/parity/metadata/amp-threads-share-help-76-stdout.txt",
+    "amp_threads_share_stderr": "docs/parity/metadata/amp-threads-share-help-76-stderr.txt",
+    "amp_threads_share_h_stdout": "docs/parity/metadata/amp-threads-share-help-short-76-stdout.txt",
+    "amp_threads_share_h_stderr": "docs/parity/metadata/amp-threads-share-help-short-76-stderr.txt",
+    "rika_threads_share_help_before": "docs/parity/metadata/rika-threads-share-help-76-before.txt",
+    "rika_threads_share_h_before": "docs/parity/metadata/rika-threads-share-help-short-76-before.txt",
+    "rika_threads_share_help_after": "docs/parity/metadata/rika-threads-share-help-76.txt",
+    "rika_threads_share_h_after": "docs/parity/metadata/rika-threads-share-help-short-76.txt",
+    "rika_threads_share_stdout": "docs/parity/metadata/rika-threads-share-help-76-stdout.txt",
+    "rika_threads_share_stderr": "docs/parity/metadata/rika-threads-share-help-76-stderr.txt",
+    "rika_threads_share_h_stdout": "docs/parity/metadata/rika-threads-share-help-short-76-stdout.txt",
+    "rika_threads_share_h_stderr": "docs/parity/metadata/rika-threads-share-help-short-76-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1946,
+    "stderr_bytes": 15,
+    "stdout_sha256": "b5f5ac999fe4006241a926eb4f317a83211563daffdd9d3819c72706f33d7927",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1946,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "b5f5ac999fe4006241a926eb4f317a83211563daffdd9d3819c72706f33d7927",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "pending_review",
+  "review": {
+    "reviewer": "PENDING",
+    "verdict": "PENDING"
+  },
+  "scope": "Proves exact threads share --help and threads share -h combined bytes, exit code, and stdout/stderr split for the captured Amp version. Thread share behavior, share aliases, visibility mutation, support sharing, other thread subcommand help pages, and future Amp help changes remain separate parity work. Row #76 is not closed until independent review passes."
+}

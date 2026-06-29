@@ -168,7 +168,7 @@ describe("HashlineFile", () => {
     expect(readResult).toMatchObject({ status: "success", name: "read" })
     expect(object(readResult.output).content).toMatch(/^1:[A-Za-z0-9_-]{4}\|hello$/)
 
-    const shell = await runTool(root, ToolExecutor.execute(call("shell.command", { command: "printf ok" })))
+    const shell = await runTool(root, ToolExecutor.execute(call("shell_command", { command: "printf ok" })))
     expect(shell).toMatchObject({ status: "success", output: { stdout: "ok" } })
   })
 })

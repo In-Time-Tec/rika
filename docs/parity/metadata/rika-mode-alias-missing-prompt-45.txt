@@ -1,0 +1,37 @@
+Prompt is required for --execute
+Usage:
+  rika [options]
+  rika interactive [options]
+  rika threads list [--include-archived] [--limit <n>]
+  rika threads search [--include-archived] [--limit <n>] <query>
+  rika threads archive <thread-id>
+  rika threads unarchive <thread-id>
+  rika threads share <thread-id>
+  rika threads reference <thread-id> [query]
+  rika skills list
+  rika skills inspect <name>
+  rika mcp list
+  rika mcp approve <server-name>
+  rika config keymap
+  rika review [--staged] [--base <ref>] [--workspace <path>] [--ephemeral] [paths...]
+  rika extensions create-skill <name> --description <text> [--instructions <text>] [--thread <id>]
+  rika extensions create-plugin <name> --description <text> [--thread <id>]
+  rika extensions enable-plugin <name> --verification <command> [--thread <id>]
+  rika extensions disable-plugin <name> [--reason <text>] [--thread <id>]
+  rika extensions rollback-plugin <name> [--reason <text>] [--thread <id>]
+  rika server [--host <host>] [--port <n>] [--token <token>] [--workspace <path>] [--ephemeral]
+  rika doctor
+  rika ide status [--server <url>] [--token <token>]
+  rika ide connect --client <id> [--server <url>] [--token <token>] [--workspace <path>] [--capabilities <csv>]
+  rika ide disconnect --client <id> [--server <url>] [--token <token>]
+  rika ide open-file --path <path> [--start-line <n> --end-line <n>] [--server <url>] [--token <token>]
+  rika run [options] <prompt>
+  rika --execute [options] <prompt>
+
+Options:
+  -x, --execute           Run one non-interactive turn
+  -m, --mode <rush|smart|deep> Select agent mode
+  --workspace <path>      Workspace root for the turn
+  --thread <id>           Reuse a durable thread id
+  --ephemeral            Use in-memory persistence for this run
+  -h, --help             Show this help

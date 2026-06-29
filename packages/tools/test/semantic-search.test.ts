@@ -124,7 +124,7 @@ describe("SemanticSearch", () => {
       await runLive(root, SemanticSearch.search({ query: "validate token", language: "typescript" })),
     )
 
-    expect(status).toMatchObject({ type: "semantic_search.status", backend: "local", degraded: true })
+    expect(status).toMatchObject({ type: "semantic_search_status", backend: "local", degraded: true })
     expect(array(status.missing_configuration)).toEqual(["OPENROUTER_API_KEY", "TURBOPUFFER_API_KEY"])
     expect(output).toMatchObject({ type: "semantic_search", backend: "local", degraded: true })
     expect(object(array(output.hits)[0])).toMatchObject({ path: "src/auth/session.ts", language: "typescript" })
@@ -145,7 +145,7 @@ describe("SemanticSearch", () => {
       ToolExecutor.execute(call("semantic_search", {})).pipe(Effect.provide(executorLayer)),
     )
 
-    expect(descriptors.map((descriptor) => descriptor.name)).toEqual(["semantic_search", "semantic_search.status"])
+    expect(descriptors.map((descriptor) => descriptor.name)).toEqual(["semantic_search", "semantic_search_status"])
     expect(result).toMatchObject({
       status: "error",
       error: { message: "semantic_search requires query, queries, or file" },

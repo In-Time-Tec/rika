@@ -1,0 +1,91 @@
+{
+  "row": 60,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T11:54:43Z",
+  "surface": "CLI mcp oauth logout help",
+  "state": "MCP oauth logout --help and -h flags",
+  "commands": {
+    "amp_mcp_oauth_logout_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp oauth logout --help",
+    "amp_mcp_oauth_logout_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp oauth logout -h",
+    "rika_mcp_oauth_logout_help_before": "bun packages/cli/src/main.ts mcp oauth logout --help",
+    "rika_mcp_oauth_logout_h_before": "bun packages/cli/src/main.ts mcp oauth logout -h",
+    "rika_mcp_oauth_logout_help_after": "bun packages/cli/src/main.ts mcp oauth logout --help",
+    "rika_mcp_oauth_logout_h_after": "bun packages/cli/src/main.ts mcp oauth logout -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-oauth-logout-help-60.txt docs/parity/metadata/rika-mcp-oauth-logout-help-60.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-oauth-logout-help-short-60.txt docs/parity/metadata/rika-mcp-oauth-logout-help-short-60.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-oauth-logout-help-60-stdout.txt docs/parity/metadata/rika-mcp-oauth-logout-help-60-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-oauth-logout-help-60-stderr.txt docs/parity/metadata/rika-mcp-oauth-logout-help-60-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-mcp-oauth-logout-help-short-60-stdout.txt docs/parity/metadata/rika-mcp-oauth-logout-help-short-60-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-mcp-oauth-logout-help-short-60-stderr.txt docs/parity/metadata/rika-mcp-oauth-logout-help-short-60-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_oauth_logout_help": 0,
+    "amp_mcp_oauth_logout_h": 0,
+    "rika_mcp_oauth_logout_help_before": 0,
+    "rika_mcp_oauth_logout_h_before": 0,
+    "rika_mcp_oauth_logout_help_after": 0,
+    "rika_mcp_oauth_logout_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_oauth_logout_help": 196,
+    "amp_mcp_oauth_logout_h": 196,
+    "rika_mcp_oauth_logout_help_before": 657,
+    "rika_mcp_oauth_logout_h_before": 657,
+    "rika_mcp_oauth_logout_help_after": 196,
+    "rika_mcp_oauth_logout_h_after": 196,
+    "stdout": 196,
+    "stderr": 0,
+    "short_stdout": 196,
+    "short_stderr": 0
+  },
+  "sha256": {
+    "amp_mcp_oauth_logout_help": "60e25f5eab3ecdc9684fda7b8c71ab116e023a639f87b6048e09a1d8cd799471",
+    "amp_mcp_oauth_logout_h": "60e25f5eab3ecdc9684fda7b8c71ab116e023a639f87b6048e09a1d8cd799471",
+    "rika_mcp_oauth_logout_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_oauth_logout_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_oauth_logout_help_after": "60e25f5eab3ecdc9684fda7b8c71ab116e023a639f87b6048e09a1d8cd799471",
+    "rika_mcp_oauth_logout_h_after": "60e25f5eab3ecdc9684fda7b8c71ab116e023a639f87b6048e09a1d8cd799471"
+  },
+  "artifacts": {
+    "amp_mcp_oauth_logout_help": "docs/parity/metadata/amp-mcp-oauth-logout-help-60.txt",
+    "amp_mcp_oauth_logout_h": "docs/parity/metadata/amp-mcp-oauth-logout-help-short-60.txt",
+    "amp_mcp_oauth_logout_stdout": "docs/parity/metadata/amp-mcp-oauth-logout-help-60-stdout.txt",
+    "amp_mcp_oauth_logout_stderr": "docs/parity/metadata/amp-mcp-oauth-logout-help-60-stderr.txt",
+    "amp_mcp_oauth_logout_h_stdout": "docs/parity/metadata/amp-mcp-oauth-logout-help-short-60-stdout.txt",
+    "amp_mcp_oauth_logout_h_stderr": "docs/parity/metadata/amp-mcp-oauth-logout-help-short-60-stderr.txt",
+    "rika_mcp_oauth_logout_help_before": "docs/parity/metadata/rika-mcp-oauth-logout-help-60-before.txt",
+    "rika_mcp_oauth_logout_h_before": "docs/parity/metadata/rika-mcp-oauth-logout-help-short-60-before.txt",
+    "rika_mcp_oauth_logout_help_after": "docs/parity/metadata/rika-mcp-oauth-logout-help-60.txt",
+    "rika_mcp_oauth_logout_h_after": "docs/parity/metadata/rika-mcp-oauth-logout-help-short-60.txt",
+    "rika_mcp_oauth_logout_stdout": "docs/parity/metadata/rika-mcp-oauth-logout-help-60-stdout.txt",
+    "rika_mcp_oauth_logout_stderr": "docs/parity/metadata/rika-mcp-oauth-logout-help-60-stderr.txt",
+    "rika_mcp_oauth_logout_h_stdout": "docs/parity/metadata/rika-mcp-oauth-logout-help-short-60-stdout.txt",
+    "rika_mcp_oauth_logout_h_stderr": "docs/parity/metadata/rika-mcp-oauth-logout-help-short-60-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 196,
+    "stderr_bytes": 0,
+    "stdout_sha256": "60e25f5eab3ecdc9684fda7b8c71ab116e023a639f87b6048e09a1d8cd799471",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 196,
+    "short_stderr_bytes": 0,
+    "short_stdout_sha256": "60e25f5eab3ecdc9684fda7b8c71ab116e023a639f87b6048e09a1d8cd799471",
+    "short_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Row60-Slate",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp oauth logout --help and mcp oauth logout -h combined bytes, exit code, and stdout/stderr split only. MCP OAuth logout behavior, other OAuth help pages, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

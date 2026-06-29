@@ -1,0 +1,66 @@
+{
+  "leader": "ctrl+x", // Leader key for <leader> shortcuts
+  "amp.disconnect": null, // Disconnect the active thread without reconnecting
+  "amp.endCredits": null, // Roll the full-screen Amp credits
+  "amp.help": null, // Show help & keymaps
+  "amp.quit": "ctrl+c ctrl+c", // Quit
+  "amp.reconnect": null, // Disconnect and reconnect the active thread
+  "amp.relaunch": null, // Quit, reopen Amp, and resume active threads
+  "amp.showVersion": null, // Show current Amp version
+  "amp.showWelcome": null, // Show the welcome message again
+  "debug.copyCommand": null, // Copy debug command to clipboard
+  "debug.pageLogs": null, // View CLI logs in pager
+  "feedback.sendReportWithDiagnostics": null, // Generate and send a diagnostic report for Amp support
+  "ide.connect": null, // Connect to an IDE
+  "label.add": null, // Add label to thread
+  "label.remove": null, // Remove label from thread
+  "mcp.authenticate": null, // Retry OAuth authentication for an MCP server
+  "mcp.info": null, // Show MCP servers and tools
+  "mode.toggle": "ctrl+s", // Switch to the next available mode
+  "mode.toggleReasoningEffort": "alt+d", // Cycle reasoning effort for the active model
+  "mode.use.deep": null, // Enable deep mode
+  "mode.use.large": null, // Enable large mode
+  "mode.use.nostromo": null, // Enable nostromo mode
+  "mode.use.review": null, // Enable review mode
+  "mode.use.rush": null, // Enable rush mode
+  "mode.use.smart": null, // Enable smart mode
+  "news.open": null, // Open Amp Chronicle in browser
+  "plugins.activity": null, // Show recent plugin activity triggered by hooks
+  "plugins.list": null, // List all loaded plugins
+  "plugins.reload": null, // Reload all plugins
+  "prompt.clear": null, // Clear input
+  "prompt.copySelection": null, // Copy selection
+  "prompt.dequeue": null, // Dequeue prompts
+  "prompt.history": "ctrl+r", // Restore a previous prompt
+  "prompt.openInEditor": "ctrl+g", // Edit prompt in $EDITOR
+  "prompt.pasteImageFromClipboard": "ctrl+v", // Paste image from clipboard
+  "prompt.steerQueuedMessage": null, // Steer with the next queued prompt
+  "settings.openInEditor": null, // Open CLI settings in $EDITOR
+  "skills.list": null, // List available skills for this thread
+  "speed.toggleFast": "alt+r", // Toggle fast speed for this thread
+  "thread.analyzeContext": null, // Show token usage by prompt section for this thread
+  "thread.archive": "ctrl+c ctrl+n", // Archive and new thread
+  "thread.archiveAndQuit": "ctrl+c ctrl+e", // Archive and quit
+  "thread.archiveSelectedInSidebar": "mod+shift+e", // Archive the selected sidebar thread
+  "thread.copyID": null, // Copy thread ID
+  "thread.copyMarkdown": null, // Copy thread as Markdown
+  "thread.copyURL": null, // Copy thread URL
+  "thread.mention": null, // Mention a thread
+  "thread.new": null, // Start new thread
+  "thread.newRemote": "<leader>r", // Toggle remote sandbox mode for the next thread
+  "thread.openInBrowser": null, // Open thread in browser
+  "thread.rename": null, // Rename thread title
+  "thread.selectRemoteExecutor": null, // Choose whether the next remote thread runs in the Orb or a daemon
+  "thread.selectRemoteProject": null, // Choose the project for the next remote thread
+  "thread.showCost": null, // Show usage cost and entitlement for the active thread
+  "thread.showHideSidebar": null, // Show or hide the thread sidebar
+  "thread.switch": null, // Switch to existing thread
+  "thread.switchToNext": null, // Switch to next thread
+  "thread.switchToNextInSidebar": "ctrl+alt+down", // Switch to next thread in sidebar
+  "thread.switchToPrevious": null, // Switch to previous thread
+  "thread.switchToPreviousInSidebar": "ctrl+alt+up", // Switch to previous thread in sidebar
+  "thread.toggleDetails": "alt+t", // Expand or collapse tool and activity details
+  "thread.toggleOutline": null, // Toggle the outline for the visible assistant response
+  "thread.toggleSidebar": "alt+s", // Show, focus, or hide the thread sidebar
+  "threadStatus.toggleVisibility": null // Toggle thread status tab visibility
+}

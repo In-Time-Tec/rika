@@ -1,0 +1,91 @@
+{
+  "row": 62,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T12:16:36Z",
+  "surface": "CLI mcp doctor help",
+  "state": "MCP doctor --help and -h flags",
+  "commands": {
+    "amp_mcp_doctor_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp doctor --help",
+    "amp_mcp_doctor_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp doctor -h",
+    "rika_mcp_doctor_help_before": "bun packages/cli/src/main.ts mcp doctor --help",
+    "rika_mcp_doctor_h_before": "bun packages/cli/src/main.ts mcp doctor -h",
+    "rika_mcp_doctor_help_after": "bun packages/cli/src/main.ts mcp doctor --help",
+    "rika_mcp_doctor_h_after": "bun packages/cli/src/main.ts mcp doctor -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-doctor-help-62.txt docs/parity/metadata/rika-mcp-doctor-help-62.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-doctor-help-short-62.txt docs/parity/metadata/rika-mcp-doctor-help-short-62.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-doctor-help-62-stdout.txt docs/parity/metadata/rika-mcp-doctor-help-62-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-doctor-help-62-stderr.txt docs/parity/metadata/rika-mcp-doctor-help-62-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-mcp-doctor-help-short-62-stdout.txt docs/parity/metadata/rika-mcp-doctor-help-short-62-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-mcp-doctor-help-short-62-stderr.txt docs/parity/metadata/rika-mcp-doctor-help-short-62-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_doctor_help": 0,
+    "amp_mcp_doctor_h": 0,
+    "rika_mcp_doctor_help_before": 0,
+    "rika_mcp_doctor_h_before": 0,
+    "rika_mcp_doctor_help_after": 0,
+    "rika_mcp_doctor_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_doctor_help": 1796,
+    "amp_mcp_doctor_h": 1796,
+    "rika_mcp_doctor_help_before": 657,
+    "rika_mcp_doctor_h_before": 657,
+    "rika_mcp_doctor_help_after": 1796,
+    "rika_mcp_doctor_h_after": 1796,
+    "stdout": 1781,
+    "stderr": 15,
+    "short_stdout": 1781,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_mcp_doctor_help": "91c73511c88c6d482b864b08f498483ea51499bb454cb13d392381cdb4c80223",
+    "amp_mcp_doctor_h": "91c73511c88c6d482b864b08f498483ea51499bb454cb13d392381cdb4c80223",
+    "rika_mcp_doctor_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_doctor_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_doctor_help_after": "91c73511c88c6d482b864b08f498483ea51499bb454cb13d392381cdb4c80223",
+    "rika_mcp_doctor_h_after": "91c73511c88c6d482b864b08f498483ea51499bb454cb13d392381cdb4c80223"
+  },
+  "artifacts": {
+    "amp_mcp_doctor_help": "docs/parity/metadata/amp-mcp-doctor-help-62.txt",
+    "amp_mcp_doctor_h": "docs/parity/metadata/amp-mcp-doctor-help-short-62.txt",
+    "amp_mcp_doctor_stdout": "docs/parity/metadata/amp-mcp-doctor-help-62-stdout.txt",
+    "amp_mcp_doctor_stderr": "docs/parity/metadata/amp-mcp-doctor-help-62-stderr.txt",
+    "amp_mcp_doctor_h_stdout": "docs/parity/metadata/amp-mcp-doctor-help-short-62-stdout.txt",
+    "amp_mcp_doctor_h_stderr": "docs/parity/metadata/amp-mcp-doctor-help-short-62-stderr.txt",
+    "rika_mcp_doctor_help_before": "docs/parity/metadata/rika-mcp-doctor-help-62-before.txt",
+    "rika_mcp_doctor_h_before": "docs/parity/metadata/rika-mcp-doctor-help-short-62-before.txt",
+    "rika_mcp_doctor_help_after": "docs/parity/metadata/rika-mcp-doctor-help-62.txt",
+    "rika_mcp_doctor_h_after": "docs/parity/metadata/rika-mcp-doctor-help-short-62.txt",
+    "rika_mcp_doctor_stdout": "docs/parity/metadata/rika-mcp-doctor-help-62-stdout.txt",
+    "rika_mcp_doctor_stderr": "docs/parity/metadata/rika-mcp-doctor-help-62-stderr.txt",
+    "rika_mcp_doctor_h_stdout": "docs/parity/metadata/rika-mcp-doctor-help-short-62-stdout.txt",
+    "rika_mcp_doctor_h_stderr": "docs/parity/metadata/rika-mcp-doctor-help-short-62-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1781,
+    "stderr_bytes": 15,
+    "stdout_sha256": "dda3f0337099858d28afdc05ae72100dd8741ee9ac16e53b7422a1f44b5d338e",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1781,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "dda3f0337099858d28afdc05ae72100dd8741ee9ac16e53b7422a1f44b5d338e",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Rowan Bytecheck",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp doctor --help and mcp doctor -h combined bytes, exit code, and stdout/stderr split. MCP doctor behavior, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

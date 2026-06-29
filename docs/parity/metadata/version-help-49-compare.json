@@ -1,0 +1,61 @@
+{
+  "row": 49,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T09:50:45Z",
+  "surface": "CLI version help",
+  "state": "Version --help and -h flags",
+  "commands": {
+    "amp_version_help": "AMP_SKIP_UPDATE_CHECK=1 amp version --help",
+    "amp_version_h": "AMP_SKIP_UPDATE_CHECK=1 amp version -h",
+    "rika_version_help_before": "bun packages/cli/src/main.ts version --help",
+    "rika_version_h_before": "bun packages/cli/src/main.ts version -h",
+    "rika_version_help_after": "bun packages/cli/src/main.ts version --help",
+    "rika_version_h_after": "bun packages/cli/src/main.ts version -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-version-help-49.txt docs/parity/metadata/rika-version-help-49.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-version-help-short-49.txt docs/parity/metadata/rika-version-help-short-49.txt"
+  },
+  "exit_codes": {
+    "amp_version_help": 0,
+    "amp_version_h": 0,
+    "rika_version_help_before": 0,
+    "rika_version_h_before": 0,
+    "rika_version_help_after": 0,
+    "rika_version_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0
+  },
+  "bytes": {
+    "amp_version_help": 128,
+    "amp_version_h": 128,
+    "rika_version_help_before": 577,
+    "rika_version_h_before": 577,
+    "rika_version_help_after": 128,
+    "rika_version_h_after": 128,
+    "stdout": 113,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_version_help": "4201d053a4f07d5db35f8a76951a00c412e49ded93b2b7c1a9a1c178609ccbd9",
+    "amp_version_h": "4201d053a4f07d5db35f8a76951a00c412e49ded93b2b7c1a9a1c178609ccbd9",
+    "rika_version_help_before": "ca598fac2819f74d121ebbc4c7d848a11badb3a324e9e189595f6b934ac2fe9d",
+    "rika_version_h_before": "ca598fac2819f74d121ebbc4c7d848a11badb3a324e9e189595f6b934ac2fe9d",
+    "rika_version_help_after": "4201d053a4f07d5db35f8a76951a00c412e49ded93b2b7c1a9a1c178609ccbd9",
+    "rika_version_h_after": "4201d053a4f07d5db35f8a76951a00c412e49ded93b2b7c1a9a1c178609ccbd9"
+  },
+  "artifacts": {
+    "amp_version_help": "docs/parity/metadata/amp-version-help-49.txt",
+    "amp_version_h": "docs/parity/metadata/amp-version-help-short-49.txt",
+    "rika_version_help_before": "docs/parity/metadata/rika-version-help-49-before.txt",
+    "rika_version_h_before": "docs/parity/metadata/rika-version-help-short-49-before.txt",
+    "rika_version_help_after": "docs/parity/metadata/rika-version-help-49.txt",
+    "rika_version_h_after": "docs/parity/metadata/rika-version-help-short-49.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 113,
+    "stderr_bytes": 15
+  },
+  "result": "match",
+  "scope": "Proves exact version --help and version -h combined bytes, exit code, and stdout/stderr split only. Other subcommand help pages and future Amp help changes remain separate parity work."
+}

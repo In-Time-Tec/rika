@@ -6,16 +6,16 @@ describe("palette.filter", () => {
     expect(Palette.filter("")).toEqual(Palette.commands)
   })
 
-  test("narrows by id, title, and hint, ignoring a leading slash", () => {
-    expect(Palette.filter("/mode").map((command) => command.id)).toEqual(["mode"])
-    expect(Palette.filter("archive").map((command) => command.id)).toEqual(["archive", "unarchive"])
-    expect(Palette.filter("review").map((command) => command.id)).toContain("review")
-    expect(Palette.filter("agent mode").map((command) => command.id)).toEqual(["mode"])
+  test("narrows by id, action, command, and hint, ignoring a leading slash", () => {
+    expect(Palette.filter("/mode").map((command) => command.id)).toEqual(["mode-rush", "mode-smart", "mode-deep"])
+    expect(Palette.filter("authenticate").map((command) => command.id)).toEqual(["mcp-authenticate"])
+    expect(Palette.filter("ast-grep outline").map((command) => command.id)).toEqual(["ast-grep-outline-status"])
+    expect(Palette.filter("switch threads").map((command) => command.id)).toEqual(["thread-switch"])
   })
 
   test("at clamps the selected index into range", () => {
-    expect(Palette.at("/mode", 0)?.id).toBe("mode")
-    expect(Palette.at("/mode", 99)?.id).toBe("mode")
+    expect(Palette.at("/mode", 0)?.id).toBe("mode-rush")
+    expect(Palette.at("/mode", 99)?.id).toBe("mode-deep")
     expect(Palette.at("definitely-not-a-command", 0)).toBeUndefined()
   })
 })

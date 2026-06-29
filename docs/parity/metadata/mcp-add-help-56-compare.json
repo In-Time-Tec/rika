@@ -1,0 +1,75 @@
+{
+  "row": 56,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T11:09:26Z",
+  "surface": "CLI mcp add help",
+  "state": "MCP add --help and -h flags",
+  "commands": {
+    "amp_mcp_add_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp add --help",
+    "amp_mcp_add_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp add -h",
+    "rika_mcp_add_help_before": "bun packages/cli/src/main.ts mcp add --help",
+    "rika_mcp_add_h_before": "bun packages/cli/src/main.ts mcp add -h",
+    "rika_mcp_add_help_after": "bun packages/cli/src/main.ts mcp add --help",
+    "rika_mcp_add_h_after": "bun packages/cli/src/main.ts mcp add -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-add-help-56.txt docs/parity/metadata/rika-mcp-add-help-56.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-add-help-short-56.txt docs/parity/metadata/rika-mcp-add-help-short-56.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-add-help-stdout-56.txt docs/parity/metadata/rika-mcp-add-help-stdout-56.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-add-help-stderr-56.txt docs/parity/metadata/rika-mcp-add-help-stderr-56.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_add_help": 0,
+    "amp_mcp_add_h": 0,
+    "rika_mcp_add_help_before": 0,
+    "rika_mcp_add_h_before": 0,
+    "rika_mcp_add_help_after": 0,
+    "rika_mcp_add_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_add_help": 3119,
+    "amp_mcp_add_h": 3119,
+    "rika_mcp_add_help_before": 657,
+    "rika_mcp_add_h_before": 657,
+    "rika_mcp_add_help_after": 3119,
+    "rika_mcp_add_h_after": 3119,
+    "stdout": 3104,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_mcp_add_help": "f64b1cf348620fcdd573fe4b68431bad73e2551f9c07722206fae667a2dd6e81",
+    "amp_mcp_add_h": "f64b1cf348620fcdd573fe4b68431bad73e2551f9c07722206fae667a2dd6e81",
+    "rika_mcp_add_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_add_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_add_help_after": "f64b1cf348620fcdd573fe4b68431bad73e2551f9c07722206fae667a2dd6e81",
+    "rika_mcp_add_h_after": "f64b1cf348620fcdd573fe4b68431bad73e2551f9c07722206fae667a2dd6e81"
+  },
+  "artifacts": {
+    "amp_mcp_add_help": "docs/parity/metadata/amp-mcp-add-help-56.txt",
+    "amp_mcp_add_h": "docs/parity/metadata/amp-mcp-add-help-short-56.txt",
+    "amp_mcp_add_stdout": "docs/parity/metadata/amp-mcp-add-help-stdout-56.txt",
+    "amp_mcp_add_stderr": "docs/parity/metadata/amp-mcp-add-help-stderr-56.txt",
+    "rika_mcp_add_help_before": "docs/parity/metadata/rika-mcp-add-help-56-before.txt",
+    "rika_mcp_add_h_before": "docs/parity/metadata/rika-mcp-add-help-short-56-before.txt",
+    "rika_mcp_add_help_after": "docs/parity/metadata/rika-mcp-add-help-56.txt",
+    "rika_mcp_add_h_after": "docs/parity/metadata/rika-mcp-add-help-short-56.txt",
+    "rika_mcp_add_stdout": "docs/parity/metadata/rika-mcp-add-help-stdout-56.txt",
+    "rika_mcp_add_stderr": "docs/parity/metadata/rika-mcp-add-help-stderr-56.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 3104,
+    "stderr_bytes": 15,
+    "stdout_sha256": "9eb3bebf0fb9e6013874c28adb223eb62c7e7d6effb4186b5e10d047bbbdcd9c",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Kuhn",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp add --help and mcp add -h combined bytes, exit code, and stdout/stderr split only. MCP add command behavior, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

@@ -58,8 +58,8 @@ describe("PluginHost", () => {
       [
         source("capabilities", (rika) => {
           rika.registerTool(
-            "plugin.echo",
-            { description: "Echo from a plugin", input_schema: { type: "object" } },
+            "plugin_echo",
+            { description: "Echo from a plugin", inputSchema: { type: "object" } },
             (toolCall) => ({
               echoed: toolCall.input,
             }),
@@ -81,7 +81,7 @@ describe("PluginHost", () => {
       Effect.gen(function* () {
         const definitions = yield* PluginHost.toolDefinitions()
         const registryLayer = ToolRegistry.layerFromDefinitions(definitions)
-        const toolOutput = yield* ToolRegistry.execute(call("plugin.echo", { text: "hello" })).pipe(
+        const toolOutput = yield* ToolRegistry.execute(call("plugin_echo", { text: "hello" })).pipe(
           Effect.provide(registryLayer),
         )
         const commands = yield* PluginHost.commands()
@@ -115,14 +115,14 @@ describe("PluginHost", () => {
       source("guard", (rika) => {
         rika.on("tool.call", (event) => {
           order.push("guard")
-          if (event.tool === "shell.command") return PermissionPolicy.reject("blocked by plugin")
+          if (event.tool === "shell_command") return PermissionPolicy.reject("blocked by plugin")
           return undefined
         })
       }),
     ])
 
     const decision = await Effect.runPromise(
-      PermissionPolicy.decide(call("shell.command", { command: "rm -rf /" })).pipe(
+      PermissionPolicy.decide(call("shell_command", { command: "rm -rf /" })).pipe(
         Effect.provide(PluginHost.permissionPolicyLayer),
         Effect.provide(layer),
       ),
@@ -138,7 +138,7 @@ describe("PluginHost", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const mode = yield* PermissionPolicy.mode()
-        const decision = yield* PermissionPolicy.decide(call("shell.command", { command: "printf ok" }))
+        const decision = yield* PermissionPolicy.decide(call("shell_command", { command: "printf ok" }))
         return { mode, decision }
       }).pipe(Effect.provide(PluginHost.permissionPolicyLayer), Effect.provide(layer)),
     )
@@ -150,13 +150,13 @@ describe("PluginHost", () => {
     const layer = hostLayer([
       source("rewrite", (rika) => {
         rika.on("tool.call", (event) => {
-          if (event.tool === "fake.rewrite") return PermissionPolicy.modify({ text: "from plugin" })
+          if (event.tool === "fake_rewrite") return PermissionPolicy.modify({ text: "from plugin" })
           return undefined
         })
       }),
       source("synth", (rika) => {
         rika.on("tool.call", (event) => {
-          if (event.tool !== "fake.synth") return undefined
+          if (event.tool !== "fake_synth") return undefined
           return PermissionPolicy.synthesize({
             id: event.call.id,
             name: event.call.name,
@@ -169,8 +169,8 @@ describe("PluginHost", () => {
     const executorLayer = ToolExecutor.layer.pipe(
       Layer.provideMerge(
         ToolRegistry.fakeLayer({
-          "fake.rewrite": (toolCall) => Effect.succeed({ input: toolCall.input }),
-          "fake.synth": () => Effect.succeed({ should_not: "run" }),
+          fake_rewrite: (toolCall) => Effect.succeed({ input: toolCall.input }),
+          fake_synth: () => Effect.succeed({ should_not: "run" }),
         }),
       ),
       Layer.provideMerge(PluginHost.permissionPolicyLayerFromConfig()),
@@ -178,8 +178,8 @@ describe("PluginHost", () => {
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
-        const modified = yield* ToolExecutor.execute(call("fake.rewrite", { text: "original" }))
-        const synthesized = yield* ToolExecutor.execute(call("fake.synth", {}))
+        const modified = yield* ToolExecutor.execute(call("fake_rewrite", { text: "original" }))
+        const synthesized = yield* ToolExecutor.execute(call("fake_synth", {}))
         return { modified, synthesized }
       }).pipe(Effect.provide(executorLayer), Effect.provide(layer)),
     )
@@ -205,18 +205,18 @@ describe("PluginHost", () => {
         }))
       }),
     ])
-    const baseExecutorLayer = ToolExecutor.fakeLayer({ "fake.tool": () => Effect.succeed({ original: true }) })
+    const baseExecutorLayer = ToolExecutor.fakeLayer({ fake_tool: () => Effect.succeed({ original: true }) })
     const executorLayer = PluginHost.toolResultExecutorLayer.pipe(
       Layer.provideMerge(baseExecutorLayer),
       Layer.provideMerge(layer),
     )
 
     const observed = await Effect.runPromise(
-      ToolExecutor.execute(call("fake.tool", {})).pipe(Effect.provide(executorLayer)),
+      ToolExecutor.execute(call("fake_tool", {})).pipe(Effect.provide(executorLayer)),
     )
 
     expect(observed).toMatchObject({
-      name: "fake.tool",
+      name: "fake_tool",
       status: "success",
       output: { observed: true, original: { original: true } },
     })

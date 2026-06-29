@@ -5,7 +5,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./tool": "./src/tool.ts"
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",

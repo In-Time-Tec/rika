@@ -67,7 +67,7 @@ export const readOnlyRegistryLayerFromServices: Layer.Layer<
       ...FffSearch.toolDefinitions(fffSearch),
       ...AstGrepOutline.toolDefinitions(astGrepOutline),
       ...HashlineFile.toolDefinitions(hashlineFile),
-    ].filter((definition) => SubagentRuntime.readOnlyToolNames.some((name) => name === definition.descriptor.name))
+    ].filter((definition) => SubagentRuntime.readOnlyToolNames.some((name) => name === definition.tool.name))
 
     return yield* ToolRegistry.Service.pipe(Effect.provide(ToolRegistry.layerFromDefinitions(definitions)))
   }),

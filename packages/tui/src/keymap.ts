@@ -14,12 +14,19 @@ export interface Context {
 export type Action =
   | { readonly _tag: "Insert"; readonly text: string }
   | { readonly _tag: "Backspace" }
+  | { readonly _tag: "DeleteForward" }
+  | { readonly _tag: "DeleteWordBackward" }
+  | { readonly _tag: "DeleteWordForward" }
+  | { readonly _tag: "DeleteToLineStart" }
+  | { readonly _tag: "DeleteToLineEnd" }
   | { readonly _tag: "Submit" }
   | { readonly _tag: "Newline" }
   | { readonly _tag: "CursorLeft" }
   | { readonly _tag: "CursorRight" }
   | { readonly _tag: "CursorHome" }
   | { readonly _tag: "CursorEnd" }
+  | { readonly _tag: "WordLeft" }
+  | { readonly _tag: "WordRight" }
   | { readonly _tag: "FocusPrev" }
   | { readonly _tag: "FocusNext" }
   | { readonly _tag: "OpenPalette" }
@@ -125,6 +132,17 @@ const resolveInput = (context: Context, key: Keys.Key): Resolution => {
     if (isEnter(key) && !key.shift) return action({ _tag: "Steer" })
     if (key.name === "backspace") return action({ _tag: "DequeueSelected" })
   }
+
+  if (key.ctrl && key.name === "w") return action({ _tag: "DeleteWordBackward" })
+  if (key.ctrl && key.name === "u") return action({ _tag: "DeleteToLineStart" })
+  if (key.ctrl && key.name === "k") return action({ _tag: "DeleteToLineEnd" })
+  if (key.ctrl && key.name === "d") return action({ _tag: "DeleteForward" })
+  if ((key.ctrl || key.alt) && key.name === "backspace") return action({ _tag: "DeleteWordBackward" })
+  if ((key.ctrl || key.alt) && key.name === "delete") return action({ _tag: "DeleteWordForward" })
+  if ((key.ctrl || key.alt) && key.name === "left") return action({ _tag: "WordLeft" })
+  if ((key.ctrl || key.alt) && key.name === "right") return action({ _tag: "WordRight" })
+  if (key.alt && key.name === "b") return action({ _tag: "WordLeft" })
+  if (key.alt && key.name === "f") return action({ _tag: "WordRight" })
 
   if (context.navigating && key.sequence === "e") return action({ _tag: "EditMessage" })
   if (key.name === "backtab") return action({ _tag: "NavNextMessage" })

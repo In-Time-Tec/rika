@@ -68,6 +68,64 @@ export const McpCommand = Schema.Struct({
   server_name: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Cli.Args.McpCommand" })
 
+export const ConfigAction = Schema.Literals(["keymap"]).annotate({
+  identifier: "Rika.Cli.Args.ConfigAction",
+})
+export type ConfigAction = typeof ConfigAction.Type
+
+export interface ConfigCommand extends Schema.Schema.Type<typeof ConfigCommand> {}
+export const ConfigCommand = Schema.Struct({
+  type: Schema.Literal("config"),
+  action: ConfigAction,
+}).annotate({ identifier: "Rika.Cli.Args.ConfigCommand" })
+
+export interface VersionCommand extends Schema.Schema.Type<typeof VersionCommand> {}
+export const VersionCommand = Schema.Struct({
+  type: Schema.Literal("version"),
+}).annotate({ identifier: "Rika.Cli.Args.VersionCommand" })
+
+export interface HelpCommand extends Schema.Schema.Type<typeof HelpCommand> {}
+export const HelpCommand = Schema.Struct({
+  type: Schema.Literal("help"),
+  topic: Schema.optional(
+    Schema.Literals([
+      "clone",
+      "config",
+      "config-edit",
+      "config-keymap",
+      "last",
+      "login",
+      "logout",
+      "mcp",
+      "mcp-add",
+      "mcp-approve",
+      "mcp-doctor",
+      "mcp-list",
+      "mcp-oauth",
+      "mcp-oauth-login",
+      "mcp-oauth-logout",
+      "mcp-oauth-status",
+      "mcp-remove",
+      "threads",
+      "threads-continue",
+      "threads-label",
+      "threads-list",
+      "threads-new",
+      "threads-search",
+      "threads-share",
+      "threads-usage",
+      "threads-visibility",
+      "top",
+      "version",
+    ]),
+  ),
+}).annotate({ identifier: "Rika.Cli.Args.HelpCommand" })
+
+export interface InvalidExecuteAliasCommand extends Schema.Schema.Type<typeof InvalidExecuteAliasCommand> {}
+export const InvalidExecuteAliasCommand = Schema.Struct({
+  type: Schema.Literal("invalid_execute_alias"),
+}).annotate({ identifier: "Rika.Cli.Args.InvalidExecuteAliasCommand" })
+
 export interface ReviewCommand extends Schema.Schema.Type<typeof ReviewCommand> {}
 export const ReviewCommand = Schema.Struct({
   type: Schema.Literal("review"),
@@ -139,6 +197,10 @@ export type Command =
   | ThreadCommand
   | SkillCommand
   | McpCommand
+  | ConfigCommand
+  | VersionCommand
+  | HelpCommand
+  | InvalidExecuteAliasCommand
   | ReviewCommand
   | ExtensionCommand
   | ServerCommand
@@ -151,9 +213,12 @@ export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError",
   usage: Schema.optional(Schema.String),
 }) {}
 
+export const invalidExecuteAliasErrorText = "Error: error: unknown option '-e'\n\u001b[=0u\u001b[<u\u001b[?25h"
+
 export const usage = [
   "Usage:",
   "  rika [options]",
+  "  rika version",
   "  rika interactive [options]",
   "  rika threads list [--include-archived] [--limit <n>]",
   "  rika threads search [--include-archived] [--limit <n>] <query>",
@@ -165,6 +230,7 @@ export const usage = [
   "  rika skills inspect <name>",
   "  rika mcp list",
   "  rika mcp approve <server-name>",
+  "  rika config keymap",
   "  rika review [--staged] [--base <ref>] [--workspace <path>] [--ephemeral] [paths...]",
   "  rika extensions create-skill <name> --description <text> [--instructions <text>] [--thread <id>]",
   "  rika extensions create-plugin <name> --description <text> [--thread <id>]",
@@ -181,8 +247,10 @@ export const usage = [
   "  rika --execute [options] <prompt>",
   "",
   "Options:",
-  "  -e, --execute           Run one non-interactive turn",
-  "  --mode <rush|smart|deep> Select agent mode",
+  "  -V, --version          Print the version number and exit",
+  "  -v                     Alias for --version",
+  "  -x, --execute           Run one non-interactive turn",
+  "  -m, --mode <rush|smart|deep> Select agent mode",
   "  --workspace <path>      Workspace root for the turn",
   "  --thread <id>           Reuse a durable thread id",
   "  --ephemeral            Use in-memory persistence for this run",
@@ -190,6 +258,15 @@ export const usage = [
 ].join("\n")
 
 export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<string>) {
+  const helpCommand = toHelpCommand(argv)
+  if (helpCommand !== undefined) return helpCommand
+
+  const invalidExecuteAliasCommand = toInvalidExecuteAliasCommand(argv)
+  if (invalidExecuteAliasCommand !== undefined) return invalidExecuteAliasCommand
+
+  const versionCommand = toVersionCommand(argv)
+  if (versionCommand !== undefined) return versionCommand
+
   const parsedRef = yield* Ref.make(Option.none<Command>())
   const rejectedRef = yield* Ref.make(Option.none<ArgsError>())
   const captured = makeCapturedConsole()
@@ -216,7 +293,11 @@ export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<
 })
 
 const baseConfig = {
-  mode: Flag.choice("mode", ["rush", "smart", "deep"]).pipe(Flag.optional, Flag.withDescription("Select agent mode")),
+  mode: Flag.choice("mode", ["rush", "smart", "deep"]).pipe(
+    Flag.withAlias("m"),
+    Flag.optional,
+    Flag.withDescription("Select agent mode"),
+  ),
   workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root for the turn")),
   thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Reuse a durable thread id")),
   ephemeral: Flag.boolean("ephemeral").pipe(Flag.withDescription("Use in-memory persistence for this run")),
@@ -231,7 +312,7 @@ const executeConfig = {
 }
 
 const rootConfig = {
-  execute: Flag.boolean("execute").pipe(Flag.withAlias("e"), Flag.withDescription("Run one non-interactive turn")),
+  execute: Flag.boolean("execute").pipe(Flag.withAlias("x"), Flag.withDescription("Run one non-interactive turn")),
   ...baseConfig,
   prompt: Argument.string("prompt").pipe(
     Argument.variadic({ min: 0 }),
@@ -466,9 +547,11 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
     CliCommand.withShortDescription("Start interactive UI"),
   )
 
+  const version = makeVersionCommand(parsedRef)
   const threads = makeThreadsCommand(parsedRef, rejectedRef)
   const skills = makeSkillsCommand(parsedRef, rejectedRef)
   const mcp = makeMcpCommand(parsedRef, rejectedRef)
+  const config = makeConfigCommand(parsedRef, rejectedRef)
   const review = makeReviewCommand(parsedRef)
   const extensions = makeExtensionsCommand(parsedRef, rejectedRef)
   const server = makeServerCommand(parsedRef)
@@ -491,9 +574,28 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
           ),
   ).pipe(
     CliCommand.withDescription("Effect-native coding agent"),
-    CliCommand.withSubcommands([run, interactive, threads, skills, mcp, review, extensions, server, doctor, ide]),
+    CliCommand.withSubcommands([
+      version,
+      run,
+      interactive,
+      threads,
+      skills,
+      mcp,
+      config,
+      review,
+      extensions,
+      server,
+      doctor,
+      ide,
+    ]),
   )
 }
+
+const makeVersionCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
+  CliCommand.make("version", {}, () => Ref.set(parsedRef, Option.some(toVersionCommandValue()))).pipe(
+    CliCommand.withDescription("Print the version number and exit"),
+    CliCommand.withShortDescription("Print version"),
+  )
 
 const makeThreadsCommand = (
   parsedRef: Ref.Ref<Option.Option<Command>>,
@@ -586,6 +688,24 @@ const makeMcpCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef:
     CliCommand.withDescription("Manage configured MCP servers"),
     CliCommand.withShortDescription("Manage MCP"),
     CliCommand.withSubcommands([list, approve]),
+  )
+}
+
+const makeConfigCommand = (
+  parsedRef: Ref.Ref<Option.Option<Command>>,
+  rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
+) => {
+  const keymap = CliCommand.make("keymap", {}, () => Ref.set(parsedRef, Option.some(toConfigKeymapCommand()))).pipe(
+    CliCommand.withDescription("Print effective key bindings"),
+    CliCommand.withShortDescription("Print keymap"),
+  )
+
+  return CliCommand.make("config", {}, () =>
+    Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a config subcommand", exit_code: 2, usage }))),
+  ).pipe(
+    CliCommand.withDescription("Inspect Rika configuration"),
+    CliCommand.withShortDescription("Inspect config"),
+    CliCommand.withSubcommands([keymap]),
   )
 }
 
@@ -762,6 +882,145 @@ const toMcpApproveCommand = (input: McpServerInput): McpCommand => ({
   action: "approve",
   server_name: input.serverName,
 })
+
+const toConfigKeymapCommand = (): ConfigCommand => ({ type: "config", action: "keymap" })
+
+const toVersionCommandValue = (): VersionCommand => ({ type: "version" })
+
+const toVersionCommand = (argv: ReadonlyArray<string>): VersionCommand | undefined =>
+  argv.length === 1 && (argv[0] === "--version" || argv[0] === "-v" || argv[0] === "-V" || argv[0] === "version")
+    ? toVersionCommandValue()
+    : undefined
+
+const toHelpCommand = (argv: ReadonlyArray<string>): HelpCommand | undefined =>
+  argv.length === 1 && (argv[0] === "--help" || argv[0] === "-h")
+    ? { type: "help" }
+    : argv.length === 2 && argv[0] === "top" && (argv[1] === "--help" || argv[1] === "-h")
+      ? { type: "help", topic: "top" }
+      : argv.length === 2 && argv[0] === "last" && (argv[1] === "--help" || argv[1] === "-h")
+        ? { type: "help", topic: "last" }
+        : argv.length === 2 && argv[0] === "threads" && (argv[1] === "--help" || argv[1] === "-h")
+          ? { type: "help", topic: "threads" }
+          : argv.length === 3 &&
+              argv[0] === "threads" &&
+              argv[1] === "new" &&
+              (argv[2] === "--help" || argv[2] === "-h")
+            ? { type: "help", topic: "threads-new" }
+            : argv.length === 3 &&
+                argv[0] === "threads" &&
+                argv[1] === "continue" &&
+                (argv[2] === "--help" || argv[2] === "-h")
+              ? { type: "help", topic: "threads-continue" }
+              : argv.length === 3 &&
+                  argv[0] === "threads" &&
+                  argv[1] === "list" &&
+                  (argv[2] === "--help" || argv[2] === "-h")
+                ? { type: "help", topic: "threads-list" }
+                : argv.length === 3 &&
+                    argv[0] === "threads" &&
+                    argv[1] === "usage" &&
+                    (argv[2] === "--help" || argv[2] === "-h")
+                  ? { type: "help", topic: "threads-usage" }
+                  : argv.length === 3 &&
+                      argv[0] === "threads" &&
+                      argv[1] === "visibility" &&
+                      (argv[2] === "--help" || argv[2] === "-h")
+                    ? { type: "help", topic: "threads-visibility" }
+                    : argv.length === 3 &&
+                        argv[0] === "threads" &&
+                        argv[1] === "label" &&
+                        (argv[2] === "--help" || argv[2] === "-h")
+                      ? { type: "help", topic: "threads-label" }
+                      : argv.length === 3 &&
+                          argv[0] === "threads" &&
+                          argv[1] === "share" &&
+                          (argv[2] === "--help" || argv[2] === "-h")
+                        ? { type: "help", topic: "threads-share" }
+                        : argv.length === 3 &&
+                            argv[0] === "threads" &&
+                            argv[1] === "search" &&
+                            (argv[2] === "--help" || argv[2] === "-h")
+                          ? { type: "help", topic: "threads-search" }
+                          : argv.length === 2 && argv[0] === "clone" && (argv[1] === "--help" || argv[1] === "-h")
+                            ? { type: "help", topic: "clone" }
+                            : argv.length === 2 && argv[0] === "login" && (argv[1] === "--help" || argv[1] === "-h")
+                              ? { type: "help", topic: "login" }
+                              : argv.length === 2 && argv[0] === "logout" && (argv[1] === "--help" || argv[1] === "-h")
+                                ? { type: "help", topic: "logout" }
+                                : argv.length === 3 &&
+                                    argv[0] === "config" &&
+                                    argv[1] === "edit" &&
+                                    (argv[2] === "--help" || argv[2] === "-h")
+                                  ? { type: "help", topic: "config-edit" }
+                                  : argv.length === 3 &&
+                                      argv[0] === "config" &&
+                                      argv[1] === "keymap" &&
+                                      (argv[2] === "--help" || argv[2] === "-h")
+                                    ? { type: "help", topic: "config-keymap" }
+                                    : argv.length === 2 &&
+                                        argv[0] === "config" &&
+                                        (argv[1] === "--help" || argv[1] === "-h")
+                                      ? { type: "help", topic: "config" }
+                                      : argv.length === 3 &&
+                                          argv[0] === "mcp" &&
+                                          argv[1] === "add" &&
+                                          (argv[2] === "--help" || argv[2] === "-h")
+                                        ? { type: "help", topic: "mcp-add" }
+                                        : argv.length === 3 &&
+                                            argv[0] === "mcp" &&
+                                            argv[1] === "approve" &&
+                                            (argv[2] === "--help" || argv[2] === "-h")
+                                          ? { type: "help", topic: "mcp-approve" }
+                                          : argv.length === 3 &&
+                                              argv[0] === "mcp" &&
+                                              argv[1] === "doctor" &&
+                                              (argv[2] === "--help" || argv[2] === "-h")
+                                            ? { type: "help", topic: "mcp-doctor" }
+                                            : argv.length === 3 &&
+                                                argv[0] === "mcp" &&
+                                                argv[1] === "list" &&
+                                                (argv[2] === "--help" || argv[2] === "-h")
+                                              ? { type: "help", topic: "mcp-list" }
+                                              : argv.length === 4 &&
+                                                  argv[0] === "mcp" &&
+                                                  argv[1] === "oauth" &&
+                                                  argv[2] === "login" &&
+                                                  (argv[3] === "--help" || argv[3] === "-h")
+                                                ? { type: "help", topic: "mcp-oauth-login" }
+                                                : argv.length === 4 &&
+                                                    argv[0] === "mcp" &&
+                                                    argv[1] === "oauth" &&
+                                                    argv[2] === "logout" &&
+                                                    (argv[3] === "--help" || argv[3] === "-h")
+                                                  ? { type: "help", topic: "mcp-oauth-logout" }
+                                                  : argv.length === 4 &&
+                                                      argv[0] === "mcp" &&
+                                                      argv[1] === "oauth" &&
+                                                      argv[2] === "status" &&
+                                                      (argv[3] === "--help" || argv[3] === "-h")
+                                                    ? { type: "help", topic: "mcp-oauth-status" }
+                                                    : argv.length === 3 &&
+                                                        argv[0] === "mcp" &&
+                                                        argv[1] === "oauth" &&
+                                                        (argv[2] === "--help" || argv[2] === "-h")
+                                                      ? { type: "help", topic: "mcp-oauth" }
+                                                      : argv.length === 3 &&
+                                                          argv[0] === "mcp" &&
+                                                          argv[1] === "remove" &&
+                                                          (argv[2] === "--help" || argv[2] === "-h")
+                                                        ? { type: "help", topic: "mcp-remove" }
+                                                        : argv.length === 2 &&
+                                                            argv[0] === "mcp" &&
+                                                            (argv[1] === "--help" || argv[1] === "-h")
+                                                          ? { type: "help", topic: "mcp" }
+                                                          : argv.length === 2 &&
+                                                              argv[0] === "version" &&
+                                                              (argv[1] === "--help" || argv[1] === "-h")
+                                                            ? { type: "help", topic: "version" }
+                                                            : undefined
+
+const toInvalidExecuteAliasCommand = (argv: ReadonlyArray<string>): InvalidExecuteAliasCommand | undefined =>
+  argv.length === 1 && argv[0] === "-e" ? { type: "invalid_execute_alias" } : undefined
 
 const toReviewCommand = (input: ReviewInput): ReviewCommand => {
   const workspaceRoot = Option.getOrUndefined(input.workspace)

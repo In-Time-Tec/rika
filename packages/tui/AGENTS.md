@@ -39,7 +39,7 @@ One pure model, one native adapter, one loop:
 
 ## Backend coupling
 
-Rika uses a TEXT tool-call protocol: the model emits `{"tool_call":{…}}` as assistant content, parsed in `@rika/agent`. The agent loop iterates tool calls (up to 25) until a non-tool answer. The TUI hides the intermediate tool-call JSON and shows the resulting tool cards.
+Rika uses Effect AI native tool calls. Provider tool parameter deltas arrive as typed tool events, not assistant text. The TUI renders assistant text only from `model.stream.chunk` and renders tools only from `tool.call.*` events; any JSON tool-call scrubber is a legacy migration guard, not correctness logic.
 
 ## Testing and verification
 

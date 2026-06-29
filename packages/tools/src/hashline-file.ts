@@ -3,9 +3,11 @@ import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promis
 import { dirname, relative, resolve } from "node:path"
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
 import { Config } from "@rika/core"
-import { Common, Tool } from "@rika/schema"
+import { Common } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import { parseDiffFromFile, type FileContents } from "@pierre/diffs"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 
 const defaultMaxReadBytes = 100_000
 const hashLength = 4
@@ -17,17 +19,17 @@ const diffLineNumberPrefixPattern = /^[+-]\d+\s/
 export interface ReadInput extends Schema.Schema.Type<typeof ReadInput> {}
 export const ReadInput = Schema.Struct({
   path: Schema.String,
-  start_line: Schema.optional(Schema.Int),
-  end_line: Schema.optional(Schema.Int),
-  max_output_bytes: Schema.optional(Schema.Int),
+  start_line: Schema.optionalKey(Schema.Int),
+  end_line: Schema.optionalKey(Schema.Int),
+  max_output_bytes: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.HashlineFile.ReadInput" })
 
 export interface WriteInput extends Schema.Schema.Type<typeof WriteInput> {}
 export const WriteInput = Schema.Struct({
   path: Schema.String,
   content: Schema.String,
-  overwrite: Schema.optional(Schema.Boolean),
-  max_anchor_bytes: Schema.optional(Schema.Int),
+  overwrite: Schema.optionalKey(Schema.Boolean),
+  max_anchor_bytes: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.HashlineFile.WriteInput" })
 
 export const EditOperationType = Schema.Literals([
@@ -43,18 +45,18 @@ export type EditOperationType = typeof EditOperationType.Type
 export interface EditOperation extends Schema.Schema.Type<typeof EditOperation> {}
 export const EditOperation = Schema.Struct({
   type: EditOperationType,
-  anchor: Schema.optional(Schema.String),
-  end_anchor: Schema.optional(Schema.String),
-  new_text: Schema.optional(Schema.String),
-  old_text: Schema.optional(Schema.String),
-  exact: Schema.optional(Schema.Boolean),
+  anchor: Schema.optionalKey(Schema.String),
+  end_anchor: Schema.optionalKey(Schema.String),
+  new_text: Schema.optionalKey(Schema.String),
+  old_text: Schema.optionalKey(Schema.String),
+  exact: Schema.optionalKey(Schema.Boolean),
 }).annotate({ identifier: "Rika.Tools.HashlineFile.EditOperation" })
 
 export interface EditInput extends Schema.Schema.Type<typeof EditInput> {}
 export const EditInput = Schema.Struct({
   path: Schema.String,
   edits: Schema.Array(EditOperation),
-  max_anchor_bytes: Schema.optional(Schema.Int),
+  max_anchor_bytes: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.HashlineFile.EditInput" })
 
 export class HashlineFileError extends Schema.TaggedErrorClass<HashlineFileError>()("HashlineFileError", {
@@ -197,34 +199,40 @@ export const edit = Effect.fn("HashlineFile.edit.call")(function* (input: EditIn
 
 export const toolDefinitions = (service: Interface): ReadonlyArray<ToolRegistry.Definition> => [
   {
-    descriptor: {
-      name: "read",
+    tool: Tool.make("read", {
       description: "Read a text file with LINE:HASH|content anchors for safe follow-up edits.",
-      input_schema: readInputSchema,
-    },
-    execute: Effect.fn("HashlineFile.tool.read")(function* (call: Tool.Call) {
+      parameters: ReadInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("HashlineFile.tool.read")(function* (call: Call) {
       const input = yield* decodeReadInput(call)
       return yield* service.read(input).pipe(Effect.mapError(toRegistryError("read")))
     }),
   },
   {
-    descriptor: {
-      name: "write",
+    tool: Tool.make("write", {
       description: "Atomically write a text file and return fresh hashline anchors plus Pierre diff metadata.",
-      input_schema: writeInputSchema,
-    },
-    execute: Effect.fn("HashlineFile.tool.write")(function* (call: Tool.Call) {
+      parameters: WriteInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("HashlineFile.tool.write")(function* (call: Call) {
       const input = yield* decodeWriteInput(call)
       return yield* service.write(input).pipe(Effect.mapError(toRegistryError("write")))
     }),
   },
   {
-    descriptor: {
-      name: "edit",
+    tool: Tool.make("edit", {
       description: "Apply strict hashline edits. Stale anchors fail; exact replacement requires exact: true.",
-      input_schema: editInputSchema,
-    },
-    execute: Effect.fn("HashlineFile.tool.edit")(function* (call: Tool.Call) {
+      parameters: EditInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("HashlineFile.tool.edit")(function* (call: Call) {
       const input = yield* decodeEditInput(call)
       return yield* service.edit(input).pipe(Effect.mapError(toRegistryError("edit")))
     }),
@@ -269,52 +277,6 @@ interface LineEdit {
   readonly end: number
   readonly newLines: ReadonlyArray<string>
   readonly order: number
-}
-
-const readInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    path: { type: "string" },
-    start_line: { type: "integer" },
-    end_line: { type: "integer" },
-    max_output_bytes: { type: "integer" },
-  },
-  required: ["path"],
-}
-
-const writeInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    path: { type: "string" },
-    content: { type: "string" },
-    overwrite: { type: "boolean" },
-    max_anchor_bytes: { type: "integer" },
-  },
-  required: ["path", "content"],
-}
-
-const editInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    path: { type: "string" },
-    edits: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          type: { type: "string" },
-          anchor: { type: "string" },
-          end_anchor: { type: "string" },
-          new_text: { type: "string" },
-          old_text: { type: "string" },
-          exact: { type: "boolean" },
-        },
-        required: ["type"],
-      },
-    },
-    max_anchor_bytes: { type: "integer" },
-  },
-  required: ["path", "edits"],
 }
 
 const resolveWorkspacePath = (workspaceRoot: string, inputPath: string) =>
@@ -781,30 +743,33 @@ const jsonValue = (value: unknown) =>
     })
   })
 
-const aliasField = (call: Tool.Call, from: string, to: string): Tool.Call => {
-  const input = call.input as unknown
+const aliasField = (call: Call, from: string, to: string): Call => {
+  const input = call.input
   if (typeof input !== "object" || input === null || Array.isArray(input)) return call
-  const record = input as Record<string, unknown>
-  if (record[from] === undefined || record[to] !== undefined) return call
-  return { ...call, input: { ...record, [to]: record[from] } as typeof call.input }
+  const entries = Object.entries(input)
+  const source = entries.find(([key]) => key === from)
+  if (source === undefined || entries.some(([key]) => key === to)) return call
+  const decoded = Schema.decodeUnknownOption(Common.JsonValue)(Object.fromEntries([...entries, [to, source[1]]]))
+  if (Option.isNone(decoded)) return call
+  return { ...call, input: decoded.value }
 }
 
-const withReadAliases = (call: Tool.Call): Tool.Call =>
+const withReadAliases = (call: Call): Call =>
   aliasField(aliasField(aliasField(call, "file", "path"), "line_start", "start_line"), "line_end", "end_line")
 
-const decodeReadInput = (call: Tool.Call) => {
+const decodeReadInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(ReadInput)(withReadAliases(call).input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return invalidToolInput(call.name)
 }
 
-const decodeWriteInput = (call: Tool.Call) => {
+const decodeWriteInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(WriteInput)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return invalidToolInput(call.name)
 }
 
-const decodeEditInput = (call: Tool.Call) => {
+const decodeEditInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(EditInput)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return invalidToolInput(call.name)

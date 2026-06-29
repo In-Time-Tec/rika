@@ -1,0 +1,62 @@
+Usage: amp mcp add [options] <name> [args...]
+
+Add an MCP server to amp.mcpServers in the Amp CLI settings file.
+
+By default, this modifies global settings (~/.config/amp/settings.json). Use --workspace to target workspace settings instead.
+
+Usage:
+  amp mcp add <name> -- <command> [args...]                   (local MCP server, started with command)
+  amp mcp add <name> --env KEY=VAL -- <command> [args...]     (local MCP server, with env vars)
+  amp mcp add <name> <url>                                    (remote MCP server with auto-detected transport)
+  amp mcp add <name> --header KEY=VAL <url>                   (remote MCP server with HTTP headers)
+  amp mcp add <name> --workspace -- <command> [args...]       (add to workspace settings)
+
+Examples:
+  amp mcp add context7 -- npx -y @upstash/context7-mcp
+  amp mcp add postgres --env PGUSER=orb -- npx -y @modelcontextprotocol/server-postgres postgresql://localhost/orbing
+  amp mcp add sourcegraph --header "Authorization=token <sg-instance-token>" https://sourcegraph.example.com/.api/mcp/v1
+  amp mcp add hugging-face https://huggingface.co/mcp
+  amp mcp add monday --header "Authorization=Bearer <token>" https://mcp.monday.com/sse
+  amp mcp add project-specific --workspace -- npx -y @some/server
+
+Options:
+
+  --env <kv>
+      Environment variables as KEY=VALUE pairs (repeatable)
+  --header <kv>
+      HTTP headers as KEY=VALUE pairs for URL-based MCP servers (repeatable)
+  --workspace
+      Target workspace settings instead of global settings
+
+Global options:
+
+  --visibility <visibility>
+      Set thread visibility (private, unlisted, workspace, group)
+  -V, --version
+      Print the version number and exit
+  -v
+      Alias for --version
+  --settings-file <value>
+      Custom settings file path (overrides the default location /Users/dallen.pyrah/.config/amp/settings.json)
+  --log-level <value>
+      Set log level (parent, children, category, sinks, parentSinks, filters, lowestLevel, contextLocalStorage)
+  --log-file <value>
+      Set log file location (overrides the default location /Users/dallen.pyrah/.cache/amp/logs/cli.log)
+  --mcp-config <value>
+      JSON configuration or file path for MCP servers to merge with existing settings
+  -m, --mode <value>
+      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+  --effort <value>
+      Set reasoning effort for the new thread, when supported by the selected mode
+  --stream-json
+      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+  --stream-json-thinking
+      Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
+  --stream-json-input
+      Read JSON Lines user messages from stdin. Requires both --execute and --stream-json.
+  --no-archive-after-execute
+      When used with --execute on a new thread or with the review command, leave the thread unarchived after the command
+      finishes.
+  -l, --label <label>
+      Add a label to the thread created or continued by this command. Repeat the flag for multiple labels.
+

@@ -1,0 +1,91 @@
+{
+  "row": 61,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T12:05:22Z",
+  "surface": "CLI mcp oauth status help",
+  "state": "MCP oauth status --help and -h flags",
+  "commands": {
+    "amp_mcp_oauth_status_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp oauth status --help",
+    "amp_mcp_oauth_status_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp oauth status -h",
+    "rika_mcp_oauth_status_help_before": "bun packages/cli/src/main.ts mcp oauth status --help",
+    "rika_mcp_oauth_status_h_before": "bun packages/cli/src/main.ts mcp oauth status -h",
+    "rika_mcp_oauth_status_help_after": "bun packages/cli/src/main.ts mcp oauth status --help",
+    "rika_mcp_oauth_status_h_after": "bun packages/cli/src/main.ts mcp oauth status -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-oauth-status-help-61.txt docs/parity/metadata/rika-mcp-oauth-status-help-61.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-oauth-status-help-short-61.txt docs/parity/metadata/rika-mcp-oauth-status-help-short-61.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-oauth-status-help-61-stdout.txt docs/parity/metadata/rika-mcp-oauth-status-help-61-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-oauth-status-help-61-stderr.txt docs/parity/metadata/rika-mcp-oauth-status-help-61-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-mcp-oauth-status-help-short-61-stdout.txt docs/parity/metadata/rika-mcp-oauth-status-help-short-61-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-mcp-oauth-status-help-short-61-stderr.txt docs/parity/metadata/rika-mcp-oauth-status-help-short-61-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_oauth_status_help": 0,
+    "amp_mcp_oauth_status_h": 0,
+    "rika_mcp_oauth_status_help_before": 0,
+    "rika_mcp_oauth_status_h_before": 0,
+    "rika_mcp_oauth_status_help_after": 0,
+    "rika_mcp_oauth_status_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_oauth_status_help": 189,
+    "amp_mcp_oauth_status_h": 189,
+    "rika_mcp_oauth_status_help_before": 657,
+    "rika_mcp_oauth_status_h_before": 657,
+    "rika_mcp_oauth_status_help_after": 189,
+    "rika_mcp_oauth_status_h_after": 189,
+    "stdout": 189,
+    "stderr": 0,
+    "short_stdout": 189,
+    "short_stderr": 0
+  },
+  "sha256": {
+    "amp_mcp_oauth_status_help": "21e8c3fc5b9515a270a24b2a038c6666830c5a3b700a52c3b5a8a08d49acd28b",
+    "amp_mcp_oauth_status_h": "21e8c3fc5b9515a270a24b2a038c6666830c5a3b700a52c3b5a8a08d49acd28b",
+    "rika_mcp_oauth_status_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_oauth_status_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_oauth_status_help_after": "21e8c3fc5b9515a270a24b2a038c6666830c5a3b700a52c3b5a8a08d49acd28b",
+    "rika_mcp_oauth_status_h_after": "21e8c3fc5b9515a270a24b2a038c6666830c5a3b700a52c3b5a8a08d49acd28b"
+  },
+  "artifacts": {
+    "amp_mcp_oauth_status_help": "docs/parity/metadata/amp-mcp-oauth-status-help-61.txt",
+    "amp_mcp_oauth_status_h": "docs/parity/metadata/amp-mcp-oauth-status-help-short-61.txt",
+    "amp_mcp_oauth_status_stdout": "docs/parity/metadata/amp-mcp-oauth-status-help-61-stdout.txt",
+    "amp_mcp_oauth_status_stderr": "docs/parity/metadata/amp-mcp-oauth-status-help-61-stderr.txt",
+    "amp_mcp_oauth_status_h_stdout": "docs/parity/metadata/amp-mcp-oauth-status-help-short-61-stdout.txt",
+    "amp_mcp_oauth_status_h_stderr": "docs/parity/metadata/amp-mcp-oauth-status-help-short-61-stderr.txt",
+    "rika_mcp_oauth_status_help_before": "docs/parity/metadata/rika-mcp-oauth-status-help-61-before.txt",
+    "rika_mcp_oauth_status_h_before": "docs/parity/metadata/rika-mcp-oauth-status-help-short-61-before.txt",
+    "rika_mcp_oauth_status_help_after": "docs/parity/metadata/rika-mcp-oauth-status-help-61.txt",
+    "rika_mcp_oauth_status_h_after": "docs/parity/metadata/rika-mcp-oauth-status-help-short-61.txt",
+    "rika_mcp_oauth_status_stdout": "docs/parity/metadata/rika-mcp-oauth-status-help-61-stdout.txt",
+    "rika_mcp_oauth_status_stderr": "docs/parity/metadata/rika-mcp-oauth-status-help-61-stderr.txt",
+    "rika_mcp_oauth_status_h_stdout": "docs/parity/metadata/rika-mcp-oauth-status-help-short-61-stdout.txt",
+    "rika_mcp_oauth_status_h_stderr": "docs/parity/metadata/rika-mcp-oauth-status-help-short-61-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 189,
+    "stderr_bytes": 0,
+    "stdout_sha256": "21e8c3fc5b9515a270a24b2a038c6666830c5a3b700a52c3b5a8a08d49acd28b",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 189,
+    "short_stderr_bytes": 0,
+    "short_stdout_sha256": "21e8c3fc5b9515a270a24b2a038c6666830c5a3b700a52c3b5a8a08d49acd28b",
+    "short_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Bytewise",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp oauth status --help and mcp oauth status -h combined bytes, exit code, and stdout/stderr split only. MCP OAuth status behavior, other OAuth help pages, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

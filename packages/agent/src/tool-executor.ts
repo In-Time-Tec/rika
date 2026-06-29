@@ -1,6 +1,8 @@
 import { Config } from "@rika/core"
-import { Common, ErrorEnvelope, Tool } from "@rika/schema"
+import { Common, ErrorEnvelope } from "@rika/schema"
+import type { Call, Result } from "@rika/schema/tool"
 import { Context, Effect, Layer, Schema } from "effect"
+import type { Tool } from "effect/unstable/ai"
 import * as PermissionPolicy from "./permission-policy"
 import * as ToolRegistry from "./tool-registry"
 
@@ -16,8 +18,9 @@ export class ToolExecutorError extends Schema.TaggedErrorClass<ToolExecutorError
 }) {}
 
 export interface Interface {
+  readonly tools: Effect.Effect<ReadonlyArray<Tool.Any>>
   readonly describe: Effect.Effect<ReadonlyArray<Descriptor>>
-  readonly execute: (call: Tool.Call) => Effect.Effect<Tool.Result>
+  readonly execute: (call: Call) => Effect.Effect<Result>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/agent/ToolExecutor") {}
@@ -25,8 +28,9 @@ export class Service extends Context.Service<Service, Interface>()("@rika/agent/
 export type FakeHandler = ToolRegistry.FakeHandler
 
 const makeExecutor = (registry: ToolRegistry.Interface, policy: PermissionPolicy.Interface): Interface => ({
+  tools: registry.tools,
   describe: registry.describe,
-  execute: Effect.fn("ToolExecutor.execute")(function* (call: Tool.Call) {
+  execute: Effect.fn("ToolExecutor.execute")(function* (call: Call) {
     const mode = yield* policy.mode
     const decision = yield* policy.decide(call).pipe(
       Effect.match({
@@ -90,18 +94,15 @@ export const emptyLayer = layer.pipe(
   Layer.provideMerge(PermissionPolicy.allowLayer),
 )
 
-export const fakeLayer = (handlers: Readonly<Record<string, FakeHandler>>, descriptors?: ReadonlyArray<Descriptor>) =>
+export const fakeLayer = (handlers: Readonly<Record<string, FakeHandler>>, tools?: ReadonlyArray<Tool.Any>) =>
   layer.pipe(
-    Layer.provideMerge(ToolRegistry.fakeLayer(handlers, descriptors)),
+    Layer.provideMerge(ToolRegistry.fakeLayer(handlers, tools)),
     Layer.provideMerge(PermissionPolicy.allowLayer),
   )
 
-export const fakeReadOnlyLayer = (
-  handlers: Readonly<Record<string, FakeHandler>>,
-  descriptors?: ReadonlyArray<Descriptor>,
-) =>
+export const fakeReadOnlyLayer = (handlers: Readonly<Record<string, FakeHandler>>, tools?: ReadonlyArray<Tool.Any>) =>
   readOnlyLayer.pipe(
-    Layer.provideMerge(ToolRegistry.fakeLayer(handlers, descriptors)),
+    Layer.provideMerge(ToolRegistry.fakeLayer(handlers, tools)),
     Layer.provideMerge(PermissionPolicy.allowLayer),
   )
 
@@ -115,12 +116,17 @@ export const describe = Effect.fn("ToolExecutor.describe.call")(function* () {
   return yield* executor.describe
 })
 
-export const execute = Effect.fn("ToolExecutor.execute.call")(function* (call: Tool.Call) {
+export const tools = Effect.fn("ToolExecutor.tools.call")(function* () {
+  const executor = yield* Service
+  return yield* executor.tools
+})
+
+export const execute = Effect.fn("ToolExecutor.execute.call")(function* (call: Call) {
   const executor = yield* Service
   return yield* executor.execute(call)
 })
 
-const executeRegistryCall = (registry: ToolRegistry.Interface, call: Tool.Call) =>
+const executeRegistryCall = (registry: ToolRegistry.Interface, call: Call) =>
   registry.execute(call).pipe(
     Effect.match({
       onFailure: (error) => errorResult(call, fromRegistryError(error)),
@@ -128,13 +134,13 @@ const executeRegistryCall = (registry: ToolRegistry.Interface, call: Tool.Call) 
     }),
   )
 
-const modifiedCall = (call: Tool.Call, input: Common.JsonValue): Tool.Call => ({
+const modifiedCall = (call: Call, input: Common.JsonValue): Call => ({
   ...call,
   input,
   metadata: { ...call.metadata, permission_action: "modify" },
 })
 
-const normalizeSynthesizedResult = (call: Tool.Call, result: Tool.Result): Tool.Result => ({
+const normalizeSynthesizedResult = (call: Call, result: Result): Result => ({
   ...result,
   id: call.id,
   name: call.name,
@@ -148,7 +154,7 @@ const permissionMetadata = (
   permission_action: action,
 })
 
-const withMetadata = (result: Tool.Result, metadata: Common.Metadata): Tool.Result => ({
+const withMetadata = (result: Result, metadata: Common.Metadata): Result => ({
   ...result,
   metadata: { ...result.metadata, ...metadata },
 })
@@ -162,14 +168,14 @@ const fromRegistryError = (error: ToolRegistry.ToolRegistryError) =>
     ...(error.details === undefined ? {} : { details: error.details }),
   })
 
-export const successResult = (call: Tool.Call, output: Common.JsonValue): Tool.Result => ({
+export const successResult = (call: Call, output: Common.JsonValue): Result => ({
   id: call.id,
   name: call.name,
   status: "success",
   output,
 })
 
-export const errorResult = (call: Tool.Call, error: ToolExecutorError): Tool.Result => ({
+export const errorResult = (call: Call, error: ToolExecutorError): Result => ({
   id: call.id,
   name: call.name,
   status: "error",

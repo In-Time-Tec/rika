@@ -29,9 +29,11 @@ import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import { Adapter, RemoteSession, Session, Ticker } from "@rika/tui"
 import { Effect, Layer } from "effect"
 import * as Args from "./args"
+import * as CliConfig from "./config"
 import * as Doctor from "./doctor"
 import * as Execute from "./execute"
 import * as Extensions from "./extensions"
+import * as Help from "./help"
 import * as Ide from "./ide"
 import * as LocalBackend from "./local-backend"
 import * as Mcp from "./mcp"
@@ -41,6 +43,7 @@ import * as RuntimeEnv from "./runtime-env"
 import * as Server from "./server"
 import * as Skills from "./skills"
 import * as Threads from "./threads"
+import * as Version from "./version"
 
 export interface ProcessInput {
   readonly argv: ReadonlyArray<string>
@@ -60,35 +63,51 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
             onFailure: (error: Args.ArgsError) =>
               Output.stderr(Execute.formatError(error)).pipe(Effect.as(error.exit_code)),
             onSuccess: (command) =>
-              (command.type === "execute"
-                ? Execute.executeCommand(command).pipe(Effect.provide(liveLayer(command, env, input.cwd)))
-                : command.type === "interactive"
-                  ? command.ephemeral
-                    ? Session.run(command).pipe(Effect.provide(interactiveLiveLayer(command, env, input.cwd)))
-                    : RemoteSession.run(command).pipe(
-                        Effect.provide(interactiveRemoteLiveLayer(command, env, input.cwd)),
-                      )
-                  : command.type === "threads"
-                    ? Threads.executeCommand(command).pipe(Effect.provide(threadsLiveLayer(command, env, input.cwd)))
-                    : command.type === "skills"
-                      ? Skills.executeCommand(command).pipe(Effect.provide(skillsLiveLayer(command, env, input.cwd)))
-                      : command.type === "mcp"
-                        ? Mcp.executeCommand(command).pipe(Effect.provide(mcpLiveLayer(command, env, input.cwd)))
-                        : command.type === "review"
-                          ? Review.executeCommand(command).pipe(
-                              Effect.provide(reviewLiveLayer(command, env, input.cwd)),
+              (command.type === "invalid_execute_alias"
+                ? Output.stderrRaw(Args.invalidExecuteAliasErrorText).pipe(Effect.as(1))
+                : command.type === "help"
+                  ? Help.executeCommand(command)
+                  : command.type === "version"
+                    ? Version.executeCommand(command)
+                    : command.type === "execute"
+                      ? Execute.executeCommand(command).pipe(Effect.provide(liveLayer(command, env, input.cwd)))
+                      : command.type === "interactive"
+                        ? command.ephemeral
+                          ? Session.run(command).pipe(Effect.provide(interactiveLiveLayer(command, env, input.cwd)))
+                          : RemoteSession.run(command).pipe(
+                              Effect.provide(interactiveRemoteLiveLayer(command, env, input.cwd)),
                             )
-                          : command.type === "extensions"
-                            ? Extensions.executeCommand(command).pipe(
-                                Effect.provide(extensionsLiveLayer(command, env, input.cwd)),
+                        : command.type === "threads"
+                          ? Threads.executeCommand(command).pipe(
+                              Effect.provide(threadsLiveLayer(command, env, input.cwd)),
+                            )
+                          : command.type === "skills"
+                            ? Skills.executeCommand(command).pipe(
+                                Effect.provide(skillsLiveLayer(command, env, input.cwd)),
                               )
-                            : command.type === "ide"
-                              ? Ide.executeCommand(command).pipe(Effect.provide(ideLiveLayer(command, env, input.cwd)))
-                              : command.type === "doctor"
-                                ? Doctor.executeCommand(command).pipe(Effect.provide(doctorLiveLayer(env, input.cwd)))
-                                : Server.executeCommand(command).pipe(
-                                    Effect.provide(serverLiveLayer(command, env, input.cwd)),
-                                  )
+                            : command.type === "mcp"
+                              ? Mcp.executeCommand(command).pipe(Effect.provide(mcpLiveLayer(command, env, input.cwd)))
+                              : command.type === "config"
+                                ? CliConfig.executeCommand(command)
+                                : command.type === "review"
+                                  ? Review.executeCommand(command).pipe(
+                                      Effect.provide(reviewLiveLayer(command, env, input.cwd)),
+                                    )
+                                  : command.type === "extensions"
+                                    ? Extensions.executeCommand(command).pipe(
+                                        Effect.provide(extensionsLiveLayer(command, env, input.cwd)),
+                                      )
+                                    : command.type === "ide"
+                                      ? Ide.executeCommand(command).pipe(
+                                          Effect.provide(ideLiveLayer(command, env, input.cwd)),
+                                        )
+                                      : command.type === "doctor"
+                                        ? Doctor.executeCommand(command).pipe(
+                                            Effect.provide(doctorLiveLayer(env, input.cwd)),
+                                          )
+                                        : Server.executeCommand(command).pipe(
+                                            Effect.provide(serverLiveLayer(command, env, input.cwd)),
+                                          )
               ).pipe(
                 Effect.matchEffect({
                   onFailure: (error: RuntimeError) => Output.stderr(formatRuntimeError(error)).pipe(Effect.as(1)),

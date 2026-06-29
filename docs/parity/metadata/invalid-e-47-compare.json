@@ -1,0 +1,36 @@
+{
+  "row": 47,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T09:25:09Z",
+  "surface": "CLI execute mode",
+  "state": "Invalid -e shorthand error",
+  "commands": {
+    "amp": "AMP_SKIP_UPDATE_CHECK=1 amp -e",
+    "rika_before": "bun packages/cli/src/main.ts -e",
+    "rika_after": "bun packages/cli/src/main.ts -e",
+    "compare": "cmp -s docs/parity/metadata/amp-invalid-e-47.txt docs/parity/metadata/rika-invalid-e-47.txt"
+  },
+  "exit_codes": {
+    "amp": 1,
+    "rika_before": 2,
+    "rika_after": 1,
+    "compare": 0
+  },
+  "bytes": {
+    "amp": 49,
+    "rika_before": 1480,
+    "rika_after": 49
+  },
+  "sha256": {
+    "amp": "9f73da379050a992a2fa62192b9a9d01607ec5045edb2cef02454856811b6115",
+    "rika_before": "8c16b56b5324322e078d1333a0500ffe59f4e26f9448c70957886b5dd22e8b05",
+    "rika_after": "9f73da379050a992a2fa62192b9a9d01607ec5045edb2cef02454856811b6115"
+  },
+  "artifacts": {
+    "amp": "docs/parity/metadata/amp-invalid-e-47.txt",
+    "rika_before": "docs/parity/metadata/rika-invalid-e-47-before.txt",
+    "rika_after": "docs/parity/metadata/rika-invalid-e-47.txt"
+  },
+  "result": "match",
+  "scope": "Proves exact invalid -e combined stdout/stderr bytes and exit code only. Broader invalid flag handling and generated help formatting remain separate parity work."
+}

@@ -1,0 +1,132 @@
+{
+  "row": 42,
+  "generated_at": "2026-06-29T08:31:12.213Z",
+  "surface": "Keybindings",
+  "state": "Empty startup, Ctrl+S once from deep",
+  "method": {
+    "launcher": "Ghostty.app via open -na and CoreGraphics window-id discovery",
+    "count": 4,
+    "interval_ms": 500,
+    "settle_ms": 3000,
+    "focus_ms": 500,
+    "trigger": "ctrl+s",
+    "trigger_settle_ms": 700,
+    "require_same_dimensions": true,
+    "workspace": "/Users/dallen.pyrah/projects/rika",
+    "out_dir": "docs/parity/screenshots"
+  },
+  "launches": [
+    {
+      "label": "amp",
+      "run_id": "rika-parity-mode-switch-ctrl-s-42-1782721843934-amp",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-mode-switch-ctrl-s-42-1782721843934-amp' AMP_SKIP_UPDATE_CHECK=1 amp",
+      "ghostty_pid": 13650,
+      "window_id": 35192,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    },
+    {
+      "label": "rika",
+      "run_id": "rika-parity-mode-switch-ctrl-s-42-1782721843934-rika",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-mode-switch-ctrl-s-42-1782721843934-rika' RIKA_DATA_DIR='/tmp/rika-parity-data-source-42' bun packages/cli/src/main.ts interactive --ephemeral --mode deep",
+      "ghostty_pid": 13730,
+      "window_id": 35200,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    }
+  ],
+  "geometry": {
+    "all_pairs_same_dimensions": true,
+    "amp_dimensions": [
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414"
+    ],
+    "rika_dimensions": [
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414"
+    ],
+    "distinct_amp_dimensions": [
+      "1942x1414"
+    ],
+    "distinct_rika_dimensions": [
+      "1942x1414"
+    ],
+    "distinct_pair_dimensions": [
+      "1942x1414:1942x1414"
+    ]
+  },
+  "captures": [
+    {
+      "frame": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-01.png",
+        "sha256": "4dc588477b888d848f7b57ebb6ae5794a20177ba84633eacf83b5f86f30b25b0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-01.png",
+        "sha256": "d55c0dad19d5984e2fb55a3b89c7003275cca7cbd6d5d0ed6cb2b195eacae996",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-02.png",
+        "sha256": "689f538e33f8b42becced0b7d572fe308d0b7563e392501445a44dd54e660a34",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-02.png",
+        "sha256": "2e4a1289c9a0dd1b83e5735ad895b2087788ea9b2272851f1ae4c7aee8005a9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-03.png",
+        "sha256": "7cc4579ad4b5dc303c0f458a548be29ae8e6fbbd4bc9aea04fe87c74d15b0031",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-03.png",
+        "sha256": "72474b98ac051d4ad0683629c4ffeb77e4c1e06aa5fe931592c41e1fc21dce40",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-04.png",
+        "sha256": "320ec4889890dcd2c34f50713b458c0df79965955e7622f6d654930d2dd19eed",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-04.png",
+        "sha256": "bf3b9e0b1269c5248d84984a7aa13cd075e940baf8836114cba7e7ff957409e6",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    }
+  ]
+}

@@ -1,0 +1,287 @@
+Amp CLI
+
+Usage: amp [options] [command]
+
+Commands:
+
+  version       Print the version number and exit
+  logout        Log out by removing stored API key
+  login         Log in to Amp
+  clone         Clone a workspace repository
+  top           Show live active threads
+  last          [alias: l] Continue the last thread
+  threads       [alias: t, thread] Manage threads
+    new         [alias: n] Create a new thread
+    continue    [alias: c] Continue an existing thread
+    list        [alias: l, ls] List all threads
+    usage       Show usage information for a thread
+    visibility  [alias: v] Show or set default visibility for this repository
+    search      [alias: find] Search threads
+    label       Add labels to a thread
+    share       [alias: s] Share a thread
+    report      Generate and send a diagnostic report for a thread to provide to Amp support
+    rename      [alias: r] Rename a thread
+    archive     Archive a thread
+    delete      Delete a thread
+    markdown    [alias: md] Render thread as markdown
+    export      Export a thread as JSON
+    raw         [alias: raw-thread] Export raw actor thread data as JSON
+  tools         [alias: tool] Tool management commands
+    list        [alias: ls] List all active tools (including MCP tools)
+    show        Show details about an active tool
+  review        Run code review through the review agent mode
+  skill         [alias: skills] Manage skills from GitHub or local sources
+    add         Install skills from a source
+    list        [alias: ls] List all available skills
+    remove      [alias: rm] Remove an installed skill
+    info        Show information about a skill
+  permissions   [alias: permission] Manage permissions
+    list        [alias: ls] List permissions
+    test        Test permissions
+    edit        Edit permissions
+    add         Add permission rule
+  mcp           Manage MCP servers
+    add         Add an MCP server configuration
+    list        List all MCP server configurations
+    remove      Remove an MCP server configuration
+    oauth       Manage OAuth authentication for MCP servers
+      login     Register OAuth client credentials for an MCP server
+      logout    Remove OAuth credentials for an MCP server
+      status    Show OAuth status for an MCP server
+    doctor      Check MCP server status
+    approve     Approve a workspace MCP server
+  config        Manage Amp configuration
+    edit        Open the Amp settings file in $EDITOR
+    keymap      List command keymap entries
+  projects      Project management commands
+    create      Create a project for a repository
+    list        List projects accessible to you
+    get         Get project details
+    delete      [alias: rm] Delete a project
+  usage         Show your current Amp usage and credit balance
+  update        [alias: up] Update Amp CLI
+
+Options:
+
+  --visibility <visibility>
+      Set thread visibility (private, unlisted, workspace, group)
+  -V, --version
+      Print the version number and exit
+  -v
+      Alias for --version
+  --notifications
+      Enable notification alerts (audio locally, terminal bell over SSH or with AMP_FORCE_BEL; enabled by default when
+      not in execute mode)
+  --no-notifications
+      Disable notification alerts (audio locally, terminal bell over SSH or with AMP_FORCE_BEL; enabled by default when
+      not in execute mode)
+  --color
+      Enable color output (enabled by default if stdout and stderr are sent to a TTY)
+  --no-color
+      Disable color output (enabled by default if stdout and stderr are sent to a TTY)
+  --settings-file <value>
+      Custom settings file path (overrides the default location /Users/dallen.pyrah/.config/amp/settings.json)
+  --log-level <value>
+      Set log level (parent, children, category, sinks, parentSinks, filters, lowestLevel, contextLocalStorage)
+  --log-file <value>
+      Set log file location (overrides the default location /Users/dallen.pyrah/.cache/amp/logs/cli.log)
+  --ide
+      Enable IDE connection (default). When enabled, Amp automatically includes your open IDE's file and text selection
+      with every message.
+  --no-ide
+      Disable IDE connection
+  --mcp-config <value>
+      JSON configuration or file path for MCP servers to merge with existing settings
+  -m, --mode <value>
+      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+  --effort <value>
+      Set reasoning effort for the new thread, when supported by the selected mode
+  -x, --execute [message]
+      Use execute mode, optionally with user message. In execute mode, agent will execute provided prompt (either as
+      argument, or via stdin). Only last assistant message is printed. Enabled automatically when redirecting stdout.
+  --stream-json
+      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+  --stream-json-thinking
+      Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
+  --stream-json-input
+      Read JSON Lines user messages from stdin. Requires both --execute and --stream-json.
+  --no-archive-after-execute
+      When used with --execute on a new thread or with the review command, leave the thread unarchived after the command
+      finishes.
+  -l, --label <label>
+      Add a label to the thread created or continued by this command. Repeat the flag for multiple labels.
+
+Environment variables:
+
+  AMP_API_KEY        Access token for Amp (see https://ampcode.com/settings)
+  AMP_URL            URL for the Amp service (default is https://ampcode.com/)
+  AMP_LOG_LEVEL      Set log level (can also use --log-level)
+  AMP_LOG_FILE       Set log file location (can also use --log-file)
+  AMP_SETTINGS_FILE  Set settings file path (can also use --settings-file, default:
+                     /Users/dallen.pyrah/.config/amp/settings.json)
+
+Examples:
+
+Start an interactive session:
+
+  $ amp
+
+Start an interactive session with a user message:
+
+  $ echo "commit all my unstaged changes" | amp
+
+Use execute mode (--execute or -x) to send a command to an agent, have it execute it, print only the agent's last message, and then exit:
+
+  $ amp -x "what file in this folder is in markdown format?"
+  All Markdown files in this folder:
+  - README.md (root)
+  - AGENT.md (root)
+  - Documentation (7 files in doc/)
+  - Various README.md files in subdirectories
+  Total: **13 Markdown files** found across the project.
+
+Stream JSON output and extract assistant text blocks with jq:
+
+  $ amp -x "what file in this folder is in markdown format?" --stream-json | jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="text") | .text'
+
+Stream JSON output with thinking blocks and extract them with jq:
+
+  $ amp -x "what file in this folder is in markdown format?" --stream-json-thinking | jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="thinking") | .thinking'
+
+Pipe data to the agent and send along a prompt in execute mode:
+
+  $ cat ~/.zshrc | amp -x "what does the 'beautiful' function do?"
+  The `beautiful` function creates an infinite loop that prints the letter "o" in cycling colors every 0.2 seconds.
+
+Execute a prompt from a file and store final assistant message output in a file (redirecting stdout is equivalent to providing -x/--execute):
+
+  $ amp < prompt.txt > output.txt
+
+Add an MCP server with a local command:
+
+  $ amp mcp add context7 -- npx -y @upstash/context7-mcp
+
+Add an MCP server with environment variables:
+
+  $ amp mcp add postgres --env PGUSER=orb -- npx -y @modelcontextprotocol/server-postgres postgresql://localhost/orbing
+
+Add a remote MCP server:
+
+  $ amp mcp add hugging-face https://huggingface.co/mcp
+
+Configuration:
+
+Amp can be configured using a JSON settings file located at /Users/dallen.pyrah/.config/amp/settings.json. All settings use the "amp." prefix.
+
+Settings reference:
+
+  amp.dangerouslyAllowAll
+      Disable all command confirmation prompts (agent will execute all commands without asking)
+  amp.defaultVisibility
+      Define default thread visibility per repository origin using mappings like "github.com/org/repo": "workspace".
+      Values: private, workspace, group.
+  amp.experimental.modes
+      Enable experimental agent modes by name. Available modes: deep
+  amp.fuzzy.alwaysIncludePaths
+      Glob patterns for paths that should always be included in fuzzy file search, even if gitignored
+  amp.git.commit.ampThread.enabled
+      Enable adding Amp-Thread trailer in git commits
+  amp.git.commit.coauthor.enabled
+      Enable adding Amp as co-author in git commits
+  amp.guardedFiles.allowlist
+      Array of file glob patterns that are allowed to be accessed without confirmation. Takes precedence over the
+      built-in denylist.
+  amp.keymap
+      Command shortcuts keyed by command ID. Values can be a shortcut string, an array of shortcuts, or null. User
+      keymap entries override workspace entries. Run "amp config keymap" to list all command IDs, descriptions, and
+      effective keys, with null for unbound commands.
+  amp.mcpServers
+      Model Context Protocol servers to connect to for additional tools
+  amp.network.timeout
+      How many seconds to wait for network requests to the Amp server before timing out
+  amp.notifications.enabled
+      Enable notification alerts when the agent completes tasks. Over SSH, or when AMP_FORCE_BEL is set, this sends a
+      terminal bell.
+  amp.notifications.system.enabled
+      Enable system notifications when terminal is not focused
+  amp.permissions
+      Permission rules for tool calls. See amp permissions --help
+  amp.proxy
+      Proxy URL used for both HTTP and HTTPS requests to the Amp server
+  amp.showCosts
+      Set to false to hide costs while working on a thread
+  amp.skills.disableClaudeCodeSkills
+      Disable loading skills from Claude Code directories (.claude/skills/, ~/.claude/skills/,
+      ~/.claude/plugins/cache/). Amp-native skill directories are not affected.
+  amp.skills.path
+      Path to additional directories containing skills. Supports colon-separated paths (semicolon on Windows). Use ~ for
+      home directory.
+  amp.terminal.animation
+      Set to false to disable terminal animations (or use the equivalent NO_ANIMATION=1 env var)
+  amp.terminal.copyOnSelect
+      Automatically copy selection to clipboard.
+  amp.terminal.detailsExpandedByDefault
+      Expand thinking and tool call details by default in the CLI transcript.
+  amp.tools.disable
+      Array of tool names to disable. Use 'builtin:toolname' to disable only the builtin tool with that name (allowing
+      an MCP server to provide a tool by that name).
+  amp.tools.enable
+      Array of tool name patterns to enable. Supports glob patterns (e.g., 'mcp__metabase__*'). If not set, all tools
+      are enabled. If set, only matching tools are enabled.
+  amp.updates.mode
+      Control update checking behavior: "warn" shows update notifications, "disabled" turns off checking, "auto"
+      automatically runs update.
+
+Example configuration:
+
+{
+  "amp.dangerouslyAllowAll": false,
+  "amp.defaultVisibility": {
+    "github.com/ampcode/amp": "workspace"
+  },
+  "amp.experimental.modes": [],
+  "amp.fuzzy.alwaysIncludePaths": [],
+  "amp.git.commit.ampThread.enabled": true,
+  "amp.git.commit.coauthor.enabled": true,
+  "amp.guardedFiles.allowlist": [],
+  "amp.keymap": {},
+  "amp.mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "@modelcontextprotocol/server-filesystem",
+        "/path/to/allowed/dir"
+      ]
+    }
+  },
+  "amp.network.timeout": 30,
+  "amp.notifications.enabled": true,
+  "amp.notifications.system.enabled": true,
+  "amp.permissions": [
+    {
+      "tool": "Bash",
+      "action": "ask",
+      "matches": {
+        "cmd": [
+          "git push*",
+          "git commit*",
+          "git branch -D*",
+          "git checkout HEAD*"
+        ]
+      }
+    }
+  ],
+  "amp.showCosts": true,
+  "amp.skills.disableClaudeCodeSkills": false,
+  "amp.terminal.animation": true,
+  "amp.terminal.copyOnSelect": true,
+  "amp.terminal.detailsExpandedByDefault": false,
+  "amp.tools.disable": [
+    "browser_navigate",
+    "builtin:edit_file"
+  ],
+  "amp.updates.mode": "auto"
+}
+
+
+[=0u[<u[?25h

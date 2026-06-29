@@ -1,0 +1,34 @@
+DESCRIPTION
+  Effect-native coding agent
+
+USAGE
+  rika <subcommand> [flags] <prompt...>
+
+ARGUMENTS
+  prompt... string    Prompt text to send to the agent when --execute is set
+
+FLAGS
+  --execute, -x         Run one non-interactive turn
+  --mode choice         Select agent mode (choices: rush, smart, deep)
+  --workspace string    Workspace root for the turn
+  --thread string       Reuse a durable thread id
+  --ephemeral           Use in-memory persistence for this run
+
+GLOBAL FLAGS
+  --help, -h                                                          Show help information
+  --version, -v                                                       Show version information
+  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+
+SUBCOMMANDS
+  run            Run one prompt
+  interactive    Start interactive UI
+  threads        Manage threads
+  skills         Manage skills
+  mcp            Manage MCP
+  config         Inspect config
+  review         Review local diff
+  extensions     Manage extensions
+  server         Start remote-control server
+  doctor         Print diagnostics
+  ide            Manage IDE connection

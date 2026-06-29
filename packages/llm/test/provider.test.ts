@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { Effect, Layer, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import { Effect, Layer, Schema, Stream } from "effect"
+import { AiError, LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { Provider } from "../src/index"
 
 const request: Provider.GenerateRequest = {
@@ -9,6 +8,16 @@ const request: Provider.GenerateRequest = {
   model: "model-test",
   messages: [{ role: "user", content: "Hello" }],
 }
+
+const FakeEcho = Tool.dynamic("fake_echo", {
+  parameters: Schema.Struct({ text: Schema.String }),
+  success: Schema.Json,
+})
+const FakeEchoToolkit = Toolkit.make(FakeEcho)
+const fakeEchoToolkit = Effect.provide(
+  FakeEchoToolkit,
+  FakeEchoToolkit.toLayer(FakeEchoToolkit.of({ fake_echo: () => Effect.succeed(null) })),
+)
 
 describe("LLM Provider", () => {
   test("fake layer returns deterministic responses through the provider interface", async () => {
@@ -39,6 +48,45 @@ describe("LLM Provider", () => {
       {
         type: "response.completed",
         response: { provider: "openai", model: "model-test", content: "streamed", finish_reason: "stop" },
+      },
+    ])
+  })
+
+  test("maps Effect AI tool parameter parts to typed tool stream events", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        return yield* provider
+          .stream({
+            ...request,
+            toolkit: fakeEchoToolkit,
+          })
+          .pipe(Stream.runCollect)
+      }).pipe(
+        Effect.provide(
+          Provider.fakeLayer([
+            {
+              type: "tool-call",
+              id: "call_fake_echo",
+              name: "fake_echo",
+              input: { text: "hello" },
+              input_text: '{"text":"hello"}',
+            },
+          ]),
+        ),
+      ),
+    )
+
+    expect(Array.from(result)).toEqual([
+      { type: "response.started", provider: "openai", model: "model-test" },
+      { type: "tool.input.started", id: "call_fake_echo", name: "fake_echo" },
+      { type: "tool.input.delta", id: "call_fake_echo", text: '{"text":"hello"}' },
+      { type: "tool.input.ended", id: "call_fake_echo", name: "fake_echo", input_text: '{"text":"hello"}' },
+      { type: "tool.call", id: "call_fake_echo", name: "fake_echo", input: { text: "hello" } },
+      { type: "tool.result", id: "call_fake_echo", name: "fake_echo", result: null, is_failure: false },
+      {
+        type: "response.completed",
+        response: { provider: "openai", model: "model-test", content: "", finish_reason: "tool-call" },
       },
     ])
   })

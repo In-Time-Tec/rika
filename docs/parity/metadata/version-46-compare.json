@@ -1,0 +1,64 @@
+{
+  "row": 46,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T09:15:21Z",
+  "surface": "CLI version output",
+  "state": "version flags and version command",
+  "amp_version_line": "0.0.1782665646-g2f0017 (released 2026-06-28T16:54:06.000Z, 16h ago)",
+  "commands": {
+    "amp_long": "AMP_SKIP_UPDATE_CHECK=1 amp --version",
+    "amp_lower_v": "AMP_SKIP_UPDATE_CHECK=1 amp -v",
+    "amp_upper_v": "AMP_SKIP_UPDATE_CHECK=1 amp -V",
+    "amp_command": "AMP_SKIP_UPDATE_CHECK=1 amp version",
+    "rika_long": "bun packages/cli/src/main.ts --version",
+    "rika_lower_v": "bun packages/cli/src/main.ts -v",
+    "rika_upper_v": "bun packages/cli/src/main.ts -V",
+    "rika_command": "bun packages/cli/src/main.ts version"
+  },
+  "before": {
+    "rika_long": "rika v0.0.0",
+    "rika_lower_v": "rika v0.0.0",
+    "rika_upper_v": "Unrecognized flag: -V in command rika",
+    "rika_command": "Expected run, interactive, or --execute"
+  },
+  "exit_codes_after": {
+    "amp_long": 0,
+    "amp_lower_v": 0,
+    "amp_upper_v": 0,
+    "amp_command": 0,
+    "rika_long": 0,
+    "rika_lower_v": 0,
+    "rika_upper_v": 0,
+    "rika_command": 0
+  },
+  "comparisons": {
+    "long": "cmp -s docs/parity/metadata/amp-version-long-46.txt docs/parity/metadata/rika-version-long-46.txt",
+    "lower_v": "cmp -s docs/parity/metadata/amp-version-lower-v-46.txt docs/parity/metadata/rika-version-lower-v-46.txt",
+    "upper_v": "cmp -s docs/parity/metadata/amp-version-upper-v-46.txt docs/parity/metadata/rika-version-upper-v-46.txt",
+    "command": "cmp -s docs/parity/metadata/amp-version-command-46.txt docs/parity/metadata/rika-version-command-46.txt"
+  },
+  "comparison_exit_codes": {
+    "long": 0,
+    "lower_v": 0,
+    "upper_v": 0,
+    "command": 0
+  },
+  "sha256_each_after": "c22a192477df4a7ebdeb7013fa231518e51b1dfda541bf5c988e55346e9024fe",
+  "bytes_each_after": 68,
+  "artifacts": {
+    "amp_long": "docs/parity/metadata/amp-version-long-46.txt",
+    "amp_lower_v": "docs/parity/metadata/amp-version-lower-v-46.txt",
+    "amp_upper_v": "docs/parity/metadata/amp-version-upper-v-46.txt",
+    "amp_command": "docs/parity/metadata/amp-version-command-46.txt",
+    "rika_long_before": "docs/parity/metadata/rika-version-long-46-before.txt",
+    "rika_lower_v_before": "docs/parity/metadata/rika-version-lower-v-46-before.txt",
+    "rika_upper_v_before": "docs/parity/metadata/rika-version-upper-v-46-before.txt",
+    "rika_command_before": "docs/parity/metadata/rika-version-command-46-before.txt",
+    "rika_long": "docs/parity/metadata/rika-version-long-46.txt",
+    "rika_lower_v": "docs/parity/metadata/rika-version-lower-v-46.txt",
+    "rika_upper_v": "docs/parity/metadata/rika-version-upper-v-46.txt",
+    "rika_command": "docs/parity/metadata/rika-version-command-46.txt"
+  },
+  "result": "match",
+  "scope": "This proves byte-for-byte parity for the pinned Amp version output across --version, -v, -V, and version. It does not prove full generated help parity or future Amp release parity."
+}

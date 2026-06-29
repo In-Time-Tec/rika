@@ -136,6 +136,29 @@ export const ToolCallRequested = Schema.Struct({
   data: Schema.Struct({ call: Call }),
 }).annotate({ identifier: "Rika.Event.ToolCallRequested" })
 
+export interface ToolCallInputStarted extends Schema.Schema.Type<typeof ToolCallInputStarted> {}
+export const ToolCallInputStarted = Schema.Struct({
+  ...fields,
+  turn_id: TurnId,
+  type: Schema.Literal("tool.call.input.started"),
+  data: Schema.Struct({
+    id: ToolCallId,
+    name: Schema.String,
+  }),
+}).annotate({ identifier: "Rika.Event.ToolCallInputStarted" })
+
+export interface ToolCallInputEnded extends Schema.Schema.Type<typeof ToolCallInputEnded> {}
+export const ToolCallInputEnded = Schema.Struct({
+  ...fields,
+  turn_id: TurnId,
+  type: Schema.Literal("tool.call.input.ended"),
+  data: Schema.Struct({
+    id: ToolCallId,
+    name: Schema.String,
+    input_text: Schema.String,
+  }),
+}).annotate({ identifier: "Rika.Event.ToolCallInputEnded" })
+
 export interface ToolCallCompleted extends Schema.Schema.Type<typeof ToolCallCompleted> {}
 export const ToolCallCompleted = Schema.Struct({
   ...fields,
@@ -189,6 +212,8 @@ export type Event =
   | ContextResolved
   | SkillLoaded
   | SubagentCompleted
+  | ToolCallInputStarted
+  | ToolCallInputEnded
   | ToolCallRequested
   | ToolCallCompleted
   | ArtifactCreated
@@ -206,6 +231,8 @@ export const Event = Schema.Union([
   ContextResolved,
   SkillLoaded,
   SubagentCompleted,
+  ToolCallInputStarted,
+  ToolCallInputEnded,
   ToolCallRequested,
   ToolCallCompleted,
   ArtifactCreated,
@@ -225,6 +252,9 @@ export const references = (event: Event): References => {
   switch (event.type) {
     case "message.added":
       return { message_id: event.data.message.id }
+    case "tool.call.input.started":
+    case "tool.call.input.ended":
+      return { tool_call_id: event.data.id }
     case "tool.call.requested":
       return { tool_call_id: event.data.call.id }
     case "tool.call.completed":

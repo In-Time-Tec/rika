@@ -131,6 +131,41 @@ describe("TUI session", () => {
     expect(frames).toContain("deploy: Deploy safely")
     expect(frames).toContain("Deploy instructions")
   })
+
+  test("handles Amp-compatible palette commands through slash commands", async () => {
+    const { exitCode, rendered } = await runSession([
+      "/version",
+      "/credits",
+      "/welcome",
+      "/ast-grep outline status",
+      "/debug page logs",
+      "/debug copy command",
+      "/ide connect",
+      "/mcp authenticate",
+      "/mcp info",
+      "/exit",
+    ])
+
+    const frames = text(rendered)
+    expect(exitCode).toBe(0)
+    expect(frames).toContain("Rika 0.0.0")
+    expect(frames).toContain("Rika is Amp-compatible software.")
+    expect(frames).toContain("ast-grep outline status: ready")
+    expect(frames).toContain("Debug page logs are empty.")
+    expect(frames).toContain("Debug command copied.")
+    expect(frames).toContain("IDE connection requested.")
+    expect(frames).toContain("MCP authentication requested.")
+    expect(frames).toContain("No MCP servers connected.")
+    expect(frames).not.toContain("Unknown command /welcome")
+  })
+
+  test("relaunch exits after recording a relaunch notice", async () => {
+    const { exitCode, rendered } = await runSession(["/relaunch"])
+
+    const frames = text(rendered)
+    expect(exitCode).toBe(0)
+    expect(frames).toContain("Relaunch requested. Start Rika again after this session exits.")
+  })
 })
 
 const deploySkill: SkillRegistry.Skill = {

@@ -9,81 +9,90 @@ Status: `unverified` (claimed in code, not visually compared) · `partial` ·
 `mismatch` · `match` (indistinguishable, evidence logged) · `gap` (missing).
 
 ## Modes & models
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| Agent modes | `deep` (GPT-5.5 + extended thinking), `smart` (Opus 4.8), `rush` (fast GPT-5.5) | `packages/llm/src/modes.ts` | unverified |
-| Mode switch | `Ctrl+S`; palette `mode` | `packages/tui/` keymap/palette | unverified |
-| Reasoning effort toggle | `Alt+D` cycles effort per mode | `packages/tui/` (`cycleReasoning`) | unverified |
-| Fast mode toggle | `Alt+R` | `packages/tui/` (`toggleFastMode`) | unverified |
-| Model routing per task | Review→GPT-5.5, Search→Gemini 3 Flash, Oracle→GPT-5.5, etc. | `packages/llm/` | unverified |
+
+| Feature                 | Amp behavior                                                                    | Rika location                                           | Status                                                                                                                                                                                |
+| ----------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent modes             | `deep` (GPT-5.5 + extended thinking), `smart` (Opus 4.8), `rush` (fast GPT-5.5) | `packages/cli/src/args.ts`, `packages/llm/src/modes.ts` | partial - CLI `-m`/`--mode` alias parsing verified in `SCREENSHOT_LOG.md` #45; model routing, visible mode state, and per-mode behavior remain unverified                             |
+| Mode switch             | `Ctrl+S`; palette `mode`                                                        | `packages/tui/` keymap/palette                          | mismatch - first Ctrl+S evidence is `SCREENSHOT_LOG.md` #42; Amp keymap reports `mode.toggle: ctrl+s`, but scripted Ghostty capture left Amp on `deep³` while Rika switched to `rush` |
+| Reasoning effort toggle | `Alt+D` cycles effort per mode                                                  | `packages/tui/` (`cycleReasoning`)                      | unverified                                                                                                                                                                            |
+| Fast mode toggle        | `Alt+R`                                                                         | `packages/tui/` (`toggleFastMode`)                      | unverified                                                                                                                                                                            |
+| Model routing per task  | Review→GPT-5.5, Search→Gemini 3 Flash, Oracle→GPT-5.5, etc.                     | `packages/llm/`                                         | unverified                                                                                                                                                                            |
 
 ## Prompting & input
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| Submit / newline | Enter submits; Shift+Enter / Ctrl+J / `\`+Enter newline | `packages/tui/` input | unverified |
-| Queue messages | type while busy → queued; Enter Enter steer; Esc Esc interrupt | `packages/tui/` (`enqueueMessage`/`dequeue`) | unverified |
-| Edit prior message | Tab to navigate, `e` to edit | `packages/tui/` (`navPrev/Next`, `editNav`) | unverified |
-| Prompt history | `Ctrl+R` | `packages/tui/` (`historyPrev/Next`) | unverified |
-| Open prompt in `$EDITOR` | `Ctrl+G` | `packages/tui/` | unverified |
-| Image paste | `Ctrl+V` paste from clipboard | `packages/tui/` | gap? |
-| `@file` mention | `@` fuzzy file picker | `packages/tui/` (`FilePickerState`) | unverified |
-| `@@` thread mention | search threads to mention | `packages/agent/` thread service | unverified |
+
+| Feature                  | Amp behavior                                                   | Rika location                                | Status     |
+| ------------------------ | -------------------------------------------------------------- | -------------------------------------------- | ---------- |
+| Submit / newline         | Enter submits; Shift+Enter / Ctrl+J / `\`+Enter newline        | `packages/tui/` input                        | unverified |
+| Queue messages           | type while busy → queued; Enter Enter steer; Esc Esc interrupt | `packages/tui/` (`enqueueMessage`/`dequeue`) | unverified |
+| Edit prior message       | Tab to navigate, `e` to edit                                   | `packages/tui/` (`navPrev/Next`, `editNav`)  | unverified |
+| Prompt history           | `Ctrl+R`                                                       | `packages/tui/` (`historyPrev/Next`)         | unverified |
+| Open prompt in `$EDITOR` | `Ctrl+G`                                                       | `packages/tui/`                              | unverified |
+| Image paste              | `Ctrl+V` paste from clipboard                                  | `packages/tui/`                              | gap?       |
+| `@file` mention          | `@` fuzzy file picker                                          | `packages/tui/` (`FilePickerState`)          | unverified |
+| `@@` thread mention      | search threads to mention                                      | `packages/agent/` thread service             | unverified |
 
 ## Threads
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| Durable threads | create/open/list/search/archive/share/reference | `packages/agent/src/thread-service.ts` | unverified |
-| Switch thread | thread switcher UI | `packages/tui/` (`withThread`) | unverified |
-| Archive | `Ctrl+C Ctrl+N` (archive+new), `Ctrl+C Ctrl+E` (archive+quit), palette | `packages/tui/` | unverified |
-| Reference threads | by URL / `@T-…` id | `packages/agent/` | unverified |
-| Find threads | search by keyword/file/repo/author/date | `packages/agent/` | unverified |
-| Thread visibility / sharing | private/workspace/group/unlisted | `packages/server/`, `packages/agent/` | unverified |
-| Remote control | continue CLI thread from web | `packages/server/`, `packages/sdk/` | unverified |
+
+| Feature                     | Amp behavior                                                           | Rika location                          | Status     |
+| --------------------------- | ---------------------------------------------------------------------- | -------------------------------------- | ---------- |
+| Durable threads             | create/open/list/search/archive/share/reference                        | `packages/agent/src/thread-service.ts` | unverified |
+| Switch thread               | thread switcher UI                                                     | `packages/tui/` (`withThread`)         | unverified |
+| Archive                     | `Ctrl+C Ctrl+N` (archive+new), `Ctrl+C Ctrl+E` (archive+quit), palette | `packages/tui/`                        | unverified |
+| Reference threads           | by URL / `@T-…` id                                                     | `packages/agent/`                      | unverified |
+| Find threads                | search by keyword/file/repo/author/date                                | `packages/agent/`                      | unverified |
+| Thread visibility / sharing | private/workspace/group/unlisted                                       | `packages/server/`, `packages/agent/`  | unverified |
+| Remote control              | continue CLI thread from web                                           | `packages/server/`, `packages/sdk/`    | unverified |
 
 ## Tools & subagents
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| Built-in tools list | `amp tools list` | `packages/tools/` | unverified |
-| File find/search | ripgrep → **Rika: fff** (deliberate, §3) | `packages/tools/src/fff-search.ts` | unverified |
-| Read/edit | hashline read/edit | `packages/tools/src/hashline-file.ts` | unverified |
-| Semantic search | **Rika addition** (§3) | `packages/tools/` | unverified |
-| AST-grep outline | **Rika addition** (§3) | `packages/tools/src/ast-grep-outline.ts` | unverified |
-| Subagents | own context, own tools, parallel, final-summary, auto-spawn | `packages/agent/src/subagent-runtime.ts` | **gap — see goal.md §4** |
-| Oracle | GPT-5.5 second-opinion tool | `packages/tools/src/specialty-tools.ts` | unverified |
-| Librarian | cross-repo / GitHub code search subagent | `packages/tools/src/specialty-tools.ts` | unverified |
-| Painter | image gen/edit tool | `packages/tools/src/specialty-tools.ts` | unverified |
-| Code review | `amp review` + checks subagents | `packages/agent/src/review-service.ts` | unverified |
+
+| Feature             | Amp behavior                                                | Rika location                            | Status                   |
+| ------------------- | ----------------------------------------------------------- | ---------------------------------------- | ------------------------ |
+| Built-in tools list | `amp tools list`                                            | `packages/tools/`                        | unverified               |
+| File find/search    | ripgrep → **Rika: fff** (deliberate, §3)                    | `packages/tools/src/fff-search.ts`       | unverified               |
+| Read/edit           | hashline read/edit                                          | `packages/tools/src/hashline-file.ts`    | unverified               |
+| Semantic search     | **Rika addition** (§3)                                      | `packages/tools/`                        | unverified               |
+| AST-grep outline    | **Rika addition** (§3)                                      | `packages/tools/src/ast-grep-outline.ts` | unverified               |
+| Subagents           | own context, own tools, parallel, final-summary, auto-spawn | `packages/agent/src/subagent-runtime.ts` | **gap — see goal.md §4** |
+| Oracle              | GPT-5.5 second-opinion tool                                 | `packages/tools/src/specialty-tools.ts`  | unverified               |
+| Librarian           | cross-repo / GitHub code search subagent                    | `packages/tools/src/specialty-tools.ts`  | unverified               |
+| Painter             | image gen/edit tool                                         | `packages/tools/src/specialty-tools.ts`  | unverified               |
+| Code review         | `amp review` + checks subagents                             | `packages/agent/src/review-service.ts`   | unverified               |
 
 ## Guidance, skills, plugins, MCP
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| AGENTS.md resolution | cwd+parents+subtree+global, globs, `@`-mentions | `packages/agent/src/context-resolver.ts` | unverified |
-| Skills | discovery/list/inspect/load, precedence order | `packages/agent/src/skill-registry.ts` | unverified |
-| Plugins | TS plugin host: events/tools/commands/UI/ai.ask | `packages/plugin/src/plugin-host.ts` | unverified |
-| Self-extension | generate/verify/enable/disable/rollback skills+plugins | `packages/plugin/src/self-extension.ts` | unverified |
-| MCP | local+remote servers, approval, permissions | `packages/tools/src/mcp-client.ts` | unverified |
-| Permissions | default allow-all; policy plugin overrides | `packages/agent/` PermissionPolicy | unverified |
+
+| Feature              | Amp behavior                                           | Rika location                            | Status     |
+| -------------------- | ------------------------------------------------------ | ---------------------------------------- | ---------- |
+| AGENTS.md resolution | cwd+parents+subtree+global, globs, `@`-mentions        | `packages/agent/src/context-resolver.ts` | unverified |
+| Skills               | discovery/list/inspect/load, precedence order          | `packages/agent/src/skill-registry.ts`   | unverified |
+| Plugins              | TS plugin host: events/tools/commands/UI/ai.ask        | `packages/plugin/src/plugin-host.ts`     | unverified |
+| Self-extension       | generate/verify/enable/disable/rollback skills+plugins | `packages/plugin/src/self-extension.ts`  | unverified |
+| MCP                  | local+remote servers, approval, permissions            | `packages/tools/src/mcp-client.ts`       | unverified |
+| Permissions          | default allow-all; policy plugin overrides             | `packages/agent/` PermissionPolicy       | unverified |
 
 ## CLI & integrations
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| Interactive CLI | `rika` | `packages/cli/`, `packages/tui/` | unverified |
-| Execute mode | `-x` / stdout redirect | `packages/cli/src/execute.ts` | unverified |
-| Streaming JSON | `--stream-json[-input][-thinking]` | `packages/cli/` | unverified |
-| Command palette | `Ctrl+O` | `packages/tui/src/palette.ts` | unverified |
-| Keybindings | full keymap; `amp config keymap` equiv | `packages/tui/src/keymap.ts` | unverified |
-| IDE integration | VS Code/JetBrains/Neovim/Zed seam | `packages/ide/` | unverified |
-| Config/settings | `amp.*` settings, user+workspace precedence | `packages/cli/`, `packages/core/` | unverified |
-| Notifications | sound/bell on done/blocked | `packages/tui/` | unverified |
+
+| Feature         | Amp behavior                                       | Rika location                                              | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| --------------- | -------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Interactive CLI | `rika`                                             | `packages/cli/`, `packages/tui/`                           | unverified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Version output  | `amp --version`, `amp -v`, `amp -V`, `amp version` | `packages/cli/src/version.ts`, `packages/cli/src/args.ts`  | match - pinned Amp version output byte-matches across all four entrypoints in `SCREENSHOT_LOG.md` #46; full generated help parity and future Amp release parity remain separate work                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Help output     | root `--help`/`-h`; command/subcommand help        | `packages/cli/src/help.ts`, `packages/cli/src/args.ts`     | partial - root help verified in `SCREENSHOT_LOG.md` #48, version help in #49, clone help in #65, login help in #64, logout help in #63, top help in #66, last help in #67, threads help in #68, threads new help in #69, threads continue help in #70, threads list help in #71, threads usage help in #72, threads visibility help in #73, threads search help in #74, threads label help in #75, threads share help evidence exists in #76 but is pending verification/review, config help in #50, config keymap help in #51, config edit help in #52, mcp help in #53, mcp list help in #54, mcp approve help in #55, mcp add help in #56, mcp remove help in #57, mcp oauth help in #58, mcp oauth login help in #59, mcp oauth logout help in #60, mcp oauth status help in #61, and mcp doctor help in #62; other command/subcommand help pages and future Amp release help remain separate work |
+| Execute mode    | `-x` / stdout redirect                             | `packages/cli/src/args.ts`, `packages/cli/src/execute.ts`  | partial - visible `-x`/`--execute` alias parity and `-e` rejection verified in `SCREENSHOT_LOG.md` #44; `-m` with execute mode verified in #45; exact invalid `-e` error output and exit code verified in #47; execute runtime, stdout redirect behavior, stream output, broader invalid-flag handling, and execute subcommand help formatting remain unverified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Streaming JSON  | `--stream-json[-input][-thinking]`                 | `packages/cli/`                                            | unverified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Command palette | `Ctrl+O`                                           | `packages/tui/src/palette.ts`                              | mismatch - latest stable command-palette evidence is `SCREENSHOT_LOG.md` #38; #25 is the initial mismatch baseline; #27, #30, #33, #39, #40, and #41 are rejected/reverted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Keybindings     | full keymap; `amp config keymap` equiv             | `packages/cli/src/config.ts`, `packages/tui/src/keymap.ts` | partial - `rika config keymap` stdout byte-matches `amp config keymap` in `SCREENSHOT_LOG.md` #43; interactive Ctrl+S evidence remains a mismatch/open investigation in #42; each binding's runtime behavior still needs row-by-row verification                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| IDE integration | VS Code/JetBrains/Neovim/Zed seam                  | `packages/ide/`                                            | unverified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Config/settings | `amp.*` settings, user+workspace precedence        | `packages/cli/`, `packages/core/`                          | partial - `config keymap` stdout parity proven in `SCREENSHOT_LOG.md` #43; user/workspace settings precedence remains unverified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Notifications   | sound/bell on done/blocked                         | `packages/tui/`                                            | unverified                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 
 ## UI chrome (the nitpicky visual surface — see goal.md §6)
-| Feature | Amp behavior | Rika location | Status |
-| --- | --- | --- | --- |
-| Startup screen | wordmark/version/tips/model line | `packages/tui/` | unverified |
-| Status line | mode/model/effort/fast/branch/cost | `packages/tui/src/view-state.ts` | unverified |
-| Tool-call card collapse/expand (click + key) | click to toggle; Alt+T | `packages/tui/` (`toggleDetails`, `isCardCollapsed`, `focusPrev/Next`) | unverified |
-| Thinking block | reasoning render + toggle | `packages/tui/` (`toggleThinking`, `withReasoningDelta`) | unverified |
-| Spinner | frames + placement | `packages/tui/` (`spinnerFrames`) | unverified |
-| Scroll-while-streaming | hold position mid-stream | `packages/tui/` | unverified |
-| Diff rendering | add/remove colors, file header | `packages/tui/` (`diff` card) | unverified |
-| Cost display | per-thread cost line | `packages/tui/` | unverified |
+
+| Feature                                      | Amp behavior                       | Rika location                                                          | Status                                                                                                                    |
+| -------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Startup screen                               | wordmark/version/tips/model line   | `packages/tui/`                                                        | mismatch — latest stable crop evidence is `SCREENSHOT_LOG.md` #20; #14, #17, #21, #22, #23, and #24 are rejected/reverted |
+| Status line                                  | mode/model/effort/fast/branch/cost | `packages/tui/src/view-state.ts`                                       | mismatch — latest stable crop evidence is `SCREENSHOT_LOG.md` #20; #14, #17, #21, #22, #23, and #24 are rejected/reverted |
+| Tool-call card collapse/expand (click + key) | click to toggle; Alt+T             | `packages/tui/` (`toggleDetails`, `isCardCollapsed`, `focusPrev/Next`) | unverified                                                                                                                |
+| Thinking block                               | reasoning render + toggle          | `packages/tui/` (`toggleThinking`, `withReasoningDelta`)               | unverified                                                                                                                |
+| Spinner                                      | frames + placement                 | `packages/tui/` (`spinnerFrames`)                                      | unverified                                                                                                                |
+| Scroll-while-streaming                       | hold position mid-stream           | `packages/tui/`                                                        | unverified                                                                                                                |
+| Diff rendering                               | add/remove colors, file header     | `packages/tui/` (`diff` card)                                          | unverified                                                                                                                |
+| Cost display                                 | per-thread cost line               | `packages/tui/`                                                        | unverified                                                                                                                |

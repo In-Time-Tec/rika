@@ -1,0 +1,171 @@
+{
+  "row": 18,
+  "date": "2026-06-29",
+  "surface": "Startup & status line",
+  "state": "Empty startup, deep tier visible",
+  "verdict": "mismatch",
+  "method": {
+    "source": "screenshot RGB pixels converted via sips BMP output",
+    "logo_crop": {
+      "left": 150,
+      "top": 180,
+      "right_exclusive": 875,
+      "bottom_exclusive": 1000
+    },
+    "logo_predicate": "max(rgb)>28 && saturation>0.18 && green>=red*0.65",
+    "welcome_crop": {
+      "left": 850,
+      "top": 400,
+      "right_exclusive": 1300,
+      "bottom_exclusive": 700
+    },
+    "welcome_predicate": "max(rgb)>40 && saturation>0.15 && green>red*1.05 && green>blue*0.8",
+    "grid": {
+      "left": 217,
+      "top": 302,
+      "cell_width": 17,
+      "cell_height": 37,
+      "rows": 18,
+      "columns": 40
+    }
+  },
+  "artifacts": {
+    "amp_screenshot": {
+      "path": "docs/parity/screenshots/amp/startup-empty-18-05.png",
+      "sha256": "eafffbba6e4d0d36bd387da1e7a438ac54db5d8808eac4f9d76bc191760fec27",
+      "width": 1942,
+      "height": 1414
+    },
+    "rika_screenshot": {
+      "path": "docs/parity/screenshots/rika/startup-empty-18-01.png",
+      "sha256": "a2e59d700e13950e9434b8ba097fc17c48ae54f7211d7f212e13a562dd87207c",
+      "width": 1942,
+      "height": 1414
+    },
+    "visual_diff": {
+      "path": "docs/parity/diffs/startup-empty-18-content-crop-burst-best.png",
+      "sha256": "804e228521e8589add9013cd68c654ccfe6260e1bcd903f9ff3ddf0e191d4efd",
+      "width": 1942,
+      "height": 1414
+    }
+  },
+  "measurements": {
+    "amp": {
+      "logo": {
+        "bbox": {
+          "left": 258,
+          "top": 316,
+          "right": 825,
+          "bottom": 950
+        },
+        "width": 568,
+        "height": 635,
+        "pixel_count": 19892,
+        "mean_rgb": [
+          52,
+          106,
+          104
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 934,
+          "top": 485,
+          "right": 1169,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 2204,
+        "mean_rgb": [
+          67,
+          148,
+          115
+        ]
+      },
+      "grid": [
+        "                ••••••                  ",
+        "           •●●•••••••••••••             ",
+        "        •●●•••••••••••••••••••          ",
+        "      ••••••••••••••••••••••••••        ",
+        "    •••••••••••••••••••••••••••••       ",
+        "   ••••••••••••••●●●••••••••••••••      ",
+        "  •••••••••••••••••••••••••••••••••     ",
+        "  ••••••••••••••••••••••••••••••••••    ",
+        "  •••••••●●●●●●●••••••••••••••••••••    ",
+        "  •••••••●●●●●●•••••••••••••••••••••    ",
+        "  ••••••••••••••••••••••••••••••••••    ",
+        "  •••••••••••••••••••••••••••••••••     ",
+        "   •••••••••••••••••••••••••••••••      ",
+        "    •••••••••••••••••••••••••••••       ",
+        "      ••••••••••••••••••••••••••        ",
+        "        ••••••••••••••••••••••          ",
+        "           ···············•             ",
+        "                  •••                   "
+      ]
+    },
+    "rika": {
+      "logo": {
+        "bbox": {
+          "left": 241,
+          "top": 307,
+          "right": 809,
+          "bottom": 943
+        },
+        "width": 569,
+        "height": 637,
+        "pixel_count": 26273,
+        "mean_rgb": [
+          49,
+          99,
+          110
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 934,
+          "top": 485,
+          "right": 1169,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 1831,
+        "mean_rgb": [
+          63,
+          145,
+          114
+        ]
+      },
+      "grid": [
+        "               •••••                    ",
+        "          ••●●●•••••••••••              ",
+        "       ••••••••••••••••••••••           ",
+        "     ••••••••••••••••••••••••••         ",
+        "   •●●●•••••••••••••••••••••••••        ",
+        "  •••••••••••●●●•••••••••••••••••       ",
+        " ••••••••••●●●••••••••••••••••••••      ",
+        " ••••••••••●●••••••••••••••••••••••     ",
+        " ••••••••●●●●●●●•••••••••••••••••••     ",
+        " •••••••••●●●●●●•••••••••••••••••••     ",
+        " ••••••••••••••••••••••••••••••••••     ",
+        " •••••••••••••••••••••••••••••••••      ",
+        "  •••••••••••••••••••••••••••••••       ",
+        "   •••••••••••••••••••••••••••••        ",
+        "     ••••••••••••••••••••••••••         ",
+        "       ••••••••••••••••••••••           ",
+        "         •••••••••••••••••              ",
+        "                 ••                     "
+      ]
+    }
+  },
+  "derived_deltas": {
+    "logo_left_delta": -17,
+    "logo_right_delta": -16,
+    "logo_top_delta": -9,
+    "logo_bottom_delta": -7,
+    "logo_pixel_count_delta": 6381,
+    "welcome_left_delta": 0,
+    "welcome_top_delta": 0
+  }
+}

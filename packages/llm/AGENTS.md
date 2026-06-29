@@ -22,7 +22,7 @@
 - Agent orchestration code depends on `Router.Service`; Effect AI/provider-package details stay in this package.
 - Tests use `Provider.fakeLayer`; they must not require network or model credentials.
 - Keep modes as data so custom modes and providers can be added without changing actors or CLI code.
-- Normalize Effect AI streams into Rika `Provider.StreamEvent` values before exposing them outside this package.
+- Normalize Effect AI streams into Rika `Provider.StreamEvent` values before exposing them outside this package. Tool parameter parts must remain typed tool events; never downgrade them to assistant text.
 
 ## Streaming resilience
 

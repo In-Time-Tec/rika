@@ -1,12 +1,13 @@
 import { Config } from "@rika/core"
-import { Common, Tool } from "@rika/schema"
+import { Common } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 
 export interface Descriptor extends Schema.Schema.Type<typeof Descriptor> {}
 export const Descriptor = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
-  input_schema: Schema.optional(Common.JsonValue),
 }).annotate({ identifier: "Rika.Agent.ToolRegistry.Descriptor" })
 
 export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError>()("ToolRegistryError", {
@@ -17,32 +18,39 @@ export class ToolRegistryError extends Schema.TaggedErrorClass<ToolRegistryError
 }) {}
 
 export interface Definition {
-  readonly descriptor: Descriptor
-  readonly execute: (call: Tool.Call) => Effect.Effect<Common.JsonValue, ToolRegistryError>
+  readonly tool: Tool.Any
+  readonly execute: (call: Call) => Effect.Effect<Common.JsonValue, ToolRegistryError>
 }
 
 export interface Interface {
+  readonly tools: Effect.Effect<ReadonlyArray<Tool.Any>>
   readonly describe: Effect.Effect<ReadonlyArray<Descriptor>>
-  readonly execute: (call: Tool.Call) => Effect.Effect<Common.JsonValue, ToolRegistryError>
+  readonly execute: (call: Call) => Effect.Effect<Common.JsonValue, ToolRegistryError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/agent/ToolRegistry") {}
 
-export type FakeHandler = (call: Tool.Call) => Effect.Effect<Common.JsonValue, ToolRegistryError>
+export type FakeHandler = (call: Call) => Effect.Effect<Common.JsonValue, ToolRegistryError>
 
 export const layerFromDefinitions = (definitions: ReadonlyArray<Definition>) => {
-  const byName = Object.fromEntries(definitions.map((definition) => [definition.descriptor.name, definition]))
+  const byName: Record<string, Definition | undefined> = {}
+  for (const definition of definitions) {
+    byName[definition.tool.name] = definition
+  }
+  const executeDefinition = (call: Call): Effect.Effect<Common.JsonValue, ToolRegistryError> =>
+    Effect.gen(function* () {
+      const definition = byName[call.name]
+      if (definition === undefined) {
+        return yield* new ToolRegistryError({ message: `No tool named ${call.name} is registered`, name: call.name })
+      }
+      return yield* definition.execute(call)
+    })
   return Layer.succeed(
     Service,
     Service.of({
-      describe: Effect.succeed(definitions.map((definition) => definition.descriptor)),
-      execute: Effect.fn("ToolRegistry.execute")(function* (call: Tool.Call) {
-        const definition = byName[call.name]
-        if (definition === undefined) {
-          return yield* new ToolRegistryError({ message: `No tool named ${call.name} is registered`, name: call.name })
-        }
-        return yield* definition.execute(call)
-      }),
+      tools: Effect.succeed(definitions.map((definition) => definition.tool)),
+      describe: Effect.succeed(definitions.map((definition) => descriptorFromTool(definition.tool))),
+      execute: executeDefinition,
     }),
   )
 }
@@ -51,13 +59,13 @@ export const emptyLayer = layerFromDefinitions([])
 
 export const fakeLayer = (
   handlers: Readonly<Record<string, FakeHandler>>,
-  descriptors: ReadonlyArray<Descriptor> = descriptorsFromHandlers(handlers),
+  tools: ReadonlyArray<Tool.Any> = toolsFromHandlers(handlers),
 ) =>
   layerFromDefinitions(
-    descriptors.map((descriptor) => ({
-      descriptor,
-      execute: Effect.fn(`ToolRegistry.fake.${descriptor.name}`)(function* (call: Tool.Call) {
-        const handler = handlers[descriptor.name]
+    tools.map((tool) => ({
+      tool,
+      execute: Effect.fn(`ToolRegistry.fake.${tool.name}`)(function* (call: Call) {
+        const handler = handlers[tool.name]
         if (handler === undefined) {
           return yield* new ToolRegistryError({
             message: `No fake tool named ${call.name} is registered`,
@@ -85,7 +93,12 @@ export const describe = Effect.fn("ToolRegistry.describe.call")(function* () {
   return yield* registry.describe
 })
 
-export const execute = Effect.fn("ToolRegistry.execute.call")(function* (call: Tool.Call) {
+export const tools = Effect.fn("ToolRegistry.tools.call")(function* () {
+  const registry = yield* Service
+  return yield* registry.tools
+})
+
+export const execute = Effect.fn("ToolRegistry.execute.call")(function* (call: Call) {
   const registry = yield* Service
   return yield* registry.execute(call)
 })
@@ -93,29 +106,23 @@ export const execute = Effect.fn("ToolRegistry.execute.call")(function* (call: T
 export interface ShellInput extends Schema.Schema.Type<typeof ShellInput> {}
 export const ShellInput = Schema.Struct({
   command: Schema.String,
-  timeout_ms: Schema.optional(Schema.Int),
-  max_output_bytes: Schema.optional(Schema.Int),
+  timeout_ms: Schema.optionalKey(Schema.Int),
+  max_output_bytes: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Agent.ToolRegistry.ShellInput" })
 
 const shellDefinition = (workspaceRoot: string): Definition => ({
-  descriptor: {
-    name: "shell.command",
+  tool: Tool.make("shell_command", {
     description: "Run a shell command in the current workspace and return capped stdout/stderr.",
-    input_schema: {
-      type: "object",
-      properties: {
-        command: { type: "string" },
-        timeout_ms: { type: "integer" },
-        max_output_bytes: { type: "integer" },
-      },
-      required: ["command"],
-    },
-  },
-  execute: Effect.fn("ToolRegistry.shell.execute")(function* (call: Tool.Call) {
+    parameters: ShellInput,
+    success: Schema.Json,
+    failure: Schema.Json,
+    failureMode: "return",
+  }),
+  execute: Effect.fn("ToolRegistry.shell.execute")(function* (call: Call) {
     const decoded = Schema.decodeUnknownOption(ShellInput)(call.input)
     if (Option.isNone(decoded)) {
       return yield* new ToolRegistryError({
-        message: "shell.command input must include a string command",
+        message: "shell_command input must include a string command",
         name: call.name,
         retryable: false,
       })
@@ -221,5 +228,18 @@ const shellOutputToJson = (output: ShellOutput): Common.JsonValue => ({
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
-const descriptorsFromHandlers = (handlers: Readonly<Record<string, FakeHandler>>): ReadonlyArray<Descriptor> =>
-  Object.keys(handlers).map((name) => ({ name, description: `Fake tool ${name}` }))
+export const descriptorFromTool = (tool: Tool.Any): Descriptor => ({
+  name: tool.name,
+  description: Tool.getDescription(tool) ?? `Tool ${tool.name}`,
+})
+
+const toolsFromHandlers = (handlers: Readonly<Record<string, FakeHandler>>): ReadonlyArray<Tool.Any> =>
+  Object.keys(handlers).map((name) =>
+    Tool.make(name, {
+      description: `Fake tool ${name}`,
+      parameters: Schema.Record(Schema.String, Schema.Json),
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+  )

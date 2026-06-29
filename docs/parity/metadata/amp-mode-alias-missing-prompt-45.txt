@@ -1,0 +1,5 @@
+Error: User message must be provided through stdin or as argument when using execute mode
+
+Either pass a message as an argument: amp --execute "your message"
+Or pipe via stdin: echo "your message" | amp --execute
+[=0u[<u[?25h

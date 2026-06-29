@@ -6,7 +6,7 @@ export const commandAndToolPlugin: PluginEntrypoint = (rika) => {
     "example.echo",
     {
       description: "Echo a JSON input value from an example plugin.",
-      input_schema: { type: "object" },
+      inputSchema: { type: "object" },
     },
     (call) => ({ plugin: "example", input: call.input }),
   )
@@ -22,7 +22,7 @@ export const commandAndToolPlugin: PluginEntrypoint = (rika) => {
 
 export const permissionHookPlugin: PluginEntrypoint = (rika) => {
   rika.on("tool.call", (event) => {
-    if (event.tool === "shell.command") return PermissionPolicy.reject("example plugin blocked shell.command")
+    if (event.tool === "shell_command") return PermissionPolicy.reject("example plugin blocked shell_command")
     return undefined
   })
 }

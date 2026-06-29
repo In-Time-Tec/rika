@@ -3,7 +3,8 @@ import { mkdir, readdir, readFile, stat } from "node:fs/promises"
 import { basename, dirname, relative, resolve } from "node:path"
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
 import { Config } from "@rika/core"
-import { Common, Tool } from "@rika/schema"
+import { Common } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import {
   FileFinder,
   type DirSearchOptions as NativeDirSearchOptions,
@@ -21,6 +22,7 @@ import {
   type SearchResult as NativeSearchResult,
 } from "@ff-labs/fff-bun"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 import "./fff-bun-globals"
 
 const defaultPageSize = 50
@@ -28,6 +30,7 @@ const maxPageSize = 200
 const defaultWaitMs = 5_000
 const defaultTimeBudgetMs = 500
 const defaultMaxFileSize = 10 * 1024 * 1024
+const defaultGrepMode: NativeGrepMode = "plain"
 const hashLength = 4
 
 interface NativeGlobOptions {
@@ -40,28 +43,28 @@ interface NativeGlobOptions {
 export interface FileSearchInput extends Schema.Schema.Type<typeof FileSearchInput> {}
 export const FileSearchInput = Schema.Struct({
   query: Schema.String,
-  page_size: Schema.optional(Schema.Int),
-  page_index: Schema.optional(Schema.Int),
-  current_file: Schema.optional(Schema.String),
-  wait_ms: Schema.optional(Schema.Int),
+  page_size: Schema.optionalKey(Schema.Int),
+  page_index: Schema.optionalKey(Schema.Int),
+  current_file: Schema.optionalKey(Schema.String),
+  wait_ms: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.FffSearch.FileSearchInput" })
 
 export interface GlobInput extends Schema.Schema.Type<typeof GlobInput> {}
 export const GlobInput = Schema.Struct({
   pattern: Schema.String,
-  page_size: Schema.optional(Schema.Int),
-  page_index: Schema.optional(Schema.Int),
-  current_file: Schema.optional(Schema.String),
-  wait_ms: Schema.optional(Schema.Int),
+  page_size: Schema.optionalKey(Schema.Int),
+  page_index: Schema.optionalKey(Schema.Int),
+  current_file: Schema.optionalKey(Schema.String),
+  wait_ms: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.FffSearch.GlobInput" })
 
 export interface DirectorySearchInput extends Schema.Schema.Type<typeof DirectorySearchInput> {}
 export const DirectorySearchInput = Schema.Struct({
   query: Schema.String,
-  page_size: Schema.optional(Schema.Int),
-  page_index: Schema.optional(Schema.Int),
-  current_file: Schema.optional(Schema.String),
-  wait_ms: Schema.optional(Schema.Int),
+  page_size: Schema.optionalKey(Schema.Int),
+  page_index: Schema.optionalKey(Schema.Int),
+  current_file: Schema.optionalKey(Schema.String),
+  wait_ms: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.FffSearch.DirectorySearchInput" })
 
 export const GrepMode = Schema.Literals(["plain", "regex", "fuzzy"]).annotate({
@@ -72,48 +75,48 @@ export type GrepMode = typeof GrepMode.Type
 export interface GrepInput extends Schema.Schema.Type<typeof GrepInput> {}
 export const GrepInput = Schema.Struct({
   query: Schema.String,
-  path: Schema.optional(Schema.String),
-  exclude: Schema.optional(Schema.Array(Schema.String)),
-  mode: Schema.optional(GrepMode),
-  smart_case: Schema.optional(Schema.Boolean),
-  context: Schema.optional(Schema.Int),
-  before_context: Schema.optional(Schema.Int),
-  after_context: Schema.optional(Schema.Int),
-  page_size: Schema.optional(Schema.Int),
-  cursor: Schema.optional(Schema.Int),
-  time_budget_ms: Schema.optional(Schema.Int),
-  max_file_size: Schema.optional(Schema.Int),
-  max_matches_per_file: Schema.optional(Schema.Int),
-  classify_definitions: Schema.optional(Schema.Boolean),
-  wait_ms: Schema.optional(Schema.Int),
+  path: Schema.optionalKey(Schema.String),
+  exclude: Schema.optionalKey(Schema.Array(Schema.String)),
+  mode: Schema.optionalKey(GrepMode),
+  smart_case: Schema.optionalKey(Schema.Boolean),
+  context: Schema.optionalKey(Schema.Int),
+  before_context: Schema.optionalKey(Schema.Int),
+  after_context: Schema.optionalKey(Schema.Int),
+  page_size: Schema.optionalKey(Schema.Int),
+  cursor: Schema.optionalKey(Schema.Int),
+  time_budget_ms: Schema.optionalKey(Schema.Int),
+  max_file_size: Schema.optionalKey(Schema.Int),
+  max_matches_per_file: Schema.optionalKey(Schema.Int),
+  classify_definitions: Schema.optionalKey(Schema.Boolean),
+  wait_ms: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.FffSearch.GrepInput" })
 
 export interface MultiGrepInput extends Schema.Schema.Type<typeof MultiGrepInput> {}
 export const MultiGrepInput = Schema.Struct({
   patterns: Schema.Array(Schema.String),
-  constraints: Schema.optional(Schema.String),
-  exclude: Schema.optional(Schema.Array(Schema.String)),
-  smart_case: Schema.optional(Schema.Boolean),
-  context: Schema.optional(Schema.Int),
-  before_context: Schema.optional(Schema.Int),
-  after_context: Schema.optional(Schema.Int),
-  page_size: Schema.optional(Schema.Int),
-  cursor: Schema.optional(Schema.Int),
-  time_budget_ms: Schema.optional(Schema.Int),
-  max_file_size: Schema.optional(Schema.Int),
-  max_matches_per_file: Schema.optional(Schema.Int),
-  classify_definitions: Schema.optional(Schema.Boolean),
-  wait_ms: Schema.optional(Schema.Int),
+  constraints: Schema.optionalKey(Schema.String),
+  exclude: Schema.optionalKey(Schema.Array(Schema.String)),
+  smart_case: Schema.optionalKey(Schema.Boolean),
+  context: Schema.optionalKey(Schema.Int),
+  before_context: Schema.optionalKey(Schema.Int),
+  after_context: Schema.optionalKey(Schema.Int),
+  page_size: Schema.optionalKey(Schema.Int),
+  cursor: Schema.optionalKey(Schema.Int),
+  time_budget_ms: Schema.optionalKey(Schema.Int),
+  max_file_size: Schema.optionalKey(Schema.Int),
+  max_matches_per_file: Schema.optionalKey(Schema.Int),
+  classify_definitions: Schema.optionalKey(Schema.Boolean),
+  wait_ms: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.FffSearch.MultiGrepInput" })
 
 export interface HealthInput extends Schema.Schema.Type<typeof HealthInput> {}
 export const HealthInput = Schema.Struct({
-  test_path: Schema.optional(Schema.String),
+  test_path: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.FffSearch.HealthInput" })
 
 export interface RescanInput extends Schema.Schema.Type<typeof RescanInput> {}
 export const RescanInput = Schema.Struct({
-  wait_ms: Schema.optional(Schema.Int),
+  wait_ms: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.FffSearch.RescanInput" })
 
 export class FffSearchError extends Schema.TaggedErrorClass<FffSearchError>()("FffSearchError", {
@@ -249,84 +252,98 @@ export const rescan = Effect.fn("FffSearch.rescan.call")(function* (input: Resca
 
 export const toolDefinitions = (service: Interface): ReadonlyArray<ToolRegistry.Definition> => [
   {
-    descriptor: {
-      name: "fffind",
+    tool: Tool.make("fffind", {
       description:
         "Use fff to fuzzy-search repo-relative file paths. Prefer this over shell find/fd/ls for ordinary path discovery; stop after useful results and read/edit the top files.",
-      input_schema: fileSearchInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.fffind")(function* (call: Tool.Call) {
+      parameters: FileSearchInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.fffind")(function* (call: Call) {
       const input = yield* decodeFileSearchInput(call)
       return yield* service.fileSearch(input).pipe(Effect.mapError(toRegistryError("fffind")))
     }),
   },
   {
-    descriptor: {
-      name: "fff.glob",
+    tool: Tool.make("fff_glob", {
       description:
         "Use fff glob filtering for exact path constraints such as **/*.ts. Prefer this over shell glob/fd for file lists.",
-      input_schema: globInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.glob")(function* (call: Tool.Call) {
+      parameters: GlobInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.glob")(function* (call: Call) {
       const input = yield* decodeGlobInput(call)
-      return yield* service.glob(input).pipe(Effect.mapError(toRegistryError("fff.glob")))
+      return yield* service.glob(input).pipe(Effect.mapError(toRegistryError("fff_glob")))
     }),
   },
   {
-    descriptor: {
-      name: "fff.directory_search",
+    tool: Tool.make("fff_directory_search", {
       description: "Use fff to fuzzy-search directories before narrowing path or grep work.",
-      input_schema: directorySearchInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.directory_search")(function* (call: Tool.Call) {
+      parameters: DirectorySearchInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.directory_search")(function* (call: Call) {
       const input = yield* decodeDirectorySearchInput(call)
-      return yield* service.directorySearch(input).pipe(Effect.mapError(toRegistryError("fff.directory_search")))
+      return yield* service.directorySearch(input).pipe(Effect.mapError(toRegistryError("fff_directory_search")))
     }),
   },
   {
-    descriptor: {
-      name: "ffgrep",
+    tool: Tool.make("ffgrep", {
       description:
         "Use fff indexed content search. Prefer this over shell rg/grep for ordinary code search; results include file:line hits and hashline anchors when available.",
-      input_schema: grepInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.ffgrep")(function* (call: Tool.Call) {
+      parameters: GrepInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.ffgrep")(function* (call: Call) {
       const input = yield* decodeGrepInput(call)
       return yield* service.grep(input).pipe(Effect.mapError(toRegistryError("ffgrep")))
     }),
   },
   {
-    descriptor: {
-      name: "fff.multi_grep",
+    tool: Tool.make("fff_multi_grep", {
       description:
         "Use fff multi-pattern OR content search for several literal identifiers in one indexed pass instead of many grep calls.",
-      input_schema: multiGrepInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.multi_grep")(function* (call: Tool.Call) {
+      parameters: MultiGrepInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.multi_grep")(function* (call: Call) {
       const input = yield* decodeMultiGrepInput(call)
-      return yield* service.multiGrep(input).pipe(Effect.mapError(toRegistryError("fff.multi_grep")))
+      return yield* service.multiGrep(input).pipe(Effect.mapError(toRegistryError("fff_multi_grep")))
     }),
   },
   {
-    descriptor: {
-      name: "fff.health",
+    tool: Tool.make("fff_health", {
       description: "Report fff index, watcher, git, frecency, and fallback health for the current workspace.",
-      input_schema: healthInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.health")(function* (call: Tool.Call) {
+      parameters: HealthInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.health")(function* (call: Call) {
       const input = yield* decodeHealthInput(call)
-      return yield* service.health(input).pipe(Effect.mapError(toRegistryError("fff.health")))
+      return yield* service.health(input).pipe(Effect.mapError(toRegistryError("fff_health")))
     }),
   },
   {
-    descriptor: {
-      name: "fff.rescan",
+    tool: Tool.make("fff_rescan", {
       description: "Ask fff to rescan the workspace after large filesystem changes or if search results look stale.",
-      input_schema: rescanInputSchema,
-    },
-    execute: Effect.fn("FffSearch.tool.rescan")(function* (call: Tool.Call) {
+      parameters: RescanInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("FffSearch.tool.rescan")(function* (call: Call) {
       const input = yield* decodeRescanInput(call)
-      return yield* service.rescan(input).pipe(Effect.mapError(toRegistryError("fff.rescan")))
+      return yield* service.rescan(input).pipe(Effect.mapError(toRegistryError("fff_rescan")))
     }),
   },
 ]
@@ -751,95 +768,6 @@ const memoryGrepResult = (
   }
 }
 
-const fileSearchInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    query: { type: "string" },
-    page_size: { type: "integer" },
-    page_index: { type: "integer" },
-    current_file: { type: "string" },
-    wait_ms: { type: "integer" },
-  },
-  required: ["query"],
-}
-
-const globInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    pattern: { type: "string" },
-    page_size: { type: "integer" },
-    page_index: { type: "integer" },
-    current_file: { type: "string" },
-    wait_ms: { type: "integer" },
-  },
-  required: ["pattern"],
-}
-
-const directorySearchInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    query: { type: "string" },
-    page_size: { type: "integer" },
-    page_index: { type: "integer" },
-    current_file: { type: "string" },
-    wait_ms: { type: "integer" },
-  },
-  required: ["query"],
-}
-
-const grepInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    query: { type: "string" },
-    path: { type: "string" },
-    exclude: { type: "array", items: { type: "string" } },
-    mode: { type: "string", enum: ["plain", "regex", "fuzzy"] },
-    smart_case: { type: "boolean" },
-    context: { type: "integer" },
-    before_context: { type: "integer" },
-    after_context: { type: "integer" },
-    page_size: { type: "integer" },
-    cursor: { type: "integer" },
-    time_budget_ms: { type: "integer" },
-    max_file_size: { type: "integer" },
-    max_matches_per_file: { type: "integer" },
-    classify_definitions: { type: "boolean" },
-    wait_ms: { type: "integer" },
-  },
-  required: ["query"],
-}
-
-const multiGrepInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: {
-    patterns: { type: "array", items: { type: "string" } },
-    constraints: { type: "string" },
-    exclude: { type: "array", items: { type: "string" } },
-    smart_case: { type: "boolean" },
-    context: { type: "integer" },
-    before_context: { type: "integer" },
-    after_context: { type: "integer" },
-    page_size: { type: "integer" },
-    cursor: { type: "integer" },
-    time_budget_ms: { type: "integer" },
-    max_file_size: { type: "integer" },
-    max_matches_per_file: { type: "integer" },
-    classify_definitions: { type: "boolean" },
-    wait_ms: { type: "integer" },
-  },
-  required: ["patterns"],
-}
-
-const healthInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: { test_path: { type: "string" } },
-}
-
-const rescanInputSchema: Common.JsonValue = {
-  type: "object",
-  properties: { wait_ms: { type: "integer" } },
-}
-
 const searchOptions = (input: FileSearchInput): NativeSearchOptions => ({
   pageIndex: Math.max(0, input.page_index ?? 0),
   pageSize: clamp(input.page_size ?? defaultPageSize, 1, maxPageSize),
@@ -859,7 +787,7 @@ const directoryOptions = (input: DirectorySearchInput): NativeDirSearchOptions =
 })
 
 const grepOptions = (input: GrepInput): NativeGrepOptions => ({
-  mode: (input.mode ?? "plain") as NativeGrepMode,
+  mode: input.mode ?? defaultGrepMode,
   smartCase: input.smart_case ?? true,
   pageSize: clamp(input.page_size ?? defaultPageSize, 1, maxPageSize),
   timeBudgetMs: clamp(input.time_budget_ms ?? defaultTimeBudgetMs, 0, 60_000),
@@ -1087,25 +1015,28 @@ const anchorForMatch = (workspaceRoot: string, match: NativeGrepResult["items"][
 const hashLine = (content: string, line: number, occurrence: number, salt: number) =>
   createHash("sha256").update(`${line}\0${occurrence}\0${salt}\0${content}`).digest("base64url").slice(0, hashLength)
 
-const aliasField = (call: Tool.Call, from: string, to: string): Tool.Call => {
-  const input = call.input as unknown
+const aliasField = (call: Call, from: string, to: string): Call => {
+  const input = call.input
   if (typeof input !== "object" || input === null || Array.isArray(input)) return call
-  const record = input as Record<string, unknown>
-  if (typeof record[from] !== "string" || record[to] !== undefined) return call
-  return { ...call, input: { ...record, [to]: record[from] } as typeof call.input }
+  const entries = Object.entries(input)
+  const source = entries.find(([key]) => key === from)
+  if (source === undefined || typeof source[1] !== "string" || entries.some(([key]) => key === to)) return call
+  const decoded = Schema.decodeUnknownOption(Common.JsonValue)(Object.fromEntries([...entries, [to, source[1]]]))
+  if (Option.isNone(decoded)) return call
+  return { ...call, input: decoded.value }
 }
 
-const decodeFileSearchInput = (call: Tool.Call) =>
+const decodeFileSearchInput = (call: Call) =>
   decodeToolInput(FileSearchInput, aliasField(call, "pattern", "query"))
-const decodeGlobInput = (call: Tool.Call) => decodeToolInput(GlobInput, aliasField(call, "query", "pattern"))
-const decodeDirectorySearchInput = (call: Tool.Call) =>
+const decodeGlobInput = (call: Call) => decodeToolInput(GlobInput, aliasField(call, "query", "pattern"))
+const decodeDirectorySearchInput = (call: Call) =>
   decodeToolInput(DirectorySearchInput, aliasField(call, "pattern", "query"))
-const decodeGrepInput = (call: Tool.Call) => decodeToolInput(GrepInput, aliasField(call, "pattern", "query"))
-const decodeMultiGrepInput = (call: Tool.Call) => decodeToolInput(MultiGrepInput, call)
-const decodeHealthInput = (call: Tool.Call) => decodeToolInput(HealthInput, call)
-const decodeRescanInput = (call: Tool.Call) => decodeToolInput(RescanInput, call)
+const decodeGrepInput = (call: Call) => decodeToolInput(GrepInput, aliasField(call, "pattern", "query"))
+const decodeMultiGrepInput = (call: Call) => decodeToolInput(MultiGrepInput, call)
+const decodeHealthInput = (call: Call) => decodeToolInput(HealthInput, call)
+const decodeRescanInput = (call: Call) => decodeToolInput(RescanInput, call)
 
-const decodeToolInput = <A>(schema: Schema.ConstraintDecoder<A>, call: Tool.Call) => {
+const decodeToolInput = <A>(schema: Schema.ConstraintDecoder<A>, call: Call) => {
   const decoded = Schema.decodeUnknownOption(schema)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return new ToolRegistry.ToolRegistryError({

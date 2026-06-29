@@ -19,6 +19,8 @@ export interface Card {
   readonly status: CardStatus
   readonly collapsed: boolean
   readonly body?: string
+  readonly tool_name?: string
+  readonly expandable?: boolean
 }
 
 export type TranscriptEntry =
@@ -82,6 +84,7 @@ export interface ViewState {
   readonly focus_index?: number
   readonly expanded_ids: ReadonlySet<string>
   readonly details_expanded: boolean
+  readonly tool_group_expanded: boolean
   readonly queued: ReadonlyArray<string>
   readonly queue_selected: number
   readonly history: ReadonlyArray<string>
@@ -104,6 +107,7 @@ const interactionDefaults = {
   input: emptyInput,
   expanded_ids: new Set<string>() as ReadonlySet<string>,
   details_expanded: false,
+  tool_group_expanded: false,
   queued: [] as ReadonlyArray<string>,
   queue_selected: -1,
   history: [] as ReadonlyArray<string>,
@@ -122,7 +126,7 @@ export const initial = (input: Input): ViewState =>
 export const fromEvents = (input: Input, seed = initialSeed(input)): ViewState =>
   (input.events ?? []).reduce((state, event) => applyEvent(state, event), seed)
 
-const modeDefaultEffort = (mode: Config.Mode): number => (mode === "deep" ? 3 : mode === "smart" ? 2 : 1)
+const modeDefaultEffort = (mode: Config.Mode): number => (mode === "deep" ? 3 : 0)
 
 const initialSeed = (input: Input): ViewState => ({
   thread_id: input.thread_id,
@@ -164,8 +168,16 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
       })
     case "model.reasoning.delta":
       return tick(withReasoningDelta(state, event.data.text))
+    case "tool.call.input.started":
+      return tick(
+        updateCard({ ...state, activity: "running-tools", active: true, streaming_text: "" }, toolInputCard(event)),
+      )
+    case "tool.call.input.ended":
+      return tick({ ...state, activity: "running-tools", active: true, streaming_text: "" })
     case "tool.call.requested":
-      return tick(updateCard({ ...state, activity: "running-tools", active: true, streaming_text: "" }, toolCard(event)))
+      return tick(
+        updateCard({ ...state, activity: "running-tools", active: true, streaming_text: "" }, toolCard(event)),
+      )
     case "tool.call.completed":
       return tick(applyToolResult({ ...state, activity: "streaming", active: true }, event))
     case "artifact.created":
@@ -188,7 +200,7 @@ export const withMode = (state: ViewState, mode: Config.Mode): ViewState => ({
 
 export const cycleReasoning = (state: ViewState): ViewState => ({
   ...state,
-  reasoning_effort: (state.reasoning_effort % 3) + 1,
+  reasoning_effort: state.mode === "deep" ? (state.reasoning_effort % 3) + 1 : 0,
 })
 
 export const toggleFastMode = (state: ViewState): ViewState => ({ ...state, fast_mode: !state.fast_mode })
@@ -226,7 +238,7 @@ export const withPalette = (state: ViewState): ViewState => ({
   palette: { open: true, query: "", selected: 0 },
   shortcuts_open: false,
   notice:
-    "Command palette: /mode, /skills, /skill, /threads, /search, /new, /thread, /archive, /unarchive, /share, /reference, /review, /exit",
+    "Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, /debug, /ide, /mcp, /mode rush, /mode smart, /mode deep",
 })
 
 const withoutNotice = (state: ViewState): ViewState => {
@@ -247,6 +259,44 @@ export const backspace = (state: ViewState): ViewState => {
   return { ...state, input: { text: next, cursor: cursor - 1 } }
 }
 
+export const deleteForward = (state: ViewState): ViewState => {
+  const { text, cursor } = state.input
+  if (cursor >= text.length) return state
+  return { ...state, input: { text: `${text.slice(0, cursor)}${text.slice(cursor + 1)}`, cursor } }
+}
+
+export const deleteWordBackward = (state: ViewState): ViewState => {
+  const { text, cursor } = state.input
+  const end = clampCursor(text, cursor)
+  const start = wordStartBefore(text, end)
+  if (start === end) return state
+  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+}
+
+export const deleteWordForward = (state: ViewState): ViewState => {
+  const { text, cursor } = state.input
+  const start = clampCursor(text, cursor)
+  const end = wordEndAfter(text, start)
+  if (start === end) return state
+  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+}
+
+export const deleteToLineStart = (state: ViewState): ViewState => {
+  const { text, cursor } = state.input
+  const end = clampCursor(text, cursor)
+  const start = lineStartBefore(text, end)
+  if (start === end) return state
+  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+}
+
+export const deleteToLineEnd = (state: ViewState): ViewState => {
+  const { text, cursor } = state.input
+  const start = clampCursor(text, cursor)
+  const end = lineEndAfter(text, start)
+  if (start === end) return state
+  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+}
+
 export const moveCursorLeft = (state: ViewState): ViewState => ({
   ...state,
   input: { ...state.input, cursor: Math.max(0, state.input.cursor - 1) },
@@ -264,7 +314,48 @@ export const moveCursorEnd = (state: ViewState): ViewState => ({
   input: { ...state.input, cursor: state.input.text.length },
 })
 
+export const moveWordLeft = (state: ViewState): ViewState => ({
+  ...state,
+  input: {
+    ...state.input,
+    cursor: wordStartBefore(state.input.text, clampCursor(state.input.text, state.input.cursor)),
+  },
+})
+
+export const moveWordRight = (state: ViewState): ViewState => ({
+  ...state,
+  input: { ...state.input, cursor: wordEndAfter(state.input.text, clampCursor(state.input.text, state.input.cursor)) },
+})
+
 export const newline = (state: ViewState): ViewState => insertText(state, "\n")
+
+const clampCursor = (text: string, cursor: number): number => Math.max(0, Math.min(text.length, cursor))
+
+const isSpace = (text: string): boolean => /\s/.test(text)
+
+const wordStartBefore = (text: string, cursor: number): number => {
+  let index = cursor
+  while (index > 0 && isSpace(text[index - 1] ?? "")) index -= 1
+  while (index > 0 && !isSpace(text[index - 1] ?? "")) index -= 1
+  return index
+}
+
+const wordEndAfter = (text: string, cursor: number): number => {
+  let index = cursor
+  while (index < text.length && isSpace(text[index] ?? "")) index += 1
+  while (index < text.length && !isSpace(text[index] ?? "")) index += 1
+  return index
+}
+
+const lineStartBefore = (text: string, cursor: number): number => {
+  const index = text.slice(0, cursor).lastIndexOf("\n")
+  return index === -1 ? 0 : index + 1
+}
+
+const lineEndAfter = (text: string, cursor: number): number => {
+  const index = text.indexOf("\n", cursor)
+  return index === -1 ? text.length : index
+}
 
 export const clearInput = (state: ViewState): ViewState =>
   setFocus({ ...state, input: emptyInput, history_index: -1, nav_index: -1 }, undefined)
@@ -292,7 +383,9 @@ export const historyNext = (state: ViewState): ViewState => {
 }
 
 export const userMessageTexts = (state: ViewState): ReadonlyArray<string> =>
-  state.entries.flatMap((entry) => (entry.kind === "message" && entry.message.role === "user" ? [entry.message.text] : []))
+  state.entries.flatMap((entry) =>
+    entry.kind === "message" && entry.message.role === "user" ? [entry.message.text] : [],
+  )
 
 export const navPrevMessage = (state: ViewState): ViewState => {
   const count = userMessageTexts(state).length
@@ -345,22 +438,39 @@ export const focusNext = (state: ViewState): ViewState => {
 export const focusedCard = (state: ViewState): Card | undefined =>
   state.focus_index === undefined ? undefined : state.cards[state.focus_index]
 
+export const toggleCard = (state: ViewState, id: string): ViewState => {
+  const card = state.cards.find((candidate) => candidate.id === id)
+  if (card === undefined || !isCardExpandable(card)) return state
+  const next = new Set(state.expanded_ids)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  return { ...state, expanded_ids: next }
+}
+
+export const toggleToolGroup = (state: ViewState): ViewState => ({
+  ...state,
+  tool_group_expanded: !state.tool_group_expanded,
+})
+
 export const toggleDetails = (state: ViewState): ViewState => {
   const card = focusedCard(state)
-  if (card !== undefined) {
-    const next = new Set(state.expanded_ids)
-    if (next.has(card.id)) next.delete(card.id)
-    else next.add(card.id)
-    return { ...state, expanded_ids: next }
+  if (card !== undefined) return toggleCard(state, card.id)
+  return {
+    ...state,
+    details_expanded: !state.details_expanded,
+    thinking: { ...state.thinking, visible: !state.thinking.visible },
   }
-  return { ...state, details_expanded: !state.details_expanded, thinking: { ...state.thinking, visible: !state.thinking.visible } }
 }
 
 export const isCardCollapsed = (state: ViewState, card: Card): boolean => {
+  if (!isCardExpandable(card)) return true
   if (state.expanded_ids.has(card.id)) return false
   if (state.details_expanded) return false
   return card.collapsed
 }
+
+export const isCardExpandable = (card: Card): boolean =>
+  card.expandable !== false && card.body !== undefined && card.body.length > 0
 
 export const enqueueMessage = (state: ViewState, message: string): ViewState => ({
   ...state,
@@ -449,7 +559,13 @@ export const closeShortcuts = (state: ViewState): ViewState => ({ ...state, shor
 
 export const openFilePicker = (state: ViewState, files: ReadonlyArray<string>): ViewState => ({
   ...withoutNotice(state),
-  filepicker: { open: true, query: "", selected: 0, kind: "file", items: files.map((file) => ({ label: file, insert: file })) },
+  filepicker: {
+    open: true,
+    query: "",
+    selected: 0,
+    kind: "file",
+    items: files.map((file) => ({ label: file, insert: file })),
+  },
 })
 
 export const openThreadPicker = (state: ViewState, items: ReadonlyArray<PickerItem>): ViewState => ({
@@ -536,48 +652,76 @@ const subagentCard = (event: Event.SubagentCompleted): Card => ({
   body: [event.data.summary, ...event.data.evidence.map((evidence) => `- ${evidence}`)].join("\n"),
 })
 
-const toolCard = (event: Event.ToolCallRequested): Card => ({
-  id: event.data.call.id,
+const toolCard = (event: Event.ToolCallRequested): Card => {
+  const body = toolRequestBody(event.data.call.name, event.data.call.input)
+  return {
+    id: event.data.call.id,
+    kind: "tool",
+    title: toolRequestTitle(event.data.call.name, event.data.call.input),
+    subtitle: "",
+    status: "running",
+    collapsed: true,
+    ...(body === undefined ? {} : { body }),
+    tool_name: event.data.call.name,
+    expandable: !isReadTool(event.data.call.name) && body !== undefined && body.length > 0,
+  }
+}
+
+const toolInputCard = (event: Event.ToolCallInputStarted): Card => ({
+  id: event.data.id,
   kind: "tool",
-  title: event.data.call.name,
-  subtitle: toolTarget(event.data.call.input),
+  title: event.data.name,
+  subtitle: "",
   status: "running",
   collapsed: true,
-  body: jsonSummary(event.data.call.input),
+  body: "",
+  tool_name: event.data.name,
+  expandable: false,
 })
-
-const toolTarget = (input: unknown): string => {
-  if (typeof input !== "object" || input === null || Array.isArray(input)) return ""
-  const record = input as Record<string, unknown>
-  const value = record.path ?? record.query ?? record.pattern ?? record.command ?? record.file
-  if (typeof value === "string") return value
-  const queries = record.queries
-  if (Array.isArray(queries) && typeof queries[0] === "string") return queries[0]
-  return ""
-}
 
 const applyToolResult = (state: ViewState, event: Event.ToolCallCompleted): ViewState => {
   const result = event.data.result
   const existing = state.cards.find((card) => card.id === result.id)
-  const next = updateCard(state, {
+  const toolName = existing?.tool_name ?? result.name
+  const status = result.status === "success" ? "success" : "error"
+  const errorBody = result.error?.message ?? "Tool failed"
+  if (isReadTool(toolName)) {
+    return updateCard(state, {
+      id: result.id,
+      kind: "tool",
+      title: existing?.title ?? toolReadTitle(result.output),
+      subtitle: result.status === "success" ? "" : errorBody,
+      status,
+      collapsed: true,
+      tool_name: toolName,
+      expandable: false,
+    })
+  }
+  const diff = result.status === "success" ? extractPierreDiff(result.output) : undefined
+  if (diff !== undefined) {
+    return updateCard(state, {
+      id: result.id,
+      kind: "tool",
+      title: editedTitle(toolName, diff),
+      subtitle: "",
+      status,
+      collapsed: true,
+      body: diff.body,
+      tool_name: toolName,
+      expandable: true,
+    })
+  }
+  const body = result.status === "success" ? toolResultBody(toolName, result.output) : errorBody
+  return updateCard(state, {
     id: result.id,
     kind: "tool",
-    title: result.name,
-    subtitle: existing?.subtitle ?? "",
-    status: result.status === "success" ? "success" : "error",
+    title: existing?.title ?? toolResultTitle(toolName, result.output),
+    subtitle: "",
+    status,
     collapsed: true,
-    body: result.status === "success" ? jsonSummary(result.output) : (result.error?.message ?? "Tool failed"),
-  })
-  const diff = extractDiff(result.output)
-  if (diff === undefined) return next
-  return pushCard(next, {
-    id: `${result.id}:diff`,
-    kind: "diff",
-    title: "File diff",
-    subtitle: diff,
-    status: result.status === "success" ? "success" : "error",
-    collapsed: true,
-    body: "Pierre diff metadata is available for expansion.",
+    ...(body === undefined ? {} : { body }),
+    tool_name: toolName,
+    expandable: body !== undefined && body.length > 0,
   })
 }
 
@@ -637,18 +781,109 @@ const jsonSummary = (value: Common.JsonValue | undefined) => {
   return `${text.slice(0, 800)}\n… truncated`
 }
 
-const extractDiff = (value: Common.JsonValue | undefined): string | undefined => {
+const toolRequestTitle = (name: string, input: Common.JsonValue): string => {
+  const lower = name.toLowerCase()
+  if (isReadTool(name)) return toolReadTitle(input)
+  if (lower === "write") return withTarget("Write", pathFrom(input))
+  if (lower.includes("edit") || lower === "apply_patch") return withTarget("Edit", pathFrom(input))
+  if (isCommandTool(name)) {
+    const command = stringField(input, "command") ?? stringField(input, "cmd") ?? stringField(input, "script")
+    return command === undefined ? "Run command" : `$ ${oneLine(command, 160)}`
+  }
+  if (lower.includes("grep")) {
+    const pattern = stringField(input, "pattern") ?? stringField(input, "query")
+    const path = pathFrom(input)
+    return ["Grep", path, pattern === undefined ? undefined : quoted(oneLine(pattern, 80))]
+      .filter((part): part is string => part !== undefined && part.length > 0)
+      .join(" ")
+  }
+  if (isSearchTool(name)) {
+    const query = searchQuery(input)
+    return query === undefined ? "Search" : `Search ${oneLine(query, 120)}`
+  }
+  return withTarget(humanToolName(name), pathFrom(input) ?? searchQuery(input))
+}
+
+const toolReadTitle = (value: Common.JsonValue | undefined): string => {
+  const path = pathFrom(value)
+  return path === undefined ? "Read" : `Read ${path}${lineRangeSuffix(value)}`
+}
+
+const toolRequestBody = (name: string, input: Common.JsonValue): string | undefined => {
+  if (isReadTool(name)) return undefined
+  if (isCommandTool(name)) {
+    const command = stringField(input, "command") ?? stringField(input, "cmd") ?? stringField(input, "script")
+    if (command !== undefined) return command
+  }
+  const text = jsonSummary(input)
+  return text.length === 0 ? undefined : text
+}
+
+const toolResultTitle = (name: string, output: Common.JsonValue | undefined): string =>
+  withTarget(humanToolName(name), pathFrom(output) ?? searchQuery(output))
+
+const toolResultBody = (name: string, output: Common.JsonValue | undefined): string | undefined => {
+  if (output === undefined) return undefined
+  if (typeof output === "string") return output.length === 0 ? undefined : limitBlock(output)
+  if (isJsonObject(output)) {
+    const stdout = stringField(output, "stdout")
+    const stderr = stringField(output, "stderr")
+    if (stdout !== undefined || stderr !== undefined) {
+      const chunks = [stdout, stderr].filter((chunk): chunk is string => chunk !== undefined && chunk.length > 0)
+      return limitBlock(chunks.join("\n").trimEnd())
+    }
+    const results = arrayField(output, "results") ?? arrayField(output, "matches")
+    if (results !== undefined) return limitBlock(renderResultList(results))
+    const content = isReadTool(name)
+      ? undefined
+      : (stringField(output, "content") ?? stringField(output, "text") ?? stringField(output, "summary"))
+    if (content !== undefined && content.length > 0) return limitBlock(content)
+  }
+  const text = jsonSummary(output)
+  return text.length === 0 ? undefined : text
+}
+
+const renderResultList = (items: ReadonlyArray<Common.JsonValue>): string => {
+  const rows = items.slice(0, 30).map(renderResultItem)
+  if (items.length > rows.length) rows.push(`… ${items.length - rows.length} more results`)
+  return rows.join("\n")
+}
+
+const renderResultItem = (item: Common.JsonValue): string => {
+  if (!isJsonObject(item)) return jsonSummary(item)
+  const path = pathFrom(item) ?? stringField(item, "title") ?? stringField(item, "name")
+  const line = numberField(item, "line") ?? numberField(item, "line_number") ?? numberField(item, "start_line")
+  const text =
+    stringField(item, "text") ??
+    stringField(item, "snippet") ??
+    stringField(item, "content") ??
+    stringField(item, "summary")
+  const label = path === undefined ? undefined : line === undefined ? path : `${path}:${line}`
+  if (label !== undefined && text !== undefined) return `${label}\n  ${oneLine(text, 220)}`
+  if (label !== undefined) return label
+  if (text !== undefined) return text
+  return jsonSummary(item)
+}
+
+interface RenderedDiff {
+  readonly path: string
+  readonly additions: number
+  readonly deletions: number
+  readonly body: string
+}
+
+const extractPierreDiff = (value: Common.JsonValue | undefined): RenderedDiff | undefined => {
   if (Array.isArray(value)) {
     for (const item of value) {
-      const found = extractDiff(item)
+      const found = extractPierreDiff(item)
       if (found !== undefined) return found
     }
     return undefined
   }
   if (!isJsonObject(value)) return undefined
-  if (isPierreDiff(value)) return diffSubtitle(value)
+  if (isPierreDiff(value)) return renderPierreDiff(value)
   for (const child of Object.values(value)) {
-    const found = extractDiff(child)
+    const found = extractPierreDiff(child)
     if (found !== undefined) return found
   }
   return undefined
@@ -657,13 +892,148 @@ const extractDiff = (value: Common.JsonValue | undefined): string | undefined =>
 const isPierreDiff = (value: Record<string, Common.JsonValue>) =>
   value.kind === "diff" && value.renderer === "@pierre/diffs"
 
-const diffSubtitle = (value: Record<string, Common.JsonValue>) => {
+const renderPierreDiff = (value: Record<string, Common.JsonValue>): RenderedDiff | undefined => {
   const fileDiff = value.file_diff
-  if (isJsonObject(fileDiff)) {
-    const name = fileDiff.name
-    if (typeof name === "string") return `${name} · collapsed`
+  if (!isJsonObject(fileDiff)) return undefined
+  const path = stringField(fileDiff, "name") ?? "diff"
+  const deletionLines = stringArrayField(fileDiff, "deletionLines")
+  const additionLines = stringArrayField(fileDiff, "additionLines")
+  const hunks = arrayField(fileDiff, "hunks")?.filter(isJsonObject) ?? []
+  const body: Array<string> = [`diff -- ${path}`]
+  let additions = 0
+  let deletions = 0
+  for (const hunk of hunks) {
+    body.push(hunkSpec(hunk))
+    const content = arrayField(hunk, "hunkContent")?.filter(isJsonObject) ?? []
+    for (const part of content) {
+      if (part.type === "context") {
+        const count = numberField(part, "lines") ?? 0
+        const deletionStart = numberField(part, "deletionLineIndex") ?? 0
+        const additionStart = numberField(part, "additionLineIndex") ?? 0
+        for (let index = 0; index < count; index += 1) {
+          body.push(` ${diffLine(deletionLines[deletionStart + index] ?? additionLines[additionStart + index] ?? "")}`)
+        }
+      }
+      if (part.type === "change") {
+        const deletionCount = numberField(part, "deletions") ?? 0
+        const additionCount = numberField(part, "additions") ?? 0
+        const deletionStart = numberField(part, "deletionLineIndex") ?? 0
+        const additionStart = numberField(part, "additionLineIndex") ?? 0
+        deletions += deletionCount
+        additions += additionCount
+        for (let index = 0; index < deletionCount; index += 1) {
+          body.push(`-${diffLine(deletionLines[deletionStart + index] ?? "")}`)
+        }
+        for (let index = 0; index < additionCount; index += 1) {
+          body.push(`+${diffLine(additionLines[additionStart + index] ?? "")}`)
+        }
+      }
+    }
   }
-  return "collapsed"
+  return { path, additions, deletions, body: limitBlock(body.join("\n")) }
+}
+
+const hunkSpec = (hunk: Record<string, Common.JsonValue>): string => {
+  const spec = stringField(hunk, "hunkSpecs")
+  if (spec !== undefined) return spec.trimEnd()
+  const deletionStart = numberField(hunk, "deletionStart") ?? 0
+  const deletionCount = numberField(hunk, "deletionCount") ?? 0
+  const additionStart = numberField(hunk, "additionStart") ?? 0
+  const additionCount = numberField(hunk, "additionCount") ?? 0
+  return `@@ -${deletionStart},${deletionCount} +${additionStart},${additionCount} @@`
+}
+
+const diffLine = (line: string): string => line.replace(/\r?\n$/, "")
+
+const editedTitle = (name: string, diff: RenderedDiff): string => {
+  const verb = name.toLowerCase() === "write" ? "Wrote" : "Edited"
+  const stats = `${diff.additions > 0 ? ` +${diff.additions}` : ""}${diff.deletions > 0 ? ` -${diff.deletions}` : ""}`
+  return `${verb} ${diff.path}${stats}`
+}
+
+const isReadTool = (name: string): boolean => name.toLowerCase() === "read" || name.toLowerCase().endsWith(".read")
+
+const isCommandTool = (name: string): boolean => {
+  const lower = name.toLowerCase()
+  return lower === "bash" || lower === "shell" || lower.includes("shell") || lower.includes("command")
+}
+
+const isSearchTool = (name: string): boolean => {
+  const lower = name.toLowerCase()
+  return lower.includes("search") || lower.includes("find")
+}
+
+const withTarget = (verb: string, target: string | undefined): string =>
+  target === undefined || target.length === 0 ? verb : `${verb} ${target}`
+
+const humanToolName = (name: string): string => {
+  const words = name
+    .replace(/[-_.]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((word) => word.length > 0)
+  if (words.length === 0) return "Tool"
+  return words.map((word) => `${word[0]?.toUpperCase() ?? ""}${word.slice(1)}`).join(" ")
+}
+
+const pathFrom = (value: Common.JsonValue | undefined): string | undefined => {
+  if (!isJsonObject(value)) return undefined
+  return stringField(value, "path") ?? stringField(value, "file") ?? stringField(value, "name")
+}
+
+const searchQuery = (value: Common.JsonValue | undefined): string | undefined => {
+  if (!isJsonObject(value)) return undefined
+  const direct = stringField(value, "query") ?? stringField(value, "pattern")
+  if (direct !== undefined) return direct
+  const queries = arrayField(value, "queries")
+  const first = queries?.[0]
+  return typeof first === "string" ? first : undefined
+}
+
+const lineRangeSuffix = (value: Common.JsonValue | undefined): string => {
+  if (!isJsonObject(value)) return ""
+  const start =
+    numberField(value, "start_line") ?? numberField(isJsonObject(value.range) ? value.range : undefined, "start_line")
+  const end =
+    numberField(value, "end_line") ?? numberField(isJsonObject(value.range) ? value.range : undefined, "end_line")
+  if (start === undefined || end === undefined) return ""
+  return start === end ? ` L${start}` : ` L${start}-${end}`
+}
+
+const quoted = (value: string): string => `"${value}"`
+
+const oneLine = (value: string, max: number): string => {
+  const text = value.replace(/\s+/g, " ").trim()
+  if (text.length <= max) return text
+  return `${text.slice(0, Math.max(0, max - 1))}…`
+}
+
+const limitBlock = (value: string): string => {
+  if (value.length <= 12000) return value
+  return `${value.slice(0, 12000)}\n… truncated`
+}
+
+const stringField = (value: Common.JsonValue | undefined, key: string): string | undefined => {
+  if (!isJsonObject(value)) return undefined
+  const field = value[key]
+  return typeof field === "string" && field.length > 0 ? field : undefined
+}
+
+const numberField = (value: Common.JsonValue | undefined, key: string): number | undefined => {
+  if (!isJsonObject(value)) return undefined
+  const field = value[key]
+  return typeof field === "number" && Number.isFinite(field) ? field : undefined
+}
+
+const arrayField = (value: Common.JsonValue | undefined, key: string): ReadonlyArray<Common.JsonValue> | undefined => {
+  if (!isJsonObject(value)) return undefined
+  const field = value[key]
+  return Array.isArray(field) ? field : undefined
+}
+
+const stringArrayField = (value: Common.JsonValue | undefined, key: string): ReadonlyArray<string> => {
+  const field = arrayField(value, key)
+  return field?.filter((item): item is string => typeof item === "string") ?? []
 }
 
 const isJsonObject = (value: Common.JsonValue | undefined): value is Record<string, Common.JsonValue> =>

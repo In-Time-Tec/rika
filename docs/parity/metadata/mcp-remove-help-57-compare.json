@@ -1,0 +1,75 @@
+{
+  "row": 57,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T11:20:02Z",
+  "surface": "CLI mcp remove help",
+  "state": "MCP remove --help and -h flags",
+  "commands": {
+    "amp_mcp_remove_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp remove --help",
+    "amp_mcp_remove_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp remove -h",
+    "rika_mcp_remove_help_before": "bun packages/cli/src/main.ts mcp remove --help",
+    "rika_mcp_remove_h_before": "bun packages/cli/src/main.ts mcp remove -h",
+    "rika_mcp_remove_help_after": "bun packages/cli/src/main.ts mcp remove --help",
+    "rika_mcp_remove_h_after": "bun packages/cli/src/main.ts mcp remove -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-remove-help-57.txt docs/parity/metadata/rika-mcp-remove-help-57.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-remove-help-short-57.txt docs/parity/metadata/rika-mcp-remove-help-short-57.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-remove-help-stdout-57.txt docs/parity/metadata/rika-mcp-remove-help-stdout-57.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-remove-help-stderr-57.txt docs/parity/metadata/rika-mcp-remove-help-stderr-57.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_remove_help": 0,
+    "amp_mcp_remove_h": 0,
+    "rika_mcp_remove_help_before": 0,
+    "rika_mcp_remove_h_before": 0,
+    "rika_mcp_remove_help_after": 0,
+    "rika_mcp_remove_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_remove_help": 1981,
+    "amp_mcp_remove_h": 1981,
+    "rika_mcp_remove_help_before": 657,
+    "rika_mcp_remove_h_before": 657,
+    "rika_mcp_remove_help_after": 1981,
+    "rika_mcp_remove_h_after": 1981,
+    "stdout": 1966,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_mcp_remove_help": "975b644f6a01c7c8fed62cd30ca9d27d07c36bb724fe1c3c42ce3f198c036957",
+    "amp_mcp_remove_h": "975b644f6a01c7c8fed62cd30ca9d27d07c36bb724fe1c3c42ce3f198c036957",
+    "rika_mcp_remove_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_remove_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_remove_help_after": "975b644f6a01c7c8fed62cd30ca9d27d07c36bb724fe1c3c42ce3f198c036957",
+    "rika_mcp_remove_h_after": "975b644f6a01c7c8fed62cd30ca9d27d07c36bb724fe1c3c42ce3f198c036957"
+  },
+  "artifacts": {
+    "amp_mcp_remove_help": "docs/parity/metadata/amp-mcp-remove-help-57.txt",
+    "amp_mcp_remove_h": "docs/parity/metadata/amp-mcp-remove-help-short-57.txt",
+    "amp_mcp_remove_stdout": "docs/parity/metadata/amp-mcp-remove-help-stdout-57.txt",
+    "amp_mcp_remove_stderr": "docs/parity/metadata/amp-mcp-remove-help-stderr-57.txt",
+    "rika_mcp_remove_help_before": "docs/parity/metadata/rika-mcp-remove-help-57-before.txt",
+    "rika_mcp_remove_h_before": "docs/parity/metadata/rika-mcp-remove-help-short-57-before.txt",
+    "rika_mcp_remove_help_after": "docs/parity/metadata/rika-mcp-remove-help-57.txt",
+    "rika_mcp_remove_h_after": "docs/parity/metadata/rika-mcp-remove-help-short-57.txt",
+    "rika_mcp_remove_stdout": "docs/parity/metadata/rika-mcp-remove-help-stdout-57.txt",
+    "rika_mcp_remove_stderr": "docs/parity/metadata/rika-mcp-remove-help-stderr-57.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1966,
+    "stderr_bytes": 15,
+    "stdout_sha256": "b6f90972e2e0867b2b7d2198109f61e9a0da75189cde5c968c7fc84172802228",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Ohm",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp remove --help and mcp remove -h combined bytes, exit code, and stdout/stderr split only. MCP remove command behavior, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

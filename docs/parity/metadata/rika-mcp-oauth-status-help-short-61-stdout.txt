@@ -1,0 +1,9 @@
+Usage: amp mcp oauth status [options] <server-name>
+
+Show OAuth status for an MCP server
+
+Arguments:
+  server-name  Name of the MCP server
+
+Options:
+  -h, --help   display help for command

@@ -16,9 +16,24 @@ describe("TUI remote session", () => {
   test("runs as a thin client over the shared backend SDK", async () => {
     const backend = fakeBackend()
     const rendered: Array<ViewState.ViewState> = []
-    const keys = ["hello", "/threads", "/new", "/thread thread_remote_initial", "/archive", "/unarchive", "/exit"].flatMap(
-      line,
-    )
+    const keys = [
+      "hello",
+      "/welcome",
+      "/threads",
+      "/new",
+      "/thread thread_remote_initial",
+      "/archive",
+      "/unarchive",
+      "/version",
+      "/credits",
+      "/ast-grep outline status",
+      "/debug page logs",
+      "/debug copy command",
+      "/ide connect",
+      "/mcp authenticate",
+      "/mcp info",
+      "/exit",
+    ].flatMap(line)
 
     const exitCode = await Effect.runPromise(
       RemoteSession.run({ workspace_root: workspaceRoot, mode: "smart" }).pipe(
@@ -36,7 +51,34 @@ describe("TUI remote session", () => {
     expect(frames).toContain("Resumed thread thread_remote_initial")
     expect(frames).toContain("Archived thread_remote_initial")
     expect(frames).toContain("Unarchived thread_remote_initial")
+    expect(frames).toContain("Rika 0.0.0")
+    expect(frames).toContain("Rika is Amp-compatible software.")
+    expect(frames).toContain("ast-grep outline status: ready")
+    expect(frames).toContain("Debug page logs are empty.")
+    expect(frames).toContain("Debug command copied.")
+    expect(frames).toContain("IDE connection requested.")
+    expect(frames).toContain("MCP authentication requested.")
+    expect(frames).toContain("No MCP servers connected.")
+    expect(frames).not.toContain("Unknown command /welcome")
     expect(backend.turns).toEqual(["hello"])
+  })
+
+  test("relaunch exits after recording a relaunch notice", async () => {
+    const backend = fakeBackend()
+    const rendered: Array<ViewState.ViewState> = []
+
+    const exitCode = await Effect.runPromise(
+      RemoteSession.run({ workspace_root: workspaceRoot, mode: "smart" }).pipe(
+        Effect.provide(RemoteSession.layerFromClient(backend.client)),
+        Effect.provide(Adapter.memoryLayer({ rendered, keys: line("/relaunch") })),
+        Effect.provide(Ticker.memoryLayer),
+      ),
+    )
+
+    const frames = text(rendered)
+    expect(exitCode).toBe(0)
+    expect(frames).toContain("Relaunch requested. Start Rika again after this session exits.")
+    expect(backend.turns).toEqual([])
   })
 })
 

@@ -1,0 +1,131 @@
+{
+  "row": 15,
+  "generated_at": "2026-06-29T04:37:02.069Z",
+  "surface": "Startup & status line",
+  "state": "Empty startup, deep tier visible",
+  "method": {
+    "launcher": "Ghostty.app via open -na and CoreGraphics window-id discovery",
+    "count": 6,
+    "interval_ms": 100,
+    "settle_ms": 2500,
+    "focus_ms": 200,
+    "workspace": "/Users/dallen.pyrah/projects/rika",
+    "out_dir": "docs/parity/screenshots"
+  },
+  "launches": [
+    {
+      "label": "amp",
+      "run_id": "rika-parity-startup-15-1782707805953-amp",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-startup-15-1782707805953-amp' AMP_SKIP_UPDATE_CHECK=1 amp",
+      "ghostty_pid": 79652,
+      "window_id": 32739,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    },
+    {
+      "label": "rika",
+      "run_id": "rika-parity-startup-15-1782707805953-rika",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-startup-15-1782707805953-rika' RIKA_DATA_DIR='/tmp/rika-parity-data-source-15' bun packages/cli/src/main.ts interactive --ephemeral --mode deep",
+      "ghostty_pid": 79715,
+      "window_id": 32747,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    }
+  ],
+  "captures": [
+    {
+      "frame": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-15-01.png",
+        "sha256": "ecdeac2f2e783cd064e6a1a64a3de5099be0bb0a2dcb0dcf2ca157b64645782a",
+        "width": 1828,
+        "height": 1366
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-15-01.png",
+        "sha256": "3529990f08ca93cf5974d65b191d30b19bc733c82a5a58d74165ecddac64bf55",
+        "width": 1840,
+        "height": 1372
+      }
+    },
+    {
+      "frame": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-15-02.png",
+        "sha256": "08fba4eac1c7cb3ec1dfe807d6737b2e5948c3786adf7c642359f1225a6eac07",
+        "width": 1902,
+        "height": 1400
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-15-02.png",
+        "sha256": "27af587506303432573f916790227e43ff9875604fb148fc01706ee02d4c04fc",
+        "width": 1872,
+        "height": 1386
+      }
+    },
+    {
+      "frame": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-15-03.png",
+        "sha256": "f68d003874bc3e4a792f29410e7985e2025d10869428a60764d2d71269fb7d98",
+        "width": 1852,
+        "height": 1376
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-15-03.png",
+        "sha256": "d1b207d2bee0d30f8139714d2ebbe6a1961ad00a573ab48a767b72ac18f734ce",
+        "width": 1918,
+        "height": 1406
+      }
+    },
+    {
+      "frame": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-15-04.png",
+        "sha256": "af563c841eaab5ba10715191b789b7aeda64ff1b316220e7179ea1593f43a3cb",
+        "width": 1872,
+        "height": 1386
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-15-04.png",
+        "sha256": "45a064b50e2d91737c6ba228af9e5bb3027730a0f7ecc97c49df743ef0e3293c",
+        "width": 1852,
+        "height": 1376
+      }
+    },
+    {
+      "frame": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-15-05.png",
+        "sha256": "3093a77b623d5c290d017a57699080de9aa534b1d07cbc03f53ce0f6ff7bb0b4",
+        "width": 1906,
+        "height": 1400
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-15-05.png",
+        "sha256": "5e4a730ee37f11f8a81d50e8c9b4c3924378db5e1179a4e300e8ef46708a0bb6",
+        "width": 1852,
+        "height": 1376
+      }
+    },
+    {
+      "frame": 6,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-15-06.png",
+        "sha256": "fb52e939f42815a1baf280def9d78621ce8a84b3bcf0f36abe0b875d71278bbc",
+        "width": 1902,
+        "height": 1400
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-15-06.png",
+        "sha256": "c278689d97406b9ba73a7e907cf540fdb3029329756609c4789fb82a352ed9d5",
+        "width": 1936,
+        "height": 1414
+      }
+    }
+  ]
+}

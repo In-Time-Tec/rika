@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Effect, Exit, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
+import { AiError } from "effect/unstable/ai"
 import { OpenAi, Provider, Retry } from "../src/index"
 
 const request: Provider.GenerateRequest = {

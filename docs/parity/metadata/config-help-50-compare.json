@@ -1,0 +1,61 @@
+{
+  "row": 50,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T09:58:14Z",
+  "surface": "CLI config help",
+  "state": "Config --help and -h flags",
+  "commands": {
+    "amp_config_help": "AMP_SKIP_UPDATE_CHECK=1 amp config --help",
+    "amp_config_h": "AMP_SKIP_UPDATE_CHECK=1 amp config -h",
+    "rika_config_help_before": "bun packages/cli/src/main.ts config --help",
+    "rika_config_h_before": "bun packages/cli/src/main.ts config -h",
+    "rika_config_help_after": "bun packages/cli/src/main.ts config --help",
+    "rika_config_h_after": "bun packages/cli/src/main.ts config -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-config-help-50.txt docs/parity/metadata/rika-config-help-50.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-config-help-short-50.txt docs/parity/metadata/rika-config-help-short-50.txt"
+  },
+  "exit_codes": {
+    "amp_config_help": 0,
+    "amp_config_h": 0,
+    "rika_config_help_before": 0,
+    "rika_config_h_before": 0,
+    "rika_config_help_after": 0,
+    "rika_config_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0
+  },
+  "bytes": {
+    "amp_config_help": 1769,
+    "amp_config_h": 1769,
+    "rika_config_help_before": 620,
+    "rika_config_h_before": 620,
+    "rika_config_help_after": 1769,
+    "rika_config_h_after": 1769,
+    "stdout": 1754,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_config_help": "37b86109940eb675ece1323913b5b9aa44f9aaa2d8bce18ec2509f5a2276a456",
+    "amp_config_h": "37b86109940eb675ece1323913b5b9aa44f9aaa2d8bce18ec2509f5a2276a456",
+    "rika_config_help_before": "479490542da3a8be7c04d0376efe421f8190d3b967e48ec99e78a9eaee709c0a",
+    "rika_config_h_before": "479490542da3a8be7c04d0376efe421f8190d3b967e48ec99e78a9eaee709c0a",
+    "rika_config_help_after": "37b86109940eb675ece1323913b5b9aa44f9aaa2d8bce18ec2509f5a2276a456",
+    "rika_config_h_after": "37b86109940eb675ece1323913b5b9aa44f9aaa2d8bce18ec2509f5a2276a456"
+  },
+  "artifacts": {
+    "amp_config_help": "docs/parity/metadata/amp-config-help-50.txt",
+    "amp_config_h": "docs/parity/metadata/amp-config-help-short-50.txt",
+    "rika_config_help_before": "docs/parity/metadata/rika-config-help-50-before.txt",
+    "rika_config_h_before": "docs/parity/metadata/rika-config-help-short-50-before.txt",
+    "rika_config_help_after": "docs/parity/metadata/rika-config-help-50.txt",
+    "rika_config_h_after": "docs/parity/metadata/rika-config-help-short-50.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1754,
+    "stderr_bytes": 15
+  },
+  "result": "match",
+  "scope": "Proves exact config --help and config -h combined bytes, exit code, and stdout/stderr split only. Config subcommand help pages, config edit/keymap behavior, and future Amp help changes remain separate parity work."
+}

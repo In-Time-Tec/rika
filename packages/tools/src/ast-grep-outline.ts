@@ -3,8 +3,10 @@ import { isAbsolute, relative, resolve, sep } from "node:path"
 import { promisify } from "node:util"
 import { ToolRegistry } from "@rika/agent"
 import { Config } from "@rika/core"
-import { Common, Tool } from "@rika/schema"
+import { Common } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 
 const execFileAsync = promisify(execFile)
 const defaultMaxOutputChars = 30_000
@@ -37,21 +39,21 @@ const NoIgnoreInput = Schema.Union([NoIgnore, Schema.Array(NoIgnore)])
 
 export interface OutlineInput extends Schema.Schema.Type<typeof OutlineInput> {}
 export const OutlineInput = Schema.Struct({
-  paths: Schema.optional(StringOrStringArray),
-  items: Schema.optional(Items),
-  view: Schema.optional(View),
-  match: Schema.optional(Schema.String),
-  types: Schema.optional(StringOrStringArray),
-  lang: Schema.optional(Schema.String),
-  pubMembers: Schema.optional(Schema.Boolean),
-  json: Schema.optional(JsonInput),
-  globs: Schema.optional(StringOrStringArray),
-  config: Schema.optional(Schema.String),
-  outlineRules: Schema.optional(Schema.String),
-  noDefaultOutlineRules: Schema.optional(Schema.Boolean),
-  noIgnore: Schema.optional(NoIgnoreInput),
-  follow: Schema.optional(Schema.Boolean),
-  maxOutputChars: Schema.optional(Schema.Int),
+  paths: Schema.optionalKey(StringOrStringArray),
+  items: Schema.optionalKey(Items),
+  view: Schema.optionalKey(View),
+  match: Schema.optionalKey(Schema.String),
+  types: Schema.optionalKey(StringOrStringArray),
+  lang: Schema.optionalKey(Schema.String),
+  pubMembers: Schema.optionalKey(Schema.Boolean),
+  json: Schema.optionalKey(JsonInput),
+  globs: Schema.optionalKey(StringOrStringArray),
+  config: Schema.optionalKey(Schema.String),
+  outlineRules: Schema.optionalKey(Schema.String),
+  noDefaultOutlineRules: Schema.optionalKey(Schema.Boolean),
+  noIgnore: Schema.optionalKey(NoIgnoreInput),
+  follow: Schema.optionalKey(Schema.Boolean),
+  maxOutputChars: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.AstGrepOutline.OutlineInput" })
 
 export class AstGrepOutlineError extends Schema.TaggedErrorClass<AstGrepOutlineError>()("AstGrepOutlineError", {
@@ -101,17 +103,19 @@ export const outline = Effect.fn("AstGrepOutline.outline.call")(function* (input
 
 export const toolDefinitions = (service: Interface): ReadonlyArray<ToolRegistry.Definition> => [
   {
-    descriptor: {
-      name: "ast_grep_outline",
+    tool: Tool.make("ast_grep_outline", {
       description: [
         "Run `ast-grep outline` for a fast, local, AST-backed table of contents before reading full source.",
         "Use after fff/search has identified candidate files or directories and you need shape: exports, imports, classes, functions, structs, interfaces, methods, fields, and source ranges.",
         "Prefer it over opening whole large files when deciding which symbol or line range to read next. It has no index, no type resolution, and no cross-file semantics.",
         "Default behavior mirrors ast-grep: file inputs show local structure with member digest, directory inputs show exported surface with grouped names. Narrow with items, view, match, types, or globs before reading source.",
       ].join(" "),
-      input_schema: outlineInputSchema,
-    },
-    execute: Effect.fn("AstGrepOutline.tool.outline")(function* (call: Tool.Call) {
+      parameters: OutlineInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("AstGrepOutline.tool.outline")(function* (call: Call) {
       const input = yield* decodeOutlineInput(call)
       return yield* service.outline(input).pipe(Effect.mapError(toRegistryError("ast_grep_outline")))
     }),
@@ -231,46 +235,18 @@ const liveRunner: CommandRunner = {
 
 export const layer: Layer.Layer<Service, never, Config.Service> = layerFromRunner(liveRunner)
 
-const outlineInputSchema: Common.JsonValue = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    paths: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" }, maxItems: 20 }] },
-    items: { type: "string", enum: ["auto", "structure", "exports", "imports", "all"] },
-    view: { type: "string", enum: ["auto", "names", "signatures", "digest", "expanded"] },
-    match: { type: "string" },
-    types: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" }, maxItems: 20 }] },
-    lang: { type: "string" },
-    pubMembers: { type: "boolean" },
-    json: { oneOf: [{ type: "boolean" }, { type: "string", enum: ["pretty", "stream", "compact"] }] },
-    globs: { oneOf: [{ type: "string" }, { type: "array", items: { type: "string" }, maxItems: 20 }] },
-    config: { type: "string" },
-    outlineRules: { type: "string" },
-    noDefaultOutlineRules: { type: "boolean" },
-    noIgnore: {
-      oneOf: [
-        { type: "string", enum: ["hidden", "dot", "exclude", "global", "parent", "vcs"] },
-        {
-          type: "array",
-          items: { type: "string", enum: ["hidden", "dot", "exclude", "global", "parent", "vcs"] },
-          maxItems: 6,
-        },
-      ],
-    },
-    follow: { type: "boolean" },
-    maxOutputChars: { type: "number", minimum: 2000, maximum: 80000 },
-  },
-}
-
-const aliasField = (call: Tool.Call, from: string, to: string): Tool.Call => {
-  const input = call.input as unknown
+const aliasField = (call: Call, from: string, to: string): Call => {
+  const input = call.input
   if (typeof input !== "object" || input === null || Array.isArray(input)) return call
-  const record = input as Record<string, unknown>
-  if (record[from] === undefined || record[to] !== undefined) return call
-  return { ...call, input: { ...record, [to]: record[from] } as typeof call.input }
+  const entries = Object.entries(input)
+  const source = entries.find(([key]) => key === from)
+  if (source === undefined || entries.some(([key]) => key === to)) return call
+  const decoded = Schema.decodeUnknownOption(Common.JsonValue)(Object.fromEntries([...entries, [to, source[1]]]))
+  if (Option.isNone(decoded)) return call
+  return { ...call, input: decoded.value }
 }
 
-const decodeOutlineInput = (call: Tool.Call) => {
+const decodeOutlineInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(OutlineInput)(aliasField(call, "path", "paths").input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return new ToolRegistry.ToolRegistryError({

@@ -1,0 +1,132 @@
+{
+  "row": 26,
+  "generated_at": "2026-06-29T06:21:19.803Z",
+  "surface": "Command palette",
+  "state": "Empty startup, Ctrl+O palette open",
+  "method": {
+    "launcher": "Ghostty.app via open -na and CoreGraphics window-id discovery",
+    "count": 4,
+    "interval_ms": 500,
+    "settle_ms": 3000,
+    "focus_ms": 500,
+    "trigger": "ctrl+o",
+    "trigger_settle_ms": 700,
+    "require_same_dimensions": true,
+    "workspace": "/Users/dallen.pyrah/projects/rika",
+    "out_dir": "docs/parity/screenshots"
+  },
+  "launches": [
+    {
+      "label": "amp",
+      "run_id": "rika-parity-command-palette-open-26-1782714058280-amp",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-command-palette-open-26-1782714058280-amp' AMP_SKIP_UPDATE_CHECK=1 amp",
+      "ghostty_pid": 81257,
+      "window_id": 33949,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    },
+    {
+      "label": "rika",
+      "run_id": "rika-parity-command-palette-open-26-1782714058280-rika",
+      "command": "cd '/Users/dallen.pyrah/projects/rika' && exec env RIKA_PARITY_RUN_ID='rika-parity-command-palette-open-26-1782714058280-rika' RIKA_DATA_DIR='/tmp/rika-parity-data-source-26' bun packages/cli/src/main.ts interactive --ephemeral --mode deep",
+      "ghostty_pid": 81327,
+      "window_id": 33957,
+      "window_bounds": {
+        "width": 858,
+        "height": 595
+      }
+    }
+  ],
+  "geometry": {
+    "all_pairs_same_dimensions": true,
+    "amp_dimensions": [
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414"
+    ],
+    "rika_dimensions": [
+      "1942x1414",
+      "1942x1414",
+      "1942x1414",
+      "1942x1414"
+    ],
+    "distinct_amp_dimensions": [
+      "1942x1414"
+    ],
+    "distinct_rika_dimensions": [
+      "1942x1414"
+    ],
+    "distinct_pair_dimensions": [
+      "1942x1414:1942x1414"
+    ]
+  },
+  "captures": [
+    {
+      "frame": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/command-palette-open-26-01.png",
+        "sha256": "c6d6d67080c382a84ab31a9b83f8d609c12b34d1d4cf3ab668eb2b0b08db30d8",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/command-palette-open-26-01.png",
+        "sha256": "f5cff7a41894a1b2f5fbb07595e27b52b3a67d948225a1c599b370386f287770",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/command-palette-open-26-02.png",
+        "sha256": "19a33facf7166660564b6ecf6b9747f064c05bcff8ffb782289a3169b0901de0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/command-palette-open-26-02.png",
+        "sha256": "eb82a067762e7f9836367cfaccd7c5b4397f96bb25b2e59cb4afb7b4ac1b4250",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/command-palette-open-26-03.png",
+        "sha256": "6f018ec5f873d2358875254cf32366e28db276e16164e22da12f37339fec0267",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/command-palette-open-26-03.png",
+        "sha256": "d677d83a969693242befaa7fec1d9fff2e196f62e4a46f0f974fed333ac55a11",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    },
+    {
+      "frame": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/command-palette-open-26-04.png",
+        "sha256": "4054790d94e252953fb0a84e3ef649e91cfc2d48560e758d4346e6fa8f70d1e0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/command-palette-open-26-04.png",
+        "sha256": "a50b4e645f1425e526739b379730c60ec66f481a08f0303678e131158b3c79d9",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true
+    }
+  ]
+}

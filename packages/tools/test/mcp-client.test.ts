@@ -72,7 +72,7 @@ describe("McpClient", () => {
     const calls: Array<string> = []
     const runtime = layer(
       [workspaceSource({ local: { command: "node", args: ["server.js"] } })],
-      fakeConnector({ local: { tools: [{ name: "echo", input_schema: { type: "object" } }] } }, calls),
+      fakeConnector({ local: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }, calls),
     )
 
     const result = await Effect.runPromise(
@@ -93,7 +93,7 @@ describe("McpClient", () => {
     expect(calls).toEqual(["connect:local", "list:local", "close:local"])
     expect(result.approval.server_name).toBe("local")
     expect(result.after).toMatchObject([{ name: "local", status: "ready" }])
-    expect(result.definitions.map((definition) => definition.descriptor.name)).toEqual(["mcp.local.echo"])
+    expect(result.definitions.map((definition) => definition.tool.name)).toEqual(["mcp.local.echo"])
   })
 
   test("filters tools before they reach the model context", async () => {
@@ -106,9 +106,9 @@ describe("McpClient", () => {
       fakeConnector({
         remote: {
           tools: [
-            { name: "read_file", input_schema: { type: "object" } },
-            { name: "write", input_schema: { type: "object" } },
-            { name: "debug", input_schema: { type: "object" } },
+            { name: "read_file", inputSchema: { type: "object" } },
+            { name: "write", inputSchema: { type: "object" } },
+            { name: "debug", inputSchema: { type: "object" } },
           ],
         },
       }),
@@ -116,7 +116,7 @@ describe("McpClient", () => {
 
     const definitions = await Effect.runPromise(McpClient.toolDefinitions().pipe(Effect.provide(runtime)))
 
-    expect(definitions.map((definition) => definition.descriptor.name)).toEqual(["mcp.remote.read_file"])
+    expect(definitions.map((definition) => definition.tool.name)).toEqual(["mcp.remote.read_file"])
   })
 
   test("does not hide approval store failures when building MCP tool definitions", async () => {
@@ -134,7 +134,7 @@ describe("McpClient", () => {
     )
     const runtime = layer(
       [workspaceSource({ local: { command: "node", args: ["server.js"] } })],
-      fakeConnector({ local: { tools: [{ name: "echo", input_schema: { type: "object" } }] } }),
+      fakeConnector({ local: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }),
       approvals,
     )
 
@@ -155,7 +155,7 @@ describe("McpClient", () => {
     const calls: Array<string> = []
     const runtime = layer(
       [userSource({ remote: { url: "https://example.com/mcp" } })],
-      fakeConnector({ remote: { tools: [{ name: "echo", input_schema: { type: "object" } }] } }, calls),
+      fakeConnector({ remote: { tools: [{ name: "echo", inputSchema: { type: "object" } }] } }, calls),
     )
 
     const result = await Effect.runPromise(
@@ -180,8 +180,8 @@ describe("McpClient", () => {
       fakeConnector({
         remote: {
           tools: [
-            { name: "ok", input_schema: { type: "object" } },
-            { name: "fail", input_schema: { type: "object" } },
+            { name: "ok", inputSchema: { type: "object" } },
+            { name: "fail", inputSchema: { type: "object" } },
           ],
           call: (name, input) =>
             name === "fail"
@@ -231,7 +231,7 @@ describe("McpClient", () => {
           fakeConnector(
             {
               remote: {
-                tools: [{ name: "hang", input_schema: { type: "object" } }],
+                tools: [{ name: "hang", inputSchema: { type: "object" } }],
                 call: () => Deferred.succeed(started, undefined).pipe(Effect.flatMap(() => Effect.never)),
               },
             },

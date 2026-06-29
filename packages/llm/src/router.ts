@@ -3,7 +3,7 @@ import { Context, Effect, Layer, Schema, Stream } from "effect"
 import * as Modes from "./modes"
 import * as Provider from "./provider"
 
-export interface Request extends Schema.Schema.Type<typeof Request> {}
+export interface Request extends Schema.Schema.Type<typeof Request>, Provider.RuntimeOptions {}
 export const Request = Schema.Struct({
   mode: Schema.optional(Modes.ModeName),
   provider: Schema.optional(Provider.ProviderName),
@@ -15,7 +15,7 @@ export const Request = Schema.Struct({
   metadata: Schema.optional(Provider.Metadata),
 }).annotate({ identifier: "Rika.LLM.Router.Request" })
 
-export interface RoutedRequest extends Schema.Schema.Type<typeof RoutedRequest> {}
+export interface RoutedRequest extends Schema.Schema.Type<typeof RoutedRequest>, Provider.RuntimeOptions {}
 export const RoutedRequest = Schema.Struct({
   mode: Modes.ModeName,
   provider: Provider.ProviderName,
@@ -100,6 +100,8 @@ const makeRoute = (config: Config.Interface) =>
       max_output_tokens: request.max_output_tokens ?? mode.max_output_tokens,
       ...(temperature === undefined ? {} : { temperature }),
       ...(metadata === undefined ? {} : { metadata }),
+      ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+      ...(request.toolkit === undefined ? {} : { toolkit: request.toolkit }),
     }
   })
 

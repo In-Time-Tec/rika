@@ -1,9 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Keymap, Keys } from "../src/index"
 
-const inputCtx = (
-  overrides: Partial<Keymap.Context> = {},
-): Keymap.Context => ({
+const inputCtx = (overrides: Partial<Keymap.Context> = {}): Keymap.Context => ({
   surface: "input",
   busy: false,
   inputEmpty: false,
@@ -97,6 +95,29 @@ describe("keymap.resolve", () => {
     expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "right" })))._tag).toBe("CursorRight")
     expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "home" })))._tag).toBe("CursorHome")
     expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "end" })))._tag).toBe("CursorEnd")
+  })
+
+  test("prompt word and line editing chords resolve before printable input", () => {
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("w")))._tag).toBe("DeleteWordBackward")
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "backspace", ctrl: true })))._tag).toBe(
+      "DeleteWordBackward",
+    )
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "backspace", alt: true })))._tag).toBe(
+      "DeleteWordBackward",
+    )
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "delete", ctrl: true })))._tag).toBe(
+      "DeleteWordForward",
+    )
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("u")))._tag).toBe("DeleteToLineStart")
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("k")))._tag).toBe("DeleteToLineEnd")
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "left", ctrl: true })))._tag).toBe(
+      "WordLeft",
+    )
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "right", ctrl: true })))._tag).toBe(
+      "WordRight",
+    )
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.alt("b")))._tag).toBe("WordLeft")
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.alt("f")))._tag).toBe("WordRight")
   })
 
   test("Ctrl+C starts a chord; second key resolves quit / archive variants", () => {

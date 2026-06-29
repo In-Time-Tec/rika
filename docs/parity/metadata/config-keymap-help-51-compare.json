@@ -1,0 +1,61 @@
+{
+  "row": 51,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T10:06:40Z",
+  "surface": "CLI config keymap help",
+  "state": "Config keymap --help and -h flags",
+  "commands": {
+    "amp_config_keymap_help": "AMP_SKIP_UPDATE_CHECK=1 amp config keymap --help",
+    "amp_config_keymap_h": "AMP_SKIP_UPDATE_CHECK=1 amp config keymap -h",
+    "rika_config_keymap_help_before": "bun packages/cli/src/main.ts config keymap --help",
+    "rika_config_keymap_h_before": "bun packages/cli/src/main.ts config keymap -h",
+    "rika_config_keymap_help_after": "bun packages/cli/src/main.ts config keymap --help",
+    "rika_config_keymap_h_after": "bun packages/cli/src/main.ts config keymap -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-config-keymap-help-51.txt docs/parity/metadata/rika-config-keymap-help-51.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-config-keymap-help-short-51.txt docs/parity/metadata/rika-config-keymap-help-short-51.txt"
+  },
+  "exit_codes": {
+    "amp_config_keymap_help": 0,
+    "amp_config_keymap_h": 0,
+    "rika_config_keymap_help_before": 0,
+    "rika_config_keymap_h_before": 0,
+    "rika_config_keymap_help_after": 0,
+    "rika_config_keymap_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0
+  },
+  "bytes": {
+    "amp_config_keymap_help": 1708,
+    "amp_config_keymap_h": 1708,
+    "rika_config_keymap_help_before": 578,
+    "rika_config_keymap_h_before": 578,
+    "rika_config_keymap_help_after": 1708,
+    "rika_config_keymap_h_after": 1708,
+    "stdout": 1693,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_config_keymap_help": "ffa7753e5a6e4303dcd114fbb1eef6b1902b7cc970a55fb88e64038b40629055",
+    "amp_config_keymap_h": "ffa7753e5a6e4303dcd114fbb1eef6b1902b7cc970a55fb88e64038b40629055",
+    "rika_config_keymap_help_before": "f558b7bec81785923b015bf5c423355ba7e8cabdc38c4b2091766acebd8f1a49",
+    "rika_config_keymap_h_before": "f558b7bec81785923b015bf5c423355ba7e8cabdc38c4b2091766acebd8f1a49",
+    "rika_config_keymap_help_after": "ffa7753e5a6e4303dcd114fbb1eef6b1902b7cc970a55fb88e64038b40629055",
+    "rika_config_keymap_h_after": "ffa7753e5a6e4303dcd114fbb1eef6b1902b7cc970a55fb88e64038b40629055"
+  },
+  "artifacts": {
+    "amp_config_keymap_help": "docs/parity/metadata/amp-config-keymap-help-51.txt",
+    "amp_config_keymap_h": "docs/parity/metadata/amp-config-keymap-help-short-51.txt",
+    "rika_config_keymap_help_before": "docs/parity/metadata/rika-config-keymap-help-51-before.txt",
+    "rika_config_keymap_h_before": "docs/parity/metadata/rika-config-keymap-help-short-51-before.txt",
+    "rika_config_keymap_help_after": "docs/parity/metadata/rika-config-keymap-help-51.txt",
+    "rika_config_keymap_h_after": "docs/parity/metadata/rika-config-keymap-help-short-51.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1693,
+    "stderr_bytes": 15
+  },
+  "result": "match",
+  "scope": "Proves exact config keymap --help and config keymap -h combined bytes, exit code, and stdout/stderr split only. Config keymap command output was already tracked separately; other config subcommand help pages and future Amp help changes remain separate parity work."
+}

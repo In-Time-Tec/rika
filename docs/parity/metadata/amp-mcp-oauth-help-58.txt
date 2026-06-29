@@ -1,0 +1,13 @@
+Usage: amp mcp oauth [options] [command]
+
+Manage OAuth authentication for MCP servers
+
+Options:
+  -h, --help                     display help for command
+
+Commands:
+  login [options] <server-name>  Register OAuth client credentials for an MCP
+                                 server
+  logout <server-name>           Remove OAuth credentials for an MCP server
+  status <server-name>           Show OAuth status for an MCP server
+  help [command]                 display help for command

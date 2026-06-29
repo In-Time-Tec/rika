@@ -23,6 +23,7 @@ export const requestConfigFromRikaRequest = (
   ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
   ...(request.max_output_tokens === undefined ? {} : { max_output_tokens: request.max_output_tokens }),
   ...(request.reasoning_effort === undefined ? {} : { reasoning: { effort: request.reasoning_effort } }),
+  ...(request.metadata === undefined ? {} : { metadata: request.metadata }),
 })
 
 export const withRequestConfig = (request: Provider.GenerateRequest) => {

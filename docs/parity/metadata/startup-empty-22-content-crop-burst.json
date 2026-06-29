@@ -1,0 +1,1131 @@
+{
+  "kind": "parity-burst-compare",
+  "generated_at": "2026-06-29T05:48:41.194Z",
+  "method": {
+    "source": "pairwise exact RGBA diff after sips BMP conversion",
+    "ranking": "ascending total_absolute_channel_delta",
+    "include": "^startup-empty-22-[0-9]+\\.png$",
+    "crop": {
+      "left": 128,
+      "top": 88,
+      "width": 1664,
+      "height": 1056
+    }
+  },
+  "amp_count": 6,
+  "rika_count": 6,
+  "pair_count": 36,
+  "best_pair": {
+    "amp_index": 4,
+    "rika_index": 2,
+    "amp": {
+      "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+      "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+      "width": 1942,
+      "height": 1414
+    },
+    "rika": {
+      "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+      "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+      "width": 1942,
+      "height": 1414
+    },
+    "same_dimensions": true,
+    "compared_pixels": 1757184,
+    "diff_pixel_denominator": 1757184,
+    "different_pixels": 58469,
+    "different_percent": 3.3274261545745922,
+    "diff_bbox": {
+      "left": 128,
+      "top": 94,
+      "right": 1791,
+      "bottom": 1142
+    },
+    "total_absolute_channel_delta": 5492804,
+    "mean_absolute_channel_delta": 0.781478206038753,
+    "max_channel_delta": 225,
+    "visual_diff_image": "docs/parity/diffs/startup-empty-22-content-crop-burst-best.png"
+  },
+  "pairs": [
+    {
+      "amp_index": 4,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+        "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+        "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 58469,
+      "different_percent": 3.3274261545745922,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 5492804,
+      "mean_absolute_channel_delta": 0.781478206038753,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 4,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+        "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-01.png",
+        "sha256": "74c2070f8ea4284973144e2a0ade7eddd095b48da4e59a7a8f73c3d310b396bd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 58056,
+      "different_percent": 3.30392263986014,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 5560969,
+      "mean_absolute_channel_delta": 0.7911762513202943,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-02.png",
+        "sha256": "66829703e47b940c0635ee43750400d7eeb6ca7bd340e2a5adf5705937c0d5ad",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+        "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 59961,
+      "different_percent": 3.4123347355769234,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6178486,
+      "mean_absolute_channel_delta": 0.8790323039590617,
+      "max_channel_delta": 237
+    },
+    {
+      "amp_index": 4,
+      "rika_index": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+        "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-06.png",
+        "sha256": "9da474456f8949dba25e988b44a552bbec09cc0349e51035d3199194f452a1dd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 60363,
+      "different_percent": 3.4352122486888113,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6562013,
+      "mean_absolute_channel_delta": 0.9335978759196533,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 4,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+        "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-02.png",
+        "sha256": "89c8a345810c3eef147c0d14a05cb9c47843e28b2386c97848c4dfcdd7ce53ae",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 60681,
+      "different_percent": 3.4533093859265738,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6651129,
+      "mean_absolute_channel_delta": 0.9462766847410402,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-02.png",
+        "sha256": "66829703e47b940c0635ee43750400d7eeb6ca7bd340e2a5adf5705937c0d5ad",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-01.png",
+        "sha256": "74c2070f8ea4284973144e2a0ade7eddd095b48da4e59a7a8f73c3d310b396bd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 60259,
+      "different_percent": 3.4292936880827503,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6657393,
+      "mean_absolute_channel_delta": 0.9471678833861451,
+      "max_channel_delta": 237
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-02.png",
+        "sha256": "66829703e47b940c0635ee43750400d7eeb6ca7bd340e2a5adf5705937c0d5ad",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-06.png",
+        "sha256": "9da474456f8949dba25e988b44a552bbec09cc0349e51035d3199194f452a1dd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 60531,
+      "different_percent": 3.4447730004370634,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6685613,
+      "mean_absolute_channel_delta": 0.9511828300280448,
+      "max_channel_delta": 221
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-03.png",
+        "sha256": "3a8e5967c4379962cdbea97adab42c58e587146ea93a37bdcbd9fd32b01e2ee4",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-02.png",
+        "sha256": "89c8a345810c3eef147c0d14a05cb9c47843e28b2386c97848c4dfcdd7ce53ae",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 63880,
+      "different_percent": 3.6353620337995336,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6763631,
+      "mean_absolute_channel_delta": 0.9622826920800553,
+      "max_channel_delta": 233
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-02.png",
+        "sha256": "66829703e47b940c0635ee43750400d7eeb6ca7bd340e2a5adf5705937c0d5ad",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-02.png",
+        "sha256": "89c8a345810c3eef147c0d14a05cb9c47843e28b2386c97848c4dfcdd7ce53ae",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 60836,
+      "different_percent": 3.462130317599067,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6784465,
+      "mean_absolute_channel_delta": 0.9652468096681964,
+      "max_channel_delta": 221
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-03.png",
+        "sha256": "3a8e5967c4379962cdbea97adab42c58e587146ea93a37bdcbd9fd32b01e2ee4",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-06.png",
+        "sha256": "9da474456f8949dba25e988b44a552bbec09cc0349e51035d3199194f452a1dd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 63931,
+      "different_percent": 3.6382644048659674,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 6837953,
+      "mean_absolute_channel_delta": 0.972856712785912,
+      "max_channel_delta": 233
+    },
+    {
+      "amp_index": 4,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+        "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-04.png",
+        "sha256": "dc1531968c579d1a4b79a1c09ebe835cf5b80dc684b76e305205d9daaaf4074e",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 59757,
+      "different_percent": 3.4007252513111887,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7098239,
+      "mean_absolute_channel_delta": 1.0098884066779574,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-02.png",
+        "sha256": "66829703e47b940c0635ee43750400d7eeb6ca7bd340e2a5adf5705937c0d5ad",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-04.png",
+        "sha256": "dc1531968c579d1a4b79a1c09ebe835cf5b80dc684b76e305205d9daaaf4074e",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 59865,
+      "different_percent": 3.4068714488636362,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7241205,
+      "mean_absolute_channel_delta": 1.03022862147618,
+      "max_channel_delta": 221
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-03.png",
+        "sha256": "3a8e5967c4379962cdbea97adab42c58e587146ea93a37bdcbd9fd32b01e2ee4",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+        "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 65049,
+      "different_percent": 3.701888931381119,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7255716,
+      "mean_absolute_channel_delta": 1.0322931463068181,
+      "max_channel_delta": 233
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-03.png",
+        "sha256": "3a8e5967c4379962cdbea97adab42c58e587146ea93a37bdcbd9fd32b01e2ee4",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-01.png",
+        "sha256": "74c2070f8ea4284973144e2a0ade7eddd095b48da4e59a7a8f73c3d310b396bd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 64555,
+      "different_percent": 3.673775768502331,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7257257,
+      "mean_absolute_channel_delta": 1.032512389140807,
+      "max_channel_delta": 233
+    },
+    {
+      "amp_index": 4,
+      "rika_index": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-05.png",
+        "sha256": "94b53b54d41d3ea4dc859ea8fbdb36e6ee7f474c0ddc1f8a38f96ca7510d99a0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-05.png",
+        "sha256": "31cd27a1cb2e25107bb2b6decb94776e37a929df9a06d45546970443b6cfea1c",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 64036,
+      "different_percent": 3.644239874708625,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7437418,
+      "mean_absolute_channel_delta": 1.0581444515770688,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-02.png",
+        "sha256": "66829703e47b940c0635ee43750400d7eeb6ca7bd340e2a5adf5705937c0d5ad",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-05.png",
+        "sha256": "31cd27a1cb2e25107bb2b6decb94776e37a929df9a06d45546970443b6cfea1c",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 64311,
+      "different_percent": 3.659889914772727,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7665820,
+      "mean_absolute_channel_delta": 1.0906399102199884,
+      "max_channel_delta": 221
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-03.png",
+        "sha256": "3a8e5967c4379962cdbea97adab42c58e587146ea93a37bdcbd9fd32b01e2ee4",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-05.png",
+        "sha256": "31cd27a1cb2e25107bb2b6decb94776e37a929df9a06d45546970443b6cfea1c",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 67779,
+      "different_percent": 3.8572511472902096,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 7776746,
+      "mean_absolute_channel_delta": 1.1064216951668124,
+      "max_channel_delta": 233
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-03.png",
+        "sha256": "3a8e5967c4379962cdbea97adab42c58e587146ea93a37bdcbd9fd32b01e2ee4",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-04.png",
+        "sha256": "dc1531968c579d1a4b79a1c09ebe835cf5b80dc684b76e305205d9daaaf4074e",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 64870,
+      "different_percent": 3.691702178030303,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 8259799,
+      "mean_absolute_channel_delta": 1.175147138831221,
+      "max_channel_delta": 233
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-01.png",
+        "sha256": "071eb292e3f554084319b23f1baf356017607b8f3defae7dcc9dd089e2f45926",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-06.png",
+        "sha256": "9da474456f8949dba25e988b44a552bbec09cc0349e51035d3199194f452a1dd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 71458,
+      "different_percent": 4.066620228729604,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9368116,
+      "mean_absolute_channel_delta": 1.3328308247741842,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-01.png",
+        "sha256": "071eb292e3f554084319b23f1baf356017607b8f3defae7dcc9dd089e2f45926",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+        "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 71864,
+      "different_percent": 4.089725378787879,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9405227,
+      "mean_absolute_channel_delta": 1.3381107214725378,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-01.png",
+        "sha256": "071eb292e3f554084319b23f1baf356017607b8f3defae7dcc9dd089e2f45926",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-01.png",
+        "sha256": "74c2070f8ea4284973144e2a0ade7eddd095b48da4e59a7a8f73c3d310b396bd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 71261,
+      "different_percent": 4.055409109120046,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9446162,
+      "mean_absolute_channel_delta": 1.3439346704727564,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-01.png",
+        "sha256": "071eb292e3f554084319b23f1baf356017607b8f3defae7dcc9dd089e2f45926",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-02.png",
+        "sha256": "89c8a345810c3eef147c0d14a05cb9c47843e28b2386c97848c4dfcdd7ce53ae",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 71738,
+      "different_percent": 4.08255481497669,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9457702,
+      "mean_absolute_channel_delta": 1.3455765019485724,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-01.png",
+        "sha256": "071eb292e3f554084319b23f1baf356017607b8f3defae7dcc9dd089e2f45926",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-04.png",
+        "sha256": "dc1531968c579d1a4b79a1c09ebe835cf5b80dc684b76e305205d9daaaf4074e",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 71411,
+      "different_percent": 4.063945494609557,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9706862,
+      "mean_absolute_channel_delta": 1.3810252654246795,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 5,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-06.png",
+        "sha256": "88269e0d4516c9647ca13810d961860861753fcace296f0ca63bcb7973116b9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-02.png",
+        "sha256": "89c8a345810c3eef147c0d14a05cb9c47843e28b2386c97848c4dfcdd7ce53ae",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 73430,
+      "different_percent": 4.178845243298368,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9802464,
+      "mean_absolute_channel_delta": 1.3946268575174825,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 5,
+      "rika_index": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-06.png",
+        "sha256": "88269e0d4516c9647ca13810d961860861753fcace296f0ca63bcb7973116b9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-06.png",
+        "sha256": "9da474456f8949dba25e988b44a552bbec09cc0349e51035d3199194f452a1dd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 73450,
+      "different_percent": 4.179983428030303,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9869618,
+      "mean_absolute_channel_delta": 1.4041810647035255,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-01.png",
+        "sha256": "071eb292e3f554084319b23f1baf356017607b8f3defae7dcc9dd089e2f45926",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-05.png",
+        "sha256": "31cd27a1cb2e25107bb2b6decb94776e37a929df9a06d45546970443b6cfea1c",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 74866,
+      "different_percent": 4.260566907051282,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10015725,
+      "mean_absolute_channel_delta": 1.4249681592821242,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 5,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-06.png",
+        "sha256": "88269e0d4516c9647ca13810d961860861753fcace296f0ca63bcb7973116b9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+        "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 74117,
+      "different_percent": 4.217941888840326,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10132827,
+      "mean_absolute_channel_delta": 1.4416286228420017,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 5,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-06.png",
+        "sha256": "88269e0d4516c9647ca13810d961860861753fcace296f0ca63bcb7973116b9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-01.png",
+        "sha256": "74c2070f8ea4284973144e2a0ade7eddd095b48da4e59a7a8f73c3d310b396bd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 73781,
+      "different_percent": 4.198820385343823,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10194732,
+      "mean_absolute_channel_delta": 1.4504360385708042,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 5,
+      "rika_index": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-06.png",
+        "sha256": "88269e0d4516c9647ca13810d961860861753fcace296f0ca63bcb7973116b9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-05.png",
+        "sha256": "31cd27a1cb2e25107bb2b6decb94776e37a929df9a06d45546970443b6cfea1c",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 75866,
+      "different_percent": 4.317476143648018,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10196729,
+      "mean_absolute_channel_delta": 1.4507201579345135,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 5,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-06.png",
+        "sha256": "88269e0d4516c9647ca13810d961860861753fcace296f0ca63bcb7973116b9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-04.png",
+        "sha256": "dc1531968c579d1a4b79a1c09ebe835cf5b80dc684b76e305205d9daaaf4074e",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 73451,
+      "different_percent": 4.1800403372669,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10651608,
+      "mean_absolute_channel_delta": 1.5154371995192308,
+      "max_channel_delta": 229
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-04.png",
+        "sha256": "b7826182cc575bf2689a2cc2de809cb2bc5c28d2263fa9b333107d09fd0f2ec3",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-01.png",
+        "sha256": "74c2070f8ea4284973144e2a0ade7eddd095b48da4e59a7a8f73c3d310b396bd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 79904,
+      "different_percent": 4.5472756410256405,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 11810279,
+      "mean_absolute_channel_delta": 1.6802849047111743,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-04.png",
+        "sha256": "b7826182cc575bf2689a2cc2de809cb2bc5c28d2263fa9b333107d09fd0f2ec3",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-03.png",
+        "sha256": "fd28ebc23a2acaa5b55e4325ca4e3846806350b2dc887f1990e55df1c003797b",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 81103,
+      "different_percent": 4.615509815705128,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 11928842,
+      "mean_absolute_channel_delta": 1.6971532292577214,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 5,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-04.png",
+        "sha256": "b7826182cc575bf2689a2cc2de809cb2bc5c28d2263fa9b333107d09fd0f2ec3",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-06.png",
+        "sha256": "9da474456f8949dba25e988b44a552bbec09cc0349e51035d3199194f452a1dd",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 81568,
+      "different_percent": 4.64197261072261,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 12212483,
+      "mean_absolute_channel_delta": 1.737507711201559,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-04.png",
+        "sha256": "b7826182cc575bf2689a2cc2de809cb2bc5c28d2263fa9b333107d09fd0f2ec3",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-02.png",
+        "sha256": "89c8a345810c3eef147c0d14a05cb9c47843e28b2386c97848c4dfcdd7ce53ae",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 81795,
+      "different_percent": 4.65489100743007,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 12291441,
+      "mean_absolute_channel_delta": 1.7487413099595717,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-04.png",
+        "sha256": "b7826182cc575bf2689a2cc2de809cb2bc5c28d2263fa9b333107d09fd0f2ec3",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-04.png",
+        "sha256": "dc1531968c579d1a4b79a1c09ebe835cf5b80dc684b76e305205d9daaaf4074e",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 80948,
+      "different_percent": 4.606688884032635,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 12322649,
+      "mean_absolute_channel_delta": 1.753181368598849,
+      "max_channel_delta": 225
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 4,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/startup-empty-22-04.png",
+        "sha256": "b7826182cc575bf2689a2cc2de809cb2bc5c28d2263fa9b333107d09fd0f2ec3",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/startup-empty-22-05.png",
+        "sha256": "31cd27a1cb2e25107bb2b6decb94776e37a929df9a06d45546970443b6cfea1c",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 84074,
+      "different_percent": 4.784587157634033,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 12548868,
+      "mean_absolute_channel_delta": 1.7853662450830419,
+      "max_channel_delta": 225
+    }
+  ]
+}

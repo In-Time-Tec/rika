@@ -1,0 +1,91 @@
+{
+  "row": 67,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T13:14:23Z",
+  "surface": "CLI last help",
+  "state": "Last --help and -h flags",
+  "commands": {
+    "amp_last_help": "AMP_SKIP_UPDATE_CHECK=1 amp last --help",
+    "amp_last_h": "AMP_SKIP_UPDATE_CHECK=1 amp last -h",
+    "rika_last_help_before": "bun packages/cli/src/main.ts last --help",
+    "rika_last_h_before": "bun packages/cli/src/main.ts last -h",
+    "rika_last_help_after": "bun packages/cli/src/main.ts last --help",
+    "rika_last_h_after": "bun packages/cli/src/main.ts last -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-last-help-67.txt docs/parity/metadata/rika-last-help-67.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-last-help-short-67.txt docs/parity/metadata/rika-last-help-short-67.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-last-help-67-stdout.txt docs/parity/metadata/rika-last-help-67-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-last-help-67-stderr.txt docs/parity/metadata/rika-last-help-67-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-last-help-short-67-stdout.txt docs/parity/metadata/rika-last-help-short-67-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-last-help-short-67-stderr.txt docs/parity/metadata/rika-last-help-short-67-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_last_help": 0,
+    "amp_last_h": 0,
+    "rika_last_help_before": 0,
+    "rika_last_h_before": 0,
+    "rika_last_help_after": 0,
+    "rika_last_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_last_help": 1669,
+    "amp_last_h": 1669,
+    "rika_last_help_before": 1397,
+    "rika_last_h_before": 1397,
+    "rika_last_help_after": 1669,
+    "rika_last_h_after": 1669,
+    "stdout": 1654,
+    "stderr": 15,
+    "short_stdout": 1654,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_last_help": "c1fc30f1b082e0016ad3e56f0d1d50266124f9622178ed147e504d049a06ba89",
+    "amp_last_h": "c1fc30f1b082e0016ad3e56f0d1d50266124f9622178ed147e504d049a06ba89",
+    "rika_last_help_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_last_h_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_last_help_after": "c1fc30f1b082e0016ad3e56f0d1d50266124f9622178ed147e504d049a06ba89",
+    "rika_last_h_after": "c1fc30f1b082e0016ad3e56f0d1d50266124f9622178ed147e504d049a06ba89"
+  },
+  "artifacts": {
+    "amp_last_help": "docs/parity/metadata/amp-last-help-67.txt",
+    "amp_last_h": "docs/parity/metadata/amp-last-help-short-67.txt",
+    "amp_last_stdout": "docs/parity/metadata/amp-last-help-67-stdout.txt",
+    "amp_last_stderr": "docs/parity/metadata/amp-last-help-67-stderr.txt",
+    "amp_last_h_stdout": "docs/parity/metadata/amp-last-help-short-67-stdout.txt",
+    "amp_last_h_stderr": "docs/parity/metadata/amp-last-help-short-67-stderr.txt",
+    "rika_last_help_before": "docs/parity/metadata/rika-last-help-67-before.txt",
+    "rika_last_h_before": "docs/parity/metadata/rika-last-help-short-67-before.txt",
+    "rika_last_help_after": "docs/parity/metadata/rika-last-help-67.txt",
+    "rika_last_h_after": "docs/parity/metadata/rika-last-help-short-67.txt",
+    "rika_last_stdout": "docs/parity/metadata/rika-last-help-67-stdout.txt",
+    "rika_last_stderr": "docs/parity/metadata/rika-last-help-67-stderr.txt",
+    "rika_last_h_stdout": "docs/parity/metadata/rika-last-help-short-67-stdout.txt",
+    "rika_last_h_stderr": "docs/parity/metadata/rika-last-help-short-67-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1654,
+    "stderr_bytes": 15,
+    "stdout_sha256": "3094fc10f313c7f70b1e86e1195e6caeab37608b6dedf10cbd4768e7c553b109",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1654,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "3094fc10f313c7f70b1e86e1195e6caeab37608b6dedf10cbd4768e7c553b109",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Heisenberg",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact last --help and last -h combined bytes, exit code, and stdout/stderr split for the captured Amp version. Last command behavior, other command help pages, and future Amp help changes remain separate parity work."
+}

@@ -1,6 +1,8 @@
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
 import { Config } from "@rika/core"
-import { Common, Tool } from "@rika/schema"
+import { Common } from "@rika/schema"
+import { Call, Result } from "@rika/schema/tool"
+import { Tool } from "effect/unstable/ai"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { readdir } from "node:fs/promises"
 import { basename, join } from "node:path"
@@ -60,12 +62,12 @@ export interface Interface {
   readonly modes: Effect.Effect<ReadonlyArray<Api.ModeRegistration>>
   readonly subagents: Effect.Effect<ReadonlyArray<Api.SubagentRegistration>>
   readonly runCommand: (name: string) => Effect.Effect<void, RunError>
-  readonly decideToolCall: (call: Tool.Call) => Effect.Effect<PermissionPolicy.Decision, RunError>
+  readonly decideToolCall: (call: Call) => Effect.Effect<PermissionPolicy.Decision, RunError>
   readonly decideToolCallOverride: (
-    call: Tool.Call,
+    call: Call,
   ) => Effect.Effect<Option.Option<PermissionPolicy.Decision>, RunError>
   readonly hasToolCallHooks: Effect.Effect<boolean>
-  readonly observeToolResult: (result: Tool.Result) => Effect.Effect<Tool.Result, RunError>
+  readonly observeToolResult: (result: Result) => Effect.Effect<Result, RunError>
   readonly emitSessionStart: (event: Api.SessionStartEvent) => Effect.Effect<void, RunError>
   readonly emitAgentStart: (event: Api.AgentStartEvent) => Effect.Effect<void, RunError>
   readonly emitAgentEnd: (event: Api.AgentEndEvent) => Effect.Effect<ReadonlyArray<Api.AgentContinue>, RunError>
@@ -99,7 +101,7 @@ interface State {
   agentStartHandlers: Array<HandlerRecord<Api.AgentStartEvent, void>>
   agentEndHandlers: Array<HandlerRecord<Api.AgentEndEvent, Api.AgentContinue | void>>
   toolCallHandlers: Array<HandlerRecord<Api.ToolCallEvent, PermissionPolicy.Decision | void>>
-  toolResultHandlers: Array<HandlerRecord<Api.ToolResultEvent, Tool.Result | void>>
+  toolResultHandlers: Array<HandlerRecord<Api.ToolResultEvent, Result | void>>
   logs: Array<string>
 }
 
@@ -160,7 +162,7 @@ export const permissionPolicyLayer = Layer.effect(
         const hasToolCallHooks = yield* host.hasToolCallHooks
         return hasToolCallHooks ? "plugin" : "allow-all"
       }),
-      decide: Effect.fn("PluginHost.PermissionPolicy.decide")(function* (call: Tool.Call) {
+      decide: Effect.fn("PluginHost.PermissionPolicy.decide")(function* (call: Call) {
         return yield* host.decideToolCall(call).pipe(
           Effect.mapError(
             (error) =>
@@ -188,7 +190,7 @@ export const permissionPolicyLayerFromConfig = (
           if (hasToolCallHooks) return "plugin"
           return config.mode
         }),
-        decide: Effect.fn("PluginHost.PermissionPolicy.decide.configured")(function* (call: Tool.Call) {
+        decide: Effect.fn("PluginHost.PermissionPolicy.decide.configured")(function* (call: Call) {
           const override = yield* host.decideToolCallOverride(call).pipe(
             Effect.mapError(
               (error) =>
@@ -211,8 +213,9 @@ export const toolResultExecutorLayer = Layer.effect(
     const host = yield* Service
     const base = yield* ToolExecutor.Service
     return ToolExecutor.Service.of({
+      tools: base.tools,
       describe: base.describe,
-      execute: Effect.fn("PluginHost.ToolExecutor.execute")(function* (call: Tool.Call) {
+      execute: Effect.fn("PluginHost.ToolExecutor.execute")(function* (call: Call) {
         const result = yield* base.execute(call)
         return yield* host.observeToolResult(result).pipe(Effect.catch(() => Effect.succeed(result)))
       }),
@@ -223,7 +226,7 @@ export const toolResultExecutorLayer = Layer.effect(
 const makeService = (ui: PluginUi.Interface, loadCandidates: CandidateLoader) =>
   Effect.gen(function* () {
     const state = emptyState()
-    const decideToolCallOverride = Effect.fn("PluginHost.decideToolCallOverride")(function* (call: Tool.Call) {
+    const decideToolCallOverride = Effect.fn("PluginHost.decideToolCallOverride")(function* (call: Call) {
       for (const record of state.toolCallHandlers) {
         const result = yield* invokeUnknown(
           () => record.handler({ tool: call.name, call }, contextFor(record.plugin, ui)),
@@ -264,11 +267,11 @@ const makeService = (ui: PluginUi.Interface, loadCandidates: CandidateLoader) =>
         return yield* invokeVoid(() => command.handler(contextFor(command.plugin, ui)), command.plugin, "runCommand")
       }),
       decideToolCallOverride,
-      decideToolCall: Effect.fn("PluginHost.decideToolCall")(function* (call: Tool.Call) {
+      decideToolCall: Effect.fn("PluginHost.decideToolCall")(function* (call: Call) {
         const override = yield* decideToolCallOverride(call)
         return Option.getOrElse(override, () => PermissionPolicy.allow)
       }),
-      observeToolResult: Effect.fn("PluginHost.observeToolResult")(function* (result: Tool.Result) {
+      observeToolResult: Effect.fn("PluginHost.observeToolResult")(function* (result: Result) {
         let current = result
         for (const record of state.toolResultHandlers) {
           const next = yield* invokeUnknown(
@@ -361,7 +364,7 @@ const apiFor = (plugin: Api.PluginSummary, state: State): Api.PluginAPI => {
         descriptor: {
           name,
           description: options.description,
-          ...(options.input_schema === undefined ? {} : { input_schema: options.input_schema }),
+          ...(options.inputSchema === undefined ? {} : { inputSchema: options.inputSchema }),
         },
         execute,
       })
@@ -391,8 +394,8 @@ const apiFor = (plugin: Api.PluginSummary, state: State): Api.PluginAPI => {
 }
 
 const toolDefinition = (registration: Api.ToolRegistration, ui: PluginUi.Interface): ToolRegistry.Definition => ({
-  descriptor: registration.descriptor,
-  execute: Effect.fn(`PluginHost.tool.${registration.descriptor.name}`)(function* (call: Tool.Call) {
+  tool: pluginTool(registration.descriptor),
+  execute: Effect.fn(`PluginHost.tool.${registration.descriptor.name}`)(function* (call: Call) {
     const output = yield* invokeUnknown(
       () => registration.execute(call, contextFor(registration.plugin, ui)),
       registration.plugin,
@@ -419,6 +422,25 @@ const toolDefinition = (registration: Api.ToolRegistration, ui: PluginUi.Interfa
   }),
 })
 
+const pluginTool = (descriptor: Api.ToolDescriptor) => {
+  if (descriptor.inputSchema === undefined) {
+    return Tool.make(descriptor.name, {
+      description: descriptor.description,
+      parameters: Tool.EmptyParams,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    })
+  }
+  return Tool.dynamic(descriptor.name, {
+    description: descriptor.description,
+    parameters: Schema.Json,
+    success: Schema.Json,
+    failure: Schema.Json,
+    failureMode: "return",
+  }).annotate(Tool.Strict, false)
+}
+
 const emitVoidHandlers = <Event>(
   handlers: Array<HandlerRecord<Event, void>>,
   ui: PluginUi.Interface,
@@ -439,7 +461,7 @@ const discoverLocalPlugins = (workspaceRoot: string): Effect.Effect<ReadonlyArra
     }).pipe(
       Effect.catchIf(
         (cause) => cause instanceof Error && "code" in cause && cause.code === "ENOENT",
-        () => Effect.succeed([] as ReadonlyArray<string>),
+        () => Effect.succeed<ReadonlyArray<string>>([]),
       ),
       Effect.mapError(
         (cause) =>
@@ -539,7 +561,7 @@ const isPolicyDecision = (value: unknown): value is PermissionPolicy.Decision =>
   )
 }
 
-const isToolResult = (value: unknown): value is Tool.Result =>
+const isToolResult = (value: unknown): value is Result =>
   isRecord(value) && typeof value.name === "string" && (value.status === "success" || value.status === "error")
 
 const isAgentContinue = (value: unknown): value is Api.AgentContinue =>

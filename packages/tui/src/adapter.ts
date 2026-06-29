@@ -2,11 +2,13 @@ import {
   BoxRenderable,
   type CliRenderer,
   CliRenderEvents,
+  bg,
   bold,
   createCliRenderer,
   dim,
   fg,
   type KeyEvent,
+  RGBA,
   reverse,
   ScrollBoxRenderable,
   StyledText,
@@ -30,17 +32,21 @@ export interface ExitSummary {
 export interface Adapter {
   readonly render: (state: ViewState.ViewState) => Effect.Effect<void>
   readonly keys: Stream.Stream<Keys.Key>
+  readonly actions: Stream.Stream<Action>
   readonly resizes: Stream.Stream<void>
   readonly setExit: (summary: ExitSummary) => Effect.Effect<void>
   readonly editExternally: (text: string) => Effect.Effect<string>
   readonly pasteImage: (workspacePath: string) => Effect.Effect<string | undefined>
 }
 
+export type Action = { readonly _tag: "ToggleCard"; readonly card_id: string } | { readonly _tag: "ToggleToolGroup" }
+
 export class Service extends Context.Service<Service, Adapter>()("@rika/tui/Renderer") {}
 
 export interface MemoryRenderer {
   readonly rendered: Array<ViewState.ViewState>
   readonly keys?: ReadonlyArray<Keys.Key>
+  readonly actions?: ReadonlyArray<Action>
 }
 
 export const memoryLayer = (memory: MemoryRenderer) =>
@@ -49,6 +55,7 @@ export const memoryLayer = (memory: MemoryRenderer) =>
     Service.of({
       render: (state: ViewState.ViewState) => Effect.sync(() => memory.rendered.push(state)),
       keys: Stream.fromIterable(memory.keys ?? []),
+      actions: Stream.fromIterable(memory.actions ?? []),
       resizes: Stream.empty,
       setExit: () => Effect.void,
       editExternally: (text: string) => Effect.succeed(text),
@@ -68,7 +75,17 @@ const color = {
   yellow: "#d29922",
   accent: "#58a6ff",
   panel: "#0a0a0a",
+  modalPanel: "#121212",
 } as const
+
+const cutoutBackground = (renderer: CliRenderer): RGBA => {
+  const background: unknown = Reflect.get(renderer, "backgroundColor")
+  return background instanceof RGBA && background.a > 0 ? RGBA.defaultBackground(background) : RGBA.defaultBackground()
+}
+
+const ansiTeal = (text: string): string => `\x1b[38;2;45;212;191m${text}\x1b[0m`
+const ansiDim = (text: string): string => `\x1b[38;2;125;133;144m${text}\x1b[0m`
+const ansiBold = (text: string): string => `\x1b[1m${text}\x1b[0m`
 
 export const layer = Layer.effect(
   Service,
@@ -91,7 +108,8 @@ export const layer = Layer.effect(
         }),
     )
 
-    const surface = new Surface(renderer)
+    const actions = yield* Queue.unbounded<Action>()
+    const surface = new Surface(renderer, actions)
     yield* Effect.sync(() => renderer.start())
 
     return Service.of({
@@ -100,12 +118,15 @@ export const layer = Layer.effect(
           try {
             surface.update(state)
             renderer.requestRender()
-          } catch {
-          }
+          } catch {}
         }),
       keys: keyStream(renderer),
+      actions: Stream.fromQueue(actions),
       resizes: resizeStream(renderer),
-      setExit: (summary: ExitSummary) => Effect.sync(() => { exitSummary = renderExitSummary(summary) }),
+      setExit: (summary: ExitSummary) =>
+        Effect.sync(() => {
+          exitSummary = renderExitSummary(summary)
+        }),
       editExternally: (text: string) =>
         Effect.tryPromise(async () => {
           const editor = process.env.EDITOR ?? process.env.VISUAL ?? "vi"
@@ -148,14 +169,11 @@ end try`
 )
 
 const renderExitSummary = (summary: ExitSummary): string => {
-  const teal = (s: string) => `\x1b[38;2;45;212;191m${s}\x1b[0m`
-  const dim = (s: string) => `\x1b[38;2;125;133;144m${s}\x1b[0m`
-  const boldText = (s: string) => `\x1b[1m${s}\x1b[0m`
   const title = summary.title.length > 0 ? summary.title : "(empty thread)"
   const mark = ["  ·•●•·", " •●●●●•", " •●●●●•", "  ·•●•·"]
-  const right = ["", boldText(title), dim(summary.workspace_path), dim(`thread ${summary.thread_id}`)]
-  const rows = mark.map((line, index) => `${teal(line)}    ${right[index] ?? ""}`)
-  return ["", ...rows, "", dim(`rika --thread ${summary.thread_id}`), ""].join("\n") + "\n"
+  const right = ["", ansiBold(title), ansiDim(summary.workspace_path), ansiDim(`thread ${summary.thread_id}`)]
+  const rows = mark.map((line, index) => `${ansiTeal(line)}    ${right[index] ?? ""}`)
+  return ["", ...rows, "", ansiDim(`rika --thread ${summary.thread_id}`), ""].join("\n") + "\n"
 }
 
 const keyStream = (renderer: CliRenderer): Stream.Stream<Keys.Key> =>
@@ -206,7 +224,10 @@ export class Surface {
   private readonly filePickerList: BoxRenderable
   private transcriptSignature = ""
 
-  constructor(private readonly renderer: CliRenderer) {
+  constructor(
+    private readonly renderer: CliRenderer,
+    private readonly actions?: Queue.Enqueue<Action>,
+  ) {
     const root = renderer.root
 
     this.transcript = new ScrollBoxRenderable(renderer, {
@@ -230,20 +251,34 @@ export class Surface {
     this.inputBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
-      borderColor: color.border,
+      borderColor: color.text,
       paddingLeft: 1,
       paddingRight: 1,
       flexShrink: 0,
-      minHeight: 4,
+      minHeight: 5,
     })
     this.shortcutsText = new TextRenderable(renderer, { content: "", visible: false })
     this.inputText = new TextRenderable(renderer, { content: "" })
     this.inputBox.add(this.shortcutsText)
     this.inputBox.add(this.inputText)
-    this.costText = new TextRenderable(renderer, { content: "", position: "absolute", top: -1, right: 1, zIndex: 10, bg: color.panel })
-    this.cwdText = new TextRenderable(renderer, { content: "", position: "absolute", bottom: -1, right: 1, zIndex: 10, bg: color.panel })
-    this.statusText = new TextRenderable(renderer, { content: "", position: "absolute", bottom: -1, left: 2, zIndex: 10, visible: false, bg: color.panel })
-    this.queueHintText = new TextRenderable(renderer, { content: "", position: "absolute", top: -1, left: 2, zIndex: 10, visible: false, bg: color.panel })
+    this.costText = new TextRenderable(renderer, { content: "", position: "absolute", top: -1, right: 1, zIndex: 10 })
+    this.cwdText = new TextRenderable(renderer, { content: "", position: "absolute", bottom: -1, right: 1, zIndex: 10 })
+    this.statusText = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      bottom: -1,
+      left: 2,
+      zIndex: 10,
+      visible: false,
+    })
+    this.queueHintText = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      top: -1,
+      left: 2,
+      zIndex: 10,
+      visible: false,
+    })
     this.inputBox.add(this.costText)
     this.inputBox.add(this.cwdText)
     this.inputBox.add(this.statusText)
@@ -253,20 +288,24 @@ export class Surface {
     this.paletteBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
-      borderColor: color.border,
+      borderColor: "#dedede",
       title: "Command Palette",
-      titleColor: color.dim,
+      titleColor: "#ffba7b",
       position: "absolute",
       zIndex: 20,
       visible: false,
-      backgroundColor: color.panel,
+      backgroundColor: color.modalPanel,
       flexDirection: "column",
       paddingLeft: 2,
       paddingRight: 2,
       paddingTop: 1,
     })
     this.paletteQuery = new TextRenderable(renderer, { content: "" })
-    this.paletteList = new BoxRenderable(renderer, { flexDirection: "column", marginTop: 1, backgroundColor: color.panel })
+    this.paletteList = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      marginTop: 1,
+      backgroundColor: color.modalPanel,
+    })
     this.paletteBox.add(this.paletteQuery)
     this.paletteBox.add(this.paletteList)
     root.add(this.paletteBox)
@@ -274,27 +313,40 @@ export class Surface {
     this.filePickerBox = new BoxRenderable(renderer, {
       border: true,
       borderStyle: "rounded",
-      borderColor: color.border,
+      borderColor: "#dedede",
       title: "Add file",
-      titleColor: color.dim,
+      titleColor: "#ffba7b",
       position: "absolute",
       zIndex: 20,
       visible: false,
-      backgroundColor: color.panel,
+      backgroundColor: color.modalPanel,
       flexDirection: "column",
       paddingLeft: 2,
       paddingRight: 2,
       paddingTop: 1,
     })
     this.filePickerQuery = new TextRenderable(renderer, { content: "" })
-    this.filePickerList = new BoxRenderable(renderer, { flexDirection: "column", marginTop: 1, backgroundColor: color.panel })
+    this.filePickerList = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      marginTop: 1,
+      backgroundColor: color.modalPanel,
+    })
     this.filePickerBox.add(this.filePickerQuery)
     this.filePickerBox.add(this.filePickerList)
     root.add(this.filePickerBox)
   }
 
   update(state: ViewState.ViewState): void {
-    this.costText.content = t` ${fg(color.dim)(`$${state.cost_usd.toFixed(2)} `)}${fg(color.faint)("— ")}${fg(modeColor(state.mode))(modeLabel(state.mode, state.reasoning_effort))}${state.fast_mode ? fg(color.yellow)(" ⚡") : fg(color.faint)("")} `
+    const cutoutBg = cutoutBackground(this.renderer)
+    this.costText.bg = cutoutBg
+    this.cwdText.bg = cutoutBg
+    this.statusText.bg = cutoutBg
+    this.queueHintText.bg = cutoutBg
+
+    this.costText.content =
+      state.cost_usd > 0
+        ? t` ${fg(color.dim)(`$${state.cost_usd.toFixed(2)} `)}${fg(color.faint)("— ")}${fg(modeColor(state.mode))(modeLabel(state.mode, state.reasoning_effort))}${state.fast_mode ? fg(color.yellow)(" ⚡") : fg(color.faint)("")} `
+        : t` ${fg(modeColor(state.mode))(modeLabel(state.mode, state.reasoning_effort))}${state.fast_mode ? fg(color.yellow)(" ⚡") : fg(color.faint)("")} `
     this.cwdText.content = t` ${fg(color.dim)(cwdLabel(state))} `
     this.transcript.verticalScrollbarOptions = { visible: false, showArrows: false }
 
@@ -317,12 +369,12 @@ export class Surface {
     if (state.palette.open) {
       const filtered = Palette.filter(state.palette.query)
       const selected = Math.min(state.palette.selected, Math.max(0, filtered.length - 1))
-      const width = 74
+      const width = 80
       const height = Math.min(filtered.length + 5, Math.max(6, this.renderer.height - 4))
       this.paletteBox.width = width
       this.paletteBox.height = height
       this.paletteBox.left = Math.max(2, Math.floor((this.renderer.width - width) / 2))
-      this.paletteBox.top = Math.max(1, Math.floor((this.renderer.height - height) / 3))
+      this.paletteBox.top = Math.max(1, Math.floor((this.renderer.height - height) / 2))
       this.paletteQuery.content = t`${fg(color.faint)("> ")}${fg(color.text)(state.palette.query)}${reverse(" ")}`
       const visible = windowList(filtered, selected, Math.max(1, height - 5))
       this.rebuildPaletteList(visible.rows, selected - visible.start, width - 6)
@@ -332,12 +384,12 @@ export class Surface {
     if (state.filepicker.open) {
       const files = ViewState.filteredFiles(state)
       const selected = Math.min(state.filepicker.selected, Math.max(0, files.length - 1))
-      const width = 72
+      const width = 80
       const height = Math.min(files.length + 5, Math.max(6, this.renderer.height - 4))
       this.filePickerBox.width = width
       this.filePickerBox.height = height
       this.filePickerBox.left = Math.max(2, Math.floor((this.renderer.width - width) / 2))
-      this.filePickerBox.top = Math.max(1, Math.floor((this.renderer.height - height) / 3))
+      this.filePickerBox.top = Math.max(1, Math.floor((this.renderer.height - height) / 2))
       this.filePickerQuery.content = t`${fg(color.faint)(state.filepicker.kind === "thread" ? "@@" : "@")}${fg(color.text)(state.filepicker.query)}${reverse(" ")}`
       const visible = windowList(files, selected, Math.max(1, height - 5))
       this.rebuildFilePickerList(visible.rows, selected - visible.start, width - 6)
@@ -365,7 +417,9 @@ export class Surface {
           }),
         )
       } else {
-        this.filePickerList.add(new TextRenderable(this.renderer, { content: t`${fg(color.text)(file)}`, flexShrink: 0 }))
+        this.filePickerList.add(
+          new TextRenderable(this.renderer, { content: t`${fg(color.text)(file)}`, flexShrink: 0 }),
+        )
       }
     })
   }
@@ -434,9 +488,16 @@ export class Surface {
 
   private addCard(state: ViewState.ViewState, card: ViewState.Card): void {
     const collapsed = ViewState.isCardCollapsed(state, card)
+    const expandable = ViewState.isCardExpandable(card)
     const focused = ViewState.focusedCard(state)?.id === card.id
     const frame = ViewState.spinnerFrames[state.spinner_index % ViewState.spinnerFrames.length] ?? "⠋"
-    this.entriesBox.add(new TextRenderable(this.renderer, { content: cardHeader(card, collapsed, focused, frame), marginTop: 1 }))
+    this.entriesBox.add(
+      new TextRenderable(this.renderer, {
+        content: cardHeader(card, collapsed, expandable, focused, frame),
+        marginTop: 1,
+        ...(expandable ? { onMouseDown: this.emitAction({ _tag: "ToggleCard", card_id: card.id }) } : {}),
+      }),
+    )
     if (!collapsed && card.body !== undefined && card.body.length > 0) {
       this.entriesBox.add(
         new TextRenderable(this.renderer, {
@@ -452,29 +513,50 @@ export class Surface {
     const anyRunning = cards.some((card) => card.status === "running")
     const anyError = cards.some((card) => card.status === "error")
     const icon = anyRunning ? fg(color.yellow)(frame) : anyError ? fg(color.red)("✕") : fg(color.green)("✓")
-    const expanded = state.details_expanded
+    const expanded = state.tool_group_expanded || state.details_expanded
     this.entriesBox.add(
       new TextRenderable(this.renderer, {
         content: t`${icon} ${fg(color.dim)(toolGroupSummary(cards))} ${dim(expanded ? "▾" : "▸")}`,
         marginTop: 1,
+        onMouseDown: this.emitAction({ _tag: "ToggleToolGroup" }),
       }),
     )
     if (expanded) {
       for (const card of cards) {
+        const collapsed = ViewState.isCardCollapsed(state, card)
+        const expandable = ViewState.isCardExpandable(card)
         this.entriesBox.add(
           new TextRenderable(this.renderer, {
-            content: t`${statusIcon(card, frame)} ${fg(color.dim)(card.title)}${card.subtitle.length > 0 ? fg(color.faint)(` ${card.subtitle}`) : fg(color.faint)("")} ${dim("▸")}`,
+            content: t`${statusIcon(card, frame)} ${fg(color.dim)(card.title)}${card.subtitle.length > 0 ? fg(color.faint)(` ${card.subtitle}`) : fg(color.faint)("")}${expandable ? dim(` ${collapsed ? "▸" : "▾"}`) : fg(color.faint)("")}`,
             paddingLeft: 2,
+            ...(expandable ? { onMouseDown: this.emitAction({ _tag: "ToggleCard", card_id: card.id }) } : {}),
           }),
         )
+        if (!collapsed && card.body !== undefined && card.body.length > 0) {
+          this.entriesBox.add(
+            new TextRenderable(this.renderer, {
+              content: t`${fg(color.dim)(card.body)}`,
+              paddingLeft: 4,
+            }),
+          )
+        }
       }
+    }
+  }
+
+  private emitAction(action: Action): (event: { stopPropagation: () => void; preventDefault: () => void }) => void {
+    return (event) => {
+      event.stopPropagation()
+      event.preventDefault()
+      if (this.actions !== undefined) Queue.offerUnsafe(this.actions, action)
     }
   }
 }
 
-const toolCategory = (name: string): "file" | "search" | "edit" | "command" => {
-  if (name === "read") return "file"
-  if (name === "write" || name.includes("edit")) return "edit"
+const toolCategory = (card: ViewState.Card): "file" | "search" | "edit" | "command" => {
+  const name = (card.tool_name ?? card.title).toLowerCase()
+  if (name === "read" || name.endsWith(".read")) return "file"
+  if (name === "write" || name.includes("edit") || name === "apply_patch") return "edit"
   if (name.includes("shell") || name === "bash" || name.includes("command")) return "command"
   return "search"
 }
@@ -485,7 +567,7 @@ const toolGroupSummary = (cards: ReadonlyArray<ViewState.Card>): string => {
   let edits = 0
   let commands = 0
   for (const card of cards) {
-    const category = toolCategory(card.title)
+    const category = toolCategory(card)
     if (category === "file") files += 1
     else if (category === "search") searches += 1
     else if (category === "edit") edits += 1
@@ -507,9 +589,12 @@ const isWelcome = (state: ViewState.ViewState) =>
 const superscripts = ["", "¹", "²", "³"] as const
 
 const modeLabel = (mode: ViewState.ViewState["mode"], effort: number): string =>
-  `${mode}${superscripts[effort] ?? ""}`
+  mode === "deep" ? `${mode}${superscripts[effort] ?? superscripts[1]}` : mode
 
-const hex2 = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, "0")
+const hex2 = (n: number) =>
+  Math.max(0, Math.min(255, Math.round(n)))
+    .toString(16)
+    .padStart(2, "0")
 
 const modeRgb = (mode: ViewState.ViewState["mode"]): readonly [number, number, number] =>
   mode === "deep" ? [63, 185, 80] : mode === "rush" ? [210, 162, 92] : [88, 166, 255]
@@ -569,13 +654,15 @@ const inputLine = (state: ViewState.ViewState): StyledText => {
 
 const inputBufferChunks = (state: ViewState.ViewState): Array<TextChunk> => {
   const text = state.input.text
-  if (text.length === 0) return [reverse(" ")]
+  if (text.length === 0) return [cursorBlock(" ")]
   const cursor = Math.max(0, Math.min(state.input.cursor, text.length))
   const before = text.slice(0, cursor)
   const at = text[cursor] ?? " "
   const after = text.slice(cursor + 1)
-  return [fg(color.text)(before), reverse(at), fg(color.text)(after)]
+  return [fg(color.text)(before), cursorBlock(at), fg(color.text)(after)]
 }
+
+const cursorBlock = (text: string): TextChunk => fg(color.panel)(bg(color.text)(text))
 
 const windowList = <T>(
   items: ReadonlyArray<T>,
@@ -587,12 +674,18 @@ const windowList = <T>(
   return { rows: items.slice(start, start + visible), start }
 }
 
-const cardHeader = (card: ViewState.Card, collapsed: boolean, focused: boolean, frame: string): StyledText => {
-  const arrow = collapsed ? "▸" : "▾"
+const cardHeader = (
+  card: ViewState.Card,
+  collapsed: boolean,
+  expandable: boolean,
+  focused: boolean,
+  frame: string,
+): StyledText => {
+  const arrow = expandable ? ` ${collapsed ? "▸" : "▾"}` : ""
   const icon = statusIcon(card, frame)
   const meta = card.subtitle.length === 0 ? "" : card.kind === "tool" ? ` ${card.subtitle}` : ` · ${card.subtitle}`
   const titleColor = focused ? color.accent : color.dim
-  return t`${icon} ${fg(titleColor)(card.title)}${fg(color.faint)(meta)} ${dim(arrow)}`
+  return t`${icon} ${fg(titleColor)(card.title)}${fg(color.faint)(meta)}${dim(arrow)}`
 }
 
 const paletteRow = (
@@ -602,20 +695,22 @@ const paletteRow = (
   catWidth: number,
   width: number,
 ): TextRenderable => {
+  const rowIndent = "       "
   const cat = command.category.padStart(catWidth)
   const key = command.key ?? ""
-  const actionWidth = Math.max(0, width - catWidth - 2 - (key.length > 0 ? key.length + 1 : 0))
+  const actionWidth = Math.max(0, width - rowIndent.length - catWidth - 2 - (key.length > 0 ? key.length + 1 : 0))
   const action = command.action.padEnd(actionWidth)
   if (selected) {
+    const selectedText = "#929292"
     return new TextRenderable(renderer, {
-      content: t`${fg("#7a4a18")(cat)}  ${bold(fg("#3d2710")(action))}${key.length > 0 ? fg("#7a4a18")(` ${key}`) : fg("#7a4a18")("")}`,
-      bg: "#e8c79c",
+      content: t`${fg(selectedText)(rowIndent)}${fg(selectedText)(cat)}  ${fg(selectedText)(action)}${key.length > 0 ? fg(selectedText)(` ${key}`) : fg(selectedText)("")}`,
+      bg: "#ffba7b",
       width,
       flexShrink: 0,
     })
   }
   return new TextRenderable(renderer, {
-    content: t`${fg(color.dim)(cat)}  ${fg(color.text)(action)}${key.length > 0 ? fg(color.faint)(` ${key}`) : fg(color.faint)("")}`,
+    content: t`${fg(color.dim)(rowIndent)}${fg(color.dim)(cat)}  ${fg(color.text)(action)}${key.length > 0 ? fg(color.faint)(` ${key}`) : fg(color.faint)("")}`,
     flexShrink: 0,
   })
 }
@@ -751,44 +846,266 @@ const welcomeBlock = (renderer: CliRenderer, phase: number, mode: ViewState.View
     flexGrow: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
+    justifyContent: "flex-start",
     gap: 4,
+    paddingLeft: 3,
   })
   row.add(new TextRenderable(renderer, { content: orb(phase, mode) }))
   row.add(
     new TextRenderable(renderer, {
-      content: t`${fg(modeColor(mode))("Welcome to Rika")}\n\n${fg(color.text)("ctrl+o")} ${fg(color.dim)("for commands")}\n${fg(color.text)("?")} ${fg(color.dim)("for shortcuts")}`,
+      content: t`${fg(welcomeColor(mode))("Welcome to Amp")}\n\n\n${fg(color.text)("ctrl+o")} ${fg(color.dim)("for commands")}\n${fg(color.text)("?")} ${fg(color.dim)("for shortcuts")}`,
     }),
   )
   return row
 }
 
+const welcomeColor = (mode: ViewState.ViewState["mode"]): string => (mode === "deep" ? "#55d6a6" : modeColor(mode))
+
+const ampOrbFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
+  "                                        ",
+  "                                        ",
+  "                                        ",
+  ...rows.map(shiftOrbRow),
+]
+
+const shiftOrbRow = (row: string): string => ` ${row}`.slice(0, 40)
+
+const ampOrbFrames = [
+  ampOrbFrame([
+    "            •••••••••••••               ",
+    "         ••••••••••●●••••••••           ",
+    "      •••••●●●●●●●●•••••••••••••        ",
+    "    •••••●●●•••••••••••••••••••••       ",
+    "   •••••●●•••••••●●●•••••••••••••••     ",
+    "  ••••●●•••••●●●•••●●●●●●●••••••••••    ",
+    " ••••●●••••●●●•••●●●●●●●●●••••••••••    ",
+    " ••••●••••●●•••••••••••••••••••••••••   ",
+    "••••••••••●●•••••••••••••••••••••••••   ",
+    "••••••••••●●•••••••••••••••••••••••••   ",
+    " ••••••••••••••••••••••••••••••••••••   ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "   ••••••••••••••••••••••••••••••••     ",
+    "    •••••••••••••••••••••••••••••       ",
+    "      •••••••••••••••••••••••••         ",
+    "         ••••••••••••••••••••           ",
+    "             ···········•               ",
+  ]),
+  ampOrbFrame([
+    "             ••••••••••••               ",
+    "         ••••••••••••••••••••           ",
+    "      ••●●•••••●●●•••••••••••••         ",
+    "     ••••●●•●●•••••••••••••••••••       ",
+    "   ••••●●●●•••••••••••••••••••••••      ",
+    "  •••••••••••●●••••••••••••••••••••     ",
+    " •••••●●•••●●•••••●●●●●●●•••••••••••    ",
+    " ••••●••••●••••••••●●●●•••••••••••••    ",
+    " ••••●••••●••••••••••••••••••••••••••   ",
+    " •••••••••●●•••••••••••••••••••••••••   ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   •••••••••••••••••••••••••••••••      ",
+    "     ••••••••••••••••••••••••••••       ",
+    "      •••••••••••••••••••••••••         ",
+    "         •••••••••••••••••••            ",
+    "              ·········•                ",
+  ]),
+  ampOrbFrame([
+    "              ••••••••••                ",
+    "          ••••••••••••••••••            ",
+    "       ●●••••••●●●•••••••••••••         ",
+    "     ●●•••••●●•••••••••••••••••••       ",
+    "    •••••●●●••••••••••••••••••••••      ",
+    "   ••••●●••••••••••••••••••••••••••     ",
+    "  ••••●●••••••••••••••••••••••••••••    ",
+    " ••••••••••••••••●●●●●●•••••••••••••    ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    " ••••●••••●●••••••••••••••••••••••••    ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "    ••••••••••••••••••••••••••••••      ",
+    "     •••••••••••••••••••••••••••        ",
+    "       ••••••••••••••••••••••••         ",
+    "          ••••••••••••••••••            ",
+    "               ·······•                 ",
+  ]),
+  ampOrbFrame([
+    "               ••••••••                 ",
+    "          ••●●••••••••••••••            ",
+    "       •••••••••••••••••••••••          ",
+    "     ••••••●●•••••••••••••••••••        ",
+    "    •••••●●•••••••••••••••••••••••      ",
+    "   ••••••••••••••••••••••••••••••••     ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "  ••••••••••••••●●●●••••••••••••••••    ",
+    " •••••••••••••••●●●●••••••••••••••••    ",
+    " •••••••••●•••••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   ••••••••••••••••••••••••••••••••     ",
+    "    ••••••••••••••••••••••••••••••      ",
+    "     •••••••••••••••••••••••••••        ",
+    "       •••••••••••••••••••••••          ",
+    "          ·················             ",
+    "                ·····•                  ",
+  ]),
+  ampOrbFrame([
+    "                ••••••                  ",
+    "          •••••••••••••••••             ",
+    "       •••••••••••••••••••••••          ",
+    "     •••••••••••••••••••••••••••        ",
+    "    •••••••••••••••••••••••••••••       ",
+    "   •••••••••••••••••••••••••••••••      ",
+    "  •●●••••••••••••••••••••••••••••••     ",
+    "  ••••••••••••●●●•••••••••••••••••••    ",
+    " ••••••••••••●●●●●●•••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   •••••••••••••••••••••••••••••••      ",
+    "    •••••••••••••••••••••••••••••       ",
+    "      ••••••••••••••••••••••••••        ",
+    "        ••••••••••••••••••••••          ",
+    "          •···············•             ",
+    "                 ••••                   ",
+  ]),
+  ampOrbFrame([
+    "                •••••                   ",
+    "           ••●●••••••••••••             ",
+    "        ••••••••••••••••••••••          ",
+    "      ••••••••••••••••••••••••••        ",
+    "    •●●••••••••••••••••••••••••••       ",
+    "   •••••••••••●●••••••••••••••••••      ",
+    "  ••••••••••●●•••••••••••••••••••••     ",
+    "  ••••••••••●•••••••••••••••••••••••    ",
+    "  ••••••••●●●●●●••••••••••••••••••••    ",
+    "  •••••••••●●●●●••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   •••••••••••••••••••••••••••••••      ",
+    "    •••••••••••••••••••••••••••••       ",
+    "      ••••••••••••••••••••••••••        ",
+    "        ••••••••••••••••••••••          ",
+    "          •···············•             ",
+    "                  ••                    ",
+  ]),
+  ampOrbFrame([
+    "                ••••••                  ",
+    "          •••••••••••••••••             ",
+    "        •●●•••••••••••••••••••          ",
+    "      ••••••••••••••••••••••••••        ",
+    "    •••••••••••••••••••••••••••••       ",
+    "   ••••••••••••••●●●●•••••••••••••      ",
+    "  •••••••••••••●●●•••••••••••••••••     ",
+    "  •••••••●••••••••••••••••••••••••••    ",
+    "  •••••••●●●●●●•••••••••••••••••••••    ",
+    "  •••••••●●●●●••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   •••••••••••••••••••••••••••••••      ",
+    "    •••••••••••••••••••••••••••••       ",
+    "     •••••••••••••••••••••••••••        ",
+    "       •••••••••••••••••••••••          ",
+    "          •···············•             ",
+    "                 •••                    ",
+  ]),
+  ampOrbFrame([
+    "               ••••••••                 ",
+    "          ••••••••••••••••••            ",
+    "       •••••••••••••••••••••••          ",
+    "     •••••••••••••••••••••••••••        ",
+    "    •••••••••••●●●••••••••••••••••      ",
+    "   •••••••••●●●••••••••••••••••••••     ",
+    "  •••••••••●●●●••••••••••••••••••••     ",
+    "  •••••●•••●●●••••••••••••••••••••••    ",
+    " ••••••●●●●●●●••••••••••••••••••••••    ",
+    " •••••••●●●●●•••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   ••••••••••••••••••••••••••••••••     ",
+    "    ••••••••••••••••••••••••••••••      ",
+    "     •••••••••••••••••••••••••••        ",
+    "       •••••••••••••••••••••••          ",
+    "          ·················             ",
+    "                ·····•                  ",
+  ]),
+  ampOrbFrame([
+    "              ••••••••••                ",
+    "         •••••••••••••••••••            ",
+    "       ••••••••••••••••••••••••         ",
+    "     ••••••••●●●●••••••••••••••••       ",
+    "   •••••••●●●•••••••••••••••••••••      ",
+    "  ••••••●●●••••••••••••••••••••••••     ",
+    "  ••••••●●●•••••••••••••••••••••••••    ",
+    " ••••●•●●●●•••••••••••••••••••••••••    ",
+    " ••••●●●●●●●●●••••••••••••••••••••••    ",
+    " •••••••●●●•••••••••••••••••••••••••    ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "  •••••••••••••••••••••••••••••••••     ",
+    "   •••••••••••••••••••••••••••••••      ",
+    "     ••••••••••••••••••••••••••••       ",
+    "       ••••••••••••••••••••••••         ",
+    "         •••••••••••••••••••            ",
+    "              •·······•                 ",
+  ]),
+  ampOrbFrame([
+    "            •••••••••••••               ",
+    "        •••••●●●●●●••••••••••           ",
+    "      •••●●●●•••••••••••••••••••        ",
+    "    ••●●●●•••••●●••••••••••••••••       ",
+    "   ••●●●••••●●●●●••••••••••••••••••     ",
+    "  •••●●••••●●●●•••••••••••••••••••••    ",
+    " ••●●●•••••●●●●●••••••••••••••••••••    ",
+    " ••●●●●●●●●●●••••●●••••••••••••••••••   ",
+    " ••••●●●●●●●●••••••••••••••••••••••••   ",
+    " •••••••••••●●•••••••••••••••••••••••   ",
+    " ••••••••••••••••••••••••••••••••••••   ",
+    " •••••••••••••••••••••••••••••••••••    ",
+    "  ••••••••••••••••••••••••••••••••••    ",
+    "   ••••••••••••••••••••••••••••••••     ",
+    "    •••••••••••••••••••••••••••••       ",
+    "      •••••••••••••••••••••••••         ",
+    "         ••••••••••••••••••••           ",
+    "             ···········•               ",
+  ]),
+] as const
+
 const orb = (phase: number, mode: ViewState.ViewState["mode"]): StyledText => {
-  const [br, bg, bb] = modeRgb(mode)
-  const rows = 15
-  const columns = 25
-  const centerRow = (rows - 1) / 2
-  const centerColumn = (columns - 1) / 2
+  const pattern = ampOrbFrames[(phase + 5) % ampOrbFrames.length] ?? ampOrbFrames[0]
   const chunks: TextChunk[] = []
-  for (let r = 0; r < rows; r += 1) {
+  for (let r = 0; r < pattern.length; r += 1) {
     if (r > 0) chunks.push(fg(color.text)("\n"))
-    for (let c = 0; c < columns; c += 1) {
-      const x = (c - centerColumn) / centerColumn
-      const y = (r - centerRow) / centerRow
-      const radius = Math.hypot(x * 1.02, y * 1.12)
-      if (radius > 1) {
-        chunks.push(fg(color.text)("  "))
-        continue
+    for (const glyph of pattern[r] ?? "") {
+      if (glyph === " ") {
+        chunks.push(fg(color.text)(" "))
+      } else {
+        const [red, green, blue] = orbColor((r - 1) / 17, mode)
+        chunks.push(fg(`#${hex2(red)}${hex2(green)}${hex2(blue)}`)(glyph))
       }
-      const wave = (Math.sin(c * 0.72 + r * 0.44 + phase * 0.8) + 1) / 2
-      const edge = 1 - radius
-      const intensity = Math.min(1, Math.max(0, 0.26 + wave * 0.36 + edge * 0.3))
-      const glyph = intensity > 0.78 ? "●" : intensity > 0.52 ? "•" : "·"
-      const k = 0.4 + intensity * 0.6
-      chunks.push(fg(`#${hex2(br * k)}${hex2(bg * k)}${hex2(bb * k)}`)(`${glyph} `))
     }
   }
   return new StyledText(chunks)
+}
+
+const orbColor = (row: number, mode: ViewState.ViewState["mode"]): readonly [number, number, number] => {
+  if (mode !== "deep") return modeRgb(mode)
+  const clamped = Math.max(0, Math.min(1, row))
+  const top = [92, 225, 152] as const
+  const middle = [64, 140, 124] as const
+  const bottom = [36, 64, 168] as const
+  return clamped < 0.48 ? mix(top, middle, clamped / 0.48) : mix(middle, bottom, (clamped - 0.48) / 0.52)
+}
+
+const mix = (
+  a: readonly [number, number, number],
+  b: readonly [number, number, number],
+  tValue: number,
+): readonly [number, number, number] => {
+  const clamped = Math.max(0, Math.min(1, tValue))
+  return [a[0] + (b[0] - a[0]) * clamped, a[1] + (b[1] - a[1]) * clamped, a[2] + (b[2] - a[2]) * clamped]
 }
 
 const transcriptSignature = (state: ViewState.ViewState): string => {
@@ -805,5 +1122,6 @@ const transcriptSignature = (state: ViewState.ViewState): string => {
     items,
     `focus:${state.focus_index ?? -1}`,
     `nav:${state.nav_index}`,
+    `tools:${state.tool_group_expanded ? "e" : "c"}`,
   ].join("#")
 }

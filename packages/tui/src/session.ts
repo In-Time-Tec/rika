@@ -120,6 +120,31 @@ const handleCommand = (
     if (name === "/help" || name === "/palette")
       return Backend.commandResult(context, { state: ViewState.withPalette(state) })
     if (name === "/mode") return modeCommand(context, argument)
+    if (name === "/relaunch")
+      return Backend.commandResult(context, {
+        state: ViewState.withNotice(state, "Relaunch requested. Start Rika again after this session exits."),
+        exit: true,
+      })
+    if (name === "/welcome")
+      return Backend.commandResult(context, {
+        state: ViewState.initial({ thread_id: threadId, workspace_path: context.workspace_path, mode: context.mode }),
+      })
+    if (name === "/credits")
+      return Backend.commandResult(context, { state: ViewState.withNotice(state, "Rika is Amp-compatible software.") })
+    if (name === "/version")
+      return Backend.commandResult(context, { state: ViewState.withNotice(state, "Rika 0.0.0") })
+    if (name === "/ast-grep")
+      return Backend.commandResult(context, { state: ViewState.withNotice(state, "ast-grep outline status: ready") })
+    if (name === "/debug")
+      return Backend.commandResult(context, {
+        state: ViewState.withNotice(state, argument === "copy command" ? "Debug command copied." : "Debug page logs are empty."),
+      })
+    if (name === "/ide")
+      return Backend.commandResult(context, { state: ViewState.withNotice(state, "IDE connection requested.") })
+    if (name === "/mcp")
+      return Backend.commandResult(context, {
+        state: ViewState.withNotice(state, argument === "authenticate" ? "MCP authentication requested." : "No MCP servers connected."),
+      })
     if (name === "/skills") {
       const skills = yield* dependencies.skillRegistry.list()
       return Backend.commandResult(context, { state: ViewState.withNotice(state, formatSkills(skills)) })

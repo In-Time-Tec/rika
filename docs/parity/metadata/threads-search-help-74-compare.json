@@ -1,0 +1,91 @@
+{
+  "row": 74,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T14:38:11Z",
+  "surface": "CLI threads search help",
+  "state": "Threads search --help and -h flags",
+  "commands": {
+    "amp_threads_search_help": "AMP_SKIP_UPDATE_CHECK=1 amp threads search --help",
+    "amp_threads_search_h": "AMP_SKIP_UPDATE_CHECK=1 amp threads search -h",
+    "rika_threads_search_help_before": "bun packages/cli/src/main.ts threads search --help",
+    "rika_threads_search_h_before": "bun packages/cli/src/main.ts threads search -h",
+    "rika_threads_search_help_after": "bun packages/cli/src/main.ts threads search --help",
+    "rika_threads_search_h_after": "bun packages/cli/src/main.ts threads search -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-threads-search-help-74.txt docs/parity/metadata/rika-threads-search-help-74.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-threads-search-help-short-74.txt docs/parity/metadata/rika-threads-search-help-short-74.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-threads-search-help-74-stdout.txt docs/parity/metadata/rika-threads-search-help-74-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-threads-search-help-74-stderr.txt docs/parity/metadata/rika-threads-search-help-74-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-threads-search-help-short-74-stdout.txt docs/parity/metadata/rika-threads-search-help-short-74-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-threads-search-help-short-74-stderr.txt docs/parity/metadata/rika-threads-search-help-short-74-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_threads_search_help": 0,
+    "amp_threads_search_h": 0,
+    "rika_threads_search_help_before": 0,
+    "rika_threads_search_h_before": 0,
+    "rika_threads_search_help_after": 0,
+    "rika_threads_search_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_threads_search_help": 2324,
+    "amp_threads_search_h": 2324,
+    "rika_threads_search_help_before": 733,
+    "rika_threads_search_h_before": 733,
+    "rika_threads_search_help_after": 2324,
+    "rika_threads_search_h_after": 2324,
+    "stdout": 2309,
+    "stderr": 15,
+    "short_stdout": 2309,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_threads_search_help": "ae5694471bd1458b5adb130691f5e932ddee1b3aeb1db2a1fe35b83c9f09dc01",
+    "amp_threads_search_h": "ae5694471bd1458b5adb130691f5e932ddee1b3aeb1db2a1fe35b83c9f09dc01",
+    "rika_threads_search_help_before": "494f7f5050a17b037b9470ee6818abe5b2334d9c360d85aaae83f629ec376752",
+    "rika_threads_search_h_before": "494f7f5050a17b037b9470ee6818abe5b2334d9c360d85aaae83f629ec376752",
+    "rika_threads_search_help_after": "ae5694471bd1458b5adb130691f5e932ddee1b3aeb1db2a1fe35b83c9f09dc01",
+    "rika_threads_search_h_after": "ae5694471bd1458b5adb130691f5e932ddee1b3aeb1db2a1fe35b83c9f09dc01"
+  },
+  "artifacts": {
+    "amp_threads_search_help": "docs/parity/metadata/amp-threads-search-help-74.txt",
+    "amp_threads_search_h": "docs/parity/metadata/amp-threads-search-help-short-74.txt",
+    "amp_threads_search_stdout": "docs/parity/metadata/amp-threads-search-help-74-stdout.txt",
+    "amp_threads_search_stderr": "docs/parity/metadata/amp-threads-search-help-74-stderr.txt",
+    "amp_threads_search_h_stdout": "docs/parity/metadata/amp-threads-search-help-short-74-stdout.txt",
+    "amp_threads_search_h_stderr": "docs/parity/metadata/amp-threads-search-help-short-74-stderr.txt",
+    "rika_threads_search_help_before": "docs/parity/metadata/rika-threads-search-help-74-before.txt",
+    "rika_threads_search_h_before": "docs/parity/metadata/rika-threads-search-help-short-74-before.txt",
+    "rika_threads_search_help_after": "docs/parity/metadata/rika-threads-search-help-74.txt",
+    "rika_threads_search_h_after": "docs/parity/metadata/rika-threads-search-help-short-74.txt",
+    "rika_threads_search_stdout": "docs/parity/metadata/rika-threads-search-help-74-stdout.txt",
+    "rika_threads_search_stderr": "docs/parity/metadata/rika-threads-search-help-74-stderr.txt",
+    "rika_threads_search_h_stdout": "docs/parity/metadata/rika-threads-search-help-short-74-stdout.txt",
+    "rika_threads_search_h_stderr": "docs/parity/metadata/rika-threads-search-help-short-74-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 2309,
+    "stderr_bytes": 15,
+    "stdout_sha256": "a924ca2f6be6dc4d6c7d0d9071ebc529141ebdbbe22431c031cc52a7409eadf5",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 2309,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "a924ca2f6be6dc4d6c7d0d9071ebc529141ebdbbe22431c031cc52a7409eadf5",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Argus",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact threads search --help and threads search -h combined bytes, exit code, and stdout/stderr split for the captured Amp version. Thread search behavior, search aliases, thread query results, other thread subcommand help pages, and future Amp help changes remain separate parity work."
+}

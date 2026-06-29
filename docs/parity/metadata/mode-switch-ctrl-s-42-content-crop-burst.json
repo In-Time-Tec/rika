@@ -1,0 +1,531 @@
+{
+  "kind": "parity-burst-compare",
+  "generated_at": "2026-06-29T08:31:12.213Z",
+  "method": {
+    "source": "pairwise exact RGBA diff after sips BMP conversion",
+    "ranking": "ascending total_absolute_channel_delta",
+    "include": "mode-switch-ctrl-s-42",
+    "crop": {
+      "left": 128,
+      "top": 88,
+      "width": 1664,
+      "height": 1056
+    }
+  },
+  "amp_count": 4,
+  "rika_count": 4,
+  "pair_count": 16,
+  "best_pair": {
+    "amp_index": 2,
+    "rika_index": 0,
+    "amp": {
+      "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-03.png",
+      "sha256": "7cc4579ad4b5dc303c0f458a548be29ae8e6fbbd4bc9aea04fe87c74d15b0031",
+      "width": 1942,
+      "height": 1414
+    },
+    "rika": {
+      "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-01.png",
+      "sha256": "d55c0dad19d5984e2fb55a3b89c7003275cca7cbd6d5d0ed6cb2b195eacae996",
+      "width": 1942,
+      "height": 1414
+    },
+    "same_dimensions": true,
+    "compared_pixels": 1757184,
+    "diff_pixel_denominator": 1757184,
+    "different_pixels": 58200,
+    "different_percent": 3.3121175699300696,
+    "diff_bbox": {
+      "left": 128,
+      "top": 94,
+      "right": 1791,
+      "bottom": 1142
+    },
+    "total_absolute_channel_delta": 9104667,
+    "mean_absolute_channel_delta": 1.29534912109375,
+    "max_channel_delta": 245,
+    "visual_diff_image": "docs/parity/diffs/mode-switch-ctrl-s-42-content-crop-burst-best.png"
+  },
+  "pairs": [
+    {
+      "amp_index": 2,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-03.png",
+        "sha256": "7cc4579ad4b5dc303c0f458a548be29ae8e6fbbd4bc9aea04fe87c74d15b0031",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-01.png",
+        "sha256": "d55c0dad19d5984e2fb55a3b89c7003275cca7cbd6d5d0ed6cb2b195eacae996",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 58200,
+      "different_percent": 3.3121175699300696,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9104667,
+      "mean_absolute_channel_delta": 1.29534912109375,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-03.png",
+        "sha256": "7cc4579ad4b5dc303c0f458a548be29ae8e6fbbd4bc9aea04fe87c74d15b0031",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-04.png",
+        "sha256": "bf3b9e0b1269c5248d84984a7aa13cd075e940baf8836114cba7e7ff957409e6",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 57662,
+      "different_percent": 3.2815004006410255,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 9450778,
+      "mean_absolute_channel_delta": 1.3445914030630828,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-03.png",
+        "sha256": "7cc4579ad4b5dc303c0f458a548be29ae8e6fbbd4bc9aea04fe87c74d15b0031",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-02.png",
+        "sha256": "2e4a1289c9a0dd1b83e5735ad895b2087788ea9b2272851f1ae4c7aee8005a9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 58938,
+      "different_percent": 3.3541165865384617,
+      "diff_bbox": {
+        "left": 128,
+        "top": 305,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10124497,
+      "mean_absolute_channel_delta": 1.4404434879898746,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 2,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-03.png",
+        "sha256": "7cc4579ad4b5dc303c0f458a548be29ae8e6fbbd4bc9aea04fe87c74d15b0031",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-03.png",
+        "sha256": "72474b98ac051d4ad0683629c4ffeb77e4c1e06aa5fe931592c41e1fc21dce40",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 61539,
+      "different_percent": 3.5021375109265738,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10846089,
+      "mean_absolute_channel_delta": 1.5431066126256556,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-02.png",
+        "sha256": "689f538e33f8b42becced0b7d572fe308d0b7563e392501445a44dd54e660a34",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-04.png",
+        "sha256": "bf3b9e0b1269c5248d84984a7aa13cd075e940baf8836114cba7e7ff957409e6",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 63248,
+      "different_percent": 3.599395396270396,
+      "diff_bbox": {
+        "left": 128,
+        "top": 305,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 10940940,
+      "mean_absolute_channel_delta": 1.5566013576267483,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-02.png",
+        "sha256": "689f538e33f8b42becced0b7d572fe308d0b7563e392501445a44dd54e660a34",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-02.png",
+        "sha256": "2e4a1289c9a0dd1b83e5735ad895b2087788ea9b2272851f1ae4c7aee8005a9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 64624,
+      "different_percent": 3.6777025058275057,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 11035727,
+      "mean_absolute_channel_delta": 1.5700869971499853,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-02.png",
+        "sha256": "689f538e33f8b42becced0b7d572fe308d0b7563e392501445a44dd54e660a34",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-01.png",
+        "sha256": "d55c0dad19d5984e2fb55a3b89c7003275cca7cbd6d5d0ed6cb2b195eacae996",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 65304,
+      "different_percent": 3.7164007867132867,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 11048013,
+      "mean_absolute_channel_delta": 1.5718349643520542,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 1,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-02.png",
+        "sha256": "689f538e33f8b42becced0b7d572fe308d0b7563e392501445a44dd54e660a34",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-03.png",
+        "sha256": "72474b98ac051d4ad0683629c4ffeb77e4c1e06aa5fe931592c41e1fc21dce40",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 66336,
+      "different_percent": 3.775131118881119,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 11678815,
+      "mean_absolute_channel_delta": 1.6615811150112907,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-04.png",
+        "sha256": "320ec4889890dcd2c34f50713b458c0df79965955e7622f6d654930d2dd19eed",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-03.png",
+        "sha256": "72474b98ac051d4ad0683629c4ffeb77e4c1e06aa5fe931592c41e1fc21dce40",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 81996,
+      "different_percent": 4.666329763986013,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 16306713,
+      "mean_absolute_channel_delta": 2.3200064705802013,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-04.png",
+        "sha256": "320ec4889890dcd2c34f50713b458c0df79965955e7622f6d654930d2dd19eed",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-01.png",
+        "sha256": "d55c0dad19d5984e2fb55a3b89c7003275cca7cbd6d5d0ed6cb2b195eacae996",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 82230,
+      "different_percent": 4.67964652534965,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 16447743,
+      "mean_absolute_channel_delta": 2.3400712446732954,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-04.png",
+        "sha256": "320ec4889890dcd2c34f50713b458c0df79965955e7622f6d654930d2dd19eed",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-02.png",
+        "sha256": "2e4a1289c9a0dd1b83e5735ad895b2087788ea9b2272851f1ae4c7aee8005a9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 83382,
+      "different_percent": 4.745205965909091,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 16909125,
+      "mean_absolute_channel_delta": 2.405713488171984,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 3,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-04.png",
+        "sha256": "320ec4889890dcd2c34f50713b458c0df79965955e7622f6d654930d2dd19eed",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-04.png",
+        "sha256": "bf3b9e0b1269c5248d84984a7aa13cd075e940baf8836114cba7e7ff957409e6",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 82862,
+      "different_percent": 4.715613162878788,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 16924230,
+      "mean_absolute_channel_delta": 2.4078625232189683,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 2,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-01.png",
+        "sha256": "4dc588477b888d848f7b57ebb6ae5794a20177ba84633eacf83b5f86f30b25b0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-03.png",
+        "sha256": "72474b98ac051d4ad0683629c4ffeb77e4c1e06aa5fe931592c41e1fc21dce40",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 85611,
+      "different_percent": 4.872056654283217,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 17338521,
+      "mean_absolute_channel_delta": 2.466804984566215,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 1,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-01.png",
+        "sha256": "4dc588477b888d848f7b57ebb6ae5794a20177ba84633eacf83b5f86f30b25b0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-02.png",
+        "sha256": "2e4a1289c9a0dd1b83e5735ad895b2087788ea9b2272851f1ae4c7aee8005a9a",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 86928,
+      "different_percent": 4.947006118881119,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 17645245,
+      "mean_absolute_channel_delta": 2.5104435562809586,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 3,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-01.png",
+        "sha256": "4dc588477b888d848f7b57ebb6ae5794a20177ba84633eacf83b5f86f30b25b0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-04.png",
+        "sha256": "bf3b9e0b1269c5248d84984a7aa13cd075e940baf8836114cba7e7ff957409e6",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 87686,
+      "different_percent": 4.990143320221446,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 18257904,
+      "mean_absolute_channel_delta": 2.5976084462412588,
+      "max_channel_delta": 245
+    },
+    {
+      "amp_index": 0,
+      "rika_index": 0,
+      "amp": {
+        "path": "docs/parity/screenshots/amp/mode-switch-ctrl-s-42-01.png",
+        "sha256": "4dc588477b888d848f7b57ebb6ae5794a20177ba84633eacf83b5f86f30b25b0",
+        "width": 1942,
+        "height": 1414
+      },
+      "rika": {
+        "path": "docs/parity/screenshots/rika/mode-switch-ctrl-s-42-01.png",
+        "sha256": "d55c0dad19d5984e2fb55a3b89c7003275cca7cbd6d5d0ed6cb2b195eacae996",
+        "width": 1942,
+        "height": 1414
+      },
+      "same_dimensions": true,
+      "compared_pixels": 1757184,
+      "diff_pixel_denominator": 1757184,
+      "different_pixels": 88380,
+      "different_percent": 5.029638330419581,
+      "diff_bbox": {
+        "left": 128,
+        "top": 94,
+        "right": 1791,
+        "bottom": 1142
+      },
+      "total_absolute_channel_delta": 18447409,
+      "mean_absolute_channel_delta": 2.6245699084444203,
+      "max_channel_delta": 245
+    }
+  ]
+}

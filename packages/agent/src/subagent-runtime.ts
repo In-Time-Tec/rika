@@ -1,7 +1,9 @@
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
-import { Common, Ids, Tool } from "@rika/schema"
+import { Common, Ids } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 import * as ToolExecutor from "./tool-executor"
 import * as ToolRegistry from "./tool-registry"
 
@@ -17,20 +19,20 @@ export type ToolAccess = typeof ToolAccess.Type
 
 export interface Spec extends Schema.Schema.Type<typeof Spec> {}
 export const Spec = Schema.Struct({
-  name: Schema.optional(Schema.String),
+  name: Schema.optionalKey(Schema.String),
   prompt: Schema.String,
-  tool_access: Schema.optional(ToolAccess),
-  tool_names: Schema.optional(Schema.Array(Schema.String)),
-  max_output_chars: Schema.optional(Schema.Int),
-  mode: Schema.optional(Config.Mode),
+  tool_access: Schema.optionalKey(ToolAccess),
+  tool_names: Schema.optionalKey(Schema.Array(Schema.String)),
+  max_output_chars: Schema.optionalKey(Schema.Int),
+  mode: Schema.optionalKey(Config.Mode),
 }).annotate({ identifier: "Rika.Agent.SubagentRuntime.Spec" })
 
 export interface RunBatchInput extends Schema.Schema.Type<typeof RunBatchInput> {}
 export const RunBatchInput = Schema.Struct({
-  parent_thread_id: Schema.optional(Ids.ThreadId),
-  parent_turn_id: Schema.optional(Ids.TurnId),
+  parent_thread_id: Schema.optionalKey(Ids.ThreadId),
+  parent_turn_id: Schema.optionalKey(Ids.TurnId),
   agents: Schema.Array(Spec),
-  cancelled: Schema.optional(Schema.Boolean),
+  cancelled: Schema.optionalKey(Schema.Boolean),
 }).annotate({ identifier: "Rika.Agent.SubagentRuntime.RunBatchInput" })
 
 export interface RunSummary extends Schema.Schema.Type<typeof RunSummary> {}
@@ -75,13 +77,13 @@ interface Dependencies {
 
 export const readOnlyToolNames = [
   "semantic_search",
-  "semantic_search.status",
+  "semantic_search_status",
   "fffind",
-  "fff.glob",
-  "fff.directory_search",
+  "fff_glob",
+  "fff_directory_search",
   "ffgrep",
-  "fff.multi_grep",
-  "fff.health",
+  "fff_multi_grep",
+  "fff_health",
   "ast_grep_outline",
   "read",
 ] as const
@@ -116,33 +118,15 @@ export const runBatch = Effect.fn("SubagentRuntime.runBatch.call")(function* (in
 
 export const toolDefinitions = (runtime: Interface): ReadonlyArray<ToolRegistry.Definition> => [
   {
-    descriptor: {
-      name: "task",
+    tool: Tool.make("task", {
       description:
         "Run one or more isolated read-only subagents in parallel and return compact summaries with evidence. Use for independent research, verification, or codebase exploration; do not use for mutating work.",
-      input_schema: {
-        type: "object",
-        properties: {
-          agents: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                name: { type: "string" },
-                prompt: { type: "string" },
-                tool_access: { enum: ["read-only", "none"] },
-                tool_names: { type: "array", items: { type: "string" } },
-                max_output_chars: { type: "integer" },
-                mode: { enum: ["rush", "smart", "deep"] },
-              },
-              required: ["prompt"],
-            },
-          },
-        },
-        required: ["agents"],
-      },
-    },
-    execute: Effect.fn("SubagentRuntime.tool.execute")(function* (call: Tool.Call) {
+      parameters: RunBatchInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("SubagentRuntime.tool.execute")(function* (call: Call) {
       const decoded = Schema.decodeUnknownOption(RunBatchInput)(call.input)
       if (Option.isNone(decoded)) {
         return yield* new ToolRegistry.ToolRegistryError({
@@ -306,7 +290,7 @@ const runToolFollowUp = (
       })
     }
 
-    const toolCall: Tool.Call = {
+    const toolCall: Call = {
       id: Ids.ToolCallId.make(yield* dependencies.idGenerator.next("tool_call")),
       name: toolRequest.name,
       input: toolRequest.input,
@@ -397,7 +381,7 @@ const subagentMetadata = (input: RunBatchInput, subagentId: string, name: string
   ...(input.parent_turn_id === undefined ? {} : { parent_turn_id: input.parent_turn_id }),
 })
 
-const withParentFromToolCall = (input: RunBatchInput, call: Tool.Call): RunBatchInput => ({
+const withParentFromToolCall = (input: RunBatchInput, call: Call): RunBatchInput => ({
   ...input,
   ...(typeof call.metadata?.thread_id === "string"
     ? { parent_thread_id: Ids.ThreadId.make(call.metadata.thread_id) }

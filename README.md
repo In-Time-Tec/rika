@@ -1,8 +1,8 @@
 # Rika
 
-Rika is a greenfield, Effect-native coding agent operating system inspired by Amp Code. It is planned as a Bun + Turbo monorepo with OpenCode-shaped Effect modules, Rivet actors from day one, Drizzle-backed durable threads, and a Pi-style extension system that can safely extend or modify the agent itself.
+Rika is a greenfield, Effect-native coding agent operating system inspired by Amp Code. It is a Bun + Turbo monorepo with OpenCode-shaped Effect modules, Rivet actor orchestration, Drizzle-backed durable threads, and an extension system for skills, plugins, MCP, IDE integration, and remote control.
 
-The implementation plan is tracked as stacked GitHub issues in this repository. The repository starts as a Bun/Turbo workspace with placeholder packages for the shared schema and core Effect layers.
+The implementation is growing through stacked GitHub issues, with reusable packages for the agent loop, shared schemas, persistence, tools, LLM routing, plugins, the TUI, CLI, SDK, server, IDE bridge, and Rivet host.
 
 ## Product Direction
 

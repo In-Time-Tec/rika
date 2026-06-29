@@ -1,0 +1,21 @@
+{
+  "row": 43,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T08:44:38Z",
+  "surface": "CLI & keybindings",
+  "state": "config keymap stdout",
+  "amp_command": "AMP_SKIP_UPDATE_CHECK=1 amp config keymap",
+  "rika_command": "bun packages/cli/src/main.ts config keymap",
+  "amp_exit_code": 0,
+  "rika_exit_code": 0,
+  "comparison_command": "cmp -s docs/parity/metadata/amp-config-keymap-43.txt docs/parity/metadata/rika-config-keymap-43.txt",
+  "comparison_exit_code": 0,
+  "bytes_each": 4060,
+  "sha256_each": "052cc48890e4d7ad8b04d161d8b7055c20eb017082a4097478eb86bba2a87437",
+  "artifacts": {
+    "amp_stdout": "docs/parity/metadata/amp-config-keymap-43.txt",
+    "rika_stdout": "docs/parity/metadata/rika-config-keymap-43.txt"
+  },
+  "result": "match",
+  "scope": "This proves byte-for-byte parity for the config keymap CLI stdout only. Interactive key delivery and each keybinding's runtime behavior remain separately verified rows."
+}

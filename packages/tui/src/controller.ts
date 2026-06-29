@@ -28,6 +28,7 @@ export interface Dependencies<E> {
 
 type AppEvent =
   | { readonly _tag: "Key"; readonly key: Keys.Key }
+  | { readonly _tag: "Ui"; readonly action: Adapter.Action }
   | { readonly _tag: "Tick" }
   | { readonly _tag: "Model"; readonly event: Event.Event }
   | { readonly _tag: "TurnEnded"; readonly token: number; readonly error?: unknown }
@@ -78,16 +79,14 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           const token = turnToken
           currentTurnId = undefined
           const fiber = yield* Effect.forkScoped(
-            deps.backend
-              .streamTurn({ thread_id: threadId, workspace_path: workspacePath, content, mode })
-              .pipe(
-                Stream.runForEach((event) => Queue.offer(queue, { _tag: "Model", event }).pipe(Effect.asVoid)),
-                Effect.matchCauseEffect({
-                  onFailure: (cause: Cause.Cause<E>) =>
-                    Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
-                  onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token }).pipe(Effect.asVoid),
-                }),
-              ),
+            deps.backend.streamTurn({ thread_id: threadId, workspace_path: workspacePath, content, mode }).pipe(
+              Stream.runForEach((event) => Queue.offer(queue, { _tag: "Model", event }).pipe(Effect.asVoid)),
+              Effect.matchCauseEffect({
+                onFailure: (cause: Cause.Cause<E>) =>
+                  Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
+                onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token }).pipe(Effect.asVoid),
+              }),
+            ),
           )
           turnFiber = fiber
           yield* render()
@@ -184,6 +183,21 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             case "Backspace":
               state = ViewState.backspace(state)
               break
+            case "DeleteForward":
+              state = ViewState.deleteForward(state)
+              break
+            case "DeleteWordBackward":
+              state = ViewState.deleteWordBackward(state)
+              break
+            case "DeleteWordForward":
+              state = ViewState.deleteWordForward(state)
+              break
+            case "DeleteToLineStart":
+              state = ViewState.deleteToLineStart(state)
+              break
+            case "DeleteToLineEnd":
+              state = ViewState.deleteToLineEnd(state)
+              break
             case "Newline":
               state = ViewState.newline(state)
               break
@@ -198,6 +212,12 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               break
             case "CursorEnd":
               state = ViewState.moveCursorEnd(state)
+              break
+            case "WordLeft":
+              state = ViewState.moveWordLeft(state)
+              break
+            case "WordRight":
+              state = ViewState.moveWordRight(state)
               break
             case "FocusPrev":
               state = state.queued.length > 0 ? ViewState.queueUp(state) : ViewState.focusPrev(state)
@@ -279,7 +299,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                 )
               } else {
                 if (state.input.text.trim().length > 0) state = ViewState.enqueueMessage(state, state.input.text.trim())
-                state = ViewState.withNotice(ViewState.clearInput(state), "Steering message queued for the running turn.")
+                state = ViewState.withNotice(
+                  ViewState.clearInput(state),
+                  "Steering message queued for the running turn.",
+                )
               }
               break
             }
@@ -399,6 +422,19 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           yield* maybeShutdown()
         })
 
+      const handleUiAction = (action: Adapter.Action) =>
+        Effect.gen(function* () {
+          switch (action._tag) {
+            case "ToggleCard":
+              state = ViewState.toggleCard(state, action.card_id)
+              break
+            case "ToggleToolGroup":
+              state = ViewState.toggleToolGroup(state)
+              break
+          }
+          yield* render()
+        })
+
       const handle = (appEvent: AppEvent) =>
         Effect.gen(function* () {
           switch (appEvent._tag) {
@@ -421,12 +457,20 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               keysDone = true
               yield* maybeShutdown()
               return
+            case "Ui":
+              yield* handleUiAction(appEvent.action)
+              return
             case "Key":
               yield* handleKey(appEvent.key)
               return
           }
         })
 
+      yield* Effect.forkScoped(
+        deps.renderer.actions.pipe(
+          Stream.runForEach((action) => Queue.offer(queue, { _tag: "Ui", action }).pipe(Effect.asVoid)),
+        ),
+      )
       yield* Effect.forkScoped(
         deps.renderer.keys.pipe(
           Stream.runForEach((key) => Queue.offer(queue, { _tag: "Key", key }).pipe(Effect.asVoid)),

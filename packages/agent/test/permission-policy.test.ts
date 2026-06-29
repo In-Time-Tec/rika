@@ -13,7 +13,7 @@ describe("PermissionPolicy", () => {
   test("defaults to allow-all with no approval prompts", async () => {
     const config = PermissionPolicy.configFromEnv({})
 
-    const result = await Effect.runPromise(PermissionPolicy.decideFromConfig(config, call("shell.command")))
+    const result = await Effect.runPromise(PermissionPolicy.decideFromConfig(config, call("shell_command")))
 
     expect(config).toEqual({ mode: "allow-all" })
     expect(PermissionPolicy.summary(config)).toEqual({
@@ -27,14 +27,14 @@ describe("PermissionPolicy", () => {
   test("configured guarded tools reject through the normal decision type", async () => {
     const config = PermissionPolicy.configFromEnv({ RIKA_GUARDED_TOOLS: "shell.*, write" })
 
-    const blocked = await Effect.runPromise(PermissionPolicy.decideFromConfig(config, call("shell.command")))
+    const blocked = await Effect.runPromise(PermissionPolicy.decideFromConfig(config, call("shell_command")))
     const allowed = await Effect.runPromise(PermissionPolicy.decideFromConfig(config, call("read")))
 
     expect(config).toEqual({ mode: "configured", guarded_tools: ["shell.*", "write"] })
     expect(blocked).toMatchObject({
       action: "reject-and-continue",
-      message: "Tool shell.command is guarded by permission policy",
-      details: { permission_mode: "configured", matched: "tool", tool: "shell.command", pattern: "shell.*" },
+      message: "Tool shell_command is guarded by permission policy",
+      details: { permission_mode: "configured", matched: "tool", tool: "shell_command", pattern: "shell.*" },
     })
     expect(allowed).toEqual(PermissionPolicy.allow)
   })
@@ -57,7 +57,7 @@ describe("PermissionPolicy", () => {
   test("layerFromConfig exposes the active permission mode", async () => {
     const mode = await Effect.runPromise(
       PermissionPolicy.mode().pipe(
-        Effect.provide(PermissionPolicy.layerFromConfig({ mode: "configured", guarded_tools: ["shell.command"] })),
+        Effect.provide(PermissionPolicy.layerFromConfig({ mode: "configured", guarded_tools: ["shell_command"] })),
       ),
     )
 

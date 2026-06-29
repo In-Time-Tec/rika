@@ -1,0 +1,7 @@
+Usage: amp version [options]
+
+Print the version number and exit
+
+Options:
+  -h, --help  display help for command
+[=0u[<u[?25h

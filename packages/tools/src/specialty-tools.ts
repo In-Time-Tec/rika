@@ -2,32 +2,34 @@ import { ToolRegistry } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Router } from "@rika/llm"
 import { ArtifactStore } from "@rika/persistence"
-import { Artifact, Common, Ids, Tool } from "@rika/schema"
+import { Artifact, Common, Ids } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 
 const defaultMaxOutputChars = 24_000
 
 export interface OracleInput extends Schema.Schema.Type<typeof OracleInput> {}
 export const OracleInput = Schema.Struct({
   task: Schema.String,
-  context: Schema.optional(Schema.String),
-  max_output_chars: Schema.optional(Schema.Int),
+  context: Schema.optionalKey(Schema.String),
+  max_output_chars: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.OracleInput" })
 
 export interface LibrarianInput extends Schema.Schema.Type<typeof LibrarianInput> {}
 export const LibrarianInput = Schema.Struct({
   question: Schema.String,
-  repository: Schema.optional(Schema.String),
-  context: Schema.optional(Schema.String),
-  max_output_chars: Schema.optional(Schema.Int),
+  repository: Schema.optionalKey(Schema.String),
+  context: Schema.optionalKey(Schema.String),
+  max_output_chars: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.LibrarianInput" })
 
 export interface PainterInput extends Schema.Schema.Type<typeof PainterInput> {}
 export const PainterInput = Schema.Struct({
   prompt: Schema.String,
-  input_image_paths: Schema.optional(Schema.Array(Schema.String)),
-  size: Schema.optional(Schema.String),
-  max_output_chars: Schema.optional(Schema.Int),
+  input_image_paths: Schema.optionalKey(Schema.Array(Schema.String)),
+  size: Schema.optionalKey(Schema.String),
+  max_output_chars: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.PainterInput" })
 
 export const Severity = Schema.Literals(["low", "medium", "high", "critical"]).annotate({
@@ -40,47 +42,47 @@ export const Finding = Schema.Struct({
   severity: Severity,
   title: Schema.String,
   evidence: Schema.String,
-  recommendation: Schema.optional(Schema.String),
+  recommendation: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.Finding" })
 
 export interface Citation extends Schema.Schema.Type<typeof Citation> {}
 export const Citation = Schema.Struct({
   title: Schema.String,
-  url: Schema.optional(Schema.String),
-  repository: Schema.optional(Schema.String),
-  path: Schema.optional(Schema.String),
-  line_start: Schema.optional(Schema.Int),
-  line_end: Schema.optional(Schema.Int),
-  excerpt: Schema.optional(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  repository: Schema.optionalKey(Schema.String),
+  path: Schema.optionalKey(Schema.String),
+  line_start: Schema.optionalKey(Schema.Int),
+  line_end: Schema.optionalKey(Schema.Int),
+  excerpt: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.Citation" })
 
 export interface ImageAsset extends Schema.Schema.Type<typeof ImageAsset> {}
 export const ImageAsset = Schema.Struct({
   mime_type: Schema.String,
-  data_url: Schema.optional(Schema.String),
-  url: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.String),
+  data_url: Schema.optionalKey(Schema.String),
+  url: Schema.optionalKey(Schema.String),
+  description: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.ImageAsset" })
 
 export interface OracleDraft extends Schema.Schema.Type<typeof OracleDraft> {}
 export const OracleDraft = Schema.Struct({
   answer: Schema.String,
   findings: Schema.Array(Finding),
-  model: Schema.optional(Schema.String),
+  model: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.OracleDraft" })
 
 export interface ResearchDraft extends Schema.Schema.Type<typeof ResearchDraft> {}
 export const ResearchDraft = Schema.Struct({
   answer: Schema.String,
   citations: Schema.Array(Citation),
-  model: Schema.optional(Schema.String),
+  model: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.ResearchDraft" })
 
 export interface PainterDraft extends Schema.Schema.Type<typeof PainterDraft> {}
 export const PainterDraft = Schema.Struct({
   prompt: Schema.String,
   images: Schema.Array(ImageAsset),
-  model: Schema.optional(Schema.String),
+  model: Schema.optionalKey(Schema.String),
 }).annotate({ identifier: "Rika.Tools.SpecialtyTools.PainterDraft" })
 
 export class SpecialtyToolsError extends Schema.TaggedErrorClass<SpecialtyToolsError>()("SpecialtyToolsError", {
@@ -97,9 +99,9 @@ export interface Backend {
 }
 
 export interface Interface {
-  readonly oracle: (input: OracleInput, call: Tool.Call) => Effect.Effect<Common.JsonValue, SpecialtyToolsError>
-  readonly librarian: (input: LibrarianInput, call: Tool.Call) => Effect.Effect<Common.JsonValue, SpecialtyToolsError>
-  readonly painter: (input: PainterInput, call: Tool.Call) => Effect.Effect<Common.JsonValue, SpecialtyToolsError>
+  readonly oracle: (input: OracleInput, call: Call) => Effect.Effect<Common.JsonValue, SpecialtyToolsError>
+  readonly librarian: (input: LibrarianInput, call: Call) => Effect.Effect<Common.JsonValue, SpecialtyToolsError>
+  readonly painter: (input: PainterInput, call: Call) => Effect.Effect<Common.JsonValue, SpecialtyToolsError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/tools/SpecialtyTools") {}
@@ -145,54 +147,60 @@ export const fakeLayer = (backend: Partial<Backend> = {}) =>
     painter: backend.painter ?? ((input) => Effect.succeed(defaultPainterDraft(input))),
   })
 
-export const oracle = Effect.fn("SpecialtyTools.oracle.call")(function* (input: OracleInput, call: Tool.Call) {
+export const oracle = Effect.fn("SpecialtyTools.oracle.call")(function* (input: OracleInput, call: Call) {
   const service = yield* Service
   return yield* service.oracle(input, call)
 })
 
-export const librarian = Effect.fn("SpecialtyTools.librarian.call")(function* (input: LibrarianInput, call: Tool.Call) {
+export const librarian = Effect.fn("SpecialtyTools.librarian.call")(function* (input: LibrarianInput, call: Call) {
   const service = yield* Service
   return yield* service.librarian(input, call)
 })
 
-export const painter = Effect.fn("SpecialtyTools.painter.call")(function* (input: PainterInput, call: Tool.Call) {
+export const painter = Effect.fn("SpecialtyTools.painter.call")(function* (input: PainterInput, call: Call) {
   const service = yield* Service
   return yield* service.painter(input, call)
 })
 
 export const toolDefinitions = (service: Interface): ReadonlyArray<ToolRegistry.Definition> => [
   {
-    descriptor: {
-      name: "oracle",
+    tool: Tool.make("oracle", {
       description:
         "Ask a separate model-routed second-opinion reviewer for hard reasoning, complex debugging, implementation-plan critique, or subtle code review. Do not use for routine edits.",
-      input_schema: oracleInputSchema,
-    },
-    execute: Effect.fn("SpecialtyTools.tool.oracle")(function* (call: Tool.Call) {
+      parameters: OracleInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("SpecialtyTools.tool.oracle")(function* (call: Call) {
       const input = yield* decodeOracleInput(call)
       return yield* service.oracle(input, call).pipe(Effect.mapError(toRegistryError("oracle")))
     }),
   },
   {
-    descriptor: {
-      name: "librarian",
+    tool: Tool.make("librarian", {
       description:
         "Research external repositories or libraries outside the local workspace. Use for remote codebase understanding; do not use it as a replacement for local semantic_search or fff tools.",
-      input_schema: librarianInputSchema,
-    },
-    execute: Effect.fn("SpecialtyTools.tool.librarian")(function* (call: Tool.Call) {
+      parameters: LibrarianInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("SpecialtyTools.tool.librarian")(function* (call: Call) {
       const input = yield* decodeLibrarianInput(call)
       return yield* service.librarian(input, call).pipe(Effect.mapError(toRegistryError("librarian")))
     }),
   },
   {
-    descriptor: {
-      name: "painter",
+    tool: Tool.make("painter", {
       description:
         "Opt-in image generation/editing tool. Use only when the user explicitly asks for Painter or image generation/editing. Stores generated image assets as artifacts.",
-      input_schema: painterInputSchema,
-    },
-    execute: Effect.fn("SpecialtyTools.tool.painter")(function* (call: Tool.Call) {
+      parameters: PainterInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("SpecialtyTools.tool.painter")(function* (call: Call) {
       const input = yield* decodePainterInput(call)
       return yield* service.painter(input, call).pipe(Effect.mapError(toRegistryError("painter")))
     }),
@@ -209,7 +217,7 @@ export const registryLayerFromService: Layer.Layer<ToolRegistry.Service, never, 
 
 const makeService = (dependencies: Dependencies): Interface =>
   Service.of({
-    oracle: Effect.fn("SpecialtyTools.oracle")(function* (input: OracleInput, call: Tool.Call) {
+    oracle: Effect.fn("SpecialtyTools.oracle")(function* (input: OracleInput, call: Call) {
       const draft = yield* dependencies.backend.oracle(input)
       const artifact = yield* persistArtifact(dependencies, call, {
         kind: "research",
@@ -225,7 +233,7 @@ const makeService = (dependencies: Dependencies): Interface =>
         ...(draft.model === undefined ? {} : { model: draft.model }),
       })
     }),
-    librarian: Effect.fn("SpecialtyTools.librarian")(function* (input: LibrarianInput, call: Tool.Call) {
+    librarian: Effect.fn("SpecialtyTools.librarian")(function* (input: LibrarianInput, call: Call) {
       const draft = yield* dependencies.backend.librarian(input)
       const artifact = yield* persistArtifact(dependencies, call, {
         kind: "research",
@@ -241,7 +249,7 @@ const makeService = (dependencies: Dependencies): Interface =>
         ...(draft.model === undefined ? {} : { model: draft.model }),
       })
     }),
-    painter: Effect.fn("SpecialtyTools.painter")(function* (input: PainterInput, call: Tool.Call) {
+    painter: Effect.fn("SpecialtyTools.painter")(function* (input: PainterInput, call: Call) {
       const draft = yield* dependencies.backend.painter(input)
       const artifact = yield* persistArtifact(dependencies, call, {
         kind: "image",
@@ -311,7 +319,7 @@ interface ArtifactParts {
   readonly metadata: Common.Metadata
 }
 
-const persistArtifact = (dependencies: Dependencies, call: Tool.Call, parts: ArtifactParts) =>
+const persistArtifact = (dependencies: Dependencies, call: Call, parts: ArtifactParts) =>
   Effect.gen(function* () {
     const threadId = threadIdFromCall(call)
     const turnId = turnIdFromCall(call)
@@ -338,12 +346,12 @@ const persistArtifact = (dependencies: Dependencies, call: Tool.Call, parts: Art
       .pipe(Effect.mapError((error) => fromExternalError(error, "persistArtifact")))
   })
 
-const threadIdFromCall = (call: Tool.Call) => {
+const threadIdFromCall = (call: Call) => {
   const value = call.metadata?.thread_id
   return typeof value === "string" ? Option.some(Ids.ThreadId.make(value)) : Option.none<Ids.ThreadId>()
 }
 
-const turnIdFromCall = (call: Tool.Call) => {
+const turnIdFromCall = (call: Call) => {
   const value = call.metadata?.turn_id
   return typeof value === "string" ? Option.some(Ids.TurnId.make(value)) : Option.none<Ids.TurnId>()
 }
@@ -397,8 +405,8 @@ const defaultResearchDraft = (input: LibrarianInput): ResearchDraft => ({
   citations: [
     {
       title: input.repository ?? "fake external source",
-      repository: input.repository,
       excerpt: input.context ?? input.question,
+      ...(input.repository === undefined ? {} : { repository: input.repository }),
     },
   ],
   model: "fake-specialty",
@@ -495,25 +503,25 @@ const extractJson = (content: string) => {
   return trimmed.slice(firstLineEnd + 1, lastFenceStart).trim()
 }
 
-const decodeOracleInput = (call: Tool.Call) => {
+const decodeOracleInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(OracleInput)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return invalidInput(call, "oracle")
 }
 
-const decodeLibrarianInput = (call: Tool.Call) => {
+const decodeLibrarianInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(LibrarianInput)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return invalidInput(call, "librarian")
 }
 
-const decodePainterInput = (call: Tool.Call) => {
+const decodePainterInput = (call: Call) => {
   const decoded = Schema.decodeUnknownOption(PainterInput)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return invalidInput(call, "painter")
 }
 
-const invalidInput = (call: Tool.Call, name: string) =>
+const invalidInput = (call: Call, name: string) =>
   new ToolRegistry.ToolRegistryError({
     message: `${name} input did not match the expected schema`,
     name: call.name,
@@ -597,38 +605,3 @@ const painterUserPrompt = (input: PainterInput) =>
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n")
-
-const oracleInputSchema: Common.JsonValue = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    task: { type: "string" },
-    context: { type: "string" },
-    max_output_chars: { type: "integer" },
-  },
-  required: ["task"],
-}
-
-const librarianInputSchema: Common.JsonValue = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    question: { type: "string" },
-    repository: { type: "string" },
-    context: { type: "string" },
-    max_output_chars: { type: "integer" },
-  },
-  required: ["question"],
-}
-
-const painterInputSchema: Common.JsonValue = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    prompt: { type: "string" },
-    input_image_paths: { type: "array", items: { type: "string" }, maxItems: 3 },
-    size: { type: "string" },
-    max_output_chars: { type: "integer" },
-  },
-  required: ["prompt"],
-}

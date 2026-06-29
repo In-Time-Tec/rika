@@ -4,7 +4,7 @@ import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
 import { Effect, Layer, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
+import { AiError } from "effect/unstable/ai"
 import { AgentLoop, ContextResolver, PermissionPolicy, SkillRegistry, ToolExecutor, ToolRegistry } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_agent_loop")
@@ -17,7 +17,7 @@ const configLayer = Config.layerFromValues({
 })
 
 const defaultToolLayer = ToolExecutor.fakeLayer({
-  "fake.echo": (call) => Effect.succeed({ echoed: call.input }),
+  fake_echo: (call) => Effect.succeed({ echoed: call.input }),
 })
 
 const makeLayer = (
@@ -60,7 +60,7 @@ const makeLayer = (
 describe("AgentLoop", () => {
   test("runs a fake model requested fake tool in one persisted turn", async () => {
     const layer = makeLayer([
-      JSON.stringify({ tool_call: { name: "fake.echo", input: { text: "hello" } } }),
+      { type: "tool-call", id: "call_fake_echo_1", name: "fake_echo", input: { text: "hello" } },
       "tool saw hello",
     ])
 
@@ -84,14 +84,15 @@ describe("AgentLoop", () => {
       "turn.started",
       "message.added",
       "context.resolved",
-      "model.stream.chunk",
+      "tool.call.input.started",
+      "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
       "model.stream.chunk",
       "message.added",
       "turn.completed",
     ])
-    expect(result.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    expect(result.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
     expect(result.events.find((event) => event.type === "context.resolved")).toMatchObject({
       data: { rendered: "<rika_context>Test guidance</rika_context>" },
     })
@@ -108,8 +109,8 @@ describe("AgentLoop", () => {
   test("loops through multiple tool calls before emitting the final answer", async () => {
     const multiToolThread = Ids.ThreadId.make("thread_agent_multi_tool")
     const layer = makeLayer([
-      JSON.stringify({ tool_call: { name: "fake.echo", input: { text: "first" } } }),
-      JSON.stringify({ tool_call: { name: "fake.echo", input: { text: "second" } } }),
+      { type: "tool-call", id: "call_fake_echo_1", name: "fake_echo", input: { text: "first" } },
+      { type: "tool-call", id: "call_fake_echo_2", name: "fake_echo", input: { text: "second" } },
       "done after two tools",
     ])
 
@@ -133,10 +134,12 @@ describe("AgentLoop", () => {
       "turn.started",
       "message.added",
       "context.resolved",
-      "model.stream.chunk",
+      "tool.call.input.started",
+      "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
-      "model.stream.chunk",
+      "tool.call.input.started",
+      "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
       "model.stream.chunk",
@@ -145,8 +148,6 @@ describe("AgentLoop", () => {
     ])
     expect(result.events.filter((event) => event.type === "tool.call.requested")).toHaveLength(2)
     expect(result.events.filter((event) => event.type === "tool.call.completed")).toHaveLength(2)
-    // Intermediate tool_call responses must not be persisted as assistant messages:
-    // only the user message and the final non-tool answer are message.added events.
     expect(result.events.filter((event) => event.type === "message.added")).toHaveLength(2)
     expect(result.events.at(-1)).toMatchObject({ type: "turn.completed" })
     expect(result.events.findLast((event) => event.type === "message.added")).toMatchObject({
@@ -186,11 +187,14 @@ describe("AgentLoop", () => {
 
   test("records permission-blocked tool calls as structured tool results", async () => {
     const toolLayer = ToolExecutor.layer.pipe(
-      Layer.provideMerge(ToolRegistry.fakeLayer({ "fake.echo": (call) => Effect.succeed({ echoed: call.input }) })),
-      Layer.provideMerge(PermissionPolicy.rejectLayer("policy denied fake.echo")),
+      Layer.provideMerge(ToolRegistry.fakeLayer({ fake_echo: (call) => Effect.succeed({ echoed: call.input }) })),
+      Layer.provideMerge(PermissionPolicy.rejectLayer("policy denied fake_echo")),
     )
     const layer = makeLayer(
-      [JSON.stringify({ tool_call: { name: "fake.echo", input: { text: "blocked" } } }), "continued after block"],
+      [
+        { type: "tool-call", id: "call_fake_echo_blocked", name: "fake_echo", input: { text: "blocked" } },
+        "continued after block",
+      ],
       toolLayer,
     )
 
@@ -209,7 +213,7 @@ describe("AgentLoop", () => {
 
     expect(result.turn.status).toBe("completed")
     expect(result.events.find((event) => event.type === "tool.call.completed")).toMatchObject({
-      data: { result: { status: "error", error: { kind: "permission", message: "policy denied fake.echo" } } },
+      data: { result: { status: "error", error: { kind: "permission", message: "policy denied fake_echo" } } },
     })
     expect(result.events.at(-1)).toMatchObject({ type: "turn.completed" })
   })
@@ -235,7 +239,10 @@ describe("AgentLoop", () => {
         }),
     })
     const layer = makeLayer(
-      [JSON.stringify({ tool_call: { name: "task", input: { agents: [{ prompt: "find behavior" }] } } }), "merged"],
+      [
+        { type: "tool-call", id: "call_task_1", name: "task", input: { agents: [{ prompt: "find behavior" }] } },
+        "merged",
+      ],
       toolLayer,
     )
 
@@ -258,7 +265,8 @@ describe("AgentLoop", () => {
       "turn.started",
       "message.added",
       "context.resolved",
-      "model.stream.chunk",
+      "tool.call.input.started",
+      "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
       "subagent.completed",
@@ -273,7 +281,7 @@ describe("AgentLoop", () => {
 
   test("does not persist subagent summaries returned by non-task tools", async () => {
     const toolLayer = ToolExecutor.fakeLayer({
-      "fake.batch": () =>
+      fake_batch: () =>
         Effect.succeed({
           type: "subagent.batch",
           runs: [
@@ -291,7 +299,10 @@ describe("AgentLoop", () => {
           ],
         }),
     })
-    const layer = makeLayer([JSON.stringify({ tool_call: { name: "fake.batch", input: {} } }), "merged"], toolLayer)
+    const layer = makeLayer(
+      [{ type: "tool-call", id: "call_fake_batch_1", name: "fake_batch", input: {} }, "merged"],
+      toolLayer,
+    )
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {

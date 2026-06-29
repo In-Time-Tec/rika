@@ -1,0 +1,91 @@
+{
+  "row": 58,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T11:32:41Z",
+  "surface": "CLI mcp oauth help",
+  "state": "MCP oauth --help and -h flags",
+  "commands": {
+    "amp_mcp_oauth_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp oauth --help",
+    "amp_mcp_oauth_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp oauth -h",
+    "rika_mcp_oauth_help_before": "bun packages/cli/src/main.ts mcp oauth --help",
+    "rika_mcp_oauth_h_before": "bun packages/cli/src/main.ts mcp oauth -h",
+    "rika_mcp_oauth_help_after": "bun packages/cli/src/main.ts mcp oauth --help",
+    "rika_mcp_oauth_h_after": "bun packages/cli/src/main.ts mcp oauth -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-oauth-help-58.txt docs/parity/metadata/rika-mcp-oauth-help-58.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-oauth-help-short-58.txt docs/parity/metadata/rika-mcp-oauth-help-short-58.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-oauth-help-stdout-58.txt docs/parity/metadata/rika-mcp-oauth-help-stdout-58.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-oauth-help-stderr-58.txt docs/parity/metadata/rika-mcp-oauth-help-stderr-58.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-mcp-oauth-help-short-stdout-58.txt docs/parity/metadata/rika-mcp-oauth-help-short-stdout-58.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-mcp-oauth-help-short-stderr-58.txt docs/parity/metadata/rika-mcp-oauth-help-short-stderr-58.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_oauth_help": 0,
+    "amp_mcp_oauth_h": 0,
+    "rika_mcp_oauth_help_before": 0,
+    "rika_mcp_oauth_h_before": 0,
+    "rika_mcp_oauth_help_after": 0,
+    "rika_mcp_oauth_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_oauth_help": 486,
+    "amp_mcp_oauth_h": 486,
+    "rika_mcp_oauth_help_before": 657,
+    "rika_mcp_oauth_h_before": 657,
+    "rika_mcp_oauth_help_after": 486,
+    "rika_mcp_oauth_h_after": 486,
+    "stdout": 486,
+    "stderr": 0,
+    "short_stdout": 486,
+    "short_stderr": 0
+  },
+  "sha256": {
+    "amp_mcp_oauth_help": "854ae064256c933e24b1c82f8bc57cc43bcc1ece961fd873cb1f9e5b586e32e0",
+    "amp_mcp_oauth_h": "854ae064256c933e24b1c82f8bc57cc43bcc1ece961fd873cb1f9e5b586e32e0",
+    "rika_mcp_oauth_help_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_oauth_h_before": "5c04aa523df53ea4b17d8723d806a71973431393f788aa9d86ee46e475c12469",
+    "rika_mcp_oauth_help_after": "854ae064256c933e24b1c82f8bc57cc43bcc1ece961fd873cb1f9e5b586e32e0",
+    "rika_mcp_oauth_h_after": "854ae064256c933e24b1c82f8bc57cc43bcc1ece961fd873cb1f9e5b586e32e0"
+  },
+  "artifacts": {
+    "amp_mcp_oauth_help": "docs/parity/metadata/amp-mcp-oauth-help-58.txt",
+    "amp_mcp_oauth_h": "docs/parity/metadata/amp-mcp-oauth-help-short-58.txt",
+    "amp_mcp_oauth_stdout": "docs/parity/metadata/amp-mcp-oauth-help-stdout-58.txt",
+    "amp_mcp_oauth_stderr": "docs/parity/metadata/amp-mcp-oauth-help-stderr-58.txt",
+    "amp_mcp_oauth_h_stdout": "docs/parity/metadata/amp-mcp-oauth-help-short-stdout-58.txt",
+    "amp_mcp_oauth_h_stderr": "docs/parity/metadata/amp-mcp-oauth-help-short-stderr-58.txt",
+    "rika_mcp_oauth_help_before": "docs/parity/metadata/rika-mcp-oauth-help-58-before.txt",
+    "rika_mcp_oauth_h_before": "docs/parity/metadata/rika-mcp-oauth-help-short-58-before.txt",
+    "rika_mcp_oauth_help_after": "docs/parity/metadata/rika-mcp-oauth-help-58.txt",
+    "rika_mcp_oauth_h_after": "docs/parity/metadata/rika-mcp-oauth-help-short-58.txt",
+    "rika_mcp_oauth_stdout": "docs/parity/metadata/rika-mcp-oauth-help-stdout-58.txt",
+    "rika_mcp_oauth_stderr": "docs/parity/metadata/rika-mcp-oauth-help-stderr-58.txt",
+    "rika_mcp_oauth_h_stdout": "docs/parity/metadata/rika-mcp-oauth-help-short-stdout-58.txt",
+    "rika_mcp_oauth_h_stderr": "docs/parity/metadata/rika-mcp-oauth-help-short-stderr-58.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 486,
+    "stderr_bytes": 0,
+    "stdout_sha256": "854ae064256c933e24b1c82f8bc57cc43bcc1ece961fd873cb1f9e5b586e32e0",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 486,
+    "short_stderr_bytes": 0,
+    "short_stdout_sha256": "854ae064256c933e24b1c82f8bc57cc43bcc1ece961fd873cb1f9e5b586e32e0",
+    "short_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Rowan-58",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp oauth --help and mcp oauth -h combined bytes, exit code, and stdout/stderr split only. MCP OAuth login/logout/status help pages, OAuth behavior, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

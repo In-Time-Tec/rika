@@ -1,0 +1,9 @@
+Usage: amp mcp oauth logout [options] <server-name>
+
+Remove OAuth credentials for an MCP server
+
+Arguments:
+  server-name  Name of the MCP server
+
+Options:
+  -h, --help   display help for command

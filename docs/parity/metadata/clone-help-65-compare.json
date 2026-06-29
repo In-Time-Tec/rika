@@ -1,0 +1,91 @@
+{
+  "row": 65,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T12:49:00Z",
+  "surface": "CLI clone help",
+  "state": "Clone --help and -h flags",
+  "commands": {
+    "amp_clone_help": "AMP_SKIP_UPDATE_CHECK=1 amp clone --help",
+    "amp_clone_h": "AMP_SKIP_UPDATE_CHECK=1 amp clone -h",
+    "rika_clone_help_before": "bun packages/cli/src/main.ts clone --help",
+    "rika_clone_h_before": "bun packages/cli/src/main.ts clone -h",
+    "rika_clone_help_after": "bun packages/cli/src/main.ts clone --help",
+    "rika_clone_h_after": "bun packages/cli/src/main.ts clone -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-clone-help-65.txt docs/parity/metadata/rika-clone-help-65.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-clone-help-short-65.txt docs/parity/metadata/rika-clone-help-short-65.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-clone-help-65-stdout.txt docs/parity/metadata/rika-clone-help-65-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-clone-help-65-stderr.txt docs/parity/metadata/rika-clone-help-65-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-clone-help-short-65-stdout.txt docs/parity/metadata/rika-clone-help-short-65-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-clone-help-short-65-stderr.txt docs/parity/metadata/rika-clone-help-short-65-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_clone_help": 0,
+    "amp_clone_h": 0,
+    "rika_clone_help_before": 0,
+    "rika_clone_h_before": 0,
+    "rika_clone_help_after": 0,
+    "rika_clone_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_clone_help": 1690,
+    "amp_clone_h": 1690,
+    "rika_clone_help_before": 1397,
+    "rika_clone_h_before": 1397,
+    "rika_clone_help_after": 1690,
+    "rika_clone_h_after": 1690,
+    "stdout": 1675,
+    "stderr": 15,
+    "short_stdout": 1675,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_clone_help": "b50309cc0cc5bd8c57e7c7395ef94c8d0a828ac9419a2c86944925ec55d6fac8",
+    "amp_clone_h": "b50309cc0cc5bd8c57e7c7395ef94c8d0a828ac9419a2c86944925ec55d6fac8",
+    "rika_clone_help_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_clone_h_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_clone_help_after": "b50309cc0cc5bd8c57e7c7395ef94c8d0a828ac9419a2c86944925ec55d6fac8",
+    "rika_clone_h_after": "b50309cc0cc5bd8c57e7c7395ef94c8d0a828ac9419a2c86944925ec55d6fac8"
+  },
+  "artifacts": {
+    "amp_clone_help": "docs/parity/metadata/amp-clone-help-65.txt",
+    "amp_clone_h": "docs/parity/metadata/amp-clone-help-short-65.txt",
+    "amp_clone_stdout": "docs/parity/metadata/amp-clone-help-65-stdout.txt",
+    "amp_clone_stderr": "docs/parity/metadata/amp-clone-help-65-stderr.txt",
+    "amp_clone_h_stdout": "docs/parity/metadata/amp-clone-help-short-65-stdout.txt",
+    "amp_clone_h_stderr": "docs/parity/metadata/amp-clone-help-short-65-stderr.txt",
+    "rika_clone_help_before": "docs/parity/metadata/rika-clone-help-65-before.txt",
+    "rika_clone_h_before": "docs/parity/metadata/rika-clone-help-short-65-before.txt",
+    "rika_clone_help_after": "docs/parity/metadata/rika-clone-help-65.txt",
+    "rika_clone_h_after": "docs/parity/metadata/rika-clone-help-short-65.txt",
+    "rika_clone_stdout": "docs/parity/metadata/rika-clone-help-65-stdout.txt",
+    "rika_clone_stderr": "docs/parity/metadata/rika-clone-help-65-stderr.txt",
+    "rika_clone_h_stdout": "docs/parity/metadata/rika-clone-help-short-65-stdout.txt",
+    "rika_clone_h_stderr": "docs/parity/metadata/rika-clone-help-short-65-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1675,
+    "stderr_bytes": 15,
+    "stdout_sha256": "9bef338aac1777259bd92577a14208eae44266b7bb37df4f0a5201582e0cc836",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1675,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "9bef338aac1777259bd92577a14208eae44266b7bb37df4f0a5201582e0cc836",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Codex independent reviewer",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact clone --help and clone -h combined bytes, exit code, and stdout/stderr split. Clone command behavior, other command help pages, and future Amp help changes remain separate parity work."
+}

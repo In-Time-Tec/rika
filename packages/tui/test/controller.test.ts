@@ -18,7 +18,11 @@ interface Harness {
 
 const run = (
   keys: ReadonlyArray<Keys.Key>,
-  options: { failFirstTurn?: boolean; seedEvents?: ReadonlyArray<Event.Event> } = {},
+  options: {
+    failFirstTurn?: boolean
+    seedEvents?: ReadonlyArray<Event.Event>
+    actions?: ReadonlyArray<Adapter.Action>
+  } = {},
 ) => {
   const rendered: Recorded = []
   const turns: Array<string> = []
@@ -28,6 +32,7 @@ const run = (
   const adapter: Adapter.Adapter = {
     render: (state) => Effect.sync(() => rendered.push(state)),
     keys: Stream.fromIterable(keys),
+    actions: Stream.fromIterable(options.actions ?? []),
     resizes: Stream.empty,
     setExit: () => Effect.void,
     editExternally: (text) => Effect.succeed(text),
@@ -51,7 +56,8 @@ const run = (
     runCommand: (context, command) =>
       Effect.sync(() => {
         commands.push(command)
-        if (command === "/exit") return { ...context, state: ViewState.withNotice(context.state, "Goodbye."), exit: true }
+        if (command === "/exit")
+          return { ...context, state: ViewState.withNotice(context.state, "Goodbye."), exit: true }
         return { ...context, state: ViewState.withNotice(context.state, `Ran ${command}`), exit: false }
       }),
     listThreads: () => Effect.succeed([]),
@@ -92,6 +98,29 @@ describe("Controller", () => {
     expect(expanded).toBe(true)
   })
 
+  test("adapter UI actions expand cards without keyboard focus", async () => {
+    const { rendered } = await run(quit, {
+      seedEvents: [toolRequested(1), toolCompleted(2)],
+      actions: [{ _tag: "ToggleCard", card_id: "tool_controller" }],
+    })
+    expect(rendered.some((state) => state.expanded_ids.has("tool_controller"))).toBe(true)
+  })
+
+  test("word editing chords mutate the input before submit", async () => {
+    const keys = [
+      ...Keys.fromString("alpha beta gamma"),
+      Keys.ctrl("w"),
+      ...Keys.fromString("delta"),
+      Keys.ctrl("u"),
+      ...Keys.fromString("final prompt"),
+      Keys.enter,
+      ...quit,
+    ]
+    const { turns } = await run(keys)
+    expect(turns).toContain("final prompt")
+    expect(turns).not.toContain("alpha beta deltafinal prompt")
+  })
+
   test("a typed /help runs through the backend command handler", async () => {
     const keys = [...Keys.fromString("/help"), Keys.enter, ...quit]
     const { commands } = await run(keys)
@@ -99,15 +128,9 @@ describe("Controller", () => {
   })
 
   test("the palette runs the selected command", async () => {
-    // Open palette, narrow to "mode", run it.
-    const keys = [
-      Keys.ctrl("o"),
-      ...Keys.fromString("mode"),
-      Keys.enter,
-      ...quit,
-    ]
+    const keys = [Keys.ctrl("o"), ...Keys.fromString("mode"), Keys.enter, ...quit]
     const { commands } = await run(keys)
-    expect(commands).toContain("/mode")
+    expect(commands).toContain("/mode rush")
   })
 })
 

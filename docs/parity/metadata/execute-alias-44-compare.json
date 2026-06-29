@@ -1,0 +1,56 @@
+{
+  "row": 44,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T08:57:57Z",
+  "surface": "CLI execute mode",
+  "state": "visible execute alias and rejected -e shorthand",
+  "before": {
+    "amp_help": "Amp exposes -x, --execute [message]",
+    "amp_invalid_e": "Amp rejects -e",
+    "rika_help": "Rika exposed --execute, -e",
+    "rika_invalid_x": "Rika rejected -x"
+  },
+  "after": {
+    "rika_help": "Rika exposes --execute, -x",
+    "rika_invalid_e": "Rika rejects -e",
+    "rika_missing_prompt": "Rika accepts -x and reports a missing prompt"
+  },
+  "commands": {
+    "amp_help": "AMP_SKIP_UPDATE_CHECK=1 amp --help",
+    "rika_help": "bun packages/cli/src/main.ts --help",
+    "amp_invalid_e": "AMP_SKIP_UPDATE_CHECK=1 amp -e",
+    "rika_invalid_e": "bun packages/cli/src/main.ts -e",
+    "amp_missing_prompt": "AMP_SKIP_UPDATE_CHECK=1 amp -x",
+    "rika_missing_prompt": "bun packages/cli/src/main.ts -x"
+  },
+  "exit_codes": {
+    "amp_help": 0,
+    "rika_help": 0,
+    "amp_invalid_e": 1,
+    "rika_invalid_e": 2,
+    "amp_missing_prompt": 1,
+    "rika_missing_prompt": 2
+  },
+  "sha256": {
+    "amp_help": "97cbb472004ffe4e9a822425c46af3c90f23432f008839b6978f295e47013cb3",
+    "rika_help": "47dd6d2ff486894b27c2344b4afa1a83ee621d3d13d86a1a9e1f6b803f6b94bb",
+    "amp_invalid_e": "9f73da379050a992a2fa62192b9a9d01607ec5045edb2cef02454856811b6115",
+    "rika_invalid_e": "8be7081ad33f72391bc7c5f191df87ca4dd88b24fd927f25f46dc0e8fd2aa9f6",
+    "amp_missing_prompt": "39b3cf40432109cad88bb0f2881fd8643a6613a1b6c1e46729e951c19e6ac1d8",
+    "rika_missing_prompt": "af0f61354dea740d7f7c4380c8f5daa9fd95f949d992e3efd6c3d6135d680893"
+  },
+  "artifacts": {
+    "amp_help": "docs/parity/metadata/amp-execute-alias-help-44.txt",
+    "rika_help": "docs/parity/metadata/rika-execute-alias-help-44.txt",
+    "amp_invalid_e": "docs/parity/metadata/amp-execute-alias-invalid-e-44.txt",
+    "rika_invalid_e": "docs/parity/metadata/rika-execute-alias-invalid-e-44.txt",
+    "amp_missing_prompt": "docs/parity/metadata/amp-execute-alias-missing-prompt-44.txt",
+    "rika_missing_prompt": "docs/parity/metadata/rika-execute-alias-missing-prompt-44.txt"
+  },
+  "result": "scoped_alias_match",
+  "known_remaining_deltas": [
+    "Rika's full help surface is still Effect CLI-shaped, not Amp-shaped.",
+    "Invalid -e and missing-prompt exit codes/messages are not byte-for-byte Amp-compatible.",
+    "Execute-mode runtime behavior, stdout redirect behavior, and stream JSON output remain unverified."
+  ]
+}

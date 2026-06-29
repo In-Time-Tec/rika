@@ -16,6 +16,10 @@
     "lint": "oxlint .",
     "package": "bun run scripts/package-cli.ts",
     "package:smoke": "bun run scripts/package-smoke.ts",
+    "parity:burst-compare": "bun run scripts/parity-burst-compare.ts",
+    "parity:diff": "bun run scripts/parity-pixel-diff.ts",
+    "parity:startup-burst-capture": "bun run scripts/parity-startup-burst-capture.ts",
+    "parity:startup-measure": "bun run scripts/parity-startup-measure.ts",
     "update:local": "bun run scripts/install-release.ts",
     "test": "bun turbo test",
     "typecheck": "bun turbo typecheck"

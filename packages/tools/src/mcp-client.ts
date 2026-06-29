@@ -1,11 +1,12 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client"
-import type { Tool as SdkTool } from "@modelcontextprotocol/client"
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio"
 import { ToolRegistry } from "@rika/agent"
 import { Config } from "@rika/core"
 import { Database, McpApprovalStore } from "@rika/persistence"
-import { Common, Tool } from "@rika/schema"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Common } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
+import { Context, Effect, JsonSchema, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 import { createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
@@ -95,7 +96,7 @@ export class Service extends Context.Service<Service, Interface>()("@rika/tools/
 export interface RemoteTool {
   readonly name: string
   readonly description?: string
-  readonly input_schema?: Common.JsonValue
+  readonly inputSchema?: JsonSchema.JsonSchema
 }
 
 export interface Connection {
@@ -285,12 +286,8 @@ const definitionsForServer = (server: ConfiguredServer, connector: Connector) =>
   )
 
 const toolDefinition = (server: ConfiguredServer, tool: RemoteTool, connector: Connector): ToolRegistry.Definition => ({
-  descriptor: {
-    name: rikaToolName(server.name, tool.name),
-    description: `[MCP:${server.name}] ${tool.description ?? tool.name}`,
-    ...(tool.input_schema === undefined ? {} : { input_schema: tool.input_schema }),
-  },
-  execute: Effect.fn(`McpClient.tool.${server.name}.${tool.name}`)(function* (call: Tool.Call) {
+  tool: remoteToolDefinition(server, tool),
+  execute: Effect.fn(`McpClient.tool.${server.name}.${tool.name}`)(function* (call: Call) {
     return yield* withConnection(connector, server, (connection) => connection.callTool(tool.name, call.input)).pipe(
       Effect.mapError(
         (error) =>
@@ -304,6 +301,27 @@ const toolDefinition = (server: ConfiguredServer, tool: RemoteTool, connector: C
     )
   }),
 })
+
+const remoteToolDefinition = (server: ConfiguredServer, tool: RemoteTool) => {
+  const name = rikaToolName(server.name, tool.name)
+  const description = `[MCP:${server.name}] ${tool.description ?? tool.name}`
+  if (tool.inputSchema === undefined) {
+    return Tool.make(name, {
+      description,
+      parameters: Tool.EmptyParams,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    })
+  }
+  return Tool.dynamic(name, {
+    description,
+    parameters: tool.inputSchema,
+    success: Schema.Json,
+    failure: Schema.Json,
+    failureMode: "return",
+  }).annotate(Tool.Strict, false)
+}
 
 const withConnection = <A>(
   connector: Connector,
@@ -365,10 +383,14 @@ const makeTransport = (server: ConfiguredServer) => {
   return new StreamableHTTPClientTransport(url, { requestInit: { headers: { ...server.config.headers } } })
 }
 
-const sdkToolToRemoteTool = (tool: SdkTool): RemoteTool => ({
+const sdkToolToRemoteTool = (tool: {
+  readonly name: string
+  readonly description?: string | undefined
+  readonly inputSchema: JsonSchema.JsonSchema
+}): RemoteTool => ({
   name: tool.name,
   ...(tool.description === undefined ? {} : { description: tool.description }),
-  input_schema: toJsonValue(tool.inputSchema),
+  inputSchema: tool.inputSchema,
 })
 
 const liveSettingsLoader: SettingsLoader = (config) =>

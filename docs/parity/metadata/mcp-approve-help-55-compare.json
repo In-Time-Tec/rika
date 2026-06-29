@@ -1,0 +1,75 @@
+{
+  "row": 55,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T10:59:51Z",
+  "surface": "CLI mcp approve help",
+  "state": "MCP approve --help and -h flags",
+  "commands": {
+    "amp_mcp_approve_help": "AMP_SKIP_UPDATE_CHECK=1 amp mcp approve --help",
+    "amp_mcp_approve_h": "AMP_SKIP_UPDATE_CHECK=1 amp mcp approve -h",
+    "rika_mcp_approve_help_before": "bun packages/cli/src/main.ts mcp approve --help",
+    "rika_mcp_approve_h_before": "bun packages/cli/src/main.ts mcp approve -h",
+    "rika_mcp_approve_help_after": "bun packages/cli/src/main.ts mcp approve --help",
+    "rika_mcp_approve_h_after": "bun packages/cli/src/main.ts mcp approve -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-mcp-approve-help-55.txt docs/parity/metadata/rika-mcp-approve-help-55.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-mcp-approve-help-short-55.txt docs/parity/metadata/rika-mcp-approve-help-short-55.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-mcp-approve-help-stdout-55.txt docs/parity/metadata/rika-mcp-approve-help-stdout-55.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-mcp-approve-help-stderr-55.txt docs/parity/metadata/rika-mcp-approve-help-stderr-55.txt"
+  },
+  "exit_codes": {
+    "amp_mcp_approve_help": 0,
+    "amp_mcp_approve_h": 0,
+    "rika_mcp_approve_help_before": 0,
+    "rika_mcp_approve_h_before": 0,
+    "rika_mcp_approve_help_after": 0,
+    "rika_mcp_approve_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0
+  },
+  "bytes": {
+    "amp_mcp_approve_help": 1969,
+    "amp_mcp_approve_h": 1969,
+    "rika_mcp_approve_help_before": 651,
+    "rika_mcp_approve_h_before": 651,
+    "rika_mcp_approve_help_after": 1969,
+    "rika_mcp_approve_h_after": 1969,
+    "stdout": 1954,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_mcp_approve_help": "8e1f0eb13894f40b8e8d606d4b73b4a0c6b2176e82d7c6bce11e29a80d7fe354",
+    "amp_mcp_approve_h": "8e1f0eb13894f40b8e8d606d4b73b4a0c6b2176e82d7c6bce11e29a80d7fe354",
+    "rika_mcp_approve_help_before": "c0fc09b9e75b4c11e45f520a271e9c29bc60f9ee5fe7eb1d3fe36c04fdc69995",
+    "rika_mcp_approve_h_before": "c0fc09b9e75b4c11e45f520a271e9c29bc60f9ee5fe7eb1d3fe36c04fdc69995",
+    "rika_mcp_approve_help_after": "8e1f0eb13894f40b8e8d606d4b73b4a0c6b2176e82d7c6bce11e29a80d7fe354",
+    "rika_mcp_approve_h_after": "8e1f0eb13894f40b8e8d606d4b73b4a0c6b2176e82d7c6bce11e29a80d7fe354"
+  },
+  "artifacts": {
+    "amp_mcp_approve_help": "docs/parity/metadata/amp-mcp-approve-help-55.txt",
+    "amp_mcp_approve_h": "docs/parity/metadata/amp-mcp-approve-help-short-55.txt",
+    "amp_mcp_approve_stdout": "docs/parity/metadata/amp-mcp-approve-help-stdout-55.txt",
+    "amp_mcp_approve_stderr": "docs/parity/metadata/amp-mcp-approve-help-stderr-55.txt",
+    "rika_mcp_approve_help_before": "docs/parity/metadata/rika-mcp-approve-help-55-before.txt",
+    "rika_mcp_approve_h_before": "docs/parity/metadata/rika-mcp-approve-help-short-55-before.txt",
+    "rika_mcp_approve_help_after": "docs/parity/metadata/rika-mcp-approve-help-55.txt",
+    "rika_mcp_approve_h_after": "docs/parity/metadata/rika-mcp-approve-help-short-55.txt",
+    "rika_mcp_approve_stdout": "docs/parity/metadata/rika-mcp-approve-help-stdout-55.txt",
+    "rika_mcp_approve_stderr": "docs/parity/metadata/rika-mcp-approve-help-stderr-55.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1954,
+    "stderr_bytes": 15,
+    "stdout_sha256": "dedbd4723696d39fee8c0a7a1a913a306c2dbb13ecbb33052b5ae7cdc3ae299b",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Lorentz",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact mcp approve --help and mcp approve -h combined bytes, exit code, and stdout/stderr split only. MCP approve command behavior, other MCP subcommand help pages, and future Amp help changes remain separate parity work."
+}

@@ -1,0 +1,29 @@
+{
+  "amp": {
+    "path": "docs/parity/screenshots/amp/startup-empty-13.png",
+    "sha256": "67555fbc7571679911f3976bb28d71e7a48dd0453d6bb2e197f89a79f209c74c",
+    "width": 1940,
+    "height": 1414
+  },
+  "rika": {
+    "path": "docs/parity/screenshots/rika/startup-empty-13.png",
+    "sha256": "6240d4a059ad1ee08cc51e323855701d002b1e25d9ebaa8b0224d8db8a22582a",
+    "width": 1940,
+    "height": 1414
+  },
+  "same_dimensions": true,
+  "compared_pixels": 2743160,
+  "diff_pixel_denominator": 2743160,
+  "different_pixels": 87821,
+  "different_percent": 3.201453797809825,
+  "diff_bbox": {
+    "left": 123,
+    "top": 302,
+    "right": 1807,
+    "bottom": 1253
+  },
+  "visual_diff_image": "docs/parity/diffs/startup-empty-13.png",
+  "total_absolute_channel_delta": 12536167,
+  "mean_absolute_channel_delta": 1.1424932377258343,
+  "max_channel_delta": 229
+}

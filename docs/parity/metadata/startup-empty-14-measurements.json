@@ -1,0 +1,186 @@
+{
+  "row": 14,
+  "date": "2026-06-29",
+  "surface": "Startup & status line",
+  "state": "Empty startup, deep tier visible",
+  "verdict": "mismatch",
+  "method": {
+    "source": "screenshot RGB pixels converted via sips BMP output",
+    "logo_crop": {
+      "left": 150,
+      "top": 180,
+      "right_exclusive": 875,
+      "bottom_exclusive": 1000
+    },
+    "logo_predicate": "max(rgb)>28 && saturation>0.18 && green>=red*0.65",
+    "welcome_crop": {
+      "left": 850,
+      "top": 400,
+      "right_exclusive": 1300,
+      "bottom_exclusive": 700
+    },
+    "welcome_predicate": "max(rgb)>40 && saturation>0.15 && green>red*1.05 && green>blue*0.8",
+    "grid": {
+      "left": 217,
+      "top": 302,
+      "cell_width": 17,
+      "cell_height": 37,
+      "rows": 18,
+      "columns": 40
+    }
+  },
+  "artifacts": {
+    "amp_screenshot": {
+      "path": "docs/parity/screenshots/amp/startup-empty-14.png",
+      "sha256": "a23d0fdbc4e468aa917e9938d8ef07c51aa50700a97cb0027a29c1e013000167",
+      "width": 1940,
+      "height": 1414
+    },
+    "rika_screenshot": {
+      "path": "docs/parity/screenshots/rika/startup-empty-14.png",
+      "sha256": "6b26bdf449eee7bebfd1b8aa37d7ed49e09b8b90d32cebcb534122ae5b879f8f",
+      "width": 1940,
+      "height": 1414
+    },
+    "pixel_diff": {
+      "path": "docs/parity/diffs/startup-empty-14.json",
+      "sha256": "5f664ca855e53370f0e7a3e9be161dbc1ba27a85f86f65d2bb380e3df6bce656",
+      "different_pixels": 113950,
+      "different_percent": 4.153968415987402,
+      "diff_bbox": {
+        "left": 123,
+        "top": 302,
+        "right": 1807,
+        "bottom": 1253
+      },
+      "total_absolute_channel_delta": 20143946,
+      "mean_absolute_channel_delta": 1.8358340381166247,
+      "max_channel_delta": 237
+    },
+    "visual_diff": {
+      "path": "docs/parity/diffs/startup-empty-14.png",
+      "sha256": "cf8e1d65e6c11acba389a4f52a07d1b891a4a81eff2179a578b002d4de2be61d",
+      "width": 1940,
+      "height": 1414
+    }
+  },
+  "measurements": {
+    "amp": {
+      "logo": {
+        "bbox": {
+          "left": 241,
+          "top": 305,
+          "right": 823,
+          "bottom": 950
+        },
+        "width": 583,
+        "height": 646,
+        "pixel_count": 19634,
+        "mean_rgb": [
+          55,
+          116,
+          114
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 932,
+          "top": 485,
+          "right": 1167,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 1946,
+        "mean_rgb": [
+          74,
+          168,
+          130
+        ]
+      },
+      "grid": [
+        "               •••••••                  ",
+        "          ••••••••••••••••••            ",
+        "       •••••••••••••••••••••••          ",
+        "     •••••••••••••••••••••••••••        ",
+        "    ••••••••••••••••••••••••••••••      ",
+        "   •●●●●•••••••••••••••••••••••••••     ",
+        "  •●●••••••••••••••••••••••••••••••     ",
+        "  ••••●●●●●●••••••••••••••••••••••••    ",
+        " •••••●●●●●●●•••••••••••••••••••••••    ",
+        " ••●••••●•••••••••••••••••••••••••••    ",
+        "  •●••••••••••••••••••••••••••••••••    ",
+        "  •••••••••••••••••••••••••••••••••     ",
+        "   ••••••••••••••••••••••••••••••••     ",
+        "    •••••••••••••••••••••••••••••       ",
+        "     •••••••••••••••••••••••••••        ",
+        "       •••••••••••••••••••••••          ",
+        "          ·················             ",
+        "                •···••                  "
+      ]
+    },
+    "rika": {
+      "logo": {
+        "bbox": {
+          "left": 223,
+          "top": 302,
+          "right": 813,
+          "bottom": 943
+        },
+        "width": 591,
+        "height": 642,
+        "pixel_count": 69167,
+        "mean_rgb": [
+          63,
+          138,
+          127
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 932,
+          "top": 485,
+          "right": 1167,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 1672,
+        "mean_rgb": [
+          67,
+          159,
+          125
+        ]
+      },
+      "grid": [
+        "               ●●●●●●·                  ",
+        "         ●●●●●●●●●●●●●●●●●·             ",
+        "      ●●●●●●●●●●●●●●●●●●●●●●●·          ",
+        "    ●●●●●●●●●●●●●●●●●●●●●●●●●●●·        ",
+        "   ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●·       ",
+        "  ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●·      ",
+        " ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●·     ",
+        " ●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●●·    ",
+        "••••••••••••●●●●●●••••••●●●●●●●●●●●·    ",
+        " •••••••••••••••••••••••●●●●●●●●●●●·    ",
+        " ••••••••••••••••••••••••••••••••••     ",
+        " •••••••••••••••••••••••••••••••••      ",
+        "  •••••••••••••••••••••••••••••••       ",
+        "   •••••••••••••••••••••••••••••        ",
+        "     ••••••••••••••••••••••••••         ",
+        "       ••••••••••••••••••••••           ",
+        "         •••••••••••••••••              ",
+        "                ••••                    "
+      ]
+    }
+  },
+  "derived_deltas": {
+    "logo_left_delta": -18,
+    "logo_right_delta": -10,
+    "logo_top_delta": -3,
+    "logo_bottom_delta": -7,
+    "logo_pixel_count_delta": 49533,
+    "welcome_left_delta": 0,
+    "welcome_top_delta": 0
+  }
+}

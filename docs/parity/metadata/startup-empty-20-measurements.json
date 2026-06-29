@@ -1,0 +1,171 @@
+{
+  "row": 20,
+  "date": "2026-06-29",
+  "surface": "Startup & status line",
+  "state": "Empty startup, deep tier visible",
+  "verdict": "mismatch",
+  "method": {
+    "source": "screenshot RGB pixels converted via sips BMP output",
+    "logo_crop": {
+      "left": 150,
+      "top": 180,
+      "right_exclusive": 875,
+      "bottom_exclusive": 1000
+    },
+    "logo_predicate": "max(rgb)>28 && saturation>0.18 && green>=red*0.65",
+    "welcome_crop": {
+      "left": 850,
+      "top": 400,
+      "right_exclusive": 1300,
+      "bottom_exclusive": 700
+    },
+    "welcome_predicate": "max(rgb)>40 && saturation>0.15 && green>red*1.05 && green>blue*0.8",
+    "grid": {
+      "left": 217,
+      "top": 302,
+      "cell_width": 17,
+      "cell_height": 37,
+      "rows": 18,
+      "columns": 40
+    }
+  },
+  "artifacts": {
+    "amp_screenshot": {
+      "path": "docs/parity/screenshots/amp/startup-empty-20-05.png",
+      "sha256": "55bcdb18f21980318178cd203aac2954a29a60db393ff6022b6804a124d506a0",
+      "width": 1942,
+      "height": 1414
+    },
+    "rika_screenshot": {
+      "path": "docs/parity/screenshots/rika/startup-empty-20-01.png",
+      "sha256": "026c37785e3e36d0ba1d7e2c3f0928d705d07359120e53deca0e6e650d901008",
+      "width": 1942,
+      "height": 1414
+    },
+    "visual_diff": {
+      "path": "docs/parity/diffs/startup-empty-20-content-crop-burst-best.png",
+      "sha256": "050b002c5d04cc9a342203cc0ab39ccea42eb0ff7c38b579e7291590c37c7ed8",
+      "width": 1942,
+      "height": 1414
+    }
+  },
+  "measurements": {
+    "amp": {
+      "logo": {
+        "bbox": {
+          "left": 242,
+          "top": 305,
+          "right": 825,
+          "bottom": 950
+        },
+        "width": 584,
+        "height": 646,
+        "pixel_count": 20411,
+        "mean_rgb": [
+          51,
+          105,
+          102
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 933,
+          "top": 485,
+          "right": 1169,
+          "bottom": 510
+        },
+        "width": 237,
+        "height": 26,
+        "pixel_count": 2244,
+        "mean_rgb": [
+          66,
+          147,
+          114
+        ]
+      },
+      "grid": [
+        "               ••••••••                 ",
+        "          ••••••••••••••••••            ",
+        "       •••••••••••••••••••••••          ",
+        "     ••••••••••••●●•••••●•••••••        ",
+        "    •••••••••●●••••••••••••••••●••      ",
+        "   ••••••••••••••••••••••••••••••••     ",
+        "  •••••••••••••••••••••••••••••••••     ",
+        "  •••••••••••••●●●●●••••••••••••••••    ",
+        " ••••••••••••••●●●●●●●••••••••••••••    ",
+        " •●•••••••●●••••••••••••••••••••••••    ",
+        "  ••●•••••••••••••••••••••••••••••••    ",
+        "  •••••••••••••••••••••••••••••••••     ",
+        "   ••••••••••••••••••••••••••••••••     ",
+        "    •••••••••••••••••••••••••••••       ",
+        "     •••••••••••••••••••••••••••        ",
+        "       •••••••••••••••••••••••          ",
+        "          ·················             ",
+        "                •···••                  "
+      ]
+    },
+    "rika": {
+      "logo": {
+        "bbox": {
+          "left": 224,
+          "top": 307,
+          "right": 809,
+          "bottom": 942
+        },
+        "width": 586,
+        "height": 636,
+        "pixel_count": 26074,
+        "mean_rgb": [
+          49,
+          99,
+          109
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 934,
+          "top": 485,
+          "right": 1169,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 1848,
+        "mean_rgb": [
+          62,
+          144,
+          113
+        ]
+      },
+      "grid": [
+        "              ••••••••                  ",
+        "         ••●●●•••••••••••••             ",
+        "      •••••••••••••••••••••••           ",
+        "    ••••••●●●••••••••••••••••••         ",
+        "   •••••●●●••••••••••••••••••••••       ",
+        "  ••••••••••••••••••••••••••••••••      ",
+        " •••••••••••••••••••••••••••••••••      ",
+        " ••••••••••••••●●●●●•••••••••••••••     ",
+        "•••••••••••••••●●●●●•••••••••••••••     ",
+        "•••••••••●●••••••••••••••••••••••••     ",
+        " ••••••••••••••••••••••••••••••••••     ",
+        " •••••••••••••••••••••••••••••••••      ",
+        "  ••••••••••••••••••••••••••••••••      ",
+        "   ••••••••••••••••••••••••••••••       ",
+        "    •••••••••••••••••••••••••••         ",
+        "      •••••••••••••••••••••••           ",
+        "         •••••••••••••••••              ",
+        "               ••••••                   "
+      ]
+    }
+  },
+  "derived_deltas": {
+    "logo_left_delta": -18,
+    "logo_right_delta": -16,
+    "logo_top_delta": 2,
+    "logo_bottom_delta": -8,
+    "logo_pixel_count_delta": 5663,
+    "welcome_left_delta": 1,
+    "welcome_top_delta": 0
+  }
+}

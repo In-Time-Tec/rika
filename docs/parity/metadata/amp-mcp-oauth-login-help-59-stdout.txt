@@ -1,0 +1,17 @@
+Usage: amp mcp oauth login [options] <server-name>
+
+Register OAuth client credentials for an MCP server
+
+Arguments:
+  server-name               Name of the MCP server to authenticate with
+
+Options:
+  --server-url <url>        MCP server URL
+  --client-id <id>          OAuth client ID
+  --client-secret <secret>  OAuth client secret; only necessary for clients
+                            that don't support PKCE
+  --scopes <scopes>         OAuth scopes (comma-separated)
+  --auth-url <url>          OAuth authorization URL (discovered if not
+                            provided)
+  --token-url <url>         OAuth token URL (discovered if not provided)
+  -h, --help                display help for command

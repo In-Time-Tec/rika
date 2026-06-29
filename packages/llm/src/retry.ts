@@ -1,6 +1,6 @@
 import { Schedule, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
-import type * as Provider from "./provider"
+import { AiError } from "effect/unstable/ai"
+import type { StreamMiddleware } from "./provider"
 
 export const isTransient = (error: unknown): boolean =>
   AiError.isAiError(error) && error.isRetryable && error.reason._tag !== "InvalidOutputError"
@@ -11,4 +11,4 @@ const transientSchedule = Schedule.exponential("250 millis", 2).pipe(
   Schedule.collectWhile((metadata) => isTransient(metadata.input)),
 )
 
-export const middleware: Provider.StreamMiddleware = () => (stream) => Stream.retry(stream, transientSchedule)
+export const middleware: StreamMiddleware = () => (stream) => Stream.retry(stream, transientSchedule)

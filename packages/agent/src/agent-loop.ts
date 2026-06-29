@@ -3,9 +3,10 @@ import { Provider, Router } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, ErrorEnvelope, Event, Ide, Ids, Message, Tool } from "@rika/schema"
 import { Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
+import { AiError, Prompt } from "effect/unstable/ai"
 import * as ContextResolver from "./context-resolver"
 import * as SkillRegistry from "./skill-registry"
+import * as Toolkit from "./toolkit"
 import * as ToolExecutor from "./tool-executor"
 
 export interface RunTurnInput extends Schema.Schema.Type<typeof RunTurnInput> {}
@@ -84,12 +85,25 @@ interface Dependencies {
   readonly contextResolver: ContextResolver.Interface
   readonly skillRegistry: SkillRegistry.Interface
   readonly toolExecutor: ToolExecutor.Interface
+  readonly toolkit: Toolkit.Interface
 }
 
 type Emit = (event: Event.Event) => Effect.Effect<void, RunError>
 
 const MAX_TOOL_ITERATIONS = 25
 const MAX_EMPTY_ANSWER_RETRIES = 2
+
+interface ModelInput {
+  readonly messages: ReadonlyArray<Provider.Message>
+  readonly prompt: ReadonlyArray<Prompt.MessageEncoded>
+  readonly tools: Toolkit.Prepared
+}
+
+interface ModelTurn {
+  readonly response: Provider.GenerateResponse
+  readonly toolCalls: ReadonlyArray<Tool.Call>
+  readonly toolResults: ReadonlyArray<Tool.Result>
+}
 
 export const layer = Layer.effect(
   Service,
@@ -104,6 +118,7 @@ export const layer = Layer.effect(
     const contextResolver = yield* ContextResolver.Service
     const skillRegistry = yield* SkillRegistry.Service
     const toolExecutor = yield* ToolExecutor.Service
+    const toolkit = yield* Toolkit.Service
     const queuedTurns = yield* Queue.unbounded<RunTurnInput>()
     const dependencies: Dependencies = {
       config,
@@ -116,6 +131,7 @@ export const layer = Layer.effect(
       contextResolver,
       skillRegistry,
       toolExecutor,
+      toolkit,
     }
 
     return Service.of({
@@ -160,7 +176,7 @@ export const layer = Layer.effect(
       }),
     })
   }),
-)
+).pipe(Layer.provideMerge(Toolkit.layer))
 
 export const runTurn = Effect.fn("AgentLoop.runTurn.call")(function* (input: RunTurnInput) {
   const agentLoop = yield* Service
@@ -242,24 +258,20 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
     }
 
     const history = [...existingEvents, ...appendedEvents]
-    let messages: ReadonlyArray<Provider.Message> = yield* contextMessages(dependencies, history, skillSelection)
+    let modelInput: ModelInput = yield* contextModelInput(dependencies, history, skillSelection)
     let emptyRetries = 0
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
-      const response =
+      const modelTurn =
         iteration === 0
-          ? yield* streamModelResponseWithRecovery(dependencies, input, turnId, messages, append)
-          : yield* streamModelResponse(dependencies, input, turnId, messages, append)
-      const toolRequest = parseToolRequest(response.content)
+          ? yield* streamModelResponseWithRecovery(dependencies, input, turnId, modelInput, append)
+          : yield* streamModelResponse(dependencies, input, turnId, modelInput, append)
+      const response = modelTurn.response
 
-      if (toolRequest === undefined) {
-        if (withoutToolCalls(response.content).length === 0 && emptyRetries < MAX_EMPTY_ANSWER_RETRIES) {
+      if (modelTurn.toolResults.length === 0) {
+        if (response.content.trim().length === 0 && emptyRetries < MAX_EMPTY_ANSWER_RETRIES) {
           emptyRetries += 1
-          messages = [
-            ...messages,
-            { role: "assistant" as const, content: response.content },
-            { role: "user" as const, content: "Now write your final answer to the user as plain text, without any tool call." },
-          ]
+          modelInput = appendTextRetry(modelInput, response.content)
           continue
         }
         yield* append(
@@ -269,23 +281,7 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
         return
       }
 
-      const call = yield* makeToolCall(dependencies, input.thread_id, turnId, toolRequest)
-      yield* append(yield* makeToolCallRequested(dependencies, input.thread_id, turnId, call, sequence + 1))
-      const result = yield* dependencies.toolExecutor.execute(call).pipe(
-        Effect.catch((error: ToolExecutor.ToolExecutorError) => Effect.succeed(ToolExecutor.errorResult(call, error))),
-      )
-      yield* append(yield* makeToolCallCompleted(dependencies, input.thread_id, turnId, result, sequence + 1))
-      if (call.name === "task" && result.status === "success") {
-        for (const summary of subagentSummaries(result.output)) {
-          yield* append(yield* makeSubagentCompleted(dependencies, input.thread_id, turnId, summary, sequence + 1))
-        }
-      }
-
-      messages = [
-        ...messages,
-        { role: "assistant" as const, content: response.content },
-        { role: "tool" as const, content: JSON.stringify(result) },
-      ]
+      modelInput = appendToolResults(modelInput, response.content, modelTurn.toolCalls, modelTurn.toolResults)
     }
 
     yield* append(
@@ -333,14 +329,16 @@ const streamModelResponse = (
   dependencies: Dependencies,
   input: RunTurnInput,
   turnId: Ids.TurnId,
-  messages: ReadonlyArray<Provider.Message>,
+  modelInput: ModelInput,
   append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
 ) =>
   Effect.gen(function* () {
-    const request = routerRequest(input, messages)
+    const request = routerRequest(input, modelInput)
     let provider = "unknown"
     let model = "unknown"
     let completed: Provider.GenerateResponse | undefined
+    const toolCalls: Array<Tool.Call> = []
+    const toolResults: Array<Tool.Result> = []
 
     yield* dependencies.router.stream(request).pipe(
       Stream.runForEach((streamEvent) => {
@@ -363,6 +361,43 @@ const streamModelResponse = (
               provider,
               model,
             ).pipe(Effect.flatMap(append), Effect.asVoid)
+          case "tool.input.started":
+            return makeToolCallInputStarted(
+              dependencies,
+              input.thread_id,
+              turnId,
+              Ids.ToolCallId.make(streamEvent.id),
+              streamEvent.name,
+            ).pipe(Effect.flatMap(append), Effect.asVoid)
+          case "tool.input.delta":
+            return Effect.void
+          case "tool.input.ended":
+            return makeToolCallInputEnded(
+              dependencies,
+              input.thread_id,
+              turnId,
+              Ids.ToolCallId.make(streamEvent.id),
+              streamEvent.name,
+              streamEvent.input_text,
+            ).pipe(Effect.flatMap(append), Effect.asVoid)
+          case "tool.call":
+            return makeToolCall(dependencies, input.thread_id, turnId, streamEvent).pipe(
+              Effect.flatMap((call) => {
+                toolCalls.push(call)
+                return makeToolCallRequested(dependencies, input.thread_id, turnId, call)
+              }),
+              Effect.flatMap(append),
+              Effect.asVoid,
+            )
+          case "tool.result": {
+            const result = makeToolResult(streamEvent)
+            toolResults.push(result)
+            return makeToolCallCompleted(dependencies, input.thread_id, turnId, result).pipe(
+              Effect.flatMap(append),
+              Effect.andThen(appendSubagentSummaries(dependencies, input.thread_id, turnId, result, append)),
+              Effect.asVoid,
+            )
+          }
           case "response.completed":
             completed = streamEvent.response
             return Effect.void
@@ -379,34 +414,38 @@ const streamModelResponse = (
       })
     }
 
-    return completed
+    return { response: completed, toolCalls, toolResults } satisfies ModelTurn
   })
 
 const streamModelResponseWithRecovery = (
   dependencies: Dependencies,
   input: RunTurnInput,
   turnId: Ids.TurnId,
-  messages: ReadonlyArray<Provider.Message>,
+  modelInput: ModelInput,
   append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
 ) =>
-  streamModelResponse(dependencies, input, turnId, messages, append).pipe(
+  streamModelResponse(dependencies, input, turnId, modelInput, append).pipe(
     Effect.catch((error: RunError) =>
       isModelError(error)
-        ? streamModelResponse(dependencies, input, turnId, [...messages, modelErrorMessage(error)], append)
+        ? streamModelResponse(dependencies, input, turnId, appendModelError(modelInput, error), append)
         : Effect.fail(error),
     ),
   )
 
-const contextMessages = (
+const contextModelInput = (
   dependencies: Dependencies,
   events: ReadonlyArray<Event.Event>,
   skills: SkillRegistry.Selection,
 ) =>
   Effect.gen(function* () {
     const tools = yield* dependencies.toolExecutor.describe
+    const prepared = yield* dependencies.toolkit.build
     const config = yield* dependencies.config.get
     const resolvedContext = latestResolvedContext(events)
-    return [systemMessage(config, tools, resolvedContext, skills), ...messagesFromEvents(events)]
+    const system = systemMessage(config, tools, resolvedContext, skills)
+    const messages = [system, ...messagesFromEvents(events)]
+    const prompt = [providerMessageToPromptMessage(system), ...promptMessagesFromEvents(events)]
+    return { messages, prompt, tools: prepared } satisfies ModelInput
   })
 
 const systemMessage = (
@@ -478,11 +517,7 @@ const selfExtensionGuidance = () =>
 const toolInstructions = (tools: ReadonlyArray<ToolExecutor.Descriptor>) => {
   if (tools.length === 0) return "No tools are currently available."
   const lines = tools.map((tool) => `- ${tool.name}: ${tool.description}`)
-  return [
-    "Available tools:",
-    ...lines,
-    'To call a tool, respond with JSON only: {"tool_call":{"name":"tool.name","input":{}}}',
-  ].join("\n")
+  return ["Available tools:", ...lines, "Call tools through the provided tool interface when needed."].join("\n")
 }
 
 const messagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Provider.Message> =>
@@ -490,8 +525,10 @@ const messagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<P
     switch (event.type) {
       case "message.added":
         return messageToProviderMessages(event.data.message)
-      case "tool.call.completed":
-        return [{ role: "tool" as const, content: JSON.stringify(event.data.result) }]
+      case "tool.call.completed": {
+        const message: Provider.Message = { role: "tool", content: JSON.stringify(event.data.result) }
+        return [message]
+      }
       default:
         return []
     }
@@ -519,104 +556,132 @@ const messageText = (message: Message.Message) =>
     .map((part) => part.text)
     .join("\n")
 
-interface ToolRequest {
-  readonly name: string
-  readonly input: Common.JsonValue
-}
+const promptMessagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Prompt.MessageEncoded> =>
+  events.flatMap((event) => {
+    switch (event.type) {
+      case "message.added":
+        return messageToPromptMessages(event.data.message)
+      case "tool.call.requested":
+        return [toolCallPromptMessage(event.data.call)]
+      case "tool.call.completed":
+        return [toolResultPromptMessage([event.data.result])]
+      default:
+        return []
+    }
+  })
 
-const parseToolRequest = (content: string): ToolRequest | undefined => {
-  const leading = extractLeadingObject(content)
-  if (leading === undefined) return undefined
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(leading)
-  } catch {
-    return undefined
+const messageToPromptMessages = (message: Message.Message): ReadonlyArray<Prompt.MessageEncoded> => {
+  const content = messageText(message)
+  if (content.length === 0) return []
+  switch (message.role) {
+    case "system":
+      return [{ role: "system", content }]
+    case "assistant":
+      return [{ role: "assistant", content }]
+    case "tool":
+    case "user":
+      return [{ role: "user", content }]
   }
-  if (!isRecord(parsed)) return undefined
-  const toolCall = parsed.tool_call
-  if (!isRecord(toolCall) || typeof toolCall.name !== "string") return undefined
-  const decodedInput = Schema.decodeUnknownOption(Common.JsonValue)(toolCall.input ?? {})
-  if (Option.isNone(decodedInput)) return undefined
-  return { name: toolCall.name, input: decodedInput.value }
+  return []
 }
 
-const withoutToolCalls = (content: string): string => {
-  let result = content
-  let index = result.indexOf('{"tool_call"')
-  while (index !== -1) {
-    let depth = 0
-    let inString = false
-    let escaped = false
-    let end = result.length
-    for (let i = index; i < result.length; i += 1) {
-      const ch = result[i]
-      if (escaped) {
-        escaped = false
-        continue
-      }
-      if (ch === "\\") {
-        escaped = true
-        continue
-      }
-      if (ch === '"') {
-        inString = !inString
-        continue
-      }
-      if (inString) continue
-      if (ch === "{") depth += 1
-      else if (ch === "}") {
-        depth -= 1
-        if (depth === 0) {
-          end = i + 1
-          break
-        }
-      }
-    }
-    result = `${result.slice(0, index)}${result.slice(end)}`
-    index = result.indexOf('{"tool_call"')
+const providerMessageToPromptMessage = (message: Provider.Message): Prompt.MessageEncoded => {
+  switch (message.role) {
+    case "system":
+    case "developer":
+      return { role: "system", content: message.content }
+    case "assistant":
+      return { role: "assistant", content: message.content }
+    case "tool":
+    case "user":
+      return { role: "user", content: message.content }
   }
-  return result.trim()
+  return { role: "user", content: message.content }
 }
 
-const extractLeadingObject = (content: string): string | undefined => {
-  const trimmed = extractJson(content)
-  if (!trimmed.startsWith("{")) return undefined
-  let depth = 0
-  let inString = false
-  let escaped = false
-  for (let index = 0; index < trimmed.length; index += 1) {
-    const ch = trimmed[index]
-    if (escaped) {
-      escaped = false
-      continue
-    }
-    if (ch === "\\") {
-      escaped = true
-      continue
-    }
-    if (ch === '"') {
-      inString = !inString
-      continue
-    }
-    if (inString) continue
-    if (ch === "{") depth += 1
-    else if (ch === "}") {
-      depth -= 1
-      if (depth === 0) return trimmed.slice(0, index + 1)
-    }
+const appendTextRetry = (modelInput: ModelInput, content: string): ModelInput => {
+  const userMessage: Provider.Message = {
+    role: "user",
+    content: "Now write your final answer to the user as plain text.",
   }
-  return undefined
+  return {
+    ...modelInput,
+    messages: [...modelInput.messages, { role: "assistant", content }, userMessage],
+    prompt: [...modelInput.prompt, { role: "assistant", content }, providerMessageToPromptMessage(userMessage)],
+  }
 }
 
-const extractJson = (content: string) => {
-  const trimmed = content.trim()
-  if (!trimmed.startsWith("```")) return trimmed
-  const firstLineEnd = trimmed.indexOf("\n")
-  const lastFenceStart = trimmed.lastIndexOf("```")
-  if (firstLineEnd < 0 || lastFenceStart <= firstLineEnd) return trimmed
-  return trimmed.slice(firstLineEnd + 1, lastFenceStart).trim()
+const appendModelError = (modelInput: ModelInput, error: AiError.AiError | Router.RouterError): ModelInput => {
+  const message = modelErrorMessage(error)
+  return {
+    ...modelInput,
+    messages: [...modelInput.messages, message],
+    prompt: [...modelInput.prompt, { role: "user", content: message.content }],
+  }
 }
+
+const appendToolResults = (
+  modelInput: ModelInput,
+  content: string,
+  calls: ReadonlyArray<Tool.Call>,
+  results: ReadonlyArray<Tool.Result>,
+): ModelInput => ({
+  ...modelInput,
+  messages: [
+    ...modelInput.messages,
+    { role: "assistant", content },
+    ...results.map((result): Provider.Message => ({ role: "tool", content: JSON.stringify(result) })),
+  ],
+  prompt: [
+    ...modelInput.prompt,
+    assistantToolPromptMessage(content, calls),
+    toolResultPromptMessage(results),
+  ],
+})
+
+const toolCallPromptMessage = (call: Tool.Call): Prompt.MessageEncoded => ({
+  role: "assistant",
+  content: [
+    {
+      type: "tool-call",
+      id: call.id,
+      name: call.name,
+      params: call.input,
+      providerExecuted: false,
+    },
+  ],
+})
+
+const assistantToolPromptMessage = (
+  content: string,
+  calls: ReadonlyArray<Tool.Call>,
+): Prompt.MessageEncoded => {
+  const parts: Array<Prompt.AssistantMessagePartEncoded> = content.length === 0 ? [] : [{ type: "text", text: content }]
+  for (const call of calls) {
+    parts.push({
+      type: "tool-call",
+      id: call.id,
+      name: call.name,
+      params: call.input,
+      providerExecuted: false,
+    })
+  }
+  return { role: "assistant", content: parts }
+}
+
+const toolResultPromptMessage = (results: ReadonlyArray<Tool.Result>): Prompt.MessageEncoded => ({
+  role: "tool",
+  content: results.map((result) => ({
+    type: "tool-result",
+    id: result.id,
+    name: result.name,
+    isFailure: result.status === "error",
+    result:
+      result.status === "success"
+        ? (result.output ?? null)
+        : (result.error ?? { kind: "tool", message: "Tool failed" }),
+  })),
+})
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -672,8 +737,12 @@ const isToolAccess = (value: unknown): value is Event.SubagentCompleted["data"][
 const stringArray = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined
 
-const routerRequest = (input: RunTurnInput, messages: ReadonlyArray<Provider.Message>): Router.Request =>
-  input.mode === undefined ? { messages } : { mode: input.mode, messages }
+const routerRequest = (input: RunTurnInput, modelInput: ModelInput): Router.Request => ({
+  ...(input.mode === undefined ? {} : { mode: input.mode }),
+  messages: modelInput.messages,
+  prompt: modelInput.prompt,
+  toolkit: modelInput.tools.toolkit,
+})
 
 const latestSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.sequence ?? 0
 
@@ -903,16 +972,117 @@ const makeModelReasoningChunk = (
     return event
   })
 
-const makeToolCall = (dependencies: Dependencies, threadId: Ids.ThreadId, turnId: Ids.TurnId, request: ToolRequest) =>
+const makeToolCall = (
+  dependencies: Dependencies,
+  threadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  request: Provider.ToolCall,
+) =>
   Effect.gen(function* () {
-    const id = Ids.ToolCallId.make(yield* dependencies.idGenerator.next("tool_call"))
+    const decodedInput = Schema.decodeUnknownOption(Common.JsonValue)(request.input)
+    if (decodedInput._tag === "None") {
+      return yield* new AgentLoopError({
+        message: `Tool ${request.name} input was not JSON-serializable`,
+        operation: "makeToolCall",
+        thread_id: threadId,
+        turn_id: turnId,
+      })
+    }
     const call: Tool.Call = {
-      id,
+      id: Ids.ToolCallId.make(request.id),
       name: request.name,
-      input: request.input,
+      input: decodedInput.value,
       metadata: { thread_id: threadId, turn_id: turnId },
     }
     return call
+  })
+
+const makeToolResult = (request: Provider.ToolResult): Tool.Result => {
+  const id = Ids.ToolCallId.make(request.id)
+  const decoded = Schema.decodeUnknownOption(Tool.Result)(request.result)
+  if (Option.isSome(decoded)) return { ...decoded.value, id, name: request.name }
+  const value = Schema.decodeUnknownOption(Common.JsonValue)(request.result)
+  if (request.is_failure) {
+    return {
+      id,
+      name: request.name,
+      status: "error",
+      error: {
+        kind: "tool",
+        message: "Tool failed",
+        ...(Option.isSome(value) ? { details: value.value } : {}),
+      },
+    }
+  }
+  return {
+    id,
+    name: request.name,
+    status: "success",
+    output: Option.isSome(value) ? value.value : null,
+  }
+}
+
+const appendSubagentSummaries = (
+  dependencies: Dependencies,
+  threadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  result: Tool.Result,
+  append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
+) =>
+  Effect.gen(function* () {
+    if (result.name !== "task" || result.status !== "success") return
+    for (const summary of subagentSummaries(result.output)) {
+      yield* makeSubagentCompleted(dependencies, threadId, turnId, summary).pipe(Effect.flatMap(append))
+    }
+  })
+
+const makeToolCallInputStarted = (
+  dependencies: Dependencies,
+  threadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  toolCallId: Ids.ToolCallId,
+  name: string,
+) =>
+  Effect.gen(function* () {
+    const createdAt = yield* dependencies.time.nowMillis
+    const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const events = yield* readThread(dependencies, { thread_id: threadId })
+    const event: Event.ToolCallInputStarted = {
+      id,
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence: latestSequence(events) + 1,
+      version: 1,
+      created_at: createdAt,
+      type: "tool.call.input.started",
+      data: { id: toolCallId, name },
+    }
+    return event
+  })
+
+const makeToolCallInputEnded = (
+  dependencies: Dependencies,
+  threadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  toolCallId: Ids.ToolCallId,
+  name: string,
+  inputText: string,
+) =>
+  Effect.gen(function* () {
+    const createdAt = yield* dependencies.time.nowMillis
+    const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const events = yield* readThread(dependencies, { thread_id: threadId })
+    const event: Event.ToolCallInputEnded = {
+      id,
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence: latestSequence(events) + 1,
+      version: 1,
+      created_at: createdAt,
+      type: "tool.call.input.ended",
+      data: { id: toolCallId, name, input_text: inputText },
+    }
+    return event
   })
 
 const makeSubagentCompleted = (
@@ -920,16 +1090,17 @@ const makeSubagentCompleted = (
   threadId: Ids.ThreadId,
   turnId: Ids.TurnId,
   summary: Event.SubagentCompleted["data"],
-  sequence: number,
+  sequence?: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const events = sequence === undefined ? yield* readThread(dependencies, { thread_id: threadId }) : []
     const event: Event.SubagentCompleted = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence,
+      sequence: sequence ?? latestSequence(events) + 1,
       version: 1,
       created_at: createdAt,
       type: "subagent.completed",
@@ -943,16 +1114,17 @@ const makeToolCallRequested = (
   threadId: Ids.ThreadId,
   turnId: Ids.TurnId,
   call: Tool.Call,
-  sequence: number,
+  sequence?: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const events = sequence === undefined ? yield* readThread(dependencies, { thread_id: threadId }) : []
     const event: Event.ToolCallRequested = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence,
+      sequence: sequence ?? latestSequence(events) + 1,
       version: 1,
       created_at: createdAt,
       type: "tool.call.requested",
@@ -966,16 +1138,17 @@ const makeToolCallCompleted = (
   threadId: Ids.ThreadId,
   turnId: Ids.TurnId,
   result: Tool.Result,
-  sequence: number,
+  sequence?: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const events = sequence === undefined ? yield* readThread(dependencies, { thread_id: threadId }) : []
     const event: Event.ToolCallCompleted = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence,
+      sequence: sequence ?? latestSequence(events) + 1,
       version: 1,
       created_at: createdAt,
       type: "tool.call.completed",

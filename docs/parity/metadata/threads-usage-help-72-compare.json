@@ -1,0 +1,91 @@
+{
+  "row": 72,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T14:15:29Z",
+  "surface": "CLI threads usage help",
+  "state": "Threads usage --help and -h flags",
+  "commands": {
+    "amp_threads_usage_help": "AMP_SKIP_UPDATE_CHECK=1 amp threads usage --help",
+    "amp_threads_usage_h": "AMP_SKIP_UPDATE_CHECK=1 amp threads usage -h",
+    "rika_threads_usage_help_before": "bun packages/cli/src/main.ts threads usage --help",
+    "rika_threads_usage_h_before": "bun packages/cli/src/main.ts threads usage -h",
+    "rika_threads_usage_help_after": "bun packages/cli/src/main.ts threads usage --help",
+    "rika_threads_usage_h_after": "bun packages/cli/src/main.ts threads usage -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-threads-usage-help-72.txt docs/parity/metadata/rika-threads-usage-help-72.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-threads-usage-help-short-72.txt docs/parity/metadata/rika-threads-usage-help-short-72.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-threads-usage-help-72-stdout.txt docs/parity/metadata/rika-threads-usage-help-72-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-threads-usage-help-72-stderr.txt docs/parity/metadata/rika-threads-usage-help-72-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-threads-usage-help-short-72-stdout.txt docs/parity/metadata/rika-threads-usage-help-short-72-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-threads-usage-help-short-72-stderr.txt docs/parity/metadata/rika-threads-usage-help-short-72-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_threads_usage_help": 0,
+    "amp_threads_usage_h": 0,
+    "rika_threads_usage_help_before": 0,
+    "rika_threads_usage_h_before": 0,
+    "rika_threads_usage_help_after": 0,
+    "rika_threads_usage_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_threads_usage_help": 1745,
+    "amp_threads_usage_h": 1745,
+    "rika_threads_usage_help_before": 804,
+    "rika_threads_usage_h_before": 804,
+    "rika_threads_usage_help_after": 1745,
+    "rika_threads_usage_h_after": 1745,
+    "stdout": 1730,
+    "stderr": 15,
+    "short_stdout": 1730,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_threads_usage_help": "2bb3b4e4e6fc956495fd3d42ad29fb74f86bfb067ed2dc34c5119d76a36dae2b",
+    "amp_threads_usage_h": "2bb3b4e4e6fc956495fd3d42ad29fb74f86bfb067ed2dc34c5119d76a36dae2b",
+    "rika_threads_usage_help_before": "53c5d907e1e8dfe76dbfedeb13a679373b8f241b2d6893cb746a51bc0b1875f9",
+    "rika_threads_usage_h_before": "53c5d907e1e8dfe76dbfedeb13a679373b8f241b2d6893cb746a51bc0b1875f9",
+    "rika_threads_usage_help_after": "2bb3b4e4e6fc956495fd3d42ad29fb74f86bfb067ed2dc34c5119d76a36dae2b",
+    "rika_threads_usage_h_after": "2bb3b4e4e6fc956495fd3d42ad29fb74f86bfb067ed2dc34c5119d76a36dae2b"
+  },
+  "artifacts": {
+    "amp_threads_usage_help": "docs/parity/metadata/amp-threads-usage-help-72.txt",
+    "amp_threads_usage_h": "docs/parity/metadata/amp-threads-usage-help-short-72.txt",
+    "amp_threads_usage_stdout": "docs/parity/metadata/amp-threads-usage-help-72-stdout.txt",
+    "amp_threads_usage_stderr": "docs/parity/metadata/amp-threads-usage-help-72-stderr.txt",
+    "amp_threads_usage_h_stdout": "docs/parity/metadata/amp-threads-usage-help-short-72-stdout.txt",
+    "amp_threads_usage_h_stderr": "docs/parity/metadata/amp-threads-usage-help-short-72-stderr.txt",
+    "rika_threads_usage_help_before": "docs/parity/metadata/rika-threads-usage-help-72-before.txt",
+    "rika_threads_usage_h_before": "docs/parity/metadata/rika-threads-usage-help-short-72-before.txt",
+    "rika_threads_usage_help_after": "docs/parity/metadata/rika-threads-usage-help-72.txt",
+    "rika_threads_usage_h_after": "docs/parity/metadata/rika-threads-usage-help-short-72.txt",
+    "rika_threads_usage_stdout": "docs/parity/metadata/rika-threads-usage-help-72-stdout.txt",
+    "rika_threads_usage_stderr": "docs/parity/metadata/rika-threads-usage-help-72-stderr.txt",
+    "rika_threads_usage_h_stdout": "docs/parity/metadata/rika-threads-usage-help-short-72-stdout.txt",
+    "rika_threads_usage_h_stderr": "docs/parity/metadata/rika-threads-usage-help-short-72-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1730,
+    "stderr_bytes": 15,
+    "stdout_sha256": "3855b03539ed6ade9d5229f8cbad1c7d5ddc0a699aff21ef55d05ab6061c60fd",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1730,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "3855b03539ed6ade9d5229f8cbad1c7d5ddc0a699aff21ef55d05ab6061c60fd",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Vega",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact threads usage --help and threads usage -h combined bytes, exit code, and stdout/stderr split for the captured Amp version. Thread usage behavior, thread aliases, other thread subcommand help pages, and future Amp help changes remain separate parity work."
+}

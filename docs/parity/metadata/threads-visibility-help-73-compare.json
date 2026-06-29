@@ -1,0 +1,91 @@
+{
+  "row": 73,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T14:26:32Z",
+  "surface": "CLI threads visibility help",
+  "state": "Threads visibility --help and -h flags",
+  "commands": {
+    "amp_threads_visibility_help": "AMP_SKIP_UPDATE_CHECK=1 amp threads visibility --help",
+    "amp_threads_visibility_h": "AMP_SKIP_UPDATE_CHECK=1 amp threads visibility -h",
+    "rika_threads_visibility_help_before": "bun packages/cli/src/main.ts threads visibility --help",
+    "rika_threads_visibility_h_before": "bun packages/cli/src/main.ts threads visibility -h",
+    "rika_threads_visibility_help_after": "bun packages/cli/src/main.ts threads visibility --help",
+    "rika_threads_visibility_h_after": "bun packages/cli/src/main.ts threads visibility -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-threads-visibility-help-73.txt docs/parity/metadata/rika-threads-visibility-help-73.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-threads-visibility-help-short-73.txt docs/parity/metadata/rika-threads-visibility-help-short-73.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-threads-visibility-help-73-stdout.txt docs/parity/metadata/rika-threads-visibility-help-73-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-threads-visibility-help-73-stderr.txt docs/parity/metadata/rika-threads-visibility-help-73-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-threads-visibility-help-short-73-stdout.txt docs/parity/metadata/rika-threads-visibility-help-short-73-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-threads-visibility-help-short-73-stderr.txt docs/parity/metadata/rika-threads-visibility-help-short-73-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_threads_visibility_help": 0,
+    "amp_threads_visibility_h": 0,
+    "rika_threads_visibility_help_before": 0,
+    "rika_threads_visibility_h_before": 0,
+    "rika_threads_visibility_help_after": 0,
+    "rika_threads_visibility_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_threads_visibility_help": 1771,
+    "amp_threads_visibility_h": 1771,
+    "rika_threads_visibility_help_before": 804,
+    "rika_threads_visibility_h_before": 804,
+    "rika_threads_visibility_help_after": 1771,
+    "rika_threads_visibility_h_after": 1771,
+    "stdout": 1756,
+    "stderr": 15,
+    "short_stdout": 1756,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_threads_visibility_help": "7137538318a93887dfd527d11c10027e4e62ed12c67c1517ccc6a11a2edd9b03",
+    "amp_threads_visibility_h": "7137538318a93887dfd527d11c10027e4e62ed12c67c1517ccc6a11a2edd9b03",
+    "rika_threads_visibility_help_before": "53c5d907e1e8dfe76dbfedeb13a679373b8f241b2d6893cb746a51bc0b1875f9",
+    "rika_threads_visibility_h_before": "53c5d907e1e8dfe76dbfedeb13a679373b8f241b2d6893cb746a51bc0b1875f9",
+    "rika_threads_visibility_help_after": "7137538318a93887dfd527d11c10027e4e62ed12c67c1517ccc6a11a2edd9b03",
+    "rika_threads_visibility_h_after": "7137538318a93887dfd527d11c10027e4e62ed12c67c1517ccc6a11a2edd9b03"
+  },
+  "artifacts": {
+    "amp_threads_visibility_help": "docs/parity/metadata/amp-threads-visibility-help-73.txt",
+    "amp_threads_visibility_h": "docs/parity/metadata/amp-threads-visibility-help-short-73.txt",
+    "amp_threads_visibility_stdout": "docs/parity/metadata/amp-threads-visibility-help-73-stdout.txt",
+    "amp_threads_visibility_stderr": "docs/parity/metadata/amp-threads-visibility-help-73-stderr.txt",
+    "amp_threads_visibility_h_stdout": "docs/parity/metadata/amp-threads-visibility-help-short-73-stdout.txt",
+    "amp_threads_visibility_h_stderr": "docs/parity/metadata/amp-threads-visibility-help-short-73-stderr.txt",
+    "rika_threads_visibility_help_before": "docs/parity/metadata/rika-threads-visibility-help-73-before.txt",
+    "rika_threads_visibility_h_before": "docs/parity/metadata/rika-threads-visibility-help-short-73-before.txt",
+    "rika_threads_visibility_help_after": "docs/parity/metadata/rika-threads-visibility-help-73.txt",
+    "rika_threads_visibility_h_after": "docs/parity/metadata/rika-threads-visibility-help-short-73.txt",
+    "rika_threads_visibility_stdout": "docs/parity/metadata/rika-threads-visibility-help-73-stdout.txt",
+    "rika_threads_visibility_stderr": "docs/parity/metadata/rika-threads-visibility-help-73-stderr.txt",
+    "rika_threads_visibility_h_stdout": "docs/parity/metadata/rika-threads-visibility-help-short-73-stdout.txt",
+    "rika_threads_visibility_h_stderr": "docs/parity/metadata/rika-threads-visibility-help-short-73-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1756,
+    "stderr_bytes": 15,
+    "stdout_sha256": "7fe0b838fab7bbca382eb82c4c77321231f46fde42884dc825ee5b27cd7f6db9",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1756,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "7fe0b838fab7bbca382eb82c4c77321231f46fde42884dc825ee5b27cd7f6db9",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Noether",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact threads visibility --help and threads visibility -h combined bytes, exit code, and stdout/stderr split for the captured Amp version. Thread visibility behavior, visibility aliases, other thread subcommand help pages, and future Amp help changes remain separate parity work."
+}

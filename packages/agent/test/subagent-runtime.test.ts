@@ -1,17 +1,26 @@
 import { describe, expect, test } from "bun:test"
 import { IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
-import { Common, Ids, Tool } from "@rika/schema"
-import { Effect, Layer, Stream } from "effect"
+import { Common, Ids } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
+import { Effect, Layer, Schema, Stream } from "effect"
+import { Tool } from "effect/unstable/ai"
 import { SubagentRuntime, ToolExecutor } from "../src/index"
 
 const now = Common.TimestampMillis.make(2_000_000_000_000)
+const readTool = Tool.make("read", {
+  description: "Read a workspace file",
+  parameters: Schema.Struct({ path: Schema.String }),
+  success: Schema.Json,
+  failure: Schema.Json,
+  failureMode: "return",
+})
 
 const defaultToolLayer = ToolExecutor.fakeReadOnlyLayer(
   {
     read: (call) => Effect.succeed({ path: pathFromInput(call.input), content: "read output" }),
   },
-  [{ name: "read", description: "Read a workspace file" }],
+  [readTool],
 )
 
 const makeLayer = (routerLayer: Layer.Layer<Router.Service>, toolLayer = defaultToolLayer) =>
@@ -80,7 +89,7 @@ describe("SubagentRuntime", () => {
   })
 
   test("allows one read-only tool call and feeds only the result into the final summary", async () => {
-    const toolCalls: Array<Tool.Call> = []
+    const toolCalls: Array<Call> = []
     const routerRequests: Array<Router.Request> = []
     let requestCount = 0
     const routerLayer = fakeRouterLayer((request) =>
@@ -102,7 +111,7 @@ describe("SubagentRuntime", () => {
             return { path: "README.md", content: "setup notes" }
           }),
       },
-      [{ name: "read", description: "Read a workspace file" }],
+      [readTool],
     )
 
     const result = await Effect.runPromise(

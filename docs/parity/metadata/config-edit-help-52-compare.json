@@ -1,0 +1,71 @@
+{
+  "row": 52,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T10:20:26Z",
+  "surface": "CLI config edit help",
+  "state": "Config edit --help and -h flags",
+  "commands": {
+    "amp_config_edit_help": "AMP_SKIP_UPDATE_CHECK=1 amp config edit --help",
+    "amp_config_edit_h": "AMP_SKIP_UPDATE_CHECK=1 amp config edit -h",
+    "rika_config_edit_help_before": "bun packages/cli/src/main.ts config edit --help",
+    "rika_config_edit_h_before": "bun packages/cli/src/main.ts config edit -h",
+    "rika_config_edit_help_after": "bun packages/cli/src/main.ts config edit --help",
+    "rika_config_edit_h_after": "bun packages/cli/src/main.ts config edit -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-config-edit-help-52.txt docs/parity/metadata/rika-config-edit-help-52.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-config-edit-help-short-52.txt docs/parity/metadata/rika-config-edit-help-short-52.txt"
+  },
+  "exit_codes": {
+    "amp_config_edit_help": 0,
+    "amp_config_edit_h": 0,
+    "rika_config_edit_help_before": 0,
+    "rika_config_edit_h_before": 0,
+    "rika_config_edit_help_after": 0,
+    "rika_config_edit_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0
+  },
+  "bytes": {
+    "amp_config_edit_help": 1891,
+    "amp_config_edit_h": 1891,
+    "rika_config_edit_help_before": 620,
+    "rika_config_edit_h_before": 620,
+    "rika_config_edit_help_after": 1891,
+    "rika_config_edit_h_after": 1891,
+    "stdout": 1876,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_config_edit_help": "2c3d64c21d59d6b6a9f4acce1221433f22d623213f017c1d82cb4e749276766b",
+    "amp_config_edit_h": "2c3d64c21d59d6b6a9f4acce1221433f22d623213f017c1d82cb4e749276766b",
+    "rika_config_edit_help_before": "479490542da3a8be7c04d0376efe421f8190d3b967e48ec99e78a9eaee709c0a",
+    "rika_config_edit_h_before": "479490542da3a8be7c04d0376efe421f8190d3b967e48ec99e78a9eaee709c0a",
+    "rika_config_edit_help_after": "2c3d64c21d59d6b6a9f4acce1221433f22d623213f017c1d82cb4e749276766b",
+    "rika_config_edit_h_after": "2c3d64c21d59d6b6a9f4acce1221433f22d623213f017c1d82cb4e749276766b"
+  },
+  "artifacts": {
+    "amp_config_edit_help": "docs/parity/metadata/amp-config-edit-help-52.txt",
+    "amp_config_edit_h": "docs/parity/metadata/amp-config-edit-help-short-52.txt",
+    "amp_config_edit_stdout": "docs/parity/metadata/amp-config-edit-help-stdout-52.txt",
+    "amp_config_edit_stderr": "docs/parity/metadata/amp-config-edit-help-stderr-52.txt",
+    "rika_config_edit_help_before": "docs/parity/metadata/rika-config-edit-help-52-before.txt",
+    "rika_config_edit_h_before": "docs/parity/metadata/rika-config-edit-help-short-52-before.txt",
+    "rika_config_edit_help_after": "docs/parity/metadata/rika-config-edit-help-52.txt",
+    "rika_config_edit_h_after": "docs/parity/metadata/rika-config-edit-help-short-52.txt",
+    "rika_config_edit_stdout": "docs/parity/metadata/rika-config-edit-help-stdout-52.txt",
+    "rika_config_edit_stderr": "docs/parity/metadata/rika-config-edit-help-stderr-52.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1876,
+    "stderr_bytes": 15,
+    "stdout_sha256": "17d0505858c87dc2e33596a1f23d80c92f9c816d37f4830e162ea112590a18ca",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Ramanujan",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact config edit --help and config edit -h combined bytes, exit code, and stdout/stderr split only. Config edit command behavior, other config subcommand help pages, and future Amp help changes remain separate parity work."
+}

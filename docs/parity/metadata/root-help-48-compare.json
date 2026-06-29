@@ -1,0 +1,61 @@
+{
+  "row": 48,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T09:41:54Z",
+  "surface": "CLI root help",
+  "state": "Root --help and -h flags",
+  "commands": {
+    "amp_help": "AMP_SKIP_UPDATE_CHECK=1 amp --help",
+    "amp_h": "AMP_SKIP_UPDATE_CHECK=1 amp -h",
+    "rika_help_before": "bun packages/cli/src/main.ts --help",
+    "rika_h_before": "bun packages/cli/src/main.ts -h",
+    "rika_help_after": "bun packages/cli/src/main.ts --help",
+    "rika_h_after": "bun packages/cli/src/main.ts -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-root-help-48.txt docs/parity/metadata/rika-root-help-48.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-root-help-short-48.txt docs/parity/metadata/rika-root-help-short-48.txt"
+  },
+  "exit_codes": {
+    "amp_help": 0,
+    "amp_h": 0,
+    "rika_help_before": 0,
+    "rika_h_before": 0,
+    "rika_help_after": 0,
+    "rika_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0
+  },
+  "bytes": {
+    "amp_help": 12211,
+    "amp_h": 12211,
+    "rika_help_before": 1397,
+    "rika_h_before": 1397,
+    "rika_help_after": 12211,
+    "rika_h_after": 12211,
+    "stdout": 12196,
+    "stderr": 15
+  },
+  "sha256": {
+    "amp_help": "97cbb472004ffe4e9a822425c46af3c90f23432f008839b6978f295e47013cb3",
+    "amp_h": "97cbb472004ffe4e9a822425c46af3c90f23432f008839b6978f295e47013cb3",
+    "rika_help_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_h_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_help_after": "97cbb472004ffe4e9a822425c46af3c90f23432f008839b6978f295e47013cb3",
+    "rika_h_after": "97cbb472004ffe4e9a822425c46af3c90f23432f008839b6978f295e47013cb3"
+  },
+  "artifacts": {
+    "amp_help": "docs/parity/metadata/amp-root-help-48.txt",
+    "amp_h": "docs/parity/metadata/amp-root-help-short-48.txt",
+    "rika_help_before": "docs/parity/metadata/rika-root-help-48-before.txt",
+    "rika_h_before": "docs/parity/metadata/rika-root-help-short-48-before.txt",
+    "rika_help_after": "docs/parity/metadata/rika-root-help-48.txt",
+    "rika_h_after": "docs/parity/metadata/rika-root-help-short-48.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 12196,
+    "stderr_bytes": 15
+  },
+  "result": "match",
+  "scope": "Proves exact root --help and -h combined bytes, exit code, and stdout/stderr split only. Subcommand help pages, update-dependent future Amp help, and other parser diagnostics remain separate parity work."
+}

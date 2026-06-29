@@ -1,0 +1,15 @@
+DESCRIPTION
+  Manage configured MCP servers
+
+USAGE
+  rika mcp <subcommand> [flags]
+
+GLOBAL FLAGS
+  --help, -h                                                          Show help information
+  --version, -v                                                       Show version information
+  --completions <bash|zsh|fish|sh>                                    Print shell completion script (choices: bash, zsh, fish, sh)
+  --log-level <all|trace|debug|info|warn|warning|error|fatal|none>    Sets the minimum log level (choices: all, trace, debug, info, warn, warning, error, fatal, none)
+
+SUBCOMMANDS
+  list       List MCP servers
+  approve    Approve MCP server

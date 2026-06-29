@@ -1,0 +1,37 @@
+Usage: amp logout [options]
+
+Log out by removing stored API key
+
+Global options:
+
+  --visibility <visibility>
+      Set thread visibility (private, unlisted, workspace, group)
+  -V, --version
+      Print the version number and exit
+  -v
+      Alias for --version
+  --settings-file <value>
+      Custom settings file path (overrides the default location /Users/dallen.pyrah/.config/amp/settings.json)
+  --log-level <value>
+      Set log level (parent, children, category, sinks, parentSinks, filters, lowestLevel, contextLocalStorage)
+  --log-file <value>
+      Set log file location (overrides the default location /Users/dallen.pyrah/.cache/amp/logs/cli.log)
+  --mcp-config <value>
+      JSON configuration or file path for MCP servers to merge with existing settings
+  -m, --mode <value>
+      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+  --effort <value>
+      Set reasoning effort for the new thread, when supported by the selected mode
+  --stream-json
+      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+  --stream-json-thinking
+      Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
+  --stream-json-input
+      Read JSON Lines user messages from stdin. Requires both --execute and --stream-json.
+  --no-archive-after-execute
+      When used with --execute on a new thread or with the review command, leave the thread unarchived after the command
+      finishes.
+  -l, --label <label>
+      Add a label to the thread created or continued by this command. Repeat the flag for multiple labels.
+
+[=0u[<u[?25h

@@ -1,0 +1,49 @@
+{
+  "row": 45,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T09:06:55Z",
+  "surface": "CLI mode option",
+  "state": "visible mode alias and accepted -m shorthand",
+  "before": {
+    "amp_help": "Amp exposes -m, --mode <value>",
+    "amp_execute_mode_alias": "Amp accepts -x -m deep far enough to reach missing-prompt validation",
+    "rika_help": "Rika exposed --mode without -m in generated help",
+    "rika_execute_mode_alias": "Rika rejected -m under -x"
+  },
+  "after": {
+    "rika_generated_help": "Rika exposes --mode, -m choice in generated Effect CLI help",
+    "rika_custom_usage": "Rika custom usage exposes -m, --mode <rush|smart|deep>",
+    "rika_execute_mode_alias": "Rika accepts -x -m deep far enough to reach missing-prompt validation"
+  },
+  "commands": {
+    "amp_help": "AMP_SKIP_UPDATE_CHECK=1 amp --help",
+    "rika_help": "bun packages/cli/src/main.ts --help",
+    "amp_execute_mode_alias": "AMP_SKIP_UPDATE_CHECK=1 amp -x -m deep",
+    "rika_execute_mode_alias": "bun packages/cli/src/main.ts -x -m deep"
+  },
+  "exit_codes": {
+    "amp_help": 0,
+    "rika_help": 0,
+    "amp_execute_mode_alias": 1,
+    "rika_execute_mode_alias": 2
+  },
+  "sha256": {
+    "amp_help": "97cbb472004ffe4e9a822425c46af3c90f23432f008839b6978f295e47013cb3",
+    "rika_help": "1d2688de60abb428ac2ebb9a758e721d57cc0c0f644b33e9f4c64928a483ecf4",
+    "amp_execute_mode_alias": "39b3cf40432109cad88bb0f2881fd8643a6613a1b6c1e46729e951c19e6ac1d8",
+    "rika_execute_mode_alias": "bedeba3ec2f1c055c0e7610190b3ef88a5066c7722bfe805326d09acc22ef273"
+  },
+  "artifacts": {
+    "amp_help": "docs/parity/metadata/amp-mode-alias-help-45.txt",
+    "rika_help": "docs/parity/metadata/rika-mode-alias-help-45.txt",
+    "amp_execute_mode_alias": "docs/parity/metadata/amp-mode-alias-missing-prompt-45.txt",
+    "rika_execute_mode_alias": "docs/parity/metadata/rika-mode-alias-missing-prompt-45.txt"
+  },
+  "result": "scoped_mode_alias_match",
+  "known_remaining_deltas": [
+    "Rika's generated help still orders mode aliases as --mode, -m instead of Amp's -m, --mode.",
+    "Rika's generated help and custom usage text are not byte-for-byte Amp-compatible.",
+    "Missing-prompt exit codes and messages are not byte-for-byte Amp-compatible.",
+    "Actual mode model routing, interactive mode display behavior, and execute-mode runtime behavior remain unverified."
+  ]
+}

@@ -1,9 +1,5 @@
 import { Context, Effect, Layer, Schema, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as AiModel from "effect/unstable/ai/Model"
-import type * as Prompt from "effect/unstable/ai/Prompt"
-import type * as AiResponse from "effect/unstable/ai/Response"
+import { AiError, LanguageModel, Model, Prompt, Response } from "effect/unstable/ai"
 
 export const ProviderName = Schema.String.annotate({ identifier: "Rika.LLM.ProviderName" })
 export type ProviderName = typeof ProviderName.Type
@@ -33,7 +29,7 @@ export const Metadata = Schema.Record(Schema.String, Schema.String).annotate({
 })
 export type Metadata = typeof Metadata.Type
 
-export interface GenerateRequest extends Schema.Schema.Type<typeof GenerateRequest> {}
+export interface GenerateRequest extends Schema.Schema.Type<typeof GenerateRequest>, RuntimeOptions {}
 export const GenerateRequest = Schema.Struct({
   provider: ProviderName,
   model: ModelId,
@@ -43,6 +39,13 @@ export const GenerateRequest = Schema.Struct({
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Metadata),
 }).annotate({ identifier: "Rika.LLM.GenerateRequest" })
+
+export type ToolkitInput = LanguageModel.ToolkitInput<any, never, never>
+
+export interface RuntimeOptions {
+  readonly prompt?: Prompt.RawInput
+  readonly toolkit?: ToolkitInput
+}
 
 export interface Usage extends Schema.Schema.Type<typeof Usage> {}
 export const Usage = Schema.Struct({
@@ -93,17 +96,72 @@ export const ReasoningDelta = Schema.Struct({
   text: Schema.String,
 }).annotate({ identifier: "Rika.LLM.StreamEvent.ReasoningDelta" })
 
+export interface ToolInputStarted extends Schema.Schema.Type<typeof ToolInputStarted> {}
+export const ToolInputStarted = Schema.Struct({
+  type: Schema.Literal("tool.input.started"),
+  id: Schema.String,
+  name: Schema.String,
+}).annotate({ identifier: "Rika.LLM.StreamEvent.ToolInputStarted" })
+
+export interface ToolInputDelta extends Schema.Schema.Type<typeof ToolInputDelta> {}
+export const ToolInputDelta = Schema.Struct({
+  type: Schema.Literal("tool.input.delta"),
+  id: Schema.String,
+  text: Schema.String,
+}).annotate({ identifier: "Rika.LLM.StreamEvent.ToolInputDelta" })
+
+export interface ToolInputEnded extends Schema.Schema.Type<typeof ToolInputEnded> {}
+export const ToolInputEnded = Schema.Struct({
+  type: Schema.Literal("tool.input.ended"),
+  id: Schema.String,
+  name: Schema.String,
+  input_text: Schema.String,
+}).annotate({ identifier: "Rika.LLM.StreamEvent.ToolInputEnded" })
+
+export interface ToolCall extends Schema.Schema.Type<typeof ToolCall> {}
+export const ToolCall = Schema.Struct({
+  type: Schema.Literal("tool.call"),
+  id: Schema.String,
+  name: Schema.String,
+  input: Schema.Unknown,
+}).annotate({ identifier: "Rika.LLM.StreamEvent.ToolCall" })
+
+export interface ToolResult extends Schema.Schema.Type<typeof ToolResult> {}
+export const ToolResult = Schema.Struct({
+  type: Schema.Literal("tool.result"),
+  id: Schema.String,
+  name: Schema.String,
+  result: Schema.Unknown,
+  is_failure: Schema.Boolean,
+}).annotate({ identifier: "Rika.LLM.StreamEvent.ToolResult" })
+
 export interface ResponseCompleted extends Schema.Schema.Type<typeof ResponseCompleted> {}
 export const ResponseCompleted = Schema.Struct({
   type: Schema.Literal("response.completed"),
   response: GenerateResponse,
 }).annotate({ identifier: "Rika.LLM.StreamEvent.ResponseCompleted" })
 
-export type StreamEvent = ResponseStarted | ContentDelta | ReasoningDelta | ResponseCompleted
-export const StreamEvent = Schema.Union([ResponseStarted, ContentDelta, ReasoningDelta, ResponseCompleted]).pipe(
-  Schema.toTaggedUnion("type"),
-  Schema.annotate({ identifier: "Rika.LLM.StreamEvent" }),
-)
+export type StreamEvent =
+  | ResponseStarted
+  | ContentDelta
+  | ReasoningDelta
+  | ToolInputStarted
+  | ToolInputDelta
+  | ToolInputEnded
+  | ToolCall
+  | ToolResult
+  | ResponseCompleted
+export const StreamEvent = Schema.Union([
+  ResponseStarted,
+  ContentDelta,
+  ReasoningDelta,
+  ToolInputStarted,
+  ToolInputDelta,
+  ToolInputEnded,
+  ToolCall,
+  ToolResult,
+  ResponseCompleted,
+]).pipe(Schema.toTaggedUnion("type"), Schema.annotate({ identifier: "Rika.LLM.StreamEvent" }))
 
 export type ProviderError = AiError.AiError
 
@@ -128,7 +186,18 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/llm/Provider") {}
 
-export type FakeResponse = string | GenerateResponse
+export interface FakeToolCallResponse {
+  readonly type: "tool-call"
+  readonly name: string
+  readonly input: unknown
+  readonly id?: string
+  readonly input_text?: string
+  readonly content?: string
+  readonly result?: unknown
+  readonly is_failure?: boolean
+}
+
+export type FakeResponse = string | GenerateResponse | FakeToolCallResponse
 
 export interface FakeOptions {
   readonly name?: ProviderName
@@ -140,7 +209,7 @@ export const layer = (options: LayerOptions = {}) =>
     Service,
     Effect.gen(function* () {
       const languageModel = yield* LanguageModel.LanguageModel
-      const providerName = yield* AiModel.ProviderName
+      const providerName = yield* Model.ProviderName
 
       return Service.of({
         name: providerName,
@@ -173,17 +242,18 @@ export const fakeLanguageModelLayer = (
     LanguageModel.LanguageModel,
     LanguageModel.make({
       generateText: Effect.fn("LLM.Provider.fake.generateText")(function* () {
-        const response = normalizeFakeResponse(responseAt(responses, nextIndex))
+        const response = responseAt(responses, nextIndex)
         nextIndex += 1
         return [...aiPartsFromFakeResponse(response)]
       }),
       streamText: () => {
-        const response = normalizeFakeResponse(responseAt(responses, nextIndex))
+        const response = responseAt(responses, nextIndex)
         nextIndex += 1
+        const normalized = normalizeFakeResponse(response)
         if (options.failStreamWith !== undefined) {
-          return Stream.fromIterable<AiResponse.StreamPartEncoded>([
+          return Stream.fromIterable<Response.StreamPartEncoded>([
             { type: "text-start", id: "fake-text" },
-            { type: "text-delta", id: "fake-text", delta: response.content },
+            { type: "text-delta", id: "fake-text", delta: normalized.content },
           ]).pipe(Stream.concat(Stream.fail(options.failStreamWith)))
         }
         return Stream.fromIterable(aiStreamPartsFromFakeResponse(response))
@@ -191,34 +261,42 @@ export const fakeLanguageModelLayer = (
     }),
   )
 
-  return Layer.mergeAll(Layer.succeed(AiModel.ProviderName, providerName), languageModelLayer)
+  return Layer.mergeAll(Layer.succeed(Model.ProviderName, providerName), languageModelLayer)
 }
 
 export const completeWithLanguageModel = (languageModel: LanguageModel.Service, request: GenerateRequest) =>
-  languageModel
-    .generateText({ prompt: promptFromMessages(request.messages) })
-    .pipe(
-      Effect.map((response) => responseFromAiResponse(request, response)),
-      Effect.catch((error: ProviderError) =>
-        AiError.isAiError(error) && error.reason._tag === "InvalidOutputError"
-          ? Effect.succeed<GenerateResponse>({
-              provider: request.provider,
-              model: request.model,
-              content: "",
-              finish_reason: "stop",
-            })
-          : Effect.fail(error),
-      ),
-    )
+  languageModel.generateText({ prompt: request.prompt ?? promptFromMessages(request.messages) }).pipe(
+    Effect.map((response) => responseFromGenerateText(request, response)),
+    Effect.catch((error: ProviderError) =>
+      AiError.isAiError(error) && error.reason._tag === "InvalidOutputError"
+        ? Effect.succeed<GenerateResponse>({
+            provider: request.provider,
+            model: request.model,
+            content: "",
+            finish_reason: "stop",
+          })
+        : Effect.fail(error),
+    ),
+  )
 
 export const streamWithLanguageModel = (
   languageModel: LanguageModel.Service,
   request: GenerateRequest,
 ): Stream.Stream<StreamEvent, ProviderError> =>
   Stream.suspend(() => {
-    const state: StreamState = { content: "" }
+    const state: StreamState = { content: "", toolInputs: new Map() }
     const start: ResponseStarted = { type: "response.started", provider: request.provider, model: request.model }
-    const body = languageModel.streamText({ prompt: promptFromMessages(request.messages) }).pipe(
+    const prompt = request.prompt ?? promptFromMessages(request.messages)
+    const stream =
+      request.toolkit === undefined
+        ? languageModel.streamText({ prompt })
+        : languageModel.streamText({
+            prompt,
+            toolkit: request.toolkit,
+            toolChoice: "auto",
+          })
+    const body = stream.pipe(
+      Stream.provideContext(emptyContext()),
       Stream.flatMap((part) => Stream.fromIterable(streamEventsFromAiPart(part, state))),
       Stream.catchReason("AiError", "InvalidOutputError", () => {
         state.finish_reason ??= "stop"
@@ -237,6 +315,8 @@ export const streamWithLanguageModel = (
     )
   })
 
+const emptyContext = (): Context.Context<unknown> => Context.makeUnsafe(new Map())
+
 export const promptFromMessages = (messages: ReadonlyArray<Message>): Prompt.RawInput =>
   messages.map((message): Prompt.MessageEncoded => {
     switch (message.role) {
@@ -252,14 +332,14 @@ export const promptFromMessages = (messages: ReadonlyArray<Message>): Prompt.Raw
     return { role: "user", content: message.content }
   })
 
-export const responseFromAiResponse = (
+export const responseFromGenerateText = (
   request: GenerateRequest,
-  response: LanguageModel.GenerateTextResponse<Record<string, never>>,
+  response: LanguageModel.GenerateTextResponse<any>,
 ): GenerateResponse =>
   responseFromParts(request, response.text, finishReasonFromAi(response.finishReason), usageFromAi(response.usage))
 
 export const streamEventsFromAiPart = (
-  part: AiResponse.StreamPart<Record<string, never>>,
+  part: Response.StreamPart<any>,
   state: StreamState,
 ): ReadonlyArray<StreamEvent> => {
   switch (part.type) {
@@ -272,6 +352,35 @@ export const streamEventsFromAiPart = (
       if (part.delta.length === 0) return []
       return [{ type: "reasoning.delta", text: part.delta }]
     }
+    case "tool-params-start": {
+      const name = part.name
+      state.toolInputs.set(part.id, { name, input_text: "" })
+      return [{ type: "tool.input.started", id: part.id, name }]
+    }
+    case "tool-params-delta": {
+      const existing = state.toolInputs.get(part.id)
+      if (existing !== undefined) {
+        state.toolInputs.set(part.id, { ...existing, input_text: existing.input_text + part.delta })
+      }
+      return part.delta.length === 0 ? [] : [{ type: "tool.input.delta", id: part.id, text: part.delta }]
+    }
+    case "tool-params-end": {
+      const existing = state.toolInputs.get(part.id)
+      if (existing === undefined) return []
+      return [{ type: "tool.input.ended", id: part.id, name: existing.name, input_text: existing.input_text }]
+    }
+    case "tool-call":
+      return [{ type: "tool.call", id: part.id, name: part.name, input: part.params }]
+    case "tool-result":
+      return [
+        {
+          type: "tool.result",
+          id: part.id,
+          name: part.name,
+          result: part.result,
+          is_failure: part.isFailure,
+        },
+      ]
     case "finish": {
       state.finish_reason = finishReasonFromAi(part.reason)
       state.usage = usageFromAi(part.usage)
@@ -289,10 +398,10 @@ export const streamEventsFromResponse = (response: GenerateResponse): ReadonlyAr
   return events
 }
 
-export const finishReasonFromAi = (reason: AiResponse.FinishReason): FinishReason =>
+export const finishReasonFromAi = (reason: Response.FinishReason): FinishReason =>
   reason === "tool-calls" ? "tool-call" : reason === "pause" || reason === "other" ? "unknown" : reason
 
-export const usageFromAi = (usage: AiResponse.Usage): Usage => ({
+export const usageFromAi = (usage: Response.Usage): Usage => ({
   ...(usage.inputTokens.total === undefined ? {} : { input_tokens: usage.inputTokens.total }),
   ...(usage.outputTokens.total === undefined ? {} : { output_tokens: usage.outputTokens.total }),
   ...(usage.outputTokens.reasoning === undefined ? {} : { reasoning_tokens: usage.outputTokens.reasoning }),
@@ -309,6 +418,13 @@ const responseAt = (responses: ReadonlyArray<FakeResponse>, index: number): Fake
 const normalizeFakeResponse = (
   response: FakeResponse,
 ): Pick<GenerateResponse, "content" | "finish_reason" | "usage"> => {
+  if (isFakeToolCallResponse(response)) {
+    return {
+      content: response.content ?? "",
+      finish_reason: "tool-call",
+    }
+  }
+
   if (typeof response === "string") {
     return {
       content: response,
@@ -325,6 +441,7 @@ const normalizeFakeResponse = (
 
 interface StreamState {
   content: string
+  toolInputs: Map<string, { readonly name: string; readonly input_text: string }>
   finish_reason?: FinishReason
   usage?: Usage
 }
@@ -353,7 +470,7 @@ const hasUsage = (usage: Usage) =>
   usage.reasoning_tokens !== undefined ||
   usage.total_tokens !== undefined
 
-const finishReasonToAi = (reason: FinishReason): AiResponse.FinishReason =>
+const finishReasonToAi = (reason: FinishReason): Response.FinishReason =>
   reason === "tool-call" ? "tool-calls" : reason
 
 const emptyAiUsage = () => ({
@@ -386,28 +503,92 @@ const aiUsageFromUsage = (usage: Usage | undefined) => {
   }
 }
 
-const aiPartsFromFakeResponse = (
-  response: Pick<GenerateResponse, "content" | "finish_reason" | "usage">,
-): ReadonlyArray<AiResponse.PartEncoded> => [
-  { type: "text", text: response.content },
-  {
-    type: "finish",
-    reason: finishReasonToAi(response.finish_reason ?? "stop"),
-    usage: aiUsageFromUsage(response.usage),
-    response: undefined,
-  },
-]
+const aiPartsFromFakeResponse = (response: FakeResponse): ReadonlyArray<Response.PartEncoded> => {
+  if (isFakeToolCallResponse(response)) {
+    const id = response.id ?? "fake_tool_call"
+    const textParts: Array<Response.PartEncoded> =
+      response.content === undefined || response.content.length === 0
+        ? []
+        : [{ type: "text", text: response.content }]
+    return [
+      ...textParts,
+      { type: "tool-call", id, name: response.name, params: response.input },
+      {
+        type: "finish",
+        reason: "tool-calls",
+        usage: aiUsageFromUsage(undefined),
+        response: undefined,
+      },
+    ]
+  }
 
-const aiStreamPartsFromFakeResponse = (
-  response: Pick<GenerateResponse, "content" | "finish_reason" | "usage">,
-): ReadonlyArray<AiResponse.StreamPartEncoded> => [
-  { type: "text-start", id: "fake-text" },
-  { type: "text-delta", id: "fake-text", delta: response.content },
-  { type: "text-end", id: "fake-text" },
-  {
-    type: "finish",
-    reason: finishReasonToAi(response.finish_reason ?? "stop"),
-    usage: aiUsageFromUsage(response.usage),
-    response: undefined,
-  },
-]
+  const normalized = normalizeFakeResponse(response)
+  return [
+    { type: "text", text: normalized.content },
+    {
+      type: "finish",
+      reason: finishReasonToAi(normalized.finish_reason ?? "stop"),
+      usage: aiUsageFromUsage(normalized.usage),
+      response: undefined,
+    },
+  ]
+}
+
+const aiStreamPartsFromFakeResponse = (response: FakeResponse): ReadonlyArray<Response.StreamPartEncoded> => {
+  if (isFakeToolCallResponse(response)) {
+    const id = response.id ?? "fake_tool_call"
+    const inputText = response.input_text ?? JSON.stringify(response.input)
+    const textParts: Array<Response.StreamPartEncoded> =
+      response.content === undefined || response.content.length === 0
+        ? []
+        : [
+            { type: "text-start", id: "fake-text" },
+            { type: "text-delta", id: "fake-text", delta: response.content },
+            { type: "text-end", id: "fake-text" },
+          ]
+    const resultParts: Array<Response.StreamPartEncoded> =
+      response.result === undefined
+        ? []
+        : [
+            {
+              type: "tool-result",
+              id,
+              name: response.name,
+              result: response.result,
+              isFailure: response.is_failure ?? false,
+              providerExecuted: false,
+              preliminary: false,
+            },
+          ]
+    return [
+      ...textParts,
+      { type: "tool-params-start", id, name: response.name },
+      { type: "tool-params-delta", id, delta: inputText },
+      { type: "tool-params-end", id },
+      { type: "tool-call", id, name: response.name, params: response.input },
+      ...resultParts,
+      {
+        type: "finish",
+        reason: "tool-calls",
+        usage: aiUsageFromUsage(undefined),
+        response: undefined,
+      },
+    ]
+  }
+
+  const normalized = normalizeFakeResponse(response)
+  return [
+    { type: "text-start", id: "fake-text" },
+    { type: "text-delta", id: "fake-text", delta: normalized.content },
+    { type: "text-end", id: "fake-text" },
+    {
+      type: "finish",
+      reason: finishReasonToAi(normalized.finish_reason ?? "stop"),
+      usage: aiUsageFromUsage(normalized.usage),
+      response: undefined,
+    },
+  ]
+}
+
+const isFakeToolCallResponse = (response: FakeResponse): response is FakeToolCallResponse =>
+  typeof response === "object" && response !== null && "type" in response && response.type === "tool-call"

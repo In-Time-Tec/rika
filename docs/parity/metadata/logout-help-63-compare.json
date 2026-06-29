@@ -1,0 +1,91 @@
+{
+  "row": 63,
+  "date": "2026-06-29",
+  "generated_at": "2026-06-29T12:29:03Z",
+  "surface": "CLI logout help",
+  "state": "Logout --help and -h flags",
+  "commands": {
+    "amp_logout_help": "AMP_SKIP_UPDATE_CHECK=1 amp logout --help",
+    "amp_logout_h": "AMP_SKIP_UPDATE_CHECK=1 amp logout -h",
+    "rika_logout_help_before": "bun packages/cli/src/main.ts logout --help",
+    "rika_logout_h_before": "bun packages/cli/src/main.ts logout -h",
+    "rika_logout_help_after": "bun packages/cli/src/main.ts logout --help",
+    "rika_logout_h_after": "bun packages/cli/src/main.ts logout -h",
+    "compare_help": "cmp -s docs/parity/metadata/amp-logout-help-63.txt docs/parity/metadata/rika-logout-help-63.txt",
+    "compare_h": "cmp -s docs/parity/metadata/amp-logout-help-short-63.txt docs/parity/metadata/rika-logout-help-short-63.txt",
+    "compare_stdout": "cmp -s docs/parity/metadata/amp-logout-help-63-stdout.txt docs/parity/metadata/rika-logout-help-63-stdout.txt",
+    "compare_stderr": "cmp -s docs/parity/metadata/amp-logout-help-63-stderr.txt docs/parity/metadata/rika-logout-help-63-stderr.txt",
+    "compare_short_stdout": "cmp -s docs/parity/metadata/amp-logout-help-short-63-stdout.txt docs/parity/metadata/rika-logout-help-short-63-stdout.txt",
+    "compare_short_stderr": "cmp -s docs/parity/metadata/amp-logout-help-short-63-stderr.txt docs/parity/metadata/rika-logout-help-short-63-stderr.txt"
+  },
+  "exit_codes": {
+    "amp_logout_help": 0,
+    "amp_logout_h": 0,
+    "rika_logout_help_before": 0,
+    "rika_logout_h_before": 0,
+    "rika_logout_help_after": 0,
+    "rika_logout_h_after": 0,
+    "compare_help": 0,
+    "compare_h": 0,
+    "compare_stdout": 0,
+    "compare_stderr": 0,
+    "compare_short_stdout": 0,
+    "compare_short_stderr": 0
+  },
+  "bytes": {
+    "amp_logout_help": 1671,
+    "amp_logout_h": 1671,
+    "rika_logout_help_before": 1397,
+    "rika_logout_h_before": 1397,
+    "rika_logout_help_after": 1671,
+    "rika_logout_h_after": 1671,
+    "stdout": 1656,
+    "stderr": 15,
+    "short_stdout": 1656,
+    "short_stderr": 15
+  },
+  "sha256": {
+    "amp_logout_help": "c775cccebfe04e7e471ede70b885ea81ad7f795db406dc3bd10b9855ca52d955",
+    "amp_logout_h": "c775cccebfe04e7e471ede70b885ea81ad7f795db406dc3bd10b9855ca52d955",
+    "rika_logout_help_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_logout_h_before": "87bef846cd39694c31c085192761a5a5e046b04a60eae3898e39c6f4033c0fb5",
+    "rika_logout_help_after": "c775cccebfe04e7e471ede70b885ea81ad7f795db406dc3bd10b9855ca52d955",
+    "rika_logout_h_after": "c775cccebfe04e7e471ede70b885ea81ad7f795db406dc3bd10b9855ca52d955"
+  },
+  "artifacts": {
+    "amp_logout_help": "docs/parity/metadata/amp-logout-help-63.txt",
+    "amp_logout_h": "docs/parity/metadata/amp-logout-help-short-63.txt",
+    "amp_logout_stdout": "docs/parity/metadata/amp-logout-help-63-stdout.txt",
+    "amp_logout_stderr": "docs/parity/metadata/amp-logout-help-63-stderr.txt",
+    "amp_logout_h_stdout": "docs/parity/metadata/amp-logout-help-short-63-stdout.txt",
+    "amp_logout_h_stderr": "docs/parity/metadata/amp-logout-help-short-63-stderr.txt",
+    "rika_logout_help_before": "docs/parity/metadata/rika-logout-help-63-before.txt",
+    "rika_logout_h_before": "docs/parity/metadata/rika-logout-help-short-63-before.txt",
+    "rika_logout_help_after": "docs/parity/metadata/rika-logout-help-63.txt",
+    "rika_logout_h_after": "docs/parity/metadata/rika-logout-help-short-63.txt",
+    "rika_logout_stdout": "docs/parity/metadata/rika-logout-help-63-stdout.txt",
+    "rika_logout_stderr": "docs/parity/metadata/rika-logout-help-63-stderr.txt",
+    "rika_logout_h_stdout": "docs/parity/metadata/rika-logout-help-short-63-stdout.txt",
+    "rika_logout_h_stderr": "docs/parity/metadata/rika-logout-help-short-63-stderr.txt"
+  },
+  "stream_split": {
+    "stdout_cmp": 0,
+    "stderr_cmp": 0,
+    "stdout_bytes": 1656,
+    "stderr_bytes": 15,
+    "stdout_sha256": "3b8cbd89282b96057f2765b057c56d6624827ee22f05e02be95eaa496dafe938",
+    "stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2",
+    "short_stdout_cmp": 0,
+    "short_stderr_cmp": 0,
+    "short_stdout_bytes": 1656,
+    "short_stderr_bytes": 15,
+    "short_stdout_sha256": "3b8cbd89282b96057f2765b057c56d6624827ee22f05e02be95eaa496dafe938",
+    "short_stderr_sha256": "ab903ddc1787d22a719a74f4667af6311ef78e936fafc3cb879d8c6d65ad05c2"
+  },
+  "result": "match",
+  "review": {
+    "reviewer": "Codex Row63",
+    "verdict": "PASS"
+  },
+  "scope": "Proves exact logout --help and logout -h combined bytes, exit code, and stdout/stderr split. Logout command behavior, other command help pages, and future Amp help changes remain separate parity work."
+}

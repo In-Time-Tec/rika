@@ -2,8 +2,10 @@ import { readdir, readFile, stat } from "node:fs/promises"
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path"
 import { ToolRegistry } from "@rika/agent"
 import { Config } from "@rika/core"
-import { Common, Tool } from "@rika/schema"
+import { Common } from "@rika/schema"
+import type { Call } from "@rika/schema/tool"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Tool } from "effect/unstable/ai"
 
 const defaultLimit = 8
 const maxLimit = 30
@@ -23,16 +25,16 @@ export type SourceType = typeof SourceType.Type
 
 export interface SearchInput extends Schema.Schema.Type<typeof SearchInput> {}
 export const SearchInput = Schema.Struct({
-  query: Schema.optional(Schema.String),
-  queries: Schema.optional(Schema.Array(Schema.String)),
-  mode: Schema.optional(SearchMode),
-  source: Schema.optional(Schema.Array(SourceType)),
-  file: Schema.optional(Schema.String),
-  lines: Schema.optional(Schema.String),
-  limit: Schema.optional(Schema.Int),
-  pathPrefix: Schema.optional(Schema.String),
-  language: Schema.optional(Schema.String),
-  maxOutputChars: Schema.optional(Schema.Int),
+  query: Schema.optionalKey(Schema.String),
+  queries: Schema.optionalKey(Schema.Array(Schema.String)),
+  mode: Schema.optionalKey(SearchMode),
+  source: Schema.optionalKey(Schema.Array(SourceType)),
+  file: Schema.optionalKey(Schema.String),
+  lines: Schema.optionalKey(Schema.String),
+  limit: Schema.optionalKey(Schema.Int),
+  pathPrefix: Schema.optionalKey(Schema.String),
+  language: Schema.optionalKey(Schema.String),
+  maxOutputChars: Schema.optionalKey(Schema.Int),
 }).annotate({ identifier: "Rika.Tools.SemanticSearch.SearchInput" })
 
 export interface StatusInput extends Schema.Schema.Type<typeof StatusInput> {}
@@ -177,26 +179,30 @@ export const status = Effect.fn("SemanticSearch.status.call")(function* (input: 
 
 export const toolDefinitions = (service: Interface): ReadonlyArray<ToolRegistry.Definition> => [
   {
-    descriptor: {
-      name: "semantic_search",
+    tool: Tool.make("semantic_search", {
       description: semanticSearchDescription,
-      input_schema: searchInputSchema,
-    },
-    execute: Effect.fn("SemanticSearch.tool.search")(function* (call: Tool.Call) {
+      parameters: SearchInput,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("SemanticSearch.tool.search")(function* (call: Call) {
       const input = yield* decodeSearchInput(call)
       return yield* service.search(input).pipe(Effect.mapError(toRegistryError("semantic_search")))
     }),
   },
   {
-    descriptor: {
-      name: "semantic_search.status",
+    tool: Tool.make("semantic_search_status", {
       description:
         "Report whether semantic_search is enabled, which backend is active, index counts when available, and any missing configuration causing degraded local fallback.",
-      input_schema: statusInputSchema,
-    },
-    execute: Effect.fn("SemanticSearch.tool.status")(function* (call: Tool.Call) {
+      parameters: Tool.EmptyParams,
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    }),
+    execute: Effect.fn("SemanticSearch.tool.status")(function* (call: Call) {
       const input = yield* decodeStatusInput(call)
-      return yield* service.status(input).pipe(Effect.mapError(toRegistryError("semantic_search.status")))
+      return yield* service.status(input).pipe(Effect.mapError(toRegistryError("semantic_search_status")))
     }),
   },
 ]
@@ -281,7 +287,7 @@ const makeService = (engine: Engine): Interface =>
     status: Effect.fn("SemanticSearch.status")(function* () {
       const currentStatus = yield* engine.status
       return yield* jsonValue({
-        type: "semantic_search.status",
+        type: "semantic_search_status",
         enabled: currentStatus.enabled,
         backend: currentStatus.backend,
         degraded: currentStatus.degraded,
@@ -857,49 +863,10 @@ const capText = (text: string, maxChars: number) =>
     ? { text, truncated: false }
     : { text: `${text.slice(0, maxChars)}\n… (truncated at ${maxChars} characters)`, truncated: true }
 
-const searchInputSchema: Common.JsonValue = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    query: { type: "string", description: "Natural-language description or symbol/string to find." },
-    queries: {
-      type: "array",
-      minItems: 2,
-      maxItems: 5,
-      items: { type: "string" },
-      description: "2-5 distinct facets to retrieve and merge in one parallel call.",
-    },
-    mode: {
-      type: "string",
-      enum: ["hybrid", "semantic"],
-      description: "hybrid uses semantic + exact-token matching; semantic is meaning-only.",
-    },
-    source: {
-      type: "array",
-      items: { type: "string", enum: ["code", "docs", "history", "conversation"] },
-      description: "Force sources to search: code, docs, history, conversation.",
-    },
-    file: {
-      type: "string",
-      description: "Repository-relative file path for actual commit messages and diffs that changed it.",
-    },
-    lines: { type: "string", description: "Optional line range like 40-80 to scope file history." },
-    limit: { type: "integer", minimum: 1, maximum: 30, description: "Maximum ranked results, default 8." },
-    pathPrefix: { type: "string", description: "Restrict to a repository-relative directory prefix." },
-    language: {
-      type: "string",
-      description: "Restrict to a language, e.g. typescript, python, go, rust, markdown.",
-    },
-    maxOutputChars: { type: "integer", minimum: 2000, maximum: 80000 },
-  },
-}
+const decodeSearchInput = (call: Call) => decodeToolInput(SearchInput, call)
+const decodeStatusInput = (call: Call) => decodeToolInput(StatusInput, call)
 
-const statusInputSchema: Common.JsonValue = { type: "object", additionalProperties: false, properties: {} }
-
-const decodeSearchInput = (call: Tool.Call) => decodeToolInput(SearchInput, call)
-const decodeStatusInput = (call: Tool.Call) => decodeToolInput(StatusInput, call)
-
-const decodeToolInput = <A>(schema: Schema.ConstraintDecoder<A>, call: Tool.Call) => {
+const decodeToolInput = <A>(schema: Schema.ConstraintDecoder<A>, call: Call) => {
   const decoded = Schema.decodeUnknownOption(schema)(call.input)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return new ToolRegistry.ToolRegistryError({

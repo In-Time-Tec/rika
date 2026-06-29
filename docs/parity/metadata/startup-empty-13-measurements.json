@@ -1,0 +1,186 @@
+{
+  "row": 13,
+  "date": "2026-06-29",
+  "surface": "Startup & status line",
+  "state": "Empty startup, deep tier visible",
+  "verdict": "mismatch",
+  "method": {
+    "source": "screenshot RGB pixels converted via sips BMP output",
+    "logo_crop": {
+      "left": 150,
+      "top": 180,
+      "right_exclusive": 875,
+      "bottom_exclusive": 1000
+    },
+    "logo_predicate": "max(rgb)>28 && saturation>0.18 && green>=red*0.65",
+    "welcome_crop": {
+      "left": 850,
+      "top": 400,
+      "right_exclusive": 1300,
+      "bottom_exclusive": 700
+    },
+    "welcome_predicate": "max(rgb)>40 && saturation>0.15 && green>red*1.05 && green>blue*0.8",
+    "grid": {
+      "left": 217,
+      "top": 302,
+      "cell_width": 17,
+      "cell_height": 37,
+      "rows": 18,
+      "columns": 40
+    }
+  },
+  "artifacts": {
+    "amp_screenshot": {
+      "path": "docs/parity/screenshots/amp/startup-empty-13.png",
+      "sha256": "67555fbc7571679911f3976bb28d71e7a48dd0453d6bb2e197f89a79f209c74c",
+      "width": 1940,
+      "height": 1414
+    },
+    "rika_screenshot": {
+      "path": "docs/parity/screenshots/rika/startup-empty-13.png",
+      "sha256": "6240d4a059ad1ee08cc51e323855701d002b1e25d9ebaa8b0224d8db8a22582a",
+      "width": 1940,
+      "height": 1414
+    },
+    "pixel_diff": {
+      "path": "docs/parity/diffs/startup-empty-13.json",
+      "sha256": "26512191b556041d0fad720a41ad64cea604057a462097ef3f58849f166b4416",
+      "different_pixels": 87821,
+      "different_percent": 3.201453797809825,
+      "diff_bbox": {
+        "left": 123,
+        "top": 302,
+        "right": 1807,
+        "bottom": 1253
+      },
+      "total_absolute_channel_delta": 12536167,
+      "mean_absolute_channel_delta": 1.1424932377258343,
+      "max_channel_delta": 229
+    },
+    "visual_diff": {
+      "path": "docs/parity/diffs/startup-empty-13.png",
+      "sha256": "04d24b423a8db131ad9184ffd836d0ed100345b0c6be809948ccac8581a97d60",
+      "width": 1940,
+      "height": 1414
+    }
+  },
+  "measurements": {
+    "amp": {
+      "logo": {
+        "bbox": {
+          "left": 223,
+          "top": 302,
+          "right": 840,
+          "bottom": 950
+        },
+        "width": 618,
+        "height": 649,
+        "pixel_count": 39301,
+        "mean_rgb": [
+          66,
+          145,
+          128
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 932,
+          "top": 485,
+          "right": 1167,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 1946,
+        "mean_rgb": [
+          72,
+          165,
+          129
+        ]
+      },
+      "grid": [
+        "           ●●••●●••••••••••             ",
+        "       ••●●••••●●●●●●●●●●●••••          ",
+        "     •●●●●••●●••••●●●●●•••●●●•••        ",
+        "   ••●●●●•●●●•••●●●●●●••••••••••••      ",
+        "  •●●•●●●●●•••●●●●●●●●●●●●•••••••••     ",
+        " •●●•●●•●●••●●●●●●●●●●●●●●●•••••••••    ",
+        " •••••••••●●●●●●●●●●●●●●●●•••••••••••   ",
+        "•••••••••●●●●●●●●••••••••••••••••••••   ",
+        "•••••••••●●●●●●●•••••••••••••••••••••   ",
+        "•••••••••●●●●••••••••••••••••••••••••   ",
+        "•••••••••••••••••••••••••••••••••••••   ",
+        " ••••••••••••••••••••••••••••••••••••   ",
+        " •••••••••••••••••••••••••••••••••••    ",
+        "  •••••••••••••••••••••••••••••••••     ",
+        "    ••••••••••••••••••••••••••••••      ",
+        "     •••••••••••••••••••••••••••        ",
+        "        ••••••••••••••••••••••          ",
+        "           ···············•             "
+      ]
+    },
+    "rika": {
+      "logo": {
+        "bbox": {
+          "left": 223,
+          "top": 307,
+          "right": 807,
+          "bottom": 943
+        },
+        "width": 585,
+        "height": 637,
+        "pixel_count": 25940,
+        "mean_rgb": [
+          48,
+          97,
+          125
+        ]
+      },
+      "welcome_title": {
+        "bbox": {
+          "left": 932,
+          "top": 485,
+          "right": 1167,
+          "bottom": 510
+        },
+        "width": 236,
+        "height": 26,
+        "pixel_count": 1672,
+        "mean_rgb": [
+          67,
+          159,
+          125
+        ]
+      },
+      "grid": [
+        "              ••••••••                  ",
+        "         ••••••••••••••••••             ",
+        "      •••••••••••••••••••••••           ",
+        "    •••••••••••••••••••••••••••         ",
+        "   •••••••••••●●●••••••••••••••••       ",
+        "  •••••••••●●●••••••••••••••••••••      ",
+        " •••••••••●●●●••••••••••••••••••••      ",
+        " •••••●•••●●●••••••••••••••••••••••     ",
+        "••••••●●●●●●●••••••••••••••••••••••     ",
+        "•••••••●●●●●●••••••••••••••••••••••     ",
+        " ••••••••••••••••••••••••••••••••••     ",
+        " •••••••••••••••••••••••••••••••••      ",
+        "  ••••••••••••••••••••••••••••••••      ",
+        "   ••••••••••••••••••••••••••••••       ",
+        "    •••••••••••••••••••••••••••         ",
+        "      •••••••••••••••••••••••           ",
+        "         •••••••••••••••••              ",
+        "               ••••••                   "
+      ]
+    }
+  },
+  "derived_deltas": {
+    "logo_left_delta": 0,
+    "logo_right_delta": -33,
+    "logo_top_delta": 5,
+    "logo_bottom_delta": -7,
+    "logo_pixel_count_delta": -13361,
+    "welcome_left_delta": 0,
+    "welcome_top_delta": 0
+  }
+}

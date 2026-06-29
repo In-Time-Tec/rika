@@ -1,4 +1,4 @@
-import type { PermissionPolicy, ToolRegistry } from "@rika/agent"
+import type { PermissionPolicy } from "@rika/agent"
 import type { Config } from "@rika/core"
 import type { Common, Tool } from "@rika/schema"
 
@@ -94,7 +94,7 @@ export type EventHandler =
 
 export interface RegisterToolOptions {
   readonly description: string
-  readonly input_schema?: Common.JsonValue
+  readonly inputSchema?: Common.JsonValue
 }
 
 export type ToolHandler = (call: Tool.Call, ctx: PluginContext) => MaybePromise<Common.JsonValue>
@@ -156,8 +156,14 @@ export type PluginEntrypoint = (api: PluginAPI) => MaybePromise<void>
 
 export interface ToolRegistration {
   readonly plugin: PluginSummary
-  readonly descriptor: ToolRegistry.Descriptor
+  readonly descriptor: ToolDescriptor
   readonly execute: ToolHandler
+}
+
+export interface ToolDescriptor {
+  readonly name: string
+  readonly description: string
+  readonly inputSchema?: Common.JsonValue
 }
 
 export interface CommandRegistrationState {
