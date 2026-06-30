@@ -41,12 +41,15 @@
 
 - Stdout is reserved for newline-delimited JSON protocol events; diagnostics go to stderr.
 - CLI orchestration depends on `AgentLoop.Service` and `Session.Service`; provider SDKs, Drizzle, terminal I/O, and filesystem details stay behind layers.
+- Live runtime composition owns provider selection, built-in tools, plugins, persistence, diagnostics, SDK, TUI session backends, and local remote-control server layers; keep that assembly out of feature modules.
+- Runtime environment loading may merge process env and settings files, but secrets and tokens must be redacted in doctor/status output.
 - Tests use fake model/tool layers and memory output, not process stdout or network providers.
 
 ## For AI Agents
 
 - Read `../../docs/effect-module-conventions.md` before adding or changing CLI services.
 - Keep interactive rendering in `@rika/tui`; this package should only parse, route, and compose live layers.
+- When adding startup config, update `src/runtime-env.ts`, doctor redaction, owner docs, and package smoke expectations together.
 
 ## Testing And Verification
 

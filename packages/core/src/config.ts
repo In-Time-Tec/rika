@@ -1,6 +1,8 @@
 import { Context, Effect, Layer, Option, Schema } from "effect"
 
-export const Mode = Schema.Literals(["rush", "smart", "deep"]).annotate({ identifier: "Rika.Config.Mode" })
+export const Mode = Schema.Literals(["rush", "smart", "deep1", "deep2", "deep3"]).annotate({
+  identifier: "Rika.Config.Mode",
+})
 export type Mode = typeof Mode.Type
 
 export interface Values extends Schema.Schema.Type<typeof Values> {}
@@ -9,6 +11,7 @@ export const Values = Schema.Struct({
   data_dir: Schema.String,
   default_mode: Mode,
   database_url: Schema.optional(Schema.String),
+  backend_id: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Config.Values" })
 
 export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigError", {
@@ -50,9 +53,11 @@ export const layerFromEnv = (env: Record<string, string | undefined>, cwd: strin
       }
       const values: Values =
         env.RIKA_DATABASE_URL === undefined ? base : { ...base, database_url: env.RIKA_DATABASE_URL }
+      const withBackendId: Values =
+        env.RIKA_BACKEND_ID === undefined ? values : { ...values, backend_id: env.RIKA_BACKEND_ID }
 
       return Service.of({
-        get: Effect.succeed(values),
+        get: Effect.succeed(withBackendId),
         requireEnv: Effect.fn("Config.requireEnv")(function* (key: string) {
           const value = env[key]
           if (value === undefined || value.length === 0) {

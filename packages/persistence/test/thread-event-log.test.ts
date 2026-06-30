@@ -56,6 +56,21 @@ describe("ThreadEventLog", () => {
     expect(result.capped.map((event) => event.sequence)).toEqual([1, 2])
   })
 
+  test("reads the latest thread tail in ascending sequence order", async () => {
+    const tail = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadEventLog.append(threadCreated(1))
+        yield* ThreadEventLog.append(messageAdded(2, "first"))
+        yield* ThreadEventLog.append(messageAdded(3, "second"))
+        yield* ThreadEventLog.append(messageAdded(4, "third"))
+        return yield* ThreadEventLog.readThreadTail({ thread_id: threadId, limit: 2 })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(tail.map((event) => event.sequence)).toEqual([3, 4])
+  })
+
   test("rejects stale sequence attempts explicitly", async () => {
     const error = await Effect.runPromise(
       Effect.gen(function* () {

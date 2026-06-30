@@ -18,7 +18,8 @@ export const ConfigSummary = Schema.Struct({
   workspace_root: Schema.String,
   data_dir: Schema.String,
   database_url_configured: Schema.Boolean,
-  openai_configured: Schema.Boolean,
+  base_url_configured: Schema.Boolean,
+  api_key_configured: Schema.Boolean,
   telemetry: Schema.Literal("disabled"),
 }).annotate({ identifier: "Rika.Cli.Doctor.ConfigSummary" })
 
@@ -114,8 +115,7 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
     const dataDir = input.env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
     const rivetHost = input.env.RIKA_RIVET_HOST ?? "local"
     const rivetEndpoint = input.env.RIKA_RIVET_ENDPOINT ?? input.env.RIVET_ENDPOINT ?? "http://127.0.0.1:6420"
-    const openaiConfigured =
-      secretConfigured(input.env.RIKA_OPENAI_API_KEY) || secretConfigured(input.env.OPENAI_API_KEY)
+    const apiKeyConfigured = secretConfigured(input.env.RIKA_API_KEY)
     const permissionConfig = PermissionPolicy.configFromEnv(input.env)
     const permissionSummary = PermissionPolicy.summary(permissionConfig)
     const backendStatus = yield* backend
@@ -134,7 +134,8 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
         workspace_root: workspaceRoot,
         data_dir: dataDir,
         database_url_configured: input.env.RIKA_DATABASE_URL !== undefined,
-        openai_configured: openaiConfigured,
+        base_url_configured: input.env.RIKA_BASE_URL !== undefined,
+        api_key_configured: apiKeyConfigured,
         telemetry: "disabled",
       },
       backend: {
@@ -149,14 +150,14 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
         token_configured: secretConfigured(input.env.RIKA_RIVET_TOKEN) || secretConfigured(input.env.RIVET_TOKEN),
         namespace_configured: input.env.RIKA_RIVET_NAMESPACE !== undefined || input.env.RIVET_NAMESPACE !== undefined,
       },
-      checks: checks({ dataDir, openaiConfigured, permissionSummary, rivetHost, rivetEndpoint }),
+      checks: checks({ dataDir, apiKeyConfigured, permissionSummary, rivetHost, rivetEndpoint }),
     }
     return diagnosticReport
   })
 
 const checks = (input: {
   readonly dataDir: string
-  readonly openaiConfigured: boolean
+  readonly apiKeyConfigured: boolean
   readonly permissionSummary: PermissionPolicy.PermissionSummary
   readonly rivetHost: string
   readonly rivetEndpoint: string
@@ -168,10 +169,10 @@ const checks = (input: {
   },
   {
     name: "model-provider",
-    status: input.openaiConfigured ? "ok" : "warning",
-    message: input.openaiConfigured
-      ? "OpenAI provider credentials are configured. Secret values are not printed."
-      : "OpenAI provider credentials are not configured; live model calls will fail until configured.",
+    status: input.apiKeyConfigured ? "ok" : "warning",
+    message: input.apiKeyConfigured
+      ? "Model provider API key is configured. Secret values are not printed."
+      : "RIKA_API_KEY is required for live model calls.",
   },
   {
     name: "permissions",

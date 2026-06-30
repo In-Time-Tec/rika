@@ -7,7 +7,13 @@ describe("palette.filter", () => {
   })
 
   test("narrows by id, action, command, and hint, ignoring a leading slash", () => {
-    expect(Palette.filter("/mode").map((command) => command.id)).toEqual(["mode-rush", "mode-smart", "mode-deep"])
+    expect(Palette.filter("/mode").map((command) => command.id)).toEqual([
+      "mode-rush",
+      "mode-smart",
+      "mode-deep1",
+      "mode-deep2",
+      "mode-deep3",
+    ])
     expect(Palette.filter("authenticate").map((command) => command.id)).toEqual(["mcp-authenticate"])
     expect(Palette.filter("ast-grep outline").map((command) => command.id)).toEqual(["ast-grep-outline-status"])
     expect(Palette.filter("switch threads").map((command) => command.id)).toEqual(["thread-switch"])
@@ -20,7 +26,7 @@ describe("palette.filter", () => {
 
   test("at clamps the selected index into range", () => {
     expect(Palette.at("/mode", 0)?.id).toBe("mode-rush")
-    expect(Palette.at("/mode", 99)?.id).toBe("mode-deep")
+    expect(Palette.at("/mode", 99)?.id).toBe("mode-deep3")
     expect(Palette.at("definitely-not-a-command", 0)).toBeUndefined()
   })
 })

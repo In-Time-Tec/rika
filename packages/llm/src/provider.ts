@@ -1,5 +1,5 @@
-import { Context, Effect, Layer, Schema, Stream } from "effect"
-import { AiError, LanguageModel, Model, Prompt, Response } from "effect/unstable/ai"
+import { Context, Effect, JsonSchema, Layer, Schema, Stream } from "effect"
+import { AiError, LanguageModel, Model, Prompt, Response, Tool, Toolkit } from "effect/unstable/ai"
 
 export const ProviderName = Schema.String.annotate({ identifier: "Rika.LLM.ProviderName" })
 export type ProviderName = typeof ProviderName.Type
@@ -12,7 +12,7 @@ export const Role = Schema.Literals(["system", "developer", "user", "assistant",
 })
 export type Role = typeof Role.Type
 
-export const ReasoningEffort = Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh"]).annotate({
+export const ReasoningEffort = Schema.Literals(["none", "minimal", "low", "medium", "high", "xhigh", "max"]).annotate({
   identifier: "Rika.LLM.ReasoningEffort",
 })
 export type ReasoningEffort = typeof ReasoningEffort.Type
@@ -52,7 +52,6 @@ export const GenerateRequest = Schema.Struct({
   model: ModelId,
   messages: Schema.Array(Message),
   reasoning_effort: Schema.optional(ReasoningEffort),
-  max_output_tokens: Schema.optional(Schema.Int),
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Metadata),
 }).annotate({ identifier: "Rika.LLM.GenerateRequest" })
@@ -141,6 +140,7 @@ export const ToolCall = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   input: Schema.Unknown,
+  provider_executed: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "Rika.LLM.StreamEvent.ToolCall" })
 
 export interface ToolResult extends Schema.Schema.Type<typeof ToolResult> {}
@@ -150,6 +150,7 @@ export const ToolResult = Schema.Struct({
   name: Schema.String,
   result: Schema.Unknown,
   is_failure: Schema.Boolean,
+  provider_executed: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "Rika.LLM.StreamEvent.ToolResult" })
 
 export interface ResponseCompleted extends Schema.Schema.Type<typeof ResponseCompleted> {}
@@ -203,6 +204,13 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/llm/Provider") {}
 
+export interface RegistryInterface {
+  readonly providers: ReadonlyMap<ProviderName, Interface>
+  readonly get: (name: ProviderName) => Interface | undefined
+}
+
+export class Registry extends Context.Service<Registry, RegistryInterface>()("@rika/llm/ProviderRegistry") {}
+
 export interface FakeToolCallResponse {
   readonly type: "tool-call"
   readonly name: string
@@ -221,25 +229,68 @@ export interface FakeOptions {
   readonly failStreamWith?: AiError.AiError
 }
 
-export const layer = (options: LayerOptions = {}) =>
-  Layer.effect(
-    Service,
-    Effect.gen(function* () {
-      const languageModel = yield* LanguageModel.LanguageModel
-      const providerName = yield* Model.ProviderName
+export const make = (options: LayerOptions = {}) =>
+  Effect.gen(function* () {
+    const languageModel = yield* LanguageModel.LanguageModel
+    const providerName = yield* Model.ProviderName
 
-      return Service.of({
-        name: providerName,
-        complete: Effect.fn("LLM.Provider.complete")(function* (request: GenerateRequest) {
-          const complete = completeWithLanguageModel(languageModel, request)
-          const withMiddleware = options.completeMiddleware?.(request)(complete) ?? complete
-          return yield* withMiddleware
-        }),
-        stream: (request: GenerateRequest) => {
-          const stream = streamWithLanguageModel(languageModel, request)
-          return options.streamMiddleware?.(request)(stream) ?? stream
-        },
-      })
+    return Service.of({
+      name: providerName,
+      complete: Effect.fn("LLM.Provider.complete")(function* (request: GenerateRequest) {
+        const complete = completeWithLanguageModel(languageModel, request)
+        const withMiddleware = options.completeMiddleware?.(request)(complete) ?? complete
+        return yield* withMiddleware
+      }),
+      stream: (request: GenerateRequest) => {
+        const stream = streamWithLanguageModel(languageModel, request)
+        return options.streamMiddleware?.(request)(stream) ?? stream
+      },
+    })
+  })
+
+export const layer = (options: LayerOptions = {}) => Layer.effect(Service, make(options))
+
+export const registryFromProviders = (providers: ReadonlyArray<Interface>): RegistryInterface => {
+  const providerMap = new Map(providers.map((provider) => [provider.name, provider]))
+  return Registry.of({
+    providers: providerMap,
+    get: (name) => providerMap.get(name),
+  })
+}
+
+export const registryLayerFromProviders = (providers: ReadonlyArray<Interface>) =>
+  Layer.succeed(Registry, registryFromProviders(providers))
+
+export const registryLayerFromService = Layer.effect(
+  Registry,
+  Effect.map(Service, (provider) => registryFromProviders([provider])),
+)
+
+export interface FakeRegistryEntry {
+  readonly name: ProviderName
+  readonly responses?: ReadonlyArray<FakeResponse>
+  readonly failStreamWith?: AiError.AiError
+}
+
+export const fakeRegistryLayer = (
+  entries: ReadonlyArray<FakeRegistryEntry> = [{ name: "openai" }],
+): Layer.Layer<Registry> =>
+  Layer.effect(
+    Registry,
+    Effect.gen(function* () {
+      const providers = yield* Effect.all(
+        entries.map((entry) =>
+          Service.pipe(
+            Effect.provide(
+              fakeLayer(entry.responses ?? ["fake response"], {
+                name: entry.name,
+                ...(entry.failStreamWith === undefined ? {} : { failStreamWith: entry.failStreamWith }),
+              }),
+            ),
+          ),
+        ),
+      )
+      return registryFromProviders(providers)
     }),
   )
 
@@ -282,45 +333,50 @@ export const fakeLanguageModelLayer = (
 }
 
 export const completeWithLanguageModel = (languageModel: LanguageModel.Service, request: GenerateRequest) =>
-  languageModel.generateText({ prompt: request.prompt ?? promptFromMessages(request.messages) }).pipe(
-    Effect.map((response) => responseFromGenerateText(request, response)),
-    Effect.catch((error: ProviderError) =>
-      AiError.isAiError(error) && error.reason._tag === "InvalidOutputError"
-        ? Effect.succeed<GenerateResponse>({
-            provider: request.provider,
-            model: request.model,
-            content: "",
-            finish_reason: "stop",
-          })
-        : Effect.fail(error),
-    ),
-  )
+  languageModel
+    .generateText({ prompt: sanitizePromptInput(request.prompt ?? promptFromMessages(request.messages)) })
+    .pipe(
+      Effect.map((response) => responseFromGenerateText(request, response)),
+      Effect.catch((error: ProviderError) =>
+        AiError.isAiError(error) && error.reason._tag === "InvalidOutputError"
+          ? Effect.succeed<GenerateResponse>({
+              provider: request.provider,
+              model: request.model,
+              content: "",
+              finish_reason: "stop",
+            })
+          : Effect.fail(error),
+      ),
+    )
 
 export const streamWithLanguageModel = (
   languageModel: LanguageModel.Service,
   request: GenerateRequest,
 ): Stream.Stream<StreamEvent, ProviderError> =>
   Stream.suspend(() => {
-    const state: StreamState = { content: "", toolInputs: new Map() }
+    const state: StreamState = { content: "", toolInputs: new Map(), toolProtocolStarted: false }
     const start: ResponseStarted = { type: "response.started", provider: request.provider, model: request.model }
-    const prompt = request.prompt ?? promptFromMessages(request.messages)
+    const prompt = sanitizePromptInput(request.prompt ?? promptFromMessages(request.messages))
+    const toolkit = toolkitForProvider(request.provider, request.toolkit)
     const stream =
-      request.toolkit === undefined
+      toolkit === undefined
         ? languageModel.streamText({ prompt })
         : languageModel.streamText({
             prompt,
-            toolkit: request.toolkit,
+            toolkit,
             toolChoice: "auto",
+            disableToolCallResolution: true,
           })
     const body = stream.pipe(
       Stream.provideContext(emptyContext()),
       Stream.flatMap((part) => Stream.fromIterable(streamEventsFromAiPart(part, state))),
-      Stream.catchReason("AiError", "InvalidOutputError", () => {
+      Stream.catchReason("AiError", "InvalidOutputError", (_reason, error) => {
+        if (state.toolProtocolStarted) return Stream.fail(error)
         state.finish_reason ??= "stop"
         return Stream.empty
       }),
       Stream.catch((error: ProviderError) => {
-        if (state.content.length === 0) return Stream.fail(error)
+        if (state.content.length === 0 || state.toolProtocolStarted) return Stream.fail(error)
         state.finish_reason ??= "stop"
         return Stream.empty
       }),
@@ -333,6 +389,118 @@ export const streamWithLanguageModel = (
   })
 
 const emptyContext = (): Context.Context<unknown> => Context.makeUnsafe(new Map())
+
+export const toolkitForProvider = (
+  providerName: ProviderName,
+  toolkit: ToolkitInput | undefined,
+): ToolkitInput | undefined => {
+  if (toolkit === undefined || providerName !== "anthropic") return toolkit
+  return Effect.isEffect(toolkit)
+    ? Effect.map(toolkit, adaptPreparedToolkitForAnthropic)
+    : adaptPreparedToolkitForAnthropic(toolkit)
+}
+
+export const anthropicWireTool = (tool: Tool.Any): Tool.Any => {
+  if (Tool.isProviderDefined(tool)) return tool
+  const description = Tool.getDescription(tool)
+  const wireTool = Tool.dynamic(tool.name, {
+    ...(description === undefined ? {} : { description }),
+    parameters: anthropicWireParametersSchema(tool),
+    success: anthropicWireOpaqueSchema,
+    failure: anthropicWireOpaqueSchema,
+    failureMode: tool.failureMode,
+    needsApproval: tool.needsApproval,
+  })
+  return Object.assign(wireTool, { jsonSchema: anthropicWireJsonSchema(tool) })
+}
+
+const anthropicWireOpaqueSchema = Schema.Struct({})
+
+const anthropicWireParametersSchema = (tool: Tool.Any): Schema.Top =>
+  tool.parametersSchema === Schema.Unknown ? anthropicWireOpaqueSchema : tool.parametersSchema
+
+const adaptPreparedToolkitForAnthropic = (
+  prepared: Toolkit.WithHandler<Record<string, Tool.Any>>,
+): Toolkit.WithHandler<Record<string, Tool.Any>> => ({
+  ...prepared,
+  tools: anthropicWireTools(prepared.tools),
+})
+
+const anthropicWireTools = (tools: Record<string, Tool.Any>): Record<string, Tool.Any> => {
+  const mapped: Record<string, Tool.Any> = {}
+  for (const [name, tool] of Object.entries(tools)) {
+    mapped[name] = anthropicWireTool(tool)
+  }
+  return mapped
+}
+
+const anthropicWireJsonSchema = (tool: Tool.Any): JsonSchema.JsonSchema => {
+  const document = JsonSchema.resolveTopLevel$ref(JsonSchema.fromSchemaDraft2020_12(Tool.getJsonSchema(tool)))
+  const schema =
+    Object.keys(document.definitions).length === 0
+      ? document.schema
+      : { ...document.schema, $defs: document.definitions }
+  return stripOptionalProperties(schema)
+}
+
+const stripOptionalProperties = (schema: JsonSchema.JsonSchema): JsonSchema.JsonSchema => {
+  const next: JsonSchema.JsonSchema = {}
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "properties" || key === "additionalProperties") continue
+    if (isSchemaRecord(value)) {
+      next[key] = stripOptionalProperties(value)
+    } else if (Array.isArray(value)) {
+      next[key] = value.map(stripOptionalValue)
+    } else {
+      next[key] = value
+    }
+  }
+
+  const properties = schemaProperties(schema)
+  if (properties === undefined) {
+    if (schema.type === "object") {
+      next.type = "object"
+      next.properties ??= {}
+      next.additionalProperties = false
+      delete next.required
+    }
+    return next
+  }
+
+  const required = stringArray(schema.required).filter((name) => properties[name] !== undefined)
+  const requiredProperties: Record<string, JsonSchema.JsonSchema> = {}
+  for (const name of required) {
+    const property = properties[name]
+    if (property !== undefined) requiredProperties[name] = stripOptionalProperties(property)
+  }
+
+  next.type ??= "object"
+  next.properties = requiredProperties
+  next.additionalProperties = false
+  if (required.length === 0) {
+    delete next.required
+  } else {
+    next.required = required
+  }
+  return next
+}
+
+const stripOptionalValue = (value: unknown): unknown => (isSchemaRecord(value) ? stripOptionalProperties(value) : value)
+
+const schemaProperties = (schema: JsonSchema.JsonSchema): Record<string, JsonSchema.JsonSchema> | undefined => {
+  if (!isSchemaRecord(schema.properties)) return undefined
+  const properties: Record<string, JsonSchema.JsonSchema> = {}
+  for (const [key, value] of Object.entries(schema.properties)) {
+    if (isSchemaRecord(value)) properties[key] = value
+  }
+  return properties
+}
+
+const stringArray = (value: unknown): ReadonlyArray<string> =>
+  Array.isArray(value) ? value.filter((item) => typeof item === "string") : []
+
+const isSchemaRecord = (value: unknown): value is JsonSchema.JsonSchema =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 export const promptFromMessages = (messages: ReadonlyArray<Message>): Prompt.RawInput =>
   messages.map((message): Prompt.MessageEncoded => {
@@ -374,6 +542,34 @@ const messageContentToPromptParts = (
   })
 }
 
+export const sanitizePromptInput = (input: Prompt.RawInput): Prompt.Prompt =>
+  Prompt.fromMessages(Prompt.make(input).content.flatMap(sanitizePromptMessage))
+
+const sanitizePromptMessage = (message: Prompt.Message): ReadonlyArray<Prompt.Message> => {
+  switch (message.role) {
+    case "system": {
+      const content = message.content.trim()
+      return content.length === 0 ? [] : [Prompt.makeMessage("system", { content, options: message.options })]
+    }
+    case "user": {
+      const content = sanitizeTextParts(message.content)
+      return content.length === 0 ? [] : [Prompt.makeMessage("user", { content, options: message.options })]
+    }
+    case "assistant": {
+      const content = sanitizeTextParts(message.content)
+      return content.length === 0 ? [] : [Prompt.makeMessage("assistant", { content, options: message.options })]
+    }
+    case "tool": {
+      return message.content.length === 0 ? [] : [message]
+    }
+  }
+  return []
+}
+
+const sanitizeTextParts = <A extends { readonly type: string; readonly text?: string }>(
+  parts: ReadonlyArray<A>,
+): ReadonlyArray<A> => parts.filter((part) => part.type !== "text" || (part.text ?? "").trim().length > 0)
+
 const imageData = (data: string): Uint8Array => Buffer.from(data, "base64")
 
 export const responseFromGenerateText = (
@@ -397,11 +593,13 @@ export const streamEventsFromAiPart = (
       return [{ type: "reasoning.delta", text: part.delta }]
     }
     case "tool-params-start": {
+      state.toolProtocolStarted = true
       const name = part.name
       state.toolInputs.set(part.id, { name, input_text: "" })
       return [{ type: "tool.input.started", id: part.id, name }]
     }
     case "tool-params-delta": {
+      state.toolProtocolStarted = true
       const existing = state.toolInputs.get(part.id)
       if (existing !== undefined) {
         state.toolInputs.set(part.id, { ...existing, input_text: existing.input_text + part.delta })
@@ -409,13 +607,25 @@ export const streamEventsFromAiPart = (
       return part.delta.length === 0 ? [] : [{ type: "tool.input.delta", id: part.id, text: part.delta }]
     }
     case "tool-params-end": {
+      state.toolProtocolStarted = true
       const existing = state.toolInputs.get(part.id)
       if (existing === undefined) return []
       return [{ type: "tool.input.ended", id: part.id, name: existing.name, input_text: existing.input_text }]
     }
-    case "tool-call":
-      return [{ type: "tool.call", id: part.id, name: part.name, input: part.params }]
-    case "tool-result":
+    case "tool-call": {
+      state.toolProtocolStarted = true
+      return [
+        {
+          type: "tool.call",
+          id: part.id,
+          name: part.name,
+          input: part.params,
+          ...(part.providerExecuted ? { provider_executed: true } : {}),
+        },
+      ]
+    }
+    case "tool-result": {
+      state.toolProtocolStarted = true
       return [
         {
           type: "tool.result",
@@ -423,8 +633,10 @@ export const streamEventsFromAiPart = (
           name: part.name,
           result: part.result,
           is_failure: part.isFailure,
+          ...(part.providerExecuted ? { provider_executed: true } : {}),
         },
       ]
+    }
     case "finish": {
       state.finish_reason = finishReasonFromAi(part.reason)
       state.usage = usageFromAi(part.usage)
@@ -486,6 +698,7 @@ const normalizeFakeResponse = (
 interface StreamState {
   content: string
   toolInputs: Map<string, { readonly name: string; readonly input_text: string }>
+  toolProtocolStarted: boolean
   finish_reason?: FinishReason
   usage?: Usage
 }

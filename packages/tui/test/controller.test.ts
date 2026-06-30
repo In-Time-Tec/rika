@@ -17,6 +17,7 @@ interface Harness {
   readonly turnParts: Array<ReadonlyArray<Message.ContentPart> | undefined>
   readonly commands: Array<string>
   readonly opened: Array<Adapter.OpenFileInput>
+  readonly previewLoads: Array<Ids.ThreadId>
 }
 
 const run = (
@@ -26,6 +27,8 @@ const run = (
     seedEvents?: ReadonlyArray<Event.Event>
     actions?: ReadonlyArray<Adapter.Action>
     workspacePath?: string
+    turnEvents?: (content: string) => ReadonlyArray<Event.Event>
+    threads?: ReadonlyArray<Backend.ThreadOption>
   } = {},
 ) => {
   const runWorkspacePath = options.workspacePath ?? workspacePath
@@ -34,6 +37,7 @@ const run = (
   const turnParts: Array<ReadonlyArray<Message.ContentPart> | undefined> = []
   const commands: Array<string> = []
   const opened: Array<Adapter.OpenFileInput> = []
+  const previewLoads: Array<Ids.ThreadId> = []
   let turnCount = 0
 
   const adapter: Adapter.Adapter = {
@@ -62,7 +66,7 @@ const run = (
         turnParts.push(content_parts)
         turnCount += 1
         if (options.failFirstTurn === true && turnCount === 1) return Stream.fail(new Error("model exploded"))
-        return Stream.fromIterable(turnEvents(content, `response to ${content}`))
+        return Stream.fromIterable(options.turnEvents?.(content) ?? turnEvents(content, `response to ${content}`))
       }),
     cancelTurn: () => Effect.void,
     runCommand: (context, command) =>
@@ -72,7 +76,20 @@ const run = (
           return { ...context, state: ViewState.withNotice(context.state, "Goodbye."), exit: true }
         return { ...context, state: ViewState.withNotice(context.state, `Ran ${command}`), exit: false }
       }),
-    listThreads: () => Effect.succeed([]),
+    listThreads: () => Effect.succeed(options.threads ?? []),
+    loadThreadPreview: ({ thread_id, workspace_path, mode }) =>
+      Effect.sync(() => {
+        previewLoads.push(thread_id)
+        return {
+          thread_id,
+          state: ViewState.initial({
+            thread_id,
+            workspace_path,
+            mode,
+            events: [messageAdded(1, "preview body", Ids.TurnId.make("turn_controller_preview"), "assistant")],
+          }),
+        }
+      }),
   }
 
   return Effect.runPromise(
@@ -80,7 +97,15 @@ const run = (
       { backend, renderer: adapter, ticks: Stream.empty, defaultMode: "smart", defaultWorkspace: workspacePath },
       { workspace_root: runWorkspacePath, mode: "smart" },
     ),
-  ).then((exitCode): Harness & { exitCode: number } => ({ exitCode, rendered, turns, turnParts, commands, opened }))
+  ).then((exitCode): Harness & { exitCode: number } => ({
+    exitCode,
+    rendered,
+    turns,
+    turnParts,
+    commands,
+    opened,
+    previewLoads,
+  }))
 }
 
 const quit = [Keys.ctrl("c"), Keys.ctrl("c")]
@@ -265,6 +290,115 @@ describe("Controller", () => {
     const { commands } = await run(keys)
     expect(commands).toContain("/mode rush")
   })
+
+  test("submit while busy queues the next prompt and Enter Enter steers it quietly", async () => {
+    const keys = [
+      ...Keys.fromString("first"),
+      Keys.enter,
+      ...Keys.fromString("second"),
+      Keys.enter,
+      Keys.enter,
+      ...quit,
+    ]
+    const { rendered, turns } = await run(keys)
+
+    expect(turns).toEqual(["first", "second"])
+    expect(rendered.some((state) => state.queued.includes("second"))).toBe(true)
+    expect(rendered.some((state) => (state.notice ?? "").includes("Steering"))).toBe(false)
+  })
+
+  test("selected queued prompts steer to the front of the next-turn queue", async () => {
+    const keys = [
+      ...Keys.fromString("first"),
+      Keys.enter,
+      ...Keys.fromString("a"),
+      Keys.enter,
+      ...Keys.fromString("b"),
+      Keys.enter,
+      Keys.make({ name: "up" }),
+      Keys.enter,
+      ...quit,
+    ]
+    const { turns } = await run(keys)
+
+    expect(turns).toEqual(["first", "b", "a"])
+  })
+
+  test("Esc Esc interrupts the active turn and clears queued prompts", async () => {
+    const keys = [
+      ...Keys.fromString("first"),
+      Keys.enter,
+      ...Keys.fromString("second"),
+      Keys.enter,
+      Keys.escape,
+      Keys.escape,
+      ...quit,
+    ]
+    const { rendered, turns } = await run(keys)
+
+    expect(turns).not.toContain("second")
+    expect(rendered.some((state) => state.queued.includes("second"))).toBe(true)
+    expect(rendered.some((state) => state.queued.length === 0 && !state.active)).toBe(true)
+  })
+
+  test("the switch thread palette command opens the thread switcher", async () => {
+    const thread = Ids.ThreadId.make("thread_switch_target")
+    const keys = [Keys.ctrl("o"), ...Keys.fromString("switch threads"), Keys.enter, Keys.enter, ...quit]
+    const { commands, rendered } = await run(keys, {
+      threads: [
+        {
+          thread_id: thread,
+          label: "Rika terminal image drag-paste handling",
+          title: "Rika terminal image drag-paste handling",
+          preview: "Research OpenTUI and fix image placeholders.",
+          updated_label: "17h ago",
+          archived: false,
+        },
+      ],
+    })
+
+    expect(commands).not.toContain("/threads")
+    expect(commands).toContain("/thread thread_switch_target")
+    expect(rendered.some((state) => state.threadswitcher.open)).toBe(true)
+    expect(
+      rendered.some((state) => ViewState.selectedThreadSwitcherItem(state)?.preview_state.status === "loading"),
+    ).toBe(true)
+    expect(
+      rendered.some((state) =>
+        ViewState.filteredThreadSwitcherItems(state).some((item) =>
+          item.title.includes("Rika terminal image drag-paste handling"),
+        ),
+      ),
+    ).toBe(true)
+    expect(rendered.some((state) => (state.notice ?? "").includes("Active threads"))).toBe(false)
+  })
+
+  test("bursty model streams are batched before rendering", async () => {
+    const chunkCount = 512
+    const keys = [...Keys.fromString("burst"), Keys.enter, ...quit]
+    const { rendered } = await run(keys, { turnEvents: () => burstTurnEvents(chunkCount) })
+    const assistant = rendered.at(-1)?.messages.find((message) => message.role === "assistant")
+
+    expect(rendered.length).toBeLessThan(80)
+    expect(assistant?.text.length).toBe(chunkCount)
+  })
+
+  test("ending a stream without a terminal turn event clears the active status", async () => {
+    const turnId = Ids.TurnId.make("turn_controller_missing_terminal")
+    const keys = [...Keys.fromString("missing terminal"), Keys.enter, ...quit]
+    const { rendered } = await run(keys, {
+      turnEvents: () => [
+        turnStarted(turnId, 1),
+        modelChunk(turnId, 2, "done"),
+        messageAdded(3, "done", turnId, "assistant"),
+      ],
+    })
+    const final = rendered.at(-1)
+
+    expect(rendered.some((state) => state.messages.some((message) => message.text === "done"))).toBe(true)
+    expect(final?.active).toBe(false)
+    expect(final?.activity).toBe("idle")
+  })
 })
 
 const turnEvents = (content: string, response: string): ReadonlyArray<Event.Event> => {
@@ -342,3 +476,14 @@ const turnCompleted = (turnId: Ids.TurnId, sequence: number): Event.TurnComplete
   type: "turn.completed",
   data: {},
 })
+
+const burstTurnEvents = (chunkCount: number): ReadonlyArray<Event.Event> => {
+  const turnId = Ids.TurnId.make("turn_controller_burst")
+  const chunks = Array.from({ length: chunkCount }, (_, index) => modelChunk(turnId, index + 2, "x"))
+  return [
+    turnStarted(turnId, 1),
+    ...chunks,
+    messageAdded(chunkCount + 2, "x".repeat(chunkCount), turnId, "assistant"),
+    turnCompleted(turnId, chunkCount + 3),
+  ]
+}

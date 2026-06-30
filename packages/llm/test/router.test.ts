@@ -14,7 +14,15 @@ const configLayer = Config.layerFromValues(
 
 const messages: ReadonlyArray<Provider.Message> = [{ role: "user", content: "ship it" }]
 
-const routerLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(Provider.fakeLayer(["done"])))
+const routerLayer = Router.layer.pipe(
+  Layer.provideMerge(configLayer),
+  Layer.provideMerge(
+    Provider.fakeRegistryLayer([
+      { name: "openai", responses: ["done"] },
+      { name: "anthropic", responses: ["done"] },
+    ]),
+  ),
+)
 
 describe("LLM Router", () => {
   test("routes default requests through the configured default mode", async () => {
@@ -22,33 +30,30 @@ describe("LLM Router", () => {
 
     expect(routed).toMatchObject({
       mode: "smart",
-      provider: "openai",
-      model: "gpt-5.5",
-      reasoning_effort: "medium",
-      max_output_tokens: 12_000,
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      reasoning_effort: "max",
       messages,
     })
   })
 
-  test("lets callers override mode, provider, model, and budgets", async () => {
+  test("lets callers override mode, provider, model, and reasoning", async () => {
     const routed = await Effect.runPromise(
       Router.route({
-        mode: "deep",
+        mode: "deep3",
         provider: "openai",
         model: "custom-model",
         messages,
         reasoning_effort: "xhigh",
-        max_output_tokens: 99,
         temperature: 0.1,
       }).pipe(Effect.provide(routerLayer)),
     )
 
     expect(routed).toMatchObject({
-      mode: "deep",
+      mode: "deep3",
       provider: "openai",
       model: "custom-model",
       reasoning_effort: "xhigh",
-      max_output_tokens: 99,
       temperature: 0.1,
     })
   })
@@ -81,7 +86,6 @@ describe("LLM Router", () => {
     expect(result._tag).toBe("Failure")
     if (result._tag === "Failure") {
       expect(result.cause.toString()).toContain("other")
-      expect(result.cause.toString()).toContain("openai")
     }
   })
 })

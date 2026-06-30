@@ -31,6 +31,7 @@
     ],
     "catalog": {
       "@effect/ai-openai": "4.0.0-beta.90",
+      "@effect/ai-anthropic": "4.0.0-beta.90",
       "@effect/platform-node": "4.0.0-beta.90",
       "@effect/sql-sqlite-bun": "4.0.0-beta.90",
       "@rivetkit/effect": "2.3.2",

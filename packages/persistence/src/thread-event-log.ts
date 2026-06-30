@@ -19,12 +19,20 @@ export interface ReadThreadInput {
   readonly limit?: number
 }
 
+export interface ReadThreadTailInput {
+  readonly thread_id: Ids.ThreadId
+  readonly limit: number
+}
+
 export interface Interface {
   readonly append: (
     event: Event.Event,
   ) => Effect.Effect<Event.Event, Database.DatabaseError | ThreadEventLogError, Database.Service>
   readonly readThread: (
     input: ReadThreadInput,
+  ) => Effect.Effect<ReadonlyArray<Event.Event>, Database.DatabaseError | ThreadEventLogError, Database.Service>
+  readonly readThreadTail: (
+    input: ReadThreadTailInput,
   ) => Effect.Effect<ReadonlyArray<Event.Event>, Database.DatabaseError | ThreadEventLogError, Database.Service>
   readonly readAll: () => Effect.Effect<
     ReadonlyArray<Event.Event>,
@@ -54,6 +62,14 @@ export const layer = Layer.succeed(
         }),
       )
     }),
+    readThreadTail: Effect.fn("ThreadEventLog.readThreadTail")(function* (input: ReadThreadTailInput) {
+      return yield* Database.withDatabaseEffect((database) =>
+        Effect.try({
+          try: () => readThreadTailRows(database, input).map((row) => decodePayload(row.payload)),
+          catch: (cause) => toError(cause, "readThreadTail"),
+        }),
+      )
+    }),
     readAll: Effect.fn("ThreadEventLog.readAll")(function* () {
       return yield* Database.withDatabaseEffect((database) =>
         Effect.try({
@@ -76,6 +92,11 @@ export const append = Effect.fn("ThreadEventLog.append.call")(function* (event: 
 export const readThread = Effect.fn("ThreadEventLog.readThread.call")(function* (input: ReadThreadInput) {
   const eventLog = yield* Service
   return yield* eventLog.readThread(input)
+})
+
+export const readThreadTail = Effect.fn("ThreadEventLog.readThreadTail.call")(function* (input: ReadThreadTailInput) {
+  const eventLog = yield* Service
+  return yield* eventLog.readThreadTail(input)
 })
 
 export const readAll = Effect.fn("ThreadEventLog.readAll.call")(function* () {
@@ -107,6 +128,13 @@ const readThreadRows = (database: Database.DrizzleDatabase, input: ReadThreadInp
     sql`select payload from thread_events where thread_id = ${input.thread_id} and sequence > ${afterSequence} order by sequence asc limit ${input.limit}`,
   )
 }
+
+const readThreadTailRows = (database: Database.DrizzleDatabase, input: ReadThreadTailInput) =>
+  database
+    .all<PayloadRow>(
+      sql`select payload from thread_events where thread_id = ${input.thread_id} order by sequence desc limit ${input.limit}`,
+    )
+    .reverse()
 
 const appendEventRow = (database: EventLogDatabase, event: Event.Event) => {
   const existing = database.get<PayloadRow>(sql`select payload from thread_events where id = ${event.id}`)

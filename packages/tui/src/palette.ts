@@ -8,7 +8,7 @@ export interface Command {
 }
 
 export const commands: ReadonlyArray<Command> = [
-  { id: "thread-switch", category: "thread", action: "switch", hint: "switch threads", command: "/threads" },
+  { id: "thread-switch", category: "thread", action: "switch", hint: "switch threads", command: "/switch-thread" },
   {
     id: "amp-relaunch",
     category: "amp",
@@ -53,7 +53,9 @@ export const commands: ReadonlyArray<Command> = [
   { id: "mcp-info", category: "mcp", action: "info", hint: "show MCP information", command: "/mcp info" },
   { id: "mode-rush", category: "mode", action: "use rush", hint: "switch to rush mode", command: "/mode rush" },
   { id: "mode-smart", category: "mode", action: "use smart", hint: "switch to smart mode", command: "/mode smart" },
-  { id: "mode-deep", category: "mode", action: "use deep", hint: "switch to deep mode", command: "/mode deep" },
+  { id: "mode-deep1", category: "mode", action: "use deep1", hint: "switch to deep1 mode", command: "/mode deep1" },
+  { id: "mode-deep2", category: "mode", action: "use deep2", hint: "switch to deep2 mode", command: "/mode deep2" },
+  { id: "mode-deep3", category: "mode", action: "use deep3", hint: "switch to deep3 mode", command: "/mode deep3" },
 ]
 
 const normalize = (query: string) => query.trim().toLowerCase().replace(/^\//, "")

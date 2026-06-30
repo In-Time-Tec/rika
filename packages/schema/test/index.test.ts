@@ -169,6 +169,24 @@ describe("Rika protocol schemas", () => {
     expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
   })
 
+  test("round-trips tool input delta events", () => {
+    const event: Event.Event = {
+      id: eventId,
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence: 3,
+      version: 1,
+      created_at: now,
+      type: "tool.call.input.delta",
+      data: { id: toolCallId, text: '{"path":"README.md"}' },
+    }
+
+    const decoded = Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))
+
+    expect(decoded).toEqual(event)
+    expect(Event.references(decoded)).toEqual({ tool_call_id: toolCallId })
+  })
+
   test("round-trips resolved context events", () => {
     const event: Event.Event = {
       id: eventId,
@@ -241,6 +259,13 @@ describe("Rika protocol schemas", () => {
     }
 
     expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
+
+    const readWriteEvent: Event.Event = {
+      ...event,
+      data: { ...event.data, tool_access: "read-write", tool_names: ["shell_command"] },
+    }
+
+    expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(readWriteEvent))).toEqual(readWriteEvent)
   })
 
   test("round-trips remote control API payloads", () => {
@@ -254,16 +279,23 @@ describe("Rika protocol schemas", () => {
     const summary: Remote.ThreadSummary = {
       thread_id: threadId,
       workspace_id: workspaceId,
+      title_text: "Ship remote control",
       latest_message_text: "Ship remote control",
+      diff: { additions: 2, modifications: 1, deletions: 1 },
       archived: false,
       created_at: now,
       updated_at: now,
+    }
+    const preview: Remote.PreviewThreadRequest = {
+      thread_id: threadId,
+      limit: 160,
     }
     const health: Remote.BackendHealth = {
       status: "healthy",
       url: "http://127.0.0.1:4587",
       workspace_root: "/workspace/rika",
       data_dir: "/workspace/rika/.rika",
+      backend_id: "test-backend",
       pid: 123,
       version: "0.0.0",
     }
@@ -274,6 +306,9 @@ describe("Rika protocol schemas", () => {
 
     expect(Codec.decode(Remote.StartTurnRequest)(Codec.encode(Remote.StartTurnRequest)(start))).toEqual(start)
     expect(Codec.decode(Remote.ThreadSummary)(Codec.encode(Remote.ThreadSummary)(summary))).toEqual(summary)
+    expect(Codec.decode(Remote.PreviewThreadRequest)(Codec.encode(Remote.PreviewThreadRequest)(preview))).toEqual(
+      preview,
+    )
     expect(Codec.decode(Remote.BackendHealth)(Codec.encode(Remote.BackendHealth)(health))).toEqual(health)
     expect(
       Codec.decode(Remote.SubscribeThreadEventsRequest)(

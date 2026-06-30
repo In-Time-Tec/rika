@@ -78,6 +78,35 @@ export interface FilePickerState {
   readonly items: ReadonlyArray<PickerItem>
 }
 
+export interface ThreadDiffStats {
+  readonly additions: number
+  readonly modifications: number
+  readonly deletions: number
+}
+
+export type ThreadSwitcherPreview =
+  | { readonly status: "unloaded" }
+  | { readonly status: "loading" }
+  | { readonly status: "ready"; readonly state: ViewState }
+  | { readonly status: "failed"; readonly message: string }
+
+export interface ThreadSwitcherItem {
+  readonly thread_id: Ids.ThreadId
+  readonly title: string
+  readonly preview: string
+  readonly updated_label: string
+  readonly archived: boolean
+  readonly diff?: ThreadDiffStats
+  readonly preview_state: ThreadSwitcherPreview
+}
+
+export interface ThreadSwitcherState {
+  readonly open: boolean
+  readonly query: string
+  readonly selected: number
+  readonly items: ReadonlyArray<ThreadSwitcherItem>
+}
+
 export interface ViewState {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
@@ -93,6 +122,7 @@ export interface ViewState {
   readonly cards: ReadonlyArray<Card>
   readonly entries: ReadonlyArray<TranscriptEntry>
   readonly streaming_text: string
+  readonly generated_text_chars: number
   readonly notice?: string
   readonly palette_open: boolean
   readonly input: InputBuffer
@@ -108,14 +138,20 @@ export interface ViewState {
   readonly thinking: ThinkingState
   readonly palette: PaletteState
   readonly filepicker: FilePickerState
+  readonly threadswitcher: ThreadSwitcherState
   readonly shortcuts_open: boolean
 }
 
 export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
+export const maxStreamingTextChars = 12000
+export const isDeepMode = (mode: Config.Mode): boolean => mode === "deep1" || mode === "deep2" || mode === "deep3"
+export const deepModeTier = (mode: Config.Mode): number =>
+  mode === "deep1" ? 1 : mode === "deep2" ? 2 : mode === "deep3" ? 3 : 0
 
 const emptyInput: InputBuffer = { text: "", cursor: 0, attachments: [] }
 const closedPalette: PaletteState = { open: false, query: "", selected: 0 }
 const closedFilePicker: FilePickerState = { open: false, query: "", selected: 0, kind: "file", items: [] }
+const closedThreadSwitcher: ThreadSwitcherState = { open: false, query: "", selected: 0, items: [] }
 const hiddenThinking: ThinkingState = { text: "", visible: false }
 
 const interactionDefaults = {
@@ -131,6 +167,7 @@ const interactionDefaults = {
   thinking: hiddenThinking,
   palette: closedPalette,
   filepicker: closedFilePicker,
+  threadswitcher: closedThreadSwitcher,
   palette_open: false,
   shortcuts_open: false,
 }
@@ -141,7 +178,7 @@ export const initial = (input: Input): ViewState =>
 export const fromEvents = (input: Input, seed = initialSeed(input)): ViewState =>
   (input.events ?? []).reduce((state, event) => applyEvent(state, event), seed)
 
-const modeDefaultEffort = (mode: Config.Mode): number => (mode === "deep" ? 3 : 0)
+const modeDefaultEffort = deepModeTier
 
 const initialSeed = (input: Input): ViewState => ({
   thread_id: input.thread_id,
@@ -157,6 +194,7 @@ const initialSeed = (input: Input): ViewState => ({
   cards: [],
   entries: [],
   streaming_text: "",
+  generated_text_chars: 0,
   ...interactionDefaults,
 })
 
@@ -165,7 +203,9 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
     case "thread.created":
       return withoutNotice({ ...state, thread_id: event.thread_id })
     case "turn.started":
-      return tick(withoutNotice({ ...state, activity: "thinking", active: true, streaming_text: "" }))
+      return tick(
+        withoutNotice({ ...state, activity: "thinking", active: true, streaming_text: "", generated_text_chars: 0 }),
+      )
     case "message.added":
       return applyMessage(state, event)
     case "context.resolved":
@@ -179,16 +219,25 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
         ...state,
         activity: "streaming",
         active: true,
-        streaming_text: `${state.streaming_text}${event.data.text}`,
+        streaming_text: appendStreamingText(state.streaming_text, event.data.text),
+        generated_text_chars: state.generated_text_chars + event.data.text.length,
       })
     case "model.reasoning.delta":
       return tick(withReasoningDelta(state, event.data.text))
     case "tool.call.input.started":
       return tick(
-        updateCard({ ...state, activity: "running-tools", active: true, streaming_text: "" }, toolInputCard(event)),
+        updateCard({ ...state, activity: "streaming", active: true, streaming_text: "" }, toolInputCard(event)),
       )
+    case "tool.call.input.delta":
+      return tick({
+        ...state,
+        activity: "streaming",
+        active: true,
+        streaming_text: "",
+        generated_text_chars: state.generated_text_chars + event.data.text.length,
+      })
     case "tool.call.input.ended":
-      return tick({ ...state, activity: "running-tools", active: true, streaming_text: "" })
+      return tick({ ...state, activity: "streaming", active: true, streaming_text: "" })
     case "tool.call.requested":
       return tick(
         updateCard({ ...state, activity: "running-tools", active: true, streaming_text: "" }, toolCard(state, event)),
@@ -198,14 +247,22 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
     case "artifact.created":
       return pushCard(state, systemCard("Artifact created", event.data.artifact.kind, event.id))
     case "turn.completed":
-      return { ...state, activity: "idle", active: false, streaming_text: "" }
+      return finishTurn(state)
     case "turn.failed":
-      return pushCard({ ...state, activity: "failed", active: false, streaming_text: "" }, errorCard(event))
+      return pushCard(finishTurn(state, "failed"), errorCard(event))
     case "thread.archived":
       return pushCard({ ...state, active: false, activity: "idle" }, systemCard("Thread archived", "", event.id))
   }
   return state
 }
+
+export const finishTurn = (state: ViewState, activity: "idle" | "failed" = "idle"): ViewState => ({
+  ...state,
+  activity,
+  active: false,
+  streaming_text: "",
+  generated_text_chars: 0,
+})
 
 export const withMode = (state: ViewState, mode: Config.Mode): ViewState => ({
   ...state,
@@ -215,7 +272,8 @@ export const withMode = (state: ViewState, mode: Config.Mode): ViewState => ({
 
 export const cycleReasoning = (state: ViewState): ViewState => ({
   ...state,
-  reasoning_effort: state.mode === "deep" ? (state.reasoning_effort % 3) + 1 : 0,
+  mode: nextReasoningMode(state.mode),
+  reasoning_effort: modeDefaultEffort(nextReasoningMode(state.mode)),
 })
 
 export const toggleFastMode = (state: ViewState): ViewState => ({ ...state, fast_mode: !state.fast_mode })
@@ -253,8 +311,11 @@ export const withPalette = (state: ViewState): ViewState => ({
   palette: { open: true, query: "", selected: 0 },
   shortcuts_open: false,
   notice:
-    "Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, /debug, /mcp, /mode rush, /mode smart, /mode deep",
+    "Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, /debug, /mcp, /mode rush, /mode smart, /mode deep1, /mode deep2, /mode deep3",
 })
+
+const nextReasoningMode = (mode: Config.Mode): Config.Mode =>
+  mode === "deep1" ? "deep2" : mode === "deep2" ? "deep3" : mode === "deep3" ? "deep1" : mode
 
 const withoutNotice = (state: ViewState): ViewState => {
   const { notice: _notice, ...rest } = state
@@ -591,6 +652,8 @@ export const enqueueMessage = (state: ViewState, message: string): ViewState => 
   queue_selected: -1,
 })
 
+export const clearQueuedMessages = (state: ViewState): ViewState => ({ ...state, queued: [], queue_selected: -1 })
+
 export const dequeueMessage = (state: ViewState): { readonly next?: string; readonly state: ViewState } => {
   const [next, ...rest] = state.queued
   if (next === undefined) return { state }
@@ -622,10 +685,28 @@ export const dequeueSelected = (state: ViewState): ViewState => {
 export const selectedQueued = (state: ViewState): string | undefined =>
   state.queue_selected >= 0 ? state.queued[state.queue_selected] : undefined
 
+export const promoteSelectedOrNextQueued = (state: ViewState): ViewState => {
+  if (state.queued.length === 0) return { ...state, queue_selected: -1 }
+  const index = state.queue_selected < 0 ? 0 : Math.min(state.queue_selected, state.queued.length - 1)
+  const selected = state.queued[index]
+  if (selected === undefined) return { ...state, queue_selected: -1 }
+  const queued = [selected, ...state.queued.slice(0, index), ...state.queued.slice(index + 1)]
+  return { ...state, queued, queue_selected: -1 }
+}
+
 export const withReasoningDelta = (state: ViewState, text: string): ViewState => ({
   ...state,
+  generated_text_chars: state.generated_text_chars + text.length,
   thinking: { ...state.thinking, text: `${state.thinking.text}${text}` },
 })
+
+const appendStreamingText = (current: string, next: string): string => {
+  const text = `${current}${next}`
+  if (text.length <= maxStreamingTextChars) return text
+  const start = text.length - maxStreamingTextChars
+  const newlineIndex = text.indexOf("\n", start)
+  return newlineIndex >= 0 && newlineIndex < text.length - 1 ? text.slice(newlineIndex + 1) : text.slice(start)
+}
 
 export const toggleThinking = (state: ViewState): ViewState => ({
   ...state,
@@ -636,6 +717,8 @@ export const openPalette = (state: ViewState): ViewState => ({
   ...withoutNotice(state),
   palette_open: true,
   palette: { open: true, query: "", selected: 0 },
+  filepicker: closedFilePicker,
+  threadswitcher: closedThreadSwitcher,
   shortcuts_open: false,
 })
 
@@ -666,12 +749,16 @@ export const openShortcuts = (state: ViewState): ViewState => ({
   shortcuts_open: true,
   palette_open: false,
   palette: closedPalette,
+  filepicker: closedFilePicker,
+  threadswitcher: closedThreadSwitcher,
 })
 
 export const closeShortcuts = (state: ViewState): ViewState => ({ ...state, shortcuts_open: false })
 
 export const openFilePicker = (state: ViewState, files: ReadonlyArray<string>): ViewState => ({
   ...withoutNotice(state),
+  palette_open: false,
+  palette: closedPalette,
   filepicker: {
     open: true,
     query: "",
@@ -679,14 +766,79 @@ export const openFilePicker = (state: ViewState, files: ReadonlyArray<string>): 
     kind: "file",
     items: files.map((file) => ({ label: file, insert: file })),
   },
+  threadswitcher: closedThreadSwitcher,
 })
 
 export const openThreadPicker = (state: ViewState, items: ReadonlyArray<PickerItem>): ViewState => ({
   ...withoutNotice(state),
+  palette_open: false,
+  palette: closedPalette,
   filepicker: { open: true, query: "", selected: 0, kind: "thread", items },
+  threadswitcher: closedThreadSwitcher,
 })
 
 export const closeFilePicker = (state: ViewState): ViewState => ({ ...state, filepicker: closedFilePicker })
+
+export const openThreadSwitcher = (state: ViewState, items: ReadonlyArray<ThreadSwitcherItem>): ViewState => ({
+  ...withoutNotice(state),
+  palette_open: false,
+  palette: closedPalette,
+  filepicker: closedFilePicker,
+  threadswitcher: { open: true, query: "", selected: 0, items },
+  shortcuts_open: false,
+})
+
+export const closeThreadSwitcher = (state: ViewState): ViewState => ({ ...state, threadswitcher: closedThreadSwitcher })
+
+export const threadSwitcherInsert = (state: ViewState, text: string): ViewState => ({
+  ...state,
+  threadswitcher: { ...state.threadswitcher, query: `${state.threadswitcher.query}${text}`, selected: 0 },
+})
+
+export const threadSwitcherBackspace = (state: ViewState): ViewState => ({
+  ...state,
+  threadswitcher: { ...state.threadswitcher, query: state.threadswitcher.query.slice(0, -1), selected: 0 },
+})
+
+export const threadSwitcherMove = (state: ViewState, delta: number, count: number): ViewState => {
+  if (count <= 0) return { ...state, threadswitcher: { ...state.threadswitcher, selected: 0 } }
+  const selected = (((state.threadswitcher.selected + delta) % count) + count) % count
+  return { ...state, threadswitcher: { ...state.threadswitcher, selected } }
+}
+
+export const selectedThreadSwitcherItem = (state: ViewState): ThreadSwitcherItem | undefined =>
+  filteredThreadSwitcherItems(state)[state.threadswitcher.selected]
+
+export const threadSwitcherPreviewLoading = (state: ViewState, threadId: Ids.ThreadId): ViewState =>
+  updateThreadSwitcherItem(state, threadId, (item) => ({ ...item, preview_state: { status: "loading" } }))
+
+export const threadSwitcherPreviewReady = (
+  state: ViewState,
+  threadId: Ids.ThreadId,
+  previewState: ViewState,
+): ViewState =>
+  updateThreadSwitcherItem(state, threadId, (item) => ({
+    ...item,
+    preview_state: { status: "ready", state: previewState },
+  }))
+
+export const threadSwitcherPreviewFailed = (state: ViewState, threadId: Ids.ThreadId, message: string): ViewState =>
+  updateThreadSwitcherItem(state, threadId, (item) => ({
+    ...item,
+    preview_state: { status: "failed", message },
+  }))
+
+const updateThreadSwitcherItem = (
+  state: ViewState,
+  threadId: Ids.ThreadId,
+  update: (item: ThreadSwitcherItem) => ThreadSwitcherItem,
+): ViewState => ({
+  ...state,
+  threadswitcher: {
+    ...state.threadswitcher,
+    items: state.threadswitcher.items.map((item) => (item.thread_id === threadId ? update(item) : item)),
+  },
+})
 
 export const filePickerInsert = (state: ViewState, text: string): ViewState => ({
   ...state,
@@ -715,6 +867,20 @@ export const filteredPickerItems = (state: ViewState): ReadonlyArray<PickerItem>
 
 export const filteredFiles = (state: ViewState): ReadonlyArray<string> =>
   filteredPickerItems(state).map((item) => item.label)
+
+export const filteredThreadSwitcherItems = (state: ViewState): ReadonlyArray<ThreadSwitcherItem> => {
+  const needle = state.threadswitcher.query.trim().toLowerCase()
+  const matches =
+    needle.length === 0
+      ? state.threadswitcher.items
+      : state.threadswitcher.items.filter(
+          (item) =>
+            item.title.toLowerCase().includes(needle) ||
+            item.preview.toLowerCase().includes(needle) ||
+            item.thread_id.toLowerCase().includes(needle),
+        )
+  return matches.slice(0, 50)
+}
 
 export const acceptSelected = (state: ViewState): ViewState => {
   const item = filteredPickerItems(state)[state.filepicker.selected]
@@ -795,7 +961,7 @@ const toolInputCard = (event: Event.ToolCallInputStarted): Card => ({
   kind: "tool",
   title: event.data.name,
   subtitle: "",
-  status: "running",
+  status: "info",
   collapsed: true,
   content: textContent(""),
   tool_name: event.data.name,

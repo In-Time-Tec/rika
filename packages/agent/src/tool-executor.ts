@@ -78,7 +78,13 @@ export const layer = Layer.effect(
   }),
 )
 
-export class ReadOnlyService extends Context.Service<ReadOnlyService, Interface>()("@rika/agent/ReadOnlyToolExecutor") {}
+export class ReadOnlyService extends Context.Service<ReadOnlyService, Interface>()(
+  "@rika/agent/ReadOnlyToolExecutor",
+) {}
+
+export class SubagentService extends Context.Service<SubagentService, Interface>()(
+  "@rika/agent/SubagentToolExecutor",
+) {}
 
 export const readOnlyLayer = Layer.effect(
   ReadOnlyService,
@@ -86,6 +92,15 @@ export const readOnlyLayer = Layer.effect(
     const registry = yield* ToolRegistry.Service
     const policy = yield* PermissionPolicy.Service
     return ReadOnlyService.of(makeExecutor(registry, policy))
+  }),
+)
+
+export const subagentLayer = Layer.effect(
+  SubagentService,
+  Effect.gen(function* () {
+    const registry = yield* ToolRegistry.Service
+    const policy = yield* PermissionPolicy.Service
+    return SubagentService.of(makeExecutor(registry, policy))
   }),
 )
 
@@ -102,6 +117,12 @@ export const fakeLayer = (handlers: Readonly<Record<string, FakeHandler>>, tools
 
 export const fakeReadOnlyLayer = (handlers: Readonly<Record<string, FakeHandler>>, tools?: ReadonlyArray<Tool.Any>) =>
   readOnlyLayer.pipe(
+    Layer.provideMerge(ToolRegistry.fakeLayer(handlers, tools)),
+    Layer.provideMerge(PermissionPolicy.allowLayer),
+  )
+
+export const fakeSubagentLayer = (handlers: Readonly<Record<string, FakeHandler>>, tools?: ReadonlyArray<Tool.Any>) =>
+  subagentLayer.pipe(
     Layer.provideMerge(ToolRegistry.fakeLayer(handlers, tools)),
     Layer.provideMerge(PermissionPolicy.allowLayer),
   )

@@ -28,6 +28,7 @@ export interface Interface {
     input?: Remote.ListThreadsRequest,
   ) => Effect.Effect<ReadonlyArray<Remote.ThreadSummary>, RunError>
   readonly openThread: (input: Remote.OpenThreadRequest) => Effect.Effect<Remote.ThreadRecord, RunError>
+  readonly previewThread: (input: Remote.PreviewThreadRequest) => Effect.Effect<Remote.ThreadRecord, RunError>
   readonly archiveThread: (input: Remote.ArchiveThreadRequest) => Effect.Effect<Remote.ThreadSummary, RunError>
   readonly unarchiveThread: (input: Remote.ArchiveThreadRequest) => Effect.Effect<Remote.ThreadSummary, RunError>
   readonly searchThreads: (
@@ -72,6 +73,7 @@ export const layer = Layer.effect(
           url,
           workspace_root: values.workspace_root,
           data_dir: values.data_dir,
+          backend_id: values.backend_id ?? "in-process",
           pid: process.pid,
           version: "0.0.0",
         }
@@ -107,6 +109,16 @@ export const layer = Layer.effect(
           yield* workspaceAccess.requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "read" })
         }
         const record = yield* threads.open({ thread_id: input.thread_id })
+        return { summary: toRemoteSummary(record.summary), events: record.events }
+      }),
+      previewThread: Effect.fn("RemoteControl.previewThread")(function* (input: Remote.PreviewThreadRequest) {
+        if (input.user_id !== undefined) {
+          yield* workspaceAccess.requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "read" })
+        }
+        const record = yield* threads.preview({
+          thread_id: input.thread_id,
+          ...(input.limit === undefined ? {} : { limit: input.limit }),
+        })
         return { summary: toRemoteSummary(record.summary), events: record.events }
       }),
       archiveThread: Effect.fn("RemoteControl.archiveThread")(function* (input: Remote.ArchiveThreadRequest) {
@@ -275,6 +287,13 @@ export const openThread = Effect.fn("RemoteControl.openThread.call")(function* (
   return yield* service.openThread(input)
 })
 
+export const previewThread = Effect.fn("RemoteControl.previewThread.call")(function* (
+  input: Remote.PreviewThreadRequest,
+) {
+  const service = yield* Service
+  return yield* service.previewThread(input)
+})
+
 export const archiveThread = Effect.fn("RemoteControl.archiveThread.call")(function* (
   input: Remote.ArchiveThreadRequest,
 ) {
@@ -398,7 +417,9 @@ const toRemoteSummary = (summary: ThreadService.ThreadRecord["summary"]): Remote
   thread_id: summary.thread_id,
   workspace_id: summary.workspace_id,
   ...(summary.user_id === undefined ? {} : { user_id: summary.user_id }),
+  ...(summary.title_text === undefined ? {} : { title_text: summary.title_text }),
   ...(summary.latest_message_text === undefined ? {} : { latest_message_text: summary.latest_message_text }),
+  diff: summary.diff,
   ...(summary.active_turn_id === undefined ? {} : { active_turn_id: summary.active_turn_id }),
   ...(summary.active_turn_status === undefined ? {} : { active_turn_status: summary.active_turn_status }),
   archived: summary.archived,

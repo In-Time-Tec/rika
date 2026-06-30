@@ -1,11 +1,13 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
 import { Effect } from "effect"
 import { Config, Diagnostics, IdGenerator, Runtime, TestHarness, Time } from "../src/index"
 
 const config = {
   workspace_root: "/workspace",
   data_dir: "/workspace/.rika",
-  default_mode: "deep" as const,
+  default_mode: "deep3" as const,
 }
 
 describe("core runtime services", () => {
@@ -34,6 +36,29 @@ describe("core runtime services", () => {
     )
 
     expect(diagnostics).toEqual([{ level: "info", message: "hello", data: { ok: true } }])
+  })
+
+  test("writes diagnostics to the log file from injected config env", async () => {
+    const directory = await mkdtemp(`${tmpdir()}/rika-diagnostics-`)
+    const path = `${directory}/session.ndjson`
+
+    try {
+      await Effect.runPromise(
+        Diagnostics.emit({ level: "info", message: "configured-log", data: { thread_id: "thread_test" } }).pipe(
+          Effect.provide(Diagnostics.layer),
+          Effect.provide(Config.layerFromValues(config, { RIKA_LOG_FILE: path })),
+        ),
+      )
+
+      const line = (await readFile(path, "utf8")).trim()
+      expect(JSON.parse(line)).toMatchObject({
+        level: "info",
+        message: "configured-log",
+        data: { thread_id: "thread_test" },
+      })
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("provides controlled time and deterministic IDs", async () => {

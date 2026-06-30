@@ -31,6 +31,10 @@ export interface Interface {
     input?: Remote.ListThreadsRequest,
   ) => Effect.Effect<ReadonlyArray<Remote.ThreadSummary>, SdkError>
   readonly openThread: (threadId: Ids.ThreadId, userId?: Ids.UserId) => Effect.Effect<Remote.ThreadRecord, SdkError>
+  readonly previewThread: (
+    threadId: Ids.ThreadId,
+    input?: Omit<Remote.PreviewThreadRequest, "thread_id">,
+  ) => Effect.Effect<Remote.ThreadRecord, SdkError>
   readonly archiveThread: (threadId: Ids.ThreadId, userId?: Ids.UserId) => Effect.Effect<Remote.ThreadSummary, SdkError>
   readonly unarchiveThread: (
     threadId: Ids.ThreadId,
@@ -78,6 +82,13 @@ export const make = (transport: Transport): Interface => ({
         path: `/v1/threads/${encodeURIComponent(threadId)}${query(userId === undefined ? {} : { user_id: userId })}`,
       })
       .pipe(Effect.flatMap(decodeEffect(Remote.ThreadRecord, "openThread"))),
+  previewThread: (threadId: Ids.ThreadId, input: Omit<Remote.PreviewThreadRequest, "thread_id"> = {}) =>
+    transport
+      .requestJson({
+        method: "GET",
+        path: `/v1/threads/${encodeURIComponent(threadId)}/preview${query(input)}`,
+      })
+      .pipe(Effect.flatMap(decodeEffect(Remote.ThreadRecord, "previewThread"))),
   archiveThread: (threadId: Ids.ThreadId, userId?: Ids.UserId) =>
     transport
       .requestJson({

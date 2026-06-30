@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Event, Ids, Message } from "@rika/schema"
+import { Common, Event, Ids, Message } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "../src/index"
 
@@ -62,6 +62,24 @@ describe("ThreadProjection", () => {
 
     expect(summaries).toHaveLength(1)
     expect(summaries[0]).toMatchObject({ latest_message_text: "hello projection", active_turn_status: "completed" })
+  })
+
+  test("projects stable thread titles and cumulative diff stats", async () => {
+    const summary = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        for (const event of [...projectionEvents(), toolCompletedEvent()]) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        return yield* ThreadProjection.getThread(threadId)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(summary).toMatchObject({
+      title_text: "hello projection",
+      diff: { additions: 3, modifications: 1, deletions: 1 },
+    })
   })
 
   test("does not regress projections when an older duplicate event is reapplied", async () => {
@@ -158,4 +176,42 @@ const unarchivedEvent = (): Event.ThreadUnarchived => ({
   created_at: 6,
   type: "thread.unarchived",
   data: {},
+})
+
+const toolCompletedEvent = (): Event.ToolCallCompleted => ({
+  id: Ids.EventId.make("projection_tool_completed"),
+  thread_id: threadId,
+  turn_id: turnId,
+  sequence: 5,
+  version: 1,
+  created_at: 5,
+  type: "tool.call.completed",
+  data: {
+    result: {
+      id: Ids.ToolCallId.make("projection_tool"),
+      name: "edit",
+      status: "success",
+      output: pierreDiff(),
+    },
+  },
+})
+
+const pierreDiff = (): Common.JsonValue => ({
+  kind: "diff",
+  renderer: "@pierre/diffs",
+  collapsed: true,
+  file_diff: {
+    name: "packages/tui/src/adapter.ts",
+    hunks: [
+      {
+        hunkContent: [
+          {
+            type: "change",
+            additions: 3,
+            deletions: 1,
+          },
+        ],
+      },
+    ],
+  },
 })

@@ -17,11 +17,12 @@ export const BackendHealth = Schema.Struct({
   url: Schema.String,
   workspace_root: Schema.String,
   data_dir: Schema.String,
+  backend_id: Schema.String,
   pid: Schema.optional(Schema.Int),
   version: Schema.String,
 }).annotate({ identifier: "Rika.Remote.BackendHealth" })
 
-export const AgentMode = Schema.Literals(["rush", "smart", "deep"]).annotate({
+export const AgentMode = Schema.Literals(["rush", "smart", "deep1", "deep2", "deep3"]).annotate({
   identifier: "Rika.Remote.AgentMode",
 })
 export type AgentMode = typeof AgentMode.Type
@@ -31,12 +32,21 @@ export const TurnStatus = Schema.Literals(["active", "completed", "failed"]).ann
 })
 export type TurnStatus = typeof TurnStatus.Type
 
+export interface ThreadDiffStats extends Schema.Schema.Type<typeof ThreadDiffStats> {}
+export const ThreadDiffStats = Schema.Struct({
+  additions: Schema.Int,
+  modifications: Schema.Int,
+  deletions: Schema.Int,
+}).annotate({ identifier: "Rika.Remote.ThreadDiffStats" })
+
 export interface ThreadSummary extends Schema.Schema.Type<typeof ThreadSummary> {}
 export const ThreadSummary = Schema.Struct({
   thread_id: ThreadId,
   workspace_id: WorkspaceId,
   user_id: Schema.optional(UserId),
+  title_text: Schema.optional(Schema.String),
   latest_message_text: Schema.optional(Schema.String),
+  diff: ThreadDiffStats,
   active_turn_id: Schema.optional(TurnId),
   active_turn_status: Schema.optional(TurnStatus),
   archived: Schema.Boolean,
@@ -70,6 +80,13 @@ export const OpenThreadRequest = Schema.Struct({
   thread_id: ThreadId,
   user_id: Schema.optional(UserId),
 }).annotate({ identifier: "Rika.Remote.OpenThreadRequest" })
+
+export interface PreviewThreadRequest extends Schema.Schema.Type<typeof PreviewThreadRequest> {}
+export const PreviewThreadRequest = Schema.Struct({
+  thread_id: ThreadId,
+  user_id: Schema.optional(UserId),
+  limit: Schema.optional(Schema.Int),
+}).annotate({ identifier: "Rika.Remote.PreviewThreadRequest" })
 
 export interface ArchiveThreadRequest extends Schema.Schema.Type<typeof ArchiveThreadRequest> {}
 export const ArchiveThreadRequest = Schema.Struct({

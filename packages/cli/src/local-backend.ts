@@ -26,6 +26,7 @@ export const BackendRecord = Schema.Struct({
   token: Schema.String,
   workspace_root: Schema.String,
   data_dir: Schema.String,
+  backend_id: Schema.String,
   pid: Schema.Int,
   started_at: Schema.Int,
 }).annotate({ identifier: "Rika.Cli.LocalBackend.BackendRecord" })
@@ -60,6 +61,7 @@ export interface LayerInput {
 export interface SpawnInput {
   readonly workspace_root: string
   readonly data_dir: string
+  readonly backend_id: string
   readonly host: string
   readonly port: number
   readonly token: string
@@ -134,6 +136,7 @@ const makeService = (env: Record<string, string | undefined>, cwd: string, syste
   }),
   status: Effect.fn("Cli.LocalBackend.status")(function* (input: StatusInput) {
     const remoteEndpoint = endpointFromEnv(env, { ...input, mode: "smart" })
+    const backend_id = backendId(env, cwd)
     if (remoteEndpoint !== undefined) {
       return {
         status: "remote",
@@ -148,7 +151,7 @@ const makeService = (env: Record<string, string | undefined>, cwd: string, syste
     if (Option.isNone(record)) {
       return { status: "disconnected", workspace_root: input.workspace_root, data_dir: input.data_dir }
     }
-    const healthy = yield* isHealthy(system, record.value)
+    const healthy = yield* isHealthy(system, record.value, backend_id)
     return {
       status: healthy ? "healthy" : "stale",
       workspace_root: input.workspace_root,
@@ -167,10 +170,11 @@ const connectAttempt = (input: {
   readonly attempt: number
 }): Effect.Effect<BackendEndpoint, BackendError> =>
   Effect.gen(function* () {
-    const current = yield* healthyRecord(input.system, input.input.data_dir).pipe(Effect.option)
+    const backend_id = backendId(input.env, input.cwd)
+    const current = yield* healthyRecord(input.system, input.input.data_dir, backend_id).pipe(Effect.option)
     if (Option.isSome(current)) return current.value
 
-    yield* removeStaleRecord(input.system, input.input.data_dir)
+    yield* removeStaleRecord(input.system, input.input.data_dir, backend_id)
     yield* removeStaleLock(input.system, input.input.data_dir)
 
     const locked = yield* input.system.tryAcquireLock(lockPath(input.input.data_dir))
@@ -197,15 +201,17 @@ const startUnderLock = (input: {
   readonly system: System
 }): Effect.Effect<BackendEndpoint, BackendError> =>
   Effect.gen(function* () {
-    const current = yield* healthyRecord(input.system, input.input.data_dir).pipe(Effect.option)
+    const backend_id = backendId(input.env, input.cwd)
+    const current = yield* healthyRecord(input.system, input.input.data_dir, backend_id).pipe(Effect.option)
     if (Option.isSome(current)) return current.value
 
     const token = yield* input.system.randomToken
-    const port = backendPort(input.env, input.input.workspace_root, input.input.data_dir)
+    const port = backendPort(input.env, input.input.workspace_root, input.input.data_dir, backend_id)
     const url = `http://${defaultHost}:${port}`
     const spawned = yield* input.system.spawnServer({
       workspace_root: input.input.workspace_root,
       data_dir: input.input.data_dir,
+      backend_id,
       host: defaultHost,
       port,
       token,
@@ -217,6 +223,7 @@ const startUnderLock = (input: {
       token,
       workspace_root: input.input.workspace_root,
       data_dir: input.input.data_dir,
+      backend_id,
       pid: spawned.pid,
       started_at: Date.now(),
     }
@@ -236,21 +243,28 @@ const waitForHealth = (system: System, record: BackendRecord, attempt: number): 
     ),
   )
 
-const healthyRecord = (system: System, dataDir: string): Effect.Effect<BackendEndpoint, BackendError> =>
+const healthyRecord = (system: System, dataDir: string, backend_id: string): Effect.Effect<BackendEndpoint, BackendError> =>
   Effect.gen(function* () {
     const record = yield* readRecord(system, dataDir)
-    const healthy = yield* isHealthy(system, record)
+    const healthy = yield* isHealthy(system, record, backend_id)
     if (!healthy) {
       return yield* new BackendError({ message: "Shared backend record is stale", operation: "healthyRecord" })
     }
     return endpointFromRecord(record)
   })
 
-const isHealthy = (system: System, record: BackendRecord): Effect.Effect<boolean, BackendError> =>
-  system.health(record.url, record.token).pipe(
-    Effect.map((health) => health.workspace_root === record.workspace_root && health.data_dir === record.data_dir),
-    Effect.catch(() => Effect.succeed(false)),
-  )
+const isHealthy = (system: System, record: BackendRecord, backend_id: string): Effect.Effect<boolean, BackendError> =>
+  record.backend_id !== backend_id
+    ? Effect.succeed(false)
+    : system.health(record.url, record.token).pipe(
+        Effect.map(
+          (health) =>
+            health.workspace_root === record.workspace_root &&
+            health.data_dir === record.data_dir &&
+            health.backend_id === record.backend_id,
+        ),
+        Effect.catch(() => Effect.succeed(false)),
+      )
 
 const readRecord = (system: System, dataDir: string): Effect.Effect<BackendRecord, BackendError> =>
   system.readText(recordPath(dataDir)).pipe(
@@ -265,10 +279,10 @@ const readRecord = (system: System, dataDir: string): Effect.Effect<BackendRecor
 const writeRecord = (system: System, record: BackendRecord) =>
   system.writePrivateText(recordPath(record.data_dir), `${JSON.stringify(record, null, 2)}\n`)
 
-const removeStaleRecord = (system: System, dataDir: string): Effect.Effect<void, BackendError> =>
+const removeStaleRecord = (system: System, dataDir: string, backend_id: string): Effect.Effect<void, BackendError> =>
   readRecord(system, dataDir).pipe(
     Effect.flatMap((record) =>
-      isHealthy(system, record).pipe(
+      isHealthy(system, record, backend_id).pipe(
         Effect.flatMap((healthy) => (healthy ? Effect.void : system.remove(recordPath(dataDir)))),
       ),
     ),
@@ -303,13 +317,19 @@ const endpointFromEnv = (env: Record<string, string | undefined>, input: Connect
   }
 }
 
-const backendPort = (env: Record<string, string | undefined>, workspaceRoot: string, dataDir: string) => {
+export const backendId = (env: Record<string, string | undefined>, cwd: string) => {
+  const executable = env.RIKA_BACKEND_EXECUTABLE ?? process.execPath
+  const script = env.RIKA_BACKEND_SCRIPT ?? defaultScriptArgument() ?? ""
+  return JSON.stringify({ executable, script, cwd })
+}
+
+const backendPort = (env: Record<string, string | undefined>, workspaceRoot: string, dataDir: string, backend_id: string) => {
   const configured = env.RIKA_BACKEND_PORT
   if (configured !== undefined) {
     const parsed = Number.parseInt(configured, 10)
     if (Number.isFinite(parsed) && parsed > 0) return parsed
   }
-  return 45_000 + (stableHash(`${workspaceRoot}\n${dataDir}`) % 10_000)
+  return 45_000 + (stableHash(`${workspaceRoot}\n${dataDir}\n${backend_id}`) % 10_000)
 }
 
 const stableHash = (value: string) => {
@@ -384,6 +404,7 @@ const liveSystem = (env: Record<string, string | undefined>, cwd: string): Syste
             ...env,
             RIKA_WORKSPACE_ROOT: input.workspace_root,
             RIKA_DATA_DIR: input.data_dir,
+            RIKA_BACKEND_ID: input.backend_id,
             RIKA_MODE: input.mode,
           },
           stdin: "ignore",

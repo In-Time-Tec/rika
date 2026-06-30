@@ -16,6 +16,8 @@ describe("SDK client", () => {
     const summary: Remote.ThreadSummary = {
       thread_id: threadId,
       workspace_id: workspaceId,
+      title_text: "ship",
+      diff: { additions: 0, modifications: 0, deletions: 0 },
       archived: false,
       created_at: now,
       updated_at: now,
@@ -61,6 +63,33 @@ describe("SDK client", () => {
         body: { thread_id: threadId, workspace_id: workspaceId, content: "ship" },
       },
     ])
+  })
+
+  test("uses shared schemas for thread preview requests", async () => {
+    const calls: Array<Client.RequestInput> = []
+    const summary: Remote.ThreadSummary = {
+      thread_id: threadId,
+      workspace_id: workspaceId,
+      title_text: "Preview me",
+      latest_message_text: "Preview me",
+      diff: { additions: 3, modifications: 1, deletions: 1 },
+      archived: false,
+      created_at: now,
+      updated_at: now,
+    }
+    const record: Remote.ThreadRecord = { summary, events: [] }
+    const client = Client.make({
+      requestJson: (input) => {
+        calls.push(input)
+        return Effect.succeed(Codec.encode(Remote.ThreadRecord)(record))
+      },
+      streamJson: () => Stream.empty,
+    })
+
+    const preview = await Effect.runPromise(client.previewThread(threadId, { limit: 80 }))
+
+    expect(preview).toEqual(record)
+    expect(calls).toEqual([{ method: "GET", path: "/v1/threads/thread_sdk_client/preview?limit=80" }])
   })
 
   test("fetch transport sends bearer auth and decodes API errors", async () => {

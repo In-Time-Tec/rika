@@ -122,7 +122,7 @@ export const SubagentCompleted = Schema.Struct({
     status: Schema.Literals(["completed", "failed", "cancelled"]),
     summary: Schema.String,
     evidence: Schema.Array(Schema.String),
-    tool_access: Schema.Literals(["read-only", "none"]),
+    tool_access: Schema.Literals(["read-only", "read-write", "none"]),
     tool_names: Schema.Array(Schema.String),
     started_at: TimestampMillis,
     completed_at: TimestampMillis,
@@ -146,6 +146,17 @@ export const ToolCallInputStarted = Schema.Struct({
     name: Schema.String,
   }),
 }).annotate({ identifier: "Rika.Event.ToolCallInputStarted" })
+
+export interface ToolCallInputDelta extends Schema.Schema.Type<typeof ToolCallInputDelta> {}
+export const ToolCallInputDelta = Schema.Struct({
+  ...fields,
+  turn_id: TurnId,
+  type: Schema.Literal("tool.call.input.delta"),
+  data: Schema.Struct({
+    id: ToolCallId,
+    text: Schema.String,
+  }),
+}).annotate({ identifier: "Rika.Event.ToolCallInputDelta" })
 
 export interface ToolCallInputEnded extends Schema.Schema.Type<typeof ToolCallInputEnded> {}
 export const ToolCallInputEnded = Schema.Struct({
@@ -213,6 +224,7 @@ export type Event =
   | SkillLoaded
   | SubagentCompleted
   | ToolCallInputStarted
+  | ToolCallInputDelta
   | ToolCallInputEnded
   | ToolCallRequested
   | ToolCallCompleted
@@ -232,6 +244,7 @@ export const Event = Schema.Union([
   SkillLoaded,
   SubagentCompleted,
   ToolCallInputStarted,
+  ToolCallInputDelta,
   ToolCallInputEnded,
   ToolCallRequested,
   ToolCallCompleted,
@@ -253,6 +266,7 @@ export const references = (event: Event): References => {
     case "message.added":
       return { message_id: event.data.message.id }
     case "tool.call.input.started":
+    case "tool.call.input.delta":
     case "tool.call.input.ended":
       return { tool_call_id: event.data.id }
     case "tool.call.requested":

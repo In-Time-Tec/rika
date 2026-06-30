@@ -13,18 +13,20 @@ export interface Options {
 }
 
 export const providerName = "openai"
-export const defaultApiKeyEnv = "OPENAI_API_KEY"
+export const defaultApiKeyEnv = "RIKA_API_KEY"
 
 export const requestConfigFromRikaRequest = (
   request: Provider.GenerateRequest,
-): typeof OpenAiLanguageModel.Config.Service => ({
-  model: request.model,
-  store: false,
-  ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
-  ...(request.max_output_tokens === undefined ? {} : { max_output_tokens: request.max_output_tokens }),
-  ...(request.reasoning_effort === undefined ? {} : { reasoning: { effort: request.reasoning_effort } }),
-  ...(request.metadata === undefined ? {} : { metadata: request.metadata }),
-})
+): typeof OpenAiLanguageModel.Config.Service => {
+  const reasoningEffort = openAiReasoningEffort(request.reasoning_effort)
+  return {
+    model: request.model,
+    store: false,
+    ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+    ...(reasoningEffort === undefined ? {} : { reasoning: { effort: reasoningEffort } }),
+    ...(request.metadata === undefined ? {} : { metadata: request.metadata }),
+  }
+}
 
 export const withRequestConfig = (request: Provider.GenerateRequest) => {
   const requestConfig = requestConfigFromRikaRequest(request)
@@ -55,8 +57,16 @@ export const clientLayer = (options: Options = {}) =>
 export const languageModelLayer = (options: Options = {}) =>
   OpenAiLanguageModel.model(options.model ?? Modes.defaultModel, { store: false })
 
+export const provider = (options: Options = {}) =>
+  Provider.make({
+    completeMiddleware: (request) => withRequestConfig(request),
+    streamMiddleware: (request) => (stream) => Retry.middleware(request)(withStreamRequestConfig(request)(stream)),
+  }).pipe(Effect.provide(languageModelLayer(options)), Effect.provide(clientLayer(options)))
+
 export const layer = (options: Options = {}) =>
   Provider.layer({
     completeMiddleware: (request) => withRequestConfig(request),
     streamMiddleware: (request) => (stream) => Retry.middleware(request)(withStreamRequestConfig(request)(stream)),
   }).pipe(Layer.provide(languageModelLayer(options)), Layer.provide(clientLayer(options)))
+
+const openAiReasoningEffort = (effort: Provider.ReasoningEffort | undefined) => (effort === "max" ? undefined : effort)

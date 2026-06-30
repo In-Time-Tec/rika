@@ -12,7 +12,7 @@ describe("CLI doctor command", () => {
         CI: "true",
         RIKA_WORKSPACE_ROOT: "/workspace/rika",
         RIKA_DATA_DIR: "/workspace/rika/.rika-test",
-        RIKA_OPENAI_API_KEY: "openai-secret",
+        RIKA_API_KEY: "model-secret",
         RIKA_GUARDED_TOOLS: "shell_command",
         RIKA_RIVET_HOST: "remote",
         RIKA_RIVET_ENDPOINT: "https://rivet.example.com",
@@ -27,7 +27,7 @@ describe("CLI doctor command", () => {
 
     expect(exitCode).toBe(0)
     expect(output.stderr).toEqual([])
-    expect(output.stdout.join("\n")).not.toContain("openai-secret")
+    expect(output.stdout.join("\n")).not.toContain("model-secret")
     expect(output.stdout.join("\n")).not.toContain("rivet-secret")
     const parsed = Schema.decodeUnknownSync(Doctor.Report)(JSON.parse(output.stdout[0] ?? "{}"))
     expect(parsed).toMatchObject({
@@ -36,7 +36,7 @@ describe("CLI doctor command", () => {
       config: {
         workspace_root: "/workspace/rika",
         data_dir: "/workspace/rika/.rika-test",
-        openai_configured: true,
+        api_key_configured: true,
         telemetry: "disabled",
       },
       backend: {
@@ -63,7 +63,7 @@ describe("CLI doctor command", () => {
     ])
   })
 
-  test("warns when OpenAI provider credentials are missing", async () => {
+  test("warns when model provider credentials are missing", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const layer = Doctor.layerFromInput({
       cwd: "/workspace/rika",
@@ -79,10 +79,10 @@ describe("CLI doctor command", () => {
     const parsed = Schema.decodeUnknownSync(Doctor.Report)(JSON.parse(output.stdout[0] ?? "{}"))
     const modelProvider = parsed.checks.find((check) => check.name === "model-provider")
 
-    expect(parsed.config.openai_configured).toBe(false)
+    expect(parsed.config.api_key_configured).toBe(false)
     expect(modelProvider).toMatchObject({
       status: "warning",
-      message: "OpenAI provider credentials are not configured; live model calls will fail until configured.",
+      message: "RIKA_API_KEY is required for live model calls.",
     })
   })
 })

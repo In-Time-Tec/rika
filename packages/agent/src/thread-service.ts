@@ -5,6 +5,7 @@ import { Context, Effect, Layer, Schema } from "effect"
 
 const defaultReferenceChars = 2_000
 const defaultSearchLimit = 20
+const defaultPreviewLimit = 160
 
 export interface CreateInput extends Schema.Schema.Type<typeof CreateInput> {}
 export const CreateInput = Schema.Struct({
@@ -17,6 +18,12 @@ export interface ThreadIdInput extends Schema.Schema.Type<typeof ThreadIdInput> 
 export const ThreadIdInput = Schema.Struct({
   thread_id: Ids.ThreadId,
 }).annotate({ identifier: "Rika.Agent.ThreadService.ThreadIdInput" })
+
+export interface PreviewInput extends Schema.Schema.Type<typeof PreviewInput> {}
+export const PreviewInput = Schema.Struct({
+  thread_id: Ids.ThreadId,
+  limit: Schema.optional(Schema.Int),
+}).annotate({ identifier: "Rika.Agent.ThreadService.PreviewInput" })
 
 export interface ListInput extends Schema.Schema.Type<typeof ListInput> {}
 export const ListInput = Schema.Struct({
@@ -91,6 +98,7 @@ export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<ThreadProjection.ThreadSummary, Error>
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<ThreadProjection.ThreadSummary>, Error>
   readonly open: (input: ThreadIdInput) => Effect.Effect<ThreadRecord, Error>
+  readonly preview: (input: PreviewInput) => Effect.Effect<ThreadRecord, Error>
   readonly archive: (input: ThreadIdInput) => Effect.Effect<ThreadProjection.ThreadSummary, Error>
   readonly unarchive: (input: ThreadIdInput) => Effect.Effect<ThreadProjection.ThreadSummary, Error>
   readonly deleteThread: (input: ThreadIdInput) => Effect.Effect<never, ThreadServiceError>
@@ -130,6 +138,9 @@ export const layer = Layer.effect(
       }),
       open: Effect.fn("ThreadService.open")(function* (input: ThreadIdInput) {
         return yield* openThread(dependencies, input.thread_id)
+      }),
+      preview: Effect.fn("ThreadService.preview")(function* (input: PreviewInput) {
+        return yield* previewThread(dependencies, input)
       }),
       archive: Effect.fn("ThreadService.archive")(function* (input: ThreadIdInput) {
         return yield* setArchived(dependencies, input.thread_id, true)
@@ -173,6 +184,7 @@ export const fakeLayer = (overrides: Partial<Interface> = {}) => {
       create: overrides.create ?? (() => fail("create")),
       list: overrides.list ?? (() => fail("list")),
       open: overrides.open ?? ((input) => fail("open", input.thread_id)),
+      preview: overrides.preview ?? ((input) => fail("preview", input.thread_id)),
       archive: overrides.archive ?? ((input) => fail("archive", input.thread_id)),
       unarchive: overrides.unarchive ?? ((input) => fail("unarchive", input.thread_id)),
       deleteThread: overrides.deleteThread ?? ((input) => fail("deleteThread", input.thread_id)),
@@ -196,6 +208,11 @@ export const list = Effect.fn("ThreadService.list.call")(function* (input: ListI
 export const open = Effect.fn("ThreadService.open.call")(function* (input: ThreadIdInput) {
   const service = yield* Service
   return yield* service.open(input)
+})
+
+export const preview = Effect.fn("ThreadService.preview.call")(function* (input: PreviewInput) {
+  const service = yield* Service
+  return yield* service.preview(input)
 })
 
 export const archive = Effect.fn("ThreadService.archive.call")(function* (input: ThreadIdInput) {
@@ -275,6 +292,14 @@ const openThread = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
       })
     }
     const summary = yield* requireSummary(dependencies, threadId, "open")
+    return { summary, events }
+  })
+
+const previewThread = (dependencies: Dependencies, input: PreviewInput) =>
+  Effect.gen(function* () {
+    const summary = yield* requireSummary(dependencies, input.thread_id, "preview")
+    const limit = clamp(input.limit ?? defaultPreviewLimit, 1, 500)
+    const events = yield* readThreadTail(dependencies, input.thread_id, limit)
     return { summary, events }
   })
 
@@ -443,6 +468,11 @@ const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
 const readThread = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
   dependencies.eventLog
     .readThread({ thread_id: threadId })
+    .pipe(Effect.provideService(Database.Service, dependencies.database))
+
+const readThreadTail = (dependencies: Dependencies, threadId: Ids.ThreadId, limit: number) =>
+  dependencies.eventLog
+    .readThreadTail({ thread_id: threadId, limit })
     .pipe(Effect.provideService(Database.Service, dependencies.database))
 
 const readAll = (dependencies: Dependencies) =>

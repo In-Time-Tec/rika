@@ -271,12 +271,11 @@ const modelRoutedBackend = (router: Router.Interface, workspaceRoot: string): Ba
   oracle: Effect.fn("SpecialtyTools.backend.oracle")(function* (input: OracleInput) {
     const response = yield* router
       .complete({
-        mode: "deep",
+        profile: "oracle",
         messages: [
           { role: "system", content: oracleSystemPrompt },
           { role: "user", content: oracleUserPrompt(input, workspaceRoot) },
         ],
-        max_output_tokens: 8_000,
         metadata: { specialty_tool: "oracle" },
       })
       .pipe(Effect.mapError((error) => fromExternalError(error, "oracle")))
@@ -285,12 +284,11 @@ const modelRoutedBackend = (router: Router.Interface, workspaceRoot: string): Ba
   librarian: Effect.fn("SpecialtyTools.backend.librarian")(function* (input: LibrarianInput) {
     const response = yield* router
       .complete({
-        mode: "deep",
+        profile: "librarian",
         messages: [
           { role: "system", content: librarianSystemPrompt },
           { role: "user", content: librarianUserPrompt(input) },
         ],
-        max_output_tokens: 8_000,
         metadata: { specialty_tool: "librarian" },
       })
       .pipe(Effect.mapError((error) => fromExternalError(error, "librarian")))
@@ -304,7 +302,6 @@ const modelRoutedBackend = (router: Router.Interface, workspaceRoot: string): Ba
           { role: "system", content: painterSystemPrompt },
           { role: "user", content: painterUserPrompt(input) },
         ],
-        max_output_tokens: 2_000,
         metadata: { specialty_tool: "painter" },
       })
       .pipe(Effect.mapError((error) => fromExternalError(error, "painter")))

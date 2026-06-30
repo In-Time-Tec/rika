@@ -10,6 +10,15 @@ Rika is a greenfield Effect-native coding agent system. The repository is a Bun/
 
 Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comments). Put design rationale, conventions, and context in AGENTS.md files, in `CONTEXT.md`, or in skill files under `.agents/skills/`.
 
+## Greenfield Change Policy
+
+- Rika is greenfield. There are no production users, no public compatibility contract, and no legacy behavior to preserve by default.
+- Prefer a breaking change when it makes the system more correct, simpler, more explicit, or easier to operate.
+- Do not add compatibility aliases, migration shims, fallback config keys, deprecated code paths, or legacy mode names unless the user explicitly asks for them or durable data safety requires them.
+- When renaming an API, config key, schema field, mode, command, file path, or domain concept, update all known call sites, tests, docs, and examples in the same change instead of supporting both names.
+- Delete obsolete code, tests, fixtures, docs, and branches of behavior once the replacement exists.
+- Breakage is acceptable when intentional and verified. Silent compatibility layers are the thing to avoid.
+
 ## Key Files
 
 | File                                | Purpose                                                                                                             |

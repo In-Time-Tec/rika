@@ -19,6 +19,21 @@ describe("Migration", () => {
     expect(tables.map((table) => table.name)).toContain("thread_events")
   })
 
+  test("applies projection columns used by thread summaries", async () => {
+    const columns = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Database.withDatabase((database) =>
+          database.all<{ name: string }>(sql`pragma table_info(thread_projections)`),
+        )
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["title_text", "diff_additions", "diff_modifications", "diff_deletions"]),
+    )
+  })
+
   test("resolves source, configured, and installed migration folders", () => {
     expect(Migration.migrationsFolderFromEnv({ RIKA_MIGRATIONS_DIR: "/tmp/rika-migrations" })).toBe(
       "/tmp/rika-migrations",

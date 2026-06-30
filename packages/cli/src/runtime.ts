@@ -10,9 +10,9 @@ import {
   ToolExecutor,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
-import { OpenAi, Provider, Router } from "@rika/llm"
+import { Live, Router } from "@rika/llm"
 import {
   ArtifactStore,
   Database,
@@ -27,7 +27,7 @@ import { Client } from "@rika/sdk"
 import { HttpServer, RemoteControl } from "@rika/server"
 import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import { Adapter, RemoteSession, Session, Ticker } from "@rika/tui"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Stream } from "effect"
 import * as Args from "./args"
 import * as CliConfig from "./config"
 import * as Doctor from "./doctor"
@@ -214,12 +214,13 @@ export const liveLayer = (
     },
     env,
   )
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(openAiLayer(env)), Layer.provideMerge(configLayer))
+  const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
   const storageLayer = Layer.mergeAll(
@@ -235,13 +236,13 @@ export const liveLayer = (
     IdGenerator.layer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const readOnlyToolLayer = BuiltInTools.readOnlyToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
+  const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
   )
   const subagentLayer = SubagentRuntime.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(llmLayer),
-    Layer.provide(readOnlyToolLayer),
+    Layer.provide(subagentToolLayer),
   )
   const specialtyToolLayer = SpecialtyTools.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
@@ -266,6 +267,7 @@ export const liveLayer = (
     skillLayer,
     toolLayer,
     llmLayer,
+    diagnosticsLayer,
   )
   const commandLayer = Execute.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
 
@@ -288,12 +290,13 @@ export const interactiveLiveLayer = (
     },
     env,
   )
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(openAiLayer(env)), Layer.provideMerge(configLayer))
+  const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
   const storageLayer = Layer.mergeAll(
@@ -309,13 +312,13 @@ export const interactiveLiveLayer = (
     IdGenerator.layer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const readOnlyToolLayer = BuiltInTools.readOnlyToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
+  const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
   )
   const subagentLayer = SubagentRuntime.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(llmLayer),
-    Layer.provide(readOnlyToolLayer),
+    Layer.provide(subagentToolLayer),
   )
   const specialtyToolLayer = SpecialtyTools.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
@@ -345,6 +348,7 @@ export const interactiveLiveLayer = (
     skillLayer,
     toolLayer,
     llmLayer,
+    diagnosticsLayer,
   )
   const sessionLayer = Session.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
 
@@ -366,14 +370,102 @@ export const interactiveRemoteLiveLayer = (
       const backend = yield* LocalBackend.Service
       const renderer = yield* Adapter.Service
       const ticker = yield* Ticker.Service
-      const endpoint = yield* backend.connectOrStart({ workspace_root: workspaceRoot, data_dir: dataDir, mode })
-      const client = Client.make(Client.fetchTransport({ base_url: endpoint.url, token: endpoint.token }))
+      const client = reconnectingClient({ backend, workspace_root: workspaceRoot, data_dir: dataDir, mode })
       return RemoteSession.make(client, renderer, ticker.ticks)
     }),
   ).pipe(Layer.provideMerge(backendLayer), Layer.provideMerge(Adapter.layer), Layer.provideMerge(Ticker.layer))
 
   return remoteSessionLayer
 }
+
+export interface ReconnectingClientInput {
+  readonly backend: LocalBackend.Interface
+  readonly workspace_root: string
+  readonly data_dir: string
+  readonly mode: Config.Mode
+  readonly fetch?: Client.FetchTransportInput["fetch"]
+}
+
+export const reconnectingClient = (input: ReconnectingClientInput): Client.Interface => {
+  let current: LocalBackend.BackendEndpoint | undefined
+  const resolveEndpoint = (refresh: boolean) =>
+    current !== undefined && !refresh
+      ? Effect.succeed(current)
+      : input.backend
+          .connectOrStart({
+            workspace_root: input.workspace_root,
+            data_dir: input.data_dir,
+            mode: input.mode,
+          })
+          .pipe(
+            Effect.tap((next) =>
+              Effect.sync(() => {
+                current = next
+              }),
+            ),
+            Effect.mapError(
+              (error) =>
+                new Client.SdkError({
+                  message: error.message,
+                  operation: `backend.${error.operation}`,
+                }),
+            ),
+          )
+  const clientForEndpoint = (resolvedEndpoint: LocalBackend.BackendEndpoint) =>
+    Client.make(
+      Client.fetchTransport({
+        base_url: resolvedEndpoint.url,
+        token: resolvedEndpoint.token,
+        ...(input.fetch === undefined ? {} : { fetch: input.fetch }),
+      }),
+    )
+  const request = <A>(use: (remote: Client.Interface) => Effect.Effect<A, Client.SdkError>) =>
+    resolveEndpoint(false).pipe(
+      Effect.map(clientForEndpoint),
+      Effect.flatMap(use),
+      Effect.catchTag("SdkError", (error) =>
+        retryableSdkError(error)
+          ? resolveEndpoint(true).pipe(Effect.map(clientForEndpoint), Effect.flatMap(use))
+          : Effect.fail(error),
+      ),
+    )
+  const stream = <A>(use: (remote: Client.Interface) => Stream.Stream<A, Client.SdkError>) =>
+    Stream.unwrap(resolveEndpoint(false).pipe(Effect.map((next) => use(clientForEndpoint(next))))).pipe(
+      Stream.catch((error: Client.SdkError) =>
+        retryableSdkError(error)
+          ? Stream.unwrap(resolveEndpoint(true).pipe(Effect.map((next) => use(clientForEndpoint(next)))))
+          : Stream.fail(error),
+      ),
+    )
+  const freshStream = <A>(use: (remote: Client.Interface) => Stream.Stream<A, Client.SdkError>) =>
+    Stream.unwrap(resolveEndpoint(true).pipe(Effect.map((next) => use(clientForEndpoint(next)))))
+
+  return {
+    backendHealth: () => request((remote) => remote.backendHealth()),
+    createThread: (thread) => request((remote) => remote.createThread(thread)),
+    listThreads: (thread) => request((remote) => remote.listThreads(thread)),
+    openThread: (threadId, userId) => request((remote) => remote.openThread(threadId, userId)),
+    previewThread: (threadId, preview) => request((remote) => remote.previewThread(threadId, preview)),
+    archiveThread: (threadId, userId) => request((remote) => remote.archiveThread(threadId, userId)),
+    unarchiveThread: (threadId, userId) => request((remote) => remote.unarchiveThread(threadId, userId)),
+    searchThreads: (search) => request((remote) => remote.searchThreads(search)),
+    shareThread: (threadId, userId) => request((remote) => remote.shareThread(threadId, userId)),
+    referenceThread: (reference) => request((remote) => remote.referenceThread(reference)),
+    subscribeThreadEvents: (subscription) => stream((remote) => remote.subscribeThreadEvents(subscription)),
+    startTurn: (turn) => freshStream((remote) => remote.startTurn(turn)),
+    interruptTurn: (turn) => request((remote) => remote.interruptTurn(turn)),
+    listArtifacts: (artifacts) => request((remote) => remote.listArtifacts(artifacts)),
+    getArtifact: (artifactId, userId) => request((remote) => remote.getArtifact(artifactId, userId)),
+    connectIde: (connection) => request((remote) => remote.connectIde(connection)),
+    disconnectIde: (disconnection) => request((remote) => remote.disconnectIde(disconnection)),
+    updateIdeContext: (context) => request((remote) => remote.updateIdeContext(context)),
+    ideStatus: () => request((remote) => remote.ideStatus()),
+    openIdeFile: (file) => request((remote) => remote.openIdeFile(file)),
+    ideNavigationRequests: () => request((remote) => remote.ideNavigationRequests()),
+  }
+}
+
+const retryableSdkError = (error: Client.SdkError): boolean => error.status === undefined
 
 export const skillsLiveLayer = (
   _command: Args.SkillCommand,
@@ -386,7 +478,8 @@ export const skillsLiveLayer = (
     {
       workspace_root: workspaceRoot,
       data_dir: dataDir,
-      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      default_mode: defaultModeFromEnv(env),
+      ...(env.RIKA_BACKEND_ID === undefined ? {} : { backend_id: env.RIKA_BACKEND_ID }),
       ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
     },
     env,
@@ -410,7 +503,8 @@ export const threadsLiveLayer = (
     {
       workspace_root: workspaceRoot,
       data_dir: dataDir,
-      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      default_mode: defaultModeFromEnv(env),
+      ...(env.RIKA_BACKEND_ID === undefined ? {} : { backend_id: env.RIKA_BACKEND_ID }),
       ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
     },
     env,
@@ -444,7 +538,7 @@ export const mcpLiveLayer = (
     {
       workspace_root: workspaceRoot,
       data_dir: dataDir,
-      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      default_mode: defaultModeFromEnv(env),
       ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
     },
     env,
@@ -478,7 +572,7 @@ export const reviewLiveLayer = (
     {
       workspace_root: workspaceRoot,
       data_dir: dataDir,
-      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      default_mode: defaultModeFromEnv(env),
       ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
     },
     env,
@@ -496,14 +590,14 @@ export const reviewLiveLayer = (
     artifactLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(openAiLayer(env)), Layer.provideMerge(configLayer))
-  const readOnlyToolLayer = BuiltInTools.readOnlyToolExecutorLayerFromPermissionConfig(
+  const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
+  const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(
     PermissionPolicy.configFromEnv(env),
   ).pipe(Layer.provideMerge(configLayer))
   const subagentLayer = SubagentRuntime.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(llmLayer),
-    Layer.provide(readOnlyToolLayer),
+    Layer.provide(subagentToolLayer),
   )
   const reviewServiceLayer = ReviewService.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
@@ -526,7 +620,7 @@ export const extensionsLiveLayer = (
     {
       workspace_root: workspaceRoot,
       data_dir: dataDir,
-      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      default_mode: defaultModeFromEnv(env),
       ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
     },
     env,
@@ -576,17 +670,19 @@ export const serverLiveLayer = (
     {
       workspace_root: workspaceRoot,
       data_dir: dataDir,
-      default_mode: env.RIKA_MODE === "rush" || env.RIKA_MODE === "deep" ? env.RIKA_MODE : "smart",
+      default_mode: defaultModeFromEnv(env),
+      ...(env.RIKA_BACKEND_ID === undefined ? {} : { backend_id: env.RIKA_BACKEND_ID }),
       ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
     },
     env,
   )
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(openAiLayer(env)), Layer.provideMerge(configLayer))
+  const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
   const storageLayer = Layer.mergeAll(
@@ -602,13 +698,13 @@ export const serverLiveLayer = (
     IdGenerator.layer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const readOnlyToolLayer = BuiltInTools.readOnlyToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
+  const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
   )
   const subagentLayer = SubagentRuntime.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(llmLayer),
-    Layer.provide(readOnlyToolLayer),
+    Layer.provide(subagentToolLayer),
   )
   const specialtyToolLayer = SpecialtyTools.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
@@ -635,6 +731,7 @@ export const serverLiveLayer = (
     llmLayer,
     artifactLayer,
     IdeBridge.layer,
+    diagnosticsLayer,
   )
   const remoteLayer = RemoteControl.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
   const httpLayer = HttpServer.layer.pipe(Layer.provideMerge(remoteLayer))
@@ -655,7 +752,6 @@ export type LiveLayerOutput =
   | McpApprovalStore.Service
   | Output.Service
   | PluginHost.Service
-  | Provider.Service
   | Router.Service
   | SkillRegistry.Service
   | SpecialtyTools.Service
@@ -680,7 +776,6 @@ export type InteractiveLayerOutput =
   | Migration.Service
   | McpApprovalStore.Service
   | PluginHost.Service
-  | Provider.Service
   | ReviewService.Service
   | Router.Service
   | Session.Service
@@ -733,7 +828,6 @@ export type ReviewLayerOutput =
   | IdGenerator.Service
   | Migration.Service
   | Output.Service
-  | Provider.Service
   | Review.Service
   | ReviewService.Service
   | Router.Service
@@ -768,7 +862,6 @@ export type ServerLayerOutput =
   | Migration.Service
   | Output.Service
   | PluginHost.Service
-  | Provider.Service
   | RemoteControl.Service
   | Router.Service
   | Server.Service
@@ -797,29 +890,8 @@ export type LiveLayerError =
   | PluginHost.RunError
   | ReviewService.RunError
 
-export const openAiOptionsFromEnv = (env: Record<string, string | undefined>): OpenAi.Options => {
-  const apiKeyEnv = firstNonEmptyEnvKey(env, "RIKA_OPENAI_API_KEY", "OPENAI_API_KEY") ?? "OPENAI_API_KEY"
-  const apiUrl = firstNonEmpty(
-    env.RIKA_OPENAI_API_URL,
-    env.RIKA_OPENAI_BASE_URL,
-    env.OPENAI_BASE_URL,
-    env.OPENAI_API_BASE,
-    env.VIBE_OPENAI_BASE_URL,
-  )
-
-  return {
-    apiKeyEnv,
-    ...(apiUrl === undefined ? {} : { apiUrl }),
-  }
+const defaultModeFromEnv = (env: Record<string, string | undefined>): Config.Mode => {
+  const value = env.RIKA_MODE
+  if (value === "rush" || value === "smart" || value === "deep1" || value === "deep2" || value === "deep3") return value
+  return "smart"
 }
-
-const openAiLayer = (env: Record<string, string | undefined>) => OpenAi.layer(openAiOptionsFromEnv(env))
-
-const firstNonEmpty = (...values: ReadonlyArray<string | undefined>) =>
-  values.find((value): value is string => value !== undefined && value.length > 0)
-
-const firstNonEmptyEnvKey = (env: Record<string, string | undefined>, ...keys: ReadonlyArray<string>) =>
-  keys.find((key) => {
-    const value = env[key]
-    return value !== undefined && value.length > 0
-  })

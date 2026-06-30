@@ -4,7 +4,9 @@ import { layer as diagnosticsLayer } from "./diagnostics"
 import { layer as idGeneratorLayer } from "./id-generator"
 import { layer as timeLayer } from "./time"
 
-export const layer = Layer.mergeAll(configLayer, diagnosticsLayer, timeLayer, idGeneratorLayer)
+const configuredDiagnosticsLayer = diagnosticsLayer.pipe(Layer.provideMerge(configLayer))
+
+export const layer = Layer.mergeAll(configLayer, configuredDiagnosticsLayer, timeLayer, idGeneratorLayer)
 
 export function makeRuntime<I, S, E>(service: Context.Service<I, S>, serviceLayer: Layer.Layer<I, E>) {
   let runtime: ManagedRuntime.ManagedRuntime<I, E> | undefined

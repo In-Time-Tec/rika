@@ -28,8 +28,9 @@
 - Service modules expose `Interface`, `Service`, and a live `layer` or `defaultLayer`.
 - Use `Schema.TaggedErrorClass` for service-boundary errors.
 - Use `Effect.fn("Module.method")` for service methods and workflows.
-- Tests live under `test/` and replace services with fake layers using the same `Service` tag.
+- Tests live under `test/` and replace services with fake, memory, or deterministic layers using the same `Service` tag.
 - Runtime execution helpers stay at process/test boundaries; package internals return `Effect` values.
+- Diagnostics are telemetry-free and local-only; file logging is opt-in through injected config such as `RIKA_LOG_FILE`.
 
 ## For AI Agents
 

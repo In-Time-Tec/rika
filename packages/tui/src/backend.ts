@@ -27,6 +27,17 @@ export interface CancelRequest {
   readonly turn_id: Ids.TurnId
 }
 
+export interface PreviewInput {
+  readonly thread_id: Ids.ThreadId
+  readonly workspace_path: string
+  readonly mode: Config.Mode
+}
+
+export interface ThreadPreview {
+  readonly thread_id: Ids.ThreadId
+  readonly state: ViewState.ViewState
+}
+
 export interface CommandContext {
   readonly state: ViewState.ViewState
   readonly thread_id: Ids.ThreadId
@@ -44,6 +55,35 @@ export interface CommandResult {
 export interface ThreadOption {
   readonly thread_id: Ids.ThreadId
   readonly label: string
+  readonly title: string
+  readonly preview: string
+  readonly updated_label: string
+  readonly archived: boolean
+  readonly diff?: ViewState.ThreadDiffStats
+}
+
+export interface ThreadOptionInput {
+  readonly thread_id: Ids.ThreadId
+  readonly title_text?: string
+  readonly latest_message_text?: string
+  readonly updated_at?: number
+  readonly archived?: boolean
+  readonly diff?: ViewState.ThreadDiffStats
+}
+
+export const threadOption = (input: ThreadOptionInput): ThreadOption => {
+  const fallback = readableText(input.latest_message_text ?? "")
+  const title = truncateTitle(oneLine(input.title_text ?? fallback ?? "(no messages)"))
+  const preview = fallback ?? input.title_text ?? "(no messages)"
+  return {
+    thread_id: input.thread_id,
+    label: title,
+    title,
+    preview,
+    updated_label: input.updated_at === undefined ? "" : ageLabel(input.updated_at),
+    archived: input.archived ?? false,
+    ...(input.diff === undefined || isEmptyDiff(input.diff) ? {} : { diff: input.diff }),
+  }
 }
 
 export interface SessionBackend<E> {
@@ -52,6 +92,7 @@ export interface SessionBackend<E> {
   readonly cancelTurn: (input: CancelRequest) => Effect.Effect<void, E>
   readonly runCommand: (context: CommandContext, command: string) => Effect.Effect<CommandResult, E>
   readonly listThreads: (input: { readonly workspace_path: string }) => Effect.Effect<ReadonlyArray<ThreadOption>, E>
+  readonly loadThreadPreview: (input: PreviewInput) => Effect.Effect<ThreadPreview, E>
 }
 
 export const commandResult = (
@@ -73,3 +114,42 @@ export const splitFirst = (value: string): readonly [string, string | undefined]
   const [first, ...rest] = value.split(/\s+/)
   return [first ?? value, rest.length === 0 ? undefined : rest.join(" ")]
 }
+
+const oneLine = (value: string): string => value.replace(/\s+/g, " ").trim()
+
+const readableText = (value: string): string | undefined => {
+  const text = value.replace(/\r\n?/g, "\n").trim()
+  if (text.length === 0) return undefined
+  if (isRawToolPayload(text)) return undefined
+  return text
+}
+
+const isRawToolPayload = (text: string): boolean => {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return false
+  if (trimmed.includes('"tool_call"') || trimmed.includes('"tool_result"')) return true
+  return false
+}
+
+const truncateTitle = (value: string): string => {
+  if (value.length === 0) return "(no messages)"
+  if (value.length <= 96) return value
+  return `${value.slice(0, 93)}...`
+}
+
+const ageLabel = (updatedAt: number): string => {
+  const elapsed = Math.max(0, Date.now() - updatedAt)
+  const minutes = Math.floor(elapsed / 60_000)
+  if (minutes < 1) return "now"
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 48) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days}d ago`
+  const months = Math.floor(days / 30)
+  if (months < 12) return `${months}mo ago`
+  return `${Math.floor(months / 12)}y ago`
+}
+
+const isEmptyDiff = (diff: ViewState.ThreadDiffStats): boolean =>
+  diff.additions === 0 && diff.modifications === 0 && diff.deletions === 0

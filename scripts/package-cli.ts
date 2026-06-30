@@ -2,6 +2,7 @@ import { $ } from "bun"
 
 const root = new URL("..", import.meta.url)
 const rootDir = root.pathname
+const bunNodeModulesDir = new URL("node_modules/.bun/node_modules/", root).pathname
 const packageJson = readPackageJson(await Bun.file(new URL("package.json", root)).json())
 const artifactName = `rika-${process.platform}-${process.arch}${process.platform === "win32" ? ".exe" : ""}`
 const outDir = new URL("dist/release/", root)
@@ -61,12 +62,15 @@ await Bun.write(new URL(`${artifactName}.json`, outDir), `${JSON.stringify(manif
 console.log(JSON.stringify(manifest))
 
 function isResolvable(name: string): boolean {
-  try {
-    Bun.resolveSync(name, rootDir)
-    return true
-  } catch {
-    return false
+  for (const base of [rootDir, bunNodeModulesDir]) {
+    try {
+      Bun.resolveSync(name, base)
+      return true
+    } catch {
+      continue
+    }
   }
+  return false
 }
 
 function readPackageJson(value: unknown) {

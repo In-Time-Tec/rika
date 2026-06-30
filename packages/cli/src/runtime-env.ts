@@ -69,24 +69,9 @@ export const envFromSettings = (settings: unknown, path = globalSettingsPath()):
       })
     }
 
-    const openai = isRecord(settings.openai) ? settings.openai : {}
-
     return definedEnv({
-      RIKA_OPENAI_API_KEY:
-        stringValue(settings, "RIKA_OPENAI_API_KEY") ??
-        stringValue(settings, "OPENAI_API_KEY") ??
-        stringValue(openai, "api_key") ??
-        stringValue(openai, "apiKey"),
-      RIKA_OPENAI_BASE_URL:
-        stringValue(settings, "RIKA_OPENAI_BASE_URL") ??
-        stringValue(settings, "RIKA_OPENAI_API_URL") ??
-        stringValue(settings, "OPENAI_BASE_URL") ??
-        stringValue(settings, "OPENAI_API_BASE") ??
-        stringValue(settings, "VIBE_OPENAI_BASE_URL") ??
-        stringValue(openai, "base_url") ??
-        stringValue(openai, "baseUrl") ??
-        stringValue(openai, "api_url") ??
-        stringValue(openai, "apiUrl"),
+      RIKA_API_KEY: stringValue(settings, "api_key"),
+      RIKA_BASE_URL: stringValue(settings, "base_url"),
     })
   })
 

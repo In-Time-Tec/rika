@@ -93,13 +93,26 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
     }),
   cancelTurn: ({ thread_id, turn_id }) => dependencies.agentLoop.cancelTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(dependencies, context, command),
-  listThreads: () => dependencies.threadService.list({}).pipe(Effect.map((summaries) => summaries.map(threadOption))),
+  listThreads: () =>
+    dependencies.threadService.list({}).pipe(Effect.map((summaries) => summaries.map(threadOptionFromSummary))),
+  loadThreadPreview: ({ thread_id, workspace_path, mode }) =>
+    dependencies.threadService.preview({ thread_id }).pipe(
+      Effect.map((record) => ({
+        thread_id,
+        state: ViewState.initial({ thread_id, workspace_path, mode, events: record.events }),
+      })),
+    ),
 })
 
-const threadOption = (summary: ThreadService.ThreadRecord["summary"]): Backend.ThreadOption => ({
-  thread_id: summary.thread_id,
-  label: `${summary.thread_id}: ${summary.latest_message_text ?? "(no messages)"}`,
-})
+const threadOptionFromSummary = (summary: ThreadService.ThreadRecord["summary"]): Backend.ThreadOption =>
+  Backend.threadOption({
+    thread_id: summary.thread_id,
+    ...(summary.title_text === undefined ? {} : { title_text: summary.title_text }),
+    ...(summary.latest_message_text === undefined ? {} : { latest_message_text: summary.latest_message_text }),
+    updated_at: summary.updated_at,
+    archived: summary.archived,
+    diff: summary.diff,
+  })
 
 const readThreadEvents = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
   dependencies.threadService.open({ thread_id: threadId }).pipe(Effect.map((record) => record.events))
@@ -242,7 +255,7 @@ const modeCommand = (context: Backend.CommandContext, argument: string | undefin
   const nextMode = argument === undefined || argument.length === 0 ? nextModeAfter(context.mode) : parseMode(argument)
   if (nextMode === undefined)
     return Backend.commandResult(context, {
-      state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep"),
+      state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep1|deep2|deep3"),
     })
   return Backend.commandResult(context, {
     state: ViewState.withNotice(ViewState.withMode(context.state, nextMode), `Mode switched to ${nextMode}`),
@@ -257,7 +270,9 @@ const parseMode = (value: string): Config.Mode | undefined => {
 
 const nextModeAfter = (mode: Config.Mode): Config.Mode => {
   if (mode === "rush") return "smart"
-  if (mode === "smart") return "deep"
+  if (mode === "smart") return "deep1"
+  if (mode === "deep1") return "deep2"
+  if (mode === "deep2") return "deep3"
   return "rush"
 }
 

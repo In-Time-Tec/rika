@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { Remote } from "@rika/schema"
+import { Ids, Remote } from "@rika/schema"
 import { Effect } from "effect"
-import { LocalBackend } from "../src/index"
+import { LocalBackend, Runtime } from "../src/index"
 
 const workspaceRoot = "/workspace/rika-local-backend"
 const dataDir = `${workspaceRoot}/.rika`
+const defaultBackendId = LocalBackend.backendId({}, workspaceRoot)
 
 describe("CLI local backend", () => {
   test("reuses a healthy connection record without spawning", async () => {
@@ -14,6 +15,7 @@ describe("CLI local backend", () => {
       token: "secret-token",
       workspace_root: workspaceRoot,
       data_dir: dataDir,
+      backend_id: defaultBackendId,
       pid: 123,
       started_at: 1,
     }
@@ -34,6 +36,32 @@ describe("CLI local backend", () => {
       pid: 123,
     })
     expect(system.spawns).toHaveLength(0)
+  })
+
+  test("does not reuse a healthy backend launched by a different frontend", async () => {
+    const system = fakeSystem()
+    const env = { RIKA_BACKEND_EXECUTABLE: "/workspace/rika-local-backend/bin/source-rika" }
+    const record: LocalBackend.BackendRecord = {
+      url: "http://127.0.0.1:65000",
+      token: "installed-token",
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      backend_id: "installed-rika",
+      pid: 321,
+      started_at: 1,
+    }
+    system.files.set(LocalBackend.recordPath(dataDir), JSON.stringify(record))
+    system.healthy.set(healthKey(record.url, record.token), health(record))
+
+    const endpoint = await Effect.runPromise(
+      LocalBackend.connectOrStart({ workspace_root: workspaceRoot, data_dir: dataDir, mode: "smart" }).pipe(
+        Effect.provide(LocalBackend.layerFromInput({ env, cwd: workspaceRoot, system })),
+      ),
+    )
+
+    expect(endpoint.url).not.toBe(record.url)
+    expect(system.spawns).toHaveLength(1)
+    expect(system.spawns[0]?.backend_id).toBe(LocalBackend.backendId(env, workspaceRoot))
   })
 
   test("starts one backend for concurrent callers and hides tokens from redaction", async () => {
@@ -62,6 +90,7 @@ describe("CLI local backend", () => {
       token: "dead-token",
       workspace_root: workspaceRoot,
       data_dir: dataDir,
+      backend_id: defaultBackendId,
       pid: 111,
       started_at: 1,
     }
@@ -72,7 +101,7 @@ describe("CLI local backend", () => {
       LocalBackend.status({ workspace_root: workspaceRoot, data_dir: dataDir }).pipe(Effect.provide(layer)),
     )
     const endpoint = await Effect.runPromise(
-      LocalBackend.connectOrStart({ workspace_root: workspaceRoot, data_dir: dataDir, mode: "deep" }).pipe(
+      LocalBackend.connectOrStart({ workspace_root: workspaceRoot, data_dir: dataDir, mode: "deep3" }).pipe(
         Effect.provide(layer),
       ),
     )
@@ -83,6 +112,60 @@ describe("CLI local backend", () => {
     expect(before).toMatchObject({ status: "stale", endpoint: stale.url, pid: 111 })
     expect(endpoint.url).toBe("http://127.0.0.1:45679")
     expect(after).toMatchObject({ status: "healthy", endpoint: endpoint.url, pid: endpoint.pid })
+  })
+
+  test("reconnecting client replaces a backend that dies after startup", async () => {
+    const system = fakeSystem()
+    const stale: LocalBackend.BackendRecord = {
+      url: "http://127.0.0.1:45002",
+      token: "dead-token",
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      backend_id: defaultBackendId,
+      pid: 222,
+      started_at: 1,
+    }
+    const thread = Ids.ThreadId.make("thread_reconnecting_client")
+    const summary: Remote.ThreadSummary = {
+      thread_id: thread,
+      workspace_id: Ids.WorkspaceId.make(workspaceRoot),
+      diff: { additions: 0, modifications: 0, deletions: 0 },
+      archived: false,
+      created_at: 1,
+      updated_at: 2,
+    }
+    const urls: Array<string> = []
+    system.files.set(LocalBackend.recordPath(dataDir), JSON.stringify(stale))
+    system.healthy.set(healthKey(stale.url, stale.token), health(stale))
+    const layer = LocalBackend.layerFromInput({ env: { RIKA_BACKEND_PORT: "45680" }, cwd: workspaceRoot, system })
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const backend = yield* LocalBackend.Service
+        const client = Runtime.reconnectingClient({
+          backend,
+          workspace_root: workspaceRoot,
+          data_dir: dataDir,
+          mode: "smart",
+          fetch: async (input) => {
+            const url = input instanceof Request ? input.url : String(input)
+            urls.push(url)
+            if (url.startsWith(stale.url)) {
+              system.healthy.delete(healthKey(stale.url, stale.token))
+              throw new Error("Unable to connect. Is the computer able to access the url?")
+            }
+            return new Response(JSON.stringify([summary]), { status: 200 })
+          },
+        })
+        return yield* client.listThreads({ workspace_id: Ids.WorkspaceId.make(workspaceRoot) })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result).toEqual([summary])
+    expect(system.spawns).toHaveLength(1)
+    expect(urls).toHaveLength(2)
+    expect(urls[0]).toStartWith(stale.url)
+    expect(urls[1]).toStartWith("http://127.0.0.1:45680")
   })
 })
 
@@ -148,12 +231,14 @@ const health = (input: {
   readonly url: string
   readonly workspace_root: string
   readonly data_dir: string
+  readonly backend_id: string
   readonly pid: number
 }): Remote.BackendHealth => ({
   status: "healthy",
   url: input.url,
   workspace_root: input.workspace_root,
   data_dir: input.data_dir,
+  backend_id: input.backend_id,
   pid: input.pid,
   version: "0.0.0",
 })

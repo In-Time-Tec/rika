@@ -1,8 +1,8 @@
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, ErrorEnvelope, Event, Ide, Ids, Message, Tool } from "@rika/schema"
-import { Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import { AiError, Prompt } from "effect/unstable/ai"
 import * as ContextResolver from "./context-resolver"
 import * as SkillRegistry from "./skill-registry"
@@ -78,6 +78,7 @@ export class Service extends Context.Service<Service, Interface>()("@rika/agent/
 interface Dependencies {
   readonly config: Config.Interface
   readonly database: Database.Interface
+  readonly diagnostics: Diagnostics.Interface
   readonly eventLog: ThreadEventLog.Interface
   readonly projection: ThreadProjection.Interface
   readonly idGenerator: IdGenerator.Interface
@@ -93,6 +94,8 @@ type Emit = (event: Event.Event) => Effect.Effect<void, RunError>
 
 const MAX_TOOL_ITERATIONS = 25
 const MAX_EMPTY_ANSWER_RETRIES = 2
+const MODEL_STREAM_BATCH_SIZE = 64
+const MODEL_STREAM_BATCH_WINDOW = "16 millis"
 
 interface ModelInput {
   readonly messages: ReadonlyArray<Provider.Message>
@@ -106,11 +109,14 @@ interface ModelTurn {
   readonly toolResults: ReadonlyArray<Tool.Result>
 }
 
+type NextSequence = () => number
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
     const database = yield* Database.Service
+    const diagnostics = yield* Diagnostics.Service
     const eventLog = yield* ThreadEventLog.Service
     const projection = yield* ThreadProjection.Service
     const idGenerator = yield* IdGenerator.Service
@@ -124,6 +130,7 @@ export const layer = Layer.effect(
     const dependencies: Dependencies = {
       config,
       database,
+      diagnostics,
       eventLog,
       projection,
       idGenerator,
@@ -215,13 +222,16 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
   Effect.gen(function* () {
     const existingEvents = yield* readThread(dependencies, { thread_id: input.thread_id })
     const appendedEvents: Array<Event.Event> = []
+    let collectAppendedEvents = true
     let sequence = latestSequence(existingEvents)
+    const nextSequence = () => sequence + 1
     const turnId = Ids.TurnId.make(yield* dependencies.idGenerator.next("turn"))
 
     const append = Effect.fn("AgentLoop.appendTurnEvent")(function* (event: Event.Event) {
       const appended = yield* appendAndProject(dependencies, event)
       sequence = appended.sequence
-      appendedEvents.push(appended)
+      if (collectAppendedEvents) appendedEvents.push(appended)
+      yield* emitEventDiagnostic(dependencies, appended)
       yield* emit(appended)
       return appended
     })
@@ -260,16 +270,17 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
 
     const history = [...existingEvents, ...appendedEvents]
     let modelInput: ModelInput = yield* contextModelInput(dependencies, history, skillSelection)
+    collectAppendedEvents = false
     let emptyRetries = 0
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
       const modelTurn =
         iteration === 0
-          ? yield* streamModelResponseWithRecovery(dependencies, input, turnId, modelInput, append)
-          : yield* streamModelResponse(dependencies, input, turnId, modelInput, append)
+          ? yield* streamModelResponseWithRecovery(dependencies, input, turnId, modelInput, append, nextSequence)
+          : yield* streamModelResponse(dependencies, input, turnId, modelInput, append, nextSequence)
       const response = modelTurn.response
 
-      if (modelTurn.toolResults.length === 0) {
+      if (modelTurn.toolCalls.length === 0) {
         if (response.content.trim().length === 0 && emptyRetries < MAX_EMPTY_ANSWER_RETRIES) {
           emptyRetries += 1
           modelInput = appendTextRetry(modelInput, response.content)
@@ -280,6 +291,15 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
         )
         yield* append(yield* makeTurnCompleted(dependencies, input.thread_id, turnId, sequence + 1))
         return
+      }
+
+      if (modelTurn.toolResults.length !== modelTurn.toolCalls.length) {
+        yield* new AgentLoopError({
+          message: "Model requested tool calls but not all calls produced durable tool results",
+          operation: "runTurnInternal",
+          thread_id: input.thread_id,
+          turn_id: turnId,
+        })
       }
 
       modelInput = appendToolResults(modelInput, response.content, modelTurn.toolCalls, modelTurn.toolResults)
@@ -296,35 +316,68 @@ const runTurnInternal = (dependencies: Dependencies, input: RunTurnInput, emit: 
     )
     yield* append(yield* makeTurnCompleted(dependencies, input.thread_id, turnId, sequence + 1))
   }).pipe(
-    Effect.catch((error: RunError) =>
-      recordFailure(dependencies, input, error, emit).pipe(
+    Effect.onInterrupt(() =>
+      recordFailureWithEnvelope(dependencies, input, cancelledEnvelope("Turn interrupted"), emit),
+    ),
+    Effect.catchCause((cause: Cause.Cause<RunError>) => {
+      if (Cause.hasInterruptsOnly(cause)) {
+        return recordFailureWithEnvelope(
+          dependencies,
+          input,
+          cancelledEnvelope("Turn interrupted"),
+          emit,
+        ).pipe(Effect.andThen(Effect.interrupt))
+      }
+      const error = runErrorFromCause(input, cause, "runTurn")
+      return recordFailure(dependencies, input, error, emit).pipe(
         Effect.flatMap(() =>
           isTurnLevelError(error)
             ? Effect.void
             : Effect.fail(error instanceof AgentLoopError ? error : wrapRunError(input, error, "runTurn")),
         ),
-      ),
-    ),
+      )
+    }),
   )
 
 const recordFailure = (dependencies: Dependencies, input: RunTurnInput, error: RunError, emit: Emit) =>
-  Effect.gen(function* () {
-    const events = yield* readThread(dependencies, { thread_id: input.thread_id })
-    const turnEvent = events.findLast((event) => event.turn_id !== undefined)
-    if (turnEvent?.turn_id === undefined) return
-    if (events.some((event) => event.type === "turn.failed" && event.turn_id === turnEvent.turn_id)) return
-    if (events.some((event) => event.type === "turn.completed" && event.turn_id === turnEvent.turn_id)) return
+  recordFailureWithEnvelope(dependencies, input, envelopeFromRunError(error), emit)
 
-    const failed = yield* makeTurnFailed(
-      dependencies,
-      input.thread_id,
-      turnEvent.turn_id,
-      latestSequence(events) + 1,
-      envelopeFromRunError(error),
-    )
-    const appended = yield* appendAndProject(dependencies, failed)
-    yield* emit(appended)
+const recordFailureWithEnvelope = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  error: ErrorEnvelope.Envelope,
+  emit: Emit,
+) =>
+  Effect.gen(function* () {
+    const appended = yield* appendFailureEvent(dependencies, input, error)
+    if (appended === undefined) return
+    yield* emitEventDiagnostic(dependencies, appended)
+    yield* emit(appended).pipe(Effect.catch(() => Effect.void))
   }).pipe(Effect.catch(() => Effect.void))
+
+const appendFailureEvent = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  error: ErrorEnvelope.Envelope,
+) =>
+  Effect.uninterruptible(
+    Effect.gen(function* () {
+      const events = yield* readThread(dependencies, { thread_id: input.thread_id })
+      const turnEvent = events.findLast((event) => event.turn_id !== undefined)
+      if (turnEvent?.turn_id === undefined) return undefined
+      if (events.some((event) => event.type === "turn.failed" && event.turn_id === turnEvent.turn_id)) return undefined
+      if (events.some((event) => event.type === "turn.completed" && event.turn_id === turnEvent.turn_id)) return undefined
+
+      const failed = yield* makeTurnFailed(
+        dependencies,
+        input.thread_id,
+        turnEvent.turn_id,
+        latestSequence(events) + 1,
+        error,
+      )
+      return yield* appendAndProject(dependencies, failed)
+    }),
+  )
 
 const streamModelResponse = (
   dependencies: Dependencies,
@@ -332,6 +385,7 @@ const streamModelResponse = (
   turnId: Ids.TurnId,
   modelInput: ModelInput,
   append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
+  nextSequence: NextSequence,
 ) =>
   Effect.gen(function* () {
     const request = routerRequest(input, modelInput)
@@ -340,71 +394,152 @@ const streamModelResponse = (
     let completed: Provider.GenerateResponse | undefined
     const toolCalls: Array<Tool.Call> = []
     const toolResults: Array<Tool.Result> = []
+    const completedToolIds = new Set<Ids.ToolCallId>()
+    let pendingKind: "content" | "reasoning" | "toolInput" | undefined
+    let pendingToolCallId: Ids.ToolCallId | undefined
+    let pendingText = ""
 
-    yield* dependencies.router.stream(request).pipe(
-      Stream.runForEach((streamEvent) => {
+    const flushPending = (): Effect.Effect<void, RunError> => {
+      if (pendingKind === undefined || pendingText.length === 0) return Effect.void
+      const kind = pendingKind
+      const text = pendingText
+      const toolCallId = pendingToolCallId
+      pendingKind = undefined
+      pendingToolCallId = undefined
+      pendingText = ""
+      if (kind === "toolInput") {
+        if (toolCallId === undefined) {
+          return Effect.fail(
+            new AgentLoopError({
+              message: "Buffered tool input delta was missing its tool call id",
+              operation: "streamModelResponse",
+              thread_id: input.thread_id,
+              turn_id: turnId,
+            }),
+          )
+        }
+        return makeToolCallInputDelta(dependencies, input.thread_id, turnId, toolCallId, text, nextSequence()).pipe(
+          Effect.flatMap(append),
+          Effect.asVoid,
+        )
+      }
+      return (
+        kind === "content"
+          ? makeModelStreamChunk(dependencies, input.thread_id, turnId, text, provider, model, nextSequence())
+          : makeModelReasoningChunk(dependencies, input.thread_id, turnId, text, provider, model, nextSequence())
+      ).pipe(Effect.flatMap(append), Effect.asVoid)
+    }
+
+    const bufferDelta = (kind: "content" | "reasoning", text: string) =>
+      Effect.gen(function* () {
+        if (text.length === 0) return
+        if (pendingKind !== undefined && pendingKind !== kind) yield* flushPending()
+        pendingKind = kind
+        pendingText = `${pendingText}${text}`
+      })
+
+    const bufferToolInputDelta = (toolCallId: Ids.ToolCallId, text: string) =>
+      Effect.gen(function* () {
+        if (text.length === 0) return
+        if (pendingKind !== undefined && (pendingKind !== "toolInput" || pendingToolCallId !== toolCallId)) {
+          yield* flushPending()
+        }
+        pendingKind = "toolInput"
+        pendingToolCallId = toolCallId
+        pendingText = `${pendingText}${text}`
+      })
+
+    const processStreamEvent = (streamEvent: Provider.StreamEvent) =>
+      Effect.gen(function* () {
         switch (streamEvent.type) {
           case "response.started":
+            yield* flushPending()
             provider = streamEvent.provider
             model = streamEvent.model
-            return Effect.void
+            return
           case "content.delta":
-            return makeModelStreamChunk(dependencies, input.thread_id, turnId, streamEvent.text, provider, model).pipe(
-              Effect.flatMap(append),
-              Effect.asVoid,
-            )
+            yield* bufferDelta("content", streamEvent.text)
+            return
           case "reasoning.delta":
-            return makeModelReasoningChunk(
-              dependencies,
-              input.thread_id,
-              turnId,
-              streamEvent.text,
-              provider,
-              model,
-            ).pipe(Effect.flatMap(append), Effect.asVoid)
+            yield* bufferDelta("reasoning", streamEvent.text)
+            return
           case "tool.input.started":
-            return makeToolCallInputStarted(
+            yield* flushPending()
+            yield* makeToolCallInputStarted(
               dependencies,
               input.thread_id,
               turnId,
               Ids.ToolCallId.make(streamEvent.id),
               streamEvent.name,
+              nextSequence(),
             ).pipe(Effect.flatMap(append), Effect.asVoid)
+            return
           case "tool.input.delta":
-            return Effect.void
+            yield* bufferToolInputDelta(Ids.ToolCallId.make(streamEvent.id), streamEvent.text)
+            return
           case "tool.input.ended":
-            return makeToolCallInputEnded(
+            yield* flushPending()
+            yield* makeToolCallInputEnded(
               dependencies,
               input.thread_id,
               turnId,
               Ids.ToolCallId.make(streamEvent.id),
               streamEvent.name,
               streamEvent.input_text,
+              nextSequence(),
             ).pipe(Effect.flatMap(append), Effect.asVoid)
-          case "tool.call":
-            return makeToolCall(dependencies, input.thread_id, turnId, streamEvent).pipe(
-              Effect.flatMap((call) => {
-                toolCalls.push(call)
-                return makeToolCallRequested(dependencies, input.thread_id, turnId, call)
-              }),
+            return
+          case "tool.call": {
+            yield* flushPending()
+            const call = yield* makeToolCall(dependencies, input.thread_id, turnId, streamEvent)
+            toolCalls.push(call)
+            yield* makeToolCallRequested(dependencies, input.thread_id, turnId, call, nextSequence()).pipe(
               Effect.flatMap(append),
               Effect.asVoid,
             )
-          case "tool.result": {
-            const result = makeToolResult(streamEvent)
+            if (streamEvent.provider_executed === true) return
+            const result = yield* dependencies.toolExecutor.execute(call)
+            completedToolIds.add(result.id)
             toolResults.push(result)
-            return makeToolCallCompleted(dependencies, input.thread_id, turnId, result).pipe(
+            yield* makeToolCallCompleted(dependencies, input.thread_id, turnId, result, nextSequence()).pipe(
               Effect.flatMap(append),
-              Effect.andThen(appendSubagentSummaries(dependencies, input.thread_id, turnId, result, append)),
+              Effect.andThen(
+                appendSubagentSummaries(dependencies, input.thread_id, turnId, result, append, nextSequence),
+              ),
               Effect.asVoid,
             )
+            return
+          }
+          case "tool.result": {
+            yield* flushPending()
+            const result = makeToolResult(streamEvent)
+            if (completedToolIds.has(result.id)) return
+            completedToolIds.add(result.id)
+            toolResults.push(result)
+            yield* makeToolCallCompleted(dependencies, input.thread_id, turnId, result, nextSequence()).pipe(
+              Effect.flatMap(append),
+              Effect.andThen(
+                appendSubagentSummaries(dependencies, input.thread_id, turnId, result, append, nextSequence),
+              ),
+              Effect.asVoid,
+            )
+            return
           }
           case "response.completed":
+            yield* flushPending()
             completed = streamEvent.response
-            return Effect.void
+            return
         }
-        return Effect.void
-      }),
+      })
+
+    yield* dependencies.router.stream(request).pipe(
+      Stream.groupedWithin(MODEL_STREAM_BATCH_SIZE, MODEL_STREAM_BATCH_WINDOW),
+      Stream.runForEach((streamEvents) =>
+        Effect.gen(function* () {
+          for (const streamEvent of streamEvents) yield* processStreamEvent(streamEvent)
+          yield* flushPending()
+        }),
+      ),
     )
 
     if (completed === undefined) {
@@ -424,11 +559,23 @@ const streamModelResponseWithRecovery = (
   turnId: Ids.TurnId,
   modelInput: ModelInput,
   append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
+  nextSequence: NextSequence,
 ) =>
-  streamModelResponse(dependencies, input, turnId, modelInput, append).pipe(
+  streamModelResponse(dependencies, input, turnId, modelInput, append, nextSequence).pipe(
     Effect.catch((error: RunError) =>
       isModelError(error)
-        ? streamModelResponse(dependencies, input, turnId, appendModelError(modelInput, error), append)
+        ? emitModelRecoveryDiagnostic(dependencies, input, turnId, error).pipe(
+            Effect.andThen(
+              streamModelResponse(
+                dependencies,
+                input,
+                turnId,
+                appendModelError(modelInput, error),
+                append,
+                nextSequence,
+              ),
+            ),
+          )
         : Effect.fail(error),
     ),
   )
@@ -774,7 +921,7 @@ const isSubagentStatus = (value: unknown): value is Event.SubagentCompleted["dat
   value === "completed" || value === "failed" || value === "cancelled"
 
 const isToolAccess = (value: unknown): value is Event.SubagentCompleted["data"]["tool_access"] =>
-  value === "read-only" || value === "none"
+  value === "read-only" || value === "read-write" || value === "none"
 
 const stringArray = (value: unknown): ReadonlyArray<string> | undefined =>
   Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined
@@ -785,6 +932,39 @@ const routerRequest = (input: RunTurnInput, modelInput: ModelInput): Router.Requ
   prompt: modelInput.prompt,
   toolkit: modelInput.tools.toolkit,
 })
+
+const emitEventDiagnostic = (dependencies: Dependencies, event: Event.Event) =>
+  dependencies.diagnostics
+    .emit({
+      level: "info",
+      message: "thread.event.appended",
+      data: {
+        event_id: event.id,
+        event_type: event.type,
+        thread_id: event.thread_id,
+        ...(event.turn_id === undefined ? {} : { turn_id: event.turn_id }),
+        sequence: event.sequence,
+      },
+    })
+    .pipe(Effect.catch(() => Effect.void))
+
+const emitModelRecoveryDiagnostic = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  turnId: Ids.TurnId,
+  error: AiError.AiError | Router.RouterError,
+) =>
+  dependencies.diagnostics
+    .emit({
+      level: "warn",
+      message: "model.stream.recovered",
+      data: {
+        thread_id: input.thread_id,
+        turn_id: turnId,
+        error_type: error instanceof Router.RouterError ? "RouterError" : "ProviderError",
+      },
+    })
+    .pipe(Effect.catch(() => Effect.void))
 
 const latestSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.sequence ?? 0
 
@@ -974,16 +1154,16 @@ const makeModelStreamChunk = (
   text: string,
   provider: string,
   model: string,
+  sequence: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
-    const events = yield* readThread(dependencies, { thread_id: threadId })
     const event: Event.ModelStreamChunk = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence: latestSequence(events) + 1,
+      sequence,
       version: 1,
       created_at: createdAt,
       type: "model.stream.chunk",
@@ -999,16 +1179,16 @@ const makeModelReasoningChunk = (
   text: string,
   provider: string,
   model: string,
+  sequence: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
-    const events = yield* readThread(dependencies, { thread_id: threadId })
     const event: Event.ModelReasoningDelta = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence: latestSequence(events) + 1,
+      sequence,
       version: 1,
       created_at: createdAt,
       type: "model.reasoning.delta",
@@ -1073,11 +1253,12 @@ const appendSubagentSummaries = (
   turnId: Ids.TurnId,
   result: Tool.Result,
   append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
+  nextSequence: NextSequence,
 ) =>
   Effect.gen(function* () {
     if (result.name !== "task" || result.status !== "success") return
     for (const summary of subagentSummaries(result.output)) {
-      yield* makeSubagentCompleted(dependencies, threadId, turnId, summary).pipe(Effect.flatMap(append))
+      yield* makeSubagentCompleted(dependencies, threadId, turnId, summary, nextSequence()).pipe(Effect.flatMap(append))
     }
   })
 
@@ -1087,20 +1268,44 @@ const makeToolCallInputStarted = (
   turnId: Ids.TurnId,
   toolCallId: Ids.ToolCallId,
   name: string,
+  sequence: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
-    const events = yield* readThread(dependencies, { thread_id: threadId })
     const event: Event.ToolCallInputStarted = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence: latestSequence(events) + 1,
+      sequence,
       version: 1,
       created_at: createdAt,
       type: "tool.call.input.started",
       data: { id: toolCallId, name },
+    }
+    return event
+  })
+
+const makeToolCallInputDelta = (
+  dependencies: Dependencies,
+  threadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  toolCallId: Ids.ToolCallId,
+  text: string,
+  sequence: number,
+) =>
+  Effect.gen(function* () {
+    const createdAt = yield* dependencies.time.nowMillis
+    const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const event: Event.ToolCallInputDelta = {
+      id,
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence,
+      version: 1,
+      created_at: createdAt,
+      type: "tool.call.input.delta",
+      data: { id: toolCallId, text },
     }
     return event
   })
@@ -1112,16 +1317,16 @@ const makeToolCallInputEnded = (
   toolCallId: Ids.ToolCallId,
   name: string,
   inputText: string,
+  sequence: number,
 ) =>
   Effect.gen(function* () {
     const createdAt = yield* dependencies.time.nowMillis
     const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
-    const events = yield* readThread(dependencies, { thread_id: threadId })
     const event: Event.ToolCallInputEnded = {
       id,
       thread_id: threadId,
       turn_id: turnId,
-      sequence: latestSequence(events) + 1,
+      sequence,
       version: 1,
       created_at: createdAt,
       type: "tool.call.input.ended",
@@ -1286,6 +1491,16 @@ const envelopeFromRunError = (error: RunError): ErrorEnvelope.Envelope => {
     return { kind: "model", message: error.message, retryable: error.isRetryable, code: error.reason._tag }
   }
   return { kind: "model", message: String(error) }
+}
+
+const runErrorFromCause = (input: RunTurnInput, cause: Cause.Cause<RunError>, operation: string): RunError => {
+  const failure = Cause.findErrorOption(cause)
+  if (Option.isSome(failure)) return failure.value
+  return new AgentLoopError({
+    message: Cause.pretty(cause),
+    operation,
+    thread_id: input.thread_id,
+  })
 }
 
 const wrapRunError = (input: RunTurnInput, error: RunError, operation: string) =>

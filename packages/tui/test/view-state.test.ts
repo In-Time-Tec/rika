@@ -126,13 +126,17 @@ describe("ViewState queue + thinking", () => {
     const rush = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "rush" })
     expect(ViewState.cycleReasoning(rush).reasoning_effort).toBe(0)
 
-    let deep = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "deep" })
+    let deep = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "deep3" })
+    expect(deep.mode).toBe("deep3")
     expect(deep.reasoning_effort).toBe(3)
     deep = ViewState.cycleReasoning(deep)
+    expect(deep.mode).toBe("deep1")
     expect(deep.reasoning_effort).toBe(1)
     deep = ViewState.cycleReasoning(deep)
+    expect(deep.mode).toBe("deep2")
     expect(deep.reasoning_effort).toBe(2)
     deep = ViewState.cycleReasoning(deep)
+    expect(deep.mode).toBe("deep3")
     expect(deep.reasoning_effort).toBe(3)
   })
 
@@ -159,6 +163,26 @@ describe("ViewState queue + thinking", () => {
     state = ViewState.dequeueSelected(state)
     expect(state.queued).toEqual(["a"])
     expect(state.queue_selected).toBe(0)
+  })
+
+  test("promoteSelectedOrNextQueued moves the selected or next queued message to the front", () => {
+    let state = ViewState.enqueueMessage(ViewState.enqueueMessage(ViewState.enqueueMessage(base(), "a"), "b"), "c")
+    state = ViewState.queueUp(state)
+    expect(ViewState.selectedQueued(state)).toBe("c")
+    state = ViewState.promoteSelectedOrNextQueued(state)
+    expect(state.queued).toEqual(["c", "a", "b"])
+    expect(state.queue_selected).toBe(-1)
+
+    state = ViewState.promoteSelectedOrNextQueued(state)
+    expect(state.queued).toEqual(["c", "a", "b"])
+    expect(state.queue_selected).toBe(-1)
+  })
+
+  test("clearQueuedMessages removes all queued prompts and queue focus", () => {
+    const state = ViewState.clearQueuedMessages(ViewState.queueUp(ViewState.enqueueMessage(base(), "queued")))
+
+    expect(state.queued).toEqual([])
+    expect(state.queue_selected).toBe(-1)
   })
 
   test("Tab message nav: navPrevMessage selects prior user messages, editNavMessage loads into input", () => {
@@ -217,8 +241,8 @@ describe("ViewState queue + thinking", () => {
     expect(state.thinking.text).toBe("pondering")
   })
 
-  test("tool input start clears streaming text and creates a running tool card", () => {
-    const state = ViewState.applyEvent(
+  test("tool input streaming clears assistant text and counts generated tool input", () => {
+    const started = ViewState.applyEvent(
       { ...base(), streaming_text: '{"tool_' },
       {
         ...eventBase(1),
@@ -228,9 +252,48 @@ describe("ViewState queue + thinking", () => {
       },
     )
 
-    expect(state.streaming_text).toBe("")
-    expect(state.activity).toBe("running-tools")
-    expect(state.cards.at(-1)).toMatchObject({ id: "tool_input_started", kind: "tool", title: "write" })
+    expect(started.streaming_text).toBe("")
+    expect(started.activity).toBe("streaming")
+    expect(started.cards.at(-1)).toMatchObject({
+      id: "tool_input_started",
+      kind: "tool",
+      title: "write",
+      status: "info",
+    })
+
+    const streaming = ViewState.applyEvent(started, {
+      ...eventBase(2),
+      turn_id: turnId,
+      type: "tool.call.input.delta",
+      data: { id: Ids.ToolCallId.make("tool_input_started"), text: '{"path":"a.ts"}' },
+    })
+
+    expect(streaming.activity).toBe("streaming")
+    expect(streaming.generated_text_chars).toBe('{"path":"a.ts"}'.length)
+
+    const requested = ViewState.applyEvent(streaming, toolRequested(3, "tool_input_started", "write", { path: "a.ts" }))
+
+    expect(requested.activity).toBe("running-tools")
+    expect(requested.cards.at(-1)).toMatchObject({ id: "tool_input_started", status: "running" })
+  })
+
+  test("streaming preview is bounded while generated character count stays exact", () => {
+    const chunk = "0123456789\n".repeat(200)
+    const chunks = Math.ceil((ViewState.maxStreamingTextChars * 2) / chunk.length)
+    const state = Array.from({ length: chunks }, (_, index) => index + 1).reduce(
+      (current, sequence) =>
+        ViewState.applyEvent(current, {
+          ...eventBase(sequence),
+          turn_id: turnId,
+          type: "model.stream.chunk",
+          data: { text: chunk, provider: "fake", model: "fake" },
+        }),
+      base(),
+    )
+
+    expect(state.generated_text_chars).toBe(chunk.length * chunks)
+    expect(state.streaming_text.length).toBeLessThanOrEqual(ViewState.maxStreamingTextChars)
+    expect(state.streaming_text.endsWith("0123456789\n")).toBe(true)
   })
 })
 

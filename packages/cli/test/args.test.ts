@@ -38,11 +38,11 @@ describe("CLI args", () => {
   })
 
   test("parses --execute and -x root commands", async () => {
-    const long = await Effect.runPromise(Args.parse(["--execute", "--mode", "deep", "explain", "this"]))
+    const long = await Effect.runPromise(Args.parse(["--execute", "--mode", "deep3", "explain", "this"]))
     const short = await Effect.runPromise(Args.parse(["-x", "hello"]))
     const modeAlias = await Effect.runPromise(Args.parse(["-x", "-m", "rush", "alias", "mode"]))
 
-    expect(long).toMatchObject({ type: "execute", prompt: "explain this", mode: "deep", ephemeral: false })
+    expect(long).toMatchObject({ type: "execute", prompt: "explain this", mode: "deep3", ephemeral: false })
     expect(short).toMatchObject({ type: "execute", prompt: "hello", ephemeral: false })
     expect(modeAlias).toMatchObject({ type: "execute", prompt: "alias mode", mode: "rush", ephemeral: false })
   })

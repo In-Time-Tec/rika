@@ -138,6 +138,7 @@ const fakeBackend = (): FakeBackend => {
         url: "http://127.0.0.1:4587",
         workspace_root: workspaceRoot,
         data_dir: `${workspaceRoot}/.rika`,
+        backend_id: "test-backend",
         pid: 123,
         version: "0.0.0",
       }),
@@ -155,6 +156,13 @@ const fakeBackend = (): FakeBackend => {
         if (record === undefined)
           return Effect.fail(new Client.SdkError({ message: "missing", operation: "openThread", status: 404 }))
         return Effect.succeed({ summary: record.summary, events: record.events })
+      }),
+    previewThread: (threadId) =>
+      Effect.suspend(() => {
+        const record = threads.get(threadId)
+        if (record === undefined)
+          return Effect.fail(new Client.SdkError({ message: "missing", operation: "previewThread", status: 404 }))
+        return Effect.succeed({ summary: record.summary, events: record.events.slice(-160) })
       }),
     archiveThread: (threadId) => Effect.sync(() => setArchived(threads, threadId, true)),
     unarchiveThread: (threadId) => Effect.sync(() => setArchived(threads, threadId, false)),
@@ -232,6 +240,8 @@ const summary = (threadId: Ids.ThreadId, latest?: string): Remote.ThreadSummary 
   thread_id: threadId,
   workspace_id: workspaceId,
   ...(latest === undefined ? {} : { latest_message_text: latest }),
+  ...(latest === undefined ? {} : { title_text: latest }),
+  diff: { additions: 0, modifications: 0, deletions: 0 },
   archived: false,
   created_at: Common.TimestampMillis.make(1),
   updated_at: Common.TimestampMillis.make(2),

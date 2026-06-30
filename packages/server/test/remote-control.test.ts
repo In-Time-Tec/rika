@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AgentLoop, ContextResolver, SkillRegistry, ThreadService, ToolExecutor, WorkspaceAccess } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Provider, Router } from "@rika/llm"
 import { ArtifactStore, Database, Migration, ThreadEventLog, ThreadProjection, WorkspaceStore } from "@rika/persistence"
@@ -79,7 +79,12 @@ const makeLayer = (contextLayer = defaultContextLayer) => {
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const llmLayer = Router.layer.pipe(
     Layer.provideMerge(configLayer),
-    Layer.provideMerge(Provider.fakeLayer(["remote hello"])),
+    Layer.provideMerge(
+      Provider.fakeRegistryLayer([
+        { name: "anthropic", responses: ["remote hello"] },
+        { name: "openai", responses: ["remote hello"] },
+      ]),
+    ),
   )
   const agentBase = Layer.mergeAll(
     migratedStorageLayer,
@@ -88,6 +93,7 @@ const makeLayer = (contextLayer = defaultContextLayer) => {
     contextLayer,
     SkillRegistry.emptyLayer,
     ToolExecutor.fakeLayer({}),
+    Diagnostics.memoryLayer([]),
     llmLayer,
     IdeBridge.layer,
   )
@@ -134,6 +140,9 @@ describe("remote control API and SDK", () => {
 
     const opened = await Effect.runPromise(client.openThread(threadId))
     expect(opened.events.map((event) => event.type)).toContain("turn.failed")
+    const preview = await Effect.runPromise(client.previewThread(threadId, { limit: 2 }))
+    expect(preview.summary.thread_id).toBe(threadId)
+    expect(preview.events.map((event) => event.type)).toEqual(["turn.completed", "turn.failed"])
     const subscribed = await Effect.runPromise(
       client.subscribeThreadEvents({ thread_id: threadId, after_sequence: 1 }).pipe(Stream.runCollect),
     )
@@ -197,6 +206,9 @@ describe("remote control API and SDK", () => {
     const ownerThreads = await Effect.runPromise(client.listThreads({ user_id: ownerId }))
     const outsiderThreads = await Effect.runPromise(client.listThreads({ user_id: outsiderId }))
     const outsiderOpen = await Effect.runPromise(client.openThread(threadId, outsiderId).pipe(Effect.flip))
+    const outsiderPreview = await Effect.runPromise(
+      client.previewThread(threadId, { user_id: outsiderId }).pipe(Effect.flip),
+    )
     const outsiderTurn = await Effect.runPromise(
       client
         .startTurn({ thread_id: threadId, workspace_id: workspaceId, user_id: outsiderId, content: "break in" })
@@ -207,6 +219,7 @@ describe("remote control API and SDK", () => {
     expect(ownerThreads.map((summary) => summary.thread_id)).toEqual([threadId])
     expect(outsiderThreads).toEqual([])
     expect(outsiderOpen).toMatchObject({ status: 403 })
+    expect(outsiderPreview).toMatchObject({ status: 403 })
     expect(outsiderTurn).toMatchObject({ status: 403 })
   })
 

@@ -134,7 +134,7 @@ export const decideFromConfig = (
   Effect.sync(() => {
     if (config.mode !== "configured") return allow
 
-    const toolPattern = firstMatchingPattern(config.guarded_tools ?? [], call.name)
+    const toolPattern = firstMatchingToolPattern(config.guarded_tools ?? [], call.name)
     if (toolPattern !== undefined) {
       return reject(`Tool ${call.name} is guarded by permission policy`, {
         permission_mode: "configured",
@@ -198,6 +198,11 @@ const csv = (value: string | undefined): ReadonlyArray<string> =>
 
 const firstMatchingPattern = (patterns: ReadonlyArray<string>, value: string): string | undefined =>
   patterns.find((pattern) => matchesPattern(pattern, value))
+
+const firstMatchingToolPattern = (patterns: ReadonlyArray<string>, value: string): string | undefined =>
+  patterns.find((pattern) => matchesPattern(pattern, value) || matchesPattern(pattern, toolNamespaceAlias(value)))
+
+const toolNamespaceAlias = (value: string) => value.replaceAll("_", ".").replaceAll("-", ".")
 
 const firstGuardedFileMatch = (
   patterns: ReadonlyArray<string>,

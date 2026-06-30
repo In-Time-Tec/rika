@@ -6,11 +6,11 @@ import * as Provider from "./provider"
 export interface Request extends Schema.Schema.Type<typeof Request>, Provider.RuntimeOptions {}
 export const Request = Schema.Struct({
   mode: Schema.optional(Modes.ModeName),
+  profile: Schema.optional(Modes.ProfileName),
   provider: Schema.optional(Provider.ProviderName),
   model: Schema.optional(Provider.ModelId),
   messages: Schema.Array(Provider.Message),
   reasoning_effort: Schema.optional(Provider.ReasoningEffort),
-  max_output_tokens: Schema.optional(Schema.Int),
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Provider.Metadata),
 }).annotate({ identifier: "Rika.LLM.Router.Request" })
@@ -18,11 +18,11 @@ export const Request = Schema.Struct({
 export interface RoutedRequest extends Schema.Schema.Type<typeof RoutedRequest>, Provider.RuntimeOptions {}
 export const RoutedRequest = Schema.Struct({
   mode: Modes.ModeName,
+  profile: Schema.optional(Modes.ProfileName),
   provider: Provider.ProviderName,
   model: Provider.ModelId,
   messages: Schema.Array(Provider.Message),
   reasoning_effort: Provider.ReasoningEffort,
-  max_output_tokens: Schema.Int,
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Provider.Metadata),
 }).annotate({ identifier: "Rika.LLM.Router.RoutedRequest" })
@@ -30,6 +30,7 @@ export const RoutedRequest = Schema.Struct({
 export class RouterError extends Schema.TaggedErrorClass<RouterError>()("RouterError", {
   message: Schema.String,
   mode: Schema.optional(Modes.ModeName),
+  profile: Schema.optional(Modes.ProfileName),
   provider: Schema.optional(Provider.ProviderName),
 }) {}
 
@@ -47,21 +48,21 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const config = yield* Config.Service
-    const provider = yield* Provider.Service
+    const registry = yield* Provider.Registry
     const route = makeRoute(config)
 
     return Service.of({
       route,
       complete: Effect.fn("LLM.Router.complete")(function* (request: Request) {
         const routed = yield* route(request)
-        yield* ensureProvider(provider, routed)
+        const provider = yield* providerFor(registry, routed)
         return yield* provider.complete(routed)
       }),
       stream: (request: Request) =>
         Stream.unwrap(
           Effect.gen(function* () {
             const routed = yield* route(request)
-            yield* ensureProvider(provider, routed)
+            const provider = yield* providerFor(registry, routed)
             return provider.stream(routed)
           }),
         ),
@@ -85,19 +86,19 @@ const makeRoute = (config: Config.Interface) =>
   Effect.fn("LLM.Router.route")(function* (request: Request) {
     const values = yield* config.get
     const modeName = request.mode ?? values.default_mode
-    const mode = Modes.get(modeName)
-    const provider = request.provider ?? mode.provider
-    const model = request.model ?? Modes.primaryModel(mode)
-    const temperature = request.temperature ?? mode.temperature
+    const routing = request.profile === undefined ? Modes.get(modeName) : Modes.getProfile(request.profile)
+    const provider = request.provider ?? routing.provider
+    const model = request.model ?? Modes.primaryModel(routing)
+    const temperature = request.temperature ?? routing.temperature
     const metadata = request.metadata
 
     return {
       mode: modeName,
+      ...(request.profile === undefined ? {} : { profile: request.profile }),
       provider,
       model,
       messages: request.messages,
-      reasoning_effort: request.reasoning_effort ?? mode.reasoning_effort,
-      max_output_tokens: request.max_output_tokens ?? mode.max_output_tokens,
+      reasoning_effort: request.reasoning_effort ?? routing.reasoning_effort,
       ...(temperature === undefined ? {} : { temperature }),
       ...(metadata === undefined ? {} : { metadata }),
       ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
@@ -105,11 +106,13 @@ const makeRoute = (config: Config.Interface) =>
     }
   })
 
-const ensureProvider = (provider: Provider.Interface, request: RoutedRequest) => {
-  if (provider.name === request.provider) return Effect.void
+const providerFor = (registry: Provider.RegistryInterface, request: RoutedRequest) => {
+  const provider = registry.get(request.provider)
+  if (provider !== undefined) return Effect.succeed(provider)
   return new RouterError({
-    message: `Mode ${request.mode} routed to provider ${request.provider}, but layer provides ${provider.name}`,
+    message: `Mode ${request.mode} routed to provider ${request.provider}, but no provider layer is registered`,
     mode: request.mode,
+    ...(request.profile === undefined ? {} : { profile: request.profile }),
     provider: request.provider,
   })
 }

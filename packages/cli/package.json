@@ -11,7 +11,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "build": "bun build ./src/main.ts --outdir dist --target bun --format esm",
+    "build": "bun build ./src/main.ts --outdir dist --target bun --format esm --external @opentui/core-darwin-arm64 --external @opentui/core-darwin-x64 --external @opentui/core-linux-arm64 --external @opentui/core-linux-arm64-musl --external @opentui/core-linux-x64 --external @opentui/core-linux-x64-musl --external @opentui/core-win32-arm64 --external @opentui/core-win32-x64",
     "lint": "bun --cwd ../.. oxlint packages/cli/src packages/cli/test",
     "test": "bun test --pass-with-no-tests",
     "typecheck": "bun tsc --noEmit"

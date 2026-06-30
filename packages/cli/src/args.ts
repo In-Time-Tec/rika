@@ -250,7 +250,7 @@ export const usage = [
   "  -V, --version          Print the version number and exit",
   "  -v                     Alias for --version",
   "  -x, --execute           Run one non-interactive turn",
-  "  -m, --mode <rush|smart|deep> Select agent mode",
+  "  -m, --mode <rush|smart|deep1|deep2|deep3> Select agent mode",
   "  --workspace <path>      Workspace root for the turn",
   "  --thread <id>           Reuse a durable thread id",
   "  --ephemeral            Use in-memory persistence for this run",
@@ -293,7 +293,7 @@ export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<
 })
 
 const baseConfig = {
-  mode: Flag.choice("mode", ["rush", "smart", "deep"]).pipe(
+  mode: Flag.choice("mode", ["rush", "smart", "deep1", "deep2", "deep3"]).pipe(
     Flag.withAlias("m"),
     Flag.optional,
     Flag.withDescription("Select agent mode"),

@@ -5,7 +5,7 @@ import type { Dirent } from "node:fs"
 import { stat } from "node:fs/promises"
 import { readdir, readFile } from "node:fs/promises"
 import { extname, join, relative } from "node:path"
-import type { SessionBackend, TurnRequest } from "./backend"
+import type { SessionBackend, ThreadOption, TurnRequest } from "./backend"
 import * as Adapter from "./adapter"
 import * as Keymap from "./keymap"
 import * as Keys from "./keys"
@@ -31,18 +31,29 @@ type AppEvent =
   | { readonly _tag: "Key"; readonly key: Keys.Key }
   | { readonly _tag: "Ui"; readonly action: Adapter.Action }
   | { readonly _tag: "Tick" }
-  | { readonly _tag: "Model"; readonly event: Event.Event }
+  | { readonly _tag: "ModelBatch"; readonly events: ReadonlyArray<Event.Event> }
+  | { readonly _tag: "ThreadPreviewLoaded"; readonly thread_id: Ids.ThreadId; readonly preview: ViewState.ViewState }
+  | { readonly _tag: "ThreadPreviewFailed"; readonly thread_id: Ids.ThreadId; readonly message: string }
   | { readonly _tag: "TurnEnded"; readonly token: number; readonly error?: unknown }
   | { readonly _tag: "Resize" }
   | { readonly _tag: "KeysDone" }
 
 type SubmittedTurn = Pick<TurnRequest, "content" | "content_parts">
 
+const modelEventBatchSize = 64
+const modelEventBatchWindow = "16 millis"
+
 export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<number, E> =>
   Effect.scoped(
     Effect.gen(function* () {
       const workspacePath = input.workspace_root ?? deps.defaultWorkspace
       let mode = input.mode ?? deps.defaultMode
+
+      if (input.thread_id === undefined) {
+        yield* deps.renderer.render(
+          ViewState.initial({ thread_id: Ids.ThreadId.make("pending"), workspace_path: workspacePath, mode }),
+        )
+      }
 
       const loaded = yield* deps.backend
         .loadInitial({
@@ -81,9 +92,11 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           turnToken += 1
           const token = turnToken
           currentTurnId = undefined
+          state = { ...state, active: true, activity: "idle" }
           const fiber = yield* Effect.forkScoped(
             deps.backend.streamTurn({ thread_id: threadId, workspace_path: workspacePath, ...submitted, mode }).pipe(
-              Stream.runForEach((event) => Queue.offer(queue, { _tag: "Model", event }).pipe(Effect.asVoid)),
+              Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
+              Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
               Effect.matchCauseEffect({
                 onFailure: (cause: Cause.Cause<E>) =>
                   Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
@@ -117,6 +130,43 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             exitCode = 0
           }
           yield* render()
+        })
+
+      const openThreadSwitcher = () =>
+        Effect.gen(function* () {
+          const threads = yield* deps.backend
+            .listThreads({ workspace_path: workspacePath })
+            .pipe(Effect.catchCause(() => Effect.succeed([])))
+          state = ViewState.openThreadSwitcher(state, threads.map(threadSwitcherItem))
+          yield* render()
+          yield* ensureSelectedThreadPreview()
+        })
+
+      const ensureSelectedThreadPreview = () =>
+        Effect.gen(function* () {
+          const thread = ViewState.selectedThreadSwitcherItem(state)
+          if (thread === undefined) return
+          if (thread.preview_state.status === "loading" || thread.preview_state.status === "ready") return
+          state = ViewState.threadSwitcherPreviewLoading(state, thread.thread_id)
+          yield* render()
+          yield* Effect.forkScoped(
+            deps.backend.loadThreadPreview({ thread_id: thread.thread_id, workspace_path: workspacePath, mode }).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause: Cause.Cause<E>) =>
+                  Queue.offer(queue, {
+                    _tag: "ThreadPreviewFailed",
+                    thread_id: thread.thread_id,
+                    message: errorMessage(Cause.squash(cause)),
+                  }).pipe(Effect.asVoid),
+                onSuccess: (preview) =>
+                  Queue.offer(queue, {
+                    _tag: "ThreadPreviewLoaded",
+                    thread_id: thread.thread_id,
+                    preview: preview.state,
+                  }).pipe(Effect.asVoid),
+              }),
+            ),
+          )
         })
 
       const submit = () =>
@@ -161,7 +211,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               .cancelTurn({ thread_id: threadId, turn_id: turnId })
               .pipe(Effect.catchCause(() => Effect.void))
           }
-          state = { ...ViewState.withNotice(state, "Interrupted the running turn."), queued: [] }
+          state = ViewState.withNotice(
+            { ...ViewState.clearQueuedMessages(state), active: false, activity: "idle", streaming_text: "" },
+            "Interrupted the running turn.",
+          )
           yield* render()
           yield* maybeShutdown()
         })
@@ -254,6 +307,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               const command = Palette.at(state.palette.query, state.palette.selected)
               state = ViewState.closePalette(state)
               if (command !== undefined) {
+                if (command.command === "/switch-thread") {
+                  yield* openThreadSwitcher()
+                  return
+                }
                 yield* runSlash(command.command)
                 yield* maybeShutdown()
                 return
@@ -297,21 +354,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               break
             }
             case "Steer": {
-              const selected = ViewState.selectedQueued(state)
-              if (selected !== undefined) {
-                const removed = ViewState.dequeueSelected(state)
-                state = ViewState.withNotice(
-                  { ...removed, queued: [selected, ...removed.queued], queue_selected: -1 },
-                  "Steering — moved to the front of the queue.",
-                )
-              } else {
-                const steering = ViewState.submitText(state).trim()
-                if (steering.length > 0) state = ViewState.enqueueMessage(state, steering)
-                state = ViewState.withNotice(
-                  ViewState.clearInput(state),
-                  "Steering message queued for the running turn.",
-                )
-              }
+              const steering = ViewState.submitText(state).trim()
+              state = ViewState.clearInput(state)
+              if (steering.length > 0) state = ViewState.enqueueMessage(state, steering)
+              state = ViewState.promoteSelectedOrNextQueued(state)
               break
             }
             case "DequeueSelected":
@@ -358,6 +404,38 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           yield* render()
         })
 
+      const handleThreadSwitcherKey = (key: Keys.Key) =>
+        Effect.gen(function* () {
+          const threads = ViewState.filteredThreadSwitcherItems(state)
+          if (key.name === "escape") state = ViewState.closeThreadSwitcher(state)
+          else if (key.name === "return") {
+            const thread = threads[state.threadswitcher.selected]
+            state = ViewState.closeThreadSwitcher(state)
+            if (thread !== undefined) {
+              yield* runSlash(`/thread ${thread.thread_id}`)
+              yield* maybeShutdown()
+              return
+            }
+          } else if (key.name === "up") {
+            state = ViewState.threadSwitcherMove(state, -1, threads.length)
+            yield* render()
+            yield* ensureSelectedThreadPreview()
+            return
+          } else if (key.name === "down") {
+            state = ViewState.threadSwitcherMove(state, 1, threads.length)
+            yield* render()
+            yield* ensureSelectedThreadPreview()
+            return
+          } else if (key.name === "backspace") {
+            state =
+              state.threadswitcher.query.length === 0
+                ? ViewState.closeThreadSwitcher(state)
+                : ViewState.threadSwitcherBackspace(state)
+          } else if (Keys.isPrintable(key)) state = ViewState.threadSwitcherInsert(state, Keys.char(key))
+          yield* render()
+          if (state.threadswitcher.open) yield* ensureSelectedThreadPreview()
+        })
+
       const handleFilePickerKey = (key: Keys.Key) =>
         Effect.gen(function* () {
           const files = ViewState.filteredFiles(state)
@@ -389,6 +467,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
 
       const handleKey = (key: Keys.Key) =>
         Effect.gen(function* () {
+          if (state.threadswitcher.open) {
+            yield* handleThreadSwitcherKey(key)
+            return
+          }
           if (state.filepicker.open) {
             yield* handleFilePickerKey(key)
             return
@@ -420,6 +502,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           active = false
           turnFiber = undefined
           currentTurnId = undefined
+          state = ViewState.finishTurn(state, error === undefined ? "idle" : "failed")
           if (error !== undefined) state = ViewState.withNotice(state, `Turn failed: ${errorMessage(error)}`)
           const dequeued = ViewState.dequeueMessage(state)
           state = dequeued.state
@@ -470,9 +553,19 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             case "Resize":
               yield* render()
               return
-            case "Model":
-              state = ViewState.applyEvent(state, appEvent.event)
-              if (appEvent.event.type === "turn.started") currentTurnId = appEvent.event.turn_id
+            case "ModelBatch":
+              for (const event of appEvent.events) {
+                state = ViewState.applyEvent(state, event)
+                if (event.type === "turn.started") currentTurnId = event.turn_id
+              }
+              yield* render()
+              return
+            case "ThreadPreviewLoaded":
+              state = ViewState.threadSwitcherPreviewReady(state, appEvent.thread_id, appEvent.preview)
+              yield* render()
+              return
+            case "ThreadPreviewFailed":
+              state = ViewState.threadSwitcherPreviewFailed(state, appEvent.thread_id, appEvent.message)
               yield* render()
               return
             case "TurnEnded":
@@ -716,9 +809,21 @@ const firstUserMessage = (state: ViewState.ViewState): string => {
 
 const nextMode = (mode: Config.Mode): Config.Mode => {
   if (mode === "rush") return "smart"
-  if (mode === "smart") return "deep"
+  if (mode === "smart") return "deep1"
+  if (mode === "deep1") return "deep2"
+  if (mode === "deep2") return "deep3"
   return "rush"
 }
+
+const threadSwitcherItem = (option: ThreadOption): ViewState.ThreadSwitcherItem => ({
+  thread_id: option.thread_id,
+  title: option.title,
+  preview: option.preview,
+  updated_label: option.updated_label,
+  archived: option.archived,
+  ...(option.diff === undefined ? {} : { diff: option.diff }),
+  preview_state: { status: "unloaded" },
+})
 
 const errorMessage = (value: unknown): string => {
   if (value instanceof Error) return value.message

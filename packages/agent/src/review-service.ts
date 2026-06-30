@@ -187,6 +187,7 @@ const runChecks = (
           tool_access: check.summary.tools.length === 0 ? "none" : "read-only",
           tool_names: check.summary.tools,
           max_output_chars: 6_000,
+          profile: "review",
         })),
       })
       findings.push(

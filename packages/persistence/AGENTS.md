@@ -20,7 +20,7 @@
 | `src/schema/event-log.ts`         | Drizzle schema for the canonical event log tables.               |
 | `src/schema/index.ts`             | Schema exports consumed by Drizzle Kit and services.             |
 | `src/thread-event-log.ts`         | Canonical append-only thread event log service.                  |
-| `src/thread-projection.ts`        | Rebuildable thread list/latest message/active turn projections.  |
+| `src/thread-projection.ts`        | Rebuildable thread list/latest message/active turn/diff projections. |
 | `src/workspace-store.ts`          | Durable workspace membership persistence for hosted access.      |
 | `test/database.test.ts`           | Database layer replacement tests.                                |
 | `test/artifact-store.test.ts`     | Artifact put/get/list persistence tests.                         |
@@ -39,6 +39,7 @@
 - Generated SQL migrations in `drizzle/` are committed. Do not hand-edit Drizzle metadata unless repairing a broken migration intentionally.
 - Raw Drizzle handles may be used only inside this package.
 - `ThreadEventLog` is canonical. `ThreadProjection` tables are disposable and must rebuild from `thread_events` only.
+- Projection summaries may include UI-facing conveniences such as active turn state and diff stats, but they must remain rebuildable from event payloads.
 - `WorkspaceStore` owns durable user/workspace memberships. Access decisions live above this package.
 
 ## For AI Agents

@@ -1,5 +1,5 @@
 import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
-import { Context, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Fiber, Layer, Option, Schema, Stream } from "effect"
 import * as RemoteControl from "./remote-control"
 
 const defaultHost = "127.0.0.1"
@@ -104,6 +104,17 @@ const route = (remote: RemoteControl.Interface, request: Request): Effect.Effect
     if (request.method === "GET" && segments[1] === "threads" && segments[2] !== undefined && segments.length === 3) {
       const input = openThreadRequest(url, segments[2])
       return yield* remote.openThread(input).pipe(jsonEffect(Remote.ThreadRecord))
+    }
+
+    if (
+      request.method === "GET" &&
+      segments[1] === "threads" &&
+      segments[2] !== undefined &&
+      segments[3] === "preview" &&
+      segments.length === 4
+    ) {
+      const input = previewThreadRequest(url, segments[2])
+      return yield* remote.previewThread(input).pipe(jsonEffect(Remote.ThreadRecord))
     }
 
     if (
@@ -215,7 +226,7 @@ const route = (remote: RemoteControl.Interface, request: Request): Effect.Effect
     }
 
     return notFound()
-  }).pipe(Effect.catch((error) => Effect.succeed(errorResponse(error))))
+  }).pipe(Effect.catchCause((cause: Cause.Cause<RemoteControl.RunError>) => Effect.succeed(errorResponseFromCause(cause))))
 
 const withLocalAuth = (request: Request, token: string | undefined) => {
   if (token === undefined || token.length === 0) return request
@@ -258,18 +269,31 @@ const ndjson = (events: Stream.Stream<Event.Event, RemoteControl.RunError>) => {
   let closed = false
   let fiber: Fiber.Fiber<void> | undefined
   const writeFrame = (controller: ReadableStreamDefaultController<Uint8Array>, frame: Remote.StreamFrame) => {
-    if (!closed) controller.enqueue(encoder.encode(`${JSON.stringify(Codec.encode(Remote.StreamFrame)(frame))}\n`))
+    if (closed) return
+    try {
+      controller.enqueue(encoder.encode(`${JSON.stringify(Codec.encode(Remote.StreamFrame)(frame))}\n`))
+    } catch {
+      closed = true
+    }
   }
   const close = (controller: ReadableStreamDefaultController<Uint8Array>) => {
     if (closed) return
     closed = true
-    controller.close()
+    try {
+      controller.close()
+    } catch {
+      return
+    }
   }
   const body = new ReadableStream<Uint8Array>({
     start(controller) {
       const pump = events.pipe(
         Stream.runForEach((event) => Effect.sync(() => writeFrame(controller, event))),
-        Effect.catch((error) => Effect.sync(() => writeFrame(controller, RemoteControl.errorToApi(error)))),
+        Effect.catchCause((cause: Cause.Cause<RemoteControl.RunError>) =>
+          Cause.hasInterruptsOnly(cause)
+            ? Effect.void
+            : Effect.sync(() => writeFrame(controller, errorFrameFromCause(cause))),
+        ),
         Effect.ensuring(Effect.sync(() => close(controller))),
       )
       fiber = Effect.runFork(pump)
@@ -291,6 +315,22 @@ const ndjson = (events: Stream.Stream<Event.Event, RemoteControl.RunError>) => {
 const errorResponse = (error: RemoteControl.RunError) =>
   json(RemoteControl.errorToApi(error), RemoteControl.statusFromError(error))
 
+const errorResponseFromCause = (cause: Cause.Cause<RemoteControl.RunError>) => {
+  const failure = Cause.findErrorOption(cause)
+  if (Option.isSome(failure)) return errorResponse(failure.value)
+  if (Cause.hasInterruptsOnly(cause)) return json({ error: { message: "Request interrupted", code: "interrupted" } }, 499)
+  return errorResponse(causeError(cause, "handle"))
+}
+
+const errorFrameFromCause = (cause: Cause.Cause<RemoteControl.RunError>): Remote.ApiError => {
+  const failure = Cause.findErrorOption(cause)
+  if (Option.isSome(failure)) return RemoteControl.errorToApi(failure.value)
+  return RemoteControl.errorToApi(causeError(cause, "stream"))
+}
+
+const causeError = (cause: Cause.Cause<RemoteControl.RunError>, operation: string) =>
+  new RemoteControl.RemoteControlError({ message: Cause.pretty(cause), operation, status: 500 })
+
 const notFound = () => json({ error: { message: "Not found", code: "not_found" } }, 404)
 
 const listThreadsRequest = (url: URL): Remote.ListThreadsRequest => {
@@ -311,6 +351,16 @@ const openThreadRequest = (url: URL, encodedThreadId: string): Remote.OpenThread
   return {
     thread_id: Ids.ThreadId.make(decodeURIComponent(encodedThreadId)),
     ...(userId === null ? {} : { user_id: Ids.UserId.make(userId) }),
+  }
+}
+
+const previewThreadRequest = (url: URL, encodedThreadId: string): Remote.PreviewThreadRequest => {
+  const userId = url.searchParams.get("user_id")
+  const limit = intParam(url, "limit")
+  return {
+    thread_id: Ids.ThreadId.make(decodeURIComponent(encodedThreadId)),
+    ...(userId === null ? {} : { user_id: Ids.UserId.make(userId) }),
+    ...(limit === undefined ? {} : { limit }),
   }
 }
 

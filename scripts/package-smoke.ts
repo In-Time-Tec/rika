@@ -9,7 +9,7 @@ const artifactPath = `dist/release/${artifactName}`
 await $`bun run package`
 
 const help = await runArtifact(["--help"])
-if (help.exitCode !== 0 || !combined(help).includes("SUBCOMMANDS")) {
+if (help.exitCode !== 0 || !combined(help).includes("Commands:")) {
   fail("compiled CLI did not render help", help)
 }
 

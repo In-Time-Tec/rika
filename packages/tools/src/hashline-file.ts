@@ -794,5 +794,3 @@ const toRegistryError = (name: string) => (error: HashlineFileError) =>
   })
 
 const relativePath = (workspaceRoot: string, path: string) => relative(workspaceRoot, path) || "."
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)

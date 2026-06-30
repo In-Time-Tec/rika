@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Common, Ids, Message } from "@rika/schema"
-import { Effect, Layer, Stream } from "effect"
+import { Common, Event, Ids, Message } from "@rika/schema"
+import { Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect"
 import { AiError, Prompt } from "effect/unstable/ai"
 import { AgentLoop, ContextResolver, PermissionPolicy, SkillRegistry, ToolExecutor, ToolRegistry } from "../src/index"
 
@@ -13,18 +13,25 @@ const workspaceId = Ids.WorkspaceId.make("workspace_agent_loop")
 const configLayer = Config.layerFromValues({
   workspace_root: "/workspace/rika-test",
   data_dir: "/workspace/rika-test/.rika",
-  default_mode: "smart",
+  default_mode: "rush",
 })
 
 const defaultToolLayer = ToolExecutor.fakeLayer({
   fake_echo: (call) => Effect.succeed({ echoed: call.input }),
 })
 
+const registryFromProviderLayer = (providerLayer: Layer.Layer<Provider.Service>) =>
+  Provider.registryLayerFromService.pipe(Layer.provide(providerLayer))
+
 const makeLayer = (
   responses: ReadonlyArray<Provider.FakeResponse>,
   toolLayer = defaultToolLayer,
   skillLayer = SkillRegistry.emptyLayer,
-  providerLayer = Provider.fakeLayer(responses),
+  providerLayer: Layer.Layer<Provider.Registry> = Provider.fakeRegistryLayer([
+    { name: "openai", responses },
+    { name: "anthropic", responses },
+  ]),
+  diagnosticsLayer = Diagnostics.memoryLayer([]),
 ) => {
   const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerLayer))
   const services = Layer.mergeAll(
@@ -35,6 +42,7 @@ const makeLayer = (
     ThreadProjection.layer,
     Time.fixedLayer(Common.TimestampMillis.make(1_900_000_000_000)),
     IdGenerator.sequenceLayer(1),
+    diagnosticsLayer,
     ContextResolver.fakeLayer({
       entries: [
         {
@@ -85,6 +93,7 @@ describe("AgentLoop", () => {
       "message.added",
       "context.resolved",
       "tool.call.input.started",
+      "tool.call.input.delta",
       "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
@@ -92,13 +101,21 @@ describe("AgentLoop", () => {
       "message.added",
       "turn.completed",
     ])
-    expect(result.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    expect(result.events.map((event) => event.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
     expect(result.events.find((event) => event.type === "context.resolved")).toMatchObject({
       data: { rendered: "<rika_context>Test guidance</rika_context>" },
     })
     expect(result.events.find((event) => event.type === "tool.call.completed")).toMatchObject({
       data: { result: { status: "success", output: { echoed: { text: "hello" } } } },
     })
+    const requestedIndex = result.events.findIndex((event) => event.type === "tool.call.requested")
+    const completedIndex = result.events.findIndex((event) => event.type === "tool.call.completed")
+    const assistantBetween = result.events
+      .slice(requestedIndex + 1, completedIndex)
+      .some((event) => event.type === "message.added" && event.data.message.role === "assistant")
+    expect(requestedIndex).toBeGreaterThan(-1)
+    expect(completedIndex).toBeGreaterThan(requestedIndex)
+    expect(assistantBetween).toBe(false)
     expect(result.summary).toMatchObject({
       thread_id: threadId,
       latest_message_text: "tool saw hello",
@@ -135,10 +152,12 @@ describe("AgentLoop", () => {
       "message.added",
       "context.resolved",
       "tool.call.input.started",
+      "tool.call.input.delta",
       "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
       "tool.call.input.started",
+      "tool.call.input.delta",
       "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
@@ -185,6 +204,177 @@ describe("AgentLoop", () => {
     ])
   })
 
+  test("coalesces bursty model deltas before persistence and replay", async () => {
+    const burstThread = Ids.ThreadId.make("thread_agent_bursty_model")
+    const chunkCount = 512
+    const chunkText = "x"
+    const content = chunkText.repeat(chunkCount)
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.bursty.complete")(function* (request: Provider.GenerateRequest) {
+          return fakeResponse(request, content)
+        }),
+        stream: (request: Provider.GenerateRequest) =>
+          Stream.fromIterable<Provider.StreamEvent>([
+            {
+              type: "response.started",
+              provider: request.provider,
+              model: request.model,
+            },
+          ]).pipe(
+            Stream.concat(
+              Stream.range(1, chunkCount).pipe(
+                Stream.map((): Provider.StreamEvent => ({ type: "content.delta", text: chunkText })),
+              ),
+            ),
+            Stream.concat(
+              Stream.fromIterable<Provider.StreamEvent>([
+                {
+                  type: "response.completed",
+                  response: fakeResponse(request, content),
+                },
+              ]),
+            ),
+          ),
+      }),
+    )
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: burstThread,
+          workspace_id: workspaceId,
+          content: "stream many chunks",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: burstThread })
+        const summary = yield* ThreadProjection.getThread(burstThread)
+        return { turn, events, summary }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const modelChunks = result.events.filter((event) => event.type === "model.stream.chunk")
+    expect(result.turn.status).toBe("completed")
+    expect(modelChunks.length).toBeLessThan(20)
+    expect(modelChunks.map((event) => (event.type === "model.stream.chunk" ? event.data.text : "")).join("")).toBe(
+      content,
+    )
+    expect(result.events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: result.events.length }, (_, index) => index + 1),
+    )
+    expect(result.summary).toMatchObject({ latest_message_text: content })
+  })
+
+  test("coalesces bursty tool input deltas before persistence and replay", async () => {
+    const burstThread = Ids.ThreadId.make("thread_agent_bursty_tool_input")
+    const chunkCount = 512
+    const chunkText = "x"
+    const inputText = chunkText.repeat(chunkCount)
+    const toolCallId = "call_bursty_tool_input"
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.burstyToolInput.complete")(function* (request: Provider.GenerateRequest) {
+          return fakeResponse(request, "done")
+        }),
+        stream: (request: Provider.GenerateRequest) =>
+          Stream.fromIterable<Provider.StreamEvent>([
+            {
+              type: "response.started",
+              provider: request.provider,
+              model: request.model,
+            },
+            {
+              type: "tool.input.started",
+              id: toolCallId,
+              name: "write",
+            },
+          ]).pipe(
+            Stream.concat(
+              Stream.range(1, chunkCount).pipe(
+                Stream.map((): Provider.StreamEvent => ({ type: "tool.input.delta", id: toolCallId, text: chunkText })),
+              ),
+            ),
+            Stream.concat(
+              Stream.fromIterable<Provider.StreamEvent>([
+                {
+                  type: "tool.input.ended",
+                  id: toolCallId,
+                  name: "write",
+                  input_text: inputText,
+                },
+                {
+                  type: "response.completed",
+                  response: fakeResponse(request, "done"),
+                },
+              ]),
+            ),
+          ),
+      }),
+    )
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* AgentLoop.runTurn({
+          thread_id: burstThread,
+          workspace_id: workspaceId,
+          content: "stream many tool input chunks",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: burstThread })
+        return { events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const inputDeltas = result.events.filter((event) => event.type === "tool.call.input.delta")
+    expect(inputDeltas.length).toBeLessThan(20)
+    expect(inputDeltas.map((event) => (event.type === "tool.call.input.delta" ? event.data.text : "")).join("")).toBe(
+      inputText,
+    )
+    expect(result.events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: result.events.length }, (_, index) => index + 1),
+    )
+  })
+
+  test("emits redacted session diagnostics for appended turn events", async () => {
+    const diagnostics: Array<Diagnostics.Entry> = []
+    const diagnosticsThread = Ids.ThreadId.make("thread_agent_diagnostics")
+    const layer = makeLayer(
+      ["diagnostic response"],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      Provider.fakeRegistryLayer([
+        { name: "openai", responses: ["diagnostic response"] },
+        { name: "anthropic", responses: ["diagnostic response"] },
+      ]),
+      Diagnostics.memoryLayer(diagnostics),
+    )
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* AgentLoop.runTurn({
+          thread_id: diagnosticsThread,
+          workspace_id: workspaceId,
+          content: "record diagnostics",
+        })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const appended = diagnostics.filter((entry) => entry.message === "thread.event.appended")
+    expect(appended.map((entry) => dataField(entry, "event_type"))).toContain("turn.started")
+    expect(appended.map((entry) => dataField(entry, "thread_id"))).toEqual(appended.map(() => diagnosticsThread))
+    expect(JSON.stringify(appended)).not.toContain("diagnostic response")
+    expect(JSON.stringify(appended)).not.toContain("record diagnostics")
+  })
+
   test("preserves image turn parts in the user message and model prompt", async () => {
     const captured: Array<Provider.GenerateRequest> = []
     const providerLayer = Layer.succeed(
@@ -201,7 +391,7 @@ describe("AgentLoop", () => {
         },
       }),
     )
-    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, providerLayer)
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
     const imagePart = Message.image({
       media_type: "image/png",
       data: "cG5nLWJ5dGVz",
@@ -217,6 +407,7 @@ describe("AgentLoop", () => {
           workspace_id: workspaceId,
           content: "In this image [Image 1] you can see it",
           content_parts: [Message.text("In this image "), imagePart, Message.text(" you can see it")],
+          mode: "rush",
         })
         const events = yield* ThreadEventLog.readThread({ thread_id: Ids.ThreadId.make("thread_agent_image") })
         return { turn, events }
@@ -330,6 +521,7 @@ describe("AgentLoop", () => {
       "message.added",
       "context.resolved",
       "tool.call.input.started",
+      "tool.call.input.delta",
       "tool.call.input.ended",
       "tool.call.requested",
       "tool.call.completed",
@@ -408,7 +600,7 @@ describe("AgentLoop", () => {
         skill("deploy", "Deploy safely", "Deploy instructions only when loaded"),
         skill("review", "Review code", "Review instructions must stay unloaded"),
       ]),
-      providerLayer,
+      registryFromProviderLayer(providerLayer),
     )
 
     const result = await Effect.runPromise(
@@ -418,6 +610,7 @@ describe("AgentLoop", () => {
           thread_id: Ids.ThreadId.make("thread_agent_skill"),
           workspace_id: workspaceId,
           content: "Use skill deploy for this release",
+          mode: "rush",
         })
         const events = yield* ThreadEventLog.readThread({ thread_id: Ids.ThreadId.make("thread_agent_skill") })
         return { turn, events }
@@ -474,12 +667,19 @@ describe("AgentLoop", () => {
   })
 
   test("contains a provider model failure as a terminal turn.failed event", async () => {
+    const diagnostics: Array<Diagnostics.Entry> = []
     const failure = AiError.make({
       module: "LanguageModel",
       method: "streamText",
       reason: new AiError.AuthenticationError({ kind: "InvalidKey" }),
     })
-    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, failingProviderLayer(failure))
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(failingProviderLayer(failure)),
+      Diagnostics.memoryLayer(diagnostics),
+    )
 
     const events = await Effect.runPromise(
       Effect.gen(function* () {
@@ -488,6 +688,7 @@ describe("AgentLoop", () => {
           thread_id: Ids.ThreadId.make("thread_agent_model_fail"),
           workspace_id: workspaceId,
           content: "trigger a model failure",
+          mode: "rush",
         }).pipe(Stream.runCollect)
         return Array.from(collected)
       }).pipe(Effect.provide(layer)),
@@ -504,16 +705,120 @@ describe("AgentLoop", () => {
       type: "turn.failed",
       data: { error: { kind: "model", retryable: false, code: "AuthenticationError" } },
     })
+    const appended = diagnostics.filter((entry) => entry.message === "thread.event.appended")
+    expect(appended.map((entry) => dataField(entry, "event_type"))).toContain("turn.failed")
+  })
+
+  test("records provider defects as terminal turn failures", async () => {
+    const defectThread = Ids.ThreadId.make("thread_agent_model_defect")
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: () => Effect.die(new Error("provider defect")),
+        stream: () => Stream.die(new Error("provider defect")),
+      }),
+    )
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(providerLayer),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const exit = yield* AgentLoop.streamTurn({
+          thread_id: defectThread,
+          workspace_id: workspaceId,
+          content: "trigger a provider defect",
+          mode: "rush",
+        }).pipe(Stream.runCollect, Effect.exit)
+        const events = yield* ThreadEventLog.readThread({ thread_id: defectThread })
+        const summary = yield* ThreadProjection.getThread(defectThread)
+        return { exit, events, summary }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.exit._tag).toBe("Failure")
+    expect(result.events.map((event) => event.type)).toEqual([
+      "thread.created",
+      "turn.started",
+      "message.added",
+      "context.resolved",
+      "turn.failed",
+    ])
+    expect(result.events.at(-1)).toMatchObject({ type: "turn.failed", data: { error: { kind: "unknown" } } })
+    expect(result.summary).toMatchObject({ active_turn_status: "failed" })
+  })
+
+  test("records stream consumer interruption as a terminal turn failure", async () => {
+    const interruptedThread = Ids.ThreadId.make("thread_agent_stream_interrupted")
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: () => Effect.never,
+        stream: () => Stream.never,
+      }),
+    )
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(providerLayer),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const streamed = yield* Queue.unbounded<Event.Event>()
+        const scope = yield* Scope.make()
+        const fiber = yield* Effect.forkIn(
+          AgentLoop.streamTurn({
+            thread_id: interruptedThread,
+            workspace_id: workspaceId,
+            content: "start and then lose the stream",
+            mode: "rush",
+          }).pipe(Stream.runForEach((event) => Queue.offer(streamed, event).pipe(Effect.asVoid))),
+          scope,
+        )
+        yield* takeUntilEvent(streamed, "context.resolved")
+        yield* Fiber.interrupt(fiber)
+        yield* Scope.close(scope, Exit.void)
+        const events = yield* ThreadEventLog.readThread({ thread_id: interruptedThread })
+        const summary = yield* ThreadProjection.getThread(interruptedThread)
+        return { events, summary }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.events.map((event) => event.type)).toEqual([
+      "thread.created",
+      "turn.started",
+      "message.added",
+      "context.resolved",
+      "turn.failed",
+    ])
+    expect(result.events.at(-1)).toMatchObject({ type: "turn.failed", data: { error: { kind: "cancelled" } } })
+    expect(result.summary).toMatchObject({ active_turn_status: "failed" })
   })
 
   test("feeds a model failure back to the model and completes after recovery", async () => {
     const captured: Array<Provider.GenerateRequest> = []
+    const diagnostics: Array<Diagnostics.Entry> = []
     const failure = AiError.make({
       module: "LanguageModel",
       method: "streamText",
       reason: new AiError.AuthenticationError({ kind: "InvalidKey" }),
     })
-    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, recoveringProviderLayer(failure, captured))
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(recoveringProviderLayer(failure, captured)),
+      Diagnostics.memoryLayer(diagnostics),
+    )
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -522,6 +827,7 @@ describe("AgentLoop", () => {
           thread_id: Ids.ThreadId.make("thread_agent_recover"),
           workspace_id: workspaceId,
           content: "recover from a model failure",
+          mode: "rush",
         })
         const events = yield* ThreadEventLog.readThread({ thread_id: Ids.ThreadId.make("thread_agent_recover") })
         return { turn, events }
@@ -550,6 +856,13 @@ describe("AgentLoop", () => {
       type: "model.error",
       retryable: false,
     })
+    const recoveryDiagnostic = diagnostics.find((entry) => entry.message === "model.stream.recovered")
+    expect(recoveryDiagnostic).toBeDefined()
+    if (recoveryDiagnostic === undefined) throw new Error("missing recovery diagnostic")
+    expect(dataField(recoveryDiagnostic, "error_type")).toBe("ProviderError")
+    expect(dataField(recoveryDiagnostic, "error_message")).toBeUndefined()
+    expect(JSON.stringify(recoveryDiagnostic)).not.toContain("InvalidKey")
+    expect(JSON.stringify(recoveryDiagnostic)).not.toContain("recover from a model failure")
   })
 
   test("emits model.reasoning.delta events from provider reasoning chunks", async () => {
@@ -569,7 +882,12 @@ describe("AgentLoop", () => {
           ]),
       }),
     )
-    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, reasoningProviderLayer)
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(reasoningProviderLayer),
+    )
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -578,6 +896,7 @@ describe("AgentLoop", () => {
           thread_id: Ids.ThreadId.make("thread_agent_reasoning"),
           workspace_id: workspaceId,
           content: "show your reasoning",
+          mode: "rush",
         })
         const events = yield* ThreadEventLog.readThread({ thread_id: Ids.ThreadId.make("thread_agent_reasoning") })
         return { turn, events }
@@ -620,6 +939,12 @@ const fakeResponse = (request: Provider.GenerateRequest, content: string): Provi
   content,
 })
 
+const dataField = (entry: Diagnostics.Entry, key: string) => {
+  const data = entry.data
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return undefined
+  return Object.entries(data).find(([field]) => field === key)?.[1]
+}
+
 const providerMessageText = (content: Provider.MessageContent): string =>
   typeof content === "string"
     ? content
@@ -627,6 +952,14 @@ const providerMessageText = (content: Provider.MessageContent): string =>
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n")
+
+const takeUntilEvent = (queue: Queue.Queue<Event.Event>, type: Event.Event["type"]) =>
+  Effect.gen(function* () {
+    while (true) {
+      const event = yield* Queue.take(queue)
+      if (event.type === type) return event
+    }
+  })
 
 const failingProviderLayer = (error: Provider.ProviderError) =>
   Layer.succeed(

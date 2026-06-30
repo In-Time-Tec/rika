@@ -7,8 +7,8 @@ import {
   ToolExecutor,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
-import { OpenAi, Provider, Router } from "@rika/llm"
+import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Live, Router } from "@rika/llm"
 import {
   ArtifactStore,
   Database,
@@ -41,8 +41,9 @@ const configuredMcpApprovalLayer = McpApprovalStore.layer.pipe(
   Layer.provideMerge(configuredTimeLayer),
 )
 const configuredWorkspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
-const configuredLlmLayer = Router.layer.pipe(Layer.provideMerge(OpenAi.layer()), Layer.provideMerge(Config.layer))
+const configuredLlmLayer = Live.layer(Live.optionsFromEnv(process.env)).pipe(Layer.provideMerge(Config.layer))
 const configuredSkillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(Config.layer))
+const configuredDiagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(Config.layer))
 const configuredPluginLayer = PluginHost.layer.pipe(
   Layer.provideMerge(Config.layer),
   Layer.provideMerge(PluginUi.silentLayer),
@@ -63,11 +64,11 @@ const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer
 const storageAndThreadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
 const configuredWorkspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
 const configuredContextResolverLayer = ContextResolver.layer.pipe(Layer.provide(storageAndThreadLayer))
-const configuredReadOnlyToolLayer = BuiltInTools.readOnlyToolExecutorLayer.pipe(Layer.provideMerge(Config.layer))
+const configuredSubagentToolLayer = BuiltInTools.subagentToolExecutorLayer.pipe(Layer.provideMerge(Config.layer))
 const configuredSubagentLayer = SubagentRuntime.layer.pipe(
   Layer.provideMerge(migratedStorageLayer),
   Layer.provideMerge(configuredLlmLayer),
-  Layer.provideMerge(configuredReadOnlyToolLayer),
+  Layer.provideMerge(configuredSubagentToolLayer),
 )
 const configuredSpecialtyToolLayer = SpecialtyTools.layer.pipe(
   Layer.provideMerge(migratedStorageLayer),
@@ -86,11 +87,11 @@ type ServiceLayerOutput =
   | Config.Service
   | ContextResolver.Service
   | Database.Service
+  | Diagnostics.Service
   | IdGenerator.Service
   | Migration.Service
   | McpApprovalStore.Service
   | PluginHost.Service
-  | Provider.Service
   | Router.Service
   | SkillRegistry.Service
   | SpecialtyTools.Service
@@ -120,6 +121,7 @@ const baseServiceLayer = Layer.mergeAll(
   configuredSkillLayer,
   configuredToolLayer,
   configuredLlmLayer,
+  configuredDiagnosticsLayer,
 )
 
 export const serviceLayer: Layer.Layer<ServiceLayerOutput, ServiceLayerError> = AgentLoop.layer.pipe(

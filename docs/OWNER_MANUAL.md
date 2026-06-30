@@ -40,13 +40,15 @@ rika --execute "summarize this repo" --mode smart
 
 Rika ships three mode names as routing data:
 
-| Mode    | Intent                              | Default reasoning | Tool policy  |
-| ------- | ----------------------------------- | ----------------- | ------------ |
-| `rush`  | Lowest latency for small tasks      | `none`            | `minimal`    |
-| `smart` | Balanced default                    | `medium`          | `standard`   |
-| `deep`  | Maximum capability for complex work | `high`            | `autonomous` |
+| Mode    | Intent                         | Default reasoning | Tool policy  |
+| ------- | ------------------------------ | ----------------- | ------------ |
+| `rush`  | Lowest latency for small tasks | `none`            | `minimal`    |
+| `smart` | Strong default intelligence    | `max`             | `standard`   |
+| `deep1` | Capable coding mode            | `medium`          | `autonomous` |
+| `deep2` | Deeper coding mode             | `high`            | `autonomous` |
+| `deep3` | Maximum coding mode            | `xhigh`           | `autonomous` |
 
-The current default provider is OpenAI through Effect AI (`@effect/ai-openai`), with `gpt-5.5` as the default model preference for all modes. Rika does not hand-roll provider HTTP/SSE adapters.
+Rika uses Effect AI provider packages for model access. Smart mode routes to Anthropic, and rush/deep1/deep2/deep3 modes route to OpenAI. Rika does not hand-roll provider HTTP/SSE adapters.
 
 ## Prompting
 
@@ -201,14 +203,12 @@ Rika reads configuration from three sources, in precedence order:
 2. Workspace `.env.local`.
 3. Global `~/.rika/settings.json`.
 
-Use `~/.rika/settings.json` for machine-wide defaults such as a local OpenAI-compatible proxy:
+Use `~/.rika/settings.json` for machine-wide model defaults:
 
 ```json
 {
-  "openai": {
-    "api_key": "dummy",
-    "base_url": "http://127.0.0.1:8317/v1"
-  }
+  "api_key": "dummy",
+  "base_url": "http://127.0.0.1:8317/v1"
 }
 ```
 
@@ -216,20 +216,20 @@ Use `.env.local` in a development checkout when that workspace needs different m
 
 Common environment variables:
 
-| Variable                                                                                                        | Purpose                                                |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `RIKA_WORKSPACE_ROOT`                                                                                           | Default workspace root.                                |
-| `RIKA_DATA_DIR`                                                                                                 | Local data directory. Defaults to `<workspace>/.rika`. |
-| `RIKA_DATABASE_URL`                                                                                             | Optional SQLite database URL/path override.            |
-| `RIKA_OPENAI_API_KEY` / `OPENAI_API_KEY`                                                                        | OpenAI provider credentials.                           |
-| `RIKA_OPENAI_API_URL` / `RIKA_OPENAI_BASE_URL` / `OPENAI_BASE_URL` / `OPENAI_API_BASE` / `VIBE_OPENAI_BASE_URL` | Optional OpenAI-compatible proxy endpoint.             |
-| `RIKA_BACKEND_URL` / `RIKA_BACKEND_TOKEN`                                                                       | Connect interactive TUI to an existing backend.        |
-| `RIKA_BACKEND_PORT`                                                                                             | Override deterministic shared local backend port.      |
-| `RIKA_RIVET_HOST`                                                                                               | `local` or `remote`.                                   |
-| `RIKA_RIVET_ENDPOINT` / `RIVET_ENDPOINT`                                                                        | Rivet endpoint.                                        |
-| `RIKA_RIVET_TOKEN` / `RIVET_TOKEN`                                                                              | Optional Rivet token.                                  |
-| `RIKA_RIVET_NAMESPACE` / `RIVET_NAMESPACE`                                                                      | Optional Rivet namespace.                              |
-| `RIKA_INSTALL_DIR`                                                                                              | Destination for `install:local` / `update:local`.      |
+| Variable                                   | Purpose                                                |
+| ------------------------------------------ | ------------------------------------------------------ |
+| `RIKA_WORKSPACE_ROOT`                      | Default workspace root.                                |
+| `RIKA_DATA_DIR`                            | Local data directory. Defaults to `<workspace>/.rika`. |
+| `RIKA_DATABASE_URL`                        | Optional SQLite database URL/path override.            |
+| `RIKA_API_KEY`                             | Model provider credentials.                            |
+| `RIKA_BASE_URL`                            | Optional model provider proxy endpoint.                |
+| `RIKA_BACKEND_URL` / `RIKA_BACKEND_TOKEN`  | Connect interactive TUI to an existing backend.        |
+| `RIKA_BACKEND_PORT`                        | Override deterministic shared local backend port.      |
+| `RIKA_RIVET_HOST`                          | `local` or `remote`.                                   |
+| `RIKA_RIVET_ENDPOINT` / `RIVET_ENDPOINT`   | Rivet endpoint.                                        |
+| `RIKA_RIVET_TOKEN` / `RIVET_TOKEN`         | Optional Rivet token.                                  |
+| `RIKA_RIVET_NAMESPACE` / `RIVET_NAMESPACE` | Optional Rivet namespace.                              |
+| `RIKA_INSTALL_DIR`                         | Destination for `install:local` / `update:local`.      |
 
 ## Persistence and Rivet hosting
 

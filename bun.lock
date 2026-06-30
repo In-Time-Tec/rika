@@ -87,6 +87,7 @@
       "name": "@rika/llm",
       "version": "0.0.0",
       "dependencies": {
+        "@effect/ai-anthropic": "catalog:",
         "@effect/ai-openai": "catalog:",
         "@rika/core": "workspace:*",
         "effect": "catalog:",
@@ -228,6 +229,7 @@
     },
   },
   "catalog": {
+    "@effect/ai-anthropic": "4.0.0-beta.90",
     "@effect/ai-openai": "4.0.0-beta.90",
     "@effect/platform-node": "4.0.0-beta.90",
     "@effect/sql-sqlite-bun": "4.0.0-beta.90",
@@ -261,6 +263,8 @@
     "@cbor-extract/cbor-extract-win32-x64": ["@cbor-extract/cbor-extract-win32-x64@2.2.2", "", { "os": "win32", "cpu": "x64" }, "sha512-dI+9P7cfWxkTQ+oE+7Aa6onEn92PHgfWXZivjNheCRmTBDBf2fx6RyTi0cmgpYLnD1KLZK9ZYrMxaPZ4oiXhGA=="],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.11.0", "", {}, "sha512-hD3pekGiPg0WPCCGAZmusBBJsDqGUR66Y452YgQsZOnkdQ7ViEPKuyP4huUGEZQefp8g34RRodXYmJ2TbCH+tg=="],
+
+    "@effect/ai-anthropic": ["@effect/ai-anthropic@4.0.0-beta.90", "", { "peerDependencies": { "effect": "^4.0.0-beta.90" } }, "sha512-oiqXVB69/7DplKsZGbh9JW6sSj/t+Vh+TXmVLG0+oyg7xm/oIc7J3uWJ5PA2Y1IgH/irrciU6OPC7YWthGVFKw=="],
 
     "@effect/ai-openai": ["@effect/ai-openai@4.0.0-beta.90", "", { "peerDependencies": { "effect": "^4.0.0-beta.90" } }, "sha512-aWWXah1esZXITvkIHFh/zdERknLdMnDaz7VubaE8Seduk51vEilLXK+h7cMm6uIl7RtF5v9+3+hkmEPFsIWH/w=="],
 

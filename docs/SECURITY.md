@@ -38,7 +38,7 @@ When working in untrusted repositories:
 
 Secrets should enter through environment/config boundaries:
 
-- `RIKA_OPENAI_API_KEY` / `OPENAI_API_KEY`
+- `RIKA_API_KEY`
 - `RIKA_RIVET_TOKEN` / `RIVET_TOKEN`
 - remote MCP headers/tokens when configured
 - remote-control bearer token

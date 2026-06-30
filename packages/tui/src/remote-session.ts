@@ -94,13 +94,34 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
   listThreads: ({ workspace_path }) =>
     client
       .listThreads({ workspace_id: Ids.WorkspaceId.make(workspace_path) })
-      .pipe(Effect.map((summaries) => summaries.map(threadOption))),
+      .pipe(Effect.map((summaries) => summaries.map(threadOptionFromSummary))),
+  loadThreadPreview: ({ thread_id, workspace_path, mode }) =>
+    client.previewThread(thread_id).pipe(
+      Effect.map((record) => ({
+        thread_id,
+        state: ViewState.initial({ thread_id, workspace_path, mode, events: record.events }),
+      })),
+      Effect.mapError(previewError),
+    ),
 })
 
-const threadOption = (summary: Remote.ThreadSummary): Backend.ThreadOption => ({
-  thread_id: summary.thread_id,
-  label: summaryLine(summary),
-})
+const previewError = (error: Client.SdkError): RunError => {
+  if (error.status !== undefined) return error
+  return new RemoteSessionError({
+    message: "Preview unavailable while reconnecting to the shared backend.",
+    operation: "loadThreadPreview",
+  })
+}
+
+const threadOptionFromSummary = (summary: Remote.ThreadSummary): Backend.ThreadOption =>
+  Backend.threadOption({
+    thread_id: summary.thread_id,
+    ...(summary.title_text === undefined ? {} : { title_text: summary.title_text }),
+    ...(summary.latest_message_text === undefined ? {} : { latest_message_text: summary.latest_message_text }),
+    updated_at: summary.updated_at,
+    archived: summary.archived,
+    diff: summary.diff,
+  })
 
 const handleCommand = (
   client: Client.Interface,
@@ -230,7 +251,7 @@ const modeCommand = (context: Backend.CommandContext, argument: string | undefin
   const nextMode = argument === undefined || argument.length === 0 ? nextModeAfter(context.mode) : parseMode(argument)
   if (nextMode === undefined)
     return Backend.commandResult(context, {
-      state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep"),
+      state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep1|deep2|deep3"),
     })
   return Backend.commandResult(context, {
     state: ViewState.withNotice(ViewState.withMode(context.state, nextMode), `Mode switched to ${nextMode}`),
@@ -245,7 +266,9 @@ const parseMode = (value: string): Config.Mode | undefined => {
 
 const nextModeAfter = (mode: Config.Mode): Config.Mode => {
   if (mode === "rush") return "smart"
-  if (mode === "smart") return "deep"
+  if (mode === "smart") return "deep1"
+  if (mode === "deep1") return "deep2"
+  if (mode === "deep2") return "deep3"
   return "rush"
 }
 

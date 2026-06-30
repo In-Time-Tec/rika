@@ -73,6 +73,31 @@ export const readOnlyRegistryLayerFromServices: Layer.Layer<
   }),
 )
 
+export const subagentRegistryLayerFromServices: Layer.Layer<
+  ToolRegistry.Service,
+  never,
+  AstGrepOutline.Service | Config.Service | FffSearch.Service | HashlineFile.Service | SemanticSearch.Service
+> = Layer.effect(
+  ToolRegistry.Service,
+  Effect.gen(function* () {
+    const config = yield* Config.Service
+    const values = yield* config.get
+    const astGrepOutline = yield* AstGrepOutline.Service
+    const fffSearch = yield* FffSearch.Service
+    const hashlineFile = yield* HashlineFile.Service
+    const semanticSearch = yield* SemanticSearch.Service
+    const definitions = [
+      ...ToolRegistry.shellDefinitions(values.workspace_root),
+      ...SemanticSearch.toolDefinitions(semanticSearch),
+      ...FffSearch.toolDefinitions(fffSearch),
+      ...AstGrepOutline.toolDefinitions(astGrepOutline),
+      ...HashlineFile.toolDefinitions(hashlineFile),
+    ]
+
+    return yield* ToolRegistry.Service.pipe(Effect.provide(ToolRegistry.layerFromDefinitions(definitions)))
+  }),
+)
+
 export const registryLayer: Layer.Layer<
   ToolRegistry.Service,
   FffSearch.FffSearchError | McpClient.RunError,
@@ -87,6 +112,14 @@ export const registryLayer: Layer.Layer<
 
 export const readOnlyRegistryLayer: Layer.Layer<ToolRegistry.Service, FffSearch.FffSearchError, Config.Service> =
   readOnlyRegistryLayerFromServices.pipe(
+    Layer.provideMerge(SemanticSearch.layer),
+    Layer.provideMerge(FffSearch.layer),
+    Layer.provideMerge(AstGrepOutline.layer),
+    Layer.provideMerge(HashlineFile.layer),
+  )
+
+export const subagentRegistryLayer: Layer.Layer<ToolRegistry.Service, FffSearch.FffSearchError, Config.Service> =
+  subagentRegistryLayerFromServices.pipe(
     Layer.provideMerge(SemanticSearch.layer),
     Layer.provideMerge(FffSearch.layer),
     Layer.provideMerge(AstGrepOutline.layer),
@@ -120,3 +153,13 @@ export const readOnlyToolExecutorLayerFromPermissionConfig = (
   )
 
 export const readOnlyToolExecutorLayer = readOnlyToolExecutorLayerFromPermissionConfig()
+
+export const subagentToolExecutorLayerFromPermissionConfig = (
+  permissionConfig: PermissionPolicy.PermissionConfig = PermissionPolicy.defaultConfig,
+): Layer.Layer<ToolExecutor.SubagentService, FffSearch.FffSearchError, Config.Service> =>
+  ToolExecutor.subagentLayer.pipe(
+    Layer.provideMerge(subagentRegistryLayer),
+    Layer.provideMerge(PermissionPolicy.layerFromConfig(permissionConfig)),
+  )
+
+export const subagentToolExecutorLayer = subagentToolExecutorLayerFromPermissionConfig()

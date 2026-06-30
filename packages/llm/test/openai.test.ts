@@ -9,7 +9,6 @@ const request: Provider.GenerateRequest = {
   model: "gpt-test",
   messages: [{ role: "user", content: "Hello" }],
   reasoning_effort: "low",
-  max_output_tokens: 123,
   temperature: 0.2,
   metadata: { thread_id: "T-1" },
 }
@@ -27,14 +26,13 @@ describe("OpenAI Effect AI layer", () => {
       model: "gpt-test",
       store: false,
       temperature: 0.2,
-      max_output_tokens: 123,
       metadata: { thread_id: "T-1" },
       reasoning: { effort: "low" },
     })
   })
 
   test("keeps OpenAI credentials behind the live layer options", () => {
-    expect(OpenAi.defaultApiKeyEnv).toBe("OPENAI_API_KEY")
+    expect(OpenAi.defaultApiKeyEnv).toBe("RIKA_API_KEY")
     expect(OpenAi.providerName).toBe("openai")
   })
 

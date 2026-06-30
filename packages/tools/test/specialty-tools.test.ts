@@ -33,7 +33,15 @@ const modelLayer = (responses: ReadonlyArray<Provider.FakeResponse>) =>
   SpecialtyTools.layer.pipe(
     Layer.provideMerge(baseLayer()),
     Layer.provideMerge(
-      Router.layer.pipe(Layer.provideMerge(Provider.fakeLayer(responses)), Layer.provideMerge(configLayer)),
+      Router.layer.pipe(
+        Layer.provideMerge(
+          Provider.fakeRegistryLayer([
+            { name: "anthropic", responses },
+            { name: "openai", responses },
+          ]),
+        ),
+        Layer.provideMerge(configLayer),
+      ),
     ),
   )
 

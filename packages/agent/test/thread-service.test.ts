@@ -78,23 +78,47 @@ describe("ThreadService", () => {
     expect(result.reference.rendered).toContain("Fix auth race")
     expect(result.reference.entries).toContain("File: src/auth.ts")
   })
+
+  test("loads preview records from the latest event-log tail", async () => {
+    const preview = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
+        for (const event of [messageAdded(2, "first"), messageAdded(3, "second"), messageAdded(4, "third")]) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        return yield* ThreadService.preview({ thread_id: threadId, limit: 2 })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(preview.summary.title_text).toBe("first")
+    expect(preview.summary.latest_message_text).toBe("third")
+    expect(preview.events.map((event) => event.sequence)).toEqual([3, 4])
+  })
 })
 
-const messageAdded = (): Event.MessageAdded => ({
-  id: Ids.EventId.make("thread_service_message_event"),
+const messageAdded = (
+  sequence = 2,
+  content: string | ReadonlyArray<Message.ContentPart> = [
+    Message.text("Fix auth race"),
+    { type: "file-reference", path: "src/auth.ts" },
+  ],
+): Event.MessageAdded => ({
+  id: Ids.EventId.make(`thread_service_message_event_${sequence}`),
   thread_id: threadId,
   turn_id: turnId,
-  sequence: 2,
+  sequence,
   version: 1,
   created_at: now,
   type: "message.added",
   data: {
     message: Message.user({
-      id: Ids.MessageId.make("thread_service_message"),
+      id: Ids.MessageId.make(`thread_service_message_${sequence}`),
       thread_id: threadId,
       turn_id: turnId,
       created_at: now,
-      content: [Message.text("Fix auth race"), { type: "file-reference", path: "src/auth.ts" }],
+      content,
     }),
   },
 })

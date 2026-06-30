@@ -16,7 +16,7 @@ const readTool = Tool.make("read", {
   failureMode: "return",
 })
 
-const defaultToolLayer = ToolExecutor.fakeReadOnlyLayer(
+const defaultToolLayer = ToolExecutor.fakeSubagentLayer(
   {
     read: (call) => Effect.succeed({ path: pathFromInput(call.input), content: "read output" }),
   },
@@ -69,7 +69,7 @@ describe("SubagentRuntime", () => {
     expect(requests[1]?.messages.map((message) => providerMessageText(message.content)).join("\n")).not.toContain(
       "inspect alpha",
     )
-    expect(requests.map((request) => request.max_output_tokens)).toEqual([500, 500])
+    expect(requests.map((request) => Object.hasOwn(request, "max_output_tokens"))).toEqual([false, false])
   })
 
   test("rejects mutating tool access before subagents run", async () => {
@@ -92,6 +92,67 @@ describe("SubagentRuntime", () => {
     expect(error).toMatchObject({ message: expect.stringContaining("read-only") })
   })
 
+  test("allows read-write subagents to use workspace tools", async () => {
+    const toolCalls: Array<Call> = []
+    const routerRequests: Array<Router.Request> = []
+    let requestCount = 0
+    const shellTool = Tool.make("shell_command", {
+      description: "Run a shell command",
+      parameters: Schema.Struct({ command: Schema.String }),
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    })
+    const routerLayer = fakeRouterLayer((request) =>
+      Effect.sync(() => {
+        routerRequests.push(request)
+        requestCount += 1
+        if (requestCount === 1) {
+          return response(JSON.stringify({ tool_call: { name: "shell_command", input: { command: "printf ok" } } }))
+        }
+        return response("Created the file.\n- subagent-output.txt")
+      }),
+    )
+    const toolLayer = ToolExecutor.fakeSubagentLayer(
+      {
+        shell_command: (call) =>
+          Effect.sync(() => {
+            toolCalls.push(call)
+            return { stdout: "ok", stderr: "", exit_code: 0 }
+          }),
+      },
+      [shellTool],
+    )
+
+    const result = await Effect.runPromise(
+      SubagentRuntime.runBatch({
+        agents: [
+          {
+            name: "writer",
+            prompt: "create a file",
+            tool_access: "read-write",
+            tool_names: ["shell_command"],
+          },
+        ],
+      }).pipe(Effect.provide(makeLayer(routerLayer, toolLayer))),
+    )
+
+    expect(result.runs[0]).toMatchObject({
+      name: "writer",
+      status: "completed",
+      evidence: ["subagent-output.txt"],
+      tool_access: "read-write",
+      tool_names: ["shell_command"],
+    })
+    expect(toolCalls).toHaveLength(1)
+    expect(toolCalls[0]).toMatchObject({ name: "shell_command", input: { command: "printf ok" } })
+    const systemPrompt = providerMessageText(routerRequests[0]?.messages[0]?.content ?? "")
+    expect(systemPrompt).toContain("Tools available to this subagent:")
+    expect(systemPrompt).toContain("Use mutating tools only when required by the delegated task.")
+    expect(systemPrompt).not.toContain("Read-only tools available to this subagent:")
+    expect(systemPrompt).not.toContain("Do not propose or perform file mutations.")
+  })
+
   test("allows one read-only tool call and feeds only the result into the final summary", async () => {
     const toolCalls: Array<Call> = []
     const routerRequests: Array<Router.Request> = []
@@ -107,7 +168,7 @@ describe("SubagentRuntime", () => {
         return response("Read README.md and found the setup notes.\n- README.md")
       }),
     )
-    const toolLayer = ToolExecutor.fakeReadOnlyLayer(
+    const toolLayer = ToolExecutor.fakeSubagentLayer(
       {
         read: (call) =>
           Effect.sync(() => {
@@ -141,7 +202,7 @@ describe("SubagentRuntime", () => {
         parent_turn_id: "turn_parent",
       },
     })
-    expect(routerRequests.map((request) => request.max_output_tokens)).toEqual([200, 200])
+    expect(routerRequests.map((request) => Object.hasOwn(request, "max_output_tokens"))).toEqual([false, false])
     expect(routerRequests.map((request) => request.metadata)).toEqual([
       {
         subagent_id: "subagent_1",
@@ -189,7 +250,6 @@ const fakeRouterLayer = (complete: (request: Router.Request) => Effect.Effect<Pr
           model: request.model ?? "fake-model",
           messages: request.messages,
           reasoning_effort: request.reasoning_effort ?? "none",
-          max_output_tokens: request.max_output_tokens ?? 1_000,
         }
       }),
       complete: Effect.fn("SubagentRuntime.test.complete")(complete),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AgentLoop, ContextResolver, SkillRegistry, ToolExecutor, WorkspaceAccess } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection, WorkspaceStore } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
@@ -17,7 +17,12 @@ const configLayer = Config.layerFromValues({
   default_mode: "smart",
 })
 const llmLayer = Router.layer.pipe(
-  Layer.provideMerge(Provider.fakeLayer(["actor loop response"])),
+  Layer.provideMerge(
+    Provider.fakeRegistryLayer([
+      { name: "anthropic", responses: ["actor loop response"] },
+      { name: "openai", responses: ["actor loop response"] },
+    ]),
+  ),
   Layer.provideMerge(configLayer),
 )
 
@@ -30,6 +35,7 @@ const baseServiceLayer = Layer.mergeAll(
   WorkspaceStore.layer.pipe(Layer.provideMerge(Database.memoryLayer)),
   Time.fixedLayer(Common.TimestampMillis.make(1_800_000_000_000)),
   IdGenerator.sequenceLayer(1),
+  Diagnostics.memoryLayer([]),
   ContextResolver.emptyLayer,
   SkillRegistry.emptyLayer,
   ToolExecutor.emptyLayer,

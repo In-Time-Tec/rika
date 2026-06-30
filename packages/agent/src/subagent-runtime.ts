@@ -1,5 +1,5 @@
 import { Config, IdGenerator, Time } from "@rika/core"
-import { Provider, Router } from "@rika/llm"
+import { Modes, Provider, Router } from "@rika/llm"
 import { Common, Ids } from "@rika/schema"
 import type { Call } from "@rika/schema/tool"
 import { Context, Effect, Layer, Option, Schema } from "effect"
@@ -12,7 +12,7 @@ export const Status = Schema.Literals(["completed", "failed", "cancelled"]).anno
 })
 export type Status = typeof Status.Type
 
-export const ToolAccess = Schema.Literals(["read-only", "none"]).annotate({
+export const ToolAccess = Schema.Literals(["read-only", "read-write", "none"]).annotate({
   identifier: "Rika.Agent.SubagentRuntime.ToolAccess",
 })
 export type ToolAccess = typeof ToolAccess.Type
@@ -25,6 +25,7 @@ export const Spec = Schema.Struct({
   tool_names: Schema.optionalKey(Schema.Array(Schema.String)),
   max_output_chars: Schema.optionalKey(Schema.Int),
   mode: Schema.optionalKey(Config.Mode),
+  profile: Schema.optionalKey(Modes.ProfileName),
 }).annotate({ identifier: "Rika.Agent.SubagentRuntime.Spec" })
 
 export interface RunBatchInput extends Schema.Schema.Type<typeof RunBatchInput> {}
@@ -94,7 +95,7 @@ export const layer = Layer.effect(
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
     const router = yield* Router.Service
-    const toolExecutor = yield* ToolExecutor.ReadOnlyService
+    const toolExecutor = yield* ToolExecutor.SubagentService
     const dependencies: Dependencies = { idGenerator, time, router, toolExecutor }
 
     return Service.of({
@@ -120,7 +121,7 @@ export const toolDefinitions = (runtime: Interface): ReadonlyArray<ToolRegistry.
   {
     tool: Tool.make("task", {
       description:
-        "Run one or more isolated read-only subagents in parallel and return compact summaries with evidence. Use for independent research, verification, or codebase exploration; do not use for mutating work.",
+        "Run one or more isolated subagents in parallel and return compact summaries with evidence. Use read-write access only when the user asked for delegated implementation or workspace mutation.",
       parameters: RunBatchInput,
       success: Schema.Json,
       failure: Schema.Json,
@@ -169,7 +170,9 @@ const validateBatchInput = (input: RunBatchInput) =>
           ...(spec.name === undefined ? {} : { name: spec.name }),
         })
       }
-      const disallowed = requestedToolNames(spec).filter((name) => !readOnlyToolSet.has(name))
+      const toolAccess = spec.tool_access ?? "read-only"
+      const disallowed =
+        toolAccess === "read-write" ? [] : requestedToolNames(spec).filter((name) => !readOnlyToolSet.has(name))
       if (disallowed.length > 0) {
         return yield* new SubagentRuntimeError({
           message: `Subagents are read-only; disallowed tools: ${disallowed.join(", ")}`,
@@ -207,7 +210,7 @@ const runOne = (dependencies: Dependencies, spec: Spec, index: number, input: Ru
     }
 
     const response = yield* dependencies.router
-      .complete({ mode: spec.mode, messages, max_output_tokens: outputTokenCap(spec), metadata })
+      .complete({ mode: spec.mode, profile: spec.profile, messages, metadata })
       .pipe(Effect.result)
     const completedAt = yield* dependencies.time.nowMillis
 
@@ -300,7 +303,7 @@ const runToolFollowUp = (
     const finalResponse = yield* dependencies.router
       .complete({
         mode: spec.mode,
-        max_output_tokens: outputTokenCap(spec),
+        profile: spec.profile,
         metadata: ids.metadata,
         messages: [
           ...messages,
@@ -316,7 +319,7 @@ const runToolFollowUp = (
         subagent_id: ids.subagent_id,
         name,
         status: "failed",
-        summary: "Subagent failed after a read-only tool result.",
+        summary: "Subagent failed after a tool result.",
         evidence: [],
         tool_access: toolAccess,
         tool_names: toolNames,
@@ -357,19 +360,24 @@ const subagentMessages = (
           `You are Rika subagent ${name}.`,
           "Work in isolation. Do not assume other subagents can see your context or findings.",
           "Return a compact final summary with specific evidence. Do not include raw transcripts.",
-          toolAccess === "none"
-            ? "No tools are available for this subagent."
-            : [
-                "Read-only tools available to this subagent:",
-                ...descriptors.map((descriptor) => `- ${descriptor.name}: ${descriptor.description}`),
-                'To call a tool once, respond with JSON only: {"tool_call":{"name":"tool.name","input":{}}}',
-                "Do not propose or perform file mutations.",
-              ].join("\n"),
+          toolInstructions(toolAccess, descriptors),
         ].join("\n"),
       },
       { role: "user" as const, content: spec.prompt },
     ]
   })
+
+const toolInstructions = (toolAccess: ToolAccess, descriptors: ReadonlyArray<ToolRegistry.Descriptor>) => {
+  if (toolAccess === "none") return "No tools are available for this subagent."
+  return [
+    toolAccess === "read-write" ? "Tools available to this subagent:" : "Read-only tools available to this subagent:",
+    ...descriptors.map((descriptor) => `- ${descriptor.name}: ${descriptor.description}`),
+    'To call a tool once, respond with JSON only: {"tool_call":{"name":"tool.name","input":{}}}',
+    toolAccess === "read-write"
+      ? "Use mutating tools only when required by the delegated task."
+      : "Do not propose or perform file mutations.",
+  ].join("\n")
+}
 
 const requestedToolNames = (spec: Spec): ReadonlyArray<string> =>
   spec.tool_names === undefined || spec.tool_names.length === 0 ? [...readOnlyToolNames] : [...spec.tool_names]
@@ -453,7 +461,6 @@ const extractEvidence = (content: string): ReadonlyArray<string> =>
     .slice(0, 5)
 
 const outputCap = (spec: Spec) => clamp(spec.max_output_chars ?? 2_000, 200, 8_000)
-const outputTokenCap = (spec: Spec) => clamp(Math.ceil(outputCap(spec) / 4), 200, 2_000)
 const capText = (text: string, maxChars: number) =>
   text.length <= maxChars ? text : `${text.slice(0, maxChars)}\n… truncated`
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)

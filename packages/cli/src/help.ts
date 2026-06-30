@@ -34,7 +34,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -72,7 +72,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -111,7 +111,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -154,7 +154,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -192,7 +192,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -257,7 +257,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -298,7 +298,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -345,7 +345,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -396,7 +396,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -434,7 +434,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -474,7 +474,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -530,7 +530,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -570,7 +570,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -613,7 +613,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -656,7 +656,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -701,7 +701,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -739,7 +739,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -789,7 +789,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -853,7 +853,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -901,7 +901,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -941,7 +941,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -1042,7 +1042,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -1089,7 +1089,7 @@ Global options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
@@ -1201,7 +1201,7 @@ Options:
   --mcp-config <value>
       JSON configuration or file path for MCP servers to merge with existing settings
   -m, --mode <value>
-      Set the agent mode (deep, rush, smart) — controls the model, system prompt, and tool selection
+      Set the agent mode (rush, smart, deep1, deep2, deep3) — controls the model, system prompt, and tool selection
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   -x, --execute [message]
@@ -1289,7 +1289,7 @@ Settings reference:
       Define default thread visibility per repository origin using mappings like "github.com/org/repo": "workspace".
       Values: private, workspace, group.
   amp.experimental.modes
-      Enable experimental agent modes by name. Available modes: deep
+      Enable experimental agent modes by name. Available modes: deep1, deep2, deep3
   amp.fuzzy.alwaysIncludePaths
       Glob patterns for paths that should always be included in fuzzy file search, even if gitignored
   amp.git.commit.ampThread.enabled
