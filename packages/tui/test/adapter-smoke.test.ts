@@ -62,7 +62,7 @@ describe("adapter Surface (headless)", () => {
           ViewState.withGitBranch(
             ViewState.initial({
               thread_id: threadId,
-              workspace_path: "/Users/dallen.pyrah/projects/rika",
+              workspace_path: `${process.env.HOME ?? "/root"}/projects/rika`,
               mode: "smart",
               events: [turnStarted(1)],
             }),
