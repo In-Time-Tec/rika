@@ -1,5 +1,5 @@
 import { Config } from "@rika/core"
-import { Event, Ids } from "@rika/schema"
+import { Event, Ids, Message } from "@rika/schema"
 import { Effect, Stream } from "effect"
 import * as ViewState from "./view-state"
 
@@ -18,6 +18,7 @@ export interface TurnRequest {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
   readonly content: string
+  readonly content_parts?: ReadonlyArray<Message.ContentPart>
   readonly mode: Config.Mode
 }
 

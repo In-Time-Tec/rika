@@ -12,7 +12,7 @@ describe("ViewState input editing", () => {
   test("insertText, cursor movement, and backspace are pure", () => {
     let state = base()
     state = ViewState.insertText(state, "hello")
-    expect(state.input).toEqual({ text: "hello", cursor: 5 })
+    expect(state.input).toEqual({ text: "hello", cursor: 5, attachments: [] })
     state = ViewState.moveCursorLeft(ViewState.moveCursorLeft(state))
     expect(state.input.cursor).toBe(3)
     state = ViewState.insertText(state, "X")
@@ -26,25 +26,58 @@ describe("ViewState input editing", () => {
     state = ViewState.newline(state)
     expect(state.input.text).toBe("hello\n")
     state = ViewState.clearInput(state)
-    expect(state.input).toEqual({ text: "", cursor: 0 })
+    expect(state.input).toEqual({ text: "", cursor: 0, attachments: [] })
   })
 
   test("word and line edits update the prompt around the cursor", () => {
     let state = withInput("alpha beta gamma")
     state = ViewState.deleteWordBackward(state)
-    expect(state.input).toEqual({ text: "alpha beta ", cursor: 11 })
+    expect(state.input).toEqual({ text: "alpha beta ", cursor: 11, attachments: [] })
     state = ViewState.moveWordLeft(state)
     expect(state.input.cursor).toBe(6)
     state = ViewState.deleteWordForward(state)
-    expect(state.input).toEqual({ text: "alpha  ", cursor: 6 })
+    expect(state.input).toEqual({ text: "alpha  ", cursor: 6, attachments: [] })
 
     state = withInput("first second third", 13)
     state = ViewState.deleteToLineStart(state)
-    expect(state.input).toEqual({ text: "third", cursor: 0 })
+    expect(state.input).toEqual({ text: "third", cursor: 0, attachments: [] })
 
     state = withInput("first second third", 6)
     state = ViewState.deleteToLineEnd(state)
-    expect(state.input).toEqual({ text: "first ", cursor: 6 })
+    expect(state.input).toEqual({ text: "first ", cursor: 6, attachments: [] })
+  })
+
+  test("image attachments keep the prompt path and display a placeholder", () => {
+    let state = ViewState.insertText(base(), "In this image ")
+    state = ViewState.insertImageAttachment(state, ".rika/pasted/test.png")
+    state = ViewState.insertText(state, "you can see it vs this image ")
+    state = ViewState.insertImageAttachment(state, ".rika/pasted/other.png")
+    state = ViewState.insertText(state, "you see that")
+
+    expect(ViewState.submitText(state)).toBe(
+      "In this image [Image 1] you can see it vs this image [Image 2] you see that",
+    )
+    expect(ViewState.submitInputParts(state)).toEqual([
+      { type: "text", text: "In this image " },
+      { type: "image", path: ".rika/pasted/test.png", text: "[Image 1]" },
+      { type: "text", text: " you can see it vs this image " },
+      { type: "image", path: ".rika/pasted/other.png", text: "[Image 2]" },
+      { type: "text", text: " you see that" },
+    ])
+    expect(ViewState.displayInputText(state.input)).toBe(
+      "In this image [Image 1] you can see it vs this image [Image 2] you see that",
+    )
+  })
+
+  test("pasted text displays as a collapsed token but submits full content", () => {
+    const state = ViewState.insertPastedText(base(), "line one\nline two\nline three")
+
+    expect(ViewState.submitText(state)).toBe("line one\nline two\nline three")
+    expect(ViewState.displayInputText(state.input)).toBe("[Pasted text #1 +3 lines]")
+
+    const spaced = ViewState.insertText(state, " ")
+    expect(ViewState.submitText(spaced)).toBe("line one\nline two\nline three ")
+    expect(ViewState.displayInputText(spaced.input)).toBe("[Pasted text #1 +3 lines] ")
   })
 })
 
@@ -304,7 +337,7 @@ describe("ViewState tool display", () => {
     })
 
     expect(state.cards.find((candidate) => candidate.id === "read_absolute")).toMatchObject({
-      title: "Read packages/tui/src/adapter.ts L7-9",
+      title: "Read packages/tui/src/adapter.ts",
       path: "packages/tui/src/adapter.ts",
       range: { start_line: 7, end_line: 9 },
     })
@@ -365,7 +398,10 @@ const withCards = (): ViewState.ViewState =>
     ],
   })
 
-const withInput = (text: string, cursor = text.length): ViewState.ViewState => ({ ...base(), input: { text, cursor } })
+const withInput = (text: string, cursor = text.length): ViewState.ViewState => ({
+  ...base(),
+  input: { text, cursor, attachments: [] },
+})
 
 const eventBase = (sequence: number): Omit<Event.Event, "type" | "data"> => ({
   id: Ids.EventId.make(`event_view_state_${sequence}`),

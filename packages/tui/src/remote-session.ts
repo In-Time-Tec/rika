@@ -81,8 +81,14 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
         state: ViewState.initial({ thread_id: summary.thread_id, workspace_path, mode, events: [] }),
       }
     }),
-  streamTurn: ({ thread_id, workspace_path, content, mode }) =>
-    client.startTurn({ thread_id, workspace_id: Ids.WorkspaceId.make(workspace_path), content, mode }),
+  streamTurn: ({ thread_id, workspace_path, content, content_parts, mode }) =>
+    client.startTurn({
+      thread_id,
+      workspace_id: Ids.WorkspaceId.make(workspace_path),
+      content,
+      ...(content_parts === undefined ? {} : { content_parts }),
+      mode,
+    }),
   cancelTurn: ({ thread_id, turn_id }) => client.interruptTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(client, context, command),
   listThreads: ({ workspace_path }) =>

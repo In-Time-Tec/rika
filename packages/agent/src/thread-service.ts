@@ -472,11 +472,7 @@ const groupEventsByThread = (events: ReadonlyArray<Event.Event>) => {
   return grouped
 }
 
-const messageText = (message: Message.Message) =>
-  message.content
-    .filter((part): part is Message.TextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
+const messageText = (message: Message.Message) => Message.displayText(message)
 
 const tokenize = (query: string) =>
   uniqueStrings(

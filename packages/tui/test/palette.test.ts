@@ -26,17 +26,21 @@ describe("palette.filter", () => {
 })
 
 describe("keys", () => {
-  test("fromOpenTui treats meta or option as alt", () => {
+  test("fromOpenTui keeps Command separate from Option", () => {
     expect(Keys.fromOpenTui({ name: "t", option: true, sequence: "t" }).alt).toBe(true)
     expect(Keys.fromOpenTui({ name: "t", meta: true, sequence: "t" }).alt).toBe(true)
+    expect(Keys.fromOpenTui({ name: "t", meta: true, sequence: "t" }).meta).toBe(false)
+    expect(Keys.fromOpenTui({ name: "t", super: true, sequence: "t" }).meta).toBe(true)
     expect(Keys.fromOpenTui({ name: "t", sequence: "t" }).alt).toBe(false)
   })
 
-  test("isPrintable rejects control and alt combinations", () => {
+  test("isPrintable rejects control, option, and command combinations", () => {
     expect(Keys.isPrintable(Keys.make({ name: "a", sequence: "a" }))).toBe(true)
     expect(Keys.isPrintable(Keys.make({ name: "space", sequence: " " }))).toBe(true)
     expect(Keys.isPrintable(Keys.ctrl("a"))).toBe(false)
     expect(Keys.isPrintable(Keys.alt("a"))).toBe(false)
+    expect(Keys.isPrintable(Keys.make({ name: "c", meta: true, sequence: "c" }))).toBe(false)
+    expect(Keys.isPrintable(Keys.make({ name: "c", sequence: "c", eventType: "release" }))).toBe(false)
     expect(Keys.isPrintable(Keys.make({ name: "return", sequence: "\r" }))).toBe(false)
   })
 })

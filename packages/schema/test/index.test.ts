@@ -27,6 +27,30 @@ describe("Rika protocol schemas", () => {
     expect(decoded).toEqual(message)
   })
 
+  test("round-trips image message parts with display text", () => {
+    const message = Message.user({
+      id: messageId,
+      thread_id: threadId,
+      turn_id: turnId,
+      content: [
+        Message.text("Look at "),
+        Message.image({
+          media_type: "image/png",
+          data: "cG5n",
+          filename: ".rika/pasted/test.png",
+          metadata: { label: "[Image 1]" },
+        }),
+        Message.text(" please"),
+      ],
+      created_at: now,
+    })
+
+    const decoded = Schema.decodeUnknownSync(Message.Message)(Schema.encodeSync(Message.Message)(message))
+
+    expect(decoded).toEqual(message)
+    expect(Message.displayText(decoded)).toBe("Look at [Image 1] please")
+  })
+
   test("round-trips tool calls and results", () => {
     const call: Tool.Call = {
       id: toolCallId,
@@ -224,6 +248,7 @@ describe("Rika protocol schemas", () => {
       thread_id: threadId,
       workspace_id: workspaceId,
       content: "Ship remote control",
+      content_parts: [Message.text("Ship remote control")],
       mode: "smart",
     }
     const summary: Remote.ThreadSummary = {

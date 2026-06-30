@@ -45,6 +45,19 @@ describe("HashlineFile", () => {
     expect(output.render).toMatchObject({ kind: "file", renderer: "@pierre/diffs", collapsed: true })
   })
 
+  test("read always returns the entire file", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "full.txt"), "one\ntwo\nthree\n")
+
+    const output = object(
+      await run(root, HashlineFile.read({ path: "full.txt", start_line: 2, end_line: 2, max_output_bytes: 1 })),
+    )
+
+    expect(output.content).toMatch(/^1:[A-Za-z0-9_-]{4}\|one\n2:[A-Za-z0-9_-]{4}\|two\n3:[A-Za-z0-9_-]{4}\|three$/)
+    expect(output.range).toEqual({ start_line: 1, end_line: 3 })
+    expect(output.truncated).toBe(false)
+  })
+
   test("edit rejects stale anchors and returns nearby fresh anchors", async () => {
     const root = await tempWorkspace()
     await writeFile(join(root, "stale.ts"), "one\ntwo\nthree\n")

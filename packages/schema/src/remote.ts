@@ -4,6 +4,7 @@ import { JsonValue, TimestampMillis } from "./common"
 import { Event } from "./event"
 import { ContextSnapshot as IdeContextSnapshot } from "./ide"
 import { ArtifactId, ThreadId, TurnId, UserId, WorkspaceId } from "./ids"
+import { ContentPart } from "./message"
 
 export const BackendStatus = Schema.Literals(["healthy", "starting", "stale", "disconnected", "remote"]).annotate({
   identifier: "Rika.Remote.BackendStatus",
@@ -139,6 +140,7 @@ export const StartTurnRequest = Schema.Struct({
   workspace_id: Schema.optional(WorkspaceId),
   user_id: Schema.optional(UserId),
   content: Schema.String,
+  content_parts: Schema.optional(Schema.Array(ContentPart)),
   mode: Schema.optional(AgentMode),
   cancelled: Schema.optional(Schema.Boolean),
   ide_context: Schema.optional(IdeContextSnapshot),

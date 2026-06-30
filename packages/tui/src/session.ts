@@ -83,11 +83,12 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
       const events = yield* readThreadEvents(dependencies, threadId).pipe(Effect.catch(() => Effect.succeed([])))
       return { thread_id: threadId, state: ViewState.initial({ thread_id: threadId, workspace_path, mode, events }) }
     }),
-  streamTurn: ({ thread_id, workspace_path, content, mode }) =>
+  streamTurn: ({ thread_id, workspace_path, content, content_parts, mode }) =>
     dependencies.agentLoop.streamTurn({
       thread_id,
       workspace_id: Ids.WorkspaceId.make(workspace_path),
       content,
+      ...(content_parts === undefined ? {} : { content_parts }),
       mode,
     }),
   cancelTurn: ({ thread_id, turn_id }) => dependencies.agentLoop.cancelTurn({ thread_id, turn_id }).pipe(Effect.asVoid),

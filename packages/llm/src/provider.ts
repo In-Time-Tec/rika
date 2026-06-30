@@ -17,10 +17,27 @@ export const ReasoningEffort = Schema.Literals(["none", "minimal", "low", "mediu
 })
 export type ReasoningEffort = typeof ReasoningEffort.Type
 
+export interface TextContent extends Schema.Schema.Type<typeof TextContent> {}
+export const TextContent = Schema.Struct({
+  type: Schema.Literal("text"),
+  text: Schema.String,
+}).annotate({ identifier: "Rika.LLM.MessageContent.Text" })
+
+export interface FileContent extends Schema.Schema.Type<typeof FileContent> {}
+export const FileContent = Schema.Struct({
+  type: Schema.Literal("file"),
+  media_type: Schema.String,
+  data: Schema.String,
+  filename: Schema.optional(Schema.String),
+}).annotate({ identifier: "Rika.LLM.MessageContent.File" })
+
+export type MessageContent = string | ReadonlyArray<TextContent | FileContent>
+export const MessageContent = Schema.Union([Schema.String, Schema.Array(Schema.Union([TextContent, FileContent]))])
+
 export interface Message extends Schema.Schema.Type<typeof Message> {}
 export const Message = Schema.Struct({
   role: Role,
-  content: Schema.String,
+  content: MessageContent,
   name: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.LLM.Message" })
 
@@ -322,15 +339,40 @@ export const promptFromMessages = (messages: ReadonlyArray<Message>): Prompt.Raw
     switch (message.role) {
       case "system":
       case "developer":
-        return { role: "system", content: message.content }
+        return { role: "system", content: messageContentText(message.content) }
       case "assistant":
-        return { role: "assistant", content: message.content }
+        return { role: "assistant", content: messageContentText(message.content) }
       case "tool":
       case "user":
-        return { role: "user", content: message.content }
+        return { role: "user", content: messageContentToPromptParts(message.content) }
     }
-    return { role: "user", content: message.content }
+    return { role: "user", content: messageContentToPromptParts(message.content) }
   })
+
+const messageContentText = (content: MessageContent): string =>
+  typeof content === "string"
+    ? content
+    : content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+
+const messageContentToPromptParts = (
+  content: MessageContent,
+): string | ReadonlyArray<Prompt.UserMessagePartEncoded> => {
+  if (typeof content === "string") return content
+  return content.flatMap((part): ReadonlyArray<Prompt.UserMessagePartEncoded> => {
+    if (part.type === "text") return part.text.length === 0 ? [] : [{ type: "text", text: part.text }]
+    return [
+      {
+        type: "file",
+        mediaType: part.media_type,
+        fileName: part.filename,
+        data: `data:${part.media_type};base64,${part.data}`,
+      },
+    ]
+  })
+}
 
 export const responseFromGenerateText = (
   request: GenerateRequest,
@@ -507,9 +549,7 @@ const aiPartsFromFakeResponse = (response: FakeResponse): ReadonlyArray<Response
   if (isFakeToolCallResponse(response)) {
     const id = response.id ?? "fake_tool_call"
     const textParts: Array<Response.PartEncoded> =
-      response.content === undefined || response.content.length === 0
-        ? []
-        : [{ type: "text", text: response.content }]
+      response.content === undefined || response.content.length === 0 ? [] : [{ type: "text", text: response.content }]
     return [
       ...textParts,
       { type: "tool-call", id, name: response.name, params: response.input },

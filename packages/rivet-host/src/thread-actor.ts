@@ -46,6 +46,7 @@ export const AcceptTurnPayload = Schema.Struct({
   workspace_id: Ids.WorkspaceId,
   user_id: Schema.optional(Ids.UserId),
   content: Schema.String,
+  content_parts: Schema.optional(Schema.Array(Message.ContentPart)),
 }).annotate({ identifier: "Rika.RivetHost.ThreadActor.AcceptTurnPayload" })
 
 export interface ThreadIdPayload extends Schema.Schema.Type<typeof ThreadIdPayload> {}
@@ -166,8 +167,4 @@ export const applyEventToState = (state: ThreadActorState, event: Event.Event): 
   }
 }
 
-const textFromMessage = (message: Message.Message) =>
-  message.content
-    .filter((part): part is Message.TextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
+const textFromMessage = (message: Message.Message) => Message.displayText(message)

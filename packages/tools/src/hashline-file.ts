@@ -87,11 +87,10 @@ export const layer = Layer.effect(
         const path = yield* resolveWorkspacePath(workspaceRoot, input.path)
         const snapshot = yield* readSnapshot(path)
         const anchors = buildAnchors(snapshot.lines)
-        const startLine = clamp(input.start_line ?? 1, 1, Math.max(snapshot.lines.length, 1))
-        const endLine = clamp(input.end_line ?? snapshot.lines.length, startLine, snapshot.lines.length)
-        const maxBytes = clamp(input.max_output_bytes ?? defaultMaxReadBytes, 1, 1_000_000)
-        const anchored = capAnchors(anchors.slice(startLine - 1, endLine), maxBytes)
-        const selectedLines = snapshot.lines.slice(startLine - 1, startLine - 1 + anchored.anchors.length)
+        const startLine = 1
+        const endLine = snapshot.lines.length
+        const anchored = { anchors, truncated: false }
+        const selectedLines = snapshot.lines
 
         return yield* jsonValue({
           type: "hashline.read",
@@ -100,10 +99,10 @@ export const layer = Layer.effect(
           anchors: anchored.anchors.map(anchorToJson),
           range: {
             start_line: startLine,
-            end_line: anchored.anchors.at(-1)?.line ?? startLine - 1,
+            end_line: endLine,
           },
           total_lines: snapshot.lines.length,
-          truncated: anchored.truncated || endLine < snapshot.lines.length,
+          truncated: false,
           file: fileMetadata(snapshot),
           render: {
             kind: "file",

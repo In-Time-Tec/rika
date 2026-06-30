@@ -5,15 +5,19 @@ import {
   bg,
   bold,
   createCliRenderer,
+  decodePasteBytes,
   dim,
   fg,
   type KeyEvent,
+  type PasteEvent,
   link,
   RGBA,
   reverse,
   ScrollBoxRenderable,
   StyledText,
+  stripAnsiSequences,
   t,
+  type TextOptions,
   type TextChunk,
   TextRenderable,
   underline,
@@ -103,6 +107,9 @@ const cutoutBackground = (renderer: CliRenderer): RGBA => {
   return background instanceof RGBA && background.a > 0 ? RGBA.defaultBackground(background) : RGBA.defaultBackground()
 }
 
+const selectableText = (renderer: CliRenderer, options: TextOptions): TextRenderable =>
+  new TextRenderable(renderer, { selectionBg: color.accent, selectionFg: color.panel, ...options })
+
 const ansiTeal = (text: string): string => `\x1b[38;2;45;212;191m${text}\x1b[0m`
 const ansiDim = (text: string): string => `\x1b[38;2;125;133;144m${text}\x1b[0m`
 const ansiBold = (text: string): string => `\x1b[1m${text}\x1b[0m`
@@ -131,6 +138,7 @@ export const layer = Layer.effect(
     const actions = yield* Queue.unbounded<Action>()
     const diffRenderer = new DiffRenderCache()
     const surface = new Surface(renderer, actions, diffRenderer)
+    yield* Effect.sync(() => bindSelectionCopy(renderer))
     yield* Effect.sync(() => renderer.start())
 
     return Service.of({
@@ -220,9 +228,20 @@ const keyStream = (renderer: CliRenderer): Stream.Stream<Keys.Key> =>
       const handler = (key: KeyEvent) => {
         Queue.offerUnsafe(queue, Keys.fromOpenTui(key))
       }
+      const pasteHandler = (event: PasteEvent) => {
+        const text = stripAnsiSequences(decodePasteBytes(event.bytes))
+        if (text.length > 0) Queue.offerUnsafe(queue, Keys.paste(text))
+      }
       yield* Effect.acquireRelease(
-        Effect.sync(() => renderer.keyInput.on("keypress", handler)),
-        () => Effect.sync(() => renderer.keyInput.off("keypress", handler)),
+        Effect.sync(() => {
+          renderer.keyInput.on("keypress", handler)
+          renderer.keyInput.on("paste", pasteHandler)
+        }),
+        () =>
+          Effect.sync(() => {
+            renderer.keyInput.off("keypress", handler)
+            renderer.keyInput.off("paste", pasteHandler)
+          }),
       )
       yield* Effect.never
     }),
@@ -241,6 +260,13 @@ const resizeStream = (renderer: CliRenderer): Stream.Stream<void> =>
       yield* Effect.never
     }),
   )
+
+const bindSelectionCopy = (renderer: CliRenderer): void => {
+  renderer.on(CliRenderEvents.SELECTION, (selection) => {
+    const text = selection.getSelectedText().trimEnd()
+    if (text.length > 0) renderer.copyToClipboardOSC52(text)
+  })
+}
 
 const prepareVisibleDiffs = (state: ViewState.ViewState, diffRenderer: DiffRenderCache): Effect.Effect<void> =>
   Effect.forEach(expandedDiffs(state), (diff) => diffRenderer.ensure(diff.file_diff), {
@@ -297,8 +323,8 @@ export class Surface {
       onMouseMove: () => renderer.setMousePointer("default"),
     })
     this.entriesBox = new BoxRenderable(renderer, { flexDirection: "column", flexShrink: 0 })
-    this.thinkingText = new TextRenderable(renderer, { content: "", marginTop: 1, visible: false })
-    this.streamingText = new TextRenderable(renderer, { content: "", marginTop: 1, visible: false })
+    this.thinkingText = selectableText(renderer, { content: "", marginTop: 1, visible: false })
+    this.streamingText = selectableText(renderer, { content: "", marginTop: 1, visible: false })
     this.transcript.add(this.entriesBox)
     this.transcript.add(this.thinkingText)
     this.transcript.add(this.streamingText)
@@ -313,12 +339,26 @@ export class Surface {
       flexShrink: 0,
       minHeight: 5,
     })
-    this.shortcutsText = new TextRenderable(renderer, { content: "", visible: false })
-    this.inputText = new TextRenderable(renderer, { content: "" })
+    this.shortcutsText = new TextRenderable(renderer, { content: "", visible: false, selectable: false })
+    this.inputText = new TextRenderable(renderer, { content: "", selectable: false })
     this.inputBox.add(this.shortcutsText)
     this.inputBox.add(this.inputText)
-    this.costText = new TextRenderable(renderer, { content: "", position: "absolute", top: -1, right: 1, zIndex: 10 })
-    this.cwdText = new TextRenderable(renderer, { content: "", position: "absolute", bottom: -1, right: 1, zIndex: 10 })
+    this.costText = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      top: -1,
+      right: 1,
+      zIndex: 10,
+      selectable: false,
+    })
+    this.cwdText = new TextRenderable(renderer, {
+      content: "",
+      position: "absolute",
+      bottom: -1,
+      right: 1,
+      zIndex: 10,
+      selectable: false,
+    })
     this.statusText = new TextRenderable(renderer, {
       content: "",
       position: "absolute",
@@ -326,6 +366,7 @@ export class Surface {
       left: 2,
       zIndex: 10,
       visible: false,
+      selectable: false,
     })
     this.queueHintText = new TextRenderable(renderer, {
       content: "",
@@ -334,6 +375,7 @@ export class Surface {
       left: 2,
       zIndex: 10,
       visible: false,
+      selectable: false,
     })
     this.inputBox.add(this.costText)
     this.inputBox.add(this.cwdText)
@@ -356,7 +398,7 @@ export class Surface {
       paddingRight: 2,
       paddingTop: 1,
     })
-    this.paletteQuery = new TextRenderable(renderer, { content: "" })
+    this.paletteQuery = new TextRenderable(renderer, { content: "", selectable: false })
     this.paletteList = new BoxRenderable(renderer, {
       flexDirection: "column",
       marginTop: 1,
@@ -381,7 +423,7 @@ export class Surface {
       paddingRight: 2,
       paddingTop: 1,
     })
-    this.filePickerQuery = new TextRenderable(renderer, { content: "" })
+    this.filePickerQuery = new TextRenderable(renderer, { content: "", selectable: false })
     this.filePickerList = new BoxRenderable(renderer, {
       flexDirection: "column",
       marginTop: 1,
@@ -465,7 +507,7 @@ export class Surface {
     files.forEach((file, index) => {
       if (index === selected) {
         this.filePickerList.add(
-          new TextRenderable(this.renderer, {
+          selectableText(this.renderer, {
             content: t`${bold(fg("#0a0a0a")(file.padEnd(width)))}`,
             bg: color.orange,
             width,
@@ -473,9 +515,7 @@ export class Surface {
           }),
         )
       } else {
-        this.filePickerList.add(
-          new TextRenderable(this.renderer, { content: t`${fg(color.text)(file)}`, flexShrink: 0 }),
-        )
+        this.filePickerList.add(selectableText(this.renderer, { content: t`${fg(color.text)(file)}`, flexShrink: 0 }))
       }
     })
   }
@@ -534,12 +574,12 @@ export class Surface {
         marginTop: 1,
       })
       const hint = selected ? fg(color.faint)("   e to edit · tab to cycle") : fg(color.faint)("")
-      box.add(new TextRenderable(this.renderer, { content: t`${fg(barColor)(message.text)}${hint}` }))
+      box.add(selectableText(this.renderer, { content: t`${fg(barColor)(message.text)}${hint}` }))
       return box
     }
     const text = stripToolCalls(message.text)
     if (text.length === 0) return undefined
-    return new TextRenderable(this.renderer, { content: renderMarkdown(text), marginTop: 1 })
+    return selectableText(this.renderer, { content: renderMarkdown(text), marginTop: 1 })
   }
 
   private addCard(state: ViewState.ViewState, card: ViewState.Card): void {
@@ -563,7 +603,7 @@ export class Surface {
     )
     if (!collapsed && card.content !== undefined && ViewState.isCardExpandable(card)) {
       this.entriesBox.add(
-        new TextRenderable(this.renderer, {
+        selectableText(this.renderer, {
           content: this.cardBody(card, standaloneCardBodyIndent),
         }),
       )
@@ -581,6 +621,7 @@ export class Surface {
         content: t`${icon} ${fg(color.text)(toolGroupSummary(cards))} ${dim(expanded ? "▾" : "▸")}`,
         marginTop: 1,
         onMouseDown: this.emitAction({ _tag: "ToggleToolGroup" }),
+        selectable: false,
       }),
     )
     if (expanded) {
@@ -603,7 +644,7 @@ export class Surface {
         )
         if (!collapsed && card.content !== undefined && ViewState.isCardExpandable(card)) {
           this.entriesBox.add(
-            new TextRenderable(this.renderer, {
+            selectableText(this.renderer, {
               content: this.cardBody(card, groupedCardBodyIndent),
             }),
           )
@@ -637,25 +678,37 @@ const toolCategory = (card: ViewState.Card): "file" | "search" | "edit" | "comma
 }
 
 const toolGroupSummary = (cards: ReadonlyArray<ViewState.Card>): string => {
-  let files = 0
-  let searches = 0
-  let edits = 0
+  const files = new Set<string>()
+  const searches = new Set<string>()
+  const edits = new Set<string>()
+  let untargetedFiles = 0
+  let untargetedSearches = 0
+  let untargetedEdits = 0
   let commands = 0
   for (const card of cards) {
     const category = toolCategory(card)
-    if (category === "file") files += 1
-    else if (category === "search") searches += 1
-    else if (category === "edit") edits += 1
-    else commands += 1
+    if (category === "file") {
+      if (card.path === undefined) untargetedFiles += 1
+      else files.add(card.path)
+    } else if (category === "search") {
+      searches.add(card.path ?? card.title)
+      if (card.path === undefined && card.title.length === 0) untargetedSearches += 1
+    } else if (category === "edit") {
+      if (card.path === undefined) untargetedEdits += 1
+      else edits.add(card.path)
+    } else commands += 1
   }
+  const fileCount = files.size + untargetedFiles
+  const searchCount = searches.size + untargetedSearches
+  const editCount = edits.size + untargetedEdits
   const explored: Array<string> = []
-  if (files > 0) explored.push(`${files} file${files > 1 ? "s" : ""}`)
-  if (searches > 0) explored.push(`${searches} search${searches > 1 ? "es" : ""}`)
+  if (fileCount > 0) explored.push(`${fileCount} file${fileCount > 1 ? "s" : ""}`)
+  if (searchCount > 0) explored.push(`${searchCount} search${searchCount > 1 ? "es" : ""}`)
   const segments: Array<string> = []
   if (commands > 0) segments.push(`Ran ${commands} command${commands > 1 ? "s" : ""}`)
   if (explored.length > 0) segments.push(`Explored ${explored.join(", ")}`)
-  if (edits > 0) segments.push(`Edited ${edits} file${edits > 1 ? "s" : ""}`)
-  return segments.length > 0 ? segments.join(" · ") : `Ran ${cards.length} tools`
+  if (editCount > 0) segments.push(`Edited ${editCount} file${editCount > 1 ? "s" : ""}`)
+  return segments.length > 0 ? segments.join(", ") : `Ran ${cards.length} tools`
 }
 
 const isWelcome = (state: ViewState.ViewState) =>
@@ -728,13 +781,18 @@ const inputLine = (state: ViewState.ViewState): StyledText => {
 }
 
 const inputBufferChunks = (state: ViewState.ViewState): Array<TextChunk> => {
-  const text = state.input.text
+  const text = ViewState.displayInputText(state.input)
   if (text.length === 0) return [cursorBlock(" ")]
-  const cursor = Math.max(0, Math.min(state.input.cursor, text.length))
+  const cursor = Math.max(0, Math.min(displayCursor(state.input), text.length))
   const before = text.slice(0, cursor)
   const at = text[cursor] ?? " "
   const after = text.slice(cursor + 1)
   return [fg(color.text)(before), cursorBlock(at), fg(color.text)(after)]
+}
+
+const displayCursor = (input: ViewState.InputBuffer): number => {
+  const rawBeforeCursor = input.text.slice(0, input.cursor)
+  return ViewState.displayInputText({ ...input, text: rawBeforeCursor, cursor: rawBeforeCursor.length }).length
 }
 
 const cursorBlock = (text: string): TextChunk => fg(color.panel)(bg(color.text)(text))
@@ -803,6 +861,10 @@ const cardHeaderRow = (renderer: CliRenderer, input: HeaderRowInput): BoxRendera
     const text = new TextRenderable(renderer, {
       content: segment.content,
       flexShrink: 0,
+      selectable:
+        segment.onMouseDown === undefined && segment.onMouseOver === undefined && segment.onMouseOut === undefined,
+      selectionBg: color.accent,
+      selectionFg: color.panel,
       ...(segment.onMouseDown === undefined ? {} : { onMouseDown: segment.onMouseDown }),
       ...(segment.onMouseOver === undefined ? {} : { onMouseOver: segment.onMouseOver }),
       ...(segment.onMouseOut === undefined ? {} : { onMouseOut: segment.onMouseOut }),
@@ -975,11 +1037,13 @@ const paletteRow = (
       bg: "#ffba7b",
       width,
       flexShrink: 0,
+      selectable: false,
     })
   }
   return new TextRenderable(renderer, {
     content: t`${fg(color.dim)(rowIndent)}${fg(color.dim)(cat)}  ${fg(color.text)(action)}${key.length > 0 ? fg(color.faint)(` ${key}`) : fg(color.faint)("")}`,
     flexShrink: 0,
+    selectable: false,
   })
 }
 
@@ -1118,9 +1182,9 @@ const welcomeBlock = (renderer: CliRenderer, phase: number, mode: ViewState.View
     gap: 4,
     paddingLeft: 3,
   })
-  row.add(new TextRenderable(renderer, { content: orb(phase, mode) }))
+  row.add(selectableText(renderer, { content: orb(phase, mode) }))
   row.add(
-    new TextRenderable(renderer, {
+    selectableText(renderer, {
       content: t`${fg(welcomeColor(mode))("Welcome to Amp")}\n\n\n${fg(color.text)("ctrl+o")} ${fg(color.dim)("for commands")}\n${fg(color.text)("?")} ${fg(color.dim)("for shortcuts")}`,
     }),
   )

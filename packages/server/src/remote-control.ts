@@ -193,6 +193,7 @@ export const layer = Layer.effect(
               thread_id: input.thread_id,
               workspace_id: workspaceId,
               content: input.content,
+              ...(input.content_parts === undefined ? {} : { content_parts: input.content_parts }),
               ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
               ...(input.mode === undefined ? {} : { mode: input.mode }),
               ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),

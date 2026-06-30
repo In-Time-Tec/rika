@@ -62,6 +62,21 @@ export const Message = Schema.Struct({
 }).annotate({ identifier: "Rika.Message" })
 
 export const text = (value: string): TextPart => ({ type: "text", text: value })
+export const image = (input: Omit<ImagePart, "type">): ImagePart => ({ type: "image", ...input })
+export const displayText = (message: Pick<Message, "content">): string =>
+  message.content
+    .map((part) => {
+      if (part.type === "text") return part.text
+      if (part.type === "image") return imageLabel(part)
+      return ""
+    })
+    .join("")
+
+const imageLabel = (part: ImagePart): string => {
+  const label = part.metadata?.label
+  return typeof label === "string" && label.length > 0 ? label : "[Image]"
+}
+
 export const user = (
   input: Omit<Message, "role" | "content"> & { readonly content: string | ReadonlyArray<ContentPart> },
 ) => ({

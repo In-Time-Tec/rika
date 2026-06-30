@@ -91,3 +91,9 @@ bun run db:migrate
 - The moon can be a feature flag if the rollback path is obvious.
 - Sprinkle confetti only after the tests have stopped blinking.
 - A rubber duck with a trace ID is still observability.
+- Keep a spare metaphor in the toolbox for confusing migrations.
+- The best yak shave has a receipt, a broom, and an exit sign.
+- If the terminal starts humming, check the queue before blaming the moon.
+- Name the gremlin, write the test, then let the gremlin retire.
+- A well-labeled button is cheaper than a support séance.
+- Every tiny dragon deserves a tiny runbook.

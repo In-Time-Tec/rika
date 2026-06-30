@@ -43,7 +43,7 @@ describe("SubagentRuntime", () => {
         requests.push(request)
         await new Promise((resolve) => setTimeout(resolve, 20))
         active -= 1
-        const prompt = request.messages.at(-1)?.content ?? "missing"
+        const prompt = providerMessageText(request.messages.at(-1)?.content ?? "missing")
         return response(`Summary for ${prompt}\n- evidence:${prompt}`)
       }),
     )
@@ -63,8 +63,12 @@ describe("SubagentRuntime", () => {
       "beta:completed:Summary for inspect beta",
     ])
     expect(result.runs[0]?.evidence).toEqual(["evidence:inspect alpha"])
-    expect(requests[0]?.messages.map((message) => message.content).join("\n")).not.toContain("inspect beta")
-    expect(requests[1]?.messages.map((message) => message.content).join("\n")).not.toContain("inspect alpha")
+    expect(requests[0]?.messages.map((message) => providerMessageText(message.content)).join("\n")).not.toContain(
+      "inspect beta",
+    )
+    expect(requests[1]?.messages.map((message) => providerMessageText(message.content)).join("\n")).not.toContain(
+      "inspect alpha",
+    )
     expect(requests.map((request) => request.max_output_tokens)).toEqual([500, 500])
   })
 
@@ -190,11 +194,21 @@ const fakeRouterLayer = (complete: (request: Router.Request) => Effect.Effect<Pr
       }),
       complete: Effect.fn("SubagentRuntime.test.complete")(complete),
       stream: (request: Router.Request) =>
-        Stream.fromIterable(Provider.streamEventsFromResponse(response(request.messages.at(-1)?.content ?? ""))),
+        Stream.fromIterable(
+          Provider.streamEventsFromResponse(response(providerMessageText(request.messages.at(-1)?.content ?? ""))),
+        ),
     }),
   )
 
 const response = (content: string): Provider.GenerateResponse => ({ provider: "openai", model: "fake-model", content })
+
+const providerMessageText = (content: Provider.MessageContent): string =>
+  typeof content === "string"
+    ? content
+    : content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
 
 const pathFromInput = (value: Common.JsonValue): string => {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return ""

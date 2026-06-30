@@ -206,7 +206,7 @@ describe("adapter Surface (headless)", () => {
       await setup.renderOnce()
 
       const spans = setup.captureSpans().lines.flatMap((line) => line.spans)
-      expectSpanColor(spans, "Explored 1 file · Edited 1 file", [201, 209, 217])
+      expectSpanColor(spans, "Explored 1 file, Edited 1 file", [201, 209, 217])
       expectSpanColor(spans, " Read ", [201, 209, 217])
       expectSpanColor(spans, " Edited ", [201, 209, 217])
       expectSpanColor(spans, "AGENTS.md", [210, 162, 92])
@@ -226,6 +226,33 @@ describe("adapter Surface (headless)", () => {
         path: "AGENTS.md",
         range: { start_line: 3, end_line: 5 },
       })
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
+  test("tool group summary counts reread files once", async () => {
+    const setup = await createTestRenderer({ width: 120, height: 24 })
+    try {
+      const surface = new Adapter.Surface(setup.renderer)
+      const state = ViewState.initial({
+        thread_id: threadId,
+        workspace_path: "/workspace/rika",
+        mode: "smart",
+        events: [
+          toolRequested(1, "read_agents_a", "read", { path: "/workspace/rika/AGENTS.md" }),
+          toolCompleted(2, "read_agents_a", "read", { path: "/workspace/rika/AGENTS.md", content: "hidden" }),
+          toolRequested(3, "read_agents_b", "read", { path: "AGENTS.md" }),
+          toolCompleted(4, "read_agents_b", "read", { path: "AGENTS.md", content: "hidden" }),
+          toolRequested(5, "read_context", "read", { path: "CONTEXT.md" }),
+          toolCompleted(6, "read_context", "read", { path: "CONTEXT.md", content: "hidden" }),
+        ],
+      })
+
+      surface.update(state)
+      await setup.renderOnce()
+
+      expect(setup.captureCharFrame()).toContain("Explored 2 files")
     } finally {
       setup.renderer.destroy()
     }

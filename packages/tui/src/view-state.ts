@@ -43,7 +43,16 @@ export interface Input {
 export interface InputBuffer {
   readonly text: string
   readonly cursor: number
+  readonly attachments: ReadonlyArray<InputAttachment>
 }
+
+export type InputAttachment =
+  | { readonly kind: "image"; readonly token: string; readonly text: string; readonly path: string }
+  | { readonly kind: "paste"; readonly token: string; readonly text: string; readonly value: string }
+
+export type SubmittedInputPart =
+  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "image"; readonly path: string; readonly text: string }
 
 export interface ThinkingState {
   readonly text: string
@@ -104,7 +113,7 @@ export interface ViewState {
 
 export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 
-const emptyInput: InputBuffer = { text: "", cursor: 0 }
+const emptyInput: InputBuffer = { text: "", cursor: 0, attachments: [] }
 const closedPalette: PaletteState = { open: false, query: "", selected: 0 }
 const closedFilePicker: FilePickerState = { open: false, query: "", selected: 0, kind: "file", items: [] }
 const hiddenThinking: ThinkingState = { text: "", visible: false }
@@ -255,20 +264,116 @@ const withoutNotice = (state: ViewState): ViewState => {
 export const insertText = (state: ViewState, text: string): ViewState => {
   const { text: current, cursor } = state.input
   const next = `${current.slice(0, cursor)}${text}${current.slice(cursor)}`
-  return { ...state, input: { text: next, cursor: cursor + text.length }, history_index: -1, nav_index: -1 }
+  return {
+    ...state,
+    input: { ...state.input, text: next, cursor: cursor + text.length },
+    history_index: -1,
+    nav_index: -1,
+  }
+}
+
+export const insertImageAttachment = (state: ViewState, path: string): ViewState => {
+  const token = `@${path}`
+  const text = `[Image ${imageAttachmentCount(state.input) + 1}]`
+  const next = insertText(state, `${token} `)
+  return {
+    ...next,
+    input: { ...next.input, attachments: [...state.input.attachments, { kind: "image", token, text, path }] },
+  }
+}
+
+export const insertPastedText = (state: ViewState, text: string): ViewState => {
+  const token = pastedTextToken(state.input.attachments.length)
+  const label = pastedTextLabel(pastedTextAttachmentCount(state.input) + 1, text)
+  const next = insertText(state, token)
+  return {
+    ...next,
+    input: {
+      ...next.input,
+      attachments: [...state.input.attachments, { kind: "paste", token, text: label, value: text }],
+    },
+  }
+}
+
+export const submitText = (state: ViewState): string =>
+  submitInputParts(state)
+    .map((part) => part.text)
+    .join("")
+
+export const submitInputParts = (state: ViewState): ReadonlyArray<SubmittedInputPart> => {
+  const parts: Array<SubmittedInputPart> = []
+  const text = state.input.text
+  let index = 0
+  while (index < text.length) {
+    const match = nextAttachmentMatch(state.input.attachments, text, index)
+    if (match === undefined) {
+      pushSubmittedText(parts, text.slice(index))
+      break
+    }
+    if (match.index > index) pushSubmittedText(parts, text.slice(index, match.index))
+    if (match.attachment.kind === "image")
+      parts.push({ type: "image", path: match.attachment.path, text: match.attachment.text })
+    else pushSubmittedText(parts, match.attachment.value)
+    index = match.index + match.attachment.token.length
+  }
+  return parts
+}
+
+export const displayInputText = (input: InputBuffer): string => {
+  let text = input.text
+  for (const attachment of input.attachments) {
+    if (text.includes(attachment.token)) text = text.replaceAll(attachment.token, attachment.text)
+  }
+  return text
+}
+
+export const hasCollapsedPaste = (input: InputBuffer): boolean =>
+  input.attachments.some((attachment) => attachment.kind === "paste" && input.text.includes(attachment.token))
+
+const imageAttachmentCount = (input: InputBuffer): number =>
+  input.attachments.filter((attachment) => attachment.kind === "image").length
+
+const pastedTextAttachmentCount = (input: InputBuffer): number =>
+  input.attachments.filter((attachment) => attachment.kind === "paste").length
+
+const pastedTextToken = (index: number): string => String.fromCharCode(0xe000 + index)
+
+const pastedTextLabel = (index: number, text: string): string => {
+  const lines = text.split(/\r\n|\r|\n/).length
+  return lines > 1 ? `[Pasted text #${index} +${lines} lines]` : `[Pasted text #${index}]`
+}
+
+const nextAttachmentMatch = (
+  attachments: ReadonlyArray<InputAttachment>,
+  text: string,
+  start: number,
+): { readonly attachment: InputAttachment; readonly index: number } | undefined => {
+  let best: { readonly attachment: InputAttachment; readonly index: number } | undefined
+  for (const attachment of attachments) {
+    const index = text.indexOf(attachment.token, start)
+    if (index >= 0 && (best === undefined || index < best.index)) best = { attachment, index }
+  }
+  return best
+}
+
+const pushSubmittedText = (parts: Array<SubmittedInputPart>, text: string): void => {
+  if (text.length === 0) return
+  const previous = parts.at(-1)
+  if (previous?.type === "text") parts[parts.length - 1] = { type: "text", text: previous.text + text }
+  else parts.push({ type: "text", text })
 }
 
 export const backspace = (state: ViewState): ViewState => {
   const { text, cursor } = state.input
   if (cursor === 0) return state
   const next = `${text.slice(0, cursor - 1)}${text.slice(cursor)}`
-  return { ...state, input: { text: next, cursor: cursor - 1 } }
+  return { ...state, input: { ...state.input, text: next, cursor: cursor - 1 } }
 }
 
 export const deleteForward = (state: ViewState): ViewState => {
   const { text, cursor } = state.input
   if (cursor >= text.length) return state
-  return { ...state, input: { text: `${text.slice(0, cursor)}${text.slice(cursor + 1)}`, cursor } }
+  return { ...state, input: { ...state.input, text: `${text.slice(0, cursor)}${text.slice(cursor + 1)}`, cursor } }
 }
 
 export const deleteWordBackward = (state: ViewState): ViewState => {
@@ -276,7 +381,7 @@ export const deleteWordBackward = (state: ViewState): ViewState => {
   const end = clampCursor(text, cursor)
   const start = wordStartBefore(text, end)
   if (start === end) return state
-  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+  return { ...state, input: { ...state.input, text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
 }
 
 export const deleteWordForward = (state: ViewState): ViewState => {
@@ -284,7 +389,7 @@ export const deleteWordForward = (state: ViewState): ViewState => {
   const start = clampCursor(text, cursor)
   const end = wordEndAfter(text, start)
   if (start === end) return state
-  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+  return { ...state, input: { ...state.input, text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
 }
 
 export const deleteToLineStart = (state: ViewState): ViewState => {
@@ -292,7 +397,7 @@ export const deleteToLineStart = (state: ViewState): ViewState => {
   const end = clampCursor(text, cursor)
   const start = lineStartBefore(text, end)
   if (start === end) return state
-  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+  return { ...state, input: { ...state.input, text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
 }
 
 export const deleteToLineEnd = (state: ViewState): ViewState => {
@@ -300,7 +405,7 @@ export const deleteToLineEnd = (state: ViewState): ViewState => {
   const start = clampCursor(text, cursor)
   const end = lineEndAfter(text, start)
   if (start === end) return state
-  return { ...state, input: { text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
+  return { ...state, input: { ...state.input, text: `${text.slice(0, start)}${text.slice(end)}`, cursor: start } }
 }
 
 export const moveCursorLeft = (state: ViewState): ViewState => ({
@@ -377,7 +482,7 @@ export const historyPrev = (state: ViewState): ViewState => {
   if (state.history.length === 0) return state
   const index = state.history_index === -1 ? state.history.length - 1 : Math.max(0, state.history_index - 1)
   const text = state.history[index] ?? ""
-  return { ...state, history_index: index, input: { text, cursor: text.length } }
+  return { ...state, history_index: index, input: { text, cursor: text.length, attachments: [] } }
 }
 
 export const historyNext = (state: ViewState): ViewState => {
@@ -385,7 +490,7 @@ export const historyNext = (state: ViewState): ViewState => {
   const index = state.history_index + 1
   if (index >= state.history.length) return { ...state, history_index: -1, input: emptyInput }
   const text = state.history[index] ?? ""
-  return { ...state, history_index: index, input: { text, cursor: text.length } }
+  return { ...state, history_index: index, input: { text, cursor: text.length, attachments: [] } }
 }
 
 export const userMessageTexts = (state: ViewState): ReadonlyArray<string> =>
@@ -414,7 +519,7 @@ export const editNavMessage = (state: ViewState): ViewState => {
   const texts = userMessageTexts(state)
   if (state.nav_index < 0 || state.nav_index >= texts.length) return state
   const text = texts[texts.length - 1 - state.nav_index] ?? ""
-  return { ...state, nav_index: -1, input: { text, cursor: text.length } }
+  return { ...state, nav_index: -1, input: { text, cursor: text.length, attachments: [] } }
 }
 
 export const clearNav = (state: ViewState): ViewState => (state.nav_index === -1 ? state : { ...state, nav_index: -1 })
@@ -794,11 +899,7 @@ const updateCard = (state: ViewState, card: Card): ViewState => ({
   entries: upsertCardEntry(state.entries, card),
 })
 
-const messageText = (message: Message.Message) =>
-  message.content
-    .filter((part): part is Message.TextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
+const messageText = (message: Message.Message) => Message.displayText(message)
 
 const jsonSummary = (value: Common.JsonValue | undefined) => {
   if (value === undefined) return ""
@@ -833,7 +934,7 @@ const toolRequestTitle = (workspacePath: string, name: string, input: Common.Jso
 
 const toolReadTitle = (workspacePath: string, value: Common.JsonValue | undefined): string => {
   const path = displayPathFrom(workspacePath, value)
-  return path === undefined ? "Read" : `Read ${path}${lineRangeSuffix(value)}`
+  return path === undefined ? "Read" : `Read ${path}`
 }
 
 const toolRequestBody = (name: string, input: Common.JsonValue): string | undefined => {
@@ -1006,12 +1107,6 @@ const searchQuery = (value: Common.JsonValue | undefined): string | undefined =>
   const queries = arrayField(value, "queries")
   const first = queries?.[0]
   return typeof first === "string" ? first : undefined
-}
-
-const lineRangeSuffix = (value: Common.JsonValue | undefined): string => {
-  const range = lineRange(value)
-  if (range === undefined) return ""
-  return range.start_line === range.end_line ? ` L${range.start_line}` : ` L${range.start_line}-${range.end_line}`
 }
 
 const lineRange = (value: Common.JsonValue | undefined): Common.LineRange | undefined => {

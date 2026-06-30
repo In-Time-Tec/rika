@@ -15,6 +15,7 @@ export const RunTurnInput = Schema.Struct({
   workspace_id: Ids.WorkspaceId,
   user_id: Schema.optional(Ids.UserId),
   content: Schema.String,
+  content_parts: Schema.optional(Schema.Array(Message.ContentPart)),
   mode: Schema.optional(Config.Mode),
   cancelled: Schema.optional(Schema.Boolean),
   ide_context: Schema.optional(Ide.ContextSnapshot),
@@ -550,11 +551,7 @@ const messageToProviderMessages = (message: Message.Message): ReadonlyArray<Prov
   return []
 }
 
-const messageText = (message: Message.Message) =>
-  message.content
-    .filter((part): part is Message.TextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
+const messageText = (message: Message.Message) => Message.displayText(message)
 
 const promptMessagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Prompt.MessageEncoded> =>
   events.flatMap((event) => {
@@ -571,32 +568,82 @@ const promptMessagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyA
   })
 
 const messageToPromptMessages = (message: Message.Message): ReadonlyArray<Prompt.MessageEncoded> => {
-  const content = messageText(message)
-  if (content.length === 0) return []
   switch (message.role) {
     case "system":
-      return [{ role: "system", content }]
-    case "assistant":
-      return [{ role: "assistant", content }]
-    case "tool":
-    case "user":
+    case "assistant": {
+      const content = messageText(message)
+      if (content.length === 0) return []
+      return [{ role: message.role, content }]
+    }
+    case "tool": {
+      const content = messageText(message)
+      if (content.length === 0) return []
       return [{ role: "user", content }]
+    }
+    case "user": {
+      const content = userPromptParts(message)
+      return content.length === 0 ? [] : [{ role: "user", content }]
+    }
   }
   return []
 }
+
+const userPromptParts = (message: Message.Message): ReadonlyArray<Prompt.UserMessagePartEncoded> =>
+  message.content.flatMap((part): ReadonlyArray<Prompt.UserMessagePartEncoded> => {
+    switch (part.type) {
+      case "text":
+        return part.text.length === 0 ? [] : [{ type: "text", text: part.text }]
+      case "image":
+        return [
+          {
+            type: "file",
+            mediaType: part.media_type,
+            fileName: part.filename,
+            data: `data:${part.media_type};base64,${part.data}`,
+          },
+        ]
+      default:
+        return []
+    }
+  })
 
 const providerMessageToPromptMessage = (message: Provider.Message): Prompt.MessageEncoded => {
   switch (message.role) {
     case "system":
     case "developer":
-      return { role: "system", content: message.content }
+      return { role: "system", content: providerContentText(message.content) }
     case "assistant":
-      return { role: "assistant", content: message.content }
+      return { role: "assistant", content: providerContentText(message.content) }
     case "tool":
     case "user":
-      return { role: "user", content: message.content }
+      return { role: "user", content: providerContentToPromptParts(message.content) }
   }
-  return { role: "user", content: message.content }
+  return { role: "user", content: providerContentToPromptParts(message.content) }
+}
+
+const providerContentText = (content: Provider.MessageContent): string =>
+  typeof content === "string"
+    ? content
+    : content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
+
+const providerContentToPromptParts = (
+  content: Provider.MessageContent,
+): string | ReadonlyArray<Prompt.UserMessagePartEncoded> => {
+  if (typeof content === "string") return content
+  return content.flatMap((part): ReadonlyArray<Prompt.UserMessagePartEncoded> => {
+    if (part.type === "text") return part.text.length === 0 ? [] : [{ type: "text", text: part.text }]
+    return [
+      {
+        type: "file",
+        mediaType: part.media_type,
+        fileName: part.filename,
+        data: `data:${part.media_type};base64,${part.data}`,
+      },
+    ]
+  })
 }
 
 const appendTextRetry = (modelInput: ModelInput, content: string): ModelInput => {
@@ -616,7 +663,7 @@ const appendModelError = (modelInput: ModelInput, error: AiError.AiError | Route
   return {
     ...modelInput,
     messages: [...modelInput.messages, message],
-    prompt: [...modelInput.prompt, { role: "user", content: message.content }],
+    prompt: [...modelInput.prompt, providerMessageToPromptMessage(message)],
   }
 }
 
@@ -632,11 +679,7 @@ const appendToolResults = (
     { role: "assistant", content },
     ...results.map((result): Provider.Message => ({ role: "tool", content: JSON.stringify(result) })),
   ],
-  prompt: [
-    ...modelInput.prompt,
-    assistantToolPromptMessage(content, calls),
-    toolResultPromptMessage(results),
-  ],
+  prompt: [...modelInput.prompt, assistantToolPromptMessage(content, calls), toolResultPromptMessage(results)],
 })
 
 const toolCallPromptMessage = (call: Tool.Call): Prompt.MessageEncoded => ({
@@ -652,10 +695,7 @@ const toolCallPromptMessage = (call: Tool.Call): Prompt.MessageEncoded => ({
   ],
 })
 
-const assistantToolPromptMessage = (
-  content: string,
-  calls: ReadonlyArray<Tool.Call>,
-): Prompt.MessageEncoded => {
+const assistantToolPromptMessage = (content: string, calls: ReadonlyArray<Tool.Call>): Prompt.MessageEncoded => {
   const parts: Array<Prompt.AssistantMessagePartEncoded> = content.length === 0 ? [] : [{ type: "text", text: content }]
   for (const call of calls) {
     parts.push({
@@ -824,7 +864,7 @@ const makeTurnStarted = (dependencies: Dependencies, threadId: Ids.ThreadId, tur
   })
 
 const makeUserMessageAdded = (dependencies: Dependencies, input: RunTurnInput, turnId: Ids.TurnId, sequence: number) =>
-  makeMessageAdded(dependencies, input.thread_id, turnId, "user", input.content, sequence)
+  makeMessageAdded(dependencies, input.thread_id, turnId, "user", input.content_parts ?? input.content, sequence)
 
 const makeAssistantMessageAdded = (
   dependencies: Dependencies,
@@ -891,7 +931,7 @@ const makeMessageAdded = (
   threadId: Ids.ThreadId,
   turnId: Ids.TurnId,
   role: "user" | "assistant",
-  content: string,
+  content: string | ReadonlyArray<Message.ContentPart>,
   sequence: number,
 ) =>
   Effect.gen(function* () {
@@ -908,7 +948,10 @@ const makeMessageAdded = (
     const message =
       role === "user"
         ? Message.user(messageInput)
-        : Message.assistant({ ...messageInput, content: [Message.text(content)] })
+        : Message.assistant({
+            ...messageInput,
+            content: [Message.text(typeof content === "string" ? content : Message.displayText({ content }))],
+          })
     const event: Event.MessageAdded = {
       id: eventId,
       thread_id: threadId,

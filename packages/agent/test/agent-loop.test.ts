@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Common, Ids } from "@rika/schema"
+import { Common, Ids, Message } from "@rika/schema"
 import { Effect, Layer, Stream } from "effect"
-import { AiError } from "effect/unstable/ai"
+import { AiError, Prompt } from "effect/unstable/ai"
 import { AgentLoop, ContextResolver, PermissionPolicy, SkillRegistry, ToolExecutor, ToolRegistry } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_agent_loop")
@@ -183,6 +183,70 @@ describe("AgentLoop", () => {
       "message.added",
       "turn.completed",
     ])
+  })
+
+  test("preserves image turn parts in the user message and model prompt", async () => {
+    const captured: Array<Provider.GenerateRequest> = []
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.image.complete")(function* (request: Provider.GenerateRequest) {
+          captured.push(request)
+          return fakeResponse(request, "saw image")
+        }),
+        stream: (request: Provider.GenerateRequest) => {
+          captured.push(request)
+          return Stream.fromIterable(Provider.streamEventsFromResponse(fakeResponse(request, "saw image")))
+        },
+      }),
+    )
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, providerLayer)
+    const imagePart = Message.image({
+      media_type: "image/png",
+      data: "cG5nLWJ5dGVz",
+      filename: ".rika/pasted/test.png",
+      metadata: { label: "[Image 1]" },
+    })
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: Ids.ThreadId.make("thread_agent_image"),
+          workspace_id: workspaceId,
+          content: "In this image [Image 1] you can see it",
+          content_parts: [Message.text("In this image "), imagePart, Message.text(" you can see it")],
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: Ids.ThreadId.make("thread_agent_image") })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.turn.status).toBe("completed")
+    const userMessage = result.events.find((event) => event.type === "message.added")
+    expect(userMessage).toMatchObject({
+      data: { message: { content: [Message.text("In this image "), imagePart, Message.text(" you can see it")] } },
+    })
+    expect(
+      Message.displayText(userMessage?.type === "message.added" ? userMessage.data.message : { content: [] }),
+    ).toBe("In this image [Image 1] you can see it")
+    const prompt = captured[0]?.prompt
+    const promptMessages: ReadonlyArray<Prompt.MessageEncoded> = Array.isArray(prompt) ? prompt : []
+    const promptMessage = promptMessages.findLast((message) => message.role === "user")
+    expect(promptMessage).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "In this image " },
+        {
+          type: "file",
+          mediaType: "image/png",
+          fileName: ".rika/pasted/test.png",
+          data: "data:image/png;base64,cG5nLWJ5dGVz",
+        },
+        { type: "text", text: " you can see it" },
+      ],
+    })
   })
 
   test("records permission-blocked tool calls as structured tool results", async () => {
@@ -374,7 +438,7 @@ describe("AgentLoop", () => {
     expect(result.events.find((event) => event.type === "skill.loaded")).toMatchObject({
       data: { name: "deploy", resource_paths: ["templates/deploy.md"] },
     })
-    const system = captured[0]?.messages[0]?.content ?? ""
+    const system = providerMessageText(captured[0]?.messages[0]?.content ?? "")
     expect(system).toContain("- deploy: Deploy safely")
     expect(system).toContain("- review: Review code")
     expect(system).toContain("Deploy instructions only when loaded")
@@ -479,10 +543,13 @@ describe("AgentLoop", () => {
     })
     const recoveryMessages = captured[0]?.messages ?? []
     const fedBack = recoveryMessages.find(
-      (message) => message.role === "tool" && message.content.includes("model.error"),
+      (message) => message.role === "tool" && providerMessageText(message.content).includes("model.error"),
     )
     expect(fedBack).toBeDefined()
-    expect(JSON.parse(fedBack?.content ?? "{}")).toMatchObject({ type: "model.error", retryable: false })
+    expect(JSON.parse(providerMessageText(fedBack?.content ?? "{}"))).toMatchObject({
+      type: "model.error",
+      retryable: false,
+    })
   })
 
   test("emits model.reasoning.delta events from provider reasoning chunks", async () => {
@@ -552,6 +619,14 @@ const fakeResponse = (request: Provider.GenerateRequest, content: string): Provi
   model: request.model,
   content,
 })
+
+const providerMessageText = (content: Provider.MessageContent): string =>
+  typeof content === "string"
+    ? content
+    : content
+        .filter((part) => part.type === "text")
+        .map((part) => part.text)
+        .join("\n")
 
 const failingProviderLayer = (error: Provider.ProviderError) =>
   Layer.succeed(

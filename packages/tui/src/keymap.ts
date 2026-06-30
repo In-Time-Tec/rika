@@ -13,6 +13,7 @@ export interface Context {
 
 export type Action =
   | { readonly _tag: "Insert"; readonly text: string }
+  | { readonly _tag: "Paste"; readonly text: string }
   | { readonly _tag: "Backspace" }
   | { readonly _tag: "DeleteForward" }
   | { readonly _tag: "DeleteWordBackward" }
@@ -115,6 +116,8 @@ const resolvePalette = (key: Keys.Key): Resolution => {
 const resolveOverlay = (_key: Keys.Key): Resolution => action({ _tag: "CloseOverlay" })
 
 const resolveInput = (context: Context, key: Keys.Key): Resolution => {
+  if (key.name === "paste" && key.sequence.length > 0) return action({ _tag: "Paste", text: key.sequence })
+
   if (key.ctrl && key.name === "c") return pending("ctrl-c")
   if (key.ctrl && key.name === "o") return action({ _tag: "OpenPalette" })
   if (key.ctrl && key.name === "s") return action({ _tag: "SwitchMode" })

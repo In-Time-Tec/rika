@@ -1,10 +1,11 @@
 import { Config } from "@rika/core"
-import { Event, Ids } from "@rika/schema"
+import { Event, Ids, Message } from "@rika/schema"
 import { Cause, Effect, Fiber, Queue, Schema, Stream } from "effect"
 import type { Dirent } from "node:fs"
+import { stat } from "node:fs/promises"
 import { readdir, readFile } from "node:fs/promises"
-import { join, relative } from "node:path"
-import type { SessionBackend } from "./backend"
+import { extname, join, relative } from "node:path"
+import type { SessionBackend, TurnRequest } from "./backend"
 import * as Adapter from "./adapter"
 import * as Keymap from "./keymap"
 import * as Keys from "./keys"
@@ -34,6 +35,8 @@ type AppEvent =
   | { readonly _tag: "TurnEnded"; readonly token: number; readonly error?: unknown }
   | { readonly _tag: "Resize" }
   | { readonly _tag: "KeysDone" }
+
+type SubmittedTurn = Pick<TurnRequest, "content" | "content_parts">
 
 export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<number, E> =>
   Effect.scoped(
@@ -72,14 +75,14 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           }
         })
 
-      const startTurn = (content: string) =>
+      const startTurn = (submitted: SubmittedTurn) =>
         Effect.gen(function* () {
           active = true
           turnToken += 1
           const token = turnToken
           currentTurnId = undefined
           const fiber = yield* Effect.forkScoped(
-            deps.backend.streamTurn({ thread_id: threadId, workspace_path: workspacePath, content, mode }).pipe(
+            deps.backend.streamTurn({ thread_id: threadId, workspace_path: workspacePath, ...submitted, mode }).pipe(
               Stream.runForEach((event) => Queue.offer(queue, { _tag: "Model", event }).pipe(Effect.asVoid)),
               Effect.matchCauseEffect({
                 onFailure: (cause: Cause.Cause<E>) =>
@@ -118,7 +121,8 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
 
       const submit = () =>
         Effect.gen(function* () {
-          const raw = state.input.text
+          const submitted = yield* submittedTurn(state, workspacePath)
+          const raw = submitted.content
           const trimmed = raw.trim()
           state = ViewState.clearInput(state)
           if (trimmed.length === 0) {
@@ -136,7 +140,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             yield* render()
             return
           }
-          yield* startTurn(trimmed)
+          yield* startTurn({ ...submitted, content: trimmed })
         })
 
       const forceInterrupt = () =>
@@ -178,7 +182,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
         Effect.gen(function* () {
           switch (action._tag) {
             case "Insert":
-              state = ViewState.insertText(state, action.text)
+              state = yield* insertTextOrImageAttachment(state, workspacePath, action.text)
+              break
+            case "Paste":
+              state = yield* insertPasteOrImageAttachment(state, workspacePath, action.text)
               break
             case "Backspace":
               state = ViewState.backspace(state)
@@ -272,7 +279,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               state = ViewState.toggleFastMode(state)
               break
             case "OpenEditor": {
-              const edited = yield* deps.renderer.editExternally(state.input.text)
+              const edited = yield* deps.renderer.editExternally(ViewState.submitText(state))
               state = ViewState.insertText(ViewState.clearInput(state), edited)
               break
             }
@@ -281,7 +288,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               state =
                 path === undefined
                   ? ViewState.withNotice(state, "No image in clipboard.")
-                  : ViewState.withNotice(ViewState.insertText(state, `@${path} `), "Pasted image attached.")
+                  : ViewState.withNotice(ViewState.insertImageAttachment(state, path), "Pasted image attached.")
               break
             }
             case "FileMention": {
@@ -298,7 +305,8 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                   "Steering — moved to the front of the queue.",
                 )
               } else {
-                if (state.input.text.trim().length > 0) state = ViewState.enqueueMessage(state, state.input.text.trim())
+                const steering = ViewState.submitText(state).trim()
+                if (steering.length > 0) state = ViewState.enqueueMessage(state, steering)
                 state = ViewState.withNotice(
                   ViewState.clearInput(state),
                   "Steering message queued for the running turn.",
@@ -322,6 +330,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               state = ViewState.editNavMessage(state)
               break
             case "Submit":
+              state = yield* convertTrailingImagePath(state, workspacePath)
               yield* submit()
               return
             case "ForceInterrupt":
@@ -416,7 +425,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           state = dequeued.state
           if (dequeued.next !== undefined) {
             if (dequeued.next.startsWith("/")) yield* runSlash(dequeued.next)
-            else yield* startTurn(dequeued.next)
+            else yield* startTurn({ content: dequeued.next })
           }
           yield* render()
           yield* maybeShutdown()
@@ -520,7 +529,146 @@ const freshThread = <E>(_deps: Dependencies<E>, workspacePath: string, mode: Con
     }
   })
 
+const submittedTurn = (state: ViewState.ViewState, workspacePath: string): Effect.Effect<SubmittedTurn> =>
+  Effect.gen(function* () {
+    const content = ViewState.submitText(state)
+    const parts = ViewState.submitInputParts(state)
+    if (!parts.some((part) => part.type === "image")) return { content }
+    const contentParts = yield* Effect.forEach(parts, (part) => submittedContentPart(part, workspacePath))
+    return { content, content_parts: contentParts }
+  })
+
+const submittedContentPart = (
+  part: ViewState.SubmittedInputPart,
+  workspacePath: string,
+): Effect.Effect<Message.ContentPart> => {
+  if (part.type === "text") return Effect.succeed(Message.text(part.text))
+  const path = absolutePath(part.path) ? part.path : join(workspacePath, part.path)
+  return Effect.tryPromise(() => readFile(path)).pipe(
+    Effect.map(
+      (bytes): Message.ImagePart => ({
+        type: "image",
+        media_type: imageMediaType(part.path),
+        data: Buffer.from(bytes).toString("base64"),
+        filename: part.path,
+        metadata: { label: part.text },
+      }),
+    ),
+    Effect.catch(() => Effect.succeed(Message.text(part.text))),
+  )
+}
+
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", ".rika", ".turbo", ".next", "build", "coverage"])
+
+const imageExtensions = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".heic"])
+
+const imageMediaType = (path: string): string => {
+  const ext = extname(path).toLowerCase()
+  if (ext === ".png") return "image/png"
+  if (ext === ".jpg" || ext === ".jpeg") return "image/jpeg"
+  if (ext === ".gif") return "image/gif"
+  if (ext === ".webp") return "image/webp"
+  return "application/octet-stream"
+}
+
+const insertTextOrImageAttachment = (
+  state: ViewState.ViewState,
+  workspacePath: string,
+  text: string,
+): Effect.Effect<ViewState.ViewState> =>
+  Effect.gen(function* () {
+    const path = singleImagePath(text)
+    if (path === undefined) return ViewState.insertText(state, text)
+    const relativePath = absolutePath(path) ? relative(workspacePath, path) : path
+    const exists = yield* fileExists(absolutePath(path) ? path : join(workspacePath, path))
+    return exists ? ViewState.insertImageAttachment(state, relativePath) : ViewState.insertText(state, text)
+  })
+
+const insertPasteOrImageAttachment = (
+  state: ViewState.ViewState,
+  workspacePath: string,
+  text: string,
+): Effect.Effect<ViewState.ViewState> =>
+  Effect.gen(function* () {
+    const path = singleImagePath(text)
+    if (path !== undefined) {
+      const relativePath = absolutePath(path) ? relative(workspacePath, path) : path
+      const exists = yield* fileExists(absolutePath(path) ? path : join(workspacePath, path))
+      if (exists) return ViewState.insertImageAttachment(state, relativePath)
+    }
+    return collapsiblePaste(text) ? ViewState.insertPastedText(state, text) : ViewState.insertText(state, text)
+  })
+
+const collapsiblePaste = (text: string): boolean => text.includes("\n") || text.includes("\r") || text.length > 120
+
+const convertTrailingImagePath = (
+  state: ViewState.ViewState,
+  workspacePath: string,
+): Effect.Effect<ViewState.ViewState> =>
+  Effect.gen(function* () {
+    if (state.input.attachments.some((attachment) => attachment.kind === "image")) return state
+    const path = trailingImagePath(state.input.text)
+    if (path === undefined) return state
+    const relativePath = absolutePath(path) ? relative(workspacePath, path) : path
+    const exists = yield* fileExists(absolutePath(path) ? path : join(workspacePath, path))
+    if (!exists) return state
+    const before = state.input.text.slice(0, state.input.text.length - path.length)
+    return ViewState.insertImageAttachment(
+      { ...state, input: { ...state.input, text: before, cursor: before.length, attachments: [] } },
+      relativePath,
+    )
+  })
+
+const trailingImagePath = (text: string): string | undefined => {
+  const match = /(?:^|\s)(\S+\.(?:png|jpe?g|gif|webp|bmp|tiff|heic))$/i.exec(text.trimEnd())
+  return match?.[1]
+}
+
+const singleImagePath = (text: string): string | undefined => {
+  const trimmed = text.trim()
+  const path = normalizedPastedPath(trimmed)
+  if (path === undefined || path.length === 0) return undefined
+  const lower = path.toLowerCase()
+  for (const extension of imageExtensions) {
+    if (lower.endsWith(extension)) return path
+  }
+  return undefined
+}
+
+const normalizedPastedPath = (value: string): string | undefined => {
+  const unquoted = stripWrappingQuotes(value)
+  const path = unquoted.startsWith("file://") ? fileUrlPath(unquoted) : unquoted
+  return path === undefined ? undefined : unescapePastedPath(path)
+}
+
+const stripWrappingQuotes = (value: string): string => {
+  if (value.length < 2) return value
+  const first = value[0]
+  const last = value[value.length - 1]
+  return (first === "'" && last === "'") || (first === '"' && last === '"') ? value.slice(1, -1) : value
+}
+
+const unescapePastedPath = (value: string): string => value.replace(/\\([\\ ()[\]{}'"&;!$`*?|<>#~])/g, "$1")
+
+const fileUrlPath = (value: string): string | undefined => {
+  try {
+    const url = new URL(value)
+    return url.protocol === "file:" ? decodeURIComponent(url.pathname) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const absolutePath = (path: string): boolean => path.startsWith("/")
+
+const fileExists = (path: string): Effect.Effect<boolean> =>
+  Effect.promise(async () => {
+    try {
+      return (await stat(path)).isFile()
+    } catch {
+      return false
+    }
+  })
 
 const listWorkspaceFiles = (root: string): Effect.Effect<ReadonlyArray<string>> =>
   Effect.promise(async () => {

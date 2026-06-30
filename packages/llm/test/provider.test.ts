@@ -171,4 +171,28 @@ describe("LLM Provider", () => {
       { role: "user", content: "Tool output" },
     ])
   })
+
+  test("converts structured image message content to Effect AI file parts", () => {
+    expect(
+      Provider.promptFromMessages([
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Look at " },
+            { type: "file", media_type: "image/png", data: "cG5n", filename: "shot.png" },
+            { type: "text", text: " please" },
+          ],
+        },
+      ]),
+    ).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "Look at " },
+          { type: "file", mediaType: "image/png", fileName: "shot.png", data: "data:image/png;base64,cG5n" },
+          { type: "text", text: " please" },
+        ],
+      },
+    ])
+  })
 })

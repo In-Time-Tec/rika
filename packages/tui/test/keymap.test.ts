@@ -82,6 +82,21 @@ describe("keymap.resolve", () => {
     ).toEqual({ _tag: "Insert", text: "?" })
   })
 
+  test("paste inserts text literally instead of triggering prompt shortcuts", () => {
+    expect(expectAction(Keymap.resolve(inputCtx({ inputEmpty: true }), undefined, Keys.paste("?")))).toEqual({
+      _tag: "Paste",
+      text: "?",
+    })
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.paste("@file\nnext")))).toEqual({
+      _tag: "Paste",
+      text: "@file\nnext",
+    })
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.paste("\nleading")))).toEqual({
+      _tag: "Paste",
+      text: "\nleading",
+    })
+  })
+
   test("@ begins a file mention", () => {
     expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "@", sequence: "@" })))._tag).toBe(
       "FileMention",

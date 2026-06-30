@@ -274,11 +274,7 @@ const applySequenceOnly = (database: ProjectionDatabase, event: Event.Event) =>
     where thread_id = ${event.thread_id}
   `)
 
-const messageText = (message: Message.Message) =>
-  message.content
-    .filter((part): part is Message.TextPart => part.type === "text")
-    .map((part) => part.text)
-    .join("\n")
+const messageText = (message: Message.Message) => Message.displayText(message)
 
 const rowToSummary = (row: ThreadProjectionRow): ThreadSummary => ({
   thread_id: Ids.ThreadId.make(row.thread_id),
