@@ -242,7 +242,7 @@ describe("AgentLoop", () => {
           type: "file",
           mediaType: "image/png",
           fileName: ".rika/pasted/test.png",
-          data: "data:image/png;base64,cG5nLWJ5dGVz",
+          data: Buffer.from("png-bytes"),
         },
         { type: "text", text: " you can see it" },
       ],

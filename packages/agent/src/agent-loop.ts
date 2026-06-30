@@ -599,7 +599,7 @@ const userPromptParts = (message: Message.Message): ReadonlyArray<Prompt.UserMes
             type: "file",
             mediaType: part.media_type,
             fileName: part.filename,
-            data: `data:${part.media_type};base64,${part.data}`,
+            data: imageData(part.data),
           },
         ]
       default:
@@ -640,11 +640,13 @@ const providerContentToPromptParts = (
         type: "file",
         mediaType: part.media_type,
         fileName: part.filename,
-        data: `data:${part.media_type};base64,${part.data}`,
+        data: imageData(part.data),
       },
     ]
   })
 }
+
+const imageData = (data: string): Uint8Array => Buffer.from(data, "base64")
 
 const appendTextRetry = (modelInput: ModelInput, content: string): ModelInput => {
   const userMessage: Provider.Message = {

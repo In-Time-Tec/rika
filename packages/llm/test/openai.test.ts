@@ -1,5 +1,6 @@
+import { OpenAiClient } from "@effect/ai-openai"
 import { describe, expect, test } from "bun:test"
-import { Effect, Exit, Stream } from "effect"
+import { Effect, Exit, Layer, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
 import { OpenAi, Provider, Retry } from "../src/index"
 
@@ -35,6 +36,65 @@ describe("OpenAI Effect AI layer", () => {
   test("keeps OpenAI credentials behind the live layer options", () => {
     expect(OpenAi.defaultApiKeyEnv).toBe("OPENAI_API_KEY")
     expect(OpenAi.providerName).toBe("openai")
+  })
+
+  test("serializes image file parts as OpenAI input images", async () => {
+    let captured: unknown
+    const stopAfterCapture = aiError(new AiError.InvalidRequestError({ description: "stop after capture" }))
+    const fakeClientLayer = Layer.succeed(
+      OpenAiClient.OpenAiClient,
+      OpenAiClient.OpenAiClient.of({
+        get client(): never {
+          throw new Error("unused")
+        },
+        createResponse: (options) => {
+          captured = options
+          return Effect.fail(stopAfterCapture)
+        },
+        createResponseStream: (options) => {
+          captured = options
+          return Effect.fail(stopAfterCapture)
+        },
+        createEmbedding: () => Effect.fail(stopAfterCapture),
+      }),
+    )
+
+    await Effect.runPromiseExit(
+      Effect.gen(function* () {
+        const provider = yield* Provider.Service
+        return yield* provider.complete({
+          provider: "openai",
+          model: "gpt-4.1",
+          messages: [
+            {
+              role: "user",
+              content: [
+                { type: "text", text: "Look at " },
+                { type: "file", media_type: "image/png", data: "cG5n", filename: "shot.png" },
+                { type: "text", text: " please" },
+              ],
+            },
+          ],
+        })
+      }).pipe(
+        Effect.provide(Provider.layer()),
+        Effect.provide(OpenAi.languageModelLayer({ model: "gpt-4.1" })),
+        Effect.provide(fakeClientLayer),
+      ),
+    )
+
+    expect(captured).toMatchObject({
+      input: [
+        {
+          role: "user",
+          content: [
+            { type: "input_text", text: "Look at " },
+            { type: "input_image", image_url: "data:image/png;base64,cG5n", detail: "auto" },
+            { type: "input_text", text: " please" },
+          ],
+        },
+      ],
+    })
   })
 })
 

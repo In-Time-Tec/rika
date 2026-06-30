@@ -189,7 +189,7 @@ describe("LLM Provider", () => {
         role: "user",
         content: [
           { type: "text", text: "Look at " },
-          { type: "file", mediaType: "image/png", fileName: "shot.png", data: "data:image/png;base64,cG5n" },
+          { type: "file", mediaType: "image/png", fileName: "shot.png", data: Buffer.from("png") },
           { type: "text", text: " please" },
         ],
       },
