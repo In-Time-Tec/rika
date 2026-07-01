@@ -2,11 +2,13 @@ import { existsSync, readdirSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 export async function launchMotel(args, env) {
-  const launched = Bun.spawn([...motelCommand(env), ...args], {
+  const command = motelCommand(env)
+  const launched = Bun.spawn([...command, ...args], {
     stdin: "inherit",
     stdout: "inherit",
     stderr: "inherit",
     env: childEnv(env),
+    cwd: dirname(command[1]),
   })
   const exitCode = await launched.exited
   if (exitCode !== 0) throw new Error(`motel exited ${exitCode}`)

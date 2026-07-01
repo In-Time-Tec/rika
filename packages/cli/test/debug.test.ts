@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Ids } from "@rika/schema"
 import { Effect } from "effect"
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Debug } from "../src/index"
@@ -11,6 +11,7 @@ describe("CLI debug command", () => {
     const dir = await mkdtemp(join(tmpdir(), "rika-debug-test-"))
     const script = join(dir, "fake-motel.js")
     const output = join(dir, "output.json")
+    const expectedCwd = await realpath(dir)
     const threadId = Ids.ThreadId.make("thread_debug_test")
     await writeFile(
       script,
@@ -18,6 +19,7 @@ describe("CLI debug command", () => {
 if (output === undefined) process.exit(2)
 await Bun.write(output, JSON.stringify({
   argv: process.argv.slice(2),
+  cwd: process.cwd(),
   baseUrl: process.env.MOTEL_OTEL_BASE_URL,
   queryUrl: process.env.MOTEL_OTEL_QUERY_URL,
   service: process.env.MOTEL_TUI_SERVICE_NAME,
@@ -44,6 +46,7 @@ await Bun.write(output, JSON.stringify({
       expect(exitCode).toBe(0)
       expect(invocation).toEqual({
         argv: ["tui"],
+        cwd: expectedCwd,
         baseUrl: "http://127.0.0.1:4999",
         queryUrl: "http://127.0.0.1:4999",
         service: "rika",

@@ -1,7 +1,7 @@
 import { $ } from "bun"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { join } from "node:path"
+import { dirname, join } from "node:path"
 
 const artifactName = `rika-${process.platform}-${process.arch}${process.platform === "win32" ? ".exe" : ""}`
 const artifactPath = `dist/release/${artifactName}`
@@ -117,7 +117,7 @@ async function smokeDebugCommand() {
     `#!/usr/bin/env bun
 const output = process.env.RIKA_FAKE_MOTEL_OUTPUT
 if (output === undefined) process.exit(2)
-await Bun.write(output, JSON.stringify({ argv: process.argv.slice(2), service: process.env.MOTEL_TUI_SERVICE_NAME }))
+await Bun.write(output, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), service: process.env.MOTEL_TUI_SERVICE_NAME }))
 `,
   )
   await $`chmod +x ${fakeBun}`
@@ -136,6 +136,7 @@ await Bun.write(output, JSON.stringify({ argv: process.argv.slice(2), service: p
       invocation.argv.length !== 2 ||
       invocation.argv[1] !== "tui" ||
       typeof motelScript !== "string" ||
+      invocation.cwd !== dirname(motelScript) ||
       !motelScript.endsWith(expectedMotelSuffix) ||
       !(await Bun.file(motelScript).exists())
     ) {
