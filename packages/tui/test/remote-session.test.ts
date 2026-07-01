@@ -49,7 +49,7 @@ describe("TUI remote session", () => {
     expect(frames).toContain("remote response")
     expect(frames).toContain("Active threads")
     expect(frames).toContain("Started new thread")
-    expect(frames).toContain("Resumed thread thread_remote_initial")
+    expect(rendered.some((state) => state.connecting_ticks > 0)).toBe(true)
     expect(frames).toContain("Archived thread_remote_initial")
     expect(frames).toContain("Unarchived thread_remote_initial")
     expect(frames).toContain("Rika 0.0.0")

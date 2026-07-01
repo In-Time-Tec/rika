@@ -90,7 +90,7 @@ describe("TUI session", () => {
     const frames = text(rendered)
     expect(exitCode).toBe(0)
     expect(frames).toContain("session response")
-    expect(frames).toContain("Mode switched to rush")
+    expect(rendered.some((state) => state.mode === "rush")).toBe(true)
     expect(frames).toContain("Review completed: 1 findings across 1 files")
     expect(frames).toContain("Started new thread")
     expect(rendered.some((state) => (state.notice ?? "").includes("Goodbye"))).toBe(true)
@@ -116,7 +116,7 @@ describe("TUI session", () => {
     )
 
     const frames = text(rendered)
-    expect(frames).toContain("Resumed thread thread_existing_tui")
+    expect(rendered.some((state) => state.connecting_ticks > 0)).toBe(true)
     expect(frames).toContain("old durable message")
     expect(frames).toContain("Thread export JSON")
     expect(frames).toContain('"thread_id": "thread_existing_tui"')

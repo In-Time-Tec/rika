@@ -20,6 +20,7 @@ export interface TurnRequest {
   readonly content: string
   readonly content_parts?: ReadonlyArray<Message.ContentPart>
   readonly mode: Config.Mode
+  readonly fast_mode?: boolean
 }
 
 export interface CancelRequest {

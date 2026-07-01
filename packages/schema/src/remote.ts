@@ -159,6 +159,7 @@ export const StartTurnRequest = Schema.Struct({
   content: Schema.String,
   content_parts: Schema.optional(Schema.Array(ContentPart)),
   mode: Schema.optional(AgentMode),
+  fast_mode: Schema.optional(Schema.Boolean),
   cancelled: Schema.optional(Schema.Boolean),
   ide_context: Schema.optional(IdeContextSnapshot),
 }).annotate({ identifier: "Rika.Remote.StartTurnRequest" })

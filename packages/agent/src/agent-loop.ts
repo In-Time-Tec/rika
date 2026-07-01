@@ -17,6 +17,7 @@ export const RunTurnInput = Schema.Struct({
   content: Schema.String,
   content_parts: Schema.optional(Schema.Array(Message.ContentPart)),
   mode: Schema.optional(Config.Mode),
+  fast_mode: Schema.optional(Schema.Boolean),
   cancelled: Schema.optional(Schema.Boolean),
   ide_context: Schema.optional(Ide.ContextSnapshot),
 }).annotate({ identifier: "Rika.Agent.AgentLoop.RunTurnInput" })
@@ -922,6 +923,7 @@ const stringArray = (value: unknown): ReadonlyArray<string> | undefined =>
 
 const routerRequest = (input: RunTurnInput, modelInput: ModelInput): Router.Request => ({
   ...(input.mode === undefined ? {} : { mode: input.mode }),
+  ...(input.fast_mode === undefined ? {} : { fast_mode: input.fast_mode }),
   messages: modelInput.messages,
   prompt: modelInput.prompt,
   toolkit: modelInput.tools.toolkit,

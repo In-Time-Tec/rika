@@ -13,6 +13,7 @@ export const Request = Schema.Struct({
   reasoning_effort: Schema.optional(Provider.ReasoningEffort),
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Provider.Metadata),
+  fast_mode: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "Rika.LLM.Router.Request" })
 
 export interface RoutedRequest extends Schema.Schema.Type<typeof RoutedRequest>, Provider.RuntimeOptions {}
@@ -25,6 +26,7 @@ export const RoutedRequest = Schema.Struct({
   reasoning_effort: Provider.ReasoningEffort,
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Provider.Metadata),
+  service_tier: Schema.optional(Provider.ServiceTier),
 }).annotate({ identifier: "Rika.LLM.Router.RoutedRequest" })
 
 export class RouterError extends Schema.TaggedErrorClass<RouterError>()("RouterError", {
@@ -91,6 +93,8 @@ const makeRoute = (config: Config.Interface) =>
     const model = request.model ?? Modes.primaryModel(routing)
     const temperature = request.temperature ?? routing.temperature
     const metadata = request.metadata
+    const serviceTier: Provider.ServiceTier | undefined =
+      request.fast_mode === true && provider === "openai" ? "priority" : undefined
 
     return {
       mode: modeName,
@@ -101,6 +105,7 @@ const makeRoute = (config: Config.Interface) =>
       reasoning_effort: request.reasoning_effort ?? routing.reasoning_effort,
       ...(temperature === undefined ? {} : { temperature }),
       ...(metadata === undefined ? {} : { metadata }),
+      ...(serviceTier === undefined ? {} : { service_tier: serviceTier }),
       ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
       ...(request.toolkit === undefined ? {} : { toolkit: request.toolkit }),
     }

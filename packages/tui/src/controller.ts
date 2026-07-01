@@ -94,15 +94,23 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           currentTurnId = undefined
           state = { ...state, active: true, activity: "idle" }
           const fiber = yield* Effect.forkScoped(
-            deps.backend.streamTurn({ thread_id: threadId, workspace_path: workspacePath, ...submitted, mode }).pipe(
-              Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
-              Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
-              Effect.matchCauseEffect({
-                onFailure: (cause: Cause.Cause<E>) =>
-                  Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
-                onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token }).pipe(Effect.asVoid),
-              }),
-            ),
+            deps.backend
+              .streamTurn({
+                thread_id: threadId,
+                workspace_path: workspacePath,
+                ...submitted,
+                mode,
+                fast_mode: state.fast_mode,
+              })
+              .pipe(
+                Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
+                Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
+                Effect.matchCauseEffect({
+                  onFailure: (cause: Cause.Cause<E>) =>
+                    Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
+                  onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token }).pipe(Effect.asVoid),
+                }),
+              ),
           )
           turnFiber = fiber
           yield* render()
@@ -110,6 +118,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
 
       const runSlash = (command: string) =>
         Effect.gen(function* () {
+          if (command.startsWith("/thread ")) {
+            state = ViewState.beginConnecting(state)
+            yield* render()
+          }
           const result = yield* deps.backend
             .runCommand({ state, thread_id: threadId, workspace_path: workspacePath, mode }, command)
             .pipe(
@@ -219,15 +231,21 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           yield* maybeShutdown()
         })
 
-      const switchMode = () =>
+      const openModePicker = () =>
         Effect.gen(function* () {
           if (ViewState.hasActivity(state)) {
             state = ViewState.withNotice(state, "Mode is locked once a thread is active.")
             yield* render()
             return
           }
-          mode = nextMode(mode)
-          state = ViewState.withNotice(ViewState.withMode(state, mode), `Mode switched to ${mode}`)
+          state = ViewState.openModePicker(state)
+          yield* render()
+        })
+
+      const cycleModePicker = (delta: number) =>
+        Effect.gen(function* () {
+          state = ViewState.modePickerApply(ViewState.modePickerMove(state, delta))
+          mode = state.mode
           yield* render()
         })
 
@@ -292,10 +310,18 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               state = ViewState.closePalette(state)
               break
             case "PaletteUp":
-              state = ViewState.paletteMove(state, -1, Palette.filter(state.palette.query).length)
+              state = ViewState.paletteMove(
+                state,
+                -1,
+                Palette.filter(state.palette.query, state.mode, state.fast_mode).length,
+              )
               break
             case "PaletteDown":
-              state = ViewState.paletteMove(state, 1, Palette.filter(state.palette.query).length)
+              state = ViewState.paletteMove(
+                state,
+                1,
+                Palette.filter(state.palette.query, state.mode, state.fast_mode).length,
+              )
               break
             case "PaletteInsert":
               state = ViewState.paletteInsert(state, action.text)
@@ -304,7 +330,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               state = ViewState.paletteBackspace(state)
               break
             case "PaletteRun": {
-              const command = Palette.at(state.palette.query, state.palette.selected)
+              const command = Palette.at(state.palette.query, state.palette.selected, state.mode, state.fast_mode)
               state = ViewState.closePalette(state)
               if (command !== undefined) {
                 if (command.command === "/switch-thread") {
@@ -323,17 +349,29 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             case "CloseOverlay":
               state = ViewState.closeShortcuts(state)
               break
-            case "SwitchMode":
-              yield* switchMode()
+            case "OpenModePicker":
+              yield* openModePicker()
               return
+            case "ModePickerNext":
+              yield* cycleModePicker(1)
+              return
+            case "ModePickerPrev":
+              yield* cycleModePicker(-1)
+              return
+            case "ModePickerClose":
+              state = ViewState.closeModePicker(state)
+              break
             case "ToggleDetails":
               state = ViewState.toggleDetails(state)
               break
             case "CycleReasoning":
               state = ViewState.cycleReasoning(state)
+              mode = state.mode
               break
             case "ToggleFastMode":
-              state = ViewState.toggleFastMode(state)
+              state = ViewState.isFastEligible(state.mode)
+                ? ViewState.toggleFastMode(state)
+                : ViewState.withNotice(state, "Fast speed is only available in rush and deep modes.")
               break
             case "OpenEditor": {
               const edited = yield* deps.renderer.editExternally(ViewState.submitText(state))
@@ -476,7 +514,13 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             return
           }
           const context: Keymap.Context = {
-            surface: state.palette.open ? "palette" : state.shortcuts_open ? "overlay" : "input",
+            surface: state.modepicker.open
+              ? "modepicker"
+              : state.palette.open
+                ? "palette"
+                : state.shortcuts_open
+                  ? "overlay"
+                  : "input",
             busy: active,
             inputEmpty: state.input.text.length === 0,
             trailingBackslash: state.input.text.endsWith("\\"),
@@ -805,14 +849,6 @@ const firstUserMessage = (state: ViewState.ViewState): string => {
   if (entry === undefined || entry.kind !== "message") return ""
   const text = entry.message.text.trim().replace(/\s+/g, " ")
   return text.length > 60 ? `${text.slice(0, 57)}...` : text
-}
-
-const nextMode = (mode: Config.Mode): Config.Mode => {
-  if (mode === "rush") return "smart"
-  if (mode === "smart") return "deep1"
-  if (mode === "deep1") return "deep2"
-  if (mode === "deep2") return "deep3"
-  return "rush"
 }
 
 const threadSwitcherItem = (option: ThreadOption): ViewState.ThreadSwitcherItem => ({

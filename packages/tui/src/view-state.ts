@@ -65,6 +65,14 @@ export interface PaletteState {
   readonly selected: number
 }
 
+export const modePickerFamilies = ["deep", "rush", "smart"] as const
+export type ModePickerFamily = (typeof modePickerFamilies)[number]
+
+export interface ModePickerState {
+  readonly open: boolean
+  readonly selected: number
+}
+
 export interface PickerItem {
   readonly label: string
   readonly insert: string
@@ -118,6 +126,10 @@ export interface ViewState {
   readonly activity: Activity
   readonly active: boolean
   readonly spinner_index: number
+  readonly connecting_ticks: number
+  readonly mode_switch_ticks: number
+  readonly mode_switch_kind: "mode" | "tier"
+  readonly deep_tier: number
   readonly messages: ReadonlyArray<ThreadMessage>
   readonly cards: ReadonlyArray<Card>
   readonly entries: ReadonlyArray<TranscriptEntry>
@@ -137,19 +149,24 @@ export interface ViewState {
   readonly nav_index: number
   readonly thinking: ThinkingState
   readonly palette: PaletteState
+  readonly modepicker: ModePickerState
   readonly filepicker: FilePickerState
   readonly threadswitcher: ThreadSwitcherState
   readonly shortcuts_open: boolean
 }
 
 export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
+export const connectingTicks = 12
+export const modeSwitchTicks = 8
 export const maxStreamingTextChars = 12000
 export const isDeepMode = (mode: Config.Mode): boolean => mode === "deep1" || mode === "deep2" || mode === "deep3"
 export const deepModeTier = (mode: Config.Mode): number =>
   mode === "deep1" ? 1 : mode === "deep2" ? 2 : mode === "deep3" ? 3 : 0
+export const isFastEligible = (mode: Config.Mode): boolean => mode === "rush" || isDeepMode(mode)
 
 const emptyInput: InputBuffer = { text: "", cursor: 0, attachments: [] }
 const closedPalette: PaletteState = { open: false, query: "", selected: 0 }
+const closedModePicker: ModePickerState = { open: false, selected: 0 }
 const closedFilePicker: FilePickerState = { open: false, query: "", selected: 0, kind: "file", items: [] }
 const closedThreadSwitcher: ThreadSwitcherState = { open: false, query: "", selected: 0, items: [] }
 const hiddenThinking: ThinkingState = { text: "", visible: false }
@@ -166,6 +183,7 @@ const interactionDefaults = {
   nav_index: -1,
   thinking: hiddenThinking,
   palette: closedPalette,
+  modepicker: closedModePicker,
   filepicker: closedFilePicker,
   threadswitcher: closedThreadSwitcher,
   palette_open: false,
@@ -190,6 +208,10 @@ const initialSeed = (input: Input): ViewState => ({
   activity: "idle",
   active: false,
   spinner_index: 0,
+  connecting_ticks: 0,
+  mode_switch_ticks: 0,
+  mode_switch_kind: "mode",
+  deep_tier: isDeepMode(input.mode) ? deepModeTier(input.mode) : 3,
   messages: [],
   cards: [],
   entries: [],
@@ -264,17 +286,29 @@ export const finishTurn = (state: ViewState, activity: "idle" | "failed" = "idle
   generated_text_chars: 0,
 })
 
+export const deepModeForTier = (tier: number): Config.Mode => (tier === 2 ? "deep2" : tier === 3 ? "deep3" : "deep1")
+
 export const withMode = (state: ViewState, mode: Config.Mode): ViewState => ({
   ...state,
   mode,
   reasoning_effort: modeDefaultEffort(mode),
+  fast_mode: isFastEligible(mode) ? state.fast_mode : false,
+  mode_switch_ticks: mode === state.mode ? state.mode_switch_ticks : modeSwitchTicks,
+  mode_switch_kind: "mode",
+  deep_tier: isDeepMode(mode) ? deepModeTier(mode) : state.deep_tier,
 })
 
-export const cycleReasoning = (state: ViewState): ViewState => ({
-  ...state,
-  mode: nextReasoningMode(state.mode),
-  reasoning_effort: modeDefaultEffort(nextReasoningMode(state.mode)),
-})
+export const cycleReasoning = (state: ViewState): ViewState => {
+  const next = nextReasoningMode(state.mode)
+  return {
+    ...state,
+    mode: next,
+    reasoning_effort: modeDefaultEffort(next),
+    mode_switch_ticks: next === state.mode ? state.mode_switch_ticks : modeSwitchTicks,
+    mode_switch_kind: "tier",
+    deep_tier: isDeepMode(next) ? deepModeTier(next) : state.deep_tier,
+  }
+}
 
 export const toggleFastMode = (state: ViewState): ViewState => ({ ...state, fast_mode: !state.fast_mode })
 
@@ -303,6 +337,11 @@ export const withNotice = (state: ViewState, notice: string): ViewState => ({
   palette_open: false,
   palette: closedPalette,
   shortcuts_open: false,
+})
+
+export const beginConnecting = (state: ViewState): ViewState => ({
+  ...withoutNotice(state),
+  connecting_ticks: connectingTicks,
 })
 
 export const withPalette = (state: ViewState): ViewState => ({
@@ -744,6 +783,31 @@ export const paletteMove = (state: ViewState, delta: number, count: number): Vie
   return { ...state, palette: { ...state.palette, selected } }
 }
 
+const familyOf = (mode: Config.Mode): ModePickerFamily =>
+  mode === "rush" ? "rush" : mode === "smart" ? "smart" : "deep"
+
+export const openModePicker = (state: ViewState): ViewState => ({
+  ...withoutNotice(state),
+  modepicker: { open: true, selected: Math.max(0, modePickerFamilies.indexOf(familyOf(state.mode))) },
+})
+
+export const closeModePicker = (state: ViewState): ViewState => ({
+  ...state,
+  modepicker: closedModePicker,
+})
+
+export const modePickerMove = (state: ViewState, delta: number): ViewState => {
+  const count = modePickerFamilies.length
+  const selected = (((state.modepicker.selected + delta) % count) + count) % count
+  return { ...state, modepicker: { ...state.modepicker, selected } }
+}
+
+export const modePickerApply = (state: ViewState): ViewState => {
+  const family = modePickerFamilies[state.modepicker.selected] ?? "smart"
+  if (family === "deep") return withMode(state, deepModeForTier(state.deep_tier))
+  return withMode(state, family)
+}
+
 export const openShortcuts = (state: ViewState): ViewState => ({
   ...withoutNotice(state),
   shortcuts_open: true,
@@ -890,6 +954,8 @@ export const acceptSelected = (state: ViewState): ViewState => {
 export const tickSpinner = (state: ViewState): ViewState => ({
   ...state,
   spinner_index: (state.spinner_index + 1) % spinnerFrames.length,
+  connecting_ticks: state.connecting_ticks > 0 ? state.connecting_ticks - 1 : 0,
+  mode_switch_ticks: state.mode_switch_ticks > 0 ? state.mode_switch_ticks - 1 : 0,
 })
 
 const tick = tickSpinner

@@ -25,6 +25,7 @@ export const requestConfigFromRikaRequest = (
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...(reasoningEffort === undefined ? {} : { reasoning: { effort: reasoningEffort } }),
     ...(request.metadata === undefined ? {} : { metadata: request.metadata }),
+    ...(request.service_tier === undefined ? {} : { service_tier: request.service_tier }),
   }
 }
 

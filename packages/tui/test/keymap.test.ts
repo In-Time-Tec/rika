@@ -49,9 +49,17 @@ describe("keymap.resolve", () => {
     )
   })
 
-  test("Ctrl+O opens the palette, Ctrl+S switches mode", () => {
+  test("Ctrl+O opens the palette, Ctrl+S opens the mode picker", () => {
     expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("o")))._tag).toBe("OpenPalette")
-    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("s")))._tag).toBe("SwitchMode")
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("s")))._tag).toBe("OpenModePicker")
+  })
+
+  test("Ctrl+S cycles the mode picker once it is open", () => {
+    const ctx = inputCtx({ surface: "modepicker" })
+    expect(expectAction(Keymap.resolve(ctx, undefined, Keys.ctrl("s")))._tag).toBe("ModePickerNext")
+    expect(expectAction(Keymap.resolve(ctx, undefined, Keys.make({ name: "down" })))._tag).toBe("ModePickerNext")
+    expect(expectAction(Keymap.resolve(ctx, undefined, Keys.make({ name: "up" })))._tag).toBe("ModePickerPrev")
+    expect(expectAction(Keymap.resolve(ctx, undefined, Keys.make({ name: "escape" })))._tag).toBe("ModePickerClose")
   })
 
   test("Ctrl+R recalls prompt history", () => {

@@ -17,6 +17,7 @@ import {
   StyledText,
   stripAnsiSequences,
   t,
+  TextAttributes,
   type TextOptions,
   type TextChunk,
   TextRenderable,
@@ -97,6 +98,20 @@ const color = {
   accent: "#58a6ff",
   panel: "#0a0a0a",
   modalPanel: "#121212",
+} as const
+
+const roundedTeeTop = {
+  topLeft: "├",
+  topRight: "┤",
+  bottomLeft: "╰",
+  bottomRight: "╯",
+  horizontal: "─",
+  vertical: "│",
+  topT: "┬",
+  bottomT: "┴",
+  leftT: "├",
+  rightT: "┤",
+  cross: "┼",
 } as const
 
 const standaloneCardBodyIndent = 3
@@ -301,6 +316,8 @@ export class Surface {
   private readonly paletteBox: BoxRenderable
   private readonly paletteQuery: TextRenderable
   private readonly paletteList: BoxRenderable
+  private readonly modePickerBox: BoxRenderable
+  private readonly modePickerList: BoxRenderable
   private readonly filePickerBox: BoxRenderable
   private readonly filePickerQuery: TextRenderable
   private readonly filePickerList: BoxRenderable
@@ -340,14 +357,14 @@ export class Surface {
     root.add(this.transcript)
 
     this.queueBox = new BoxRenderable(renderer, {
-      border: true,
+      border: ["top", "left", "right"],
       borderStyle: "rounded",
       borderColor: color.text,
       paddingLeft: 1,
       paddingRight: 1,
       flexShrink: 0,
       visible: false,
-      minHeight: 3,
+      minHeight: 2,
     })
     this.queueText = new TextRenderable(renderer, { content: "", selectable: false })
     this.queueHintText = new TextRenderable(renderer, {
@@ -430,6 +447,25 @@ export class Surface {
     this.paletteBox.add(this.paletteQuery)
     this.paletteBox.add(this.paletteList)
     root.add(this.paletteBox)
+
+    this.modePickerBox = new BoxRenderable(renderer, {
+      border: true,
+      borderStyle: "rounded",
+      borderColor: "#dedede",
+      position: "absolute",
+      zIndex: 20,
+      visible: false,
+      backgroundColor: color.modalPanel,
+      flexDirection: "column",
+      paddingLeft: 1,
+      paddingRight: 1,
+    })
+    this.modePickerList = new BoxRenderable(renderer, {
+      flexDirection: "column",
+      backgroundColor: color.modalPanel,
+    })
+    this.modePickerBox.add(this.modePickerList)
+    root.add(this.modePickerBox)
 
     this.filePickerBox = new BoxRenderable(renderer, {
       border: true,
@@ -528,10 +564,7 @@ export class Surface {
     this.queueHintText.bg = cutoutBg
 
     this.costText.top = -1
-    this.costText.content =
-      state.cost_usd > 0
-        ? t` ${fg(color.dim)(`${costLabel(state.cost_usd)} `)}${fg(color.faint)("— ")}${fg(modeColor(state.mode))(modeLabel(state.mode, state.reasoning_effort))}${state.fast_mode ? fg(color.yellow)(" ⚡") : fg(color.faint)("")} `
-        : t` ${fg(modeColor(state.mode))(modeLabel(state.mode, state.reasoning_effort))}${state.fast_mode ? fg(color.yellow)(" ⚡") : fg(color.faint)("")} `
+    this.costText.content = modeIndicatorContent(state)
     this.cwdText.content = t` ${fg(color.dim)(cwdLabel(state))} `
 
     this.rebuildTranscript(state)
@@ -540,7 +573,8 @@ export class Surface {
     this.shortcutsText.content = state.shortcuts_open ? shortcutsHelp() : ""
 
     this.queueBox.visible = state.queued.length > 0
-    this.queueBox.height = Math.max(3, state.queued.length + 2)
+    this.queueBox.height = Math.max(2, state.queued.length + 1)
+    this.inputBox.customBorderChars = state.queued.length > 0 ? roundedTeeTop : undefined
     this.queueText.content = queueLines(state)
     this.queueHintText.visible = state.queued.length > 0
     this.queueHintText.content = queueHintLine(state)
@@ -553,10 +587,10 @@ export class Surface {
 
     this.paletteBox.visible = state.palette.open
     if (state.palette.open) {
-      const filtered = Palette.filter(state.palette.query)
+      const filtered = Palette.filter(state.palette.query, state.mode, state.fast_mode)
       const selected = Math.min(state.palette.selected, Math.max(0, filtered.length - 1))
       const width = 80
-      const height = Math.min(filtered.length + 5, Math.max(6, this.renderer.height - 4))
+      const height = Math.min(Math.max(6, filtered.length + 5), Math.max(6, this.renderer.height - 4))
       this.paletteBox.width = width
       this.paletteBox.height = height
       this.paletteBox.left = Math.max(2, Math.floor((this.renderer.width - width) / 2))
@@ -564,6 +598,18 @@ export class Surface {
       this.paletteQuery.content = t`${fg(color.faint)("> ")}${fg(color.text)(state.palette.query)}${reverse(" ")}`
       const visible = windowList(filtered, selected, Math.max(1, height - 5))
       this.rebuildPaletteList(visible.rows, selected - visible.start, width - 6)
+    }
+
+    this.modePickerBox.visible = state.modepicker.open
+    if (state.modepicker.open) {
+      const width = 58
+      const height = ViewState.modePickerFamilies.length + 2
+      const inputRows = Math.max(5, ViewState.displayInputText(state.input).split("\n").length + 2)
+      this.modePickerBox.width = width
+      this.modePickerBox.height = height
+      this.modePickerBox.right = 1
+      this.modePickerBox.bottom = inputRows + 1
+      this.rebuildModePickerList(state, width - 2)
     }
 
     this.filePickerBox.visible = state.filepicker.open
@@ -618,6 +664,13 @@ export class Surface {
     const catWidth = commands.reduce((max, command) => Math.max(max, command.category.length), 0)
     commands.forEach((command, index) => {
       this.paletteList.add(paletteRow(this.renderer, command, index === selected, catWidth, width))
+    })
+  }
+
+  private rebuildModePickerList(state: ViewState.ViewState, width: number): void {
+    for (const child of Array.from(this.modePickerList.getChildren())) this.modePickerList.remove(child.id)
+    modePickerRows.forEach((row, index) => {
+      this.modePickerList.add(modePickerRow(this.renderer, state, row, index === state.modepicker.selected, width))
     })
   }
 
@@ -677,8 +730,14 @@ export class Surface {
       this.transcriptSignature = signature
       for (const child of Array.from(this.entriesBox.getChildren())) this.entriesBox.remove(child.id)
       if (isWelcome(state)) {
+        this.entriesBox.flexGrow = 1
+        this.entriesBox.justifyContent = "center"
+        this.entriesBox.alignItems = "stretch"
         this.entriesBox.add(welcomeBlock(this.renderer, state.spinner_index, state.mode))
       } else {
+        this.entriesBox.flexGrow = 0
+        this.entriesBox.justifyContent = "flex-start"
+        this.entriesBox.alignItems = "stretch"
         for (const block of transcriptBlocks(this.renderer, state, {
           variant: "main",
           diffRenderer: this.diffRenderer,
@@ -941,6 +1000,31 @@ const modeColor = (mode: ViewState.ViewState["mode"]): string => {
   return `#${hex2(r)}${hex2(g)}${hex2(b)}`
 }
 
+const rgbHex = (rgb: readonly [number, number, number]): string => `#${hex2(rgb[0])}${hex2(rgb[1])}${hex2(rgb[2])}`
+
+const modeLabelChunks = (state: ViewState.ViewState): TextChunk[] => {
+  const label = modeLabel(state.mode, state.reasoning_effort)
+  if (state.mode_switch_ticks <= 0) return [fg(modeColor(state.mode))(label)]
+  const base = modeRgb(state.mode)
+  const remaining = state.mode_switch_ticks / ViewState.modeSwitchTicks
+  const glowFor = (index: number, chars: number): number => {
+    if (state.mode_switch_kind === "tier") return index === chars - 1 ? remaining : 0
+    const head = (1 - remaining) * (chars + 2)
+    return Math.max(0, 1 - Math.abs(index - head) / 2)
+  }
+  const chars = [...label]
+  return chars.map((ch, index) => fg(rgbHex(mix(base, [255, 255, 255], glowFor(index, chars.length))))(ch))
+}
+
+const modeIndicatorContent = (state: ViewState.ViewState): StyledText => {
+  const chunks: TextChunk[] = [fg(color.text)(" ")]
+  if (state.cost_usd > 0) chunks.push(fg(color.dim)(`${costLabel(state.cost_usd)} `), fg(color.faint)("— "))
+  if (state.fast_mode) chunks.push(fg(color.yellow)("↯"))
+  for (const chunk of modeLabelChunks(state)) chunks.push(chunk)
+  chunks.push(fg(color.text)(" "))
+  return new StyledText(chunks)
+}
+
 const costLabel = (cost: number): string => `$${cost < 0.01 ? cost.toFixed(3) : cost.toFixed(2)}`
 
 const activityLabel = (state: ViewState.ViewState): string => {
@@ -965,6 +1049,10 @@ const statusLine = (state: ViewState.ViewState): StyledText | undefined => {
   if (state.active) {
     const frame = ViewState.spinnerFrames[state.spinner_index % ViewState.spinnerFrames.length] ?? "⠋"
     return t` ${fg(modeColor(state.mode))(frame)} ${fg(color.dim)(activityLabel(state))} `
+  }
+  if (state.connecting_ticks > 0) {
+    const frame = ViewState.spinnerFrames[state.spinner_index % ViewState.spinnerFrames.length] ?? "⠋"
+    return t` ${fg(modeColor(state.mode))(frame)} ${fg(color.dim)("Connecting")} `
   }
   if (state.notice !== undefined && state.notice.length > 0) {
     return t` ${fg(color.yellow)("◇")} ${fg(color.dim)(state.notice)} `
@@ -1274,6 +1362,33 @@ const paletteRow = (
   })
 }
 
+const modePickerRows = [
+  { family: "deep", desc: "The most capable coding mode" },
+  { family: "rush", desc: "Fast, low-token mode for small tasks" },
+  { family: "smart", desc: "Strong intelligence for any task" },
+] as const
+
+const modePickerRow = (
+  renderer: CliRenderer,
+  state: ViewState.ViewState,
+  row: (typeof modePickerRows)[number],
+  selected: boolean,
+  width: number,
+): TextRenderable => {
+  const rep: ViewState.ViewState["mode"] =
+    row.family === "deep" ? ViewState.deepModeForTier(state.deep_tier) : row.family
+  const label = row.family === "deep" ? `deep${superscripts[state.deep_tier] ?? ""}` : row.family
+  const pointer = selected ? fg(color.accent)("▶ ") : fg(color.faint)("  ")
+  const name = fg(modeColor(rep))(label.padEnd(6))
+  const desc = selected ? fg(color.text)(row.desc) : fg(color.dim)(row.desc)
+  return new TextRenderable(renderer, {
+    content: t`${pointer}${name}  ${desc}`,
+    width,
+    flexShrink: 0,
+    selectable: false,
+  })
+}
+
 const threadSwitcherRow = (
   renderer: CliRenderer,
   thread: ViewState.ThreadSwitcherItem,
@@ -1464,21 +1579,45 @@ const lineToChunks = (line: string): TextChunk[] => {
   return inlineChunks(line)
 }
 
+const linkChunk = (url: string, text: string): TextChunk => link(url)(underline(fg(color.teal)(text)))
+
 const inlineChunks = (line: string): TextChunk[] => {
   const out: TextChunk[] = []
-  const pattern = /`([^`]+)`|\*\*([^*]+)\*\*/g
+  const pattern = /`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|(https?:\/\/[^\s)\]]+)/g
   let last = 0
   let match: RegExpExecArray | null
   while ((match = pattern.exec(line)) !== null) {
     if (match.index > last) out.push(fg(color.text)(line.slice(last, match.index)))
     if (match[1] !== undefined) out.push(fg(color.orange)(match[1]))
     else if (match[2] !== undefined) out.push(bold(fg(color.text)(match[2])))
+    else if (match[3] !== undefined && match[4] !== undefined) out.push(linkChunk(match[4], match[3]))
+    else if (match[5] !== undefined) {
+      const trailing = /[.,]$/.test(match[5]) ? match[5].slice(-1) : ""
+      const url = trailing.length === 0 ? match[5] : match[5].slice(0, -1)
+      out.push(linkChunk(url, url))
+      if (trailing.length > 0) out.push(fg(color.text)(trailing))
+    }
     last = match.index + match[0].length
   }
   if (last < line.length) out.push(fg(color.text)(line.slice(last)))
   if (out.length === 0) out.push(fg(color.text)(line))
   return out
 }
+
+export interface RenderedChunk {
+  readonly text: string
+  readonly url?: string
+  readonly underline: boolean
+  readonly fg?: ReadonlyArray<number>
+}
+
+export const renderMarkdownChunks = (text: string): ReadonlyArray<RenderedChunk> =>
+  renderMarkdown(text).chunks.map((chunk) => ({
+    text: chunk.text,
+    underline: ((chunk.attributes ?? 0) & TextAttributes.UNDERLINE) !== 0,
+    ...(chunk.link === undefined ? {} : { url: chunk.link.url }),
+    ...(chunk.fg === undefined ? {} : { fg: chunk.fg.toInts().slice(0, 3) }),
+  }))
 
 const shortcutsHelp = (): StyledText => {
   const keyColor = "#8fab9c"
@@ -1507,19 +1646,20 @@ const pad = (text: string, width: number): string =>
 
 const welcomeBlock = (renderer: CliRenderer, phase: number, mode: ViewState.ViewState["mode"]): BoxRenderable => {
   const row = new BoxRenderable(renderer, {
-    flexGrow: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-start",
-    gap: 4,
-    paddingLeft: 3,
   })
-  row.add(selectableText(renderer, { content: orb(phase, mode) }))
-  row.add(
+  row.add(new BoxRenderable(renderer, { flexGrow: 1, flexShrink: 1 }))
+  row.add(selectableText(renderer, { content: orb(phase, mode), flexShrink: 0 }))
+  const right = new BoxRenderable(renderer, { flexGrow: 1, flexShrink: 1, flexDirection: "row" })
+  right.add(
     selectableText(renderer, {
+      marginLeft: 4,
+      flexShrink: 0,
       content: t`${fg(welcomeColor(mode))("Welcome to Amp")}\n\n\n${fg(color.text)("ctrl+o")} ${fg(color.dim)("for commands")}\n${fg(color.text)("?")} ${fg(color.dim)("for shortcuts")}`,
     }),
   )
+  row.add(right)
   return row
 }
 

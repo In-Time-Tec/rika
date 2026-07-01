@@ -58,6 +58,27 @@ describe("LLM Router", () => {
     })
   })
 
+  test("resolves fast mode to the priority service tier for OpenAI modes", async () => {
+    for (const mode of ["rush", "deep1", "deep2", "deep3"] as const) {
+      const routed = await Effect.runPromise(
+        Router.route({ mode, messages, fast_mode: true }).pipe(Effect.provide(routerLayer)),
+      )
+      expect(routed).toMatchObject({ provider: "openai", service_tier: "priority" })
+    }
+  })
+
+  test("does not set a service tier for non-OpenAI modes or when fast mode is off", async () => {
+    const smart = await Effect.runPromise(
+      Router.route({ mode: "smart", messages, fast_mode: true }).pipe(Effect.provide(routerLayer)),
+    )
+    expect(smart).not.toHaveProperty("service_tier")
+
+    const deepStandard = await Effect.runPromise(
+      Router.route({ mode: "deep2", messages }).pipe(Effect.provide(routerLayer)),
+    )
+    expect(deepStandard).not.toHaveProperty("service_tier")
+  })
+
   test("complete depends only on the router service and fake provider layer", async () => {
     const response = await Effect.runPromise(
       Router.complete({ mode: "rush", messages }).pipe(Effect.provide(routerLayer)),

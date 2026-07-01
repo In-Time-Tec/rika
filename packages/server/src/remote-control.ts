@@ -208,6 +208,7 @@ export const layer = Layer.effect(
               ...(input.content_parts === undefined ? {} : { content_parts: input.content_parts }),
               ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
               ...(input.mode === undefined ? {} : { mode: input.mode }),
+              ...(input.fast_mode === undefined ? {} : { fast_mode: input.fast_mode }),
               ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
               ...(ideContext === undefined ? {} : { ide_context: ideContext }),
             })

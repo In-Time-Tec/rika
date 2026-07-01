@@ -17,6 +17,11 @@ export const ReasoningEffort = Schema.Literals(["none", "minimal", "low", "mediu
 })
 export type ReasoningEffort = typeof ReasoningEffort.Type
 
+export const ServiceTier = Schema.Literals(["auto", "default", "flex", "priority"]).annotate({
+  identifier: "Rika.LLM.ServiceTier",
+})
+export type ServiceTier = typeof ServiceTier.Type
+
 export interface TextContent extends Schema.Schema.Type<typeof TextContent> {}
 export const TextContent = Schema.Struct({
   type: Schema.Literal("text"),
@@ -54,6 +59,7 @@ export const GenerateRequest = Schema.Struct({
   reasoning_effort: Schema.optional(ReasoningEffort),
   temperature: Schema.optional(Schema.Number),
   metadata: Schema.optional(Metadata),
+  service_tier: Schema.optional(ServiceTier),
 }).annotate({ identifier: "Rika.LLM.GenerateRequest" })
 
 export type ToolkitInput = LanguageModel.ToolkitInput<any, never, never>

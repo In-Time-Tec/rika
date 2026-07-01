@@ -52,6 +52,42 @@ describe("adapter Surface (headless)", () => {
     }
   })
 
+  test("linkifies bare URLs and markdown links in assistant messages", async () => {
+    const setup = await createTestRenderer({ width: 160, height: 24 })
+    try {
+      const surface = new Adapter.Surface(setup.renderer)
+      const state = ViewState.initial({
+        thread_id: threadId,
+        workspace_path: "/workspace/rika",
+        mode: "smart",
+        events: [
+          messageAdded(
+            1,
+            "assistant",
+            "See https://github.com/In-Time-Tec/relay and [ci #123](https://ci.example.com/123).",
+          ),
+        ],
+      })
+
+      surface.update(state)
+      await setup.renderOnce()
+
+      const frame = setup.captureCharFrame()
+      expect(frame).toContain("https://github.com/In-Time-Tec/relay")
+      expect(frame).toContain("ci #123")
+      expect(frame).not.toContain("[ci #123]")
+      expect(frame).not.toContain("ci.example.com")
+
+      const spans = setup.captureSpans().lines.flatMap((line) => line.spans)
+      expectSpanColor(spans, "https://github.com/In-Time-Tec/relay", [45, 212, 191])
+      expectSpanColor(spans, "ci #123", [45, 212, 191])
+      expectSpanUnderline(spans, "https://github.com/In-Time-Tec/relay")
+      expectSpanUnderline(spans, "ci #123")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   test("input border cutouts inherit the renderer background", async () => {
     const setup = await createTestRenderer({ width: 120, height: 24 })
     try {
@@ -137,14 +173,12 @@ describe("adapter Surface (headless)", () => {
       const queueTop = lines.findIndex((line) => line.includes("Enter to steer"))
       const first = lines.findIndex((line) => line.includes("first queued"))
       const second = lines.findIndex((line) => line.includes("second queued"))
-      const queueBottom = lines.findIndex((line, index) => index > second && line.startsWith("╰"))
-      const inputTop = lines.findIndex((line, index) => index > queueBottom && line.includes("deep³"))
+      const inputTop = lines.findIndex((line, index) => index > second && line.includes("deep³"))
 
       expect(queueTop).toBeGreaterThanOrEqual(0)
       expect(first).toBeGreaterThan(queueTop)
       expect(second).toBeGreaterThan(first)
-      expect(queueBottom).toBeGreaterThan(second)
-      expect(inputTop).toBeGreaterThan(queueBottom)
+      expect(inputTop).toBeGreaterThan(second)
       expect(lines.slice(inputTop).join("\n")).not.toContain("first queued")
       expect(lines.slice(inputTop).join("\n")).not.toContain("second queued")
     } finally {

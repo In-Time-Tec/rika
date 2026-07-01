@@ -1,3 +1,6 @@
+import { Config } from "@rika/core"
+import { isFastEligible } from "./view-state"
+
 export interface Command {
   readonly id: string
   readonly category: string
@@ -58,12 +61,25 @@ export const commands: ReadonlyArray<Command> = [
   { id: "mode-deep3", category: "mode", action: "use deep3", hint: "switch to deep3 mode", command: "/mode deep3" },
 ]
 
+const speedCommand = (fastMode: boolean): Command => ({
+  id: "speed-fast",
+  category: "speed",
+  action: fastMode ? "use standard speed" : "use fast (2.5x cost)",
+  hint: "priority processing for rush & deep",
+  command: "/fast",
+  key: "Opt+R",
+})
+
+export const commandsFor = (mode: Config.Mode, fastMode: boolean): ReadonlyArray<Command> =>
+  isFastEligible(mode) ? [...commands, speedCommand(fastMode)] : commands
+
 const normalize = (query: string) => query.trim().toLowerCase().replace(/^\//, "")
 
-export const filter = (query: string): ReadonlyArray<Command> => {
+export const filter = (query: string, mode: Config.Mode, fastMode: boolean): ReadonlyArray<Command> => {
+  const available = commandsFor(mode, fastMode)
   const needle = normalize(query)
-  if (needle.length === 0) return commands
-  return commands.filter(
+  if (needle.length === 0) return available
+  return available.filter(
     (command) =>
       command.id.includes(needle) ||
       command.category.toLowerCase().includes(needle) ||
@@ -73,8 +89,8 @@ export const filter = (query: string): ReadonlyArray<Command> => {
   )
 }
 
-export const at = (query: string, index: number): Command | undefined => {
-  const results = filter(query)
+export const at = (query: string, index: number, mode: Config.Mode, fastMode: boolean): Command | undefined => {
+  const results = filter(query, mode, fastMode)
   if (results.length === 0) return undefined
   const clamped = Math.min(Math.max(index, 0), results.length - 1)
   return results[clamped]

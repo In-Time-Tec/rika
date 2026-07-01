@@ -1,6 +1,6 @@
 import * as Keys from "./keys"
 
-export type Surface = "input" | "palette" | "overlay"
+export type Surface = "input" | "palette" | "modepicker" | "overlay"
 
 export interface Context {
   readonly surface: Surface
@@ -39,7 +39,10 @@ export type Action =
   | { readonly _tag: "PaletteBackspace" }
   | { readonly _tag: "OpenShortcuts" }
   | { readonly _tag: "CloseOverlay" }
-  | { readonly _tag: "SwitchMode" }
+  | { readonly _tag: "OpenModePicker" }
+  | { readonly _tag: "ModePickerNext" }
+  | { readonly _tag: "ModePickerPrev" }
+  | { readonly _tag: "ModePickerClose" }
   | { readonly _tag: "ToggleDetails" }
   | { readonly _tag: "CycleReasoning" }
   | { readonly _tag: "ToggleFastMode" }
@@ -80,6 +83,8 @@ export const resolve = (context: Context, current: Pending | undefined, key: Key
   switch (context.surface) {
     case "palette":
       return resolvePalette(key)
+    case "modepicker":
+      return resolveModePicker(key)
     case "overlay":
       return resolveOverlay(key)
     default:
@@ -113,6 +118,14 @@ const resolvePalette = (key: Keys.Key): Resolution => {
   return ignore
 }
 
+const resolveModePicker = (key: Keys.Key): Resolution => {
+  if (key.ctrl && key.name === "s") return action({ _tag: "ModePickerNext" })
+  if (key.name === "down") return action({ _tag: "ModePickerNext" })
+  if (key.name === "up") return action({ _tag: "ModePickerPrev" })
+  if (isEnter(key) || isEscape(key)) return action({ _tag: "ModePickerClose" })
+  return ignore
+}
+
 const resolveOverlay = (_key: Keys.Key): Resolution => action({ _tag: "CloseOverlay" })
 
 const resolveInput = (context: Context, key: Keys.Key): Resolution => {
@@ -120,7 +133,7 @@ const resolveInput = (context: Context, key: Keys.Key): Resolution => {
 
   if (key.ctrl && key.name === "c") return pending("ctrl-c")
   if (key.ctrl && key.name === "o") return action({ _tag: "OpenPalette" })
-  if (key.ctrl && key.name === "s") return action({ _tag: "SwitchMode" })
+  if (key.ctrl && key.name === "s") return action({ _tag: "OpenModePicker" })
   if (key.ctrl && key.name === "g") return action({ _tag: "OpenEditor" })
   if (key.ctrl && key.name === "v") return action({ _tag: "PasteImage" })
   if (key.ctrl && key.name === "r") return action({ _tag: "HistoryPrev" })

@@ -31,6 +31,21 @@ describe("OpenAI Effect AI layer", () => {
     })
   })
 
+  test("forwards a priority service tier when fast mode resolved it", () => {
+    expect(OpenAi.requestConfigFromRikaRequest({ ...request, service_tier: "priority" })).toEqual({
+      model: "gpt-test",
+      store: false,
+      temperature: 0.2,
+      metadata: { thread_id: "T-1" },
+      reasoning: { effort: "low" },
+      service_tier: "priority",
+    })
+  })
+
+  test("omits service_tier when none was resolved", () => {
+    expect(OpenAi.requestConfigFromRikaRequest(request)).not.toHaveProperty("service_tier")
+  })
+
   test("keeps OpenAI credentials behind the live layer options", () => {
     expect(OpenAi.defaultApiKeyEnv).toBe("RIKA_API_KEY")
     expect(OpenAi.providerName).toBe("openai")

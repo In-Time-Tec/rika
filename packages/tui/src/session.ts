@@ -81,15 +81,19 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
     Effect.gen(function* () {
       const threadId = thread_id ?? Ids.ThreadId.make(yield* dependencies.idGenerator.next("thread"))
       const events = yield* readThreadEvents(dependencies, threadId).pipe(Effect.catch(() => Effect.succeed([])))
-      return { thread_id: threadId, state: ViewState.initial({ thread_id: threadId, workspace_path, mode, events }) }
+      return {
+        thread_id: threadId,
+        state: ViewState.beginConnecting(ViewState.initial({ thread_id: threadId, workspace_path, mode, events })),
+      }
     }),
-  streamTurn: ({ thread_id, workspace_path, content, content_parts, mode }) =>
+  streamTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
     dependencies.agentLoop.streamTurn({
       thread_id,
       workspace_id: Ids.WorkspaceId.make(workspace_path),
       content,
       ...(content_parts === undefined ? {} : { content_parts }),
       mode,
+      ...(fast_mode === undefined ? {} : { fast_mode }),
     }),
   cancelTurn: ({ thread_id, turn_id }) => dependencies.agentLoop.cancelTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(dependencies, context, command),
@@ -130,6 +134,7 @@ const handleCommand = (
     if (name === "/help" || name === "/palette")
       return Backend.commandResult(context, { state: ViewState.withPalette(state) })
     if (name === "/mode") return modeCommand(context, argument)
+    if (name === "/fast") return fastCommand(context)
     if (name === "/relaunch")
       return Backend.commandResult(context, {
         state: ViewState.withNotice(state, "Relaunch requested. Start Rika again after this session exits."),
@@ -192,11 +197,12 @@ const handleCommand = (
         return Backend.commandResult(context, { state: ViewState.withNotice(state, "Usage: /thread <thread-id>") })
       const nextThreadId = Ids.ThreadId.make(argument)
       const record = yield* dependencies.threadService.open({ thread_id: nextThreadId })
-      const next = ViewState.withThread(state, {
-        thread_id: nextThreadId,
-        events: record.events,
-        notice: `Resumed thread ${nextThreadId}`,
-      })
+      const next = ViewState.beginConnecting(
+        ViewState.withThread(state, {
+          thread_id: nextThreadId,
+          events: record.events,
+        }),
+      )
       return Backend.commandResult(context, { state: next, thread_id: nextThreadId })
     }
     if (name === "/archive" || name === "/unarchive") {
@@ -251,6 +257,17 @@ const handleCommand = (
     })
   })
 
+const fastCommand = (context: Backend.CommandContext): Backend.CommandResult => {
+  if (!ViewState.isFastEligible(context.mode))
+    return Backend.commandResult(context, {
+      state: ViewState.withNotice(context.state, "Fast speed is only available in rush and deep modes."),
+    })
+  const next = ViewState.toggleFastMode(context.state)
+  return Backend.commandResult(context, {
+    state: ViewState.withNotice(next, next.fast_mode ? "Fast speed on ↯ (priority processing)" : "Standard speed"),
+  })
+}
+
 const modeCommand = (context: Backend.CommandContext, argument: string | undefined): Backend.CommandResult => {
   const nextMode = argument === undefined || argument.length === 0 ? nextModeAfter(context.mode) : parseMode(argument)
   if (nextMode === undefined)
@@ -258,7 +275,7 @@ const modeCommand = (context: Backend.CommandContext, argument: string | undefin
       state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep1|deep2|deep3"),
     })
   return Backend.commandResult(context, {
-    state: ViewState.withNotice(ViewState.withMode(context.state, nextMode), `Mode switched to ${nextMode}`),
+    state: ViewState.withMode(context.state, nextMode),
     mode: nextMode,
   })
 }
