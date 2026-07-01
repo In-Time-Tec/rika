@@ -25,6 +25,7 @@ await Bun.write(output, JSON.stringify({
   service: process.env.MOTEL_TUI_SERVICE_NAME,
   attrKey: process.env.MOTEL_TUI_ATTR_KEY,
   attrValue: process.env.MOTEL_TUI_ATTR_VALUE,
+  theme: process.env.MOTEL_TUI_THEME,
 }))
 `,
     )
@@ -52,6 +53,7 @@ await Bun.write(output, JSON.stringify({
         service: "rika",
         attrKey: "rika.thread_id",
         attrValue: threadId,
+        theme: "rika",
       })
     } finally {
       await rm(dir, { recursive: true, force: true })

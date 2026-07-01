@@ -23,8 +23,9 @@ import {
   TextRenderable,
   underline,
 } from "@opentui/core"
-import { mkdirSync, unlinkSync } from "node:fs"
-import { resolve } from "node:path"
+import { Telemetry } from "@rika/core"
+import { existsSync, mkdirSync, unlinkSync } from "node:fs"
+import { dirname, join, resolve } from "node:path"
 import { stdin, stdout } from "node:process"
 import { pathToFileURL } from "node:url"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
@@ -187,12 +188,14 @@ export const layer = Layer.effect(
           try: async () => {
             renderer.suspend()
             try {
-              const args = input.thread_id === undefined ? ["debug", "--all"] : ["debug", "--thread", input.thread_id]
-              const launched = Bun.spawn([...rikaCommand(), ...args], {
+              const env = motelEnv(input)
+              const command = motelCommand(env)
+              const launched = Bun.spawn([...command, "tui"], {
                 stdin: "inherit",
                 stdout: "inherit",
                 stderr: "inherit",
-                env: { ...process.env, RIKA_WORKSPACE_ROOT: input.workspace_path },
+                env: childEnv(env),
+                cwd: dirname(command[1]),
               })
               const exitCode = await launched.exited
               if (exitCode !== 0) throw new Error(`debug exited ${exitCode}`)
@@ -615,7 +618,7 @@ export class Surface {
 
     this.paletteBox.visible = state.palette.open
     if (state.palette.open) {
-      const filtered = Palette.filter(state.palette.query, state.mode, state.fast_mode)
+      const filtered = Palette.filter(state.palette.query, state.mode, state.fast_mode, ViewState.hasActivity(state))
       const selected = Math.min(state.palette.selected, Math.max(0, filtered.length - 1))
       const width = 80
       const height = Math.min(Math.max(6, filtered.length + 5), Math.max(6, this.renderer.height - 4))
@@ -1323,11 +1326,67 @@ const defaultOpenCommand = (absolutePath: string): ReadonlyArray<string> => {
   return ["xdg-open", absolutePath]
 }
 
-const rikaCommand = (): ReadonlyArray<string> => {
-  const entry = process.argv[1]
-  if (entry === undefined) return [process.execPath]
-  return /\.[cm]?[jt]s$/.test(entry) ? [process.execPath, entry] : [process.execPath]
+const motelEnv = (input: OpenDebugInput): Record<string, string | undefined> => {
+  const endpoint = trimTrailingSlash(process.env.RIKA_TELEMETRY_ENDPOINT ?? Telemetry.defaultEndpoint)
+  return {
+    ...process.env,
+    RIKA_WORKSPACE_ROOT: input.workspace_path,
+    MOTEL_OTEL_BASE_URL: endpoint,
+    MOTEL_OTEL_QUERY_URL: endpoint,
+    MOTEL_TUI_SERVICE_NAME: Telemetry.serviceName,
+    MOTEL_TUI_ATTR_KEY: input.thread_id === undefined ? undefined : "rika.thread_id",
+    MOTEL_TUI_ATTR_VALUE: input.thread_id,
+    MOTEL_TUI_THEME: process.env.MOTEL_TUI_THEME ?? "rika",
+  }
 }
+
+const childEnv = (env: Record<string, string | undefined>) => {
+  const values = { ...process.env }
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) delete values[key]
+    else values[key] = value
+  }
+  return values
+}
+
+const motelCommand = (env: Record<string, string | undefined> = process.env): readonly [string, string] => {
+  const bun = env.RIKA_BUN_EXECUTABLE ?? "bun"
+  const script = env.RIKA_MOTEL_SCRIPT ?? resolveMotelScript()
+  return [bun, script]
+}
+
+const resolveMotelScript = (): string => {
+  const installed = join(dirname(process.execPath), "..", "share", "rika", "motel", "motel.js")
+  if (existsSync(installed)) return installed
+  const localScript = resolveLocalMotelScript()
+  if (localScript !== undefined) return localScript
+  try {
+    return Bun.resolveSync("@rika/motel/src/motel.ts", process.cwd())
+  } catch {}
+  throw new Error("Cannot find bundled motel. Run bun install or reinstall Rika.")
+}
+
+const resolveLocalMotelScript = (): string | undefined => {
+  for (const root of candidateRoots()) {
+    const script = join(root, "packages", "motel", "src", "motel.ts")
+    if (existsSync(script)) return script
+  }
+  return undefined
+}
+
+const candidateRoots = (): ReadonlyArray<string> => {
+  const roots = []
+  let current = process.cwd()
+  while (true) {
+    roots.push(current)
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return roots
+}
+
+const trimTrailingSlash = (value: string) => (value.endsWith("/") ? value.slice(0, -1) : value)
 
 const indentedText = (text: string, indent: number, textColor: string): StyledText => {
   const chunks: TextChunk[] = []

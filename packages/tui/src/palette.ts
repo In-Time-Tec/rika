@@ -10,7 +10,7 @@ export interface Command {
   readonly key?: string
 }
 
-export const commands: ReadonlyArray<Command> = [
+const leadingCommands: ReadonlyArray<Command> = [
   { id: "thread-switch", category: "thread", action: "switch", hint: "switch threads", command: "/switch-thread" },
   {
     id: "amp-relaunch",
@@ -32,27 +32,25 @@ export const commands: ReadonlyArray<Command> = [
     hint: "show ast-grep outline status",
     command: "/ast-grep outline status",
   },
-  {
-    id: "debug-open",
-    category: "debug",
-    action: "open",
-    hint: "open motel for the active thread or all telemetry",
-    command: "/debug",
-  },
-  {
-    id: "debug-open-all",
-    category: "debug",
-    action: "open all",
-    hint: "open motel for all Rika telemetry",
-    command: "/debug all",
-  },
-  {
-    id: "debug-open-thread",
-    category: "debug",
-    action: "open thread",
-    hint: "open motel for the active thread",
-    command: "/debug thread",
-  },
+]
+
+const debugAllCommand: Command = {
+  id: "debug-open-all",
+  category: "debug",
+  action: "open all",
+  hint: "open motel for all Rika telemetry",
+  command: "/debug all",
+}
+
+const debugThreadCommand: Command = {
+  id: "debug-open-thread",
+  category: "debug",
+  action: "open thread",
+  hint: "open motel for the active thread",
+  command: "/debug thread",
+}
+
+const trailingCommands: ReadonlyArray<Command> = [
   {
     id: "mcp-authenticate",
     category: "mcp",
@@ -68,6 +66,8 @@ export const commands: ReadonlyArray<Command> = [
   { id: "mode-deep3", category: "mode", action: "use deep3", hint: "switch to deep3 mode", command: "/mode deep3" },
 ]
 
+export const commands: ReadonlyArray<Command> = [...leadingCommands, debugAllCommand, ...trailingCommands]
+
 const speedCommand = (fastMode: boolean): Command => ({
   id: "speed-fast",
   category: "speed",
@@ -77,13 +77,24 @@ const speedCommand = (fastMode: boolean): Command => ({
   key: "Opt+R",
 })
 
-export const commandsFor = (mode: Config.Mode, fastMode: boolean): ReadonlyArray<Command> =>
-  isFastEligible(mode) ? [...commands, speedCommand(fastMode)] : commands
+export const commandsFor = (mode: Config.Mode, fastMode: boolean, threadActive = false): ReadonlyArray<Command> => {
+  const available = [
+    ...leadingCommands,
+    ...(threadActive ? [debugThreadCommand, debugAllCommand] : [debugAllCommand]),
+    ...trailingCommands,
+  ]
+  return isFastEligible(mode) ? [...available, speedCommand(fastMode)] : available
+}
 
 const normalize = (query: string) => query.trim().toLowerCase().replace(/^\//, "")
 
-export const filter = (query: string, mode: Config.Mode, fastMode: boolean): ReadonlyArray<Command> => {
-  const available = commandsFor(mode, fastMode)
+export const filter = (
+  query: string,
+  mode: Config.Mode,
+  fastMode: boolean,
+  threadActive = false,
+): ReadonlyArray<Command> => {
+  const available = commandsFor(mode, fastMode, threadActive)
   const needle = normalize(query)
   if (needle.length === 0) return available
   return available.filter(
@@ -96,8 +107,14 @@ export const filter = (query: string, mode: Config.Mode, fastMode: boolean): Rea
   )
 }
 
-export const at = (query: string, index: number, mode: Config.Mode, fastMode: boolean): Command | undefined => {
-  const results = filter(query, mode, fastMode)
+export const at = (
+  query: string,
+  index: number,
+  mode: Config.Mode,
+  fastMode: boolean,
+  threadActive = false,
+): Command | undefined => {
+  const results = filter(query, mode, fastMode, threadActive)
   if (results.length === 0) return undefined
   const clamped = Math.min(Math.max(index, 0), results.length - 1)
   return results[clamped]

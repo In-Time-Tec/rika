@@ -63,11 +63,11 @@
       },
       "dependencies": {
         "@effect/platform-node": "catalog:",
-        "@kitlangton/motel": "0.2.6",
         "@rika/agent": "workspace:*",
         "@rika/core": "workspace:*",
         "@rika/ide": "workspace:*",
         "@rika/llm": "workspace:*",
+        "@rika/motel": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/plugin": "workspace:*",
         "@rika/schema": "workspace:*",
@@ -128,6 +128,38 @@
       },
       "devDependencies": {
         "@types/bun": "catalog:",
+        "typescript": "catalog:",
+      },
+    },
+    "packages/motel": {
+      "name": "@rika/motel",
+      "version": "0.2.6-rika.0",
+      "bin": {
+        "motel": "src/motel.ts",
+        "motel-mcp": "src/mcp.ts",
+      },
+      "dependencies": {
+        "@effect/atom-react": "4.0.0-beta.90",
+        "@effect/opentelemetry": "catalog:",
+        "@effect/platform-bun": "catalog:",
+        "@opentelemetry/api": "catalog:",
+        "@opentelemetry/exporter-logs-otlp-http": "catalog:",
+        "@opentelemetry/exporter-trace-otlp-http": "catalog:",
+        "@opentelemetry/otlp-transformer": "0.214.0",
+        "@opentelemetry/sdk-logs": "catalog:",
+        "@opentelemetry/sdk-node": "^0.219.0",
+        "@opentelemetry/sdk-trace-base": "catalog:",
+        "@opentelemetry/sdk-trace-node": "catalog:",
+        "@opentui/core": "0.4.2",
+        "@opentui/react": "0.4.2",
+        "effect": "catalog:",
+        "protobufjs": "7.6.4",
+        "react": "^19.2.7",
+        "scheduler": "^0.27.0",
+      },
+      "devDependencies": {
+        "@types/bun": "catalog:",
+        "@types/react": "^19.2.17",
         "typescript": "catalog:",
       },
     },
@@ -262,13 +294,11 @@
       },
     },
   },
-  "patchedDependencies": {
-    "@kitlangton/motel@0.2.6": "patches/@kitlangton%2Fmotel@0.2.6.patch",
-  },
   "catalog": {
     "@effect/ai-anthropic": "4.0.0-beta.90",
     "@effect/ai-openai": "4.0.0-beta.90",
     "@effect/opentelemetry": "4.0.0-beta.90",
+    "@effect/platform-bun": "4.0.0-beta.90",
     "@effect/platform-node": "4.0.0-beta.90",
     "@effect/sql-sqlite-bun": "4.0.0-beta.90",
     "@foldkit/vite-plugin": "0.10.0",
@@ -422,8 +452,6 @@
     "@js-sdsl/ordered-map": ["@js-sdsl/ordered-map@4.4.2", "", {}, "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw=="],
 
     "@js-temporal/polyfill": ["@js-temporal/polyfill@0.5.1", "", { "dependencies": { "jsbi": "^4.3.0" } }, "sha512-hloP58zRVCRSpgDxmqCWJNlizAlUgJFqG2ypq79DCvyv9tHjRYMDOcPFjzfl/A1/YxDvRCZz8wvZvmapQnKwFQ=="],
-
-    "@kitlangton/motel": ["@kitlangton/motel@0.2.6", "", { "dependencies": { "@effect/atom-react": "4.0.0-beta.90", "@effect/opentelemetry": "4.0.0-beta.90", "@effect/platform-bun": "4.0.0-beta.90", "@opentelemetry/api": "^1.9.0", "@opentelemetry/exporter-logs-otlp-http": "^0.219.0", "@opentelemetry/exporter-trace-otlp-http": "^0.219.0", "@opentelemetry/otlp-transformer": "0.214.0", "@opentelemetry/sdk-logs": "^0.219.0", "@opentelemetry/sdk-node": "^0.219.0", "@opentelemetry/sdk-trace-base": "^2.8.0", "@opentelemetry/sdk-trace-node": "^2.8.0", "@opentui/core": "0.4.2", "@opentui/react": "0.4.2", "effect": "4.0.0-beta.90", "protobufjs": "7.6.4", "react": "^19.2.7", "scheduler": "^0.27.0" }, "bin": { "motel": "src/motel.ts", "motel-mcp": "src/mcp.ts" } }, "sha512-sYH6oTRLR9o1wHzOXcL0EcjJYkjhuA0ldh0/F1ulyHlJVkcm8Xgt6fNQz+ZySkLsReryG2ubnoz7swSbEwfKRQ=="],
 
     "@modelcontextprotocol/client": ["@modelcontextprotocol/client@2.0.0-alpha.3", "", { "dependencies": { "cross-spawn": "^7.0.5", "eventsource": "^3.0.2", "eventsource-parser": "^3.0.0", "jose": "^6.1.3", "pkce-challenge": "^5.0.0", "zod": "^4.2.0" } }, "sha512-NNjaRRwHMKDgARgAlPt0Vkj963A+zoBOX2TtHptNjncjYCwadxx+reU5/H+nlimZmibhJEUznNMQr3UktzBVig=="],
 
@@ -609,6 +637,8 @@
 
     "@rika/llm": ["@rika/llm@workspace:packages/llm"],
 
+    "@rika/motel": ["@rika/motel@workspace:packages/motel"],
+
     "@rika/persistence": ["@rika/persistence@workspace:packages/persistence"],
 
     "@rika/plugin": ["@rika/plugin@workspace:packages/plugin"],
@@ -755,6 +785,8 @@
 
     "@types/node": ["@types/node@24.12.2", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-A1sre26ke7HDIuY/M23nd9gfB+nrmhtYyMINbjI1zHJxYteKR6qSMX56FsmjMcDb3SMcjJg5BiRRgOCC/yBD0g=="],
 
+    "@types/react": ["@types/react@19.2.17", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-MXfmqaVPEVgkBT/aY0aGCkRWWtByiYQXo3xdQ8r5RzuFrPiRn8Gar2tQdXSUQ2GKV3bkXckek89V8wQBY2Q/Aw=="],
+
     "@types/retry": ["@types/retry@0.12.2", "", {}, "sha512-XISRgDJ2Tc5q4TRqvgJtzsRkFYNJzZrhTdtMoGVBttwzzQJkPnS3WWTFc7kuDRoPtPakl+T+OfdEUjYJj7Jbow=="],
 
     "@types/unist": ["@types/unist@3.0.3", "", {}, "sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q=="],
@@ -867,6 +899,8 @@
 
     "crypto-browserify": ["crypto-browserify@3.12.1", "", { "dependencies": { "browserify-cipher": "^1.0.1", "browserify-sign": "^4.2.3", "create-ecdh": "^4.0.4", "create-hash": "^1.2.0", "create-hmac": "^1.1.7", "diffie-hellman": "^5.0.3", "hash-base": "~3.0.4", "inherits": "^2.0.4", "pbkdf2": "^3.1.2", "public-encrypt": "^4.0.3", "randombytes": "^2.1.0", "randomfill": "^1.0.4" } }, "sha512-r4ESw/IlusD17lgQi1O20Fa3qNnsckR126TdUuBgAu7GBYSIPvdNyONd3Zrxh0xCwA4+6w/TDArBPsMvhur+KQ=="],
 
+    "csstype": ["csstype@3.2.3", "", {}, "sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ=="],
+
     "debug": ["debug@4.4.3", "", { "dependencies": { "ms": "^2.1.3" } }, "sha512-RGwwWnwQvkVfavKVt22FGLw+xYSdzARwm0ru6DhTVA3umU5hZc28V3kO4stgYryrTlLpuvgI9GiijltAjNbcqA=="],
 
     "decompress-response": ["decompress-response@6.0.0", "", { "dependencies": { "mimic-response": "^3.1.0" } }, "sha512-aW35yZM6Bb/4oJlZncMH2LCoZtJXTRxES17vE3hoRiowU2kWHaJKFkSBDnDR+cm9J+9QhXmREyIfv0pji9ejCQ=="],
@@ -887,7 +921,7 @@
 
     "devlop": ["devlop@1.1.0", "", { "dependencies": { "dequal": "^2.0.0" } }, "sha512-RWmIqhcFf1lRYBvNmr7qTNuyCt/7/ns2jbpp1+PalgE/rDQcBT0fioSMUpJ93irlUhC5hrg4cYqe6U+0ImW0rA=="],
 
-    "diff": ["diff@8.0.3", "", {}, "sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ=="],
+    "diff": ["diff@9.0.0", "", {}, "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="],
 
     "diffie-hellman": ["diffie-hellman@5.0.3", "", { "dependencies": { "bn.js": "^4.1.0", "miller-rabin": "^4.0.0", "randombytes": "^2.0.0" } }, "sha512-kqag/Nl+f3GwyK25fhUMYj81BUOrZ9IuJsjIcDE5icNM9FJHAVm3VcUDxdLPoQtTuUylWm6ZIknYJwwaPxsUzg=="],
 
@@ -1463,7 +1497,7 @@
 
     "@opentelemetry/otlp-transformer/@opentelemetry/sdk-trace-base": ["@opentelemetry/sdk-trace-base@2.6.1", "", { "dependencies": { "@opentelemetry/core": "2.6.1", "@opentelemetry/resources": "2.6.1", "@opentelemetry/semantic-conventions": "^1.29.0" }, "peerDependencies": { "@opentelemetry/api": ">=1.3.0 <1.10.0" } }, "sha512-r86ut4T1e8vNwB35CqCcKd45yzqH6/6Wzvpk2/cZB8PsPLlZFTvrh8yfOS3CYZYcUmAx4hHTZJ8AO8Dj8nrdhw=="],
 
-    "@opentui/core/diff": ["diff@9.0.0", "", {}, "sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw=="],
+    "@pierre/diffs/diff": ["diff@8.0.3", "", {}, "sha512-qejHi7bcSD4hQAZE0tNAawRK1ZtafHDmMTMkrrIGgSLl7hTnQHmKCeB45xAcbfTqK2zowkM3j3bHt/4b/ARbYQ=="],
 
     "@secure-exec/nodejs/esbuild": ["esbuild@0.27.7", "", { "optionalDependencies": { "@esbuild/aix-ppc64": "0.27.7", "@esbuild/android-arm": "0.27.7", "@esbuild/android-arm64": "0.27.7", "@esbuild/android-x64": "0.27.7", "@esbuild/darwin-arm64": "0.27.7", "@esbuild/darwin-x64": "0.27.7", "@esbuild/freebsd-arm64": "0.27.7", "@esbuild/freebsd-x64": "0.27.7", "@esbuild/linux-arm": "0.27.7", "@esbuild/linux-arm64": "0.27.7", "@esbuild/linux-ia32": "0.27.7", "@esbuild/linux-loong64": "0.27.7", "@esbuild/linux-mips64el": "0.27.7", "@esbuild/linux-ppc64": "0.27.7", "@esbuild/linux-riscv64": "0.27.7", "@esbuild/linux-s390x": "0.27.7", "@esbuild/linux-x64": "0.27.7", "@esbuild/netbsd-arm64": "0.27.7", "@esbuild/netbsd-x64": "0.27.7", "@esbuild/openbsd-arm64": "0.27.7", "@esbuild/openbsd-x64": "0.27.7", "@esbuild/openharmony-arm64": "0.27.7", "@esbuild/sunos-x64": "0.27.7", "@esbuild/win32-arm64": "0.27.7", "@esbuild/win32-ia32": "0.27.7", "@esbuild/win32-x64": "0.27.7" }, "bin": { "esbuild": "bin/esbuild" } }, "sha512-IxpibTjyVnmrIQo5aqNpCgoACA/dTKLTlhMHihVHhdkxKyPO1uBBthumT0rdHmcsk9uMonIWS0m4FljWzILh3w=="],
 

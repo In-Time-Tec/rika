@@ -18,11 +18,11 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
-    "@kitlangton/motel": "0.2.6",
     "@rika/agent": "workspace:*",
     "@rika/core": "workspace:*",
     "@rika/ide": "workspace:*",
     "@rika/llm": "workspace:*",
+    "@rika/motel": "workspace:*",
     "@rika/persistence": "workspace:*",
     "@rika/plugin": "workspace:*",
     "@rika/schema": "workspace:*",

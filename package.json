@@ -34,6 +34,7 @@
       "@effect/ai-openai": "4.0.0-beta.90",
       "@effect/ai-anthropic": "4.0.0-beta.90",
       "@effect/opentelemetry": "4.0.0-beta.90",
+      "@effect/platform-bun": "4.0.0-beta.90",
       "@effect/platform-node": "4.0.0-beta.90",
       "@effect/sql-sqlite-bun": "4.0.0-beta.90",
       "@opentelemetry/api": "1.9.1",
@@ -80,8 +81,5 @@
   "prettier": {
     "printWidth": 120,
     "semi": false
-  },
-  "patchedDependencies": {
-    "@kitlangton/motel@0.2.6": "patches/@kitlangton%2Fmotel@0.2.6.patch"
   }
 }

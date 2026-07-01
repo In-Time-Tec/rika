@@ -350,7 +350,7 @@ export const withPalette = (state: ViewState): ViewState => ({
   palette: { open: true, query: "", selected: 0 },
   shortcuts_open: false,
   notice:
-    "Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, /debug, /mcp, /mode rush, /mode smart, /mode deep1, /mode deep2, /mode deep3",
+    "Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, /debug all, /debug thread, /mcp, /mode rush, /mode smart, /mode deep1, /mode deep2, /mode deep3",
 })
 
 const nextReasoningMode = (mode: Config.Mode): Config.Mode =>

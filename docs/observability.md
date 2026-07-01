@@ -1,6 +1,6 @@
 # Observability (Telemetry + Logging)
 
-Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. The bundled debug surface is [motel](https://github.com/kitlangton/motel), a local ingest daemon, SQLite store, and TUI viewer.
+Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. The bundled debug surface is `@rika/motel`, Rika's vendored fork of [motel](https://github.com/kitlangton/motel): a local ingest daemon, SQLite store, and TUI viewer.
 
 ## Debugging with bundled motel
 
@@ -11,7 +11,7 @@ rika debug --all                 # all Rika traces and logs
 rika debug --thread <thread-id>  # only one thread
 ```
 
-The TUI command palette exposes the same viewer. `/debug` is contextual: on an empty landing screen it opens all Rika telemetry, and inside an active thread it opens motel with `rika.thread_id=<thread-id>` applied. `/debug all` and `/debug thread` are explicit forms.
+The TUI command palette exposes the same viewer. On an empty landing screen it offers `/debug all`; once a thread has activity it offers `/debug thread` plus `/debug all`. Thread debug opens motel with `service.name=rika`, the `rika.thread_id=<thread-id>` filter, and Rika's bundled theme applied.
 
 Motel listens on `http://127.0.0.1:27686` (`/v1/traces`, `/v1/logs`) and exposes a read API (`/api/services`, `/api/traces?service=rika`, `/api/logs?service=rika`, `/api/ai/calls`). Agents working in this repo can use the `motel-debug` skill under `.agents/skills/motel-debug/`.
 

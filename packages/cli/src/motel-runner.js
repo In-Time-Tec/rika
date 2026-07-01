@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs"
+import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 
 export async function launchMotel(args, env) {
@@ -32,28 +32,18 @@ function childEnv(env) {
 function resolveMotelScript() {
   const installed = join(dirname(process.execPath), "..", "share", "rika", "motel", "motel.js")
   if (existsSync(installed)) return installed
-  const storeScript = resolveBunStoreMotelScript()
-  if (storeScript !== undefined) return storeScript
+  const localScript = resolveLocalMotelScript()
+  if (localScript !== undefined) return localScript
   try {
-    return Bun.resolveSync("@kitlangton/motel/src/motel.ts", process.cwd())
+    return Bun.resolveSync("@rika/motel/src/motel.ts", process.cwd())
   } catch {}
   throw new Error("Cannot find bundled motel. Run bun install or reinstall Rika.")
 }
 
-function resolveBunStoreMotelScript() {
+function resolveLocalMotelScript() {
   for (const root of candidateRoots()) {
-    const store = join(root, "node_modules", ".bun")
-    let entries
-    try {
-      entries = readdirSync(store)
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      if (!entry.startsWith("@kitlangton+motel@")) continue
-      const script = join(store, entry, "node_modules", "@kitlangton", "motel", "src", "motel.ts")
-      if (existsSync(script)) return script
-    }
+    const script = join(root, "packages", "motel", "src", "motel.ts")
+    if (existsSync(script)) return script
   }
   return undefined
 }

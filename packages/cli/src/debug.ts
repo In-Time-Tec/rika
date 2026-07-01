@@ -25,6 +25,7 @@ export const executeCommand = Effect.fn("Cli.Debug.executeCommand")(function* (
     MOTEL_TUI_SERVICE_NAME: Telemetry.serviceName,
     MOTEL_TUI_ATTR_KEY: command.thread_id === undefined ? undefined : "rika.thread_id",
     MOTEL_TUI_ATTR_VALUE: command.thread_id,
+    MOTEL_TUI_THEME: env.MOTEL_TUI_THEME ?? "rika",
   })
   return 0
 })

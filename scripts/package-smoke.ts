@@ -117,7 +117,12 @@ async function smokeDebugCommand() {
     `#!/usr/bin/env bun
 const output = process.env.RIKA_FAKE_MOTEL_OUTPUT
 if (output === undefined) process.exit(2)
-await Bun.write(output, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd(), service: process.env.MOTEL_TUI_SERVICE_NAME }))
+await Bun.write(output, JSON.stringify({
+  argv: process.argv.slice(2),
+  cwd: process.cwd(),
+  service: process.env.MOTEL_TUI_SERVICE_NAME,
+  theme: process.env.MOTEL_TUI_THEME,
+}))
 `,
   )
   await $`chmod +x ${fakeBun}`
@@ -130,15 +135,19 @@ await Bun.write(output, JSON.stringify({ argv: process.argv.slice(2), cwd: proce
     if (result.exitCode !== 0) fail("compiled CLI debug command failed", result)
     const invocation = JSON.parse(await Bun.file(output).text())
     const motelScript = Array.isArray(invocation.argv) ? invocation.argv[0] : undefined
+    const motelWebIndex =
+      typeof motelScript === "string" ? join(dirname(dirname(motelScript)), "web", "dist", "index.html") : ""
     if (
       invocation.service !== "rika" ||
+      invocation.theme !== "rika" ||
       !Array.isArray(invocation.argv) ||
       invocation.argv.length !== 2 ||
       invocation.argv[1] !== "tui" ||
       typeof motelScript !== "string" ||
       invocation.cwd !== dirname(motelScript) ||
       !motelScript.endsWith(expectedMotelSuffix) ||
-      !(await Bun.file(motelScript).exists())
+      !(await Bun.file(motelScript).exists()) ||
+      !(await Bun.file(motelWebIndex).exists())
     ) {
       fail("compiled CLI debug command did not launch motel with Rika filters", {
         exitCode: 1,

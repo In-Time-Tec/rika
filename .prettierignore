@@ -2,3 +2,4 @@
 **/dist/**
 **/.turbo/**
 .agents/skills/motel-debug/
+packages/motel/**

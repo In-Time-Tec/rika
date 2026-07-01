@@ -1,6 +1,4 @@
 import { $ } from "bun"
-import { existsSync, readdirSync } from "node:fs"
-import { join } from "node:path"
 
 const root = new URL("..", import.meta.url)
 const rootDir = root.pathname
@@ -11,9 +9,11 @@ const outDir = new URL("dist/release/", root)
 const shareRoot = new URL("dist/share/rika/", root)
 const drizzleShareDir = new URL("drizzle/", shareRoot)
 const motelShareDir = new URL("motel/", shareRoot)
+const motelWebShareDir = new URL("web/dist/", shareRoot)
 const migrationsDir = new URL("packages/persistence/drizzle/", root)
+const motelWebDistDir = new URL("packages/motel/web/dist/", root)
 const artifact = new URL(artifactName, outDir)
-const motelEntry = resolveBunStoreMotelEntry()
+const motelEntry = new URL("packages/motel/src/motel.ts", root).pathname
 
 // OpenTUI ships its native FFI library as a set of per-platform optional
 // packages (`@opentui/core-<platform>-<arch>`), each containing a prebuilt
@@ -47,6 +47,7 @@ const manifest = {
   share: {
     drizzle: "dist/share/rika/drizzle",
     motel: "dist/share/rika/motel/motel.js",
+    motel_web: "dist/share/rika/web/dist",
   },
   native: {
     bundled: bundledNative,
@@ -63,9 +64,11 @@ if (bundledNative.length === 0) {
 
 await $`mkdir -p ${outDir.pathname}`
 await $`rm -rf ${shareRoot.pathname}`
-await $`mkdir -p ${drizzleShareDir.pathname} ${motelShareDir.pathname}`
+await $`mkdir -p ${drizzleShareDir.pathname} ${motelShareDir.pathname} ${motelWebShareDir.pathname}`
 await $`cp -R ${migrationsDir.pathname}. ${drizzleShareDir.pathname}`
+await $`cp -R ${motelWebDistDir.pathname}. ${motelWebShareDir.pathname}`
 await $`bun build ${motelEntry} --target bun --format esm ${externalFlags} --outdir ${motelShareDir.pathname}`
+await sanitizeSourcemapDirectives(new URL("motel.js", motelShareDir))
 await $`bun build --compile packages/cli/src/main.ts ${externalFlags} --outfile ${artifact.pathname}`
 await Bun.write(new URL(`${artifactName}.json`, outDir), `${JSON.stringify(manifest, null, 2)}\n`)
 
@@ -89,12 +92,7 @@ function readPackageJson(value: unknown) {
   return typeof version === "string" ? { version } : {}
 }
 
-function resolveBunStoreMotelEntry() {
-  const store = new URL("node_modules/.bun/", root).pathname
-  for (const entry of readdirSync(store)) {
-    if (!entry.startsWith("@kitlangton+motel@")) continue
-    const script = join(store, entry, "node_modules", "@kitlangton", "motel", "src", "motel.ts")
-    if (existsSync(script)) return script
-  }
-  throw new Error("Cannot find bundled motel source. Run bun install.")
+async function sanitizeSourcemapDirectives(file: URL) {
+  const text = await Bun.file(file).text()
+  await Bun.write(file, text.replaceAll("//# sourceMappingURL=", "// sourceMappingURL="))
 }
