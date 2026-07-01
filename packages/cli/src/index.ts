@@ -1,5 +1,6 @@
 export * as Args from "./args"
 export * as CliConfig from "./config"
+export * as Debug from "./debug"
 export * as Doctor from "./doctor"
 export * as Execute from "./execute"
 export * as Extensions from "./extensions"

@@ -29,8 +29,8 @@ describe("TUI remote session", () => {
       "/version",
       "/credits",
       "/ast-grep outline status",
-      "/debug page logs",
-      "/debug copy command",
+      "/debug all",
+      "/debug thread",
       "/mcp authenticate",
       "/mcp info",
       "/exit",
@@ -55,8 +55,8 @@ describe("TUI remote session", () => {
     expect(frames).toContain("Rika 0.0.0")
     expect(frames).toContain("Rika is Amp-compatible software.")
     expect(frames).toContain("ast-grep outline status: ready")
-    expect(frames).toContain("Debug page logs are empty.")
-    expect(frames).toContain("Debug command copied.")
+    expect(frames).toContain("Opening motel for all Rika telemetry.")
+    expect(frames).toContain("Opening motel for thread")
     expect(frames).toContain("MCP authentication requested.")
     expect(frames).toContain("No MCP servers connected.")
     expect(frames).not.toContain("Unknown command /welcome")

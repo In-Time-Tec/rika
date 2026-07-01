@@ -38,6 +38,23 @@ describe("core runtime services", () => {
     expect(diagnostics).toEqual([{ level: "info", message: "hello", data: { ok: true } }])
   })
 
+  test("maps diagnostic fields to queryable telemetry attributes", () => {
+    expect(
+      Diagnostics.attributesFromFields({
+        thread_id: "thread_test",
+        duration_ms: 12,
+        cached: false,
+        nested: { tool: "shell" },
+        skipped: null,
+      }),
+    ).toEqual({
+      "rika.thread_id": "thread_test",
+      "rika.duration_ms": 12,
+      "rika.cached": false,
+      "rika.nested": '{"tool":"shell"}',
+    })
+  })
+
   test("writes diagnostics to the log file from injected config env", async () => {
     const directory = await mkdtemp(`${tmpdir()}/rika-diagnostics-`)
     const path = `${directory}/session.ndjson`

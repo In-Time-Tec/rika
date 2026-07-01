@@ -45,12 +45,18 @@ export interface OpenFileInput {
   readonly range?: ViewState.Card["range"]
 }
 
+export interface OpenDebugInput {
+  readonly workspace_path: string
+  readonly thread_id?: string
+}
+
 export interface Adapter {
   readonly render: (state: ViewState.ViewState) => Effect.Effect<void>
   readonly keys: Stream.Stream<Keys.Key>
   readonly actions: Stream.Stream<Action>
   readonly resizes: Stream.Stream<void>
   readonly setExit: (summary: ExitSummary) => Effect.Effect<void>
+  readonly openDebug: (input: OpenDebugInput) => Effect.Effect<void, Error>
   readonly openFile: (input: OpenFileInput) => Effect.Effect<void, Error>
   readonly editExternally: (text: string) => Effect.Effect<string>
   readonly pasteImage: (workspacePath: string) => Effect.Effect<string | undefined>
@@ -67,6 +73,7 @@ export interface MemoryRenderer {
   readonly rendered: Array<ViewState.ViewState>
   readonly keys?: ReadonlyArray<Keys.Key>
   readonly actions?: ReadonlyArray<Action>
+  readonly openedDebug?: Array<OpenDebugInput>
   readonly opened?: Array<OpenFileInput>
 }
 
@@ -79,6 +86,7 @@ export const memoryLayer = (memory: MemoryRenderer) =>
       actions: Stream.fromIterable(memory.actions ?? []),
       resizes: Stream.empty,
       setExit: () => Effect.void,
+      openDebug: (input) => Effect.sync(() => memory.openedDebug?.push(input)),
       openFile: (input) => Effect.sync(() => memory.opened?.push(input)),
       editExternally: (text: string) => Effect.succeed(text),
       pasteImage: () => Effect.succeed(undefined),
@@ -173,6 +181,26 @@ export const layer = Layer.effect(
       setExit: (summary: ExitSummary) =>
         Effect.sync(() => {
           exitSummary = renderExitSummary(summary)
+        }),
+      openDebug: (input: OpenDebugInput) =>
+        Effect.tryPromise({
+          try: async () => {
+            renderer.suspend()
+            try {
+              const args = input.thread_id === undefined ? ["debug", "--all"] : ["debug", "--thread", input.thread_id]
+              const launched = Bun.spawn([...rikaCommand(), ...args], {
+                stdin: "inherit",
+                stdout: "inherit",
+                stderr: "inherit",
+                env: { ...process.env, RIKA_WORKSPACE_ROOT: input.workspace_path },
+              })
+              const exitCode = await launched.exited
+              if (exitCode !== 0) throw new Error(`debug exited ${exitCode}`)
+            } finally {
+              renderer.resume()
+            }
+          },
+          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
         }),
       openFile: (input: OpenFileInput) =>
         Effect.tryPromise({
@@ -1293,6 +1321,12 @@ const defaultOpenCommand = (absolutePath: string): ReadonlyArray<string> => {
   if (process.platform === "darwin") return ["open", absolutePath]
   if (process.platform === "win32") return ["cmd", "/c", "start", "", absolutePath]
   return ["xdg-open", absolutePath]
+}
+
+const rikaCommand = (): ReadonlyArray<string> => {
+  const entry = process.argv[1]
+  if (entry === undefined) return [process.execPath]
+  return /\.[cm]?[jt]s$/.test(entry) ? [process.execPath, entry] : [process.execPath]
 }
 
 const indentedText = (text: string, indent: number, textColor: string): StyledText => {

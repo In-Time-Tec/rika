@@ -1,0 +1,39 @@
+diff --git a/src/ui/atoms.ts b/src/ui/atoms.ts
+index 8acae05ae90a3aad02d5357b645947405afda7de..50850838f05f90657647996855b3689b1b8abedc 100644
+--- a/src/ui/atoms.ts
++++ b/src/ui/atoms.ts
+@@ -71,13 +71,22 @@ export const initialServiceLogState: ServiceLogState = {
+ 	fetchedAt: null,
+ }
+ 
++const envString = (key: string): string | null => {
++	const value = process.env[key]?.trim()
++	return value && value.length > 0 ? value : null
++}
++
++const initialTraceService = envString("MOTEL_TUI_SERVICE_NAME") ?? readLastService() ?? config.otel.serviceName
++const initialActiveAttrKey = envString("MOTEL_TUI_ATTR_KEY")
++const initialActiveAttrValue = envString("MOTEL_TUI_ATTR_VALUE")
++
+ export const traceStateAtom = Atom.make(initialTraceState).pipe(Atom.keepAlive)
+ export const traceDetailStateAtom = Atom.make(initialTraceDetailState).pipe(Atom.keepAlive)
+ export const logStateAtom = Atom.make(initialLogState).pipe(Atom.keepAlive)
+ export const serviceLogStateAtom = Atom.make(initialServiceLogState).pipe(Atom.keepAlive)
+ export const selectedServiceLogIndexAtom = Atom.make(0).pipe(Atom.keepAlive)
+ export const selectedTraceIndexAtom = Atom.make(0).pipe(Atom.keepAlive)
+-export const selectedTraceServiceAtom = Atom.make<string | null>(readLastService() ?? config.otel.serviceName).pipe(Atom.keepAlive)
++export const selectedTraceServiceAtom = Atom.make<string | null>(initialTraceService).pipe(Atom.keepAlive)
+ export const refreshNonceAtom = Atom.make(0).pipe(Atom.keepAlive)
+ export const noticeAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive)
+ export const selectedSpanIndexAtom = Atom.make<number | null>(null).pipe(Atom.keepAlive)
+@@ -121,8 +130,8 @@ export const initialAttrFacetState: AttrFacetState = {
+ export const attrFacetStateAtom = Atom.make(initialAttrFacetState).pipe(Atom.keepAlive)
+ 
+ // Applied filter (drives trace list query)
+-export const activeAttrKeyAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive)
+-export const activeAttrValueAtom = Atom.make<string | null>(null).pipe(Atom.keepAlive)
++export const activeAttrKeyAtom = Atom.make<string | null>(initialActiveAttrKey).pipe(Atom.keepAlive)
++export const activeAttrValueAtom = Atom.make<string | null>(initialActiveAttrValue).pipe(Atom.keepAlive)
+ 
+ export const selectedThemeAtom = Atom.make<ThemeName>(readLastTheme()).pipe(Atom.keepAlive)
+ 

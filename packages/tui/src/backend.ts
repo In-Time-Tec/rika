@@ -52,12 +52,15 @@ export interface CommandContext {
   readonly mode: Config.Mode
 }
 
+export type DebugTarget = { readonly scope: "all" } | { readonly scope: "thread"; readonly thread_id: Ids.ThreadId }
+
 export interface CommandResult {
   readonly state: ViewState.ViewState
   readonly thread_id: Ids.ThreadId
   readonly last_sequence?: number
   readonly mode: Config.Mode
   readonly exit: boolean
+  readonly debug?: DebugTarget
 }
 
 export interface ThreadOption {
@@ -113,6 +116,7 @@ export const commandResult = (
     last_sequence?: number
     mode?: Config.Mode
     exit?: boolean
+    debug?: DebugTarget
   } = {},
 ): CommandResult => ({
   state: patch.state ?? context.state,
@@ -120,7 +124,25 @@ export const commandResult = (
   ...(patch.last_sequence === undefined ? {} : { last_sequence: patch.last_sequence }),
   mode: patch.mode ?? context.mode,
   exit: patch.exit ?? false,
+  ...(patch.debug === undefined ? {} : { debug: patch.debug }),
 })
+
+export const debugTargetFor = (context: CommandContext, argument: string | undefined): DebugTarget | undefined => {
+  const value = argument?.trim()
+  if (value === undefined || value.length === 0) {
+    return ViewState.hasActivity(context.state) ? { scope: "thread", thread_id: context.thread_id } : { scope: "all" }
+  }
+  if (value === "all") return { scope: "all" }
+  if (value === "thread") return { scope: "thread", thread_id: context.thread_id }
+  if (value.startsWith("thread ")) {
+    const threadId = value.slice("thread ".length).trim()
+    return threadId.length === 0 ? undefined : { scope: "thread", thread_id: Ids.ThreadId.make(threadId) }
+  }
+  return undefined
+}
+
+export const debugNotice = (target: DebugTarget): string =>
+  target.scope === "all" ? "Opening motel for all Rika telemetry." : `Opening motel for thread ${target.thread_id}.`
 
 export const splitCommand = (command: string): readonly [string, string | undefined] => {
   const [name, ...rest] = command.trim().split(/\s+/)

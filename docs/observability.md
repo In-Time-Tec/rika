@@ -1,34 +1,17 @@
 # Observability (Telemetry + Logging)
 
-Rika writes structured telemetry (wide events + logs) to a local NDJSON file and, when telemetry is enabled, also exports OpenTelemetry traces and logs over OTLP/HTTP.
+Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. The bundled debug surface is [motel](https://github.com/kitlangton/motel), a local ingest daemon, SQLite store, and TUI viewer.
 
-## Viewing logs: `rika logs` (built in, zero dependencies)
+## Debugging with bundled motel
 
-The fastest way to see what Rika did is the bundled `rika logs` command. It reads the local NDJSON log this workspace already writes (`{data_dir}/logs/session.ndjson`) — no motel, no external process, nothing beyond the `rika` binary itself.
-
-```
-rika logs                       # recent entries, formatted
-rika logs -f                    # follow (stream new entries live)
-rika logs --op agent.turn       # only a specific wide-event op
-rika logs --level error         # only error entries
-rika logs --thread <thread-id>  # only one thread
-rika logs --since 15m           # entries newer than a duration (30s/15m/2h/1d)
-rika logs --limit 50            # cap output (default 200)
-rika logs --json                # raw NDJSON for piping to jq
-```
-
-The log path resolves the same way the writer does: `RIKA_LOG_FILE`, then `AMP_LOG_FILE`, then `{data_dir}/logs/session.ndjson` (`--workspace` overrides the root used to compute `data_dir`).
-
-## Motel (optional, richer trace waterfalls)
-
-[motel](https://github.com/kitlangton/motel) is a local OTLP ingest server and viewer backed by SQLite. It adds trace-waterfall and AI-call views on top of what `rika logs` shows, for humans (TUI/web) and agents (HTTP API). It is optional — `rika logs` needs nothing external.
-
-## Running motel
+Use the debug command to open motel without installing anything else:
 
 ```
-bunx @kitlangton/motel        # server + TUI
-bunx @kitlangton/motel daemon # background ingest server only
+rika debug --all                 # all Rika traces and logs
+rika debug --thread <thread-id>  # only one thread
 ```
+
+The TUI command palette exposes the same viewer. `/debug` is contextual: on an empty landing screen it opens all Rika telemetry, and inside an active thread it opens motel with `rika.thread_id=<thread-id>` applied. `/debug all` and `/debug thread` are explicit forms.
 
 Motel listens on `http://127.0.0.1:27686` (`/v1/traces`, `/v1/logs`) and exposes a read API (`/api/services`, `/api/traces?service=rika`, `/api/logs?service=rika`, `/api/ai/calls`). Agents working in this repo can use the `motel-debug` skill under `.agents/skills/motel-debug/`.
 

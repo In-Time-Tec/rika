@@ -110,8 +110,12 @@ const emitLogRecord = (logger: OtelLogger, entry: Diagnostics.Entry, span: Optio
   }
 }
 
-const attributesFor = (entry: Diagnostics.Entry): Attributes =>
-  entry.data === undefined ? {} : { data: JSON.stringify(entry.data) }
+const attributesFor = (entry: Diagnostics.Entry): Attributes => {
+  const attributes: Attributes = {}
+  if (isRecord(entry.data)) Object.assign(attributes, Diagnostics.attributesFromFields(entry.data))
+  if (entry.data !== undefined) attributes.data = JSON.stringify(entry.data)
+  return attributes
+}
 
 const severityByLevel: Record<Diagnostics.Level, SeverityNumber> = {
   debug: SeverityNumber.DEBUG,
@@ -154,3 +158,6 @@ const parseToggle = (value: string | undefined): boolean | undefined => {
   }
   return undefined
 }
+
+const isRecord = (value: unknown): value is Diagnostics.Fields =>
+  typeof value === "object" && value !== null && !Array.isArray(value)

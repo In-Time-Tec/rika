@@ -189,6 +189,21 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             quitRequested = true
             exitCode = 0
           }
+          if ("debug" in result && result.debug !== undefined) {
+            const debugThreadId = result.debug.scope === "thread" ? result.debug.thread_id : undefined
+            yield* deps.renderer
+              .openDebug({
+                workspace_path: workspacePath,
+                ...(debugThreadId === undefined ? {} : { thread_id: debugThreadId }),
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => {
+                    state = ViewState.withNotice(state, `Debug failed: ${errorMessage(Cause.squash(cause))}`)
+                  }),
+                ),
+              )
+          }
           yield* render()
         })
 

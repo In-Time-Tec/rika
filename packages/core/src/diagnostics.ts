@@ -67,6 +67,18 @@ export const emit = Effect.fn("Diagnostics.emit.call")(function* (entry: Entry) 
 
 export type Fields = Record<string, Common.JsonValue>
 
+export type AttributeValue = string | number | boolean
+export type Attributes = Record<string, AttributeValue>
+
+export const attributesFromFields = (fields: Fields): Attributes => {
+  const attributes: Attributes = {}
+  for (const [key, value] of Object.entries(fields)) {
+    const attribute = attributeValue(value)
+    if (attribute !== undefined) attributes[`rika.${key}`] = attribute
+  }
+  return attributes
+}
+
 export const event = <A, E, R>(
   op: string,
   run: (fields: Fields) => Effect.Effect<A, E, R>,
@@ -80,19 +92,22 @@ export const event = <A, E, R>(
         Effect.gen(function* () {
           const endedAt = yield* Clock.currentTimeMillis
           const outcome = Exit.isSuccess(exit) ? "success" : "error"
+          const data: Fields = {
+            ...fields,
+            op,
+            outcome,
+            duration_ms: endedAt - startedAt,
+            ...(Exit.isSuccess(exit) ? {} : { error: Cause.pretty(exit.cause) }),
+          }
+          yield* Effect.annotateCurrentSpan(attributesFromFields(data))
           yield* emit({
             level: outcome === "error" ? "error" : "info",
             message: `${op} ${outcome}`,
-            data: {
-              ...fields,
-              op,
-              outcome,
-              duration_ms: endedAt - startedAt,
-              ...(Exit.isSuccess(exit) ? {} : { error: Cause.pretty(exit.cause) }),
-            },
+            data,
           })
         }),
       ),
+      Effect.withSpan(op, { attributes: attributesFromFields({ ...seed, op }) }),
     )
   })
 
@@ -108,6 +123,13 @@ export const makeFileEmit = (path: string) =>
   })
 
 const fileService = (path: string) => Service.of({ emit: makeFileEmit(path) })
+
+const attributeValue = (value: Common.JsonValue): AttributeValue | undefined => {
+  if (typeof value === "string" || typeof value === "boolean") return value
+  if (typeof value === "number") return Number.isFinite(value) ? value : undefined
+  if (value === null) return undefined
+  return JSON.stringify(value)
+}
 
 const lineFromEntry = (entry: Entry) =>
   JSON.stringify({

@@ -150,13 +150,18 @@ const handleCommand = (
     if (name === "/version") return Backend.commandResult(context, { state: ViewState.withNotice(state, "Rika 0.0.0") })
     if (name === "/ast-grep")
       return Backend.commandResult(context, { state: ViewState.withNotice(state, "ast-grep outline status: ready") })
-    if (name === "/debug")
+    if (name === "/debug") {
+      const target = Backend.debugTargetFor(context, argument)
+      if (target === undefined) {
+        return Backend.commandResult(context, {
+          state: ViewState.withNotice(state, "Usage: /debug [all|thread [thread-id]]"),
+        })
+      }
       return Backend.commandResult(context, {
-        state: ViewState.withNotice(
-          state,
-          argument === "copy command" ? "Debug command copied." : "Debug page logs are empty.",
-        ),
+        state: ViewState.withNotice(state, Backend.debugNotice(target)),
+        debug: target,
       })
+    }
     if (name === "/mcp")
       return Backend.commandResult(context, {
         state: ViewState.withNotice(

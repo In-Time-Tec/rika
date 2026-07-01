@@ -80,5 +80,8 @@
   "prettier": {
     "printWidth": 120,
     "semi": false
+  },
+  "patchedDependencies": {
+    "@kitlangton/motel@0.2.6": "patches/@kitlangton%2Fmotel@0.2.6.patch"
   }
 }

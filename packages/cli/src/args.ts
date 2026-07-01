@@ -186,23 +186,12 @@ export const IdeCommand = Schema.Struct({
   open_file: Schema.optional(Ide.OpenFileRequest),
 }).annotate({ identifier: "Rika.Cli.Args.IdeCommand" })
 
-export const LogLevelFilter = Schema.Literals(["debug", "info", "warn", "error"]).annotate({
-  identifier: "Rika.Cli.Args.LogLevelFilter",
-})
-export type LogLevelFilter = typeof LogLevelFilter.Type
-
-export interface LogsCommand extends Schema.Schema.Type<typeof LogsCommand> {}
-export const LogsCommand = Schema.Struct({
-  type: Schema.Literal("logs"),
-  follow: Schema.Boolean,
-  json: Schema.Boolean,
-  level: Schema.optional(LogLevelFilter),
-  op: Schema.optional(Schema.String),
+export interface DebugCommand extends Schema.Schema.Type<typeof DebugCommand> {}
+export const DebugCommand = Schema.Struct({
+  type: Schema.Literal("debug"),
+  all: Schema.Boolean,
   thread_id: Schema.optional(Ids.ThreadId),
-  since: Schema.optional(Schema.String),
-  limit: Schema.optional(Schema.Int),
-  workspace_root: Schema.optional(Schema.String),
-}).annotate({ identifier: "Rika.Cli.Args.LogsCommand" })
+}).annotate({ identifier: "Rika.Cli.Args.DebugCommand" })
 
 export interface DoctorCommand extends Schema.Schema.Type<typeof DoctorCommand> {}
 export const DoctorCommand = Schema.Struct({
@@ -224,7 +213,7 @@ export type Command =
   | ServerCommand
   | IdeCommand
   | DoctorCommand
-  | LogsCommand
+  | DebugCommand
 
 export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError", {
   message: Schema.String,
@@ -258,7 +247,8 @@ export const usage = [
   "  rika extensions rollback-plugin <name> [--reason <text>] [--thread <id>]",
   "  rika server [--host <host>] [--port <n>] [--token <token>] [--workspace <path>] [--ephemeral]",
   "  rika doctor",
-  "  rika logs [-f] [--level <debug|info|warn|error>] [--op <op>] [--thread <id>] [--since <dur>] [--limit <n>] [--json]",
+  "  rika debug --all",
+  "  rika debug --thread <thread-id>",
   "  rika ide status [--server <url>] [--token <token>]",
   "  rika ide connect --client <id> [--server <url>] [--token <token>] [--workspace <path>] [--capabilities <csv>]",
   "  rika ide disconnect --client <id> [--server <url>] [--token <token>]",
@@ -370,27 +360,9 @@ const mcpServerConfig = {
   serverName: Argument.string("server-name").pipe(Argument.withDescription("MCP server name")),
 }
 
-const logsConfig = {
-  follow: Flag.boolean("follow").pipe(
-    Flag.withAlias("f"),
-    Flag.withDescription("Stream new entries as they are written"),
-  ),
-  json: Flag.boolean("json").pipe(Flag.withDescription("Print raw NDJSON lines instead of a formatted view")),
-  level: Flag.choice("level", ["debug", "info", "warn", "error"]).pipe(
-    Flag.optional,
-    Flag.withDescription("Only show entries at or above this level"),
-  ),
-  op: Flag.string("op").pipe(Flag.optional, Flag.withDescription("Only show wide events with this op")),
-  thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Only show entries for this thread id")),
-  since: Flag.string("since").pipe(
-    Flag.optional,
-    Flag.withDescription("Only show entries newer than a duration, e.g. 30s, 15m, 2h, 1d"),
-  ),
-  limit: Flag.integer("limit").pipe(Flag.optional, Flag.withDescription("Maximum entries to show (default 200)")),
-  workspace: Flag.string("workspace").pipe(
-    Flag.optional,
-    Flag.withDescription("Workspace root used to resolve the log path"),
-  ),
+const debugConfig = {
+  all: Flag.boolean("all").pipe(Flag.withDescription("Open motel for all Rika telemetry")),
+  thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Open motel for one thread id")),
 }
 
 const reviewConfig = {
@@ -600,7 +572,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
   const server = makeServerCommand(parsedRef)
   const ide = makeIdeCommand(parsedRef)
   const doctor = makeDoctorCommand(parsedRef)
-  const logs = makeLogsCommand(parsedRef)
+  const debug = makeDebugCommand(parsedRef, rejectedRef)
 
   return CliCommand.make("rika", rootConfig, (input: RootInput) =>
     input.execute
@@ -630,7 +602,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
       extensions,
       server,
       doctor,
-      logs,
+      debug,
       ide,
     ]),
   )
@@ -821,10 +793,20 @@ const makeDoctorCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
     CliCommand.withShortDescription("Print diagnostics"),
   )
 
-const makeLogsCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
-  CliCommand.make("logs", logsConfig, (input: LogsInput) => Ref.set(parsedRef, Option.some(toLogsCommand(input)))).pipe(
-    CliCommand.withDescription("View Rika's local telemetry logs and wide events from this workspace"),
-    CliCommand.withShortDescription("View local logs"),
+const makeDebugCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) =>
+  CliCommand.make("debug", debugConfig, (input: DebugInput) => {
+    const command = toDebugCommand(input)
+    return command === undefined
+      ? Ref.set(
+          rejectedRef,
+          Option.some(
+            new ArgsError({ message: "Expected exactly one of --all or --thread <thread-id>", exit_code: 2, usage }),
+          ),
+        )
+      : Ref.set(parsedRef, Option.some(command))
+  }).pipe(
+    CliCommand.withDescription("Open bundled motel for Rika telemetry"),
+    CliCommand.withShortDescription("Open debug telemetry"),
   )
 
 const makeIdeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) => {
@@ -1150,34 +1132,18 @@ const toServerCommand = (input: ServerInput): ServerCommand => {
 
 const toDoctorCommand = (): DoctorCommand => ({ type: "doctor" })
 
-interface LogsInput {
-  readonly follow: boolean
-  readonly json: boolean
-  readonly level: Option.Option<LogLevelFilter>
-  readonly op: Option.Option<string>
+interface DebugInput {
+  readonly all: boolean
   readonly thread: Option.Option<string>
-  readonly since: Option.Option<string>
-  readonly limit: Option.Option<number>
-  readonly workspace: Option.Option<string>
 }
 
-const toLogsCommand = (input: LogsInput): LogsCommand => {
-  const level = Option.getOrUndefined(input.level)
-  const op = Option.getOrUndefined(input.op)
+const toDebugCommand = (input: DebugInput): DebugCommand | undefined => {
   const thread = Option.getOrUndefined(input.thread)
-  const since = Option.getOrUndefined(input.since)
-  const limit = Option.getOrUndefined(input.limit)
-  const workspaceRoot = Option.getOrUndefined(input.workspace)
+  if (input.all === (thread !== undefined)) return undefined
   return {
-    type: "logs",
-    follow: input.follow,
-    json: input.json,
-    ...(level === undefined ? {} : { level }),
-    ...(op === undefined ? {} : { op }),
+    type: "debug",
+    all: input.all,
     ...(thread === undefined ? {} : { thread_id: Ids.ThreadId.make(thread) }),
-    ...(since === undefined ? {} : { since }),
-    ...(limit === undefined ? {} : { limit }),
-    ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
   }
 }
 

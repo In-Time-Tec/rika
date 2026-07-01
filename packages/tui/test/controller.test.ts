@@ -46,6 +46,7 @@ const run = (
     actions: Stream.fromIterable(options.actions ?? []),
     resizes: Stream.empty,
     setExit: () => Effect.void,
+    openDebug: () => Effect.void,
     openFile: (input) =>
       Effect.sync(() => {
         opened.push(input)

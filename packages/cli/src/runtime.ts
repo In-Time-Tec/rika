@@ -30,13 +30,13 @@ import { Adapter, RemoteSession, Session, Ticker } from "@rika/tui"
 import { Effect, Layer, Stream } from "effect"
 import * as Args from "./args"
 import * as CliConfig from "./config"
+import * as Debug from "./debug"
 import * as Doctor from "./doctor"
 import * as Execute from "./execute"
 import * as Extensions from "./extensions"
 import * as Help from "./help"
 import * as Ide from "./ide"
 import * as LocalBackend from "./local-backend"
-import * as Logs from "./logs"
 import * as Mcp from "./mcp"
 import * as Output from "./output"
 import * as Review from "./review"
@@ -106,8 +106,8 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                                         ? Doctor.executeCommand(command).pipe(
                                             Effect.provide(doctorLiveLayer(env, input.cwd)),
                                           )
-                                        : command.type === "logs"
-                                          ? Logs.executeCommand(command, env, input.cwd)
+                                        : command.type === "debug"
+                                          ? Debug.executeCommand(command, env)
                                           : Server.executeCommand(command).pipe(
                                               Effect.provide(serverLiveLayer(command, env, input.cwd)),
                                             )
@@ -130,6 +130,7 @@ type RuntimeError =
   | ContextResolver.ContextResolverError
   | Config.ConfigError
   | Database.DatabaseError
+  | Debug.DebugError
   | Doctor.DoctorError
   | Execute.ExecuteError
   | Extensions.ExtensionsError
@@ -186,6 +187,7 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof ContextResolver.ContextResolverError) return `Rika failed: ${error.message}`
   if (error instanceof Config.ConfigError) return `Rika failed: ${error.message}`
   if (error instanceof Database.DatabaseError) return `Rika failed: ${error.message}`
+  if (error instanceof Debug.DebugError) return Debug.formatError(error)
   if (error instanceof Doctor.DoctorError) return Doctor.formatError(error)
   if (error instanceof Session.SessionError) return `Rika failed: ${error.message}`
   if (error instanceof SelfExtension.SelfExtensionError) return `Rika failed: ${error.message}`
