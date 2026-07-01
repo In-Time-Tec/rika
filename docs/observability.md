@@ -1,6 +1,27 @@
 # Observability (Telemetry + Logging)
 
-Rika exports OpenTelemetry traces and logs over OTLP/HTTP to [motel](https://github.com/kitlangton/motel), a local OTLP ingest server and viewer backed by SQLite. This gives runtime evidence for humans (TUI/web) and for agents (HTTP API).
+Rika writes structured telemetry (wide events + logs) to a local NDJSON file and, when telemetry is enabled, also exports OpenTelemetry traces and logs over OTLP/HTTP.
+
+## Viewing logs: `rika logs` (built in, zero dependencies)
+
+The fastest way to see what Rika did is the bundled `rika logs` command. It reads the local NDJSON log this workspace already writes (`{data_dir}/logs/session.ndjson`) — no motel, no external process, nothing beyond the `rika` binary itself.
+
+```
+rika logs                       # recent entries, formatted
+rika logs -f                    # follow (stream new entries live)
+rika logs --op agent.turn       # only a specific wide-event op
+rika logs --level error         # only error entries
+rika logs --thread <thread-id>  # only one thread
+rika logs --since 15m           # entries newer than a duration (30s/15m/2h/1d)
+rika logs --limit 50            # cap output (default 200)
+rika logs --json                # raw NDJSON for piping to jq
+```
+
+The log path resolves the same way the writer does: `RIKA_LOG_FILE`, then `AMP_LOG_FILE`, then `{data_dir}/logs/session.ndjson` (`--workspace` overrides the root used to compute `data_dir`).
+
+## Motel (optional, richer trace waterfalls)
+
+[motel](https://github.com/kitlangton/motel) is a local OTLP ingest server and viewer backed by SQLite. It adds trace-waterfall and AI-call views on top of what `rika logs` shows, for humans (TUI/web) and agents (HTTP API). It is optional — `rika logs` needs nothing external.
 
 ## Running motel
 

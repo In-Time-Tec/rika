@@ -36,6 +36,7 @@ import * as Extensions from "./extensions"
 import * as Help from "./help"
 import * as Ide from "./ide"
 import * as LocalBackend from "./local-backend"
+import * as Logs from "./logs"
 import * as Mcp from "./mcp"
 import * as Output from "./output"
 import * as Review from "./review"
@@ -105,9 +106,11 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                                         ? Doctor.executeCommand(command).pipe(
                                             Effect.provide(doctorLiveLayer(env, input.cwd)),
                                           )
-                                        : Server.executeCommand(command).pipe(
-                                            Effect.provide(serverLiveLayer(command, env, input.cwd)),
-                                          )
+                                        : command.type === "logs"
+                                          ? Logs.executeCommand(command, env, input.cwd)
+                                          : Server.executeCommand(command).pipe(
+                                              Effect.provide(serverLiveLayer(command, env, input.cwd)),
+                                            )
               ).pipe(
                 Effect.matchEffect({
                   onFailure: (error: RuntimeError) => Output.stderr(formatRuntimeError(error)).pipe(Effect.as(1)),
