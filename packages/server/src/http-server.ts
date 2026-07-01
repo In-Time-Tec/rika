@@ -230,7 +230,7 @@ const dispatch = (
 
     if (request.method === "POST" && segments[1] === "turns" && segments.length === 2) {
       const input = yield* decodeBody(request, Remote.StartTurnRequest)
-      return ndjson(remote.startTurn(input))
+      return yield* remote.startTurn(input).pipe(jsonEffect(Remote.StartTurnResponse))
     }
 
     if (request.method === "POST" && segments[1] === "turns" && segments[2] === "interrupt" && segments.length === 3) {

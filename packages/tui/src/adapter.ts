@@ -1012,7 +1012,7 @@ const modeLabelChunks = (state: ViewState.ViewState): TextChunk[] => {
     const head = (1 - remaining) * (chars + 2)
     return Math.max(0, 1 - Math.abs(index - head) / 2)
   }
-  const chars = [...label]
+  const chars = Array.from(label)
   return chars.map((ch, index) => fg(rgbHex(mix(base, [255, 255, 255], glowFor(index, chars.length))))(ch))
 }
 

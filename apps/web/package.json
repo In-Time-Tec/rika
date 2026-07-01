@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4590",
+    "build": "vite build",
+    "lint": "bun --cwd ../.. oxlint apps/web/src apps/web/test",
+    "test": "bun test test",
+    "typecheck": "bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@rika/schema": "workspace:*",
+    "@rika/sdk": "workspace:*",
+    "effect": "catalog:",
+    "foldkit": "catalog:"
+  },
+  "devDependencies": {
+    "@foldkit/vite-plugin": "catalog:",
+    "@types/bun": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

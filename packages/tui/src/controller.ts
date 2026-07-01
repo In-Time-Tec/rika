@@ -34,6 +34,7 @@ type AppEvent =
   | { readonly _tag: "ModelBatch"; readonly events: ReadonlyArray<Event.Event> }
   | { readonly _tag: "ThreadPreviewLoaded"; readonly thread_id: Ids.ThreadId; readonly preview: ViewState.ViewState }
   | { readonly _tag: "ThreadPreviewFailed"; readonly thread_id: Ids.ThreadId; readonly message: string }
+  | { readonly _tag: "ThreadEventsFailed"; readonly message: string }
   | { readonly _tag: "TurnEnded"; readonly token: number; readonly error?: unknown }
   | { readonly _tag: "Resize" }
   | { readonly _tag: "KeysDone" }
@@ -73,10 +74,33 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       let exitCode = 0
       let turnToken = 0
       let turnFiber: Fiber.Fiber<void> | undefined
+      let threadEventsFiber: Fiber.Fiber<void> | undefined
       let currentTurnId: Ids.TurnId | undefined
+      let activeThreadId: Ids.ThreadId | undefined
+      let lastSequence = loaded.last_sequence ?? 0
 
       const queue = yield* Queue.unbounded<AppEvent, Cause.Done>()
       const render = () => deps.renderer.render(state)
+      const useThreadEvents = deps.backend.submitTurn !== undefined && deps.backend.subscribeThreadEvents !== undefined
+
+      const restartThreadEvents = (nextThreadId: Ids.ThreadId, afterSequence: number) =>
+        Effect.gen(function* () {
+          if (deps.backend.subscribeThreadEvents === undefined) return
+          if (threadEventsFiber !== undefined && (activeThreadId === undefined || activeThreadId === nextThreadId)) {
+            yield* Effect.sync(() => threadEventsFiber?.interruptUnsafe())
+          }
+          threadEventsFiber = yield* Effect.forkScoped(
+            deps.backend.subscribeThreadEvents({ thread_id: nextThreadId, after_sequence: afterSequence }).pipe(
+              Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
+              Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
+              Effect.catchCause((cause) =>
+                Queue.offer(queue, { _tag: "ThreadEventsFailed", message: errorMessage(Cause.squash(cause)) }).pipe(
+                  Effect.asVoid,
+                ),
+              ),
+            ),
+          )
+        })
 
       const maybeShutdown = () =>
         Effect.gen(function* () {
@@ -92,17 +116,18 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           turnToken += 1
           const token = turnToken
           currentTurnId = undefined
+          activeThreadId = threadId
           state = { ...state, active: true, activity: "idle" }
-          const fiber = yield* Effect.forkScoped(
-            deps.backend
-              .streamTurn({
-                thread_id: threadId,
-                workspace_path: workspacePath,
-                ...submitted,
-                mode,
-                fast_mode: state.fast_mode,
-              })
-              .pipe(
+          const request = {
+            thread_id: threadId,
+            workspace_path: workspacePath,
+            ...submitted,
+            mode,
+            fast_mode: state.fast_mode,
+          }
+          if (deps.backend.submitTurn === undefined) {
+            turnFiber = yield* Effect.forkScoped(
+              deps.backend.streamTurn(request).pipe(
                 Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
                 Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
                 Effect.matchCauseEffect({
@@ -111,9 +136,28 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                   onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token }).pipe(Effect.asVoid),
                 }),
               ),
-          )
-          turnFiber = fiber
+            )
+          } else {
+            turnFiber = undefined
+            yield* deps.backend
+              .submitTurn(request)
+              .pipe(
+                Effect.catchCause((cause: Cause.Cause<E>) =>
+                  Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
+                ),
+              )
+          }
           yield* render()
+        })
+
+      const drainQueuedTurn = () =>
+        Effect.gen(function* () {
+          const dequeued = ViewState.dequeueMessage(state)
+          state = dequeued.state
+          if (dequeued.next !== undefined) {
+            if (dequeued.next.startsWith("/")) yield* runSlash(dequeued.next)
+            else yield* startTurn({ content: dequeued.next })
+          }
         })
 
       const runSlash = (command: string) =>
@@ -129,14 +173,18 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                 Effect.succeed({
                   state: ViewState.withNotice(state, `Command failed: ${errorMessage(Cause.squash(cause))}`),
                   thread_id: threadId,
+                  last_sequence: lastSequence,
                   mode,
                   exit: false,
                 }),
               ),
             )
           state = result.state
+          const previousThreadId = threadId
           threadId = result.thread_id
+          if (result.last_sequence !== undefined) lastSequence = result.last_sequence
           mode = result.mode
+          if (threadId !== previousThreadId) yield* restartThreadEvents(threadId, lastSequence)
           if (result.exit) {
             quitRequested = true
             exitCode = 0
@@ -214,13 +262,15 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           }
           const fiber = turnFiber
           const turnId = currentTurnId
+          const cancelThreadId = activeThreadId ?? threadId
           active = false
           turnToken += 1
           turnFiber = undefined
+          activeThreadId = undefined
           if (fiber !== undefined) yield* Fiber.interrupt(fiber)
           if (turnId !== undefined) {
             yield* deps.backend
-              .cancelTurn({ thread_id: threadId, turn_id: turnId })
+              .cancelTurn({ thread_id: cancelThreadId, turn_id: turnId })
               .pipe(Effect.catchCause(() => Effect.void))
           }
           state = ViewState.withNotice(
@@ -546,14 +596,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           active = false
           turnFiber = undefined
           currentTurnId = undefined
+          activeThreadId = undefined
           state = ViewState.finishTurn(state, error === undefined ? "idle" : "failed")
           if (error !== undefined) state = ViewState.withNotice(state, `Turn failed: ${errorMessage(error)}`)
-          const dequeued = ViewState.dequeueMessage(state)
-          state = dequeued.state
-          if (dequeued.next !== undefined) {
-            if (dequeued.next.startsWith("/")) yield* runSlash(dequeued.next)
-            else yield* startTurn({ content: dequeued.next })
-          }
+          yield* drainQueuedTurn()
           yield* render()
           yield* maybeShutdown()
         })
@@ -598,9 +644,37 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               yield* render()
               return
             case "ModelBatch":
+              let endedTurn = false
               for (const event of appEvent.events) {
+                if (useThreadEvents) {
+                  const belongsToVisibleThread = event.thread_id === threadId
+                  const belongsToActiveTurn = activeThreadId !== undefined && event.thread_id === activeThreadId
+                  if (!belongsToVisibleThread && !belongsToActiveTurn) continue
+                  if (belongsToVisibleThread) {
+                    if (event.sequence <= lastSequence) continue
+                    lastSequence = event.sequence
+                  }
+                }
                 state = ViewState.applyEvent(state, event)
-                if (event.type === "turn.started") currentTurnId = event.turn_id
+                if (event.type === "turn.started") {
+                  active = true
+                  currentTurnId = event.turn_id
+                  activeThreadId = event.thread_id
+                }
+                if (
+                  (event.type === "turn.completed" || event.type === "turn.failed") &&
+                  (currentTurnId === undefined || event.turn_id === currentTurnId)
+                ) {
+                  active = false
+                  turnFiber = undefined
+                  currentTurnId = undefined
+                  activeThreadId = undefined
+                  endedTurn = true
+                }
+              }
+              if (endedTurn && useThreadEvents) {
+                yield* drainQueuedTurn()
+                yield* maybeShutdown()
               }
               yield* render()
               return
@@ -610,6 +684,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               return
             case "ThreadPreviewFailed":
               state = ViewState.threadSwitcherPreviewFailed(state, appEvent.thread_id, appEvent.message)
+              yield* render()
+              return
+            case "ThreadEventsFailed":
+              state = ViewState.withNotice(state, `Thread sync failed: ${appEvent.message}`)
               yield* render()
               return
             case "TurnEnded":
@@ -645,6 +723,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       yield* Effect.forkScoped(
         deps.renderer.resizes.pipe(Stream.runForEach(() => Queue.offer(queue, { _tag: "Resize" }).pipe(Effect.asVoid))),
       )
+      yield* restartThreadEvents(threadId, lastSequence)
 
       yield* render()
       yield* Stream.fromQueue(queue).pipe(Stream.runForEach(handle))
@@ -663,6 +742,7 @@ const freshThread = <E>(_deps: Dependencies<E>, workspacePath: string, mode: Con
     return {
       thread_id: threadId,
       state: ViewState.initial({ thread_id: threadId, workspace_path: workspacePath, mode, events: [] }),
+      last_sequence: 0,
     }
   })
 

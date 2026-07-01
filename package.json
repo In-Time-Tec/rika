@@ -22,7 +22,8 @@
     "parity:startup-measure": "bun run scripts/parity-startup-measure.ts",
     "update:local": "bun run scripts/install-release.ts",
     "test": "bun turbo test",
-    "typecheck": "bun turbo typecheck"
+    "typecheck": "bun turbo typecheck",
+    "web:dev": "bun run --cwd apps/web dev"
   },
   "workspaces": {
     "packages": [
@@ -52,12 +53,15 @@
       "drizzle-kit": "1.0.0-rc.2",
       "drizzle-orm": "1.0.0-rc.2",
       "effect": "4.0.0-beta.90",
+      "foldkit": "0.120.0",
       "oxlint": "1.60.0",
       "oxlint-tsgolint": "0.21.0",
       "prettier": "3.6.2",
       "rivetkit": "2.3.2",
       "turbo": "2.8.13",
-      "typescript": "5.8.2"
+      "typescript": "5.8.2",
+      "vite": "8.1.2",
+      "@foldkit/vite-plugin": "0.10.0"
     }
   },
   "devDependencies": {

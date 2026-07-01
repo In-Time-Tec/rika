@@ -36,6 +36,9 @@ describe("SDK client", () => {
     const client = Client.make({
       requestJson: (input) => {
         calls.push(input)
+        if (input.path === "/v1/turns") {
+          return Effect.succeed(Codec.encode(Remote.StartTurnResponse)({ thread_id: threadId, accepted: true }))
+        }
         return Effect.succeed(Codec.encode(Remote.ThreadSummary)(summary))
       },
       streamJson: (input) => {
@@ -45,11 +48,15 @@ describe("SDK client", () => {
     })
 
     const created = await Effect.runPromise(client.createThread({ thread_id: threadId, workspace_id: workspaceId }))
+    const accepted = await Effect.runPromise(
+      client.startTurn({ thread_id: threadId, content: "ship", workspace_id: workspaceId }),
+    )
     const events = await Effect.runPromise(
-      client.startTurn({ thread_id: threadId, content: "ship", workspace_id: workspaceId }).pipe(Stream.runCollect),
+      client.subscribeThreadEvents({ thread_id: threadId }).pipe(Stream.runCollect),
     )
 
     expect(created).toEqual(summary)
+    expect(accepted).toEqual({ thread_id: threadId, accepted: true })
     expect(events).toEqual([started])
     expect(calls).toEqual([
       {
@@ -61,6 +68,10 @@ describe("SDK client", () => {
         method: "POST",
         path: "/v1/turns",
         body: { thread_id: threadId, workspace_id: workspaceId, content: "ship" },
+      },
+      {
+        method: "GET",
+        path: "/v1/threads/thread_sdk_client/events",
       },
     ])
   })
@@ -114,21 +125,17 @@ describe("SDK client", () => {
     expect(error).toMatchObject({ message: "Unauthorized", operation: "requestJson", status: 401 })
   })
 
-  test("turn streams preserve server API errors as SDK errors", async () => {
+  test("turn submission preserves server API errors as SDK errors", async () => {
     const client = Client.make({
-      requestJson: () => Effect.die("unused"),
-      streamJson: () =>
-        Stream.make(
-          Codec.encode(Remote.StreamFrame)({
-            error: { message: "Workspace denied", code: "workspace_denied", details: { status: 403 } },
-          }),
-        ),
+      requestJson: () =>
+        Effect.succeed({
+          error: { message: "Workspace denied", code: "workspace_denied", details: { status: 403 } },
+        }),
+      streamJson: () => Stream.empty,
     })
 
     const error = await Effect.runPromise(
-      client
-        .startTurn({ thread_id: threadId, workspace_id: workspaceId, content: "ship" })
-        .pipe(Stream.runCollect, Effect.flip),
+      client.startTurn({ thread_id: threadId, workspace_id: workspaceId, content: "ship" }).pipe(Effect.flip),
     )
 
     expect(error).toMatchObject({ message: "Workspace denied", operation: "startTurn", status: 403 })

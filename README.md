@@ -14,7 +14,7 @@ The implementation is growing through stacked GitHub issues, with reusable packa
 
 ## Current State
 
-This repository currently contains the monorepo scaffold, shared protocol schemas, core Effect runtime services, local SQLite persistence foundation, default built-in tools, agent context resolution, thread lifecycle/search/share services, an initial Amp-like interactive terminal adapter, the trusted-local TypeScript plugin host, MCP client integration with workspace command-server trust controls, IDE/SDK remote control, and local/remote Rivet host configuration with workspace membership checks. Runtime features continue to land through the numbered issue stack.
+This repository currently contains the monorepo scaffold, shared protocol schemas, core Effect runtime services, local SQLite persistence foundation, default built-in tools, agent context resolution, thread lifecycle/search/share services, an initial Amp-like interactive terminal adapter, the trusted-local TypeScript plugin host, MCP client integration with workspace command-server trust controls, IDE/SDK remote control, shared local backend live subscriptions, a Foldkit local web UI, and local/remote Rivet host configuration with workspace membership checks. Runtime features continue to land through the numbered issue stack.
 
 ## Verification
 
@@ -48,6 +48,12 @@ bun run test
 bun run build
 bun run format:check
 bun run package:smoke
+```
+
+Run the local Foldkit web UI against the shared backend with:
+
+```bash
+bun run web:dev
 ```
 
 Persistence migrations live in `packages/persistence/drizzle` and are managed through:

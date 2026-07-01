@@ -1,7 +1,7 @@
 import { Config } from "@rika/core"
 import { Client } from "@rika/sdk"
 import { Ids, type Remote } from "@rika/schema"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import * as Adapter from "./adapter"
 import * as Backend from "./backend"
 import * as Controller from "./controller"
@@ -72,6 +72,7 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
           )
         return {
           thread_id,
+          last_sequence: record.events.at(-1)?.sequence ?? 0,
           state: ViewState.beginConnecting(
             ViewState.initial({ thread_id, workspace_path, mode, events: record.events }),
           ),
@@ -80,20 +81,38 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
       const summary = yield* client.createThread({ workspace_id: workspaceId })
       return {
         thread_id: summary.thread_id,
+        last_sequence: 0,
         state: ViewState.beginConnecting(
           ViewState.initial({ thread_id: summary.thread_id, workspace_path, mode, events: [] }),
         ),
       }
     }),
   streamTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
-    client.startTurn({
-      thread_id,
-      workspace_id: Ids.WorkspaceId.make(workspace_path),
-      content,
-      ...(content_parts === undefined ? {} : { content_parts }),
-      mode,
-      ...(fast_mode === undefined ? {} : { fast_mode }),
-    }),
+    Stream.unwrap(
+      client
+        .startTurn({
+          thread_id,
+          workspace_id: Ids.WorkspaceId.make(workspace_path),
+          content,
+          ...(content_parts === undefined ? {} : { content_parts }),
+          mode,
+          ...(fast_mode === undefined ? {} : { fast_mode }),
+        })
+        .pipe(Effect.as(Stream.empty)),
+    ),
+  submitTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
+    client
+      .startTurn({
+        thread_id,
+        workspace_id: Ids.WorkspaceId.make(workspace_path),
+        content,
+        ...(content_parts === undefined ? {} : { content_parts }),
+        mode,
+        ...(fast_mode === undefined ? {} : { fast_mode }),
+      })
+      .pipe(Effect.asVoid),
+  subscribeThreadEvents: ({ thread_id, after_sequence }) =>
+    client.subscribeThreadEvents({ thread_id, ...(after_sequence === undefined ? {} : { after_sequence }) }),
   cancelTurn: ({ thread_id, turn_id }) => client.interruptTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(client, context, command),
   listThreads: ({ workspace_path }) =>
@@ -199,7 +218,7 @@ const handleCommand = (
         events: [],
         notice: `Started new thread ${summary.thread_id}`,
       })
-      return Backend.commandResult(context, { state: next, thread_id: summary.thread_id })
+      return Backend.commandResult(context, { state: next, thread_id: summary.thread_id, last_sequence: 0 })
     }
     if (name === "/thread") {
       if (argument === undefined || argument.length === 0)
@@ -212,7 +231,11 @@ const handleCommand = (
           events: record.events,
         }),
       )
-      return Backend.commandResult(context, { state: next, thread_id: nextThreadId })
+      return Backend.commandResult(context, {
+        state: next,
+        thread_id: nextThreadId,
+        last_sequence: record.events.at(-1)?.sequence ?? 0,
+      })
     }
     if (name === "/archive" || name === "/unarchive") {
       const target = argument === undefined || argument.length === 0 ? threadId : Ids.ThreadId.make(argument)
@@ -228,6 +251,7 @@ const handleCommand = (
             })
       return Backend.commandResult(context, {
         state: ViewState.withNotice(nextState, `${summary.archived ? "Archived" : "Unarchived"} ${target}`),
+        ...(record === undefined ? {} : { last_sequence: record.events.at(-1)?.sequence ?? 0 }),
       })
     }
     if (name === "/share") {

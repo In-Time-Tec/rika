@@ -104,6 +104,18 @@ _Avoid_: Actor API variant, cloud mode, runtime fork
 A terminal UI run that renders thread events, accepts prompts and command-palette commands, and delegates turns to the agent loop. Interactive sessions are adapters over durable threads, not a separate source of truth.
 _Avoid_: Terminal state, chat UI, REPL transcript
 
+**Shared Local Backend**:
+The per-workspace local remote-control process reused by interactive sessions and local development clients. It owns local API access to durable threads while clients render through subscriptions.
+_Avoid_: TUI backend, web server, hidden singleton
+
+**Live Thread Subscription**:
+The long-lived stream of thread events a client consumes after opening a thread. It starts after a known event sequence, catches up from the event log, then continues with live notifications.
+_Avoid_: Turn response stream, websocket state, UI cache
+
+**Foldkit Web UI**:
+The local browser client for Rika threads, built with Foldkit and rendered from the same remote-control subscription path as interactive sessions.
+_Avoid_: React app, dashboard, separate frontend state
+
 **IDE Client**:
 An editor-side participant connected to Rika for one or more workspaces. It can supply editor context and receive requests to reveal code without becoming the thread's source of truth.
 _Avoid_: Editor plugin, IDE session, frontend

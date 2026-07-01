@@ -3,7 +3,8 @@ import { Config } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { ArtifactStore, Database, ThreadEventLog } from "@rika/persistence"
 import { Artifact, Common, Event, Ide, Ids, Remote } from "@rika/schema"
-import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import * as ThreadLive from "./thread-live"
 
 export class RemoteControlError extends Schema.TaggedErrorClass<RemoteControlError>()("RemoteControlError", {
   message: Schema.String,
@@ -37,7 +38,7 @@ export interface Interface {
   readonly shareThread: (input: Remote.ShareThreadRequest) => Effect.Effect<Remote.ThreadExport, RunError>
   readonly referenceThread: (input: Remote.ReferenceThreadRequest) => Effect.Effect<Remote.ThreadReference, RunError>
   readonly subscribeThreadEvents: (input: Remote.SubscribeThreadEventsRequest) => Stream.Stream<Event.Event, RunError>
-  readonly startTurn: (input: Remote.StartTurnRequest) => Stream.Stream<Event.Event, RunError>
+  readonly startTurn: (input: Remote.StartTurnRequest) => Effect.Effect<Remote.StartTurnResponse, RunError>
   readonly interruptTurn: (input: Remote.InterruptTurnRequest) => Effect.Effect<Event.TurnFailed, RunError>
   readonly listArtifacts: (
     input: Remote.ListArtifactsRequest,
@@ -64,6 +65,31 @@ export const layer = Layer.effect(
     const eventLog = yield* ThreadEventLog.Service
     const ideBridge = yield* IdeBridge.Service
     const workspaceAccess = yield* WorkspaceAccess.Service
+    const live = yield* ThreadLive.Service
+    const activeThreads = new Set<Ids.ThreadId>()
+    const activeThreadsMutex = yield* Semaphore.make(1)
+    const reserveThread = (threadId: Ids.ThreadId) =>
+      activeThreadsMutex.withPermit(
+        Effect.sync(() => {
+          if (activeThreads.has(threadId)) return false
+          activeThreads.add(threadId)
+          return true
+        }),
+      )
+    const releaseThread = (threadId: Ids.ThreadId) =>
+      activeThreadsMutex.withPermit(
+        Effect.sync(() => {
+          activeThreads.delete(threadId)
+        }),
+      )
+    const readLoggedEvents = (threadId: Ids.ThreadId, afterSequence: number) =>
+      eventLog
+        .readThread({ thread_id: threadId, after_sequence: afterSequence })
+        .pipe(Effect.provideService(Database.Service, database))
+    const latestLoggedSequence = (threadId: Ids.ThreadId) =>
+      readLoggedEvents(threadId, 0).pipe(Effect.map((events) => events.at(-1)?.sequence ?? 0))
+    const publishLoggedEvents = (threadId: Ids.ThreadId, afterSequence: number) =>
+      readLoggedEvents(threadId, afterSequence).pipe(Effect.flatMap((events) => live.publishAll(events)))
 
     return Service.of({
       backendHealth: Effect.fn("RemoteControl.backendHealth")(function* (url: string) {
@@ -81,6 +107,7 @@ export const layer = Layer.effect(
       createThread: Effect.fn("RemoteControl.createThread")(function* (input: Remote.CreateThreadRequest) {
         const values = yield* config.get
         const workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(values.workspace_root)
+        const previousSequence = input.thread_id === undefined ? 0 : yield* latestLoggedSequence(input.thread_id)
         yield* workspaceAccess.ensureWorkspaceForCreate({
           workspace_id: workspaceId,
           ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
@@ -90,6 +117,7 @@ export const layer = Layer.effect(
           ...input,
           workspace_id: workspaceId,
         })
+        yield* publishLoggedEvents(summary.thread_id, previousSequence)
         return toRemoteSummary(summary)
       }),
       listThreads: Effect.fn("RemoteControl.listThreads")(function* (input: Remote.ListThreadsRequest = {}) {
@@ -125,13 +153,19 @@ export const layer = Layer.effect(
         if (input.user_id !== undefined) {
           yield* workspaceAccess.requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "write" })
         }
-        return toRemoteSummary(yield* threads.archive({ thread_id: input.thread_id }))
+        const previousSequence = yield* latestLoggedSequence(input.thread_id)
+        const summary = yield* threads.archive({ thread_id: input.thread_id })
+        yield* publishLoggedEvents(input.thread_id, previousSequence)
+        return toRemoteSummary(summary)
       }),
       unarchiveThread: Effect.fn("RemoteControl.unarchiveThread")(function* (input: Remote.ArchiveThreadRequest) {
         if (input.user_id !== undefined) {
           yield* workspaceAccess.requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "write" })
         }
-        return toRemoteSummary(yield* threads.unarchive({ thread_id: input.thread_id }))
+        const previousSequence = yield* latestLoggedSequence(input.thread_id)
+        const summary = yield* threads.unarchive({ thread_id: input.thread_id })
+        yield* publishLoggedEvents(input.thread_id, previousSequence)
+        return toRemoteSummary(summary)
       }),
       searchThreads: Effect.fn("RemoteControl.searchThreads")(function* (input: Remote.SearchThreadsRequest) {
         if (input.workspace_id !== undefined && input.user_id !== undefined) {
@@ -172,53 +206,65 @@ export const layer = Layer.effect(
                 action: "read",
               })
             }
-            const events = yield* eventLog
-              .readThread({
-                thread_id: input.thread_id,
-                ...(input.after_sequence === undefined ? {} : { after_sequence: input.after_sequence }),
-              })
-              .pipe(Effect.provideService(Database.Service, database))
-            return Stream.fromIterable(events)
-          }),
-        ),
-      startTurn: (input: Remote.StartTurnRequest) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const values = yield* config.get
-            const currentIdeContext = yield* ideBridge.currentContext()
-            const workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(values.workspace_root)
-            if (input.user_id !== undefined) {
-              yield* workspaceAccess
-                .requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "write" })
-                .pipe(
-                  Effect.catchTag("WorkspaceAccessError", () =>
-                    workspaceAccess.ensureWorkspaceForCreate({
-                      workspace_id: workspaceId,
-                      user_id: input.user_id,
-                      action: "write",
-                    }),
-                  ),
-                )
-            }
-            const ideContext = input.ide_context ?? Option.getOrUndefined(currentIdeContext)
-            return agentLoop.streamTurn({
+            return live.subscribe({
               thread_id: input.thread_id,
-              workspace_id: workspaceId,
-              content: input.content,
-              ...(input.content_parts === undefined ? {} : { content_parts: input.content_parts }),
-              ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
-              ...(input.mode === undefined ? {} : { mode: input.mode }),
-              ...(input.fast_mode === undefined ? {} : { fast_mode: input.fast_mode }),
-              ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
-              ...(ideContext === undefined ? {} : { ide_context: ideContext }),
+              ...(input.after_sequence === undefined ? {} : { after_sequence: input.after_sequence }),
             })
           }),
         ),
+      startTurn: Effect.fn("RemoteControl.startTurn")(function* (input: Remote.StartTurnRequest) {
+        const values = yield* config.get
+        const currentIdeContext = yield* ideBridge.currentContext()
+        const workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(values.workspace_root)
+        if (input.user_id !== undefined) {
+          yield* workspaceAccess
+            .requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "write" })
+            .pipe(
+              Effect.catchTag("WorkspaceAccessError", () =>
+                workspaceAccess.ensureWorkspaceForCreate({
+                  workspace_id: workspaceId,
+                  user_id: input.user_id,
+                  action: "write",
+                }),
+              ),
+            )
+        }
+        const reserved = yield* reserveThread(input.thread_id)
+        if (!reserved) {
+          return yield* new RemoteControlError({
+            message: `Thread ${input.thread_id} already has an active turn`,
+            operation: "startTurn",
+            status: 409,
+          })
+        }
+        const ideContext = input.ide_context ?? Option.getOrUndefined(currentIdeContext)
+        yield* agentLoop
+          .streamTurn({
+            thread_id: input.thread_id,
+            workspace_id: workspaceId,
+            content: input.content,
+            ...(input.content_parts === undefined ? {} : { content_parts: input.content_parts }),
+            ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
+            ...(input.mode === undefined ? {} : { mode: input.mode }),
+            ...(input.fast_mode === undefined ? {} : { fast_mode: input.fast_mode }),
+            ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
+            ...(ideContext === undefined ? {} : { ide_context: ideContext }),
+          })
+          .pipe(
+            Stream.runForEach((event) => live.publish(event)),
+            Effect.catch(() => Effect.void),
+            Effect.ensuring(releaseThread(input.thread_id)),
+            Effect.forkDetach,
+          )
+        return { thread_id: input.thread_id, accepted: true }
+      }),
       interruptTurn: Effect.fn("RemoteControl.interruptTurn")(function* (input: Remote.InterruptTurnRequest) {
         if (input.user_id !== undefined) {
           yield* workspaceAccess.requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "write" })
         }
-        return yield* agentLoop.cancelTurn(input)
+        const failed = yield* agentLoop.cancelTurn(input)
+        yield* live.publish(failed)
+        return failed
       }),
       listArtifacts: Effect.fn("RemoteControl.listArtifacts")(function* (input: Remote.ListArtifactsRequest) {
         if (input.user_id !== undefined) {
@@ -264,7 +310,7 @@ export const layer = Layer.effect(
       }),
     })
   }),
-)
+).pipe(Layer.provideMerge(ThreadLive.layer))
 
 export const createThread = Effect.fn("RemoteControl.createThread.call")(function* (input: Remote.CreateThreadRequest) {
   const service = yield* Service
@@ -331,8 +377,10 @@ export const referenceThread = Effect.fn("RemoteControl.referenceThread.call")(f
 export const subscribeThreadEvents = (input: Remote.SubscribeThreadEventsRequest) =>
   Stream.unwrap(Effect.map(Service, (service) => service.subscribeThreadEvents(input)))
 
-export const startTurn = (input: Remote.StartTurnRequest) =>
-  Stream.unwrap(Effect.map(Service, (service) => service.startTurn(input)))
+export const startTurn = Effect.fn("RemoteControl.startTurn.call")(function* (input: Remote.StartTurnRequest) {
+  const service = yield* Service
+  return yield* service.startTurn(input)
+})
 
 export const interruptTurn = Effect.fn("RemoteControl.interruptTurn.call")(function* (
   input: Remote.InterruptTurnRequest,

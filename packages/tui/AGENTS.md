@@ -44,6 +44,8 @@ One pure model, one native adapter, one loop:
 
 Rika uses Effect AI native tool calls. Provider tool parameter deltas arrive as typed tool events, not assistant text. The TUI renders assistant text only from `model.stream.chunk` and renders tools only from `tool.call.*` events; any JSON tool-call scrubber is a legacy migration guard, not correctness logic.
 
+Remote sessions submit turns through `submitTurn` and render all transcript changes from `subscribeThreadEvents`. The initiating TUI must not double-apply its own turn events from a submission response. Keep `last_sequence` explicit when loading, switching, and opening threads so subscription catch-up starts from the durable event boundary.
+
 ## Testing and verification
 
 Keep all logic pure and unit-tested (view-state, keymap, palette, backend helpers). The adapter is exercised via `@opentui/core/testing` (`createTestRenderer` + `captureCharFrame`) and a memory layer; never spawn the native renderer in tests. Run `bun run typecheck`, `bun run test`, and `bun run lint` from this package or the repo root.

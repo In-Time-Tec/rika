@@ -13,6 +13,7 @@
 | ----------------------------- | ------------------------------------------------------------------------ |
 | `src/remote-control.ts`       | Effect service API for thread, turn, interrupt, artifact, and IDE calls. |
 | `src/http-server.ts`          | Bun HTTP adapter for the remote-control service.                         |
+| `src/thread-live.ts`          | In-process live thread event notification and catch-up service.          |
 | `src/index.ts`                | Package namespace exports.                                               |
 | `test/remote-control.test.ts` | SDK/server contract tests over local Effect services.                    |
 
@@ -20,6 +21,8 @@
 
 - Keep the server as an adapter. It must not own durable state separate from `ThreadEventLog`, `ThreadProjection`, or artifacts.
 - API payloads use `@rika/schema` remote/event/artifact schemas; do not invent untyped response shapes.
+- `startTurn` is submit-only. All clients must render from `subscribeThreadEvents`, not from the turn submission response.
+- `ThreadLive` is notification plumbing only: attach live, catch up from `ThreadEventLog`, dedupe by event `sequence`, and recover gaps from the log.
 - Localhost starts without auth for the MVP. If a token is configured, require `Authorization: Bearer <token>`.
 - Turn execution and permission behavior must continue through `AgentLoop.Service` and `ToolExecutor.Service`.
 - Hosted user requests must pass through `WorkspaceAccess.Service`; local requests without `user_id` remain local-first.

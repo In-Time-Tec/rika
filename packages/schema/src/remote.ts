@@ -164,6 +164,12 @@ export const StartTurnRequest = Schema.Struct({
   ide_context: Schema.optional(IdeContextSnapshot),
 }).annotate({ identifier: "Rika.Remote.StartTurnRequest" })
 
+export interface StartTurnResponse extends Schema.Schema.Type<typeof StartTurnResponse> {}
+export const StartTurnResponse = Schema.Struct({
+  thread_id: ThreadId,
+  accepted: Schema.Literal(true),
+}).annotate({ identifier: "Rika.Remote.StartTurnResponse" })
+
 export interface InterruptTurnRequest extends Schema.Schema.Type<typeof InterruptTurnRequest> {}
 export const InterruptTurnRequest = Schema.Struct({
   thread_id: ThreadId,

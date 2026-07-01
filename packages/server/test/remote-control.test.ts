@@ -123,11 +123,25 @@ describe("remote control API and SDK", () => {
     expect(created).toMatchObject({ thread_id: threadId, workspace_id: workspaceId, archived: false })
     expect(health).toMatchObject({ status: "healthy", workspace_root: "/workspace/rika-remote" })
 
-    const streamed = await Effect.runPromise(
-      client
-        .startTurn({ thread_id: threadId, workspace_id: workspaceId, content: "say hello", mode: "smart" })
-        .pipe(Stream.runCollect),
+    const firstSubscriber = Effect.runPromise(
+      client.subscribeThreadEvents({ thread_id: threadId, after_sequence: 1 }).pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed" || event.type === "turn.failed"),
+        Stream.runCollect,
+      ),
     )
+    const secondSubscriber = Effect.runPromise(
+      client.subscribeThreadEvents({ thread_id: threadId, after_sequence: 1 }).pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed" || event.type === "turn.failed"),
+        Stream.runCollect,
+      ),
+    )
+    const accepted = await Effect.runPromise(
+      client.startTurn({ thread_id: threadId, workspace_id: workspaceId, content: "say hello", mode: "smart" }),
+    )
+    const [streamed, mirrored] = await Promise.all([firstSubscriber, secondSubscriber])
+
+    expect(accepted).toEqual({ thread_id: threadId, accepted: true })
+    expect(mirrored.map((event) => event.type)).toEqual(streamed.map((event) => event.type))
     expect(streamed.map((event) => event.type)).toContain("message.added")
     expect(streamed.at(-1)).toMatchObject({ type: "turn.completed" })
 
@@ -143,12 +157,15 @@ describe("remote control API and SDK", () => {
     const preview = await Effect.runPromise(client.previewThread(threadId, { limit: 2 }))
     expect(preview.summary.thread_id).toBe(threadId)
     expect(preview.events.map((event) => event.type)).toEqual(["turn.completed", "turn.failed"])
-    const subscribed = await Effect.runPromise(
-      client.subscribeThreadEvents({ thread_id: threadId, after_sequence: 1 }).pipe(Stream.runCollect),
+    const metadataEvents = Effect.runPromise(
+      client
+        .subscribeThreadEvents({ thread_id: threadId, after_sequence: preview.events.at(-1)?.sequence })
+        .pipe(Stream.take(2), Stream.runCollect),
     )
     const archived = await Effect.runPromise(client.archiveThread(threadId))
     const unarchived = await Effect.runPromise(client.unarchiveThread(threadId))
-    expect(subscribed.map((event) => event.type)).toContain("message.added")
+    const subscribed = await metadataEvents
+    expect(subscribed.map((event) => event.type)).toEqual(["thread.archived", "thread.unarchived"])
     expect(archived.archived).toBe(true)
     expect(unarchived.archived).toBe(false)
 
@@ -212,7 +229,7 @@ describe("remote control API and SDK", () => {
     const outsiderTurn = await Effect.runPromise(
       client
         .startTurn({ thread_id: threadId, workspace_id: workspaceId, user_id: outsiderId, content: "break in" })
-        .pipe(Stream.runCollect, Effect.flip),
+        .pipe(Effect.flip),
     )
 
     expect(created).toMatchObject({ thread_id: threadId, workspace_id: workspaceId, user_id: ownerId })
@@ -237,11 +254,16 @@ describe("remote control API and SDK", () => {
       }),
     )
     const status = await Effect.runPromise(client.ideStatus())
-    const streamed = await Effect.runPromise(
-      client
-        .startTurn({ thread_id: ideThreadId, workspace_id: workspaceId, content: "use my editor context" })
-        .pipe(Stream.runCollect),
+    const streamedPromise = Effect.runPromise(
+      client.subscribeThreadEvents({ thread_id: ideThreadId }).pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed" || event.type === "turn.failed"),
+        Stream.runCollect,
+      ),
     )
+    await Effect.runPromise(
+      client.startTurn({ thread_id: ideThreadId, workspace_id: workspaceId, content: "use my editor context" }),
+    )
+    const streamed = await streamedPromise
     const navigationRequest: Ide.OpenFileRequest = {
       path: "packages/server/src/remote-control.ts",
       range: { start_line: 30, end_line: 35 },

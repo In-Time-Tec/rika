@@ -18,6 +18,8 @@
 
 - Keep SDK payloads decoded through shared `@rika/schema` contracts.
 - Keep transport swappable so tests can use in-process transports and consumers can use HTTP fetch.
+- `startTurn` returns turn acceptance only. Consumers render thread updates through `subscribeThreadEvents`.
+- `subscribeThreadEvents` is the typed shared stream for TUI, web, IDE, and future hosted clients. Preserve NDJSON frame decoding and API error preservation.
 - Do not import agent, server, Drizzle, Rivet, model providers, or filesystem adapters here.
 
 ## Testing And Verification

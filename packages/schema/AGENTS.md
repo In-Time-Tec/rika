@@ -28,6 +28,7 @@
 - Keep this package infrastructure-free: no Drizzle, Rivet, model SDK, filesystem mutation, TUI, CLI, or server imports.
 - Use Effect Schema for serializable contracts once issue #4 defines the protocol package.
 - Prefer branded IDs and versioned payload schemas over unstructured objects.
+- Remote-control turn submission and thread subscription are separate protocol concepts: `StartTurnResponse` acknowledges acceptance, while thread events flow through `SubscribeThreadEventsRequest` / `StreamFrame`.
 - Tests live under `test/` and import package source through `../src/index`.
 
 ## For AI Agents

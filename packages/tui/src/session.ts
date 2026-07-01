@@ -84,6 +84,7 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
       return {
         thread_id: threadId,
         state: ViewState.beginConnecting(ViewState.initial({ thread_id: threadId, workspace_path, mode, events })),
+        last_sequence: events.at(-1)?.sequence ?? 0,
       }
     }),
   streamTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
@@ -190,7 +191,7 @@ const handleCommand = (
         events: [],
         notice: `Started new thread ${summary.thread_id}`,
       })
-      return Backend.commandResult(context, { state: next, thread_id: summary.thread_id })
+      return Backend.commandResult(context, { state: next, thread_id: summary.thread_id, last_sequence: 0 })
     }
     if (name === "/thread") {
       if (argument === undefined || argument.length === 0)
@@ -203,7 +204,11 @@ const handleCommand = (
           events: record.events,
         }),
       )
-      return Backend.commandResult(context, { state: next, thread_id: nextThreadId })
+      return Backend.commandResult(context, {
+        state: next,
+        thread_id: nextThreadId,
+        last_sequence: record.events.at(-1)?.sequence ?? 0,
+      })
     }
     if (name === "/archive" || name === "/unarchive") {
       const target = argument === undefined || argument.length === 0 ? threadId : Ids.ThreadId.make(argument)
@@ -222,6 +227,7 @@ const handleCommand = (
             })
       return Backend.commandResult(context, {
         state: ViewState.withNotice(nextState, `${summary.archived ? "Archived" : "Unarchived"} ${target}`),
+        ...(record === undefined ? {} : { last_sequence: record.events.at(-1)?.sequence ?? 0 }),
       })
     }
     if (name === "/share") {

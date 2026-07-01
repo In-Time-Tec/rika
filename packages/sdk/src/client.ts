@@ -46,7 +46,7 @@ export interface Interface {
   readonly shareThread: (threadId: Ids.ThreadId, userId?: Ids.UserId) => Effect.Effect<Remote.ThreadExport, SdkError>
   readonly referenceThread: (input: Remote.ReferenceThreadRequest) => Effect.Effect<Remote.ThreadReference, SdkError>
   readonly subscribeThreadEvents: (input: Remote.SubscribeThreadEventsRequest) => Stream.Stream<Event.Event, SdkError>
-  readonly startTurn: (input: Remote.StartTurnRequest) => Stream.Stream<Event.Event, SdkError>
+  readonly startTurn: (input: Remote.StartTurnRequest) => Effect.Effect<Remote.StartTurnResponse, SdkError>
   readonly interruptTurn: (input: Remote.InterruptTurnRequest) => Effect.Effect<Event.TurnFailed, SdkError>
   readonly listArtifacts: (
     input: Remote.ListArtifactsRequest,
@@ -137,8 +137,8 @@ export const make = (transport: Transport): Interface => ({
       .pipe(Stream.mapEffect(decodeStreamFrame)),
   startTurn: (input: Remote.StartTurnRequest) =>
     transport
-      .streamJson({ method: "POST", path: "/v1/turns", body: Codec.encode(Remote.StartTurnRequest)(input) })
-      .pipe(Stream.mapEffect(decodeStreamFrame)),
+      .requestJson({ method: "POST", path: "/v1/turns", body: Codec.encode(Remote.StartTurnRequest)(input) })
+      .pipe(Effect.flatMap(decodeEffect(Remote.StartTurnResponse, "startTurn"))),
   interruptTurn: (input: Remote.InterruptTurnRequest) =>
     transport
       .requestJson({
@@ -237,22 +237,27 @@ const decodeNdjsonStream = (body: ReadableStream<Uint8Array>) =>
 const decodeEffect =
   <const S extends Schema.ConstraintDecoder<unknown>>(schema: S, operation: string) =>
   (value: unknown): Effect.Effect<S["Type"], SdkError> =>
-    Effect.try({
-      try: () => Schema.decodeUnknownSync(schema)(value),
-      catch: (cause) => toSdkError(cause, operation),
-    })
+    isApiErrorBody(value)
+      ? Effect.fail(apiError(value, operation))
+      : Effect.try({
+          try: () => Schema.decodeUnknownSync(schema)(value),
+          catch: (cause) => toSdkError(cause, operation),
+        })
 
 const decodeStreamFrame = (value: unknown): Effect.Effect<Event.Event, SdkError> =>
   decodeEffect(
     Remote.StreamFrame,
-    "startTurn",
+    "subscribeThreadEvents",
   )(value).pipe(
     Effect.flatMap((frame) =>
-      isApiErrorFrame(frame) ? Effect.fail(apiError(frame, "startTurn")) : Effect.succeed(frame),
+      isApiErrorFrame(frame) ? Effect.fail(apiError(frame, "subscribeThreadEvents")) : Effect.succeed(frame),
     ),
   )
 
 const isApiErrorFrame = (frame: Remote.StreamFrame): frame is Remote.ApiError => "error" in frame
+
+const isApiErrorBody = (value: unknown): value is Remote.ApiError =>
+  Schema.decodeUnknownOption(Remote.ApiError)(value)._tag === "Some"
 
 const fetchInit = (request: RequestInput, token: string | undefined): RequestInit => ({
   method: request.method,

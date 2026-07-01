@@ -451,8 +451,6 @@ export const reconnectingClient = (input: ReconnectingClientInput): Client.Inter
           : Stream.fail(error),
       ),
     )
-  const freshStream = <A>(use: (remote: Client.Interface) => Stream.Stream<A, Client.SdkError>) =>
-    Stream.unwrap(resolveEndpoint(true).pipe(Effect.map((next) => use(clientForEndpoint(next)))))
 
   return {
     backendHealth: () => request((remote) => remote.backendHealth()),
@@ -466,7 +464,7 @@ export const reconnectingClient = (input: ReconnectingClientInput): Client.Inter
     shareThread: (threadId, userId) => request((remote) => remote.shareThread(threadId, userId)),
     referenceThread: (reference) => request((remote) => remote.referenceThread(reference)),
     subscribeThreadEvents: (subscription) => stream((remote) => remote.subscribeThreadEvents(subscription)),
-    startTurn: (turn) => freshStream((remote) => remote.startTurn(turn)),
+    startTurn: (turn) => request((remote) => remote.startTurn(turn)),
     interruptTurn: (turn) => request((remote) => remote.interruptTurn(turn)),
     listArtifacts: (artifacts) => request((remote) => remote.listArtifacts(artifacts)),
     getArtifact: (artifactId, userId) => request((remote) => remote.getArtifact(artifactId, userId)),

@@ -35,6 +35,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 | `docs/persistence.md`               | Drizzle, SQLite, migration, and persistence service boundary rules.                                                 |
 | `docs/remote-rivet-hosting.md`      | Local/remote Rivet hosting topology, multi-user boundaries, and recovery guidance.                                  |
 | `docs/ide-integration.md`           | Editor adapter boundaries for IDE clients, IDE context, and navigation requests.                                    |
+| `docs/local-web-sync.md`            | Local TUI/web shared-backend sync contract and Foldkit web app development flow.                                    |
 | `package.json`                      | Bun workspace, dependency catalog, and root verification scripts.                                                   |
 | `turbo.json`                        | Monorepo task graph for package build, typecheck, and test commands.                                                |
 | `.oxlintrc.json`                    | Root oxlint configuration.                                                                                          |
@@ -64,6 +65,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 | Directory         | Purpose                                                                             |
 | ----------------- | ----------------------------------------------------------------------------------- |
 | `.agents/skills/` | Project-local skills. Root guidance lists only skills committed in this repository. |
+| `apps/`           | Runtime applications such as the Foldkit web UI. See `apps/AGENTS.md`.              |
 | `packages/`       | Workspace packages. See `packages/AGENTS.md`.                                       |
 
 ## For AI Agents
@@ -91,6 +93,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 - `bun run build`: build package entrypoints through Turbo.
 - `bun run format:check`: check formatting with Prettier.
 - `bun run package:smoke`: compile the CLI release artifact and verify help/doctor startup.
+- `bun run web:dev`: run the Foldkit local web UI against the shared local backend through the Vite proxy.
 
 ## Skills Index
 

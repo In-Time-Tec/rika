@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Client } from "@rika/sdk"
 import { Common, Event, Ids, Message, Remote } from "@rika/schema"
-import { Effect, Stream } from "effect"
+import { Effect, Queue, Stream } from "effect"
 import { Adapter, Keys, RemoteSession, Ticker, ViewState } from "../src/index"
 
 const workspaceRoot = "/workspace/rika-remote-tui-test"
@@ -126,6 +126,7 @@ interface FakeBackend {
 const fakeBackend = (): FakeBackend => {
   const turns: Array<string> = []
   const threads = new Map<Ids.ThreadId, { summary: Remote.ThreadSummary; events: Array<Event.Event> }>()
+  const subscribers = new Set<(event: Event.Event) => void>()
   const initialThread = Ids.ThreadId.make("thread_remote_initial")
   const initialEvents = [threadCreated(initialThread, 1), messageAdded(initialThread, 2, "old remote message")]
   threads.set(initialThread, { summary: summary(initialThread, "old remote message"), events: [...initialEvents] })
@@ -195,9 +196,21 @@ const fakeBackend = (): FakeBackend => {
         total_chars: 0,
         truncated: false,
       }),
-    subscribeThreadEvents: (input) => Stream.fromIterable(threads.get(input.thread_id)?.events ?? []),
+    subscribeThreadEvents: (input) =>
+      Stream.callback<Event.Event>((queue) =>
+        Effect.sync(() => {
+          let lastSequence = input.after_sequence ?? 0
+          const offer = (event: Event.Event) => {
+            if (event.thread_id !== input.thread_id || event.sequence <= lastSequence) return
+            lastSequence = event.sequence
+            Queue.offerUnsafe(queue, event)
+          }
+          for (const event of threads.get(input.thread_id)?.events ?? []) offer(event)
+          subscribers.add(offer)
+        }),
+      ),
     startTurn: (input) =>
-      Stream.suspend(() => {
+      Effect.sync(() => {
         turns.push(input.content)
         const events = turnEvents(input.thread_id, input.content, "remote response")
         const record = threads.get(input.thread_id)
@@ -205,7 +218,10 @@ const fakeBackend = (): FakeBackend => {
           record.events.push(...events)
           record.summary = summary(input.thread_id, "remote response")
         }
-        return Stream.fromIterable(events)
+        for (const event of events) {
+          for (const subscriber of subscribers) subscriber(event)
+        }
+        return { thread_id: input.thread_id, accepted: true }
       }),
     interruptTurn: (input) => Effect.succeed(turnFailed(input.thread_id, input.turn_id, 1)),
     listArtifacts: () => Effect.succeed([]),

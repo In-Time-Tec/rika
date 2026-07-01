@@ -12,6 +12,7 @@ export interface LoadInput {
 export interface LoadedThread {
   readonly thread_id: Ids.ThreadId
   readonly state: ViewState.ViewState
+  readonly last_sequence?: number
 }
 
 export interface TurnRequest {
@@ -21,6 +22,11 @@ export interface TurnRequest {
   readonly content_parts?: ReadonlyArray<Message.ContentPart>
   readonly mode: Config.Mode
   readonly fast_mode?: boolean
+}
+
+export interface ThreadEventsRequest {
+  readonly thread_id: Ids.ThreadId
+  readonly after_sequence?: number
 }
 
 export interface CancelRequest {
@@ -49,6 +55,7 @@ export interface CommandContext {
 export interface CommandResult {
   readonly state: ViewState.ViewState
   readonly thread_id: Ids.ThreadId
+  readonly last_sequence?: number
   readonly mode: Config.Mode
   readonly exit: boolean
 }
@@ -90,6 +97,8 @@ export const threadOption = (input: ThreadOptionInput): ThreadOption => {
 export interface SessionBackend<E> {
   readonly loadInitial: (input: LoadInput) => Effect.Effect<LoadedThread, E>
   readonly streamTurn: (input: TurnRequest) => Stream.Stream<Event.Event, E>
+  readonly submitTurn?: (input: TurnRequest) => Effect.Effect<void, E>
+  readonly subscribeThreadEvents?: (input: ThreadEventsRequest) => Stream.Stream<Event.Event, E>
   readonly cancelTurn: (input: CancelRequest) => Effect.Effect<void, E>
   readonly runCommand: (context: CommandContext, command: string) => Effect.Effect<CommandResult, E>
   readonly listThreads: (input: { readonly workspace_path: string }) => Effect.Effect<ReadonlyArray<ThreadOption>, E>
@@ -98,10 +107,17 @@ export interface SessionBackend<E> {
 
 export const commandResult = (
   context: CommandContext,
-  patch: { state?: ViewState.ViewState; thread_id?: Ids.ThreadId; mode?: Config.Mode; exit?: boolean } = {},
+  patch: {
+    state?: ViewState.ViewState
+    thread_id?: Ids.ThreadId
+    last_sequence?: number
+    mode?: Config.Mode
+    exit?: boolean
+  } = {},
 ): CommandResult => ({
   state: patch.state ?? context.state,
   thread_id: patch.thread_id ?? context.thread_id,
+  ...(patch.last_sequence === undefined ? {} : { last_sequence: patch.last_sequence }),
   mode: patch.mode ?? context.mode,
   exit: patch.exit ?? false,
 })
