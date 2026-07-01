@@ -31,7 +31,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 | `docs/LAUNCH_CHECKLIST.md`          | Launch verification matrix, Amp-parity checklist, and known non-goals.                                              |
 | `docs/effect-module-conventions.md` | Copyable Effect service/module conventions.                                                                         |
 | `docs/runtime-and-layers.md`        | Runtime/layer assembly conventions and base service list.                                                           |
-| `docs/observability.md`             | Telemetry export to motel, `RIKA_TELEMETRY*` config, no-stdout constraint, and the wide-events logging convention.  |
+| `docs/observability.md`             | Telemetry export to the local inspector, `RIKA_TELEMETRY*` config, no-stdout constraint, and wide-events logging.   |
 | `docs/persistence.md`               | Drizzle, SQLite, migration, and persistence service boundary rules.                                                 |
 | `docs/remote-rivet-hosting.md`      | Local/remote Rivet hosting topology, multi-user boundaries, and recovery guidance.                                  |
 | `docs/ide-integration.md`           | Editor adapter boundaries for IDE clients, IDE context, and navigation requests.                                    |
@@ -47,7 +47,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 - Keep Rika fully Effect-native: use Effect services, layers, schemas, typed errors, scopes, streams, and fibers instead of ad hoc promises or singletons.
 - Follow OpenCode-style module shape: `export * as Module from "./module"`, an exported `Interface`, a `Context.Service` class, and one or more explicit `Layer` values.
 - Use `Schema.TaggedErrorClass` for errors that cross service boundaries.
-- Use `Effect.fn("Module.method")` for service methods and named workflows; these spans export to motel automatically when telemetry is on.
+- Use `Effect.fn("Module.method")` for service methods and named workflows; these spans export to the local telemetry inspector automatically when telemetry is on.
 - Log through the single `Diagnostics` sink using the wide-events pattern (`Diagnostics.event`), one rich event per operation. Never use `console.*` or `Effect.log*`. See `docs/observability.md` and `.agents/skills/effect-logging/SKILL.md`.
 - Bind services to named variables in `Effect.gen` before calling methods; do not use nested service yields.
 - Keep infrastructure swappable. Runtime code depends on service interfaces; tests provide in-memory or fake layers.

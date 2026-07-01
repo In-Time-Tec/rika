@@ -1,6 +1,7 @@
 export * as Adapter from "./adapter"
 export * as Backend from "./backend"
 export * as Controller from "./controller"
+export * as Inspect from "./inspect"
 export * as Keymap from "./keymap"
 export * as Keys from "./keys"
 export * as Palette from "./palette"

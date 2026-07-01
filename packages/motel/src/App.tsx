@@ -60,7 +60,7 @@ const buildHeaderModel = ({
 		: status === "loading"
 			? "loading traces..."
 			: ""
-	const leftLength = "MOTEL".length + SEPARATOR.length + serviceLabel.length + attrFilterLabel.length
+	const leftLength = "RIKA INSPECT".length + SEPARATOR.length + serviceLabel.length + attrFilterLabel.length
 	const gap = Math.max(2, headerFooterWidth - leftLength - right.length)
 
 	return {
@@ -84,7 +84,7 @@ const AppHeader = ({
 }) => (
 	<box paddingLeft={1} paddingRight={1} flexDirection="column">
 		<TextLine>
-			<span fg={colors.muted} attributes={TextAttributes.BOLD}>MOTEL</span>
+			<span fg={colors.muted} attributes={TextAttributes.BOLD}>RIKA INSPECT</span>
 			<span fg={colors.separator}>{SEPARATOR}</span>
 			<span fg={colors.muted}>{serviceLabel}</span>
 			{attrFilterLabel ? <span fg={colors.accent} attributes={TextAttributes.BOLD}>{attrFilterLabel}</span> : null}

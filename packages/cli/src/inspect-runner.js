@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs"
 import { dirname, join } from "node:path"
 
-export async function launchMotel(args, env) {
-  const command = motelCommand(env)
+export async function launchInspect(args, env) {
+  const command = inspectCommand(env)
   const launched = Bun.spawn([...command, ...args], {
     stdin: "inherit",
     stdout: "inherit",
@@ -11,12 +11,12 @@ export async function launchMotel(args, env) {
     cwd: dirname(command[1]),
   })
   const exitCode = await launched.exited
-  if (exitCode !== 0) throw new Error(`motel exited ${exitCode}`)
+  if (exitCode !== 0) throw new Error(`Rika Inspect exited ${exitCode}`)
 }
 
-export function motelCommand(env = process.env) {
+export function inspectCommand(env = process.env) {
   const bun = env.RIKA_BUN_EXECUTABLE ?? "bun"
-  const script = env.RIKA_MOTEL_SCRIPT ?? resolveMotelScript()
+  const script = env.RIKA_INSPECT_SCRIPT ?? resolveInspectScript()
   return [bun, script]
 }
 
@@ -29,18 +29,18 @@ function childEnv(env) {
   return values
 }
 
-function resolveMotelScript() {
-  const installed = join(dirname(process.execPath), "..", "share", "rika", "motel", "motel.js")
+function resolveInspectScript() {
+  const installed = join(dirname(process.execPath), "..", "share", "rika", "inspect", "inspect.js")
   if (existsSync(installed)) return installed
-  const localScript = resolveLocalMotelScript()
+  const localScript = resolveLocalInspectScript()
   if (localScript !== undefined) return localScript
   try {
     return Bun.resolveSync("@rika/motel/src/motel.ts", process.cwd())
   } catch {}
-  throw new Error("Cannot find bundled motel. Run bun install or reinstall Rika.")
+  throw new Error("Cannot find bundled Rika Inspect. Run bun install or reinstall Rika.")
 }
 
-function resolveLocalMotelScript() {
+function resolveLocalInspectScript() {
   for (const root of candidateRoots()) {
     const script = join(root, "packages", "motel", "src", "motel.ts")
     if (existsSync(script)) return script

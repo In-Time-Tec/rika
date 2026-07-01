@@ -25,10 +25,10 @@ if (parseDoctorReport(doctorOff.stdout).telemetry !== "disabled") {
   fail("compiled CLI doctor report did not honor RIKA_TELEMETRY=off", doctorOff)
 }
 
-await smokeDebugCommand()
+await smokeInspectCommand()
 await smokeServerHealth()
 
-console.log(JSON.stringify({ artifact: artifactPath, checks: ["help", "doctor", "debug", "server-health"] }))
+console.log(JSON.stringify({ artifact: artifactPath, checks: ["help", "doctor", "inspect", "server-health"] }))
 
 interface RunResult {
   readonly exitCode: number
@@ -107,15 +107,15 @@ async function smokeServerHealth() {
   }
 }
 
-async function smokeDebugCommand() {
-  const workspace = await mkdtemp(join(tmpdir(), "rika-package-debug-"))
+async function smokeInspectCommand() {
+  const workspace = await mkdtemp(join(tmpdir(), "rika-package-inspect-"))
   const fakeBun = join(workspace, "fake-bun")
-  const output = join(workspace, "debug.json")
-  const expectedMotelSuffix = join("dist", "share", "rika", "motel", "motel.js")
+  const output = join(workspace, "inspect.json")
+  const expectedInspectSuffix = join("dist", "share", "rika", "inspect", "inspect.js")
   await Bun.write(
     fakeBun,
     `#!/usr/bin/env bun
-const output = process.env.RIKA_FAKE_MOTEL_OUTPUT
+const output = process.env.RIKA_FAKE_INSPECT_OUTPUT
 if (output === undefined) process.exit(2)
 await Bun.write(output, JSON.stringify({
   argv: process.argv.slice(2),
@@ -128,28 +128,28 @@ await Bun.write(output, JSON.stringify({
   await $`chmod +x ${fakeBun}`
 
   try {
-    const result = await runArtifact(["--debug", "--all"], {
+    const result = await runArtifact(["inspect", "--all"], {
       RIKA_BUN_EXECUTABLE: fakeBun,
-      RIKA_FAKE_MOTEL_OUTPUT: output,
+      RIKA_FAKE_INSPECT_OUTPUT: output,
     })
-    if (result.exitCode !== 0) fail("compiled CLI debug command failed", result)
+    if (result.exitCode !== 0) fail("compiled CLI inspect command failed", result)
     const invocation = JSON.parse(await Bun.file(output).text())
-    const motelScript = Array.isArray(invocation.argv) ? invocation.argv[0] : undefined
-    const motelWebIndex =
-      typeof motelScript === "string" ? join(dirname(dirname(motelScript)), "web", "dist", "index.html") : ""
+    const inspectScript = Array.isArray(invocation.argv) ? invocation.argv[0] : undefined
+    const inspectWebIndex =
+      typeof inspectScript === "string" ? join(dirname(dirname(inspectScript)), "web", "dist", "index.html") : ""
     if (
       invocation.service !== "rika" ||
       invocation.theme !== "rika" ||
       !Array.isArray(invocation.argv) ||
       invocation.argv.length !== 2 ||
       invocation.argv[1] !== "tui" ||
-      typeof motelScript !== "string" ||
-      invocation.cwd !== dirname(motelScript) ||
-      !motelScript.endsWith(expectedMotelSuffix) ||
-      !(await Bun.file(motelScript).exists()) ||
-      !(await Bun.file(motelWebIndex).exists())
+      typeof inspectScript !== "string" ||
+      invocation.cwd !== dirname(inspectScript) ||
+      !inspectScript.endsWith(expectedInspectSuffix) ||
+      !(await Bun.file(inspectScript).exists()) ||
+      !(await Bun.file(inspectWebIndex).exists())
     ) {
-      fail("compiled CLI debug command did not launch motel with Rika filters", {
+      fail("compiled CLI inspect command did not launch bundled inspector with Rika filters", {
         exitCode: 1,
         stdout: JSON.stringify(invocation),
         stderr: "",

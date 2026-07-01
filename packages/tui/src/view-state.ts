@@ -115,6 +115,56 @@ export interface ThreadSwitcherState {
   readonly items: ReadonlyArray<ThreadSwitcherItem>
 }
 
+export type InspectTarget = { readonly scope: "all" } | { readonly scope: "thread"; readonly thread_id: Ids.ThreadId }
+
+export interface InspectTraceSummary {
+  readonly trace_id: string
+  readonly service_name: string
+  readonly operation_name: string
+  readonly started_at: number
+  readonly duration_ms: number
+  readonly span_count: number
+  readonly error_count: number
+  readonly running: boolean
+}
+
+export interface InspectSpan {
+  readonly trace_id: string
+  readonly span_id: string
+  readonly parent_span_id?: string
+  readonly service_name: string
+  readonly operation_name: string
+  readonly duration_ms: number
+  readonly status: "ok" | "error"
+  readonly depth: number
+}
+
+export interface InspectLog {
+  readonly id: string
+  readonly timestamp: number
+  readonly severity: string
+  readonly body: string
+  readonly trace_id?: string
+  readonly span_id?: string
+}
+
+export interface InspectData {
+  readonly traces: ReadonlyArray<InspectTraceSummary>
+  readonly selected_trace_id?: string
+  readonly spans: ReadonlyArray<InspectSpan>
+  readonly logs: ReadonlyArray<InspectLog>
+  readonly fetched_at: number
+}
+
+export interface InspectState extends InspectData {
+  readonly open: boolean
+  readonly target: InspectTarget
+  readonly status: "loading" | "ready" | "failed"
+  readonly view: "traces" | "logs"
+  readonly selected: number
+  readonly message?: string
+}
+
 export interface ViewState {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
@@ -152,6 +202,7 @@ export interface ViewState {
   readonly modepicker: ModePickerState
   readonly filepicker: FilePickerState
   readonly threadswitcher: ThreadSwitcherState
+  readonly inspect?: InspectState
   readonly shortcuts_open: boolean
 }
 
@@ -170,6 +221,7 @@ const closedModePicker: ModePickerState = { open: false, selected: 0 }
 const closedFilePicker: FilePickerState = { open: false, query: "", selected: 0, kind: "file", items: [] }
 const closedThreadSwitcher: ThreadSwitcherState = { open: false, query: "", selected: 0, items: [] }
 const hiddenThinking: ThinkingState = { text: "", visible: false }
+const emptyInspectData: InspectData = { traces: [], spans: [], logs: [], fetched_at: 0 }
 
 const interactionDefaults = {
   input: emptyInput,
@@ -319,6 +371,71 @@ export const withGitBranch = (state: ViewState, branch: string | undefined): Vie
 
 export const hasActivity = (state: ViewState): boolean => state.entries.length > 0
 
+export const inspectOpen = (state: ViewState): boolean => state.inspect?.open === true
+
+export const openInspect = (state: ViewState, target: InspectTarget): ViewState => ({
+  ...withoutNotice(state),
+  palette_open: false,
+  palette: closedPalette,
+  modepicker: closedModePicker,
+  filepicker: closedFilePicker,
+  threadswitcher: closedThreadSwitcher,
+  shortcuts_open: false,
+  inspect: {
+    ...emptyInspectData,
+    open: true,
+    target,
+    status: "loading",
+    view: "traces",
+    selected: 0,
+  },
+})
+
+export const closeInspect = (state: ViewState): ViewState => {
+  if (state.inspect === undefined) return state
+  return { ...state, inspect: { ...state.inspect, open: false } }
+}
+
+export const inspectLoaded = (state: ViewState, data: InspectData): ViewState => {
+  if (state.inspect === undefined) return state
+  const count = inspectSelectableCount({ ...state.inspect, ...data })
+  return {
+    ...state,
+    inspect: {
+      ...state.inspect,
+      ...data,
+      status: "ready",
+      selected: count === 0 ? 0 : Math.min(state.inspect.selected, count - 1),
+    },
+  }
+}
+
+export const inspectFailed = (state: ViewState, message: string): ViewState => {
+  if (state.inspect === undefined) return state
+  return { ...state, inspect: { ...state.inspect, status: "failed", message } }
+}
+
+export const inspectReloading = (state: ViewState): ViewState =>
+  state.inspect === undefined ? state : { ...state, inspect: { ...state.inspect, status: "loading" } }
+
+export const inspectMove = (state: ViewState, delta: number): ViewState => {
+  if (state.inspect === undefined) return state
+  const count = inspectSelectableCount(state.inspect)
+  if (count <= 0) return { ...state, inspect: { ...state.inspect, selected: 0 } }
+  const selected = (((state.inspect.selected + delta) % count) + count) % count
+  return { ...state, inspect: { ...state.inspect, selected } }
+}
+
+export const inspectToggleView = (state: ViewState): ViewState => {
+  if (state.inspect === undefined) return state
+  const view: InspectState["view"] = state.inspect.view === "traces" ? "logs" : "traces"
+  const next = { ...state.inspect, view, selected: 0 }
+  return { ...state, inspect: next }
+}
+
+const inspectSelectableCount = (inspect: InspectState): number =>
+  inspect.view === "traces" ? inspect.traces.length : inspect.logs.length
+
 export const withThread = (
   state: ViewState,
   input: { readonly thread_id: Ids.ThreadId; readonly events: ReadonlyArray<Event.Event>; readonly notice?: string },
@@ -349,8 +466,7 @@ export const withPalette = (state: ViewState): ViewState => ({
   palette_open: true,
   palette: { open: true, query: "", selected: 0 },
   shortcuts_open: false,
-  notice:
-    "Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, /debug all, /debug thread, /mcp, /mode rush, /mode smart, /mode deep1, /mode deep2, /mode deep3",
+  notice: `Command palette: /threads, /relaunch, /help, /welcome, /credits, /version, /exit, /ast-grep, ${hasActivity(state) ? "/inspect thread, /inspect all" : "/inspect all"}, /mcp, /mode rush, /mode smart, /mode deep1, /mode deep2, /mode deep3`,
 })
 
 const nextReasoningMode = (mode: Config.Mode): Config.Mode =>

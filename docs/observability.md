@@ -1,19 +1,19 @@
 # Observability (Telemetry + Logging)
 
-Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. The bundled debug surface is `@rika/motel`, Rika's vendored fork of [motel](https://github.com/kitlangton/motel): a local ingest daemon, SQLite store, and TUI viewer.
+Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. Rika Inspect ships with the CLI and provides a local ingest daemon, SQLite store, and terminal telemetry viewer without requiring a separate install.
 
-## Debugging with bundled motel
+## Inspecting telemetry
 
-Use the debug command to open motel without installing anything else:
+Use the inspect command to open telemetry without installing anything else:
 
 ```
-rika debug --all                 # all Rika traces and logs
-rika debug --thread <thread-id>  # only one thread
+rika inspect --all                 # all Rika traces and logs
+rika inspect --thread <thread-id>  # only one thread
 ```
 
-The TUI command palette exposes the same viewer. On an empty landing screen it offers `/debug all`; once a thread has activity it offers `/debug thread` plus `/debug all`. Thread debug opens motel with `service.name=rika`, the `rika.thread_id=<thread-id>` filter, and Rika's bundled theme applied.
+The TUI command palette exposes the same telemetry surface in-process. On an empty landing screen it offers `/inspect all`; once a thread has activity it offers `/inspect thread` plus `/inspect all`. Thread inspect opens a full-screen Rika pane with `service.name=rika` and the `rika.thread_id=<thread-id>` filter applied.
 
-Motel listens on `http://127.0.0.1:27686` (`/v1/traces`, `/v1/logs`) and exposes a read API (`/api/services`, `/api/traces?service=rika`, `/api/logs?service=rika`, `/api/ai/calls`). Agents working in this repo can use the `motel-debug` skill under `.agents/skills/motel-debug/`.
+The local telemetry daemon listens on `http://127.0.0.1:27686` (`/v1/traces`, `/v1/logs`) and exposes a read API (`/api/services`, `/api/traces?service=rika`, `/api/logs?service=rika`, `/api/ai/calls`).
 
 ## How export is wired
 
@@ -33,8 +33,8 @@ Telemetry is **on by default in every mode, including the compiled binary**. The
 ## Hard constraints
 
 - **Never write telemetry output to stdout/stderr.** Rika is a TUI; console output corrupts it. `Telemetry.suppressDiagnostics()` disables OpenTelemetry's internal `diag` logger, only OTLP/HTTP exporters + `Batch*Processor` are used, and the `Diagnostics` OTLP emit is wrapped in a swallowing `try/catch`.
-- **Never crash when motel is unreachable.** Batch processors drop failed exports silently; `ECONNREFUSED` (no motel running — the common end-user case) is a no-op. The local NDJSON file sink always still works.
-- **Redact secrets.** Correlated logs and AI-call spans can contain sensitive data. Do not log API keys/tokens or full prompt/response text by default; log counts, sizes, ids. Treat the motel store as sensitive dev data.
+- **Never crash when the local telemetry daemon is unreachable.** Batch processors drop failed exports silently; `ECONNREFUSED` (no daemon running — the common end-user case) is a no-op. The local NDJSON file sink always still works.
+- **Redact secrets.** Correlated logs and AI-call spans can contain sensitive data. Do not log API keys/tokens or full prompt/response text by default; log counts, sizes, ids. Treat the local telemetry store as sensitive dev data.
 
 ## Logging convention: wide events
 

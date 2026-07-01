@@ -186,7 +186,7 @@ const TelemetryGroupLive = HttpApiBuilder.group(
 	(handlers) =>
 		handlers
 			.handleRaw("root", () =>
-				Effect.succeed(textResponse("motel local telemetry server\n\nPOST /v1/traces\nPOST /v1/logs\nGET /api/services\nGET /api/traces\nGET /api/traces/search\nGET /api/traces/stats\nGET /api/traces/<trace-id>\nGET /api/traces/<trace-id>/spans\nGET /api/traces/<trace-id>/logs\nGET /api/spans/search\nGET /api/spans/<span-id>\nGET /api/spans/<span-id>/logs\nGET /api/logs\nGET /api/logs/search\nGET /api/logs/stats\nGET /api/ai/calls\nGET /api/ai/calls/<span-id>\nGET /api/ai/stats\nGET /api/facets?type=logs&field=severity\nGET /api/docs\nGET /api/docs/<name>\nGET /openapi.json\nGET /docs\nGET /trace/<trace-id>\n")),
+				Effect.succeed(textResponse("Rika Inspect local telemetry server\n\nPOST /v1/traces\nPOST /v1/logs\nGET /api/services\nGET /api/traces\nGET /api/traces/search\nGET /api/traces/stats\nGET /api/traces/<trace-id>\nGET /api/traces/<trace-id>/spans\nGET /api/traces/<trace-id>/logs\nGET /api/spans/search\nGET /api/spans/<span-id>\nGET /api/spans/<span-id>/logs\nGET /api/logs\nGET /api/logs/search\nGET /api/logs/stats\nGET /api/ai/calls\nGET /api/ai/calls/<span-id>\nGET /api/ai/stats\nGET /api/facets?type=logs&field=severity\nGET /api/docs\nGET /api/docs/<name>\nGET /openapi.json\nGET /docs\nGET /trace/<trace-id>\n")),
 			)
 			.handle("health", () =>
 				HttpMiddleware.withLoggerDisabled(Effect.succeed(healthPayload())),
@@ -360,7 +360,7 @@ const TelemetryGroupLive = HttpApiBuilder.group(
 			.handle("docs", () =>
 				Effect.succeed({
 					docs: [
-						{ name: "debug", title: "Motel Debug Workflow", path: "/api/docs/debug" },
+						{ name: "inspect", title: "Rika Inspect Workflow", path: "/api/docs/inspect" },
 						{ name: "effect", title: "Effect Instrumentation Guide", path: "/api/docs/effect" },
 					],
 				}),
@@ -369,7 +369,7 @@ const TelemetryGroupLive = HttpApiBuilder.group(
 				respondRaw(Effect.gen(function*() {
 					const fileSystem = yield* FileSystem.FileSystem
 					const docFiles: Record<string, string> = {
-						debug: path.resolve(import.meta.dir, "../skills/motel-debug/SKILL.md"),
+						inspect: path.resolve(import.meta.dir, "../skills/motel-debug/SKILL.md"),
 						effect: path.resolve(import.meta.dir, "../skills/motel-debug/references/effect.md"),
 					}
 					const filePath = docFiles[params.name]

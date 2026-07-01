@@ -58,7 +58,7 @@ const Severity = Schema.optional(
 
 const StatusTool = Tool.make("motel_status", {
 	description:
-		"Check which motel instance this shim is connected to. Call this FIRST if any other tool errors, to confirm the connection. Returns url, version, workdir, whether the cwd matches, and how many motel instances are running on this machine.",
+		"Check which Rika Inspect instance this shim is connected to. Call this FIRST if any other tool errors, to confirm the connection. Returns url, version, workdir, whether the cwd matches, and how many Rika Inspect instances are running on this machine.",
 	parameters: Tool.EmptyParams,
 	success: Schema.Struct({
 		connected: Schema.Boolean,
@@ -266,16 +266,16 @@ const AiStatsTool = Tool.make("motel_ai_stats", {
 
 const DocsIndexTool = Tool.make("motel_docs_index", {
 	description:
-		"List the documentation pages bundled with motel, such as the debug workflow and Effect guide. Use this before motel_get_doc if you are unsure which docs are available.",
+		"List the documentation pages bundled with Rika Inspect, such as the inspection workflow and Effect guide. Use this before motel_get_doc if you are unsure which docs are available.",
 	parameters: Tool.EmptyParams,
 	success: Schema.Unknown,
 }).annotate(Tool.Readonly, true)
 
 const GetDocTool = Tool.make("motel_get_doc", {
 	description:
-		"Fetch a bundled motel documentation page as markdown text. Useful for giving an agent the exact debug workflow or Effect instrumentation guidance without leaving MCP.",
+		"Fetch a bundled Rika Inspect documentation page as markdown text. Useful for giving an agent the exact inspection workflow or Effect instrumentation guidance without leaving MCP.",
 	parameters: Schema.Struct({
-		name: Schema.String.annotate({ description: "Document name, e.g. 'debug' or 'effect'." }),
+		name: Schema.String.annotate({ description: "Document name, e.g. 'inspect' or 'effect'." }),
 	}),
 	success: Schema.Unknown,
 }).annotate(Tool.Readonly, true)

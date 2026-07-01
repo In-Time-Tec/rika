@@ -81,7 +81,7 @@ const LoadingScreen = ({ width, height, message }: { width: number; height: numb
 		<box width={width} height={height} backgroundColor={RGBA.fromHex(colors.screenBg)}>
 			<box position="absolute" left={left} top={top} width={panelWidth} flexDirection="column">
 				<TextLine>
-					<span fg={colors.accent} attributes={TextAttributes.BOLD}>MOTEL</span>
+					<span fg={colors.accent} attributes={TextAttributes.BOLD}>RIKA INSPECT</span>
 					<span fg={colors.separator}>{" · "}</span>
 					<span fg={colors.muted}>starting up...</span>
 				</TextLine>
@@ -124,7 +124,7 @@ const RecoveryScreen = ({
 		<box width={width} height={height} backgroundColor={RGBA.fromHex(colors.screenBg)}>
 			<box position="absolute" left={left} top={top} width={panelWidth} flexDirection="column">
 				<TextLine>
-					<span fg={colors.accent} attributes={TextAttributes.BOLD}>MOTEL</span>
+					<span fg={colors.accent} attributes={TextAttributes.BOLD}>RIKA INSPECT</span>
 					<span fg={colors.separator}>{" · "}</span>
 					<span fg={colors.error} attributes={TextAttributes.BOLD}>{title}</span>
 				</TextLine>

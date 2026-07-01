@@ -15,7 +15,7 @@
 | `core/`        | Core Effect service examples and future runtime/domain services. See `core/AGENTS.md`.    |
 | `ide/`         | Editor integration seam and mock/reference IDE bridge. See `ide/AGENTS.md`.               |
 | `llm/`         | Provider-neutral LLM contracts and mode routing. See `llm/AGENTS.md`.                     |
-| `motel/`       | Rika-owned fork of motel for the bundled debug telemetry TUI. See `motel/AGENTS.md`.      |
+| `motel/`       | Rika-owned fork of the bundled telemetry inspector. See `motel/AGENTS.md`.                |
 | `persistence/` | Drizzle-backed local SQLite adapter services and migrations. See `persistence/AGENTS.md`. |
 | `plugin/`      | Trusted local TypeScript plugin API and host services. See `plugin/AGENTS.md`.            |
 | `rivet-host/`  | RivetKit actor definitions and local host assembly. See `rivet-host/AGENTS.md`.           |

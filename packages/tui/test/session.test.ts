@@ -138,8 +138,6 @@ describe("TUI session", () => {
       "/credits",
       "/welcome",
       "/ast-grep outline status",
-      "/debug all",
-      "/debug thread",
       "/mcp authenticate",
       "/mcp info",
       "/exit",
@@ -150,8 +148,6 @@ describe("TUI session", () => {
     expect(frames).toContain("Rika 0.0.0")
     expect(frames).toContain("Rika is Amp-compatible software.")
     expect(frames).toContain("ast-grep outline status: ready")
-    expect(frames).toContain("Opening motel for all Rika telemetry.")
-    expect(frames).toContain("Opening motel for thread")
     expect(frames).toContain("MCP authentication requested.")
     expect(frames).toContain("No MCP servers connected.")
     expect(frames).not.toContain("Unknown command /welcome")

@@ -4,18 +4,18 @@ import { Effect } from "effect"
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Debug } from "../src/index"
+import { Inspect } from "../src/index"
 
-describe("CLI debug command", () => {
-  test("launches bundled motel as a child process with Rika filters", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "rika-debug-test-"))
-    const script = join(dir, "fake-motel.js")
+describe("CLI inspect command", () => {
+  test("launches bundled inspector as a child process with Rika filters", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "rika-inspect-test-"))
+    const script = join(dir, "fake-inspect.js")
     const output = join(dir, "output.json")
     const expectedCwd = await realpath(dir)
-    const threadId = Ids.ThreadId.make("thread_debug_test")
+    const threadId = Ids.ThreadId.make("thread_inspect_test")
     await writeFile(
       script,
-      `const output = process.env.RIKA_FAKE_MOTEL_OUTPUT
+      `const output = process.env.RIKA_FAKE_INSPECT_OUTPUT
 if (output === undefined) process.exit(2)
 await Bun.write(output, JSON.stringify({
   argv: process.argv.slice(2),
@@ -32,12 +32,12 @@ await Bun.write(output, JSON.stringify({
 
     try {
       const exitCode = await Effect.runPromise(
-        Debug.executeCommand(
-          { type: "debug", all: false, thread_id: threadId },
+        Inspect.executeCommand(
+          { type: "inspect", all: false, thread_id: threadId },
           {
             RIKA_BUN_EXECUTABLE: process.execPath,
-            RIKA_FAKE_MOTEL_OUTPUT: output,
-            RIKA_MOTEL_SCRIPT: script,
+            RIKA_FAKE_INSPECT_OUTPUT: output,
+            RIKA_INSPECT_SCRIPT: script,
             RIKA_TELEMETRY_ENDPOINT: "http://127.0.0.1:4999/",
           },
         ),

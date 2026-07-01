@@ -186,12 +186,12 @@ export const IdeCommand = Schema.Struct({
   open_file: Schema.optional(Ide.OpenFileRequest),
 }).annotate({ identifier: "Rika.Cli.Args.IdeCommand" })
 
-export interface DebugCommand extends Schema.Schema.Type<typeof DebugCommand> {}
-export const DebugCommand = Schema.Struct({
-  type: Schema.Literal("debug"),
+export interface InspectCommand extends Schema.Schema.Type<typeof InspectCommand> {}
+export const InspectCommand = Schema.Struct({
+  type: Schema.Literal("inspect"),
   all: Schema.Boolean,
   thread_id: Schema.optional(Ids.ThreadId),
-}).annotate({ identifier: "Rika.Cli.Args.DebugCommand" })
+}).annotate({ identifier: "Rika.Cli.Args.InspectCommand" })
 
 export interface DoctorCommand extends Schema.Schema.Type<typeof DoctorCommand> {}
 export const DoctorCommand = Schema.Struct({
@@ -213,7 +213,7 @@ export type Command =
   | ServerCommand
   | IdeCommand
   | DoctorCommand
-  | DebugCommand
+  | InspectCommand
 
 export class ArgsError extends Schema.TaggedErrorClass<ArgsError>()("ArgsError", {
   message: Schema.String,
@@ -247,8 +247,8 @@ export const usage = [
   "  rika extensions rollback-plugin <name> [--reason <text>] [--thread <id>]",
   "  rika server [--host <host>] [--port <n>] [--token <token>] [--workspace <path>] [--ephemeral]",
   "  rika doctor",
-  "  rika debug --all",
-  "  rika debug --thread <thread-id>",
+  "  rika inspect --all",
+  "  rika inspect --thread <thread-id>",
   "  rika ide status [--server <url>] [--token <token>]",
   "  rika ide connect --client <id> [--server <url>] [--token <token>] [--workspace <path>] [--capabilities <csv>]",
   "  rika ide disconnect --client <id> [--server <url>] [--token <token>]",
@@ -268,15 +268,13 @@ export const usage = [
 ].join("\n")
 
 export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<string>) {
-  const normalizedArgv = toDebugAliasArgv(argv) ?? argv
-
-  const helpCommand = toHelpCommand(normalizedArgv)
+  const helpCommand = toHelpCommand(argv)
   if (helpCommand !== undefined) return helpCommand
 
-  const invalidExecuteAliasCommand = toInvalidExecuteAliasCommand(normalizedArgv)
+  const invalidExecuteAliasCommand = toInvalidExecuteAliasCommand(argv)
   if (invalidExecuteAliasCommand !== undefined) return invalidExecuteAliasCommand
 
-  const versionCommand = toVersionCommand(normalizedArgv)
+  const versionCommand = toVersionCommand(argv)
   if (versionCommand !== undefined) return versionCommand
 
   const parsedRef = yield* Ref.make(Option.none<Command>())
@@ -284,7 +282,7 @@ export const parse = Effect.fn("Cli.Args.parse")(function* (argv: ReadonlyArray<
   const captured = makeCapturedConsole()
   const command = makeCommand(parsedRef, rejectedRef)
   const result = yield* Effect.result(
-    CliCommand.runWith(command, { version: "0.0.0" })(normalizedArgv).pipe(
+    CliCommand.runWith(command, { version: "0.0.0" })(argv).pipe(
       Effect.provideService(Console.Console, captured.console),
       Effect.provide(NodeServices.layer),
     ),
@@ -362,9 +360,9 @@ const mcpServerConfig = {
   serverName: Argument.string("server-name").pipe(Argument.withDescription("MCP server name")),
 }
 
-const debugConfig = {
-  all: Flag.boolean("all").pipe(Flag.withDescription("Open motel for all Rika telemetry")),
-  thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Open motel for one thread id")),
+const inspectConfig = {
+  all: Flag.boolean("all").pipe(Flag.withDescription("Open Rika Inspect for all telemetry")),
+  thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Open Rika Inspect for one thread id")),
 }
 
 const reviewConfig = {
@@ -574,7 +572,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
   const server = makeServerCommand(parsedRef)
   const ide = makeIdeCommand(parsedRef)
   const doctor = makeDoctorCommand(parsedRef)
-  const debug = makeDebugCommand(parsedRef, rejectedRef)
+  const inspect = makeInspectCommand(parsedRef, rejectedRef)
 
   return CliCommand.make("rika", rootConfig, (input: RootInput) =>
     input.execute
@@ -604,7 +602,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
       extensions,
       server,
       doctor,
-      debug,
+      inspect,
       ide,
     ]),
   )
@@ -795,9 +793,12 @@ const makeDoctorCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
     CliCommand.withShortDescription("Print diagnostics"),
   )
 
-const makeDebugCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) =>
-  CliCommand.make("debug", debugConfig, (input: DebugInput) => {
-    const command = toDebugCommand(input)
+const makeInspectCommand = (
+  parsedRef: Ref.Ref<Option.Option<Command>>,
+  rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
+) =>
+  CliCommand.make("inspect", inspectConfig, (input: InspectInput) => {
+    const command = toInspectCommand(input)
     return command === undefined
       ? Ref.set(
           rejectedRef,
@@ -807,8 +808,8 @@ const makeDebugCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRe
         )
       : Ref.set(parsedRef, Option.some(command))
   }).pipe(
-    CliCommand.withDescription("Open bundled motel for Rika telemetry"),
-    CliCommand.withShortDescription("Open debug telemetry"),
+    CliCommand.withDescription("Open Rika Inspect telemetry"),
+    CliCommand.withShortDescription("Open telemetry inspector"),
   )
 
 const makeIdeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) => {
@@ -1057,9 +1058,6 @@ const toHelpCommand = (argv: ReadonlyArray<string>): HelpCommand | undefined =>
 const toInvalidExecuteAliasCommand = (argv: ReadonlyArray<string>): InvalidExecuteAliasCommand | undefined =>
   argv.length === 1 && argv[0] === "-e" ? { type: "invalid_execute_alias" } : undefined
 
-const toDebugAliasArgv = (argv: ReadonlyArray<string>): ReadonlyArray<string> | undefined =>
-  argv[0] === "--debug" ? ["debug", ...argv.slice(1)] : undefined
-
 const toReviewCommand = (input: ReviewInput): ReviewCommand => {
   const workspaceRoot = Option.getOrUndefined(input.workspace)
   const baseRef = Option.getOrUndefined(input.base)
@@ -1137,16 +1135,16 @@ const toServerCommand = (input: ServerInput): ServerCommand => {
 
 const toDoctorCommand = (): DoctorCommand => ({ type: "doctor" })
 
-interface DebugInput {
+interface InspectInput {
   readonly all: boolean
   readonly thread: Option.Option<string>
 }
 
-const toDebugCommand = (input: DebugInput): DebugCommand | undefined => {
+const toInspectCommand = (input: InspectInput): InspectCommand | undefined => {
   const thread = Option.getOrUndefined(input.thread)
   if (input.all === (thread !== undefined)) return undefined
   return {
-    type: "debug",
+    type: "inspect",
     all: input.all,
     ...(thread === undefined ? {} : { thread_id: Ids.ThreadId.make(thread) }),
   }

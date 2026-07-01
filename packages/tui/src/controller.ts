@@ -5,8 +5,9 @@ import type { Dirent } from "node:fs"
 import { stat } from "node:fs/promises"
 import { readdir, readFile } from "node:fs/promises"
 import { extname, join, relative } from "node:path"
-import type { SessionBackend, ThreadOption, TurnRequest } from "./backend"
+import type { CommandResult, SessionBackend, ThreadOption, TurnRequest } from "./backend"
 import * as Adapter from "./adapter"
+import * as Inspect from "./inspect"
 import * as Keymap from "./keymap"
 import * as Keys from "./keys"
 import * as Palette from "./palette"
@@ -34,6 +35,8 @@ type AppEvent =
   | { readonly _tag: "ModelBatch"; readonly events: ReadonlyArray<Event.Event> }
   | { readonly _tag: "ThreadPreviewLoaded"; readonly thread_id: Ids.ThreadId; readonly preview: ViewState.ViewState }
   | { readonly _tag: "ThreadPreviewFailed"; readonly thread_id: Ids.ThreadId; readonly message: string }
+  | { readonly _tag: "InspectLoaded"; readonly target: ViewState.InspectTarget; readonly data: ViewState.InspectData }
+  | { readonly _tag: "InspectFailed"; readonly target: ViewState.InspectTarget; readonly message: string }
   | { readonly _tag: "ThreadEventsFailed"; readonly message: string }
   | { readonly _tag: "TurnEnded"; readonly token: number; readonly error?: unknown }
   | { readonly _tag: "Resize" }
@@ -78,6 +81,8 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       let currentTurnId: Ids.TurnId | undefined
       let activeThreadId: Ids.ThreadId | undefined
       let lastSequence = loaded.last_sequence ?? 0
+      let inspectRefreshTicks = 0
+      let inspectLoadTarget: ViewState.InspectTarget | undefined
 
       const queue = yield* Queue.unbounded<AppEvent, Cause.Done>()
       const render = () => deps.renderer.render(state)
@@ -170,7 +175,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             .runCommand({ state, thread_id: threadId, workspace_path: workspacePath, mode }, command)
             .pipe(
               Effect.catchCause((cause) =>
-                Effect.succeed({
+                Effect.succeed<CommandResult>({
                   state: ViewState.withNotice(state, `Command failed: ${errorMessage(Cause.squash(cause))}`),
                   thread_id: threadId,
                   last_sequence: lastSequence,
@@ -189,22 +194,46 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             quitRequested = true
             exitCode = 0
           }
-          if ("debug" in result && result.debug !== undefined) {
-            const debugThreadId = result.debug.scope === "thread" ? result.debug.thread_id : undefined
-            yield* deps.renderer
-              .openDebug({
-                workspace_path: workspacePath,
-                ...(debugThreadId === undefined ? {} : { thread_id: debugThreadId }),
-              })
-              .pipe(
-                Effect.catchCause((cause) =>
-                  Effect.sync(() => {
-                    state = ViewState.withNotice(state, `Debug failed: ${errorMessage(Cause.squash(cause))}`)
-                  }),
-                ),
-              )
+          if (result.inspect !== undefined) {
+            yield* openInspect(result.inspect)
+            return
           }
           yield* render()
+        })
+
+      const openInspect = (target: ViewState.InspectTarget) =>
+        Effect.gen(function* () {
+          state = ViewState.openInspect(state, target)
+          yield* render()
+          yield* loadInspect(target)
+        })
+
+      const loadInspect = (target: ViewState.InspectTarget) =>
+        Effect.gen(function* () {
+          if (inspectLoadTarget !== undefined && sameInspectTarget(inspectLoadTarget, target)) return
+          inspectLoadTarget = target
+          yield* Effect.forkScoped(
+            Inspect.load(target, workspacePath).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause) =>
+                  Queue.offer(queue, {
+                    _tag: "InspectFailed",
+                    target,
+                    message: errorMessage(Cause.squash(cause)),
+                  }).pipe(Effect.asVoid),
+                onSuccess: (data) => Queue.offer(queue, { _tag: "InspectLoaded", target, data }).pipe(Effect.asVoid),
+              }),
+            ),
+          )
+        })
+
+      const refreshInspect = () =>
+        Effect.gen(function* () {
+          const target = state.inspect?.target
+          if (target === undefined) return
+          state = ViewState.inspectReloading(state)
+          yield* render()
+          yield* loadInspect(target)
         })
 
       const openThreadSwitcher = () =>
@@ -484,6 +513,21 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             case "EditMessage":
               state = ViewState.editNavMessage(state)
               break
+            case "CloseInspect":
+              state = ViewState.closeInspect(state)
+              break
+            case "InspectUp":
+              state = ViewState.inspectMove(state, -1)
+              break
+            case "InspectDown":
+              state = ViewState.inspectMove(state, 1)
+              break
+            case "InspectRefresh":
+              yield* refreshInspect()
+              return
+            case "InspectToggleView":
+              state = ViewState.inspectToggleView(state)
+              break
             case "Submit":
               state = yield* convertTrailingImagePath(state, workspacePath)
               yield* submit()
@@ -585,13 +629,15 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             return
           }
           const context: Keymap.Context = {
-            surface: state.modepicker.open
-              ? "modepicker"
-              : state.palette.open
-                ? "palette"
-                : state.shortcuts_open
-                  ? "overlay"
-                  : "input",
+            surface: ViewState.inspectOpen(state)
+              ? "inspect"
+              : state.modepicker.open
+                ? "modepicker"
+                : state.palette.open
+                  ? "palette"
+                  : state.shortcuts_open
+                    ? "overlay"
+                    : "input",
             busy: active,
             inputEmpty: state.input.text.length === 0,
             trailingBackslash: state.input.text.endsWith("\\"),
@@ -659,6 +705,15 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           switch (appEvent._tag) {
             case "Tick":
               state = ViewState.tickSpinner(state)
+              if (state.inspect?.open === true) {
+                inspectRefreshTicks += 1
+                if (inspectRefreshTicks >= 20 && state.inspect.status !== "loading") {
+                  inspectRefreshTicks = 0
+                  yield* loadInspect(state.inspect.target)
+                }
+              } else {
+                inspectRefreshTicks = 0
+              }
               yield* render()
               return
             case "Resize":
@@ -705,6 +760,24 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               return
             case "ThreadPreviewFailed":
               state = ViewState.threadSwitcherPreviewFailed(state, appEvent.thread_id, appEvent.message)
+              yield* render()
+              return
+            case "InspectLoaded":
+              if (inspectLoadTarget !== undefined && sameInspectTarget(inspectLoadTarget, appEvent.target)) {
+                inspectLoadTarget = undefined
+              }
+              if (state.inspect?.open === true && sameInspectTarget(state.inspect.target, appEvent.target)) {
+                state = ViewState.inspectLoaded(state, appEvent.data)
+              }
+              yield* render()
+              return
+            case "InspectFailed":
+              if (inspectLoadTarget !== undefined && sameInspectTarget(inspectLoadTarget, appEvent.target)) {
+                inspectLoadTarget = undefined
+              }
+              if (state.inspect?.open === true && sameInspectTarget(state.inspect.target, appEvent.target)) {
+                state = ViewState.inspectFailed(state, appEvent.message)
+              }
               yield* render()
               return
             case "ThreadEventsFailed":
@@ -950,6 +1023,11 @@ const firstUserMessage = (state: ViewState.ViewState): string => {
   if (entry === undefined || entry.kind !== "message") return ""
   const text = entry.message.text.trim().replace(/\s+/g, " ")
   return text.length > 60 ? `${text.slice(0, 57)}...` : text
+}
+
+const sameInspectTarget = (left: ViewState.InspectTarget, right: ViewState.InspectTarget): boolean => {
+  if (left.scope !== right.scope) return false
+  return left.scope === "all" || (right.scope === "thread" && left.thread_id === right.thread_id)
 }
 
 const threadSwitcherItem = (option: ThreadOption): ViewState.ThreadSwitcherItem => ({

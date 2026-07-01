@@ -52,7 +52,7 @@ export interface CommandContext {
   readonly mode: Config.Mode
 }
 
-export type DebugTarget = { readonly scope: "all" } | { readonly scope: "thread"; readonly thread_id: Ids.ThreadId }
+export type InspectTarget = { readonly scope: "all" } | { readonly scope: "thread"; readonly thread_id: Ids.ThreadId }
 
 export interface CommandResult {
   readonly state: ViewState.ViewState
@@ -60,7 +60,7 @@ export interface CommandResult {
   readonly last_sequence?: number
   readonly mode: Config.Mode
   readonly exit: boolean
-  readonly debug?: DebugTarget
+  readonly inspect?: InspectTarget
 }
 
 export interface ThreadOption {
@@ -116,7 +116,7 @@ export const commandResult = (
     last_sequence?: number
     mode?: Config.Mode
     exit?: boolean
-    debug?: DebugTarget
+    inspect?: InspectTarget
   } = {},
 ): CommandResult => ({
   state: patch.state ?? context.state,
@@ -124,10 +124,10 @@ export const commandResult = (
   ...(patch.last_sequence === undefined ? {} : { last_sequence: patch.last_sequence }),
   mode: patch.mode ?? context.mode,
   exit: patch.exit ?? false,
-  ...(patch.debug === undefined ? {} : { debug: patch.debug }),
+  ...(patch.inspect === undefined ? {} : { inspect: patch.inspect }),
 })
 
-export const debugTargetFor = (context: CommandContext, argument: string | undefined): DebugTarget | undefined => {
+export const inspectTargetFor = (context: CommandContext, argument: string | undefined): InspectTarget | undefined => {
   const value = argument?.trim()
   if (value === undefined || value.length === 0) {
     return ViewState.hasActivity(context.state) ? { scope: "thread", thread_id: context.thread_id } : { scope: "all" }
@@ -141,8 +141,10 @@ export const debugTargetFor = (context: CommandContext, argument: string | undef
   return undefined
 }
 
-export const debugNotice = (target: DebugTarget): string =>
-  target.scope === "all" ? "Opening motel for all Rika telemetry." : `Opening motel for thread ${target.thread_id}.`
+export const inspectNotice = (target: InspectTarget): string =>
+  target.scope === "all"
+    ? "Opening Rika Inspect for all telemetry."
+    : `Opening Rika Inspect for thread ${target.thread_id}.`
 
 export const splitCommand = (command: string): readonly [string, string | undefined] => {
   const [name, ...rest] = command.trim().split(/\s+/)

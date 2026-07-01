@@ -23,9 +23,8 @@ import {
   TextRenderable,
   underline,
 } from "@opentui/core"
-import { Telemetry } from "@rika/core"
-import { existsSync, mkdirSync, unlinkSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { mkdirSync, unlinkSync } from "node:fs"
+import { resolve } from "node:path"
 import { stdin, stdout } from "node:process"
 import { pathToFileURL } from "node:url"
 import { Context, Effect, Layer, Queue, Stream } from "effect"
@@ -46,18 +45,12 @@ export interface OpenFileInput {
   readonly range?: ViewState.Card["range"]
 }
 
-export interface OpenDebugInput {
-  readonly workspace_path: string
-  readonly thread_id?: string
-}
-
 export interface Adapter {
   readonly render: (state: ViewState.ViewState) => Effect.Effect<void>
   readonly keys: Stream.Stream<Keys.Key>
   readonly actions: Stream.Stream<Action>
   readonly resizes: Stream.Stream<void>
   readonly setExit: (summary: ExitSummary) => Effect.Effect<void>
-  readonly openDebug: (input: OpenDebugInput) => Effect.Effect<void, Error>
   readonly openFile: (input: OpenFileInput) => Effect.Effect<void, Error>
   readonly editExternally: (text: string) => Effect.Effect<string>
   readonly pasteImage: (workspacePath: string) => Effect.Effect<string | undefined>
@@ -74,7 +67,6 @@ export interface MemoryRenderer {
   readonly rendered: Array<ViewState.ViewState>
   readonly keys?: ReadonlyArray<Keys.Key>
   readonly actions?: ReadonlyArray<Action>
-  readonly openedDebug?: Array<OpenDebugInput>
   readonly opened?: Array<OpenFileInput>
 }
 
@@ -87,7 +79,6 @@ export const memoryLayer = (memory: MemoryRenderer) =>
       actions: Stream.fromIterable(memory.actions ?? []),
       resizes: Stream.empty,
       setExit: () => Effect.void,
-      openDebug: (input) => Effect.sync(() => memory.openedDebug?.push(input)),
       openFile: (input) => Effect.sync(() => memory.opened?.push(input)),
       editExternally: (text: string) => Effect.succeed(text),
       pasteImage: () => Effect.succeed(undefined),
@@ -106,7 +97,7 @@ const color = {
   yellow: "#d29922",
   accent: "#58a6ff",
   panel: "#0a0a0a",
-  modalPanel: "#121212",
+  overlayPanel: "#121212",
 } as const
 
 const roundedTeeTop = {
@@ -182,28 +173,6 @@ export const layer = Layer.effect(
       setExit: (summary: ExitSummary) =>
         Effect.sync(() => {
           exitSummary = renderExitSummary(summary)
-        }),
-      openDebug: (input: OpenDebugInput) =>
-        Effect.tryPromise({
-          try: async () => {
-            renderer.suspend()
-            try {
-              const env = motelEnv(input)
-              const command = motelCommand(env)
-              const launched = Bun.spawn([...command, "tui"], {
-                stdin: "inherit",
-                stdout: "inherit",
-                stderr: "inherit",
-                env: childEnv(env),
-                cwd: dirname(command[1]),
-              })
-              const exitCode = await launched.exited
-              if (exitCode !== 0) throw new Error(`debug exited ${exitCode}`)
-            } finally {
-              renderer.resume()
-            }
-          },
-          catch: (error) => (error instanceof Error ? error : new Error(String(error))),
         }),
       openFile: (input: OpenFileInput) =>
         Effect.tryPromise({
@@ -359,6 +328,10 @@ export class Surface {
   private readonly threadSwitcherPreviewBox: BoxRenderable
   private readonly threadSwitcherPreviewContent: ScrollBoxRenderable
   private readonly threadSwitcherFooter: TextRenderable
+  private readonly inspectBox: BoxRenderable
+  private readonly inspectHeader: TextRenderable
+  private readonly inspectBody: ScrollBoxRenderable
+  private readonly inspectFooter: TextRenderable
   private transcriptSignature = ""
 
   constructor(
@@ -463,7 +436,7 @@ export class Surface {
       position: "absolute",
       zIndex: 20,
       visible: false,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
       flexDirection: "column",
       paddingLeft: 2,
       paddingRight: 2,
@@ -473,7 +446,7 @@ export class Surface {
     this.paletteList = new BoxRenderable(renderer, {
       flexDirection: "column",
       marginTop: 1,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
     })
     this.paletteBox.add(this.paletteQuery)
     this.paletteBox.add(this.paletteList)
@@ -486,14 +459,14 @@ export class Surface {
       position: "absolute",
       zIndex: 20,
       visible: false,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
       flexDirection: "column",
       paddingLeft: 1,
       paddingRight: 1,
     })
     this.modePickerList = new BoxRenderable(renderer, {
       flexDirection: "column",
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
     })
     this.modePickerBox.add(this.modePickerList)
     root.add(this.modePickerBox)
@@ -507,7 +480,7 @@ export class Surface {
       position: "absolute",
       zIndex: 20,
       visible: false,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
       flexDirection: "column",
       paddingLeft: 2,
       paddingRight: 2,
@@ -517,7 +490,7 @@ export class Surface {
     this.filePickerList = new BoxRenderable(renderer, {
       flexDirection: "column",
       marginTop: 1,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
     })
     this.filePickerBox.add(this.filePickerQuery)
     this.filePickerBox.add(this.filePickerList)
@@ -532,7 +505,7 @@ export class Surface {
       position: "absolute",
       zIndex: 30,
       visible: false,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
       flexDirection: "column",
       paddingLeft: 2,
       paddingRight: 2,
@@ -543,11 +516,11 @@ export class Surface {
     this.threadSwitcherBody = new BoxRenderable(renderer, {
       flexDirection: "row",
       marginTop: 1,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
     })
     this.threadSwitcherList = new BoxRenderable(renderer, {
       flexDirection: "column",
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
     })
     this.threadSwitcherPreviewBox = new BoxRenderable(renderer, {
       border: true,
@@ -555,7 +528,7 @@ export class Surface {
       borderColor: "#dedede",
       title: "Thread Preview",
       titleColor: color.text,
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
       overflow: "hidden",
       marginLeft: 2,
       paddingLeft: 2,
@@ -565,7 +538,7 @@ export class Surface {
     })
     this.threadSwitcherPreviewContent = new ScrollBoxRenderable(renderer, {
       flexDirection: "column",
-      backgroundColor: color.modalPanel,
+      backgroundColor: color.overlayPanel,
       flexGrow: 1,
       scrollX: false,
       scrollY: true,
@@ -585,9 +558,48 @@ export class Surface {
     this.threadSwitcherBox.add(this.threadSwitcherBody)
     this.threadSwitcherBox.add(this.threadSwitcherFooter)
     root.add(this.threadSwitcherBox)
+
+    this.inspectBox = new BoxRenderable(renderer, {
+      position: "absolute",
+      zIndex: 50,
+      visible: false,
+      flexDirection: "column",
+      backgroundColor: color.panel,
+      paddingLeft: 1,
+      paddingRight: 1,
+      paddingTop: 1,
+    })
+    this.inspectHeader = selectableText(renderer, { content: "", flexShrink: 0 })
+    this.inspectBody = new ScrollBoxRenderable(renderer, {
+      flexDirection: "column",
+      flexGrow: 1,
+      scrollX: false,
+      scrollY: true,
+      viewportCulling: true,
+      scrollbarOptions: { showArrows: false },
+    })
+    this.inspectFooter = new TextRenderable(renderer, { content: "", flexShrink: 0, selectable: false })
+    this.inspectBox.add(this.inspectHeader)
+    this.inspectBox.add(this.inspectBody)
+    this.inspectBox.add(this.inspectFooter)
+    root.add(this.inspectBox)
   }
 
   update(state: ViewState.ViewState): void {
+    const inspect = state.inspect?.open === true ? state.inspect : undefined
+    this.inspectBox.visible = inspect !== undefined
+    this.transcript.visible = inspect === undefined
+    this.queueBox.visible = inspect === undefined && state.queued.length > 0
+    this.inputBox.visible = inspect === undefined
+    this.paletteBox.visible = inspect === undefined && state.palette.open
+    this.modePickerBox.visible = inspect === undefined && state.modepicker.open
+    this.filePickerBox.visible = inspect === undefined && state.filepicker.open
+    this.threadSwitcherBox.visible = inspect === undefined && state.threadswitcher.open
+    if (inspect !== undefined) {
+      this.rebuildInspect(inspect)
+      return
+    }
+
     const cutoutBg = cutoutBackground(this.renderer)
     this.costText.bg = cutoutBg
     this.cwdText.bg = cutoutBg
@@ -688,6 +700,32 @@ export class Surface {
       this.rebuildThreadSwitcherPreview(threads[selected], previewWidth - 6)
       this.threadSwitcherFooter.content = t`${fg(color.accent)("Opt+W/Ctrl+T")} ${fg(color.dim)("all workspaces · Esc close")}`
     }
+  }
+
+  private rebuildInspect(inspect: ViewState.InspectState): void {
+    const width = Math.max(20, this.renderer.width)
+    const height = Math.max(8, this.renderer.height)
+    const contentWidth = Math.max(20, width - 2)
+    this.inspectBox.left = 0
+    this.inspectBox.top = 0
+    this.inspectBox.width = width
+    this.inspectBox.height = height
+    this.inspectHeader.content = inspectHeaderLine(inspect, contentWidth)
+    this.inspectBody.height = Math.max(1, height - 4)
+    this.inspectFooter.content = inspectFooterLine(inspect, contentWidth)
+    for (const child of Array.from(this.inspectBody.getChildren())) this.inspectBody.remove(child.id)
+    const rows = inspectRows(inspect, contentWidth)
+    rows.forEach((row) => {
+      this.inspectBody.add(
+        selectableText(this.renderer, {
+          content: row.content,
+          width: contentWidth,
+          flexShrink: 0,
+          ...(row.selected ? { bg: color.orange } : {}),
+        }),
+      )
+    })
+    this.inspectBody.scrollTo(Math.max(0, inspect.selected - 2))
   }
 
   private rebuildPaletteList(commands: ReadonlyArray<Palette.Command>, selected: number, width: number): void {
@@ -1326,68 +1364,6 @@ const defaultOpenCommand = (absolutePath: string): ReadonlyArray<string> => {
   return ["xdg-open", absolutePath]
 }
 
-const motelEnv = (input: OpenDebugInput): Record<string, string | undefined> => {
-  const endpoint = trimTrailingSlash(process.env.RIKA_TELEMETRY_ENDPOINT ?? Telemetry.defaultEndpoint)
-  return {
-    ...process.env,
-    RIKA_WORKSPACE_ROOT: input.workspace_path,
-    MOTEL_OTEL_BASE_URL: endpoint,
-    MOTEL_OTEL_QUERY_URL: endpoint,
-    MOTEL_TUI_SERVICE_NAME: Telemetry.serviceName,
-    MOTEL_TUI_ATTR_KEY: input.thread_id === undefined ? undefined : "rika.thread_id",
-    MOTEL_TUI_ATTR_VALUE: input.thread_id,
-    MOTEL_TUI_THEME: process.env.MOTEL_TUI_THEME ?? "rika",
-  }
-}
-
-const childEnv = (env: Record<string, string | undefined>) => {
-  const values = { ...process.env }
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) delete values[key]
-    else values[key] = value
-  }
-  return values
-}
-
-const motelCommand = (env: Record<string, string | undefined> = process.env): readonly [string, string] => {
-  const bun = env.RIKA_BUN_EXECUTABLE ?? "bun"
-  const script = env.RIKA_MOTEL_SCRIPT ?? resolveMotelScript()
-  return [bun, script]
-}
-
-const resolveMotelScript = (): string => {
-  const installed = join(dirname(process.execPath), "..", "share", "rika", "motel", "motel.js")
-  if (existsSync(installed)) return installed
-  const localScript = resolveLocalMotelScript()
-  if (localScript !== undefined) return localScript
-  try {
-    return Bun.resolveSync("@rika/motel/src/motel.ts", process.cwd())
-  } catch {}
-  throw new Error("Cannot find bundled motel. Run bun install or reinstall Rika.")
-}
-
-const resolveLocalMotelScript = (): string | undefined => {
-  for (const root of candidateRoots()) {
-    const script = join(root, "packages", "motel", "src", "motel.ts")
-    if (existsSync(script)) return script
-  }
-  return undefined
-}
-
-const candidateRoots = (): ReadonlyArray<string> => {
-  const roots = []
-  let current = process.cwd()
-  while (true) {
-    roots.push(current)
-    const parent = dirname(current)
-    if (parent === current) break
-    current = parent
-  }
-  return roots
-}
-
-const trimTrailingSlash = (value: string) => (value.endsWith("/") ? value.slice(0, -1) : value)
-
 const indentedText = (text: string, indent: number, textColor: string): StyledText => {
   const chunks: TextChunk[] = []
   text.split("\n").forEach((line, index) => {
@@ -1561,6 +1537,128 @@ const threadDiffChunks = (diff: ViewState.ThreadDiffStats): Array<TextChunk> => 
   }
   return chunks
 }
+
+interface InspectRow {
+  readonly content: StyledText
+  readonly selected?: boolean
+}
+
+const inspectHeaderLine = (inspect: ViewState.InspectState, width: number): StyledText => {
+  const target = inspect.target.scope === "all" ? "all threads" : `thread ${inspect.target.thread_id}`
+  const status =
+    inspect.status === "loading"
+      ? "loading"
+      : inspect.status === "failed"
+        ? "failed"
+        : `updated ${formatClock(inspect.fetched_at)}`
+  const left = `Rika Inspect · ${target}`
+  const gap = Math.max(1, width - left.length - status.length)
+  return t`${bold(fg(color.teal)(left))}${fg(color.dim)(" ".repeat(gap))}${fg(color.dim)(status)}`
+}
+
+const inspectFooterLine = (inspect: ViewState.InspectState, width: number): StyledText => {
+  const active = inspect.view === "traces" ? "traces" : "logs"
+  const text = `↑↓/j/k select · tab ${active === "traces" ? "logs" : "traces"} · r refresh · esc/q close`
+  return t`${fg(color.dim)(truncate(text, width))}`
+}
+
+const inspectRows = (inspect: ViewState.InspectState, width: number): ReadonlyArray<InspectRow> => {
+  if (inspect.status === "loading") return [inspectSection("Loading telemetry...", width)]
+  if (inspect.status === "failed")
+    return [inspectSection(`Could not load telemetry: ${inspect.message ?? "unknown error"}`, width)]
+  if (inspect.traces.length === 0 && inspect.logs.length === 0 && inspect.spans.length === 0) {
+    return [inspectSection("No Rika telemetry found yet. Run a turn, then press r to refresh.", width)]
+  }
+  return inspect.view === "traces" ? inspectTraceRows(inspect, width) : inspectLogRows(inspect, width)
+}
+
+const inspectTraceRows = (inspect: ViewState.InspectState, width: number): ReadonlyArray<InspectRow> => {
+  const rows: Array<InspectRow> = [
+    inspectSection(
+      `Traces ${inspect.traces.length} · spans ${inspect.spans.length} · logs ${inspect.logs.length}`,
+      width,
+    ),
+  ]
+  if (inspect.traces.length === 0) {
+    rows.push(inspectMuted("No traces match this scope.", width))
+  } else {
+    inspect.traces.forEach((trace, index) => rows.push(inspectTraceRow(trace, index === inspect.selected, width)))
+  }
+  const selectedTrace = inspect.traces[inspect.selected] ?? inspect.traces[0]
+  const visibleSpans =
+    selectedTrace === undefined
+      ? inspect.spans
+      : inspect.spans.filter((span) => span.trace_id === selectedTrace.trace_id)
+  rows.push(inspectBlank())
+  rows.push(
+    inspectSection(selectedTrace === undefined ? "Recent spans" : `Spans in ${shortId(selectedTrace.trace_id)}`, width),
+  )
+  if (visibleSpans.length === 0) rows.push(inspectMuted("No spans available for the selected trace.", width))
+  else visibleSpans.slice(0, 120).forEach((span) => rows.push(inspectSpanRow(span, width)))
+  return rows
+}
+
+const inspectLogRows = (inspect: ViewState.InspectState, width: number): ReadonlyArray<InspectRow> => {
+  const rows: Array<InspectRow> = [inspectSection(`Logs ${inspect.logs.length}`, width)]
+  if (inspect.logs.length === 0) return [...rows, inspectMuted("No logs match this scope.", width)]
+  inspect.logs.forEach((log, index) => rows.push(inspectLogRow(log, index === inspect.selected, width)))
+  return rows
+}
+
+const inspectTraceRow = (trace: ViewState.InspectTraceSummary, selected: boolean, width: number): InspectRow => {
+  const icon = trace.error_count > 0 ? "✕" : trace.running ? "…" : "✓"
+  const iconColor = trace.error_count > 0 ? color.red : trace.running ? color.yellow : color.green
+  const meta = `${formatDuration(trace.duration_ms)} · ${trace.span_count} spans · ${formatClock(trace.started_at)}`
+  const title = truncate(trace.operation_name, Math.max(12, width - meta.length - 8))
+  return {
+    selected,
+    content: t`${fg(iconColor)(icon)} ${selected ? bold(fg(color.panel)(title)) : fg(color.text)(title)} ${fg(selected ? color.panel : color.dim)(meta)}`,
+  }
+}
+
+const inspectSpanRow = (span: ViewState.InspectSpan, width: number): InspectRow => {
+  const indent = "  ".repeat(Math.min(span.depth, 8))
+  const icon = span.status === "error" ? "✕" : "✓"
+  const iconColor = span.status === "error" ? color.red : color.green
+  const meta = `${formatDuration(span.duration_ms)} · ${shortId(span.span_id)}`
+  const title = truncate(`${indent}${span.operation_name}`, Math.max(12, width - meta.length - 8))
+  return { content: t`${fg(iconColor)(icon)} ${fg(color.text)(title)} ${fg(color.dim)(meta)}` }
+}
+
+const inspectLogRow = (log: ViewState.InspectLog, selected: boolean, width: number): InspectRow => {
+  const severity = log.severity.padEnd(5).slice(0, 5)
+  const source = log.trace_id === undefined ? "" : ` · ${shortId(log.trace_id)}`
+  const prefix = `${formatClock(log.timestamp)} ${severity}${source}`
+  const body = truncate(log.body.replace(/\s+/g, " ").trim(), Math.max(12, width - prefix.length - 3))
+  const severityColor =
+    log.severity === "ERROR" || log.severity === "FATAL"
+      ? color.red
+      : log.severity === "WARN"
+        ? color.yellow
+        : color.teal
+  return {
+    selected,
+    content: t`${fg(selected ? color.panel : color.dim)(prefix)} ${fg(selected ? color.panel : severityColor)("│")} ${selected ? bold(fg(color.panel)(body)) : fg(color.text)(body)}`,
+  }
+}
+
+const inspectSection = (text: string, width: number): InspectRow => ({
+  content: t`${bold(fg(color.teal)(truncate(text, width)))}`,
+})
+
+const inspectMuted = (text: string, width: number): InspectRow => ({
+  content: t`${fg(color.dim)(truncate(text, width))}`,
+})
+
+const inspectBlank = (): InspectRow => ({ content: t`` })
+
+const formatDuration = (ms: number): string =>
+  ms >= 1000 ? `${(ms / 1000).toFixed(ms >= 10_000 ? 1 : 2)}s` : `${Math.max(0, ms).toFixed(ms < 10 ? 2 : 1)}ms`
+
+const formatClock = (value: number): string =>
+  new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+
+const shortId = (value: string): string => (value.length <= 8 ? value : value.slice(0, 8))
 
 const truncate = (value: string, width: number): string => {
   if (value.length <= width) return value

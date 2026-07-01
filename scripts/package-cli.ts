@@ -8,20 +8,13 @@ const artifactName = `rika-${process.platform}-${process.arch}${process.platform
 const outDir = new URL("dist/release/", root)
 const shareRoot = new URL("dist/share/rika/", root)
 const drizzleShareDir = new URL("drizzle/", shareRoot)
-const motelShareDir = new URL("motel/", shareRoot)
-const motelWebShareDir = new URL("web/dist/", shareRoot)
+const inspectShareDir = new URL("inspect/", shareRoot)
+const inspectWebShareDir = new URL("web/dist/", shareRoot)
 const migrationsDir = new URL("packages/persistence/drizzle/", root)
-const motelWebDistDir = new URL("packages/motel/web/dist/", root)
+const inspectWebDistDir = new URL("packages/motel/web/dist/", root)
 const artifact = new URL(artifactName, outDir)
-const motelEntry = new URL("packages/motel/src/motel.ts", root).pathname
+const inspectEntry = new URL("packages/motel/src/motel.ts", root).pathname
 
-// OpenTUI ships its native FFI library as a set of per-platform optional
-// packages (`@opentui/core-<platform>-<arch>`), each containing a prebuilt
-// `libopentui` dylib/so/dll. Only the package matching the build host is
-// installed; the rest must be marked external so the bundler does not try to
-// resolve the dynamic `import("@opentui/core-…")` branches for other platforms.
-// The matching package IS bundled so `bun build --compile` embeds its native
-// library into the standalone binary.
 const nativeTargets = [
   "@opentui/core-darwin-arm64",
   "@opentui/core-darwin-x64",
@@ -46,8 +39,8 @@ const manifest = {
   artifact: `dist/release/${artifactName}`,
   share: {
     drizzle: "dist/share/rika/drizzle",
-    motel: "dist/share/rika/motel/motel.js",
-    motel_web: "dist/share/rika/web/dist",
+    inspect: "dist/share/rika/inspect/inspect.js",
+    inspect_web: "dist/share/rika/web/dist",
   },
   native: {
     bundled: bundledNative,
@@ -64,11 +57,12 @@ if (bundledNative.length === 0) {
 
 await $`mkdir -p ${outDir.pathname}`
 await $`rm -rf ${shareRoot.pathname}`
-await $`mkdir -p ${drizzleShareDir.pathname} ${motelShareDir.pathname} ${motelWebShareDir.pathname}`
+await $`mkdir -p ${drizzleShareDir.pathname} ${inspectShareDir.pathname} ${inspectWebShareDir.pathname}`
 await $`cp -R ${migrationsDir.pathname}. ${drizzleShareDir.pathname}`
-await $`cp -R ${motelWebDistDir.pathname}. ${motelWebShareDir.pathname}`
-await $`bun build ${motelEntry} --target bun --format esm ${externalFlags} --outdir ${motelShareDir.pathname}`
-await sanitizeSourcemapDirectives(new URL("motel.js", motelShareDir))
+await $`cp -R ${inspectWebDistDir.pathname}. ${inspectWebShareDir.pathname}`
+await $`bun build ${inspectEntry} --target bun --format esm ${externalFlags} --outdir ${inspectShareDir.pathname}`
+await $`mv ${new URL("motel.js", inspectShareDir).pathname} ${new URL("inspect.js", inspectShareDir).pathname}`
+await sanitizeSourcemapDirectives(new URL("inspect.js", inspectShareDir))
 await $`bun build --compile packages/cli/src/main.ts ${externalFlags} --outfile ${artifact.pathname}`
 await Bun.write(new URL(`${artifactName}.json`, outDir), `${JSON.stringify(manifest, null, 2)}\n`)
 

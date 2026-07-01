@@ -1,6 +1,6 @@
 import { config } from "./config.js"
 
-export const otelServerInstructions = () => `Motel is a local OpenTelemetry server for traces and logs. Use it for OTLP/HTTP ingestion and as a runtime evidence loop for debugging.
+export const otelServerInstructions = () => `Rika Inspect is a local OpenTelemetry server for traces and logs. Use it for OTLP/HTTP ingestion and as a runtime evidence loop for inspection.
 
 Base URL: ${config.otel.queryUrl}
 
@@ -32,34 +32,34 @@ Query endpoints:
 - Docs: GET ${config.otel.queryUrl}/api/docs
 
 Documentation:
-- Debug workflow: GET ${config.otel.queryUrl}/api/docs/debug
+- Inspect workflow: GET ${config.otel.queryUrl}/api/docs/inspect
 - Effect guide: GET ${config.otel.queryUrl}/api/docs/effect
 
 For full API details, query the OpenAPI spec at ${config.otel.queryUrl}/openapi.json.
 For setup guidance with Effect or other frameworks, query ${config.otel.queryUrl}/api/docs/effect.
 
-Debug workflow (hypothesis-driven):
+Inspect workflow (hypothesis-driven):
 
-1. Verify motel is running: curl ${config.otel.queryUrl}/api/health
+1. Verify Rika Inspect is running: curl ${config.otel.queryUrl}/api/health
 2. Generate 3-5 hypotheses about why the bug occurs before touching code.
 3. Add temporary instrumentation to confirm or reject all hypotheses.
    - Use whatever tracing/logging the codebase already has (spans, structured logs, annotations).
-   - Tag every debug point with structured attributes: debug.session, debug.hypothesis, debug.step, debug.label.
+   - Tag every inspection point with structured attributes: inspect.session, inspect.hypothesis, inspect.step, inspect.label.
    - Wrap every temporary block in markers for cleanup:
-     // #region motel debug
+     // #region rika inspect
      // ... instrumentation ...
-     // #endregion motel debug
+     // #endregion rika inspect
 4. Reproduce the issue.
-5. Query motel for evidence:
-   - curl "${config.otel.queryUrl}/api/spans/search?service=<svc>&attr.debug.hypothesis=<id>"
+5. Query Rika Inspect for evidence:
+   - curl "${config.otel.queryUrl}/api/spans/search?service=<svc>&attr.inspect.hypothesis=<id>"
    - curl "${config.otel.queryUrl}/api/spans/search?service=<svc>&traceId=<trace-id>&attrContains.ai.prompt=<phrase>"
-   - curl "${config.otel.queryUrl}/api/logs/search?service=<svc>&severity=ERROR&attr.debug.session=<session>"
-   - curl "${config.otel.queryUrl}/api/logs/search?service=<svc>&attrContains.debug.label=<substring>"
+   - curl "${config.otel.queryUrl}/api/logs/search?service=<svc>&severity=ERROR&attr.inspect.session=<session>"
+   - curl "${config.otel.queryUrl}/api/logs/search?service=<svc>&attrContains.inspect.label=<substring>"
 6. Evaluate each hypothesis (CONFIRMED / REJECTED / INCONCLUSIVE) with cited evidence.
 7. Fix only with runtime evidence. Keep instrumentation during verification.
 8. Reproduce again to verify the fix with before/after evidence.
 9. If the fix failed, revert speculative changes, generate new hypotheses, and iterate.
-10. After verified success, remove all #region motel debug blocks and confirm with git diff.
+10. After verified success, remove all #region rika inspect blocks and confirm with git diff.
 
 Rules:
 - Never fix without runtime evidence.

@@ -26,13 +26,13 @@ describe("palette.filter", () => {
     expect(Palette.filter("connect IDE", "smart", false)).toEqual([])
   })
 
-  test("offers contextual debug commands", () => {
-    expect(Palette.filter("debug", "smart", false).map((command) => command.id)).toEqual(["debug-open-all"])
-    expect(Palette.filter("debug", "smart", false, true).map((command) => command.id)).toEqual([
-      "debug-open-thread",
-      "debug-open-all",
+  test("offers contextual inspect commands", () => {
+    expect(Palette.filter("inspect", "smart", false).map((command) => command.id)).toEqual(["inspect-open-all"])
+    expect(Palette.filter("inspect", "smart", false, true).map((command) => command.id)).toEqual([
+      "inspect-open-thread",
+      "inspect-open-all",
     ])
-    expect(Palette.commands.some((command) => command.id === "debug-open")).toBe(false)
+    expect(Palette.commands.some((command) => command.id === "inspect-open")).toBe(false)
   })
 
   test("at clamps the selected index into range", () => {

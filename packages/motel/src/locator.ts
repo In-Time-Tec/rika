@@ -9,7 +9,7 @@ export class LocatorError extends Error {
 }
 
 const ambiguousDetail = (candidates: readonly RegistryEntry[]) =>
-	`Multiple motel instances running and none match cwd. Set MOTEL_URL to choose one:\n` +
+	`Multiple Rika Inspect instances running and none match cwd. Set MOTEL_URL to choose one:\n` +
 	candidates.map((c) => `  - ${c.url}  (workdir=${c.workdir}, pid=${c.pid})`).join("\n")
 
 type Resolved = {
@@ -78,7 +78,7 @@ const discover = Effect.fn("Locator.discover")(function* () {
 	if (all.length === 0) {
 		return yield* Effect.fail(
 			new LocatorError(
-				"No motel instance found. Start one with `bun run server` from your project root, then retry.",
+				"No Rika Inspect instance found. Start one with `rika inspect --all` from your project root, then retry.",
 			),
 		)
 	}

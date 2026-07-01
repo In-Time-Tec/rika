@@ -18,13 +18,13 @@ const Meta = Schema.Struct({
 const ServiceList = Schema.Struct({ data: Schema.Array(Schema.String) })
 const Health = Schema.Struct({
 	ok: Schema.Boolean,
-	service: Schema.String.pipe(Schema.annotateKey({ description: "Stable identity string. Always 'motel-local-server' — used by the MCP shim to detect impostor processes on a stale port." })),
+	service: Schema.String.pipe(Schema.annotateKey({ description: "Stable local telemetry server identity string used to detect impostor processes on a stale port." })),
 	databasePath: Schema.String,
-	pid: Schema.Number.pipe(Schema.annotateKey({ description: "Process ID of this motel instance. Used by the MCP shim to verify a registry entry points at the expected process." })),
+	pid: Schema.Number.pipe(Schema.annotateKey({ description: "Process ID of this Rika Inspect instance. Used to verify a registry entry points at the expected process." })),
 	url: Schema.String.pipe(Schema.annotateKey({ description: "Base URL this instance is actually bound to, including the dynamically-chosen port." })),
 	workdir: Schema.String.pipe(Schema.annotateKey({ description: "Working directory at the time the server started. Used by MCP discovery to match the current project via longest-prefix." })),
 	startedAt: Schema.String.pipe(Schema.annotateKey({ description: "ISO 8601 timestamp of when the server bound its port." })),
-	version: Schema.String.pipe(Schema.annotateKey({ description: "Motel version string." })),
+	version: Schema.String.pipe(Schema.annotateKey({ description: "Rika Inspect version string." })),
 	instanceId: Schema.optionalKey(Schema.String).pipe(Schema.annotateKey({ description: "Managed-daemon instance nonce used for readiness and safe shutdown identity checks." })),
 })
 const IngestTraceResponse = Schema.Struct({ insertedSpans: Schema.Number })
@@ -64,10 +64,10 @@ const ServiceParam = Schema.optionalKey(Schema.String).pipe(
 	Schema.annotateKey({ description: "Filter by service name" }),
 )
 
-export const MotelHttpApi = HttpApi.make("MotelTelemetry")
-	.annotate(OpenApi.Title, "Motel Telemetry API")
+export const MotelHttpApi = HttpApi.make("RikaInspectTelemetry")
+	.annotate(OpenApi.Title, "Rika Inspect Telemetry API")
 	.annotate(OpenApi.Version, "1.0.0")
-	.annotate(OpenApi.Description, "Local OpenTelemetry ingest, query, and debugging API. Accepts OTLP HTTP traces and logs, stores them in SQLite, and exposes query endpoints for TUI, CLI, and agent consumption.")
+	.annotate(OpenApi.Description, "Local OpenTelemetry ingest, query, and inspection API. Accepts OTLP HTTP traces and logs, stores them in SQLite, and exposes query endpoints for TUI, CLI, and agent consumption.")
 	.add(
 		HttpApiGroup.make("telemetry")
 			.annotate(OpenApi.Description, "Query traces, spans, logs, and service metadata from the local telemetry store")
@@ -300,13 +300,13 @@ export const MotelHttpApi = HttpApi.make("MotelTelemetry")
 
 				HttpApiEndpoint.get("doc", "/api/docs/:name", {
 					params: {
-						name: Schema.String.pipe(Schema.annotateKey({ description: "Document name: 'debug' for the debug workflow skill, 'effect' for Effect-specific instrumentation guidance" })),
+						name: Schema.String.pipe(Schema.annotateKey({ description: "Document name: 'inspect' for the inspection workflow, 'effect' for Effect-specific instrumentation guidance" })),
 					},
 					success: PlainText,
 					error: ErrorResponse,
 				})
 					.annotate(OpenApi.Summary, "Get a documentation page")
-					.annotate(OpenApi.Description, "Returns the full markdown content of a documentation page. Available documents: 'debug' (hypothesis-driven debugging workflow using motel), 'effect' (Effect-specific instrumentation and runtime guidance)."),
+					.annotate(OpenApi.Description, "Returns the full markdown content of a documentation page. Available documents: 'inspect' (hypothesis-driven inspection workflow), 'effect' (Effect-specific instrumentation and runtime guidance)."),
 
 				HttpApiEndpoint.get("facets", "/api/facets", {
 					query: {

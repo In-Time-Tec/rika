@@ -190,7 +190,7 @@ export const createDaemonManager = (options: DaemonOptions = {}): DaemonManager 
 			return `Port ${config.port} is in use by ${health.service}, not ${MOTEL_SERVICE_ID}.`
 		}
 		if (health.databasePath !== config.databasePath) {
-			return `Port ${config.port} is serving motel with ${health.databasePath}, expected ${config.databasePath}.`
+			return `Port ${config.port} is serving Rika Inspect with ${health.databasePath}, expected ${config.databasePath}.`
 		}
 		return null
 	}
@@ -333,7 +333,7 @@ export const createDaemonManager = (options: DaemonOptions = {}): DaemonManager 
 			startedAt: health.startedAt,
 			version: health.version,
 			sameWorkdir: workdirMatches(config.workdir, health.workdir),
-			reason: mismatch ?? (managed ? null : "Responsive motel server is not an identity-verified managed daemon."),
+			reason: mismatch ?? (managed ? null : "Responsive Rika Inspect server is not an identity-verified managed daemon."),
 			logPath: config.logPath,
 			lockPath: config.lockPath,
 			registryPid: registry?.pid ?? null,
@@ -442,7 +442,7 @@ export const createDaemonManager = (options: DaemonOptions = {}): DaemonManager 
 		const status = await getStatus()
 		if (status.pid === null) return status
 		if (status.service !== null && status.service !== MOTEL_SERVICE_ID) {
-			throw new Error(`Refusing to stop non-motel service ${status.service} on ${status.url}.`)
+			throw new Error(`Refusing to stop non-Rika Inspect service ${status.service} on ${status.url}.`)
 		}
 		const entry = readRegistryEntry()
 		if (!entry || entry.pid !== status.pid) throw new Error(`Refusing to stop pid ${status.pid}: no matching managed registry entry.`)

@@ -39,7 +39,7 @@ export interface ThemeDefinition {
 // motel-sign neon maximum contrast without color clash.
 const motelDefaultTheme: ThemeDefinition = {
 	name: "motel-default",
-	label: "Motel Default",
+	label: "Classic",
 	colors: {
 		screenBg: "#111120",       // oklch(0.185 0.030 282)
 		text: "#eee5d6",           // oklch(0.925 0.022 82)  — warm cream
@@ -166,7 +166,7 @@ export const themes = {
 
 export type ThemeName = keyof typeof themes
 
-export const defaultThemeName: ThemeName = "tokyo-night"
+export const defaultThemeName: ThemeName = "rika"
 
 export const themeOrder: readonly ThemeName[] = ["rika", "tokyo-night", "catppuccin", "motel-default"]
 

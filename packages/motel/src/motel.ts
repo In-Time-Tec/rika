@@ -60,30 +60,8 @@ case "help":
 case "--help":
 case "-h": {
 	console.log(`Usage:
-	motel
-	motel tui
-	motel daemon
-	motel status
-	motel stop
-	motel restart
-	motel server
-	motel mcp
-	motel services
-	motel traces [service] [limit]
-	motel trace <trace-id>
-	motel span <span-id>
-	motel trace-spans <trace-id>
-	motel search-spans [service] [operation] [parent=<operation>] [attr.key=value ...]
-	motel search-traces [service] [operation] [attr.key=value ...]
-	motel trace-stats <groupBy> <agg> [service] [attr.key=value ...]
-	motel logs [service]
-	motel search-logs [service] [body] [attr.key=value ...]
-	motel log-stats <groupBy> [service] [attr.key=value ...]
-	motel trace-logs <trace-id>
-	motel span-logs <span-id>
-	motel facets <traces|logs> <field>
-	motel instructions
-	motel endpoints`)
+	rika inspect --all
+	rika inspect --thread <thread-id>`)
 	break
 }
 
