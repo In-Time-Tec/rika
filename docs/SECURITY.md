@@ -39,11 +39,14 @@ When working in untrusted repositories:
 Secrets should enter through environment/config boundaries:
 
 - `RIKA_API_KEY`
+- `RIKA_EMBEDDINGS_API_KEY`
 - `RIKA_RIVET_TOKEN` / `RIVET_TOKEN`
 - remote MCP headers/tokens when configured
 - remote-control bearer token
 
 Rika should not persist raw secret values into thread events, artifacts, plugin trust records, or doctor output. `rika doctor` reports only whether secrets are configured.
+
+Thread memory sends completed-turn digest text to the configured embedding provider and persists the digest text plus embedding bytes in the local SQLite database.
 
 ## Shared local backend
 

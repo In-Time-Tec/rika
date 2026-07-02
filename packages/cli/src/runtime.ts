@@ -8,6 +8,7 @@ import {
   ReviewService,
   SkillRegistry,
   SubagentRuntime,
+  ThreadMemoryIndexer,
   ThreadService,
   ToolExecutor,
   TournamentService,
@@ -16,7 +17,7 @@ import {
 } from "@rika/agent"
 import { Config, Diagnostics, IdGenerator, Telemetry, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
-import { Live, Router } from "@rika/llm"
+import { Embeddings, Live, Router } from "@rika/llm"
 import { OrbActivity, OrbManager, SandboxClient } from "@rika/orb"
 import {
   ArtifactStore,
@@ -26,6 +27,7 @@ import {
   OrbStore,
   ProjectStore,
   ThreadEventLog,
+  ThreadMemoryStore,
   ThreadProjection,
   WorkspaceStore,
 } from "@rika/persistence"
@@ -47,6 +49,7 @@ import * as Ide from "./ide"
 import * as Input from "./input"
 import * as LocalBackend from "./local-backend"
 import * as Mcp from "./mcp"
+import * as Memory from "./memory"
 import * as Orb from "./orb"
 import * as OrbExecute from "./orb-execute"
 import * as OrbShell from "./orb-shell"
@@ -138,9 +141,13 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                                               ? Sync.executeCommand(command).pipe(
                                                   Effect.provide(syncLiveLayer(command, env, input.cwd)),
                                                 )
-                                              : Server.executeCommand(command).pipe(
-                                                  Effect.provide(serverLiveLayer(command, env, input.cwd)),
-                                                )
+                                              : command.type === "memory"
+                                                ? Memory.executeCommand(command).pipe(
+                                                    Effect.provide(memoryLiveLayer(command, env, input.cwd)),
+                                                  )
+                                                : Server.executeCommand(command).pipe(
+                                                    Effect.provide(serverLiveLayer(command, env, input.cwd)),
+                                                  )
               ).pipe(
                 Effect.matchEffect({
                   onFailure: (error: RuntimeError) =>
@@ -184,6 +191,8 @@ type RuntimeError =
   | Database.DatabaseError
   | Doctor.DoctorError
   | Execute.ExecuteError
+  | Embeddings.EmbeddingsProviderError
+  | Embeddings.EmbeddingsValidationError
   | Extensions.ExtensionsError
   | FffSearch.FffSearchError
   | Client.SdkError
@@ -192,6 +201,7 @@ type RuntimeError =
   | Input.InputError
   | LocalBackend.BackendError
   | Mcp.McpError
+  | Memory.RunError
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.McpClientError
   | Migration.MigrationError
@@ -223,6 +233,8 @@ type RuntimeError =
   | ThreadService.ThreadForkError
   | ThreadService.ThreadServiceError
   | ThreadEventLog.ThreadEventLogError
+  | ThreadMemoryIndexer.ThreadMemoryIndexerError
+  | ThreadMemoryStore.ThreadMemoryStoreError
   | ThreadProjection.ThreadProjectionError
   | Threads.ThreadsError
   | WorkspaceAccess.RunError
@@ -239,6 +251,14 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Input.InputError) return `Rika failed: ${error.message}`
   if (error instanceof LocalBackend.BackendError) return `Rika failed: ${error.message}`
   if (error instanceof Mcp.McpError) return Mcp.formatError(error)
+  if (
+    error instanceof ThreadMemoryIndexer.ThreadMemoryIndexerError ||
+    error instanceof ThreadMemoryStore.ThreadMemoryStoreError ||
+    error instanceof Embeddings.EmbeddingsProviderError ||
+    error instanceof Embeddings.EmbeddingsValidationError
+  ) {
+    return Memory.formatError(error)
+  }
   if (error instanceof McpApprovalStore.McpApprovalStoreError) return `Rika failed: ${error.message}`
   if (error instanceof McpClient.McpClientError) return `Rika failed: ${error.message}`
   if (error instanceof OrbActivity.OrbActivityError) return `Rika failed: ${error.message}`
@@ -345,6 +365,7 @@ export const liveLayer = (
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const memoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -366,6 +387,7 @@ export const liveLayer = (
     artifactLayer,
     mcpApprovalLayer,
     workspaceStoreLayer,
+    memoryStoreLayer,
     projectStoreLayer,
     Migration.layer,
     ThreadEventLog.layer,
@@ -375,6 +397,14 @@ export const liveLayer = (
     orbStoreLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const embeddingsLayer = Embeddings.layer(
+    Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
+  )
+  const memoryIndexerLayer = ThreadMemoryIndexer.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(embeddingsLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
   )
@@ -405,6 +435,7 @@ export const liveLayer = (
     workspaceAccessLayer,
     contextResolverLayer,
     skillLayer,
+    memoryIndexerLayer,
     toolLayer,
     llmLayer,
     diagnosticsLayer,
@@ -521,6 +552,7 @@ const interactiveLiveLayerFromTui = (
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const memoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
@@ -530,6 +562,7 @@ const interactiveLiveLayerFromTui = (
     artifactLayer,
     mcpApprovalLayer,
     workspaceStoreLayer,
+    memoryStoreLayer,
     Migration.layer,
     ThreadEventLog.layer,
     ThreadProjection.layer,
@@ -537,6 +570,14 @@ const interactiveLiveLayerFromTui = (
     IdGenerator.layer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const embeddingsLayer = Embeddings.layer(
+    Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
+  )
+  const memoryIndexerLayer = ThreadMemoryIndexer.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(embeddingsLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
   )
@@ -572,6 +613,7 @@ const interactiveLiveLayerFromTui = (
     contextResolverLayer,
     reviewServiceLayer,
     skillLayer,
+    memoryIndexerLayer,
     toolLayer,
     llmLayer,
     diagnosticsLayer,
@@ -1049,6 +1091,50 @@ export const skillsLiveLayer = (
   )
 }
 
+export const memoryLiveLayer = (
+  command: Args.MemoryCommand,
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Layer.Layer<MemoryLayerOutput, LiveLayerError> => {
+  const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
+  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
+  const configLayer = Config.layerFromValues(
+    {
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      default_mode: defaultModeFromEnv(env),
+      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
+    },
+    env,
+  )
+  const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
+  const timeLayer = Time.layer
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
+  const memoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const storageLayer = Layer.mergeAll(
+    configLayer,
+    Output.layer,
+    databaseLayer,
+    Migration.layer,
+    ThreadEventLog.layer,
+    ThreadProjection.layer,
+    memoryStoreLayer,
+    timeLayer,
+    IdGenerator.layer,
+    diagnosticsLayer,
+  )
+  const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const embeddingsLayer = Embeddings.layer(
+    Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
+  )
+  const indexerLayer = ThreadMemoryIndexer.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(embeddingsLayer),
+  )
+
+  return Memory.layer.pipe(Layer.provideMerge(migratedStorageLayer), Layer.provideMerge(indexerLayer))
+}
+
 export const threadsLiveLayer = (
   command: Args.ThreadCommand,
   env: Record<string, string | undefined>,
@@ -1071,6 +1157,7 @@ export const threadsLiveLayer = (
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const memoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const baseStorageLayer = Layer.mergeAll(
     configLayer,
     Output.layer,
@@ -1079,6 +1166,7 @@ export const threadsLiveLayer = (
     artifactLayer,
     mcpApprovalLayer,
     workspaceStoreLayer,
+    memoryStoreLayer,
     Migration.layer,
     ThreadEventLog.layer,
     ThreadProjection.layer,
@@ -1096,6 +1184,14 @@ export const threadsLiveLayer = (
   const telemetryLayer = Layer.empty
   const permissionConfig = PermissionPolicy.configFromEnv(env)
   const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
+  const embeddingsLayer = Embeddings.layer(
+    Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
+  )
+  const memoryIndexerLayer = ThreadMemoryIndexer.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(embeddingsLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
@@ -1148,6 +1244,7 @@ export const threadsLiveLayer = (
     workspaceAccessLayer,
     contextResolverLayer,
     skillLayer,
+    memoryIndexerLayer,
     toolLayer,
     diagnosticsLayer,
     telemetryLayer,
@@ -1525,6 +1622,7 @@ export const serverLiveLayer = (
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const memoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -1546,6 +1644,7 @@ export const serverLiveLayer = (
     artifactLayer,
     mcpApprovalLayer,
     workspaceStoreLayer,
+    memoryStoreLayer,
     projectStoreLayer,
     orbStoreLayer,
     Migration.layer,
@@ -1555,6 +1654,14 @@ export const serverLiveLayer = (
     IdGenerator.layer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const embeddingsLayer = Embeddings.layer(
+    Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
+  )
+  const memoryIndexerLayer = ThreadMemoryIndexer.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(embeddingsLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
     Layer.provideMerge(configLayer),
   )
@@ -1584,6 +1691,7 @@ export const serverLiveLayer = (
     workspaceAccessLayer,
     contextResolverLayer,
     skillLayer,
+    memoryIndexerLayer,
     toolLayer,
     llmLayer,
     artifactLayer,
@@ -1694,6 +1802,7 @@ export const syncLiveLayer = (
 export type LiveLayerOutput =
   | AgentLoop.Service
   | ArtifactStore.Service
+  | Embeddings.Service
   | Config.Service
   | ContextResolver.Service
   | Database.Service
@@ -1716,6 +1825,8 @@ export type LiveLayerOutput =
   | SpecialtyTools.Service
   | SubagentRuntime.Service
   | ThreadEventLog.Service
+  | ThreadMemoryIndexer.Service
+  | ThreadMemoryStore.Service
   | ThreadProjection.Service
   | ThreadService.Service
   | Time.Service
@@ -1740,6 +1851,7 @@ export type InteractiveLayerOutput =
   | AgentLoop.Service
   | ArtifactStore.Service
   | CheckRegistry.Service
+  | Embeddings.Service
   | Config.Service
   | ContextResolver.Service
   | Database.Service
@@ -1755,6 +1867,8 @@ export type InteractiveLayerOutput =
   | SubagentRuntime.Service
   | Ticker.Service
   | ThreadEventLog.Service
+  | ThreadMemoryIndexer.Service
+  | ThreadMemoryStore.Service
   | ThreadProjection.Service
   | ThreadService.Service
   | Time.Service
@@ -1792,6 +1906,7 @@ export type ThreadsLayerOutput =
   | JudgeService.Service
   | Migration.Service
   | McpApprovalStore.Service
+  | Embeddings.Service
   | OrbManager.Service
   | OrbStore.Service
   | Output.Service
@@ -1799,6 +1914,8 @@ export type ThreadsLayerOutput =
   | PluginUi.Service
   | ThreadEventLog.Service
   | ThreadLive.Service
+  | ThreadMemoryIndexer.Service
+  | ThreadMemoryStore.Service
   | ThreadProjection.Service
   | ThreadService.Service
   | ToolExecutor.Service
@@ -1847,6 +1964,21 @@ export type ProjectLayerOutput =
   | Time.Service
 
 export type SkillsLayerOutput = Config.Service | Output.Service | SkillRegistry.Service | Skills.Service
+
+export type MemoryLayerOutput =
+  | Config.Service
+  | Database.Service
+  | Diagnostics.Service
+  | Embeddings.Service
+  | IdGenerator.Service
+  | Memory.Service
+  | Migration.Service
+  | Output.Service
+  | ThreadEventLog.Service
+  | ThreadMemoryIndexer.Service
+  | ThreadMemoryStore.Service
+  | ThreadProjection.Service
+  | Time.Service
 
 export type SyncLayerOutput =
   | BackendEndpoint.OrbResumer
@@ -1900,6 +2032,7 @@ export type DoctorLayerOutput = Doctor.Service | LocalBackend.Service | Output.S
 export type ServerLayerOutput =
   | AgentLoop.Service
   | ArtifactStore.Service
+  | Embeddings.Service
   | Config.Service
   | ContextResolver.Service
   | Database.Service
@@ -1924,6 +2057,8 @@ export type ServerLayerOutput =
   | SubagentRuntime.Service
   | ThreadEventLog.Service
   | ThreadLive.Service
+  | ThreadMemoryIndexer.Service
+  | ThreadMemoryStore.Service
   | ThreadProjection.Service
   | ThreadService.Service
   | Time.Service
@@ -1950,6 +2085,7 @@ export type LiveLayerError =
   | ReviewService.RunError
   | SandboxClient.OrbConfigError
   | ThreadEventLog.ThreadEventLogError
+  | ThreadMemoryStore.ThreadMemoryStoreError
   | ThreadProjection.ThreadProjectionError
 
 const defaultModeFromEnv = (env: Record<string, string | undefined>): Config.Mode => {

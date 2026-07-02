@@ -219,6 +219,18 @@ export const SyncCommand = Schema.Struct({
   thread_id: Ids.ThreadId,
 }).annotate({ identifier: "Rika.Cli.Args.SyncCommand" })
 
+export const MemoryAction = Schema.Literals(["index", "status"]).annotate({
+  identifier: "Rika.Cli.Args.MemoryAction",
+})
+export type MemoryAction = typeof MemoryAction.Type
+
+export interface MemoryCommand extends Schema.Schema.Type<typeof MemoryCommand> {}
+export const MemoryCommand = Schema.Struct({
+  type: Schema.Literal("memory"),
+  action: MemoryAction,
+  workspace_root: Schema.optional(Schema.String),
+}).annotate({ identifier: "Rika.Cli.Args.MemoryCommand" })
+
 export const IdeAction = Schema.Literals(["status", "connect", "disconnect", "open-file"]).annotate({
   identifier: "Rika.Cli.Args.IdeAction",
 })
@@ -259,6 +271,7 @@ export type Command =
   | ExtensionCommand
   | ServerCommand
   | SyncCommand
+  | MemoryCommand
   | IdeCommand
   | DoctorCommand
 
@@ -304,6 +317,8 @@ export const usage = [
   "  rika extensions rollback-plugin <name> [--reason <text>] [--thread <id>]",
   "  rika server [--host <host>] [--port <n>] [--token <token>] [--workspace <path>] [--orb --base-commit <sha>] [--ephemeral]",
   "  rika sync <thread-id>",
+  "  rika memory index [--workspace <path>]",
+  "  rika memory status",
   "  rika doctor",
   "  rika ide status [--server <url>] [--token <token>]",
   "  rika ide connect --client <id> [--server <url>] [--token <token>] [--workspace <path>] [--capabilities <csv>]",
@@ -514,6 +529,10 @@ const syncConfig = {
   threadId: Argument.string("thread-id").pipe(Argument.withDescription("Thread id to sync from its orb")),
 }
 
+const memoryIndexConfig = {
+  workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root to backfill")),
+}
+
 const orbKillConfig = {
   threadId: Argument.string("thread-id").pipe(Argument.withDescription("Thread id")),
   force: Flag.boolean("force").pipe(Flag.withDescription("Skip confirmation")),
@@ -678,6 +697,10 @@ interface SyncInput {
   readonly threadId: string
 }
 
+interface MemoryIndexInput {
+  readonly workspace: Option.Option<string>
+}
+
 interface OrbKillInput {
   readonly threadId: string
   readonly force: boolean
@@ -739,6 +762,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
   const extensions = makeExtensionsCommand(parsedRef, rejectedRef)
   const server = makeServerCommand(parsedRef)
   const sync = makeSyncCommand(parsedRef)
+  const memory = makeMemoryCommand(parsedRef, rejectedRef)
   const ide = makeIdeCommand(parsedRef)
   const doctor = makeDoctorCommand(parsedRef)
 
@@ -777,6 +801,7 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
       extensions,
       server,
       sync,
+      memory,
       doctor,
       ide,
     ]),
@@ -1070,6 +1095,28 @@ const makeSyncCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
     CliCommand.withDescription("Mirror orb changes into a local worktree"),
     CliCommand.withShortDescription("Sync orb"),
   )
+
+const makeMemoryCommand = (
+  parsedRef: Ref.Ref<Option.Option<Command>>,
+  rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
+) => {
+  const index = CliCommand.make("index", memoryIndexConfig, (input: MemoryIndexInput) =>
+    Ref.set(parsedRef, Option.some(toMemoryIndexCommand(input))),
+  ).pipe(CliCommand.withDescription("Backfill thread memory chunks"), CliCommand.withShortDescription("Index memory"))
+
+  const status = CliCommand.make("status", {}, () => Ref.set(parsedRef, Option.some(toMemoryStatusCommand()))).pipe(
+    CliCommand.withDescription("Print thread memory status"),
+    CliCommand.withShortDescription("Memory status"),
+  )
+
+  return CliCommand.make("memory", {}, () =>
+    Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a memory subcommand", exit_code: 2, usage }))),
+  ).pipe(
+    CliCommand.withDescription("Inspect and backfill thread memory"),
+    CliCommand.withShortDescription("Manage memory"),
+    CliCommand.withSubcommands([index, status]),
+  )
+}
 
 const makeDoctorCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
   CliCommand.make("doctor", {}, () => Ref.set(parsedRef, Option.some(toDoctorCommand()))).pipe(
@@ -1496,6 +1543,20 @@ const toServerCommand = (input: ServerInput): ServerCommand => {
 const toSyncCommand = (input: SyncInput): SyncCommand => ({
   type: "sync",
   thread_id: Ids.ThreadId.make(input.threadId),
+})
+
+const toMemoryIndexCommand = (input: MemoryIndexInput): MemoryCommand => {
+  const workspaceRoot = Option.getOrUndefined(input.workspace)
+  return {
+    type: "memory",
+    action: "index",
+    ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
+  }
+}
+
+const toMemoryStatusCommand = (): MemoryCommand => ({
+  type: "memory",
+  action: "status",
 })
 
 const toOrbListCommand = (): OrbCommand => ({

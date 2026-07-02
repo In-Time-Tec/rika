@@ -13,6 +13,7 @@ describe("CLI doctor command", () => {
         RIKA_WORKSPACE_ROOT: "/workspace/rika",
         RIKA_DATA_DIR: "/workspace/rika/.rika-test",
         RIKA_API_KEY: "model-secret",
+        RIKA_EMBEDDINGS_API_KEY: "embeddings-secret",
         RIKA_GUARDED_TOOLS: "shell_command",
         RIKA_RIVET_HOST: "remote",
         RIKA_RIVET_ENDPOINT: "https://rivet.example.com",
@@ -28,6 +29,7 @@ describe("CLI doctor command", () => {
     expect(exitCode).toBe(0)
     expect(output.stderr).toEqual([])
     expect(output.stdout.join("\n")).not.toContain("model-secret")
+    expect(output.stdout.join("\n")).not.toContain("embeddings-secret")
     expect(output.stdout.join("\n")).not.toContain("rivet-secret")
     const parsed = Schema.decodeUnknownSync(Doctor.Report)(JSON.parse(output.stdout[0] ?? "{}"))
     expect(parsed).toMatchObject({
@@ -37,6 +39,7 @@ describe("CLI doctor command", () => {
         workspace_root: "/workspace/rika",
         data_dir: "/workspace/rika/.rika-test",
         api_key_configured: true,
+        embeddings_api_key_configured: true,
         telemetry: "enabled",
         telemetry_endpoint: "http://127.0.0.1:27686",
       },
@@ -58,6 +61,7 @@ describe("CLI doctor command", () => {
     expect(parsed.checks.map((check) => check.name)).toEqual([
       "data-dir",
       "model-provider",
+      "embeddings-provider",
       "permissions",
       "rivet",
       "telemetry",
@@ -79,11 +83,17 @@ describe("CLI doctor command", () => {
     expect(exitCode).toBe(0)
     const parsed = Schema.decodeUnknownSync(Doctor.Report)(JSON.parse(output.stdout[0] ?? "{}"))
     const modelProvider = parsed.checks.find((check) => check.name === "model-provider")
+    const embeddingsProvider = parsed.checks.find((check) => check.name === "embeddings-provider")
 
     expect(parsed.config.api_key_configured).toBe(false)
+    expect(parsed.config.embeddings_api_key_configured).toBe(false)
     expect(modelProvider).toMatchObject({
       status: "warning",
       message: "RIKA_API_KEY is required for live model calls.",
+    })
+    expect(embeddingsProvider).toMatchObject({
+      status: "warning",
+      message: "RIKA_EMBEDDINGS_API_KEY is required for live thread memory indexing.",
     })
   })
 })

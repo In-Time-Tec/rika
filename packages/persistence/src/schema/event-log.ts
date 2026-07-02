@@ -1,4 +1,4 @@
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
+import { blob, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 export const thread_events = sqliteTable(
   "thread_events",
@@ -56,6 +56,27 @@ export const thread_projections = sqliteTable(
 
 export type ThreadProjectionRow = typeof thread_projections.$inferSelect
 export type NewThreadProjectionRow = typeof thread_projections.$inferInsert
+
+export const thread_memory_chunks = sqliteTable(
+  "thread_memory_chunks",
+  {
+    id: text().primaryKey(),
+    thread_id: text().notNull(),
+    turn_id: text().notNull(),
+    workspace_id: text().notNull(),
+    text: text().notNull(),
+    embedding: blob({ mode: "buffer" }).notNull(),
+    created_at: integer().notNull(),
+  },
+  (table) => [
+    uniqueIndex("thread_memory_chunks_thread_turn_idx").on(table.thread_id, table.turn_id),
+    index("thread_memory_chunks_workspace_created_idx").on(table.workspace_id, table.created_at),
+    index("thread_memory_chunks_thread_created_idx").on(table.thread_id, table.created_at),
+  ],
+)
+
+export type ThreadMemoryChunkRow = typeof thread_memory_chunks.$inferSelect
+export type NewThreadMemoryChunkRow = typeof thread_memory_chunks.$inferInsert
 
 export const mcp_server_approvals = sqliteTable(
   "mcp_server_approvals",

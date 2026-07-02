@@ -4,6 +4,7 @@ import {
   orbs,
   projects,
   thread_events,
+  thread_memory_chunks,
   thread_projections,
   workspace_memberships,
 } from "./event-log"
@@ -14,6 +15,7 @@ export {
   orbs,
   projects,
   thread_events,
+  thread_memory_chunks,
   thread_projections,
   workspace_memberships,
 } from "./event-log"
@@ -24,6 +26,7 @@ export const schema = {
   orbs,
   projects,
   thread_events,
+  thread_memory_chunks,
   thread_projections,
   workspace_memberships,
 }

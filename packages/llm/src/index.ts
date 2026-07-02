@@ -1,5 +1,6 @@
 export * as Anthropic from "./anthropic"
 export * as Errors from "./errors"
+export * as Embeddings from "./embeddings"
 export * as ExtractJson from "./extract-json"
 export * as Live from "./live"
 export * as ModelInfo from "./model-info"

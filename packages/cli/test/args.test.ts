@@ -121,6 +121,14 @@ describe("CLI args", () => {
     })
   })
 
+  test("parses memory commands", async () => {
+    const index = await Effect.runPromise(Args.parse(["memory", "index", "--workspace", "/workspace/rika"]))
+    const status = await Effect.runPromise(Args.parse(["memory", "status"]))
+
+    expect(index).toEqual({ type: "memory", action: "index", workspace_root: "/workspace/rika" })
+    expect(status).toEqual({ type: "memory", action: "status" })
+  })
+
   test("parses orb list, kill, and shell commands", async () => {
     const threadId = Ids.ThreadId.make("thread_args_orb_kill")
     const list = await Effect.runPromise(Args.parse(["orb", "list"]))

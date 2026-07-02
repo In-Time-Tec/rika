@@ -31,6 +31,9 @@ export type ProjectId = typeof ProjectId.Type
 export const ThreadId = id("Rika.ThreadId")
 export type ThreadId = typeof ThreadId.Type
 
+export const ThreadMemoryChunkId = id("Rika.ThreadMemoryChunkId")
+export type ThreadMemoryChunkId = typeof ThreadMemoryChunkId.Type
+
 export const ToolCallId = id("Rika.ToolCallId")
 export type ToolCallId = typeof ToolCallId.Type
 

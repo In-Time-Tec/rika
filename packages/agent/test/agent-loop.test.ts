@@ -10,6 +10,7 @@ import {
   ContextResolver,
   PermissionPolicy,
   SkillRegistry,
+  ThreadMemoryIndexer,
   ThreadService,
   ToolExecutor,
   ToolRegistry,
@@ -152,6 +153,45 @@ describe("AgentLoop", () => {
       latest_message_text: "tool saw hello",
       active_turn_status: "completed",
     })
+  })
+
+  test("indexes completed turns through the detached memory hook", async () => {
+    const indexedTurns = Effect.runSync(Queue.unbounded<ThreadMemoryIndexer.IndexTurnInput>())
+    const memoryThread = Ids.ThreadId.make("thread_agent_memory_hook")
+    const layer = makeLayer(["remembered"]).pipe(
+      Layer.provideMerge(
+        ThreadMemoryIndexer.fakeLayer({
+          indexTurn: (input) =>
+            Queue.offer(indexedTurns, input).pipe(
+              Effect.as({
+                status: "skipped" as const,
+                reason: "already_indexed" as const,
+                thread_id: input.thread_id,
+                turn_id: input.turn_id,
+              }),
+            ),
+        }),
+      ),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: memoryThread,
+          workspace_id: workspaceId,
+          content: "remember this turn",
+        })
+        const indexed = yield* Queue.take(indexedTurns).pipe(Effect.timeoutOption("1 second"))
+        return { turn, indexed }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.turn.status).toBe("completed")
+    expect(result.indexed._tag).toBe("Some")
+    if (result.indexed._tag === "Some") {
+      expect(result.indexed.value).toMatchObject({ thread_id: memoryThread, turn_id: result.turn.turn_id })
+    }
   })
 
   test("default turns expose the full tool descriptor list", async () => {

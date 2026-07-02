@@ -21,6 +21,7 @@ export const ConfigSummary = Schema.Struct({
   database_url_configured: Schema.Boolean,
   base_url_configured: Schema.Boolean,
   api_key_configured: Schema.Boolean,
+  embeddings_api_key_configured: Schema.Boolean,
   telemetry: Schema.Literals(["disabled", "enabled"]),
   telemetry_endpoint: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Cli.Doctor.ConfigSummary" })
@@ -118,6 +119,7 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
     const rivetHost = input.env.RIKA_RIVET_HOST ?? "local"
     const rivetEndpoint = input.env.RIKA_RIVET_ENDPOINT ?? input.env.RIVET_ENDPOINT ?? "http://127.0.0.1:6420"
     const apiKeyConfigured = secretConfigured(input.env.RIKA_API_KEY)
+    const embeddingsApiKeyConfigured = secretConfigured(input.env.RIKA_EMBEDDINGS_API_KEY)
     const telemetry = Telemetry.fromEnv(input.env, input.version ?? "0.0.0")
     const permissionConfig = PermissionPolicy.configFromEnv(input.env)
     const permissionSummary = PermissionPolicy.summary(permissionConfig)
@@ -139,6 +141,7 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
         database_url_configured: input.env.RIKA_DATABASE_URL !== undefined,
         base_url_configured: input.env.RIKA_BASE_URL !== undefined,
         api_key_configured: apiKeyConfigured,
+        embeddings_api_key_configured: embeddingsApiKeyConfigured,
         telemetry: telemetry.enabled ? "enabled" : "disabled",
         ...(telemetry.enabled ? { telemetry_endpoint: telemetry.endpoint } : {}),
       },
@@ -154,7 +157,15 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
         token_configured: secretConfigured(input.env.RIKA_RIVET_TOKEN) || secretConfigured(input.env.RIVET_TOKEN),
         namespace_configured: input.env.RIKA_RIVET_NAMESPACE !== undefined || input.env.RIVET_NAMESPACE !== undefined,
       },
-      checks: checks({ dataDir, apiKeyConfigured, permissionSummary, rivetHost, rivetEndpoint, telemetry }),
+      checks: checks({
+        dataDir,
+        apiKeyConfigured,
+        embeddingsApiKeyConfigured,
+        permissionSummary,
+        rivetHost,
+        rivetEndpoint,
+        telemetry,
+      }),
     }
     return diagnosticReport
   })
@@ -162,6 +173,7 @@ const reportFromInput = (input: Input, backend: LocalBackend.Interface): Effect.
 const checks = (input: {
   readonly dataDir: string
   readonly apiKeyConfigured: boolean
+  readonly embeddingsApiKeyConfigured: boolean
   readonly permissionSummary: PermissionPolicy.PermissionSummary
   readonly rivetHost: string
   readonly rivetEndpoint: string
@@ -178,6 +190,15 @@ const checks = (input: {
     message: input.apiKeyConfigured
       ? "Model provider API key is configured. Secret values are not printed."
       : "RIKA_API_KEY is required for live model calls.",
+  },
+  {
+    name: "embeddings-provider",
+    status: input.embeddingsApiKeyConfigured || input.apiKeyConfigured ? "ok" : "warning",
+    message: input.embeddingsApiKeyConfigured
+      ? "Thread memory embedding API key is configured. Secret values are not printed."
+      : input.apiKeyConfigured
+        ? "Thread memory embeddings will use the OpenAI model key fallback when OpenAI is configured."
+        : "RIKA_EMBEDDINGS_API_KEY is required for live thread memory indexing.",
   },
   {
     name: "permissions",

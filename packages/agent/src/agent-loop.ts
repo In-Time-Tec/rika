@@ -9,6 +9,7 @@ import * as ContextResolver from "./context-resolver"
 import * as ContextBudget from "./context-budget"
 import * as ModelContext from "./model-context"
 import * as SkillRegistry from "./skill-registry"
+import * as ThreadMemoryIndexer from "./thread-memory-indexer"
 import * as Toolkit from "./toolkit"
 import * as ToolAccess from "./tool-access"
 import * as ToolExecutor from "./tool-executor"
@@ -98,6 +99,7 @@ interface Dependencies {
   readonly skillRegistry: SkillRegistry.Interface
   readonly toolExecutor: ToolExecutor.Interface
   readonly toolkit: Toolkit.Interface
+  readonly memoryIndexer?: ThreadMemoryIndexer.Interface
 }
 
 type Emit = (event: Event.Event) => Effect.Effect<void, RunError>
@@ -144,6 +146,7 @@ export const layer = Layer.effect(
     const skillRegistry = yield* SkillRegistry.Service
     const toolExecutor = yield* ToolExecutor.Service
     const toolkit = yield* Toolkit.Service
+    const memoryIndexer = Option.getOrUndefined(yield* Effect.serviceOption(ThreadMemoryIndexer.Service))
     const queuedTurns = yield* Queue.unbounded<RunTurnInput>()
     const dependencies: Dependencies = {
       config,
@@ -160,6 +163,7 @@ export const layer = Layer.effect(
       skillRegistry,
       toolExecutor,
       toolkit,
+      ...(memoryIndexer === undefined ? {} : { memoryIndexer }),
     }
 
     return Service.of({
@@ -450,7 +454,15 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
         yield* append(
           yield* makeAssistantMessageAdded(dependencies, input.thread_id, turnId, response.content, sequence + 1),
         )
-        yield* append(yield* makeTurnCompleted(dependencies, input.thread_id, turnId, sequence + 1, latestCompletion))
+        const completed = yield* makeTurnCompleted(
+          dependencies,
+          input.thread_id,
+          turnId,
+          sequence + 1,
+          latestCompletion,
+        )
+        yield* append(completed)
+        yield* forkMemoryIndex(dependencies, completed)
         return
       }
 
@@ -489,7 +501,9 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
         sequence + 1,
       ),
     )
-    yield* append(yield* makeTurnCompleted(dependencies, input.thread_id, turnId, sequence + 1, latestCompletion))
+    const completed = yield* makeTurnCompleted(dependencies, input.thread_id, turnId, sequence + 1, latestCompletion)
+    yield* append(completed)
+    yield* forkMemoryIndex(dependencies, completed)
   }).pipe(
     Effect.onInterrupt(() => {
       fields.status = "cancelled"
@@ -959,6 +973,26 @@ const emitModelRecoveryDiagnostic = (
       },
     })
     .pipe(Effect.catch(() => Effect.void))
+
+const forkMemoryIndex = (dependencies: Dependencies, event: Event.TurnCompleted) => {
+  if (dependencies.memoryIndexer === undefined) return Effect.void
+  return dependencies.memoryIndexer.indexTurn({ thread_id: event.thread_id, turn_id: event.turn_id }).pipe(
+    Effect.catch((error) =>
+      dependencies.diagnostics.emit({
+        level: "warn",
+        message: "thread.memory.index failed",
+        data: {
+          thread_id: event.thread_id,
+          turn_id: event.turn_id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      }),
+    ),
+    Effect.ignore,
+    Effect.forkDetach,
+    Effect.asVoid,
+  )
+}
 
 const latestSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.sequence ?? 0
 

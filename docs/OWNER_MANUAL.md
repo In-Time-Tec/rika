@@ -105,6 +105,8 @@ rika threads unarchive <thread-id>
 rika threads compact <thread-id>
 rika threads share <thread-id>
 rika threads reference <thread-id> [query]
+rika memory status
+rika memory index --workspace /repo
 ```
 
 Interactive slash commands mirror the core lifecycle: `/threads`, `/search`, `/thread`, `/new`, `/archive`, `/unarchive`, `/compact`, `/share`, and `/reference`.
@@ -268,6 +270,7 @@ Common environment variables:
 | `RIKA_DATA_DIR`                            | Local data directory. Defaults to `<workspace>/.rika`.      |
 | `RIKA_DATABASE_URL`                        | Optional SQLite database URL/path override.                 |
 | `RIKA_API_KEY`                             | Model provider credentials.                                 |
+| `RIKA_EMBEDDINGS_API_KEY`                  | Optional dedicated key for thread memory embeddings.        |
 | `RIKA_BASE_URL`                            | Optional model provider proxy endpoint.                     |
 | `RIKA_BACKEND_URL` / `RIKA_BACKEND_TOKEN`  | Connect interactive TUI to an existing backend.             |
 | `RIKA_BACKEND_PORT`                        | Override deterministic shared local backend port.           |

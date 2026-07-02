@@ -3,6 +3,7 @@ import { ModelInfo } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import * as ThreadDigest from "./thread-digest"
 
 const defaultReferenceChars = 2_000
 const defaultSearchLimit = 20
@@ -497,7 +498,7 @@ const referenceThread = (dependencies: Dependencies, input: ReferenceInput) =>
   })
 
 const referenceEntries = (record: ThreadRecord, terms: ReadonlyArray<string>) => {
-  const messages = record.events.flatMap(messageEntry)
+  const messages = record.events.flatMap(ThreadDigest.messageEntry)
   const relevant =
     terms.length === 0
       ? messages
@@ -510,8 +511,8 @@ const referenceEntries = (record: ThreadRecord, terms: ReadonlyArray<string>) =>
       ? []
       : [`Latest: ${oneLine(record.summary.latest_message_text)}`]),
     ...firstAndLast(relevant.length === 0 ? messages : relevant, 6),
-    ...toolEntries(record.events).slice(-4),
-    ...fileEntries(record.events)
+    ...ThreadDigest.toolEntries(record.events).slice(-4),
+    ...ThreadDigest.fileEntries(record.events)
       .slice(0, 8)
       .map((path) => `File: ${path}`),
   ])
@@ -539,53 +540,11 @@ const searchableFields = (summary: ThreadSummary, events: ReadonlyArray<Event.Ev
     summary.workspace_id,
     summary.user_id ?? "",
     summary.latest_message_text ?? "",
-    ...events.flatMap(messageEntry),
-    ...fileEntries(events),
-    ...toolEntries(events),
+    ...events.flatMap(ThreadDigest.messageEntry),
+    ...ThreadDigest.fileEntries(events),
+    ...ThreadDigest.toolEntries(events),
     ...events.map((event) => JSON.stringify(event.metadata ?? {})),
   ]).filter((value) => value.length > 0)
-
-const messageEntry = (event: Event.Event): ReadonlyArray<string> => {
-  if (event.type !== "message.added") return []
-  const text = messageText(event.data.message)
-  return text.length === 0 ? [] : [`${event.data.message.role}: ${oneLine(text)}`]
-}
-
-const toolEntries = (events: ReadonlyArray<Event.Event>) =>
-  events.flatMap((event) => {
-    if (event.type === "tool.call.requested") return [`Tool: ${event.data.call.name}`]
-    if (event.type === "tool.call.completed")
-      return [`Tool result: ${event.data.result.name} ${event.data.result.status}`]
-    return []
-  })
-
-const fileEntries = (events: ReadonlyArray<Event.Event>) => uniqueStrings(events.flatMap(pathsFromEvent))
-
-const pathsFromEvent = (event: Event.Event): ReadonlyArray<string> => {
-  if (event.type === "message.added") {
-    return event.data.message.content.flatMap((part) => {
-      if (part.type === "file-reference") return [part.path]
-      if (part.type === "image" && part.filename !== undefined) return [part.filename]
-      return []
-    })
-  }
-  if (event.type === "context.resolved")
-    return event.data.entries.flatMap((entry) => (entry.path === undefined ? [] : [entry.path]))
-  if (event.type === "tool.call.completed" && event.data.result.output !== undefined)
-    return pathsFromJson(event.data.result.output)
-  return []
-}
-
-const pathsFromJson = (value: Common.JsonValue): ReadonlyArray<string> => {
-  if (typeof value === "string") return looksLikePath(value) ? [value] : []
-  if (Array.isArray(value)) return value.flatMap(pathsFromJson)
-  if (!isJsonObject(value)) return []
-  return Object.entries(value).flatMap(([key, child]) =>
-    (key === "path" || key === "file" || key === "filename") && typeof child === "string" && looksLikePath(child)
-      ? [child]
-      : pathsFromJson(child),
-  )
-}
 
 const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
   Effect.gen(function* () {
@@ -743,8 +702,6 @@ const groupEventsByThread = (events: ReadonlyArray<Event.Event>) => {
   return grouped
 }
 
-const messageText = (message: Message.Message) => Message.displayText(message)
-
 const tokenize = (query: string) =>
   uniqueStrings(
     query
@@ -770,6 +727,3 @@ const latestSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.se
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(Math.floor(value), min), max)
 const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim()
-const looksLikePath = (value: string) => value.includes("/") || /\.[A-Za-z0-9]+$/.test(value)
-const isJsonObject = (value: Common.JsonValue | undefined): value is Record<string, Common.JsonValue> =>
-  typeof value === "object" && value !== null && !Array.isArray(value)
