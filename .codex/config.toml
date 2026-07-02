@@ -1,3 +1,15 @@
 [agents]
 max_threads = 12
 max_depth = 2
+
+[agents.oracle]
+description = "Read-only second-opinion reviewer for Rika plans, bugs, architecture, diffs, and final change review."
+config_file = "./agents/oracle.toml"
+
+[agents.librarian]
+description = "Deep read-only source researcher for external repositories, installed dependencies, upstream code, and documentation."
+config_file = "./agents/librarian.toml"
+
+[agents.herald]
+description = "Deep web-search subagent for finding current public information, official docs, announcements, and external references."
+config_file = "./agents/herald.toml"
