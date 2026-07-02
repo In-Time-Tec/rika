@@ -38,7 +38,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -76,7 +76,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -115,7 +115,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -158,7 +158,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -196,7 +196,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -261,7 +261,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -302,7 +302,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -349,7 +349,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -400,7 +400,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -438,7 +438,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -478,7 +478,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -534,7 +534,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -574,7 +574,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -617,7 +617,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -660,7 +660,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -705,7 +705,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -743,7 +743,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -793,7 +793,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -857,7 +857,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -905,7 +905,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -945,7 +945,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -1046,7 +1046,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -1093,7 +1093,7 @@ Global options:
   --effort <value>
       Set reasoning effort for the new thread, when supported by the selected mode
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -1207,9 +1207,9 @@ Options:
       Set reasoning effort for the new thread, when supported by the selected mode
   -x, --execute [message]
       Use execute mode, optionally with user message. In execute mode, agent will execute provided prompt (either as
-      argument, or via stdin). Only last assistant message is printed. Enabled automatically when redirecting stdout.
+      argument, or via stdin). Execute mode is only enabled when explicitly requested.
   --stream-json
-      When used with --execute, output in Claude Code-compatible stream JSON format instead of plain text.
+      When used with --execute, output Rika Event schema JSON lines.
   --stream-json-thinking
       Include thinking blocks in stream JSON output (non-Claude Code extension). Implies --stream-json.
   --stream-json-input
@@ -1239,32 +1239,26 @@ Start an interactive session with a user message:
 
   $ echo "commit all my unstaged changes" | amp
 
-Use execute mode (--execute or -x) to send a command to an agent, have it execute it, print only the agent's last message, and then exit:
+Use execute mode (--execute or -x) to send a command to an agent, stream Rika Event JSON lines, and then exit:
 
-  $ amp -x "what file in this folder is in markdown format?"
-  All Markdown files in this folder:
-  - README.md (root)
-  - AGENT.md (root)
-  - Documentation (7 files in doc/)
-  - Various README.md files in subdirectories
-  Total: **13 Markdown files** found across the project.
+  $ amp -x "what file in this folder is in markdown format?" --stream-json | jq -r 'select(.type=="message.added" and .data.message.role=="assistant") | .data.message.content[] | select(.type=="text") | .text'
 
-Stream JSON output and extract assistant text blocks with jq:
+Stream the first protocol event as JSON:
 
-  $ amp -x "what file in this folder is in markdown format?" --stream-json | jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="text") | .text'
+  $ amp -x "2+2?" --stream-json | head -1 | jq .
 
-Stream JSON output with thinking blocks and extract them with jq:
+Feed JSON Lines user messages through stdin:
 
-  $ amp -x "what file in this folder is in markdown format?" --stream-json-thinking | jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="thinking") | .thinking'
+  $ printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}' | amp -x --stream-json --stream-json-input
 
 Pipe data to the agent and send along a prompt in execute mode:
 
   $ cat ~/.zshrc | amp -x "what does the 'beautiful' function do?"
   The \`beautiful\` function creates an infinite loop that prints the letter "o" in cycling colors every 0.2 seconds.
 
-Execute a prompt from a file and store final assistant message output in a file (redirecting stdout is equivalent to providing -x/--execute):
+Execute a prompt from a file with explicit execute mode:
 
-  $ amp < prompt.txt > output.txt
+  $ amp -x < prompt.txt
 
 Add an MCP server with a local command:
 

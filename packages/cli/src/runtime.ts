@@ -312,6 +312,7 @@ export const liveLayer = (
   const contextResolverLayer = ContextResolver.layer.pipe(Layer.provide(storageAndThreadLayer))
   const baseLayer = Layer.mergeAll(
     Output.layer,
+    Input.layer,
     migratedStorageLayer,
     storageAndThreadLayer,
     workspaceAccessLayer,

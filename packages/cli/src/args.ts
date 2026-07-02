@@ -8,6 +8,8 @@ export interface ExecuteCommand extends Schema.Schema.Type<typeof ExecuteCommand
 export const ExecuteCommand = Schema.Struct({
   type: Schema.Literal("execute"),
   prompt: Schema.String,
+  stream_json: Schema.Boolean,
+  stream_json_input: Schema.Boolean,
   mode: Schema.optional(Config.Mode),
   workspace_root: Schema.optional(Schema.String),
   thread_id: Schema.optional(Ids.ThreadId),
@@ -266,8 +268,8 @@ export const usage = [
   "  rika ide connect --client <id> [--server <url>] [--token <token>] [--workspace <path>] [--capabilities <csv>]",
   "  rika ide disconnect --client <id> [--server <url>] [--token <token>]",
   "  rika ide open-file --path <path> [--start-line <n> --end-line <n>] [--server <url>] [--token <token>]",
-  "  rika run [options] <prompt>",
-  "  rika --execute [options] <prompt>",
+  "  rika run [options] [prompt]",
+  "  rika --execute [options] [prompt]",
   "",
   "Options:",
   "  -V, --version          Print the version number and exit",
@@ -277,6 +279,8 @@ export const usage = [
   "  --workspace <path>      Workspace root for the turn",
   "  --thread <id>           Reuse a durable thread id",
   "  --ephemeral            Use in-memory persistence for this run",
+  "  --stream-json          Stream schema JSON events to stdout",
+  "  --stream-json-input    Read JSON Lines user messages from stdin; requires --stream-json",
   "  -h, --help             Show this help",
 ].join("\n")
 
@@ -328,8 +332,12 @@ const baseConfig = {
 
 const executeConfig = {
   ...baseConfig,
+  streamJson: Flag.boolean("stream-json").pipe(Flag.withDescription("Stream schema JSON events to stdout")),
+  streamJsonInput: Flag.boolean("stream-json-input").pipe(
+    Flag.withDescription("Read JSON Lines user messages from stdin; requires --stream-json"),
+  ),
   prompt: Argument.string("prompt").pipe(
-    Argument.variadic({ min: 1 }),
+    Argument.variadic({ min: 0 }),
     Argument.withDescription("Prompt text to send to the agent"),
   ),
 }
@@ -337,6 +345,10 @@ const executeConfig = {
 const rootConfig = {
   execute: Flag.boolean("execute").pipe(Flag.withAlias("x"), Flag.withDescription("Run one non-interactive turn")),
   ...baseConfig,
+  streamJson: Flag.boolean("stream-json").pipe(Flag.withDescription("Stream schema JSON events to stdout")),
+  streamJsonInput: Flag.boolean("stream-json-input").pipe(
+    Flag.withDescription("Read JSON Lines user messages from stdin; requires --stream-json"),
+  ),
   prompt: Argument.string("prompt").pipe(
     Argument.variadic({ min: 0 }),
     Argument.withDescription("Prompt text to send to the agent when --execute is set"),
@@ -473,6 +485,8 @@ interface ExecuteInput {
   readonly workspace: Option.Option<string>
   readonly thread: Option.Option<string>
   readonly ephemeral: boolean
+  readonly streamJson: boolean
+  readonly streamJsonInput: boolean
   readonly prompt: ReadonlyArray<string>
 }
 
@@ -597,7 +611,7 @@ interface IdeOpenFileInput extends IdeServerInput {
 
 const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Ref.Ref<Option.Option<ArgsError>>) => {
   const run = CliCommand.make("run", executeConfig, (input: ExecuteInput) =>
-    Ref.set(parsedRef, Option.some(toExecuteCommand(input))),
+    setExecuteCommand(parsedRef, rejectedRef, input),
   ).pipe(
     CliCommand.withDescription("Run one non-interactive Rika turn"),
     CliCommand.withShortDescription("Run one prompt"),
@@ -624,18 +638,23 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
 
   return CliCommand.make("rika", rootConfig, (input: RootInput) =>
     input.execute
-      ? input.prompt.length === 0
+      ? setExecuteCommand(parsedRef, rejectedRef, input)
+      : input.streamJsonInput && !input.streamJson
         ? Ref.set(
             rejectedRef,
-            Option.some(new ArgsError({ message: "Prompt is required for --execute", exit_code: 2, usage })),
+            Option.some(new ArgsError({ message: "--stream-json-input requires --stream-json", exit_code: 2, usage })),
           )
-        : Ref.set(parsedRef, Option.some(toExecuteCommand(input)))
-      : input.prompt.length === 0
-        ? Ref.set(parsedRef, Option.some(toInteractiveCommand(input)))
-        : Ref.set(
-            rejectedRef,
-            Option.some(new ArgsError({ message: "Expected run, interactive, or --execute", exit_code: 2, usage })),
-          ),
+        : input.streamJson
+          ? Ref.set(
+              rejectedRef,
+              Option.some(new ArgsError({ message: "--stream-json requires --execute or run", exit_code: 2, usage })),
+            )
+          : input.prompt.length === 0
+            ? Ref.set(parsedRef, Option.some(toInteractiveCommand(input)))
+            : Ref.set(
+                rejectedRef,
+                Option.some(new ArgsError({ message: "Expected run, interactive, or --execute", exit_code: 2, usage })),
+              ),
   ).pipe(
     CliCommand.withDescription("Effect-native coding agent"),
     CliCommand.withSubcommands([
@@ -655,6 +674,18 @@ const makeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>, rejectedRef: Re
     ]),
   )
 }
+
+const setExecuteCommand = (
+  parsedRef: Ref.Ref<Option.Option<Command>>,
+  rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
+  input: ExecuteInput,
+) =>
+  input.streamJsonInput && !input.streamJson
+    ? Ref.set(
+        rejectedRef,
+        Option.some(new ArgsError({ message: "--stream-json-input requires --stream-json", exit_code: 2, usage })),
+      )
+    : Ref.set(parsedRef, Option.some(toExecuteCommand(input)))
 
 const makeVersionCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) =>
   CliCommand.make("version", {}, () => Ref.set(parsedRef, Option.some(toVersionCommandValue()))).pipe(
@@ -906,6 +937,8 @@ const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
   return {
     type: "execute",
     prompt: input.prompt.join(" ").trim(),
+    stream_json: input.streamJson,
+    stream_json_input: input.streamJsonInput,
     ephemeral: input.ephemeral,
     ...(mode === undefined ? {} : { mode }),
     ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),

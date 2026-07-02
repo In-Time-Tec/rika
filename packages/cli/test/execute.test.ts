@@ -6,14 +6,26 @@ import { AgentLoop, ContextResolver, SkillRegistry, ToolExecutor } from "@rika/a
 import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Common, Event, Ids } from "@rika/schema"
-import { Effect, Layer, Schema } from "effect"
-import { Execute, Output } from "../src/index"
+import { Common, Event, Ids, Message } from "@rika/schema"
+import { Cause, Effect, Fiber, Layer, ManagedRuntime, Queue, Schema, Stream } from "effect"
+import { AiError } from "effect/unstable/ai"
+import { Execute, Input, Output } from "../src/index"
 
 const defaultWorkspaceRoot = "/workspace/rika-cli-test"
 const defaultDataDir = "/workspace/rika-cli-test/.rika"
 
-const makeLayer = (output: Output.MemoryOutput, workspaceRoot = defaultWorkspaceRoot, dataDir = defaultDataDir) => {
+const makeLayer = (
+  output: Output.MemoryOutput,
+  workspaceRoot = defaultWorkspaceRoot,
+  dataDir = defaultDataDir,
+  stdin = "",
+  isTty = false,
+  providerRegistryLayer = Provider.fakeRegistryLayer([
+    { name: "anthropic", responses: ["cli response"] },
+    { name: "openai", responses: ["cli response"] },
+  ]),
+  inputLayer: Layer.Layer<Input.Service> = Input.memoryLayer(stdin, isTty),
+) => {
   const configLayer = Config.layerFromValues({
     workspace_root: workspaceRoot,
     data_dir: dataDir,
@@ -28,15 +40,7 @@ const makeLayer = (output: Output.MemoryOutput, workspaceRoot = defaultWorkspace
     Layer.provideMerge(timeLayer),
     Layer.provideMerge(idLayer),
   )
-  const llmLayer = Router.layer.pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(
-      Provider.fakeRegistryLayer([
-        { name: "anthropic", responses: ["cli response"] },
-        { name: "openai", responses: ["cli response"] },
-      ]),
-    ),
-  )
+  const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerRegistryLayer))
   const baseLayer = Layer.mergeAll(
     configLayer,
     Output.memoryLayer(output),
@@ -48,6 +52,7 @@ const makeLayer = (output: Output.MemoryOutput, workspaceRoot = defaultWorkspace
     idLayer,
     projectStoreLayer,
     Diagnostics.memoryLayer([]),
+    inputLayer,
     ContextResolver.emptyLayer,
     SkillRegistry.emptyLayer,
     ToolExecutor.emptyLayer,
@@ -111,6 +116,171 @@ describe("CLI execute", () => {
     expect(first).toMatchObject({ type: "thread.created", data: { workspace_id: "/workspace/custom" } })
   })
 
+  test("uses piped stdin as the execute prompt when no prompt argument is present", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["-x"])
+      }).pipe(Effect.provide(makeLayer(output, defaultWorkspaceRoot, defaultDataDir, "say hi"))),
+    )
+
+    const events = output.stdout.map((line) => Schema.decodeUnknownSync(Event.Event)(JSON.parse(line)))
+    const userMessage = events.find((event) => event.type === "message.added" && event.data.message.role === "user")
+
+    expect(exitCode).toBe(0)
+    expect(userMessage?.type === "message.added" ? Message.displayText(userMessage.data.message) : "").toBe("say hi")
+    expect(output.stderr).toEqual([])
+  })
+
+  test("rejects execute without a prompt when stdin is a TTY", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["-x"])
+      }).pipe(Effect.provide(makeLayer(output, defaultWorkspaceRoot, defaultDataDir, "", true))),
+    )
+
+    expect(exitCode).toBe(2)
+    expect(output.stdout).toEqual([])
+    expect(output.stderr.join("\n")).toContain("Prompt is required for --execute")
+  })
+
+  test("uses piped stdin as leading context before the prompt argument", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["-x", "answer", "this"])
+      }).pipe(Effect.provide(makeLayer(output, defaultWorkspaceRoot, defaultDataDir, "file context"))),
+    )
+
+    const events = output.stdout.map((line) => Schema.decodeUnknownSync(Event.Event)(JSON.parse(line)))
+    const userMessage = events.find((event) => event.type === "message.added" && event.data.message.role === "user")
+
+    expect(exitCode).toBe(0)
+    expect(userMessage?.type === "message.added" ? Message.displayText(userMessage.data.message) : "").toBe(
+      "file context\n\nanswer this",
+    )
+    expect(output.stderr).toEqual([])
+  })
+
+  test("runs stream JSON input messages as sequential turns on one thread", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const input = [
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: "first" }] },
+      }),
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: [{ type: "text", text: "second" }] },
+      }),
+    ].join("\n")
+
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["-x", "--stream-json", "--stream-json-input", "--thread", "thread_cli_input"])
+      }).pipe(Effect.provide(makeLayer(output, defaultWorkspaceRoot, defaultDataDir, `${input}\n`))),
+    )
+
+    const events = output.stdout.map((line) => Schema.decodeUnknownSync(Event.Event)(JSON.parse(line)))
+    const userMessages = events.flatMap((event) =>
+      event.type === "message.added" && event.data.message.role === "user"
+        ? [Message.displayText(event.data.message)]
+        : [],
+    )
+
+    expect(exitCode).toBe(0)
+    expect(events.filter((event) => event.type === "thread.created")).toHaveLength(1)
+    expect(events.filter((event) => event.type === "turn.completed")).toHaveLength(2)
+    expect(userMessages).toEqual(["first", "second"])
+    expect(new Set(events.map((event) => event.thread_id))).toEqual(new Set([Ids.ThreadId.make("thread_cli_input")]))
+    expect(output.stderr).toEqual([])
+  })
+
+  test("starts stream JSON input turns before stdin closes", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const lineQueue = await Effect.runPromise(Queue.unbounded<string, Cause.Done>())
+    const inputLayer = Layer.succeed(
+      Input.Service,
+      Input.Service.of({
+        readAll: Effect.never,
+        isTty: Effect.succeed(false),
+        lines: Stream.fromQueue(lineQueue),
+      }),
+    )
+    const runtime = ManagedRuntime.make(
+      makeLayer(output, defaultWorkspaceRoot, defaultDataDir, "", false, undefined, inputLayer),
+    )
+    const fiber = runtime.runFork(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["-x", "--stream-json", "--stream-json-input"])
+      }),
+    )
+
+    try {
+      await Effect.runPromise(
+        Queue.offer(
+          lineQueue,
+          JSON.stringify({
+            type: "user",
+            message: { role: "user", content: [{ type: "text", text: "first before eof" }] },
+          }),
+        ),
+      )
+      const eventsBeforeEof = await Effect.runPromise(
+        waitForOutputEvent(output, "turn.completed").pipe(Effect.timeout("1 second")),
+      )
+      await Effect.runPromise(Queue.end(lineQueue))
+      const exitCode = await runtime.runPromise(Fiber.join(fiber))
+
+      expect(exitCode).toBe(0)
+      expect(eventsBeforeEof.some((event) => event.type === "turn.completed")).toBe(true)
+      expect(output.stderr).toEqual([])
+    } finally {
+      await runtime.runPromise(Fiber.interrupt(fiber).pipe(Effect.ignore))
+      await runtime.dispose()
+    }
+  })
+
+  test("returns non-zero when the streamed turn ends with turn.failed", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const failure = AiError.make({
+      module: "LanguageModel",
+      method: "streamText",
+      reason: new AiError.AuthenticationError({ kind: "InvalidKey" }),
+    })
+    const providerNames: ReadonlyArray<Provider.ProviderName> = ["anthropic", "openai"]
+    const providerRegistryLayer = Provider.registryLayerFromProviders(
+      providerNames.map((name) =>
+        Provider.Service.of({
+          name,
+          complete: () => Effect.fail(failure),
+          stream: () => Stream.fail(failure),
+        }),
+      ),
+    )
+
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["-x", "fail", "--mode", "rush", "--stream-json"])
+      }).pipe(
+        Effect.provide(makeLayer(output, defaultWorkspaceRoot, defaultDataDir, "", false, providerRegistryLayer)),
+      ),
+    )
+
+    const events = output.stdout.map((line) => Schema.decodeUnknownSync(Event.Event)(JSON.parse(line)))
+
+    expect(exitCode).toBe(1)
+    expect(events.at(-1)).toMatchObject({ type: "turn.failed" })
+    expect(output.stderr).toEqual([])
+  })
+
   test("uses project workspace identity when the git remote matches a stored project", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "rika-cli-execute-data-"))
     const workspaceRoot = await mkdtemp(join(tmpdir(), "rika-cli-execute-workspace-"))
@@ -144,3 +314,12 @@ const runGit = async (cwd: string, args: ReadonlyArray<string>) => {
   const [exitCode, stderr] = await Promise.all([subprocess.exited, new Response(subprocess.stderr).text()])
   if (exitCode !== 0) throw new Error(stderr)
 }
+
+const waitForOutputEvent = (output: Output.MemoryOutput, type: Event.Event["type"]) =>
+  Effect.gen(function* () {
+    while (true) {
+      const events = output.stdout.map((line) => Schema.decodeUnknownSync(Event.Event)(JSON.parse(line)))
+      if (events.some((event) => event.type === type)) return events
+      yield* Effect.sleep("10 millis")
+    }
+  })

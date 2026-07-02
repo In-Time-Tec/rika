@@ -30,6 +30,8 @@ describe("CLI args", () => {
     expect(command).toEqual({
       type: "execute",
       prompt: "ship it",
+      stream_json: false,
+      stream_json_input: false,
       mode: "rush",
       workspace_root: "/workspace/rika",
       thread_id: threadId,
@@ -45,6 +47,58 @@ describe("CLI args", () => {
     expect(long).toMatchObject({ type: "execute", prompt: "explain this", mode: "deep3", ephemeral: false })
     expect(short).toMatchObject({ type: "execute", prompt: "hello", ephemeral: false })
     expect(modeAlias).toMatchObject({ type: "execute", prompt: "alias mode", mode: "rush", ephemeral: false })
+  })
+
+  test("allows execute without a prompt so piped stdin can supply it", async () => {
+    const command = await Effect.runPromise(Args.parse(["-x"]))
+
+    expect(command).toMatchObject({
+      type: "execute",
+      prompt: "",
+      stream_json: false,
+      stream_json_input: false,
+      ephemeral: false,
+    })
+  })
+
+  test("parses explicit stream JSON execute flags", async () => {
+    const command = await Effect.runPromise(Args.parse(["--execute", "--stream-json", "2+2?"]))
+    const run = await Effect.runPromise(Args.parse(["run", "--stream-json", "ship", "it"]))
+
+    expect(command).toMatchObject({
+      type: "execute",
+      prompt: "2+2?",
+      stream_json: true,
+      stream_json_input: false,
+      ephemeral: false,
+    })
+    expect(run).toMatchObject({
+      type: "execute",
+      prompt: "ship it",
+      stream_json: true,
+      stream_json_input: false,
+      ephemeral: false,
+    })
+  })
+
+  test("rejects stream JSON input without stream JSON output", async () => {
+    const result = await Effect.runPromise(Effect.flip(Args.parse(["--execute", "--stream-json-input", "hello"])))
+
+    expect(result).toMatchObject({
+      _tag: "ArgsError",
+      message: "--stream-json-input requires --stream-json",
+      exit_code: 2,
+    })
+  })
+
+  test("rejects root stream JSON flags without execute mode", async () => {
+    const result = await Effect.runPromise(Effect.flip(Args.parse(["--stream-json"])))
+
+    expect(result).toMatchObject({
+      _tag: "ArgsError",
+      message: "--stream-json requires --execute or run",
+      exit_code: 2,
+    })
   })
 
   test("parses Amp-compatible version commands before Effect CLI globals", async () => {
@@ -569,8 +623,8 @@ describe("CLI args", () => {
     expect(command).toEqual({ type: "invalid_execute_alias" })
   })
 
-  test("returns Effect CLI diagnostics for missing flag values", async () => {
-    const error = await Effect.runPromise(Args.parse(["run", "--mode"]).pipe(Effect.flip))
+  test("returns Effect CLI diagnostics for invalid flag values", async () => {
+    const error = await Effect.runPromise(Args.parse(["threads", "list", "--limit", "nope"]).pipe(Effect.flip))
 
     expect(error.exit_code).toBe(2)
     expect(error.message).toContain("USAGE")
