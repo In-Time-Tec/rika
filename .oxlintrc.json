@@ -17,7 +17,6 @@
     "**/build/**",
     "**/coverage/**",
     "**/.turbo/**",
-    "packages/motel/**",
     "**/skills/motel-debug/**"
   ]
 }
