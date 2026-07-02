@@ -33,6 +33,12 @@ export interface HealthInterface {
 
 export class Health extends Context.Service<Health, HealthInterface>()("@rika/cli/BackendEndpoint/Health") {}
 
+export interface ResolverInterface {
+  readonly resolveEndpoint: (input: ResolveInput) => Effect.Effect<BackendEndpoint, ResolveError>
+}
+
+export class Resolver extends Context.Service<Resolver, ResolverInterface>()("@rika/cli/BackendEndpoint/Resolver") {}
+
 export const healthLayer = Layer.succeed(
   Health,
   Health.of({
@@ -54,6 +60,31 @@ export const healthLayer = Layer.succeed(
     }),
   }),
 )
+
+export const resolverLayerFromEnv = (env?: Record<string, string | undefined>) =>
+  Layer.effect(
+    Resolver,
+    Effect.gen(function* () {
+      const localBackend = yield* LocalBackend.Service
+      const orbs = yield* OrbStore.Service
+      const health = yield* Health
+      return Resolver.of({
+        resolveEndpoint: (input) =>
+          resolveEndpoint({ ...input, env: env ?? input.env }).pipe(
+            Effect.provideService(LocalBackend.Service, localBackend),
+            Effect.provideService(OrbStore.Service, orbs),
+            Effect.provideService(Health, health),
+          ),
+      })
+    }),
+  )
+
+export const resolverLayer = resolverLayerFromEnv()
+
+export const resolve = Effect.fn("Cli.BackendEndpoint.Resolver.resolve")(function* (input: ResolveInput) {
+  const resolver = yield* Resolver
+  return yield* resolver.resolveEndpoint(input)
+})
 
 export const resolveEndpoint = Effect.fn("Cli.BackendEndpoint.resolveEndpoint")(function* (input: ResolveInput) {
   const dataDir = input.data_dir ?? input.env.RIKA_DATA_DIR ?? `${input.workspace_root}/.rika`

@@ -6,15 +6,34 @@ import { AgentLoop, ContextResolver, SkillRegistry, ToolExecutor } from "@rika/a
 import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Common, Event, Ids, Message } from "@rika/schema"
+import { Client } from "@rika/sdk"
+import { Codec, Common, Event, Ids, Message } from "@rika/schema"
 import { Cause, Effect, Fiber, Layer, ManagedRuntime, Queue, Schema, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
-import { Execute, Input, Output } from "../src/index"
+import { BackendEndpoint, Execute, Input, Output } from "../src/index"
 
 const defaultWorkspaceRoot = "/workspace/rika-cli-test"
 const defaultDataDir = "/workspace/rika-cli-test/.rika"
 
 const makeLayer = (
+  output: Output.MemoryOutput,
+  workspaceRoot = defaultWorkspaceRoot,
+  dataDir = defaultDataDir,
+  stdin = "",
+  isTty = false,
+  providerRegistryLayer = Provider.fakeRegistryLayer([
+    { name: "anthropic", responses: ["cli response"] },
+    { name: "openai", responses: ["cli response"] },
+  ]),
+  inputLayer: Layer.Layer<Input.Service> = Input.memoryLayer(stdin, isTty),
+) =>
+  Execute.layer.pipe(
+    Layer.provideMerge(
+      makeExecuteDependencies(output, workspaceRoot, dataDir, stdin, isTty, providerRegistryLayer, inputLayer),
+    ),
+  )
+
+const makeExecuteDependencies = (
   output: Output.MemoryOutput,
   workspaceRoot = defaultWorkspaceRoot,
   dataDir = defaultDataDir,
@@ -59,7 +78,7 @@ const makeLayer = (
     llmLayer,
   )
 
-  return Execute.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
+  return AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))
 }
 
 describe("CLI execute", () => {
@@ -114,6 +133,102 @@ describe("CLI execute", () => {
     const first = Schema.decodeUnknownSync(Event.Event)(JSON.parse(output.stdout[0] ?? "{}"))
     expect(first.thread_id).toBe(threadId)
     expect(first).toMatchObject({ type: "thread.created", data: { workspace_id: "/workspace/custom" } })
+  })
+
+  test("routes an existing orb thread through the resolved remote endpoint", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const threadId = Ids.ThreadId.make("thread_cli_remote")
+    const workspaceId = Ids.WorkspaceId.make(defaultWorkspaceRoot)
+    const turnId = Ids.TurnId.make("turn_cli_remote")
+    const previous: Event.ThreadCreated = {
+      id: Ids.EventId.make("event_cli_remote_created"),
+      thread_id: threadId,
+      sequence: 1,
+      version: 1,
+      created_at: Common.TimestampMillis.make(1_950_000_000_000),
+      type: "thread.created",
+      data: { workspace_id: workspaceId },
+    }
+    const terminal: Event.TurnCompleted = {
+      id: Ids.EventId.make("event_cli_remote_completed"),
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence: 2,
+      version: 1,
+      created_at: Common.TimestampMillis.make(1_950_000_000_001),
+      type: "turn.completed",
+      data: { provider: "fake", model: "remote" },
+    }
+    const calls: Array<{ readonly path: string; readonly body?: unknown }> = []
+    const client = Client.make({
+      requestJson: (input) =>
+        Effect.sync(() => {
+          calls.push({ path: input.path, ...(input.body === undefined ? {} : { body: input.body }) })
+          if (input.path === `/v1/threads/${threadId}`) {
+            return { summary: threadSummary(threadId, workspaceId), events: [Codec.encode(Event.Event)(previous)] }
+          }
+          if (input.path === "/v1/turns") {
+            return { thread_id: threadId, accepted: true }
+          }
+          throw new Error(`unexpected request ${input.path}`)
+        }),
+      streamJson: (input) =>
+        Stream.fromEffectDrain(Effect.sync(() => calls.push({ path: input.path }))).pipe(
+          Stream.concat(
+            input.path === `/v1/threads/${threadId}/events?after_sequence=1`
+              ? Stream.make(Codec.encode(Event.Event)(terminal))
+              : Stream.fail(
+                  new Client.SdkError({ message: `unexpected stream ${input.path}`, operation: "streamJson" }),
+                ),
+          ),
+        ),
+    })
+
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Execute.execute(["--execute", "--thread", threadId, "remote please"])
+      }).pipe(
+        Effect.provide(
+          Execute.layerWithClientFactory(() => client).pipe(
+            Layer.provideMerge(makeExecuteDependencies(output)),
+            Layer.provideMerge(
+              Layer.succeed(
+                BackendEndpoint.Resolver,
+                BackendEndpoint.Resolver.of({
+                  resolveEndpoint: () =>
+                    Effect.succeed({
+                      kind: "orb" as const,
+                      url: "https://orb-endpoint.rika.test",
+                      token: "orb-token",
+                      orb_id: Ids.OrbId.make("orb_cli_remote"),
+                      thread_id: threadId,
+                    }),
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+    )
+
+    const events = output.stdout.map((line) => Schema.decodeUnknownSync(Event.Event)(JSON.parse(line)))
+
+    expect(exitCode).toBe(0)
+    expect(events).toEqual([terminal])
+    expect(calls).toEqual([
+      { path: `/v1/threads/${threadId}` },
+      {
+        path: "/v1/turns",
+        body: {
+          thread_id: threadId,
+          workspace_id: workspaceId,
+          content: "remote please",
+        },
+      },
+      { path: `/v1/threads/${threadId}/events?after_sequence=1` },
+    ])
+    expect(output.stderr).toEqual([])
   })
 
   test("uses piped stdin as the execute prompt when no prompt argument is present", async () => {
@@ -314,6 +429,15 @@ const runGit = async (cwd: string, args: ReadonlyArray<string>) => {
   const [exitCode, stderr] = await Promise.all([subprocess.exited, new Response(subprocess.stderr).text()])
   if (exitCode !== 0) throw new Error(stderr)
 }
+
+const threadSummary = (threadId: Ids.ThreadId, workspaceId: Ids.WorkspaceId) => ({
+  thread_id: threadId,
+  workspace_id: workspaceId,
+  diff: { additions: 0, modifications: 0, deletions: 0 },
+  archived: false,
+  created_at: Common.TimestampMillis.make(1_950_000_000_000),
+  updated_at: Common.TimestampMillis.make(1_950_000_000_000),
+})
 
 const waitForOutputEvent = (output: Output.MemoryOutput, type: Event.Event["type"]) =>
   Effect.gen(function* () {

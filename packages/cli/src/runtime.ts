@@ -163,6 +163,7 @@ const loadTui = (): Effect.Effect<TuiModule> => Effect.promise(() => import("@ri
 type RuntimeError =
   | AgentLoop.RunError
   | ArtifactStore.ArtifactStoreError
+  | BackendEndpoint.BackendEndpointError
   | CheckRegistry.CheckRegistryError
   | ContextResolver.ContextResolverError
   | Config.ConfigError
@@ -207,6 +208,7 @@ type RuntimeError =
 
 const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Migration.MigrationError) return `Rika failed: ${error.message}`
+  if (error instanceof BackendEndpoint.BackendEndpointError) return `Rika failed: ${error.message}`
   if (error instanceof Extensions.ExtensionsError) return Extensions.formatError(error)
   if (error instanceof FffSearch.FffSearchError) return `Rika failed: ${error.message}`
   if (error instanceof Client.SdkError) return `Rika failed: ${error.message}`
@@ -315,6 +317,11 @@ export const liveLayer = (
     Layer.provideMerge(timeLayer),
     Layer.provideMerge(IdGenerator.layer),
   )
+  const orbStoreLayer = OrbStore.layer.pipe(
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
   const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
@@ -330,6 +337,7 @@ export const liveLayer = (
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
+    orbStoreLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
   const subagentToolLayer = BuiltInTools.subagentToolExecutorLayerFromPermissionConfig(permissionConfig).pipe(
@@ -367,7 +375,20 @@ export const liveLayer = (
     diagnosticsLayer,
     telemetryLayer,
   )
-  const commandLayer = Execute.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
+  const backendEndpointResolverLayer = BackendEndpoint.resolverLayerFromEnv(env).pipe(
+    Layer.provideMerge(LocalBackend.layerFromInput({ env, cwd })),
+    Layer.provideMerge(BackendEndpoint.healthLayer),
+    Layer.provideMerge(migratedStorageLayer),
+  )
+  const agentLoopLayer = AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))
+
+  const commandLayer = command.ephemeral
+    ? Execute.layer.pipe(Layer.provideMerge(agentLoopLayer), Layer.provideMerge(backendEndpointResolverLayer))
+    : Execute.layerWithClientFactory().pipe(
+        Layer.provideMerge(baseLayer),
+        Layer.provideMerge(backendEndpointResolverLayer),
+        Layer.provideMerge(agentLoopLayer),
+      )
 
   return commandLayer
 }
@@ -1063,10 +1084,14 @@ export type LiveLayerOutput =
   | Config.Service
   | ContextResolver.Service
   | Database.Service
+  | BackendEndpoint.Health
+  | BackendEndpoint.Resolver
   | Execute.Service
   | IdGenerator.Service
+  | LocalBackend.Service
   | Migration.Service
   | McpApprovalStore.Service
+  | OrbStore.Service
   | Output.Service
   | PluginHost.Service
   | ProjectStore.Service
@@ -1228,6 +1253,7 @@ export type ServerLayerOutput =
   | WorkspaceStore.Service
 
 export type LiveLayerError =
+  | BackendEndpoint.BackendEndpointError
   | Config.ConfigError
   | ContextResolver.ContextResolverError
   | Client.SdkError

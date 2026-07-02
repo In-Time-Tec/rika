@@ -20,6 +20,7 @@
   "devDependencies": {
     "@foldkit/vite-plugin": "catalog:",
     "@rika/agent": "workspace:*",
+    "@rika/cli": "workspace:*",
     "@rika/core": "workspace:*",
     "@rika/ide": "workspace:*",
     "@rika/llm": "workspace:*",
