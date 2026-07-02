@@ -56,6 +56,7 @@
       "@types/node": "24.12.2",
       "drizzle-kit": "1.0.0-rc.2",
       "drizzle-orm": "1.0.0-rc.2",
+      "e2b": "2.31.0",
       "effect": "4.0.0-beta.90",
       "foldkit": "0.120.0",
       "oxlint": "1.60.0",

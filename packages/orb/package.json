@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@rika/orb",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
+    "lint": "bun --cwd ../.. oxlint packages/orb/src packages/orb/test",
+    "test": "bun test --pass-with-no-tests",
+    "typecheck": "bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@rika/core": "workspace:*",
+    "@rika/schema": "workspace:*",
+    "e2b": "catalog:",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/bun": "catalog:",
+    "typescript": "catalog:"
+  }
+}
