@@ -1,4 +1,4 @@
-import { AgentLoop, ThreadService, WorkspaceAccess } from "@rika/agent"
+import { AgentLoop, ThreadService, WorkspaceAccess, WorkspaceIdentity } from "@rika/agent"
 import { Config } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { ArtifactStore, Database, ThreadEventLog } from "@rika/persistence"
@@ -106,7 +106,12 @@ export const layer = Layer.effect(
       }),
       createThread: Effect.fn("RemoteControl.createThread")(function* (input: Remote.CreateThreadRequest) {
         const values = yield* config.get
-        const workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(values.workspace_root)
+        const workspaceId =
+          input.workspace_id ??
+          WorkspaceIdentity.resolveWorkspaceId({
+            workspace_root: values.workspace_root,
+            ...(input.project_id === undefined ? {} : { project_id: input.project_id }),
+          })
         const previousSequence = input.thread_id === undefined ? 0 : yield* latestLoggedSequence(input.thread_id)
         yield* workspaceAccess.ensureWorkspaceForCreate({
           workspace_id: workspaceId,
@@ -114,8 +119,9 @@ export const layer = Layer.effect(
           action: "write",
         })
         const summary = yield* threads.create({
-          ...input,
+          ...(input.thread_id === undefined ? {} : { thread_id: input.thread_id }),
           workspace_id: workspaceId,
+          ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
         })
         yield* publishLoggedEvents(summary.thread_id, previousSequence)
         return toRemoteSummary(summary)
@@ -215,7 +221,12 @@ export const layer = Layer.effect(
       startTurn: Effect.fn("RemoteControl.startTurn")(function* (input: Remote.StartTurnRequest) {
         const values = yield* config.get
         const currentIdeContext = yield* ideBridge.currentContext()
-        const workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(values.workspace_root)
+        const workspaceId =
+          input.workspace_id ??
+          WorkspaceIdentity.resolveWorkspaceId({
+            workspace_root: values.workspace_root,
+            ...(input.project_id === undefined ? {} : { project_id: input.project_id }),
+          })
         if (input.user_id !== undefined) {
           yield* workspaceAccess
             .requireThread({ thread_id: input.thread_id, user_id: input.user_id, action: "write" })

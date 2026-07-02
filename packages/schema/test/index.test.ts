@@ -299,9 +299,14 @@ describe("Rika protocol schemas", () => {
     const start: Remote.StartTurnRequest = {
       thread_id: threadId,
       workspace_id: workspaceId,
+      project_id: projectId,
       content: "Ship remote control",
       content_parts: [Message.text("Ship remote control")],
       mode: "smart",
+    }
+    const create: Remote.CreateThreadRequest = {
+      thread_id: threadId,
+      project_id: projectId,
     }
     const summary: Remote.ThreadSummary = {
       thread_id: threadId,
@@ -334,6 +339,7 @@ describe("Rika protocol schemas", () => {
       after_sequence: 1,
     }
 
+    expect(Codec.decode(Remote.CreateThreadRequest)(Codec.encode(Remote.CreateThreadRequest)(create))).toEqual(create)
     expect(Codec.decode(Remote.StartTurnRequest)(Codec.encode(Remote.StartTurnRequest)(start))).toEqual(start)
     expect(Codec.decode(Remote.ThreadSummary)(Codec.encode(Remote.ThreadSummary)(summary))).toEqual(summary)
     expect(Codec.decode(Remote.PreviewThreadRequest)(Codec.encode(Remote.PreviewThreadRequest)(preview))).toEqual(

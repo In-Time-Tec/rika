@@ -38,14 +38,17 @@ export const make = (
   client: Client.Interface,
   renderer: Adapter.Adapter,
   ticks: Controller.Dependencies<RunError>["ticks"],
+  workspaceId?: Ids.WorkspaceId,
 ): Interface => {
   const backend = makeBackend(client)
   return Service.of({
     run: Effect.fn("Tui.RemoteSession.run")(function* (input: RunInput) {
       const defaultWorkspace = input.workspace_root ?? process.cwd()
+      const runInput =
+        workspaceId === undefined || input.workspace_id !== undefined ? input : { ...input, workspace_id: workspaceId }
       return yield* Controller.run(
         { backend, renderer, ticks, defaultMode: input.mode ?? "smart", defaultWorkspace },
-        input,
+        runInput,
       )
     }),
   })
@@ -57,16 +60,15 @@ export const run = Effect.fn("Tui.RemoteSession.run.call")(function* (input: Run
 })
 
 const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError> => ({
-  loadInitial: ({ thread_id, workspace_path, mode }) =>
+  loadInitial: ({ thread_id, workspace_path, workspace_id, mode }) =>
     Effect.gen(function* () {
-      const workspaceId = Ids.WorkspaceId.make(workspace_path)
       if (thread_id !== undefined) {
         const record = yield* client
           .openThread(thread_id)
           .pipe(
             Effect.catchTag("SdkError", () =>
               client
-                .createThread({ thread_id, workspace_id: workspaceId })
+                .createThread({ thread_id, workspace_id })
                 .pipe(Effect.map((summary): Remote.ThreadRecord => ({ summary, events: [] }))),
             ),
           )
@@ -78,7 +80,7 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
           ),
         }
       }
-      const summary = yield* client.createThread({ workspace_id: workspaceId })
+      const summary = yield* client.createThread({ workspace_id })
       return {
         thread_id: summary.thread_id,
         last_sequence: 0,
@@ -87,12 +89,12 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
         ),
       }
     }),
-  streamTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
+  streamTurn: ({ thread_id, workspace_id, content, content_parts, mode, fast_mode }) =>
     Stream.unwrap(
       client
         .startTurn({
           thread_id,
-          workspace_id: Ids.WorkspaceId.make(workspace_path),
+          workspace_id,
           content,
           ...(content_parts === undefined ? {} : { content_parts }),
           mode,
@@ -100,11 +102,11 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
         })
         .pipe(Effect.as(Stream.empty)),
     ),
-  submitTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
+  submitTurn: ({ thread_id, workspace_id, content, content_parts, mode, fast_mode }) =>
     client
       .startTurn({
         thread_id,
-        workspace_id: Ids.WorkspaceId.make(workspace_path),
+        workspace_id,
         content,
         ...(content_parts === undefined ? {} : { content_parts }),
         mode,
@@ -115,10 +117,8 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
     client.subscribeThreadEvents({ thread_id, ...(after_sequence === undefined ? {} : { after_sequence }) }),
   cancelTurn: ({ thread_id, turn_id }) => client.interruptTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(client, context, command),
-  listThreads: ({ workspace_path }) =>
-    client
-      .listThreads({ workspace_id: Ids.WorkspaceId.make(workspace_path) })
-      .pipe(Effect.map((summaries) => summaries.map(threadOptionFromSummary))),
+  listThreads: ({ workspace_id }) =>
+    client.listThreads({ workspace_id }).pipe(Effect.map((summaries) => summaries.map(threadOptionFromSummary))),
   loadThreadPreview: ({ thread_id, workspace_path, mode }) =>
     client.previewThread(thread_id).pipe(
       Effect.map((record) => ({
@@ -153,8 +153,7 @@ const handleCommand = (
   command: string,
 ): Effect.Effect<Backend.CommandResult, RunError> =>
   Effect.gen(function* () {
-    const { state, thread_id: threadId, workspace_path: workspacePath } = context
-    const workspaceId = Ids.WorkspaceId.make(workspacePath)
+    const { state, thread_id: threadId, workspace_path: workspacePath, workspace_id: workspaceId } = context
     const [name, argument] = Backend.splitCommand(command)
     if (name === "/exit" || name === "/quit")
       return Backend.commandResult(context, { state: ViewState.withNotice(state, "Goodbye."), exit: true })

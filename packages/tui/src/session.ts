@@ -87,10 +87,10 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
         last_sequence: events.at(-1)?.sequence ?? 0,
       }
     }),
-  streamTurn: ({ thread_id, workspace_path, content, content_parts, mode, fast_mode }) =>
+  streamTurn: ({ thread_id, workspace_id, content, content_parts, mode, fast_mode }) =>
     dependencies.agentLoop.streamTurn({
       thread_id,
-      workspace_id: Ids.WorkspaceId.make(workspace_path),
+      workspace_id,
       content,
       ...(content_parts === undefined ? {} : { content_parts }),
       mode,
@@ -98,8 +98,10 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
     }),
   cancelTurn: ({ thread_id, turn_id }) => dependencies.agentLoop.cancelTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(dependencies, context, command),
-  listThreads: () =>
-    dependencies.threadService.list({}).pipe(Effect.map((summaries) => summaries.map(threadOptionFromSummary))),
+  listThreads: ({ workspace_id }) =>
+    dependencies.threadService
+      .list({ workspace_id })
+      .pipe(Effect.map((summaries) => summaries.map(threadOptionFromSummary))),
   loadThreadPreview: ({ thread_id, workspace_path, mode }) =>
     dependencies.threadService.preview({ thread_id }).pipe(
       Effect.map((record) => ({
@@ -128,7 +130,7 @@ const handleCommand = (
   command: string,
 ): Effect.Effect<Backend.CommandResult, RunError> =>
   Effect.gen(function* () {
-    const { state, thread_id: threadId } = context
+    const { state, thread_id: threadId, workspace_id: workspaceId } = context
     const [name, argument] = Backend.splitCommand(command)
     if (name === "/exit" || name === "/quit")
       return Backend.commandResult(context, { state: ViewState.withNotice(state, "Goodbye."), exit: true })
@@ -168,17 +170,17 @@ const handleCommand = (
       return Backend.commandResult(context, { state: ViewState.withNotice(state, formatSkill(skill)) })
     }
     if (name === "/threads") {
-      const summaries = yield* dependencies.threadService.list({})
+      const summaries = yield* dependencies.threadService.list({ workspace_id: workspaceId })
       return Backend.commandResult(context, { state: ViewState.withNotice(state, formatSummaries(summaries)) })
     }
     if (name === "/search") {
       if (argument === undefined || argument.length === 0)
         return Backend.commandResult(context, { state: ViewState.withNotice(state, "Usage: /search <query>") })
-      const results = yield* dependencies.threadService.search({ query: argument })
+      const results = yield* dependencies.threadService.search({ query: argument, workspace_id: workspaceId })
       return Backend.commandResult(context, { state: ViewState.withNotice(state, formatSearchResults(results)) })
     }
     if (name === "/new") {
-      const summary = yield* dependencies.threadService.create({})
+      const summary = yield* dependencies.threadService.create({ workspace_id: workspaceId })
       const next = ViewState.withThread(state, {
         thread_id: summary.thread_id,
         events: [],

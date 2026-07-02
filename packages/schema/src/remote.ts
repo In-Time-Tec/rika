@@ -73,6 +73,7 @@ export interface CreateThreadRequest extends Schema.Schema.Type<typeof CreateThr
 export const CreateThreadRequest = Schema.Struct({
   thread_id: Schema.optional(ThreadId),
   workspace_id: Schema.optional(WorkspaceId),
+  project_id: Schema.optional(ProjectId),
   user_id: Schema.optional(UserId),
 }).annotate({ identifier: "Rika.Remote.CreateThreadRequest" })
 
@@ -171,6 +172,7 @@ export interface StartTurnRequest extends Schema.Schema.Type<typeof StartTurnReq
 export const StartTurnRequest = Schema.Struct({
   thread_id: ThreadId,
   workspace_id: Schema.optional(WorkspaceId),
+  project_id: Schema.optional(ProjectId),
   user_id: Schema.optional(UserId),
   content: Schema.String,
   content_parts: Schema.optional(Schema.Array(ContentPart)),

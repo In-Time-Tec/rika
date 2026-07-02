@@ -9,6 +9,7 @@ import {
   ThreadService,
   ToolExecutor,
   WorkspaceAccess,
+  WorkspaceIdentity,
 } from "@rika/agent"
 import { Config, Diagnostics, IdGenerator, Telemetry, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
@@ -264,6 +265,12 @@ export const liveLayer = (
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const projectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
   const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
@@ -273,6 +280,7 @@ export const liveLayer = (
     artifactLayer,
     mcpApprovalLayer,
     workspaceStoreLayer,
+    projectStoreLayer,
     Migration.layer,
     ThreadEventLog.layer,
     ThreadProjection.layer,
@@ -427,6 +435,32 @@ const interactiveRemoteLiveLayerFromTui = (
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
   const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
   const mode = command.mode ?? "smart"
+  const configLayer = Config.layerFromValues(
+    {
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      default_mode: mode,
+      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
+    },
+    env,
+  )
+  const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
+  const timeLayer = Time.layer
+  const projectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
+  const storageLayer = Layer.mergeAll(
+    configLayer,
+    databaseLayer,
+    Migration.layer,
+    timeLayer,
+    IdGenerator.layer,
+    projectStoreLayer,
+  )
+  const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
   const backendLayer = LocalBackend.layerFromInput({ env, cwd })
   const remoteSessionLayer = Layer.effect(
     RemoteSession.Service,
@@ -434,13 +468,27 @@ const interactiveRemoteLiveLayerFromTui = (
       const backend = yield* LocalBackend.Service
       const renderer = yield* Adapter.Service
       const ticker = yield* Ticker.Service
+      const workspaceId = yield* workspaceIdForRoot(workspaceRoot)
       const client = reconnectingClient({ backend, workspace_root: workspaceRoot, data_dir: dataDir, mode })
-      return RemoteSession.make(client, renderer, ticker.ticks)
+      return RemoteSession.make(client, renderer, ticker.ticks, workspaceId)
     }),
-  ).pipe(Layer.provideMerge(backendLayer), Layer.provideMerge(Adapter.layer), Layer.provideMerge(Ticker.layer))
+  ).pipe(
+    Layer.provideMerge(backendLayer),
+    Layer.provideMerge(Adapter.layer),
+    Layer.provideMerge(Ticker.layer),
+    Layer.provideMerge(migratedStorageLayer),
+  )
 
   return remoteSessionLayer
 }
+
+const workspaceIdForRoot = Effect.fn("Cli.Runtime.workspaceIdForRoot")(function* (workspaceRoot: string) {
+  const projectId = yield* Project.resolveCurrentProjectId(workspaceRoot)
+  return WorkspaceIdentity.resolveWorkspaceId({
+    workspace_root: workspaceRoot,
+    ...(projectId === undefined ? {} : { project_id: projectId }),
+  })
+})
 
 export interface ReconnectingClientInput {
   readonly backend: LocalBackend.Interface
@@ -855,6 +903,7 @@ export type LiveLayerOutput =
   | McpApprovalStore.Service
   | Output.Service
   | PluginHost.Service
+  | ProjectStore.Service
   | Router.Service
   | SkillRegistry.Service
   | SpecialtyTools.Service
@@ -895,9 +944,15 @@ export type InteractiveLayerOutput =
 
 export type InteractiveRemoteLayerOutput =
   | Adapter.Service
+  | Config.Service
+  | Database.Service
+  | IdGenerator.Service
   | LocalBackend.Service
+  | Migration.Service
+  | ProjectStore.Service
   | RemoteSession.Service
   | Ticker.Service
+  | Time.Service
 
 export type ThreadsLayerOutput =
   | Config.Service
@@ -1002,6 +1057,7 @@ export type LiveLayerError =
   | McpClient.RunError
   | Migration.MigrationError
   | PluginHost.RunError
+  | ProjectStore.ProjectStoreError
   | ReviewService.RunError
 
 const defaultModeFromEnv = (env: Record<string, string | undefined>): Config.Mode => {

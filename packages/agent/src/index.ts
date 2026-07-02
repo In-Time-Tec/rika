@@ -13,5 +13,6 @@ export * as Toolkit from "./toolkit"
 export * as ToolExecutor from "./tool-executor"
 export * as ToolRegistry from "./tool-registry"
 export * as WorkspaceAccess from "./workspace-access"
+export * as WorkspaceIdentity from "./workspace-identity"
 
 export const agentPackage = "@rika/agent"

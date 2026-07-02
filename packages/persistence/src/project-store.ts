@@ -33,6 +33,9 @@ export interface Interface {
   readonly getByName: (
     name: string,
   ) => Effect.Effect<Orb.ProjectRecord | undefined, Database.DatabaseError | ProjectStoreError>
+  readonly getByRepoOrigin: (
+    repoOrigin: string,
+  ) => Effect.Effect<Orb.ProjectRecord | undefined, Database.DatabaseError | ProjectStoreError>
   readonly list: () => Effect.Effect<ReadonlyArray<Orb.ProjectRecord>, Database.DatabaseError | ProjectStoreError>
   readonly setEnv: (
     projectId: Ids.ProjectId,
@@ -110,6 +113,20 @@ export const layer = Layer.effect(
           Effect.try({
             try: () => rowToProject(database.get<ProjectRow>(sql`select * from projects where name = ${name} limit 1`)),
             catch: (cause) => toError(cause, "getByName", undefined, name),
+          }),
+        )
+        return project === undefined ? undefined : yield* withSecretNames(project, secretsDirectory)
+      }),
+      getByRepoOrigin: Effect.fn("ProjectStore.getByRepoOrigin")(function* (repoOrigin: string) {
+        const project = yield* databaseService.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () =>
+              rowToProject(
+                database.get<ProjectRow>(
+                  sql`select * from projects where repo_origin = ${repoOrigin} order by name asc limit 1`,
+                ),
+              ),
+            catch: (cause) => toError(cause, "getByRepoOrigin"),
           }),
         )
         return project === undefined ? undefined : yield* withSecretNames(project, secretsDirectory)
@@ -194,6 +211,11 @@ export const get = Effect.fn("ProjectStore.get.call")(function* (projectId: Ids.
 export const getByName = Effect.fn("ProjectStore.getByName.call")(function* (name: string) {
   const store = yield* Service
   return yield* store.getByName(name)
+})
+
+export const getByRepoOrigin = Effect.fn("ProjectStore.getByRepoOrigin.call")(function* (repoOrigin: string) {
+  const store = yield* Service
+  return yield* store.getByRepoOrigin(repoOrigin)
 })
 
 export const list = Effect.fn("ProjectStore.list.call")(function* () {

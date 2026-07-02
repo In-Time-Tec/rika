@@ -112,15 +112,45 @@ describe("TUI remote session", () => {
       },
     ])
   })
+
+  test("uses the runtime-supplied workspace identity for remote SDK calls", async () => {
+    const backend = fakeBackend()
+    const rendered: Array<ViewState.ViewState> = []
+    const projectWorkspaceId = Ids.WorkspaceId.make("project:project_remote_session")
+
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        const renderer = yield* Adapter.Service
+        const ticker = yield* Ticker.Service
+        return yield* RemoteSession.make(backend.client, renderer, ticker.ticks, projectWorkspaceId).run({
+          workspace_root: workspaceRoot,
+          mode: "smart",
+        })
+      }).pipe(
+        Effect.provide(Adapter.memoryLayer({ rendered, keys: ["hello", "/threads", "/new", "/exit"].flatMap(line) })),
+        Effect.provide(Ticker.memoryLayer),
+      ),
+    )
+
+    expect(exitCode).toBe(0)
+    expect(backend.workspaceIds).toEqual([
+      projectWorkspaceId,
+      projectWorkspaceId,
+      projectWorkspaceId,
+      projectWorkspaceId,
+    ])
+  })
 })
 
 interface FakeBackend {
   readonly client: Client.Interface
   readonly turns: Array<string>
+  readonly workspaceIds: Array<Ids.WorkspaceId | undefined>
 }
 
 const fakeBackend = (): FakeBackend => {
   const turns: Array<string> = []
+  const workspaceIds: Array<Ids.WorkspaceId | undefined> = []
   const threads = new Map<Ids.ThreadId, { summary: Remote.ThreadSummary; events: Array<Event.Event> }>()
   const subscribers = new Set<(event: Event.Event) => void>()
   const initialThread = Ids.ThreadId.make("thread_remote_initial")
@@ -141,12 +171,17 @@ const fakeBackend = (): FakeBackend => {
       }),
     createThread: (input: Remote.CreateThreadRequest = {}) =>
       Effect.sync(() => {
+        workspaceIds.push(input.workspace_id)
         const threadId = input.thread_id ?? Ids.ThreadId.make(`thread_remote_created_${nextThread++}`)
-        const threadSummary = summary(threadId)
+        const threadSummary = summary(threadId, undefined, input.workspace_id)
         threads.set(threadId, { summary: threadSummary, events: [threadCreated(threadId, 1)] })
         return threadSummary
       }),
-    listThreads: () => Effect.sync(() => [...threads.values()].map((record) => record.summary)),
+    listThreads: (input) =>
+      Effect.sync(() => {
+        workspaceIds.push(input?.workspace_id)
+        return [...threads.values()].map((record) => record.summary)
+      }),
     openThread: (threadId) =>
       Effect.suspend(() => {
         const record = threads.get(threadId)
@@ -207,6 +242,7 @@ const fakeBackend = (): FakeBackend => {
       ),
     startTurn: (input) =>
       Effect.sync(() => {
+        workspaceIds.push(input.workspace_id)
         turns.push(input.content)
         const events = turnEvents(input.thread_id, input.content, "remote response")
         const record = threads.get(input.thread_id)
@@ -232,7 +268,7 @@ const fakeBackend = (): FakeBackend => {
     ideNavigationRequests: () => Effect.succeed([]),
   }
 
-  return { client, turns }
+  return { client, turns, workspaceIds }
 }
 
 const emptyIdeStatus = { connected: false, capabilities: [], workspace_roots: [] } as const
@@ -248,9 +284,13 @@ const setArchived = (
   return record.summary
 }
 
-const summary = (threadId: Ids.ThreadId, latest?: string): Remote.ThreadSummary => ({
+const summary = (
+  threadId: Ids.ThreadId,
+  latest?: string,
+  inputWorkspaceId: Ids.WorkspaceId = workspaceId,
+): Remote.ThreadSummary => ({
   thread_id: threadId,
-  workspace_id: workspaceId,
+  workspace_id: inputWorkspaceId,
   ...(latest === undefined ? {} : { latest_message_text: latest }),
   ...(latest === undefined ? {} : { title_text: latest }),
   diff: { additions: 0, modifications: 0, deletions: 0 },

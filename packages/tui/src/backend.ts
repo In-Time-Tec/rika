@@ -6,6 +6,7 @@ import * as ViewState from "./view-state"
 export interface LoadInput {
   readonly thread_id?: Ids.ThreadId
   readonly workspace_path: string
+  readonly workspace_id: Ids.WorkspaceId
   readonly mode: Config.Mode
 }
 
@@ -18,6 +19,7 @@ export interface LoadedThread {
 export interface TurnRequest {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
+  readonly workspace_id: Ids.WorkspaceId
   readonly content: string
   readonly content_parts?: ReadonlyArray<Message.ContentPart>
   readonly mode: Config.Mode
@@ -37,6 +39,7 @@ export interface CancelRequest {
 export interface PreviewInput {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
+  readonly workspace_id: Ids.WorkspaceId
   readonly mode: Config.Mode
 }
 
@@ -49,6 +52,7 @@ export interface CommandContext {
   readonly state: ViewState.ViewState
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
+  readonly workspace_id: Ids.WorkspaceId
   readonly mode: Config.Mode
 }
 
@@ -101,7 +105,10 @@ export interface SessionBackend<E> {
   readonly subscribeThreadEvents?: (input: ThreadEventsRequest) => Stream.Stream<Event.Event, E>
   readonly cancelTurn: (input: CancelRequest) => Effect.Effect<void, E>
   readonly runCommand: (context: CommandContext, command: string) => Effect.Effect<CommandResult, E>
-  readonly listThreads: (input: { readonly workspace_path: string }) => Effect.Effect<ReadonlyArray<ThreadOption>, E>
+  readonly listThreads: (input: {
+    readonly workspace_path: string
+    readonly workspace_id: Ids.WorkspaceId
+  }) => Effect.Effect<ReadonlyArray<ThreadOption>, E>
   readonly loadThreadPreview: (input: PreviewInput) => Effect.Effect<ThreadPreview, E>
 }
 

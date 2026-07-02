@@ -26,8 +26,9 @@ describe("ProjectStore", () => {
         })
         const byId = yield* ProjectStore.get(projectId)
         const byName = yield* ProjectStore.getByName("demo")
+        const byRepoOrigin = yield* ProjectStore.getByRepoOrigin("https://github.com/x/y")
         const listed = yield* ProjectStore.list()
-        return { created, byId, byName, listed }
+        return { created, byId, byName, byRepoOrigin, listed }
       }).pipe(Effect.provide(makeLayer(dataDir))),
     )
 
@@ -45,6 +46,7 @@ describe("ProjectStore", () => {
     expect(result.created).toEqual(expected)
     expect(result.byId).toEqual(expected)
     expect(result.byName).toEqual(expected)
+    expect(result.byRepoOrigin).toEqual(expected)
     expect(result.listed).toEqual([expected])
     await rm(dataDir, { force: true, recursive: true })
   })

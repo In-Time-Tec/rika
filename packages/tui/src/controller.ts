@@ -16,6 +16,7 @@ export interface RunInput extends Schema.Schema.Type<typeof RunInput> {}
 export const RunInput = Schema.Struct({
   mode: Schema.optional(Config.Mode),
   workspace_root: Schema.optional(Schema.String),
+  workspace_id: Schema.optional(Ids.WorkspaceId),
   thread_id: Schema.optional(Ids.ThreadId),
 }).annotate({ identifier: "Rika.Tui.Controller.RunInput" })
 
@@ -48,6 +49,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
   Effect.scoped(
     Effect.gen(function* () {
       const workspacePath = input.workspace_root ?? deps.defaultWorkspace
+      const workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(workspacePath)
       let mode = input.mode ?? deps.defaultMode
 
       if (input.thread_id === undefined) {
@@ -60,6 +62,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
         .loadInitial({
           ...(input.thread_id === undefined ? {} : { thread_id: input.thread_id }),
           workspace_path: workspacePath,
+          workspace_id: workspaceId,
           mode,
         })
         .pipe(Effect.catchCause((cause) => freshThread(deps, workspacePath, mode, Cause.squash(cause))))
@@ -121,6 +124,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           const request = {
             thread_id: threadId,
             workspace_path: workspacePath,
+            workspace_id: workspaceId,
             ...submitted,
             mode,
             fast_mode: state.fast_mode,
@@ -167,7 +171,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             yield* render()
           }
           const result = yield* deps.backend
-            .runCommand({ state, thread_id: threadId, workspace_path: workspacePath, mode }, command)
+            .runCommand(
+              { state, thread_id: threadId, workspace_path: workspacePath, workspace_id: workspaceId, mode },
+              command,
+            )
             .pipe(
               Effect.catchCause((cause) =>
                 Effect.succeed<CommandResult>({
@@ -195,7 +202,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       const openThreadSwitcher = () =>
         Effect.gen(function* () {
           const threads = yield* deps.backend
-            .listThreads({ workspace_path: workspacePath })
+            .listThreads({ workspace_path: workspacePath, workspace_id: workspaceId })
             .pipe(Effect.catchCause(() => Effect.succeed([])))
           state = ViewState.openThreadSwitcher(state, threads.map(threadSwitcherItem))
           yield* render()
@@ -210,22 +217,29 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           state = ViewState.threadSwitcherPreviewLoading(state, thread.thread_id)
           yield* render()
           yield* Effect.forkScoped(
-            deps.backend.loadThreadPreview({ thread_id: thread.thread_id, workspace_path: workspacePath, mode }).pipe(
-              Effect.matchCauseEffect({
-                onFailure: (cause: Cause.Cause<E>) =>
-                  Queue.offer(queue, {
-                    _tag: "ThreadPreviewFailed",
-                    thread_id: thread.thread_id,
-                    message: errorMessage(Cause.squash(cause)),
-                  }).pipe(Effect.asVoid),
-                onSuccess: (preview) =>
-                  Queue.offer(queue, {
-                    _tag: "ThreadPreviewLoaded",
-                    thread_id: thread.thread_id,
-                    preview: preview.state,
-                  }).pipe(Effect.asVoid),
-              }),
-            ),
+            deps.backend
+              .loadThreadPreview({
+                thread_id: thread.thread_id,
+                workspace_path: workspacePath,
+                workspace_id: workspaceId,
+                mode,
+              })
+              .pipe(
+                Effect.matchCauseEffect({
+                  onFailure: (cause: Cause.Cause<E>) =>
+                    Queue.offer(queue, {
+                      _tag: "ThreadPreviewFailed",
+                      thread_id: thread.thread_id,
+                      message: errorMessage(Cause.squash(cause)),
+                    }).pipe(Effect.asVoid),
+                  onSuccess: (preview) =>
+                    Queue.offer(queue, {
+                      _tag: "ThreadPreviewLoaded",
+                      thread_id: thread.thread_id,
+                      preview: preview.state,
+                    }).pipe(Effect.asVoid),
+                }),
+              ),
           )
         })
 
@@ -549,7 +563,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             state.filepicker.query.length === 0
           ) {
             const threads = yield* deps.backend
-              .listThreads({ workspace_path: workspacePath })
+              .listThreads({ workspace_path: workspacePath, workspace_id: workspaceId })
               .pipe(Effect.catchCause(() => Effect.succeed([])))
             state = ViewState.openThreadPicker(
               state,

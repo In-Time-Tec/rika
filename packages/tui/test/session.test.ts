@@ -14,28 +14,37 @@ const configLayer = Config.layerFromValues({
   default_mode: "smart",
 })
 
-const fakeAgentLayer = Layer.succeed(
-  AgentLoop.Service,
-  AgentLoop.Service.of({
-    runTurn: Effect.fn("Tui.Session.test.runTurn")(function* (input: AgentLoop.RunTurnInput) {
-      const events = turnEvents(input, "session response")
-      return { thread_id: input.thread_id, turn_id: Ids.TurnId.make("turn_tui_session"), status: "completed", events }
+const fakeAgentLayer = (turns: Array<AgentLoop.RunTurnInput>) =>
+  Layer.succeed(
+    AgentLoop.Service,
+    AgentLoop.Service.of({
+      runTurn: Effect.fn("Tui.Session.test.runTurn")(function* (input: AgentLoop.RunTurnInput) {
+        turns.push(input)
+        const events = turnEvents(input, "session response")
+        return { thread_id: input.thread_id, turn_id: Ids.TurnId.make("turn_tui_session"), status: "completed", events }
+      }),
+      streamTurn: (input: AgentLoop.RunTurnInput) => {
+        turns.push(input)
+        return Stream.fromIterable(turnEvents(input, "session response"))
+      },
+      cancelTurn: Effect.fn("Tui.Session.test.cancelTurn")(function* (input: AgentLoop.CancelTurnInput) {
+        return turnFailed(input.thread_id, input.turn_id, 1)
+      }),
+      queueTurn: Effect.fn("Tui.Session.test.queueTurn")(function* (input: AgentLoop.RunTurnInput) {
+        return { thread_id: input.thread_id, position: 1 }
+      }),
     }),
-    streamTurn: (input: AgentLoop.RunTurnInput) => Stream.fromIterable(turnEvents(input, "session response")),
-    cancelTurn: Effect.fn("Tui.Session.test.cancelTurn")(function* (input: AgentLoop.CancelTurnInput) {
-      return turnFailed(input.thread_id, input.turn_id, 1)
-    }),
-    queueTurn: Effect.fn("Tui.Session.test.queueTurn")(function* (input: AgentLoop.RunTurnInput) {
-      return { thread_id: input.thread_id, position: 1 }
-    }),
-  }),
-)
+  )
 
 interface Harness {
   readonly rendered: Array<ViewState.ViewState>
 }
 
-const makeLayer = (rendered: Array<ViewState.ViewState>, keys: ReadonlyArray<Keys.Key>) => {
+const makeLayer = (
+  rendered: Array<ViewState.ViewState>,
+  keys: ReadonlyArray<Keys.Key>,
+  turns: Array<AgentLoop.RunTurnInput> = [],
+) => {
   const services = Layer.mergeAll(
     configLayer,
     Database.memoryLayer,
@@ -48,7 +57,7 @@ const makeLayer = (rendered: Array<ViewState.ViewState>, keys: ReadonlyArray<Key
     Ticker.memoryLayer,
     ReviewService.fakeLayer(() => Effect.succeed(fakeReviewResult)),
     SkillRegistry.fakeLayer([deploySkill]),
-    fakeAgentLayer,
+    fakeAgentLayer(turns),
   )
   return Session.layer.pipe(Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(services))))
 }
@@ -94,6 +103,22 @@ describe("TUI session", () => {
     expect(frames).toContain("Review completed: 1 findings across 1 files")
     expect(frames).toContain("Started new thread")
     expect(rendered.some((state) => (state.notice ?? "").includes("Goodbye"))).toBe(true)
+  })
+
+  test("uses an explicit workspace identity for interactive turns", async () => {
+    const rendered: Array<ViewState.ViewState> = []
+    const keys = ["hello", "/exit"].flatMap(line)
+    const workspaceId = Ids.WorkspaceId.make("project:project_tui_session")
+    const turns: Array<AgentLoop.RunTurnInput> = []
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* Session.run({ workspace_id: workspaceId })
+      }).pipe(Effect.provide(makeLayer(rendered, keys, turns))),
+    )
+
+    expect(turns[0]?.workspace_id).toBe(workspaceId)
   })
 
   test("resumes a durable thread by replaying persisted events into the view", async () => {
@@ -219,11 +244,12 @@ const fakeReviewResult: ReviewService.ReviewResult = {
 const turnEvents = (input: AgentLoop.RunTurnInput, response: string): ReadonlyArray<Event.Event> => {
   const turnId = Ids.TurnId.make("turn_tui_session")
   return [
-    turnStarted(input.thread_id, turnId, 1),
-    messageAdded(input.thread_id, 2, input.content, turnId, "user"),
-    modelChunk(input.thread_id, turnId, 3, response),
-    messageAdded(input.thread_id, 4, response, turnId, "assistant"),
-    turnCompleted(input.thread_id, turnId, 5),
+    threadCreated(input.thread_id, 1, input.workspace_id),
+    turnStarted(input.thread_id, turnId, 2),
+    messageAdded(input.thread_id, 3, input.content, turnId, "user"),
+    modelChunk(input.thread_id, turnId, 4, response),
+    messageAdded(input.thread_id, 5, response, turnId, "assistant"),
+    turnCompleted(input.thread_id, turnId, 6),
   ]
 }
 
@@ -236,10 +262,14 @@ const base = (threadId: Ids.ThreadId, sequence: number, turnId?: Ids.TurnId): Om
   created_at: Common.TimestampMillis.make(sequence),
 })
 
-const threadCreated = (threadId: Ids.ThreadId, sequence: number): Event.ThreadCreated => ({
+const threadCreated = (
+  threadId: Ids.ThreadId,
+  sequence: number,
+  workspaceId = Ids.WorkspaceId.make(workspaceRoot),
+): Event.ThreadCreated => ({
   ...base(threadId, sequence),
   type: "thread.created",
-  data: { workspace_id: Ids.WorkspaceId.make(workspaceRoot) },
+  data: { workspace_id: workspaceId },
 })
 
 const turnStarted = (threadId: Ids.ThreadId, turnId: Ids.TurnId, sequence: number): Event.TurnStarted => ({

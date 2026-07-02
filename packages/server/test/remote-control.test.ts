@@ -12,6 +12,8 @@ import { HttpServer, RemoteControl } from "../src/index"
 const threadId = Ids.ThreadId.make("thread_remote_contract")
 const ideThreadId = Ids.ThreadId.make("thread_remote_ide")
 const workspaceId = Ids.WorkspaceId.make("workspace_remote_contract")
+const projectId = Ids.ProjectId.make("project_remote_contract")
+const projectWorkspaceId = Ids.WorkspaceId.make("project:project_remote_contract")
 const artifactId = Ids.ArtifactId.make("artifact_remote_contract")
 const ideClientId = Ids.IdeClientId.make("ide_remote_contract")
 const ownerId = Ids.UserId.make("user_remote_owner")
@@ -180,6 +182,31 @@ describe("remote control API and SDK", () => {
     const fetched = await Effect.runPromise(client.getArtifact(artifactId))
     expect(artifacts.map((item) => item.id)).toEqual([artifactId])
     expect(fetched).toEqual(artifact)
+  })
+
+  test("uses project identity when remote requests omit workspace id", async () => {
+    const runtime = ManagedRuntime.make(makeLayer())
+    const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))
+    const projectThreadId = Ids.ThreadId.make("thread_project_workspace")
+
+    const created = await Effect.runPromise(client.createThread({ thread_id: projectThreadId, project_id: projectId }))
+    const streamedPromise = Effect.runPromise(
+      client.subscribeThreadEvents({ thread_id: projectThreadId }).pipe(
+        Stream.takeUntil((event) => event.type === "turn.completed" || event.type === "turn.failed"),
+        Stream.runCollect,
+      ),
+    )
+    await Effect.runPromise(
+      client.startTurn({ thread_id: projectThreadId, project_id: projectId, content: "same repo" }),
+    )
+    const streamed = await streamedPromise
+    const opened = await Effect.runPromise(client.openThread(projectThreadId))
+
+    expect(created.workspace_id).toBe(projectWorkspaceId)
+    expect(opened.summary.workspace_id).toBe(projectWorkspaceId)
+    expect(streamed.find((event) => event.type === "thread.created")).toMatchObject({
+      data: { workspace_id: projectWorkspaceId },
+    })
   })
 
   test("local token auth blocks unauthorized HTTP calls", async () => {

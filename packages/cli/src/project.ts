@@ -1,7 +1,7 @@
 import { Config } from "@rika/core"
 import { Database, ProjectStore } from "@rika/persistence"
-import { Orb } from "@rika/schema"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Ids, Orb } from "@rika/schema"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Args from "./args"
 import * as Input from "./input"
 import * as Output from "./output"
@@ -93,10 +93,10 @@ const requireName = (command: Args.ProjectCommand) =>
 
 const repoOrigin = (command: Args.ProjectCommand, workspaceRoot: string) =>
   command.repo_origin === undefined
-    ? gitRemoteOrigin(workspaceRoot, command.action)
+    ? currentGitRemoteOrigin(workspaceRoot, command.action)
     : Effect.succeed(command.repo_origin)
 
-const gitRemoteOrigin = (workspaceRoot: string, action: Args.ProjectAction) =>
+export const currentGitRemoteOrigin = (workspaceRoot: string, action: Args.ProjectAction = "create") =>
   Effect.tryPromise({
     try: async () => {
       const subprocess = Bun.spawn(["git", "config", "--get", "remote.origin.url"], {
@@ -119,6 +119,22 @@ const gitRemoteOrigin = (workspaceRoot: string, action: Args.ProjectAction) =>
         action,
       }),
   })
+
+export const resolveCurrentProjectId = Effect.fn("Cli.Project.resolveCurrentProjectId")(function* (
+  workspaceRoot: string,
+) {
+  const projects = yield* ProjectStore.Service
+  const origin = yield* currentGitRemoteOrigin(workspaceRoot).pipe(Effect.option)
+  if (Option.isNone(origin)) return undefined
+  const project = yield* projects.getByRepoOrigin(origin.value)
+  return project?.project_id
+}) satisfies (
+  workspaceRoot: string,
+) => Effect.Effect<
+  Ids.ProjectId | undefined,
+  Database.DatabaseError | ProjectStore.ProjectStoreError,
+  ProjectStore.Service
+>
 
 const requireSecretName = (command: Args.ProjectCommand) =>
   command.secret_name === undefined

@@ -1,19 +1,33 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { AgentLoop, ContextResolver, SkillRegistry, ToolExecutor } from "@rika/agent"
 import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
-import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { Database, Migration, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids } from "@rika/schema"
 import { Effect, Layer, Schema } from "effect"
 import { Execute, Output } from "../src/index"
 
-const configLayer = Config.layerFromValues({
-  workspace_root: "/workspace/rika-cli-test",
-  data_dir: "/workspace/rika-cli-test/.rika",
-  default_mode: "smart",
-})
+const defaultWorkspaceRoot = "/workspace/rika-cli-test"
+const defaultDataDir = "/workspace/rika-cli-test/.rika"
 
-const makeLayer = (output: Output.MemoryOutput) => {
+const makeLayer = (output: Output.MemoryOutput, workspaceRoot = defaultWorkspaceRoot, dataDir = defaultDataDir) => {
+  const configLayer = Config.layerFromValues({
+    workspace_root: workspaceRoot,
+    data_dir: dataDir,
+    default_mode: "smart",
+  })
+  const databaseLayer = Database.memoryLayer
+  const timeLayer = Time.fixedLayer(Common.TimestampMillis.make(1_950_000_000_000))
+  const idLayer = IdGenerator.sequenceLayer(1)
+  const projectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(idLayer),
+  )
   const llmLayer = Router.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(
@@ -26,12 +40,13 @@ const makeLayer = (output: Output.MemoryOutput) => {
   const baseLayer = Layer.mergeAll(
     configLayer,
     Output.memoryLayer(output),
-    Database.memoryLayer,
+    databaseLayer,
     Migration.layer,
     ThreadEventLog.layer,
     ThreadProjection.layer,
-    Time.fixedLayer(Common.TimestampMillis.make(1_950_000_000_000)),
-    IdGenerator.sequenceLayer(1),
+    timeLayer,
+    idLayer,
+    projectStoreLayer,
     Diagnostics.memoryLayer([]),
     ContextResolver.emptyLayer,
     SkillRegistry.emptyLayer,
@@ -95,4 +110,37 @@ describe("CLI execute", () => {
     expect(first.thread_id).toBe(threadId)
     expect(first).toMatchObject({ type: "thread.created", data: { workspace_id: "/workspace/custom" } })
   })
+
+  test("uses project workspace identity when the git remote matches a stored project", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "rika-cli-execute-data-"))
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "rika-cli-execute-workspace-"))
+    await runGit(workspaceRoot, ["init"])
+    await runGit(workspaceRoot, ["remote", "add", "origin", "https://github.com/x/y"])
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    const exitCode = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ProjectStore.create({ name: "demo", repo_origin: "https://github.com/x/y" })
+        return yield* Execute.execute(["run", "--workspace", workspaceRoot, "hello"])
+      }).pipe(Effect.provide(makeLayer(output, workspaceRoot, dataDir))),
+    )
+
+    const first = Schema.decodeUnknownSync(Event.Event)(JSON.parse(output.stdout[0] ?? "{}"))
+
+    expect(exitCode).toBe(0)
+    expect(first).toMatchObject({
+      type: "thread.created",
+      data: { workspace_id: Ids.WorkspaceId.make("project:project_1") },
+    })
+    expect(output.stderr).toEqual([])
+    await rm(dataDir, { force: true, recursive: true })
+    await rm(workspaceRoot, { force: true, recursive: true })
+  })
 })
+
+const runGit = async (cwd: string, args: ReadonlyArray<string>) => {
+  const subprocess = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })
+  const [exitCode, stderr] = await Promise.all([subprocess.exited, new Response(subprocess.stderr).text()])
+  if (exitCode !== 0) throw new Error(stderr)
+}
