@@ -54,7 +54,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/server/RemoteControl") {}
 
-export const layer = Layer.effect(
+export const layerWithLive = Layer.effect(
   Service,
   Effect.gen(function* () {
     const agentLoop = yield* AgentLoop.Service
@@ -321,7 +321,9 @@ export const layer = Layer.effect(
       }),
     })
   }),
-).pipe(Layer.provideMerge(ThreadLive.layer))
+)
+
+export const layer = layerWithLive.pipe(Layer.provideMerge(ThreadLive.layer))
 
 export const createThread = Effect.fn("RemoteControl.createThread.call")(function* (input: Remote.CreateThreadRequest) {
   const service = yield* Service

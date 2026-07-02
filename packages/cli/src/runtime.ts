@@ -28,10 +28,10 @@ import {
 } from "@rika/persistence"
 import { PluginHost, PluginUi, SelfExtension } from "@rika/plugin"
 import { Client } from "@rika/sdk"
-import { HttpServer, RemoteControl } from "@rika/server"
+import { HttpServer, OrbMirror, RemoteControl, ThreadLive } from "@rika/server"
 import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
 import type { Adapter, RemoteSession, Session, Ticker } from "@rika/tui"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Schedule, Stream } from "effect"
 import * as Args from "./args"
 import * as CliConfig from "./config"
 import * as Doctor from "./doctor"
@@ -177,6 +177,7 @@ type RuntimeError =
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.McpClientError
   | Migration.MigrationError
+  | OrbMirror.OrbMirrorError
   | OrbExecute.OrbExecuteError
   | OrbManager.OrbProvisionError
   | OrbStore.OrbStoreError
@@ -213,6 +214,7 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Mcp.McpError) return Mcp.formatError(error)
   if (error instanceof McpApprovalStore.McpApprovalStoreError) return `Rika failed: ${error.message}`
   if (error instanceof McpClient.McpClientError) return `Rika failed: ${error.message}`
+  if (error instanceof OrbMirror.OrbMirrorError) return `Rika failed: ${error.message}`
   if (error instanceof OrbExecute.OrbExecuteError) return OrbExecute.formatError(error)
   if (error instanceof OrbManager.OrbProvisionError) return `Rika failed: ${error.message}`
   if (error instanceof OrbStore.OrbStoreError) return `Rika failed: ${error.message}`
@@ -257,6 +259,22 @@ const runtimeExitCode = (error: RuntimeError) => {
 
 const tagged = (error: unknown, tag: string): boolean =>
   typeof error === "object" && error !== null && "_tag" in error && error._tag === tag
+
+const orbMirrorSyncFailure = (error: OrbMirror.RunError): Diagnostics.Entry => ({
+  level: "error",
+  message: "orb_mirror.sync error",
+  data: {
+    op: "orb_mirror.sync",
+    outcome: "error",
+    error: error instanceof Error ? error.message : String(error),
+    error_tag: taggedErrorName(error),
+  },
+})
+
+const taggedErrorName = (error: unknown) =>
+  typeof error === "object" && error !== null && "_tag" in error && typeof error._tag === "string"
+    ? error._tag
+    : "unknown"
 
 const telemetryLayers = (env: Record<string, string | undefined>, configLayer: Layer.Layer<Config.Service>) => {
   const options = Telemetry.fromEnv(env, Version.version)
@@ -912,6 +930,12 @@ export const serverLiveLayer = (
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const orbStoreLayer = OrbStore.layer.pipe(
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
+  const sandboxLayer = SandboxClient.layer.pipe(Layer.provideMerge(configLayer))
   const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const pluginLayer = PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer))
   const permissionConfig = PermissionPolicy.configFromEnv(env)
@@ -921,6 +945,7 @@ export const serverLiveLayer = (
     artifactLayer,
     mcpApprovalLayer,
     workspaceStoreLayer,
+    orbStoreLayer,
     Migration.layer,
     ThreadEventLog.layer,
     ThreadProjection.layer,
@@ -964,9 +989,29 @@ export const serverLiveLayer = (
     diagnosticsLayer,
     telemetryLayer,
   )
-  const remoteLayer = RemoteControl.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
+  const threadLiveLayer = ThreadLive.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const agentLayer = AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))
+  const remoteLayer = RemoteControl.layerWithLive.pipe(
+    Layer.provideMerge(agentLayer),
+    Layer.provideMerge(baseLayer),
+    Layer.provideMerge(threadLiveLayer),
+  )
+  const orbMirrorLayer = OrbMirror.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(threadLiveLayer),
+    Layer.provideMerge(sandboxLayer),
+  )
+  const orbMirrorStartupLayer = Layer.effectDiscard(
+    Effect.repeat(
+      OrbMirror.syncRunning().pipe(Effect.catch((error) => Diagnostics.emit(orbMirrorSyncFailure(error)))),
+      Schedule.spaced("5 seconds"),
+    ).pipe(Effect.forkScoped),
+  ).pipe(Layer.provideMerge(orbMirrorLayer), Layer.provide(diagnosticsLayer))
   const httpLayer = HttpServer.layer.pipe(Layer.provideMerge(remoteLayer))
-  const commandLayer = Server.layer.pipe(Layer.provideMerge(Output.layer), Layer.provideMerge(httpLayer))
+  const commandLayer = Layer.mergeAll(
+    Server.layer.pipe(Layer.provideMerge(Output.layer), Layer.provideMerge(httpLayer)),
+    orbMirrorStartupLayer,
+  )
 
   return commandLayer
 }
@@ -1125,11 +1170,15 @@ export type ServerLayerOutput =
   | PluginHost.Service
   | RemoteControl.Service
   | Router.Service
+  | OrbMirror.Service
+  | OrbStore.Service
+  | SandboxClient.Service
   | Server.Service
   | SkillRegistry.Service
   | SpecialtyTools.Service
   | SubagentRuntime.Service
   | ThreadEventLog.Service
+  | ThreadLive.Service
   | ThreadProjection.Service
   | ThreadService.Service
   | Time.Service
@@ -1148,6 +1197,7 @@ export type LiveLayerError =
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.RunError
   | Migration.MigrationError
+  | OrbMirror.OrbMirrorError
   | OrbStore.OrbStoreError
   | PluginHost.RunError
   | ProjectStore.ProjectStoreError

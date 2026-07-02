@@ -39,6 +39,65 @@ describe("ThreadEventLog", () => {
     expect(count).toHaveLength(1)
   })
 
+  test("appendIfAbsent skips the exact existing thread sequence", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const first = threadCreated(1)
+        const inserted = yield* ThreadEventLog.appendIfAbsent(first)
+        const skipped = yield* ThreadEventLog.appendIfAbsent(first)
+        const replay = yield* ThreadEventLog.readThread({ thread_id: threadId })
+        return { inserted, skipped, replay }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.inserted.status).toBe("inserted")
+    expect(result.skipped.status).toBe("skipped")
+    expect(result.replay).toEqual([threadCreated(1)])
+  })
+
+  test("appendIfAbsent rejects a different payload at the same thread sequence", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadEventLog.appendIfAbsent(threadCreated(1))
+        return yield* ThreadEventLog.appendIfAbsent(messageAdded(1, "divergent remote payload")).pipe(Effect.flip)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(ThreadEventLog.ThreadEventLogError)
+    expect(error.operation).toBe("appendIfAbsent")
+  })
+
+  test("appendIfAbsent rejects a duplicate event id at a different thread sequence", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const first = threadCreated(1)
+        yield* ThreadEventLog.appendIfAbsent(first)
+        return yield* ThreadEventLog.appendIfAbsent({
+          ...first,
+          thread_id: Ids.ThreadId.make("thread_event_log_other"),
+        }).pipe(Effect.flip)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(ThreadEventLog.ThreadEventLogError)
+    expect(error.operation).toBe("appendIfAbsent")
+  })
+
+  test("appendIfAbsent rejects gaps", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        return yield* ThreadEventLog.appendIfAbsent(messageAdded(2, "gap")).pipe(Effect.flip)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(ThreadEventLog.ThreadEventLogError)
+    expect(error.operation).toBe("appendIfAbsent")
+  })
+
   test("reads complete history by default and only caps when a limit is provided", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {

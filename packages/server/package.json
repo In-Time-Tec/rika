@@ -17,13 +17,14 @@
     "@rika/agent": "workspace:*",
     "@rika/core": "workspace:*",
     "@rika/ide": "workspace:*",
+    "@rika/orb": "workspace:*",
     "@rika/persistence": "workspace:*",
+    "@rika/sdk": "workspace:*",
     "@rika/schema": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
     "@rika/llm": "workspace:*",
-    "@rika/sdk": "workspace:*",
     "@types/bun": "catalog:",
     "typescript": "catalog:"
   }
