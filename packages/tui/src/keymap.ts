@@ -1,6 +1,6 @@
 import * as Keys from "./keys"
 
-export type Surface = "input" | "palette" | "modepicker" | "overlay" | "inspect"
+export type Surface = "input" | "palette" | "modepicker" | "overlay"
 
 export interface Context {
   readonly surface: Surface
@@ -59,11 +59,6 @@ export type Action =
   | { readonly _tag: "NavPrevMessage" }
   | { readonly _tag: "NavNextMessage" }
   | { readonly _tag: "EditMessage" }
-  | { readonly _tag: "CloseInspect" }
-  | { readonly _tag: "InspectUp" }
-  | { readonly _tag: "InspectDown" }
-  | { readonly _tag: "InspectRefresh" }
-  | { readonly _tag: "InspectToggleView" }
 
 export type Pending = "ctrl-c" | "esc" | "enter"
 
@@ -92,8 +87,6 @@ export const resolve = (context: Context, current: Pending | undefined, key: Key
       return resolveModePicker(key)
     case "overlay":
       return resolveOverlay(key)
-    case "inspect":
-      return resolveInspect(key)
     default:
       return resolveInput(context, key)
   }
@@ -134,16 +127,6 @@ const resolveModePicker = (key: Keys.Key): Resolution => {
 }
 
 const resolveOverlay = (_key: Keys.Key): Resolution => action({ _tag: "CloseOverlay" })
-
-const resolveInspect = (key: Keys.Key): Resolution => {
-  if (isEscape(key)) return action({ _tag: "CloseInspect" })
-  if (key.name === "q") return action({ _tag: "CloseInspect" })
-  if (key.name === "up" || key.name === "k") return action({ _tag: "InspectUp" })
-  if (key.name === "down" || key.name === "j") return action({ _tag: "InspectDown" })
-  if (key.name === "r") return action({ _tag: "InspectRefresh" })
-  if (key.name === "tab") return action({ _tag: "InspectToggleView" })
-  return ignore
-}
 
 const resolveInput = (context: Context, key: Keys.Key): Resolution => {
   if (key.name === "paste" && key.sequence.length > 0) return action({ _tag: "Paste", text: key.sequence })

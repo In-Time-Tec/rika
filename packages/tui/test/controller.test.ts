@@ -17,6 +17,7 @@ interface Harness {
   readonly turnParts: Array<ReadonlyArray<Message.ContentPart> | undefined>
   readonly commands: Array<string>
   readonly opened: Array<Adapter.OpenFileInput>
+  readonly inspected: Array<ViewState.InspectTarget>
   readonly previewLoads: Array<Ids.ThreadId>
 }
 
@@ -37,6 +38,7 @@ const run = (
   const turnParts: Array<ReadonlyArray<Message.ContentPart> | undefined> = []
   const commands: Array<string> = []
   const opened: Array<Adapter.OpenFileInput> = []
+  const inspected: Array<ViewState.InspectTarget> = []
   const previewLoads: Array<Ids.ThreadId> = []
   let turnCount = 0
 
@@ -52,6 +54,10 @@ const run = (
       }),
     editExternally: (text) => Effect.succeed(text),
     pasteImage: () => Effect.succeed(".rika/pasted/test.png"),
+    runInspect: (target) =>
+      Effect.sync(() => {
+        inspected.push(target)
+      }),
   }
 
   const backend: Backend.SessionBackend<Error> = {
@@ -104,6 +110,7 @@ const run = (
     turnParts,
     commands,
     opened,
+    inspected,
     previewLoads,
   }))
 }
