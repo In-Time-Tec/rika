@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { AgentLoop, ContextResolver, SkillRegistry, ToolExecutor } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Client } from "@rika/sdk"
@@ -89,6 +89,83 @@ const makeExecuteDependencies = (
   )
 
   return AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))
+}
+
+const makeRedactedShellExecuteLayer = (
+  output: Output.MemoryOutput,
+  workspaceRoot: string,
+  dataDir: string,
+  logPath: string,
+  secret: string,
+) => {
+  const env = { FAKE_API_KEY: secret, RIKA_LOG_FILE: logPath }
+  const configLayer = Config.layerFromValues(
+    {
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      default_mode: "smart",
+    },
+    env,
+  )
+  const redactorLayer = SecretRedactor.layerFromEntries(SecretRedactor.entriesFromEnv(env))
+  const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
+  const timeLayer = Time.fixedLayer(Common.TimestampMillis.make(1_950_000_000_000))
+  const idLayer = IdGenerator.sequenceLayer(1)
+  const projectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(idLayer),
+  )
+  const providerRegistryLayer = Provider.fakeRegistryLayer([
+    {
+      name: "openai",
+      responses: [
+        { type: "tool-call", id: "call_cli_secret_shell", name: "shell_command", input: { command: "printf secret" } },
+        "done",
+      ],
+    },
+    {
+      name: "anthropic",
+      responses: [
+        { type: "tool-call", id: "call_cli_secret_shell", name: "shell_command", input: { command: "printf secret" } },
+        "done",
+      ],
+    },
+  ])
+  const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerRegistryLayer))
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
+  const toolLayer = ToolExecutor.fakeLayer({
+    shell_command: () =>
+      Effect.succeed({
+        exit_code: 0,
+        stdout: `${secret}\n`,
+        stderr: "",
+        stdout_truncated: false,
+        stderr_truncated: false,
+        timed_out: false,
+      }),
+  })
+  const baseLayer = Layer.mergeAll(
+    configLayer,
+    Output.memoryLayer(output),
+    databaseLayer,
+    Migration.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
+    ThreadProjection.layer,
+    timeLayer,
+    idLayer,
+    projectStoreLayer,
+    diagnosticsLayer,
+    Input.memoryLayer("", true),
+    ContextResolver.emptyLayer,
+    SkillRegistry.emptyLayer,
+    toolLayer,
+    llmLayer,
+  )
+
+  return Execute.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
 }
 
 describe("CLI execute", () => {
@@ -404,6 +481,48 @@ describe("CLI execute", () => {
     expect(exitCode).toBe(1)
     expect(events.at(-1)).toMatchObject({ type: "turn.failed" })
     expect(output.stderr).toEqual([])
+  })
+
+  test("redacts shell env secrets in streamed events, SQLite payloads, and diagnostics file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rika-cli-secret-redaction-"))
+    const workspaceRoot = join(directory, "workspace")
+    const dataDir = join(directory, ".rika")
+    const logPath = join(directory, "session.ndjson")
+    const secret = "shell-secret-from-env"
+    const redacted = "[REDACTED:FAKE_API_KEY]"
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          const exitCode = yield* Execute.execute(["-x", "--thread", "thread_cli_secret_redaction", "run shell"])
+          yield* Diagnostics.emit({
+            level: "info",
+            message: "shell stdout",
+            data: { stdout: `${secret}\n` },
+          })
+          const payloads = yield* Database.withDatabase((database) =>
+            database.all<{ payload: string }>("select payload from thread_events order by sequence asc"),
+          )
+          return { exitCode, payloads }
+        }).pipe(Effect.provide(makeRedactedShellExecuteLayer(output, workspaceRoot, dataDir, logPath, secret))),
+      )
+      const streamed = output.stdout.join("\n")
+      const payloads = JSON.stringify(result.payloads)
+      const diagnostics = await readFile(logPath, "utf8")
+
+      expect(result.exitCode).toBe(0)
+      expect(streamed).toContain(redacted)
+      expect(payloads).toContain(redacted)
+      expect(diagnostics).toContain(redacted)
+      expect(streamed).not.toContain(secret)
+      expect(payloads).not.toContain(secret)
+      expect(diagnostics).not.toContain(secret)
+      expect(output.stderr).toEqual([])
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
   })
 
   test("uses project workspace identity when the git remote matches a stored project", async () => {

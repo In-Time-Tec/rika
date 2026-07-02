@@ -1,7 +1,7 @@
 import { readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Config, Diagnostics } from "@rika/core"
+import { Config, Diagnostics, SecretRedactor } from "@rika/core"
 import { OrbStore, ProjectStore } from "@rika/persistence"
 import { Ids, Orb } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
@@ -70,6 +70,9 @@ export const layerWithSystem = (system: System) =>
       const orbs = yield* OrbStore.Service
       const sandbox = yield* SandboxClient.Service
       const diagnostics = yield* Diagnostics.Service
+      const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
+      const registerSecrets = (entries: ReadonlyArray<SecretRedactor.Entry>) =>
+        redactor === undefined ? Effect.void : redactor.register(entries)
       const resumeLocks = new Map<Ids.OrbId, Semaphore.Semaphore>()
       const resumeLocksMutex = yield* Semaphore.make(1)
       const resumeLockFor = (orbId: Ids.OrbId) =>
@@ -130,6 +133,7 @@ export const layerWithSystem = (system: System) =>
             sandboxId,
           })
           const processEnv = { ...project.env, ...projectSecrets }
+          yield* registerSecrets(secretEntries(project.env, projectSecrets))
           yield* placeRepo({
             config,
             project,
@@ -145,6 +149,7 @@ export const layerWithSystem = (system: System) =>
           yield* step("base_commit", orbs.setBaseCommit(orbId, baseCommit), { orbId, sandboxId })
           yield* runSetup(sandbox, diagnostics, sandboxId, processEnv, orbId)
           const token = yield* step("token", system.randomToken, { orbId, sandboxId })
+          yield* registerSecrets([{ label: "RIKA_ORB_TOKEN", value: token }])
           yield* startServer(sandbox, sandboxId, processEnv, token, baseCommit, orbId)
           const endpointUrl = yield* step("host_url", sandbox.hostUrl(sandboxId, serverPort), { orbId, sandboxId })
           yield* waitForHealth(system, endpointUrl, token, 0, orbId, sandboxId, healthAttempts)
@@ -216,7 +221,15 @@ export const layerWithSystem = (system: System) =>
                     orbId,
                     sandboxId,
                   })
-                  yield* ensureResumeHealth(system, sandbox, projects, record, endpoint.token, endpointUrl)
+                  yield* ensureResumeHealth(
+                    system,
+                    sandbox,
+                    projects,
+                    record,
+                    endpoint.token,
+                    endpointUrl,
+                    registerSecrets,
+                  )
                   const updatedEndpoint = yield* step(
                     "endpoint",
                     orbs.setEndpoint(orbId, { endpoint_url: endpointUrl, token: endpoint.token }),
@@ -633,15 +646,18 @@ const ensureResumeHealth = Effect.fn("OrbManager.ensureResumeHealth")(function* 
   record: SandboxOrbRecord,
   token: string,
   endpointUrl: string,
+  registerSecrets: (entries: ReadonlyArray<SecretRedactor.Entry>) => Effect.Effect<void>,
 ) {
   const firstCheck = yield* Effect.result(
     waitForHealth(system, endpointUrl, token, 0, record.orb_id, record.sandbox_id, resumeHealthAttempts),
   )
   if (firstCheck._tag === "Success") return
-  const envs = yield* step("resume_process_env", resumeProcessEnv(projects, record), {
+  const process = yield* step("resume_process_env", resumeProcessEnv(projects, record), {
     orbId: record.orb_id,
     sandboxId: record.sandbox_id,
   })
+  yield* registerSecrets(process.entries)
+  yield* registerSecrets([{ label: "RIKA_ORB_TOKEN", value: token }])
   const baseCommit = record.base_commit
   if (baseCommit === null) {
     yield* new OrbProvisionError({
@@ -651,7 +667,7 @@ const ensureResumeHealth = Effect.fn("OrbManager.ensureResumeHealth")(function* 
       sandbox_id: record.sandbox_id,
     })
   } else {
-    yield* startServer(sandbox, record.sandbox_id, envs, token, baseCommit, record.orb_id)
+    yield* startServer(sandbox, record.sandbox_id, process.envs, token, baseCommit, record.orb_id)
     yield* waitForHealth(system, endpointUrl, token, 0, record.orb_id, record.sandbox_id, resumeHealthAttempts)
   }
 })
@@ -661,9 +677,9 @@ const resumeProcessEnv = Effect.fn("OrbManager.resumeProcessEnv")(function* (
   record: SandboxOrbRecord,
 ) {
   const project = yield* projects.get(record.project_id)
-  if (project === undefined) return {}
+  if (project === undefined) return { envs: {}, entries: [] }
   const secrets = yield* projects.secretsForProvision(record.project_id)
-  return { ...project.env, ...secrets }
+  return { envs: { ...project.env, ...secrets }, entries: secretEntries(project.env, secrets) }
 })
 
 type ResumeHookResult =
@@ -710,6 +726,14 @@ const cleanupAfterProvisionFailure = (
     .kill(sandboxId)
     .pipe(Effect.ignore, Effect.andThen(orbs.setStatus(orbId, "killed").pipe(Effect.ignore)))
 }
+
+const secretEntries = (
+  env: Record<string, string>,
+  secrets: Record<string, string>,
+): ReadonlyArray<SecretRedactor.Entry> => [
+  ...SecretRedactor.entriesFromEnv(env),
+  ...Object.entries(secrets).map(([label, value]) => ({ label, value })),
+]
 
 const gitCloneEnv = (envs: Record<string, string>) => {
   const token = envs.GIT_TOKEN

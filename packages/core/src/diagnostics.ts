@@ -3,6 +3,7 @@ import { dirname } from "node:path"
 import { Cause, Clock, Context, Effect, Exit, Layer, Option, Schema } from "effect"
 import { Common } from "@rika/schema"
 import { Service as ConfigService } from "./config"
+import * as SecretRedactor from "./secret-redactor"
 
 export const Level = Schema.Literals(["debug", "info", "warn", "error"]).annotate({
   identifier: "Rika.Diagnostics.Level",
@@ -43,8 +44,9 @@ export const stderrLayer = Layer.succeed(
   Service,
   Service.of({
     emit: Effect.fn("Diagnostics.emit.stderr")(function* (entry: Entry) {
+      const redacted = yield* redactEntry(entry)
       yield* Effect.sync(() => {
-        console.error(lineFromEntry(entry))
+        console.error(lineFromEntry(redacted))
       })
     }),
   }),
@@ -55,7 +57,8 @@ export const memoryLayer = (entries: Array<Entry>) =>
     Service,
     Service.of({
       emit: Effect.fn("Diagnostics.emit.memory")(function* (entry: Entry) {
-        yield* Effect.sync(() => entries.push(entry))
+        const redacted = yield* redactEntry(entry)
+        yield* Effect.sync(() => entries.push(redacted))
       }),
     }),
   )
@@ -87,18 +90,19 @@ export const event = <A, E, R>(
   Effect.gen(function* () {
     const startedAt = yield* Clock.currentTimeMillis
     const fields: Fields = { ...seed }
+    const spanSeed = yield* redactFields({ ...seed, op })
     return yield* run(fields).pipe(
       Effect.onExit((exit) =>
         Effect.gen(function* () {
           const endedAt = yield* Clock.currentTimeMillis
           const outcome = Exit.isSuccess(exit) ? "success" : "error"
-          const data: Fields = {
+          const data = yield* redactFields({
             ...fields,
             op,
             outcome,
             duration_ms: endedAt - startedAt,
             ...(Exit.isSuccess(exit) ? {} : { error: Cause.pretty(exit.cause) }),
-          }
+          })
           yield* Effect.annotateCurrentSpan(attributesFromFields(data))
           yield* emit({
             level: outcome === "error" ? "error" : "info",
@@ -107,22 +111,41 @@ export const event = <A, E, R>(
           })
         }),
       ),
-      Effect.withSpan(op, { attributes: attributesFromFields({ ...seed, op }) }),
+      Effect.withSpan(op, { attributes: attributesFromFields(spanSeed) }),
     )
   })
 
 export const makeFileEmit = (path: string) =>
   Effect.fn("Diagnostics.emit.file")(function* (entry: Entry) {
+    const redacted = yield* redactEntry(entry)
     yield* Effect.tryPromise({
       try: async () => {
         await mkdir(dirname(path), { recursive: true })
-        await appendFile(path, `${lineFromEntry(entry)}\n`, "utf8")
+        await appendFile(path, `${lineFromEntry(redacted)}\n`, "utf8")
       },
       catch: () => undefined,
     }).pipe(Effect.catch(() => Effect.void))
   })
 
 const fileService = (path: string) => Service.of({ emit: makeFileEmit(path) })
+
+export const redactEntry = Effect.fn("Diagnostics.redactEntry")(function* (entry: Entry) {
+  const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
+  if (redactor === undefined) return entry
+  return {
+    level: entry.level,
+    message: redactor.redact(entry.message),
+    ...(entry.data === undefined ? {} : { data: redactor.redactJson(entry.data) }),
+  }
+})
+
+export const redactFields = Effect.fn("Diagnostics.redactFields")(function* (fields: Fields) {
+  const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
+  if (redactor === undefined) return fields
+  const redacted: Fields = {}
+  for (const [key, value] of Object.entries(fields)) redacted[key] = redactor.redactJson(value)
+  return redacted
+})
 
 const attributeValue = (value: Common.JsonValue): AttributeValue | undefined => {
   if (typeof value === "string" || typeof value === "boolean") return value

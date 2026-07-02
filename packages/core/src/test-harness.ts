@@ -3,6 +3,7 @@ import { Common } from "@rika/schema"
 import { Config } from "./index"
 import { Diagnostics } from "./index"
 import { IdGenerator } from "./index"
+import { SecretRedactor } from "./index"
 import { Time } from "./index"
 
 export interface TestServicesInput {
@@ -22,6 +23,7 @@ export const testLayer = (input: TestServicesInput = {}) => {
 
   return Layer.mergeAll(
     Config.layerFromValues(config, input.env),
+    SecretRedactor.layer,
     Diagnostics.memoryLayer(input.diagnostics ?? []),
     Time.fixedLayer(input.now ?? 0),
     IdGenerator.sequenceLayer(input.idStart),

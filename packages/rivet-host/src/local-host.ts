@@ -7,7 +7,7 @@ import {
   ToolExecutor,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Live, Router } from "@rika/llm"
 import {
   ArtifactStore,
@@ -33,53 +33,7 @@ export const defaultEndpoint = HostConfig.defaultLocalEndpoint
 export const endpointFromEnv = (env: Record<string, string | undefined> = process.env) =>
   env.RIKA_RIVET_ENDPOINT ?? env.RIVET_ENDPOINT ?? defaultEndpoint
 
-const configuredDatabaseLayer = Database.layer.pipe(Layer.provideMerge(Config.layer))
 const configuredTimeLayer = Time.layer
-const configuredArtifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
-const configuredMcpApprovalLayer = McpApprovalStore.layer.pipe(
-  Layer.provideMerge(configuredDatabaseLayer),
-  Layer.provideMerge(configuredTimeLayer),
-)
-const configuredWorkspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
-const configuredLlmLayer = Live.layer(Live.optionsFromEnv(process.env)).pipe(Layer.provideMerge(Config.layer))
-const configuredSkillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(Config.layer))
-const configuredDiagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(Config.layer))
-const configuredPluginLayer = PluginHost.layer.pipe(
-  Layer.provideMerge(Config.layer),
-  Layer.provideMerge(PluginUi.silentLayer),
-)
-const storageLayer = Layer.mergeAll(
-  Config.layer,
-  configuredDatabaseLayer,
-  configuredArtifactLayer,
-  configuredMcpApprovalLayer,
-  Migration.layer,
-  ThreadEventLog.layer,
-  ThreadProjection.layer,
-  configuredWorkspaceStoreLayer,
-  configuredTimeLayer,
-  IdGenerator.layer,
-)
-const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-const storageAndThreadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
-const configuredWorkspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
-const configuredContextResolverLayer = ContextResolver.layer.pipe(Layer.provide(storageAndThreadLayer))
-const configuredSubagentToolLayer = BuiltInTools.subagentToolExecutorLayer.pipe(Layer.provideMerge(Config.layer))
-const configuredSubagentLayer = SubagentRuntime.layer.pipe(
-  Layer.provideMerge(migratedStorageLayer),
-  Layer.provideMerge(configuredLlmLayer),
-  Layer.provideMerge(configuredSubagentToolLayer),
-)
-const configuredSpecialtyToolLayer = SpecialtyTools.layer.pipe(
-  Layer.provideMerge(migratedStorageLayer),
-  Layer.provideMerge(configuredLlmLayer),
-)
-const configuredToolLayer = BuiltInTools.toolExecutorLayer.pipe(
-  Layer.provideMerge(migratedStorageLayer),
-  Layer.provideMerge(configuredPluginLayer),
-  Layer.provideMerge(configuredSpecialtyToolLayer),
-  Layer.provideMerge(configuredSubagentLayer),
-)
 
 type ServiceLayerOutput =
   | AgentLoop.Service
@@ -93,6 +47,7 @@ type ServiceLayerOutput =
   | McpApprovalStore.Service
   | PluginHost.Service
   | Router.Service
+  | SecretRedactor.Service
   | SkillRegistry.Service
   | SpecialtyTools.Service
   | SubagentRuntime.Service
@@ -114,23 +69,88 @@ type ServiceLayerError =
   | Migration.MigrationError
   | PluginHost.RunError
 
-const baseServiceLayer = Layer.mergeAll(
-  storageAndThreadLayer,
-  configuredWorkspaceAccessLayer,
-  configuredContextResolverLayer,
-  configuredSkillLayer,
-  configuredToolLayer,
-  configuredLlmLayer,
-  configuredDiagnosticsLayer,
-)
+export const serviceLayerFromEnv = (
+  env: Record<string, string | undefined> = process.env,
+  cwd = process.cwd(),
+): Layer.Layer<ServiceLayerOutput, ServiceLayerError> => {
+  const configLayer = Config.layerFromEnv(env, cwd)
+  const redactorLayer = SecretRedactor.layerFromEnv(env)
+  const configuredDatabaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
+  const configuredArtifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
+  const configuredMcpApprovalLayer = McpApprovalStore.layer.pipe(
+    Layer.provideMerge(configuredDatabaseLayer),
+    Layer.provideMerge(configuredTimeLayer),
+  )
+  const configuredWorkspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
+  const configuredLlmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
+  const configuredSkillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(configLayer))
+  const configuredDiagnosticsLayer = Diagnostics.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(redactorLayer),
+  )
+  const configuredPluginLayer = PluginHost.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(PluginUi.silentLayer),
+  )
+  const storageLayer = Layer.mergeAll(
+    configLayer,
+    configuredDatabaseLayer,
+    configuredArtifactLayer,
+    configuredMcpApprovalLayer,
+    Migration.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
+    ThreadProjection.layer,
+    configuredWorkspaceStoreLayer,
+    configuredTimeLayer,
+    IdGenerator.layer,
+  )
+  const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const storageAndThreadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const configuredWorkspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const configuredContextResolverLayer = ContextResolver.layer.pipe(Layer.provide(storageAndThreadLayer))
+  const configuredSubagentToolLayer = BuiltInTools.subagentToolExecutorLayer.pipe(Layer.provideMerge(configLayer))
+  const configuredSubagentLayer = SubagentRuntime.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(configuredLlmLayer),
+    Layer.provideMerge(configuredSubagentToolLayer),
+  )
+  const configuredSpecialtyToolLayer = SpecialtyTools.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(configuredLlmLayer),
+  )
+  const configuredToolLayer = BuiltInTools.toolExecutorLayer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(configuredPluginLayer),
+    Layer.provideMerge(configuredSpecialtyToolLayer),
+    Layer.provideMerge(configuredSubagentLayer),
+  )
+  const baseServiceLayer = Layer.mergeAll(
+    storageAndThreadLayer,
+    configuredWorkspaceAccessLayer,
+    configuredContextResolverLayer,
+    configuredSkillLayer,
+    configuredToolLayer,
+    configuredLlmLayer,
+    configuredDiagnosticsLayer,
+  )
 
-export const serviceLayer: Layer.Layer<ServiceLayerOutput, ServiceLayerError> = AgentLoop.layer.pipe(
-  Layer.provideMerge(baseServiceLayer),
-)
+  return AgentLoop.layer.pipe(Layer.provideMerge(baseServiceLayer))
+}
+
+export const serviceLayer: Layer.Layer<ServiceLayerOutput, ServiceLayerError> = serviceLayerFromEnv()
 
 export const supportLayer: Layer.Layer<ServiceLayerOutput, ServiceLayerError> = serviceLayer
 
-export const actorsLayer = () => threadActorLayer.pipe(Layer.provide(supportLayer))
+export const supportLayerFromEnv = (
+  env: Record<string, string | undefined> = process.env,
+  cwd = process.cwd(),
+): Layer.Layer<ServiceLayerOutput, ServiceLayerError> => serviceLayerFromEnv(env, cwd)
+
+export const actorsLayerFromEnv = (env: Record<string, string | undefined> = process.env, cwd = process.cwd()) =>
+  threadActorLayer.pipe(Layer.provide(supportLayerFromEnv(env, cwd)))
+
+export const actorsLayer = () => actorsLayerFromEnv()
 
 export const clientLayer = (options: Options = {}) =>
   Layer.unwrap(
@@ -139,11 +159,19 @@ export const clientLayer = (options: Options = {}) =>
 
 export const threadClientLayer = (options: Options = {}) => ThreadClient.layer.pipe(Layer.provide(clientLayer(options)))
 
-export const layer = (options: Options = {}) =>
+export const layerFromEnv = (
+  env: Record<string, string | undefined> = process.env,
+  cwd = process.cwd(),
+  options: Options = {},
+) =>
   Layer.unwrap(
-    HostConfig.resolveOptions(options).pipe(
+    HostConfig.resolveOptions(options, env).pipe(
       Effect.map((host) =>
-        Registry.serve(actorsLayer()).pipe(Layer.provide(Registry.layer(HostConfig.toRegistryOptions(host)))),
+        Registry.serve(actorsLayerFromEnv(env, cwd)).pipe(
+          Layer.provide(Registry.layer(HostConfig.toRegistryOptions(host))),
+        ),
       ),
     ),
   )
+
+export const layer = (options: Options = {}) => layerFromEnv(process.env, process.cwd(), options)

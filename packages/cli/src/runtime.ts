@@ -15,7 +15,7 @@ import {
   WorkspaceAccess,
   WorkspaceIdentity,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Telemetry, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Telemetry, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Embeddings, Live, Router } from "@rika/llm"
 import { OrbActivity, OrbManager, SandboxClient } from "@rika/orb"
@@ -334,10 +334,20 @@ const taggedErrorName = (error: unknown) =>
     ? error._tag
     : "unknown"
 
-const telemetryLayers = (env: Record<string, string | undefined>, configLayer: Layer.Layer<Config.Service>) => {
+export const secretRedactorLayer = (
+  env: Record<string, string | undefined>,
+  entries: ReadonlyArray<SecretRedactor.Entry> = [],
+) => SecretRedactor.layerFromEntries([...SecretRedactor.entriesFromEnv(env), ...entries])
+
+const telemetryLayers = (
+  env: Record<string, string | undefined>,
+  configLayer: Layer.Layer<Config.Service>,
+  redactorLayer: Layer.Layer<SecretRedactor.Service> = secretRedactorLayer(env),
+) => {
   const options = Telemetry.fromEnv(env, Version.version)
   const diagnosticsLayer = (options.enabled ? Telemetry.diagnosticsLayer(options) : Diagnostics.layer).pipe(
     Layer.provideMerge(configLayer),
+    Layer.provideMerge(redactorLayer),
   )
   const telemetryLayer = options.enabled ? Telemetry.layer(options) : Layer.empty
   return { diagnosticsLayer, telemetryLayer }
@@ -359,7 +369,8 @@ export const liveLayer = (
     },
     env,
   )
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer)
+  const redactorLayer = secretRedactorLayer(env)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -390,7 +401,8 @@ export const liveLayer = (
     memoryStoreLayer,
     projectStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
@@ -482,7 +494,8 @@ export const orbExecuteLiveLayer = (
     },
     env,
   )
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer)
+  const redactorLayer = secretRedactorLayer(env)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const projectStoreLayer = ProjectStore.layer.pipe(
@@ -500,6 +513,7 @@ export const orbExecuteLiveLayer = (
   const storageLayer = Layer.mergeAll(
     configLayer,
     databaseLayer,
+    redactorLayer,
     Migration.layer,
     timeLayer,
     IdGenerator.layer,
@@ -546,7 +560,8 @@ const interactiveLiveLayerFromTui = (
     },
     env,
   )
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer)
+  const redactorLayer = secretRedactorLayer(env)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -564,7 +579,8 @@ const interactiveLiveLayerFromTui = (
     workspaceStoreLayer,
     memoryStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
@@ -661,6 +677,8 @@ const interactiveRemoteLiveLayerFromTui = (
   )
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
+  const redactorLayer = secretRedactorLayer(env)
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
@@ -678,6 +696,7 @@ const interactiveRemoteLiveLayerFromTui = (
     configLayer,
     databaseLayer,
     artifactLayer,
+    redactorLayer,
     Migration.layer,
     timeLayer,
     IdGenerator.layer,
@@ -695,7 +714,7 @@ const interactiveRemoteLiveLayerFromTui = (
   const managerLayer = OrbManager.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(sandboxLayer),
-    Layer.provideMerge(Diagnostics.layer.pipe(Layer.provideMerge(configLayer))),
+    Layer.provideMerge(diagnosticsLayer),
   )
   const backendLayer = LocalBackend.layerFromInput({ env, cwd })
   const remoteSessionLayer = Layer.effect(
@@ -1109,14 +1128,16 @@ export const memoryLiveLayer = (
   )
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
-  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
+  const redactorLayer = secretRedactorLayer(env)
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
   const memoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const storageLayer = Layer.mergeAll(
     configLayer,
     Output.layer,
     databaseLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     memoryStoreLayer,
     timeLayer,
@@ -1154,6 +1175,7 @@ export const threadsLiveLayer = (
   )
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
+  const redactorLayer = secretRedactorLayer(env)
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -1168,7 +1190,8 @@ export const threadsLiveLayer = (
     workspaceStoreLayer,
     memoryStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
@@ -1180,7 +1203,7 @@ export const threadsLiveLayer = (
   const storageAndThreadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const sandboxLayer = SandboxClient.layer.pipe(Layer.provideMerge(configLayer))
-  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
   const telemetryLayer = Layer.empty
   const permissionConfig = PermissionPolicy.configFromEnv(env)
   const llmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
@@ -1358,6 +1381,7 @@ export const orbLiveLayer = (
   )
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
+  const redactorLayer = secretRedactorLayer(env)
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
@@ -1379,14 +1403,15 @@ export const orbLiveLayer = (
     projectStoreLayer,
     orbStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
   const sandboxLayer = SandboxClient.layer.pipe(Layer.provideMerge(configLayer))
-  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer))
+  const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
   const activityLayer = OrbActivity.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(migratedStorageLayer),
@@ -1616,7 +1641,11 @@ export const serverLiveLayer = (
     },
     env,
   )
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer)
+  const redactorLayer = secretRedactorLayer(
+    env,
+    command.token === undefined ? [] : [{ label: "RIKA_SERVER_TOKEN", value: command.token }],
+  )
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -1648,7 +1677,8 @@ export const serverLiveLayer = (
     projectStoreLayer,
     orbStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
@@ -1759,7 +1789,8 @@ export const syncLiveLayer = (
     env,
   )
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
-  const { diagnosticsLayer } = telemetryLayers(env, configLayer)
+  const redactorLayer = secretRedactorLayer(env)
+  const { diagnosticsLayer } = telemetryLayers(env, configLayer, redactorLayer)
   const timeLayer = Time.layer
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
@@ -1776,6 +1807,7 @@ export const syncLiveLayer = (
   const storageLayer = Layer.mergeAll(
     configLayer,
     databaseLayer,
+    redactorLayer,
     Migration.layer,
     timeLayer,
     IdGenerator.layer,

@@ -18,7 +18,7 @@ The local telemetry daemon listens on `http://127.0.0.1:27686` (`/v1/traces`, `/
 ## How export is wired
 
 - `packages/core/src/telemetry.ts` builds the Effect layer. `Telemetry.layer(options)` installs the `@effect/opentelemetry` `NodeSdk` tracer (so every `Effect.fn("Name")` span is recorded and exported) and registers a global OTLP `LoggerProvider`. `Telemetry.diagnosticsLayer(options)` is a `Diagnostics.Service` variant that writes the local NDJSON file AND emits each entry as an OTLP log record, correlated to the enclosing span's `trace_id`/`span_id`.
-- Both are merged into the three command layers in `packages/cli/src/runtime.ts` (`liveLayer`, `interactiveLiveLayer`, `serverLiveLayer`) via the `telemetryLayers` helper.
+- Runtime command layers in `packages/cli/src/runtime.ts` merge telemetry through the `telemetryLayers` helper and share the same `SecretRedactor` instance as local event-log and orb-management services.
 - Service resource: `service.name=rika`, `service.version`, `deployment.environment.name` (development when run from source, production from the compiled binary), `process.runtime.name=bun`.
 
 ## Configuration
@@ -34,7 +34,8 @@ Telemetry is **on by default in every mode, including the compiled binary**. The
 
 - **Never write telemetry output to stdout/stderr.** Rika is a TUI; console output corrupts it. `Telemetry.suppressDiagnostics()` disables OpenTelemetry's internal `diag` logger, only OTLP/HTTP exporters + `Batch*Processor` are used, and the `Diagnostics` OTLP emit is wrapped in a swallowing `try/catch`.
 - **Never crash when the local telemetry daemon is unreachable.** Batch processors drop failed exports silently; `ECONNREFUSED` (no daemon running — the common end-user case) is a no-op. The local NDJSON file sink always still works.
-- **Redact secrets.** Correlated logs and AI-call spans can contain sensitive data. Do not log API keys/tokens or full prompt/response text by default; log counts, sizes, ids. Treat the local telemetry store as sensitive dev data.
+- **Redact secrets.** `SecretRedactor` registers exact secret values from environment variables ending in `_API_KEY`, `_TOKEN`, `_SECRET`, or `_PASSWORD`, plus local backend/orb bearer tokens and project secrets. Thread event payloads are redacted before append/idempotency checks. Diagnostics entries, OTLP log data, failure text, and span annotations are redacted before export. Do not log API keys/tokens or full prompt/response text by default; log counts, sizes, ids. Treat the local telemetry store as sensitive dev data.
+- **Do not rely on redaction across split streams.** Redaction is exact-value matching inside one string field or JSON value. It does not reconstruct a secret split across multiple model/tool stream chunks, diagnostic entries, or span annotations. Avoid emitting secret fragments and treat the redactor as a last-resort choke point, not a data-loss-prevention system.
 
 ## Logging convention: wide events
 

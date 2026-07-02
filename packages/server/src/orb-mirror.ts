@@ -1,8 +1,9 @@
-import { Database, OrbStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { SecretRedactor } from "@rika/core"
+import { Database, OrbStore, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { OrbActivity, SandboxClient } from "@rika/orb"
 import { Client } from "@rika/sdk"
 import { Ids, Orb } from "@rika/schema"
-import { Context, Duration, Effect, FiberMap, Layer, Schedule, Schema, Stream } from "effect"
+import { Context, Duration, Effect, FiberMap, Layer, Option, Schedule, Schema, Stream } from "effect"
 import * as ThreadLive from "./thread-live"
 import * as TurnInterruption from "./turn-interruption"
 
@@ -19,6 +20,7 @@ export type RunError =
   | OrbActivity.RunError
   | OrbMirrorError
   | OrbStore.OrbStoreError
+  | ProjectStore.ProjectStoreError
   | SandboxClient.RunError
   | ThreadEventLog.ThreadEventLogError
   | ThreadProjection.ThreadProjectionError
@@ -50,6 +52,8 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
       const sandbox = yield* SandboxClient.Service
       const activity = yield* OrbActivity.Service
       const live = yield* ThreadLive.Service
+      const projects = Option.getOrUndefined(yield* Effect.serviceOption(ProjectStore.Service))
+      const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
       const fibers = yield* FiberMap.make<Ids.OrbId, void, RunError>()
       const withDatabase = <A, E>(effect: Effect.Effect<A, E, Database.Service>) =>
         effect.pipe(Effect.provideService(Database.Service, database))
@@ -60,8 +64,8 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
       const appendLocal = Effect.fn("OrbMirror.appendLocal")(function* (event: OrbMirroredEvent) {
         const result = yield* withDatabase(eventLog.appendIfAbsent(event))
         if (result.status === "skipped") return false
-        yield* withDatabase(projection.apply(event))
-        yield* live.publish(event)
+        yield* withDatabase(projection.apply(result.event))
+        yield* live.publish(result.event)
         return true
       })
       const appendOrbEvent = Effect.fn("OrbMirror.appendOrbEvent")(function* (
@@ -100,6 +104,7 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
             thread_id: orb.thread_id,
           })
         }
+        yield* registerOrbSecrets(projects, redactor, orb, endpoint.token)
         const client = clientFactory(endpoint.endpoint_url, endpoint.token)
         const runAttempt = latestSequence(orb.thread_id).pipe(
           Effect.flatMap((afterSequence) =>
@@ -128,6 +133,7 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
             thread_id: orb.thread_id,
           })
         }
+        yield* registerOrbSecrets(projects, redactor, orb, endpoint.token)
         const client = clientFactory(endpoint.endpoint_url, endpoint.token)
         yield* latestSequence(orb.thread_id).pipe(
           Effect.flatMap((afterSequence) =>
@@ -160,6 +166,25 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
       })
     }),
   )
+
+const registerOrbSecrets = Effect.fn("OrbMirror.registerOrbSecrets")(function* (
+  projects: ProjectStore.Interface | undefined,
+  redactor: SecretRedactor.Interface | undefined,
+  orb: Orb.OrbRecord,
+  token: string,
+) {
+  if (redactor === undefined) return
+  const entries: Array<SecretRedactor.Entry> = [{ label: "RIKA_ORB_TOKEN", value: token }]
+  if (projects !== undefined) {
+    const project = yield* projects.get(orb.project_id)
+    if (project !== undefined) {
+      const secrets = yield* projects.secretsForProvision(orb.project_id)
+      entries.push(...SecretRedactor.entriesFromEnv(project.env))
+      entries.push(...Object.entries(secrets).map(([label, value]) => ({ label, value })))
+    }
+  }
+  yield* redactor.register(entries)
+})
 
 const handleStreamFailure = Effect.fn("OrbMirror.handleStreamFailure")(function* (
   orbs: OrbStore.Interface,

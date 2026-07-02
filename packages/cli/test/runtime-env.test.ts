@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { SecretRedactor } from "@rika/core"
 import { Effect } from "effect"
-import { RuntimeEnv } from "../src/index"
+import { Runtime, RuntimeEnv } from "../src/index"
 
 describe("CLI runtime environment", () => {
   test("maps global settings to Rika model provider env values", async () => {
@@ -54,5 +55,26 @@ describe("CLI runtime environment", () => {
 
     expect(env.RIKA_API_KEY).toBe("local-key")
     expect(env.RIKA_BASE_URL).toBe("http://global.test/v1")
+  })
+
+  test("builds a redactor layer from runtime env and command tokens", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const apiKey = yield* SecretRedactor.redact("key env-api-key-secret")
+        const serverToken = yield* SecretRedactor.redact("token server-command-token")
+        return { apiKey, serverToken }
+      }).pipe(
+        Effect.provide(
+          Runtime.secretRedactorLayer({ RIKA_API_KEY: "env-api-key-secret" }, [
+            { label: "RIKA_SERVER_TOKEN", value: "server-command-token" },
+          ]),
+        ),
+      ),
+    )
+
+    expect(result).toEqual({
+      apiKey: "key [REDACTED:RIKA_API_KEY]",
+      serverToken: "token [REDACTED:RIKA_SERVER_TOKEN]",
+    })
   })
 })

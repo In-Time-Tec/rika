@@ -1,5 +1,6 @@
-import { Codec, Event, Ids } from "@rika/schema"
-import { Context, Effect, Layer, Schema } from "effect"
+import { SecretRedactor } from "@rika/core"
+import { Codec, Common, ErrorEnvelope, Event, Ids, Message, Tool } from "@rika/schema"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { sql } from "drizzle-orm"
 import * as Database from "./database"
 import { thread_events } from "./schema"
@@ -53,60 +54,67 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/persistence/ThreadEventLog") {}
 
-export const layer = Layer.succeed(
+export const layer = Layer.effect(
   Service,
-  Service.of({
-    append: Effect.fn("ThreadEventLog.append")(function* (event: Event.Event) {
-      return yield* Database.withDatabaseEffect((database) =>
-        Effect.try({
-          try: () => appendEvent(database, event),
-          catch: (cause) => toError(cause, "append", event),
-        }),
-      )
-    }),
-    appendMany: Effect.fn("ThreadEventLog.appendMany")(function* (events: ReadonlyArray<Event.Event>) {
-      return yield* Database.withDatabaseEffect((database) =>
-        Effect.try({
-          try: () => appendEvents(database, events),
-          catch: (cause) => toError(cause, "appendMany", events[0]),
-        }),
-      )
-    }),
-    appendIfAbsent: Effect.fn("ThreadEventLog.appendIfAbsent")(function* (event: Event.Event) {
-      return yield* Database.withDatabaseEffect((database) =>
-        Effect.try({
-          try: () => appendEventIfAbsent(database, event),
-          catch: (cause) => toError(cause, "appendIfAbsent", event),
-        }),
-      )
-    }),
-    readThread: Effect.fn("ThreadEventLog.readThread")(function* (input: ReadThreadInput) {
-      return yield* Database.withDatabaseEffect((database) =>
-        Effect.try({
-          try: () => readThreadRows(database, input).map((row) => decodePayload(row.payload)),
-          catch: (cause) => toError(cause, "readThread"),
-        }),
-      )
-    }),
-    readThreadTail: Effect.fn("ThreadEventLog.readThreadTail")(function* (input: ReadThreadTailInput) {
-      return yield* Database.withDatabaseEffect((database) =>
-        Effect.try({
-          try: () => readThreadTailRows(database, input).map((row) => decodePayload(row.payload)),
-          catch: (cause) => toError(cause, "readThreadTail"),
-        }),
-      )
-    }),
-    readAll: Effect.fn("ThreadEventLog.readAll")(function* () {
-      return yield* Database.withDatabaseEffect((database) =>
-        Effect.try({
-          try: () =>
-            database
-              .all<PayloadRow>(sql`select payload from thread_events order by thread_id asc, sequence asc`)
-              .map((row) => decodePayload(row.payload)),
-          catch: (cause) => toError(cause, "readAll"),
-        }),
-      )
-    }),
+  Effect.gen(function* () {
+    const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
+    const redactForAppend = (event: Event.Event) => redactEvent(redactor, event)
+    return Service.of({
+      append: Effect.fn("ThreadEventLog.append")(function* (event: Event.Event) {
+        const redacted = redactForAppend(event)
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => appendEvent(database, redacted),
+            catch: (cause) => toError(cause, "append", redacted),
+          }),
+        )
+      }),
+      appendMany: Effect.fn("ThreadEventLog.appendMany")(function* (events: ReadonlyArray<Event.Event>) {
+        const redacted = events.map(redactForAppend)
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => appendEvents(database, redacted),
+            catch: (cause) => toError(cause, "appendMany", redacted[0]),
+          }),
+        )
+      }),
+      appendIfAbsent: Effect.fn("ThreadEventLog.appendIfAbsent")(function* (event: Event.Event) {
+        const redacted = redactForAppend(event)
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => appendEventIfAbsent(database, redacted),
+            catch: (cause) => toError(cause, "appendIfAbsent", redacted),
+          }),
+        )
+      }),
+      readThread: Effect.fn("ThreadEventLog.readThread")(function* (input: ReadThreadInput) {
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => readThreadRows(database, input).map((row) => decodePayload(row.payload)),
+            catch: (cause) => toError(cause, "readThread"),
+          }),
+        )
+      }),
+      readThreadTail: Effect.fn("ThreadEventLog.readThreadTail")(function* (input: ReadThreadTailInput) {
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => readThreadTailRows(database, input).map((row) => decodePayload(row.payload)),
+            catch: (cause) => toError(cause, "readThreadTail"),
+          }),
+        )
+      }),
+      readAll: Effect.fn("ThreadEventLog.readAll")(function* () {
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () =>
+              database
+                .all<PayloadRow>(sql`select payload from thread_events order by thread_id asc, sequence asc`)
+                .map((row) => decodePayload(row.payload)),
+            catch: (cause) => toError(cause, "readAll"),
+          }),
+        )
+      }),
+    })
   }),
 )
 
@@ -164,8 +172,8 @@ const appendEventIfAbsent = (database: Database.DrizzleDatabase, event: Event.Ev
   database.transaction((transaction) => {
     const existingBySequence = eventByThreadSequence(transaction, event.thread_id, event.sequence)
     if (existingBySequence !== undefined) {
-      requireMatchingExisting(existingBySequence.payload, event, "appendIfAbsent")
-      return { status: "skipped", event }
+      const existing = requireMatchingExisting(existingBySequence.payload, event, "appendIfAbsent")
+      return { status: "skipped", event: existing }
     }
     const existingById = eventById(transaction, event.id)
     if (existingById !== undefined) requireMatchingExisting(existingById.payload, event, "appendIfAbsent")
@@ -176,11 +184,14 @@ const appendEventIfAbsent = (database: Database.DrizzleDatabase, event: Event.Ev
     if (changes?.changes === 1) return { status: "inserted", event }
     const insertedBySequence = eventByThreadSequence(transaction, event.thread_id, event.sequence)
     if (insertedBySequence !== undefined) {
-      requireMatchingExisting(insertedBySequence.payload, event, "appendIfAbsent")
-      return { status: "skipped", event }
+      const existing = requireMatchingExisting(insertedBySequence.payload, event, "appendIfAbsent")
+      return { status: "skipped", event: existing }
     }
     const insertedById = eventById(transaction, event.id)
-    if (insertedById !== undefined) requireMatchingExisting(insertedById.payload, event, "appendIfAbsent")
+    if (insertedById !== undefined) {
+      const existing = requireMatchingExisting(insertedById.payload, event, "appendIfAbsent")
+      return { status: "skipped", event: existing }
+    }
     throw new ThreadEventLogError({
       message: `Event ${event.id} was not inserted`,
       operation: "appendIfAbsent",
@@ -300,6 +311,158 @@ const requireMatchingExisting = (payload: string, event: Event.Event, operation 
 
 export const encodePayload = (event: Event.Event) => Schema.encodeSync(EventPayload)(Codec.decode(Event.Event)(event))
 export const decodePayload = (payload: string) => Schema.decodeUnknownSync(EventPayload)(payload)
+
+const redactEvent = (redactor: SecretRedactor.Interface | undefined, event: Event.Event): Event.Event => {
+  if (redactor === undefined) return event
+  switch (event.type) {
+    case "thread.created":
+      return {
+        ...event,
+        data: {
+          ...event.data,
+          ...(event.data.title_text === undefined ? {} : { title_text: redactor.redact(event.data.title_text) }),
+        },
+      }
+    case "turn.started":
+    case "context.pruned":
+    case "turn.completed":
+    case "thread.archived":
+    case "thread.unarchived":
+      return event
+    case "message.added":
+      return { ...event, data: { message: redactMessage(redactor, event.data.message) } }
+    case "model.stream.chunk":
+    case "model.reasoning.delta":
+      return { ...event, data: { ...event.data, text: redactor.redact(event.data.text) } }
+    case "context.resolved":
+      return {
+        ...event,
+        data: {
+          ...event.data,
+          entries: event.data.entries.map((entry) => ({
+            ...entry,
+            ...(entry.content === undefined ? {} : { content: redactor.redact(entry.content) }),
+            ...(entry.thread_reference === undefined
+              ? {}
+              : { thread_reference: redactor.redact(entry.thread_reference) }),
+            ...(entry.metadata === undefined ? {} : { metadata: redactMetadata(redactor, entry.metadata) }),
+          })),
+          rendered: redactor.redact(event.data.rendered),
+          ...(event.data.metadata === undefined ? {} : { metadata: redactor.redactJson(event.data.metadata) }),
+        },
+      }
+    case "context.compacted":
+      return { ...event, data: { ...event.data, summary: redactor.redact(event.data.summary) } }
+    case "skill.loaded":
+      return {
+        ...event,
+        data: {
+          ...event.data,
+          description: redactor.redact(event.data.description),
+          source: redactor.redact(event.data.source),
+          skill_file: redactor.redact(event.data.skill_file),
+          resource_paths: event.data.resource_paths.map((path) => redactor.redact(path)),
+        },
+      }
+    case "subagent.completed":
+      return {
+        ...event,
+        data: {
+          ...event.data,
+          summary: redactor.redact(event.data.summary),
+          evidence: event.data.evidence.map((item) => redactor.redact(item)),
+        },
+      }
+    case "tool.call.input.started":
+      return event
+    case "tool.call.input.delta":
+      return { ...event, data: { ...event.data, text: redactor.redact(event.data.text) } }
+    case "tool.call.input.ended":
+      return { ...event, data: { ...event.data, input_text: redactor.redact(event.data.input_text) } }
+    case "tool.call.requested":
+      return { ...event, data: { call: redactCall(redactor, event.data.call) } }
+    case "tool.call.completed":
+      return { ...event, data: { result: redactResult(redactor, event.data.result) } }
+    case "artifact.created":
+      return {
+        ...event,
+        data: {
+          artifact: {
+            ...event.data.artifact,
+            ...(event.data.artifact.title === undefined ? {} : { title: redactor.redact(event.data.artifact.title) }),
+            content: redactor.redactJson(event.data.artifact.content),
+            ...(event.data.artifact.metadata === undefined
+              ? {}
+              : { metadata: redactMetadata(redactor, event.data.artifact.metadata) }),
+          },
+        },
+      }
+    case "turn.failed":
+      return { ...event, data: { error: redactEnvelope(redactor, event.data.error) } }
+  }
+  const exhaustive: never = event
+  return exhaustive
+}
+
+const redactMessage = (redactor: SecretRedactor.Interface, message: Message.Message): Message.Message => ({
+  ...message,
+  content: message.content.map((part) => redactContentPart(redactor, part)),
+  ...(message.metadata === undefined ? {} : { metadata: redactMetadata(redactor, message.metadata) }),
+})
+
+const redactContentPart = (redactor: SecretRedactor.Interface, part: Message.ContentPart): Message.ContentPart => {
+  switch (part.type) {
+    case "text":
+      return {
+        ...part,
+        text: redactor.redact(part.text),
+        ...(part.metadata === undefined ? {} : { metadata: redactMetadata(redactor, part.metadata) }),
+      }
+    case "tool-call":
+      return { ...part, call: redactCall(redactor, part.call) }
+    case "tool-result":
+      return { ...part, result: redactResult(redactor, part.result) }
+    case "image":
+      return {
+        ...part,
+        ...(part.filename === undefined ? {} : { filename: redactor.redact(part.filename) }),
+        ...(part.metadata === undefined ? {} : { metadata: redactMetadata(redactor, part.metadata) }),
+      }
+    case "file-reference":
+      return {
+        ...part,
+        path: redactor.redact(part.path),
+        ...(part.metadata === undefined ? {} : { metadata: redactMetadata(redactor, part.metadata) }),
+      }
+  }
+  const exhaustive: never = part
+  return exhaustive
+}
+
+const redactCall = (redactor: SecretRedactor.Interface, call: Tool.Call): Tool.Call => ({
+  ...call,
+  input: redactor.redactJson(call.input),
+  ...(call.metadata === undefined ? {} : { metadata: redactMetadata(redactor, call.metadata) }),
+})
+
+const redactResult = (redactor: SecretRedactor.Interface, result: Tool.Result): Tool.Result => ({
+  ...result,
+  ...(result.output === undefined ? {} : { output: redactor.redactJson(result.output) }),
+  ...(result.error === undefined ? {} : { error: redactEnvelope(redactor, result.error) }),
+  ...(result.metadata === undefined ? {} : { metadata: redactMetadata(redactor, result.metadata) }),
+})
+
+const redactEnvelope = (
+  redactor: SecretRedactor.Interface,
+  envelope: ErrorEnvelope.Envelope,
+): ErrorEnvelope.Envelope => ({
+  ...envelope,
+  message: redactor.redact(envelope.message),
+  ...(envelope.details === undefined ? {} : { details: redactor.redactJson(envelope.details) }),
+})
+
+const redactMetadata = (redactor: SecretRedactor.Interface, metadata: Common.Metadata): Common.Metadata =>
+  Object.fromEntries(Object.entries(metadata).map(([key, value]) => [key, redactor.redactJson(value)]))
 
 const toError = (cause: unknown, operation: string, event?: Event.Event) => {
   if (cause instanceof ThreadEventLogError) return cause

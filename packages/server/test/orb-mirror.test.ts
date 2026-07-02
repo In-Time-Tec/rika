@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { AgentLoop, CompactionService, ThreadService, WorkspaceAccess } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { OrbActivity, OrbManager, SandboxClientFake } from "@rika/orb"
 import {
@@ -82,6 +82,84 @@ describe("OrbMirror", () => {
       expect(subscriptions).toEqual([0, 2])
       expect(sandboxState.calls.setTimeout).toEqual([{ sandboxId: "sandbox_orb_mirror", timeoutMs: 300_000 }])
       expect(orb?.last_active_at).toBe(Common.TimestampMillis.make(2_010_000_005_000))
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  test("publishes and projects the canonical redacted event returned by local append", async () => {
+    const secret = "mirror-secret-value"
+    const redacted = "[REDACTED:FAKE_API_KEY]"
+    const remoteEvents = [threadCreated(1), messageAdded(2, `mirrored ${secret}`)]
+    const runtime = ManagedRuntime.make(
+      makeLayer(
+        (_endpointUrl, _token) =>
+          Client.make({
+            requestJson: () => Effect.never,
+            streamJson: () => Stream.fromIterable(remoteEvents),
+          }),
+        makeRunningSandboxState(),
+        { redaction: [{ label: "FAKE_API_KEY", value: secret }] },
+      ),
+    )
+
+    try {
+      const publishedPromise = runtime.runPromise(
+        ThreadLive.subscribe({ thread_id: threadId }).pipe(Stream.take(2), Stream.runCollect),
+      )
+
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          yield* createRunningOrb()
+          yield* OrbMirror.mirrorRunningOrbsOnce()
+        }),
+      )
+      const replay = await runtime.runPromise(ThreadEventLog.readThread({ thread_id: threadId }))
+      const projection = await runtime.runPromise(ThreadProjection.getThread(threadId))
+      const published = Array.from(await publishedPromise)
+
+      expect(JSON.stringify(replay)).toContain(redacted)
+      expect(JSON.stringify(replay)).not.toContain(secret)
+      expect(projection?.latest_message_text).toBe(`mirrored ${redacted}`)
+      expect(
+        Message.displayText(published[1]?.type === "message.added" ? published[1].data.message : { content: [] }),
+      ).toBe(`mirrored ${redacted}`)
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  test("registers running orb project secrets before restart mirroring", async () => {
+    const secret = "restart-secret-value"
+    const redacted = "[REDACTED:OPENAI_API_KEY]"
+    const remoteEvents = [threadCreated(1), messageAdded(2, `mirrored ${secret}`)]
+    const runtime = ManagedRuntime.make(
+      makeLayer((_endpointUrl, _token) =>
+        Client.make({
+          requestJson: () => Effect.never,
+          streamJson: () => Stream.fromIterable(remoteEvents),
+        }),
+      ),
+    )
+
+    try {
+      await runtime.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          const project = yield* ProjectStore.create({
+            name: "demo",
+            repo_origin: "https://github.com/example/rika.git",
+          })
+          yield* ProjectStore.setSecret(project.project_id, "OPENAI_API_KEY", secret)
+          yield* createRunningOrb(project.project_id)
+          yield* OrbMirror.mirrorRunningOrbsOnce()
+        }),
+      )
+      const replay = await runtime.runPromise(ThreadEventLog.readThread({ thread_id: threadId }))
+
+      expect(JSON.stringify(replay)).toContain(redacted)
+      expect(JSON.stringify(replay)).not.toContain(secret)
     } finally {
       await runtime.dispose()
     }
@@ -445,22 +523,34 @@ describe("OrbMirror", () => {
 const makeLayer = (
   clientFactory: OrbMirror.ClientFactory,
   sandboxState: SandboxClientFake.State = makeRunningSandboxState(),
-  options: { readonly times?: ReadonlyArray<Common.TimestampMillis> } = {},
+  options: {
+    readonly times?: ReadonlyArray<Common.TimestampMillis>
+    readonly redaction?: ReadonlyArray<SecretRedactor.Entry>
+  } = {},
 ) => {
   const configLayer = Config.layerFromValues({
     workspace_root: "/workspace/rika-orb-mirror",
-    data_dir: "/workspace/rika-orb-mirror/.rika",
+    data_dir: "/tmp/rika-orb-mirror/.rika",
     default_mode: "smart",
   })
   const databaseLayer = Database.memoryLayer
   const timeLayer = timeSequenceLayer(options.times ?? [now])
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layerFromEntries(options.redaction ?? [])
+  const projectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(idLayer),
+  )
   const storageLayer = Layer.mergeAll(
     configLayer,
     databaseLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
+    projectStoreLayer,
     OrbStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer), Layer.provideMerge(idLayer)),
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
@@ -481,6 +571,7 @@ const makeLayer = (
     migratedStorageLayer,
     liveLayer,
     SandboxClientFake.layer(sandboxState),
+    projectStoreLayer,
     activityLayer,
     mirrorLayer,
   )
@@ -631,11 +722,11 @@ const makeRemoteBackendLiveLayer = () => {
   return Layer.mergeAll(remoteLayer, httpLayer)
 }
 
-const createRunningOrb = () =>
+const createRunningOrb = (targetProjectId: Ids.ProjectId = projectId) =>
   Effect.gen(function* () {
     const created = yield* OrbStore.create({
       thread_id: threadId,
-      project_id: projectId,
+      project_id: targetProjectId,
     })
     yield* OrbStore.setSandbox(created.orb_id, "sandbox_orb_mirror")
     yield* OrbStore.setEndpoint(created.orb_id, {

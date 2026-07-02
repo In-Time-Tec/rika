@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { SecretRedactor } from "@rika/core"
 import { Ids, Remote } from "@rika/schema"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { LocalBackend, Runtime } from "../src/index"
 
 const workspaceRoot = "/workspace/rika-local-backend"
@@ -83,6 +84,29 @@ describe("CLI local backend", () => {
     expect(system.spawns).toHaveLength(1)
     expect(first.url).toBe("http://127.0.0.1:45678")
     expect(LocalBackend.redactEndpoint(first)).not.toHaveProperty("token")
+  })
+
+  test("registers generated backend tokens with the secret redactor", async () => {
+    const system = fakeSystem()
+    const layer = Layer.mergeAll(
+      SecretRedactor.layer,
+      LocalBackend.layerFromInput({ env: { RIKA_BACKEND_PORT: "45681" }, cwd: workspaceRoot, system }),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const endpoint = yield* LocalBackend.connectOrStart({
+          workspace_root: workspaceRoot,
+          data_dir: dataDir,
+          mode: "smart",
+        })
+        const redacted = yield* SecretRedactor.redact(`token ${endpoint.token}`)
+        return { endpoint, redacted }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.endpoint.token).toBe("generated-token-1")
+    expect(result.redacted).toBe("token [REDACTED:RIKA_BACKEND_TOKEN]")
   })
 
   test("replaces stale records and reports backend status", async () => {
@@ -215,7 +239,7 @@ const fakeSystem = (): FakeSystem => {
       }),
     releaseLock: (path) => Effect.sync(() => void locks.delete(path)),
     lockAgeMillis: (path) => Effect.sync(() => (locks.has(path) ? 0 : undefined)),
-    randomToken: Effect.sync(() => `token-${spawns.length + 1}`),
+    randomToken: Effect.sync(() => `generated-token-${spawns.length + 1}`),
     spawnServer: (input) =>
       Effect.sync(() => {
         spawns.push(input)

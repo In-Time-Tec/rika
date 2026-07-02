@@ -1,6 +1,6 @@
 import { mkdir, readFile, rm, stat, writeFile, chmod } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import { Config } from "@rika/core"
+import { Config, SecretRedactor } from "@rika/core"
 import { Ids, Remote } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 
@@ -221,6 +221,7 @@ const startUnderLock = (input: {
     if (Option.isSome(current)) return current.value
 
     const token = yield* input.system.randomToken
+    yield* registerBackendToken(token)
     const port = backendPort(input.env, input.input.workspace_root, input.input.data_dir, backend_id)
     const url = `http://${defaultHost}:${port}`
     const spawned = yield* input.system.spawnServer({
@@ -269,6 +270,7 @@ const healthyRecord = (
     if (!healthy) {
       return yield* new BackendError({ message: "Shared backend record is stale", operation: "healthyRecord" })
     }
+    yield* registerBackendToken(record.token)
     return endpointFromRecord(record)
   })
 
@@ -338,6 +340,13 @@ const endpointFromRecord = (record: BackendRecord): BackendEndpoint => ({
   data_dir: record.data_dir,
   pid: record.pid,
 })
+
+const registerBackendToken = (token: string) =>
+  Effect.gen(function* () {
+    if (token.length === 0) return
+    const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
+    if (redactor !== undefined) yield* redactor.register([{ label: "RIKA_BACKEND_TOKEN", value: token }])
+  })
 
 const endpointFromEnv = (env: Record<string, string | undefined>): BackendEndpoint | undefined => {
   if (env.RIKA_BACKEND_URL === undefined || env.RIKA_BACKEND_URL.length === 0) return undefined

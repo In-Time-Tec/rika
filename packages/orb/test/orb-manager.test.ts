@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Database, Migration, OrbStore, ProjectStore } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
 import { Effect, Layer } from "effect"
@@ -140,6 +140,47 @@ describe("OrbManager", () => {
     expect(sandbox.calls.kill).toEqual([])
     expect(JSON.stringify(sandbox.calls.exec.map((call) => call.cmd))).not.toContain("secret-openai")
     expect(diagnostics.some((entry) => entry.message === "orb.setup.stdout")).toBe(true)
+    await rm(dataDir, { force: true, recursive: true })
+  })
+
+  test("redacts project secrets from setup diagnostics before the orb server starts", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "rika-orb-manager-"))
+    const sandbox = SandboxClientFake.makeState({
+      execResults: [
+        [{ type: "exit", exitCode: 0 }],
+        [
+          { type: "stdout", data: "abc123\n" },
+          { type: "exit", exitCode: 0 },
+        ],
+        [
+          { type: "stdout", data: "setup saw secret-openai\n" },
+          { type: "exit", exitCode: 0 },
+        ],
+        [{ type: "started", pid: 4587 }],
+      ],
+    })
+    const diagnostics: Array<Diagnostics.Entry> = []
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ProjectStore.create({
+          name: "demo",
+          repo_origin: "https://github.com/example/rika.git",
+          template_id: "project-template",
+          env: { RIKA_ENV: "test" },
+        })
+        yield* ProjectStore.setSecret(projectId, "OPENAI_API_KEY", "secret-openai")
+        yield* OrbManager.provisionForThread({
+          thread_id: threadId,
+          project_id: projectId,
+          workspace_root: workspaceRoot,
+        })
+      }).pipe(Effect.provide(makeLayer({ sandbox, diagnostics, system: makeSystem(), dataDir }))),
+    )
+
+    expect(JSON.stringify(diagnostics)).toContain("[REDACTED:OPENAI_API_KEY]")
+    expect(JSON.stringify(diagnostics)).not.toContain("secret-openai")
     await rm(dataDir, { force: true, recursive: true })
   })
 
@@ -656,6 +697,8 @@ const makeLayer = (input: {
   const databaseLayer = Database.memoryLayer
   const timeLayer = Time.fixedLayer(now)
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer(input.diagnostics)
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -672,7 +715,8 @@ const makeLayer = (input: {
     Layer.provideMerge(projectStoreLayer),
     Layer.provideMerge(orbStoreLayer),
     Layer.provideMerge(SandboxClientFake.layer(input.sandbox)),
-    Layer.provideMerge(Diagnostics.memoryLayer(input.diagnostics)),
+    Layer.provideMerge(diagnosticsLayer),
+    Layer.provideMerge(redactorLayer),
   )
   return Layer.mergeAll(
     configLayer,
@@ -680,10 +724,11 @@ const makeLayer = (input: {
     Migration.layer,
     timeLayer,
     idLayer,
+    redactorLayer,
     projectStoreLayer,
     orbStoreLayer,
     SandboxClientFake.layer(input.sandbox),
-    Diagnostics.memoryLayer(input.diagnostics),
+    diagnosticsLayer,
     managerLayer,
   )
 }

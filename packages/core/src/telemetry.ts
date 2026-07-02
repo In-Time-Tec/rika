@@ -84,9 +84,10 @@ export const diagnosticsLayer = (options: Options) =>
       return Diagnostics.Service.of({
         emit: (entry) =>
           Effect.gen(function* () {
-            yield* fileEmit(entry)
+            const redacted = yield* Diagnostics.redactEntry(entry)
+            yield* fileEmit(redacted)
             const span = yield* Tracer.currentOtelSpan.pipe(Effect.option)
-            yield* Effect.sync(() => emitLogRecord(otelLogger, entry, span))
+            yield* Effect.sync(() => emitLogRecord(otelLogger, redacted, span))
           }),
       })
     }),
