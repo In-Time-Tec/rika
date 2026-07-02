@@ -1,6 +1,7 @@
 import {
   artifacts,
   mcp_server_approvals,
+  orbs,
   projects,
   thread_events,
   thread_projections,
@@ -10,6 +11,7 @@ import {
 export {
   artifacts,
   mcp_server_approvals,
+  orbs,
   projects,
   thread_events,
   thread_projections,
@@ -19,6 +21,7 @@ export {
 export const schema = {
   artifacts,
   mcp_server_approvals,
+  orbs,
   projects,
   thread_events,
   thread_projections,

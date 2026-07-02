@@ -136,3 +136,27 @@ export const projects = sqliteTable(
 
 export type ProjectRow = typeof projects.$inferSelect
 export type NewProjectRow = typeof projects.$inferInsert
+
+export const orbs = sqliteTable(
+  "orbs",
+  {
+    orb_id: text().primaryKey(),
+    thread_id: text().notNull(),
+    project_id: text().notNull(),
+    sandbox_id: text().notNull(),
+    status: text().notNull(),
+    base_commit: text().notNull(),
+    endpoint_url: text().notNull(),
+    token: text().notNull(),
+    created_at: integer().notNull(),
+    last_active_at: integer().notNull(),
+  },
+  (table) => [
+    uniqueIndex("orbs_thread_idx").on(table.thread_id),
+    index("orbs_project_idx").on(table.project_id),
+    index("orbs_status_idx").on(table.status),
+  ],
+)
+
+export type OrbRow = typeof orbs.$inferSelect
+export type NewOrbRow = typeof orbs.$inferInsert
