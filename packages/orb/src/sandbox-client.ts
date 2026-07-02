@@ -70,35 +70,22 @@ export interface Interface {
     sandboxId: string,
     cmd: ReadonlyArray<string>,
     opts: ExecOptions,
-  ) => Stream.Stream<ExecChunk, SandboxClientError>
-  readonly writeFile: (sandboxId: string, path: string, bytes: Uint8Array) => Effect.Effect<void, SandboxClientError>
-  readonly readFile: (sandboxId: string, path: string) => Effect.Effect<Uint8Array, SandboxClientError>
-  readonly hostUrl: (sandboxId: string, port: number) => Effect.Effect<string, SandboxClientError>
-  readonly pause: (sandboxId: string) => Effect.Effect<void, SandboxClientError>
-  readonly resume: (sandboxId: string) => Effect.Effect<void, SandboxClientError>
-  readonly kill: (sandboxId: string) => Effect.Effect<void, SandboxClientError>
-  readonly setTimeout: (sandboxId: string, ms: number) => Effect.Effect<void, SandboxClientError>
-  readonly list: (filter?: ListFilter) => Effect.Effect<ReadonlyArray<SandboxSummary>, SandboxClientError>
+  ) => Stream.Stream<ExecChunk, RunError>
+  readonly writeFile: (sandboxId: string, path: string, bytes: Uint8Array) => Effect.Effect<void, RunError>
+  readonly readFile: (sandboxId: string, path: string) => Effect.Effect<Uint8Array, RunError>
+  readonly hostUrl: (sandboxId: string, port: number) => Effect.Effect<string, RunError>
+  readonly pause: (sandboxId: string) => Effect.Effect<void, RunError>
+  readonly resume: (sandboxId: string) => Effect.Effect<void, RunError>
+  readonly kill: (sandboxId: string) => Effect.Effect<void, RunError>
+  readonly setTimeout: (sandboxId: string, ms: number) => Effect.Effect<void, RunError>
+  readonly list: (filter?: ListFilter) => Effect.Effect<ReadonlyArray<SandboxSummary>, RunError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/orb/SandboxClient") {}
 
 export const layer: Layer.Layer<Service, OrbConfigError, Config.Service> = Layer.effect(
   Service,
-  Effect.gen(function* () {
-    const config = yield* Config.Service
-    const apiKey = yield* config.requireEnv("E2B_API_KEY").pipe(
-      Effect.mapError(
-        (error) =>
-          new OrbConfigError({
-            message: error.message,
-            key: error.key ?? "E2B_API_KEY",
-          }),
-      ),
-    )
-
-    return makeLive(apiKey)
-  }),
+  Effect.map(Config.Service, (config) => makeLiveFromConfig(config)),
 )
 
 export const create = Effect.fn("SandboxClient.create.call")(function* (input: CreateInput) {
@@ -261,6 +248,37 @@ const makeLive = (apiKey: string): Interface =>
       })
     }),
   })
+
+const makeLiveFromConfig = (config: Config.Interface): Interface =>
+  Service.of({
+    create: (input) => apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).create(input))),
+    exec: (sandboxId, cmd, opts) =>
+      Stream.unwrap(apiKeyFromConfig(config).pipe(Effect.map((apiKey) => makeLive(apiKey).exec(sandboxId, cmd, opts)))),
+    writeFile: (sandboxId, path, bytes) =>
+      apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).writeFile(sandboxId, path, bytes))),
+    readFile: (sandboxId, path) =>
+      apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).readFile(sandboxId, path))),
+    hostUrl: (sandboxId, port) =>
+      apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).hostUrl(sandboxId, port))),
+    pause: (sandboxId) => apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).pause(sandboxId))),
+    resume: (sandboxId) =>
+      apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).resume(sandboxId))),
+    kill: (sandboxId) => apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).kill(sandboxId))),
+    setTimeout: (sandboxId, ms) =>
+      apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).setTimeout(sandboxId, ms))),
+    list: (filter) => apiKeyFromConfig(config).pipe(Effect.flatMap((apiKey) => makeLive(apiKey).list(filter))),
+  })
+
+const apiKeyFromConfig = (config: Config.Interface) =>
+  config.requireEnv("E2B_API_KEY").pipe(
+    Effect.mapError(
+      (error) =>
+        new OrbConfigError({
+          message: error.message,
+          key: error.key ?? "E2B_API_KEY",
+        }),
+    ),
+  )
 
 const connect = (apiKey: string, sandboxId: string, operation: string) =>
   tryPromise(operation, () => Sandbox.connect(sandboxId, { apiKey }), sandboxId)

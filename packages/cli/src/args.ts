@@ -8,9 +8,11 @@ export interface ExecuteCommand extends Schema.Schema.Type<typeof ExecuteCommand
 export const ExecuteCommand = Schema.Struct({
   type: Schema.Literal("execute"),
   prompt: Schema.String,
+  orb: Schema.Boolean,
   stream_json: Schema.Boolean,
   stream_json_input: Schema.Boolean,
   mode: Schema.optional(Config.Mode),
+  project_name: Schema.optional(Schema.String),
   workspace_root: Schema.optional(Schema.String),
   thread_id: Schema.optional(Ids.ThreadId),
   ephemeral: Schema.Boolean,
@@ -22,6 +24,7 @@ export const InteractiveCommand = Schema.Struct({
   mode: Schema.optional(Config.Mode),
   workspace_root: Schema.optional(Schema.String),
   thread_id: Schema.optional(Ids.ThreadId),
+  orb: Schema.Boolean,
   ephemeral: Schema.Boolean,
 }).annotate({ identifier: "Rika.Cli.Args.InteractiveCommand" })
 
@@ -327,11 +330,13 @@ const baseConfig = {
   ),
   workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root for the turn")),
   thread: Flag.string("thread").pipe(Flag.optional, Flag.withDescription("Reuse a durable thread id")),
+  orb: Flag.boolean("orb").pipe(Flag.withAlias("o"), Flag.withDescription("Run the turn in an orb")),
   ephemeral: Flag.boolean("ephemeral").pipe(Flag.withDescription("Use in-memory persistence for this run")),
 }
 
 const executeConfig = {
   ...baseConfig,
+  project: Flag.string("project").pipe(Flag.optional, Flag.withDescription("Project name for orb execution")),
   streamJson: Flag.boolean("stream-json").pipe(Flag.withDescription("Stream schema JSON events to stdout")),
   streamJsonInput: Flag.boolean("stream-json-input").pipe(
     Flag.withDescription("Read JSON Lines user messages from stdin; requires --stream-json"),
@@ -345,6 +350,7 @@ const executeConfig = {
 const rootConfig = {
   execute: Flag.boolean("execute").pipe(Flag.withAlias("x"), Flag.withDescription("Run one non-interactive turn")),
   ...baseConfig,
+  project: Flag.string("project").pipe(Flag.optional, Flag.withDescription("Project name for orb execution")),
   streamJson: Flag.boolean("stream-json").pipe(Flag.withDescription("Stream schema JSON events to stdout")),
   streamJsonInput: Flag.boolean("stream-json-input").pipe(
     Flag.withDescription("Read JSON Lines user messages from stdin; requires --stream-json"),
@@ -484,7 +490,9 @@ interface ExecuteInput {
   readonly mode: Option.Option<Config.Mode>
   readonly workspace: Option.Option<string>
   readonly thread: Option.Option<string>
+  readonly orb: boolean
   readonly ephemeral: boolean
+  readonly project: Option.Option<string>
   readonly streamJson: boolean
   readonly streamJsonInput: boolean
   readonly prompt: ReadonlyArray<string>
@@ -494,6 +502,7 @@ interface InteractiveInput {
   readonly mode: Option.Option<Config.Mode>
   readonly workspace: Option.Option<string>
   readonly thread: Option.Option<string>
+  readonly orb: boolean
   readonly ephemeral: boolean
 }
 
@@ -932,15 +941,18 @@ const makeIdeCommand = (parsedRef: Ref.Ref<Option.Option<Command>>) => {
 
 const toExecuteCommand = (input: ExecuteInput): ExecuteCommand => {
   const mode = Option.getOrUndefined(input.mode)
+  const projectName = Option.getOrUndefined(input.project)
   const workspaceRoot = Option.getOrUndefined(input.workspace)
   const threadId = Option.getOrUndefined(input.thread)
   return {
     type: "execute",
     prompt: input.prompt.join(" ").trim(),
+    orb: input.orb,
     stream_json: input.streamJson,
     stream_json_input: input.streamJsonInput,
     ephemeral: input.ephemeral,
     ...(mode === undefined ? {} : { mode }),
+    ...(projectName === undefined ? {} : { project_name: projectName }),
     ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),
     ...(threadId === undefined ? {} : { thread_id: Ids.ThreadId.make(threadId) }),
   }
@@ -952,6 +964,7 @@ const toInteractiveCommand = (input: InteractiveInput): InteractiveCommand => {
   const threadId = Option.getOrUndefined(input.thread)
   return {
     type: "interactive",
+    orb: input.orb,
     ephemeral: input.ephemeral,
     ...(mode === undefined ? {} : { mode }),
     ...(workspaceRoot === undefined ? {} : { workspace_root: workspaceRoot }),

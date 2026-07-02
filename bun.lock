@@ -69,6 +69,7 @@
         "@rika/core": "workspace:*",
         "@rika/ide": "workspace:*",
         "@rika/llm": "workspace:*",
+        "@rika/orb": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/plugin": "workspace:*",
         "@rika/schema": "workspace:*",
@@ -137,6 +138,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@rika/core": "workspace:*",
+        "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",
         "e2b": "catalog:",
         "effect": "catalog:",

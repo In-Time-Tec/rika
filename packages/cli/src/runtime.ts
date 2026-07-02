@@ -14,11 +14,13 @@ import {
 import { Config, Diagnostics, IdGenerator, Telemetry, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Live, Router } from "@rika/llm"
+import { OrbManager, SandboxClient } from "@rika/orb"
 import {
   ArtifactStore,
   Database,
   McpApprovalStore,
   Migration,
+  OrbStore,
   ProjectStore,
   ThreadEventLog,
   ThreadProjection,
@@ -40,6 +42,7 @@ import * as Ide from "./ide"
 import * as Input from "./input"
 import * as LocalBackend from "./local-backend"
 import * as Mcp from "./mcp"
+import * as OrbExecute from "./orb-execute"
 import * as Output from "./output"
 import * as Project from "./project"
 import * as Review from "./review"
@@ -76,9 +79,15 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                   : command.type === "version"
                     ? Version.executeCommand(command)
                     : command.type === "execute"
-                      ? Execute.executeCommand(command).pipe(Effect.provide(liveLayer(command, env, input.cwd)))
+                      ? command.orb
+                        ? OrbExecute.executeCommand(command).pipe(
+                            Effect.provide(orbExecuteLiveLayer(command, env, input.cwd)),
+                          )
+                        : Execute.executeCommand(command).pipe(Effect.provide(liveLayer(command, env, input.cwd)))
                       : command.type === "interactive"
-                        ? runInteractiveCommand(command, env, input.cwd)
+                        ? command.orb
+                          ? Output.stderr("orb interactive mode arrives with #49").pipe(Effect.as(2))
+                          : runInteractiveCommand(command, env, input.cwd)
                         : command.type === "threads"
                           ? Threads.executeCommand(command).pipe(
                               Effect.provide(threadsLiveLayer(command, env, input.cwd)),
@@ -118,7 +127,8 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                                             )
               ).pipe(
                 Effect.matchEffect({
-                  onFailure: (error: RuntimeError) => Output.stderr(formatRuntimeError(error)).pipe(Effect.as(1)),
+                  onFailure: (error: RuntimeError) =>
+                    Output.stderr(formatRuntimeError(error)).pipe(Effect.as(runtimeExitCode(error))),
                   onSuccess: (code) => Effect.succeed(code),
                 }),
               ),
@@ -167,6 +177,9 @@ type RuntimeError =
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.McpClientError
   | Migration.MigrationError
+  | OrbExecute.OrbExecuteError
+  | OrbManager.OrbProvisionError
+  | OrbStore.OrbStoreError
   | PluginHost.RunError
   | Project.ProjectError
   | ProjectStore.ProjectStoreError
@@ -175,6 +188,7 @@ type RuntimeError =
   | RemoteControl.RemoteControlError
   | RemoteSession.RemoteSessionError
   | Server.ServerError
+  | SandboxClient.OrbConfigError
   | HttpServer.HttpServerError
   | Session.SessionError
   | SelfExtension.SelfExtensionError
@@ -199,10 +213,14 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Mcp.McpError) return Mcp.formatError(error)
   if (error instanceof McpApprovalStore.McpApprovalStoreError) return `Rika failed: ${error.message}`
   if (error instanceof McpClient.McpClientError) return `Rika failed: ${error.message}`
+  if (error instanceof OrbExecute.OrbExecuteError) return OrbExecute.formatError(error)
+  if (error instanceof OrbManager.OrbProvisionError) return `Rika failed: ${error.message}`
+  if (error instanceof OrbStore.OrbStoreError) return `Rika failed: ${error.message}`
   if (error instanceof Review.ReviewError) return Review.formatError(error)
   if (error instanceof ReviewService.ReviewServiceError) return `Rika failed: ${error.message}`
   if (error instanceof RemoteControl.RemoteControlError) return `Rika failed: ${error.message}`
   if (error instanceof Server.ServerError) return Server.formatError(error)
+  if (error instanceof SandboxClient.OrbConfigError) return `Rika failed: ${error.message}`
   if (error instanceof HttpServer.HttpServerError) return `Rika failed: ${error.message}`
   if (error instanceof ArtifactStore.ArtifactStoreError) return `Rika failed: ${error.message}`
   if (error instanceof CheckRegistry.CheckRegistryError) return `Rika failed: ${error.message}`
@@ -229,6 +247,12 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof WorkspaceStore.WorkspaceStoreError) return `Rika failed: ${error.message}`
   if (error instanceof Execute.ExecuteError) return Execute.formatError(error)
   return error instanceof Error ? `Rika failed: ${error.message}` : `Rika failed: ${String(error)}`
+}
+
+const runtimeExitCode = (error: RuntimeError) => {
+  if (error instanceof Execute.ExecuteError) return error.exit_code
+  if (error instanceof OrbExecute.OrbExecuteError) return error.exit_code
+  return 1
 }
 
 const tagged = (error: unknown, tag: string): boolean =>
@@ -324,6 +348,61 @@ export const liveLayer = (
     telemetryLayer,
   )
   const commandLayer = Execute.layer.pipe(Layer.provideMerge(AgentLoop.layer.pipe(Layer.provideMerge(baseLayer))))
+
+  return commandLayer
+}
+
+export const orbExecuteLiveLayer = (
+  command: Args.ExecuteCommand,
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Layer.Layer<OrbExecuteLayerOutput, LiveLayerError, Output.Service> => {
+  const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
+  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
+  const configLayer = Config.layerFromValues(
+    {
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      default_mode: command.mode ?? "smart",
+      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
+    },
+    env,
+  )
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer)
+  const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
+  const timeLayer = Time.layer
+  const projectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
+  const orbStoreLayer = OrbStore.layer.pipe(
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(timeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
+  const storageLayer = Layer.mergeAll(
+    configLayer,
+    databaseLayer,
+    Migration.layer,
+    timeLayer,
+    IdGenerator.layer,
+    projectStoreLayer,
+    orbStoreLayer,
+  )
+  const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
+  const sandboxLayer = SandboxClient.layer.pipe(Layer.provideMerge(configLayer))
+  const managerLayer = OrbManager.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(sandboxLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
+  const commandLayer = OrbExecute.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(managerLayer),
+    Layer.provideMerge(telemetryLayer),
+  )
 
   return commandLayer
 }
@@ -917,6 +996,18 @@ export type LiveLayerOutput =
   | WorkspaceAccess.Service
   | WorkspaceStore.Service
 
+export type OrbExecuteLayerOutput =
+  | Config.Service
+  | Database.Service
+  | IdGenerator.Service
+  | Migration.Service
+  | OrbExecute.Service
+  | OrbManager.Service
+  | OrbStore.Service
+  | ProjectStore.Service
+  | SandboxClient.Service
+  | Time.Service
+
 export type InteractiveLayerOutput =
   | Adapter.Service
   | AgentLoop.Service
@@ -1057,9 +1148,11 @@ export type LiveLayerError =
   | McpApprovalStore.McpApprovalStoreError
   | McpClient.RunError
   | Migration.MigrationError
+  | OrbStore.OrbStoreError
   | PluginHost.RunError
   | ProjectStore.ProjectStoreError
   | ReviewService.RunError
+  | SandboxClient.OrbConfigError
 
 const defaultModeFromEnv = (env: Record<string, string | undefined>): Config.Mode => {
   const value = env.RIKA_MODE

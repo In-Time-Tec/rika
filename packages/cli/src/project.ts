@@ -99,7 +99,7 @@ const repoOrigin = (command: Args.ProjectCommand, workspaceRoot: string) =>
 export const currentGitRemoteOrigin = (workspaceRoot: string, action: Args.ProjectAction = "create") =>
   Effect.tryPromise({
     try: async () => {
-      const subprocess = Bun.spawn(["git", "config", "--get", "remote.origin.url"], {
+      const subprocess = Bun.spawn(["git", "remote", "get-url", "origin"], {
         cwd: workspaceRoot,
         stdout: "pipe",
         stderr: "pipe",

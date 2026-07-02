@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Effect, Layer } from "effect"
 import { Args, Help, Output, Runtime } from "../src/index"
 
@@ -53,6 +56,40 @@ describe("CLI runtime", () => {
     expect(output.stdout).toEqual([])
     expect(stderr).toBe(Args.invalidExecuteAliasErrorText)
     expect(stderr.endsWith("\n")).toBe(false)
+  })
+
+  test("rejects orb interactive mode until #49", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const exitCode = await Effect.runPromise(
+      Runtime.runProcess({ argv: ["--orb"], env: {}, cwd: "/workspace/rika" }).pipe(
+        Effect.provide(Output.memoryLayer(output)),
+      ),
+    )
+
+    expect(exitCode).toBe(2)
+    expect(output.stdout).toEqual([])
+    expect(output.stderr).toEqual(["orb interactive mode arrives with #49"])
+  })
+
+  test("routes orb execute through orb project resolution", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "rika-runtime-orb-"))
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-ox", "hello"],
+          env: { RIKA_DATA_DIR: join(workspace, ".rika") },
+          cwd: workspace,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(2)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["no project for this repo; run: rika project create <name> --repo <origin>"])
+    } finally {
+      await rm(workspace, { force: true, recursive: true })
+    }
   })
 
   test("writes Amp-compatible root help flags with raw stdout and reset stderr", async () => {

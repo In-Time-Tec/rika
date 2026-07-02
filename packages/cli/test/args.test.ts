@@ -7,7 +7,7 @@ describe("CLI args", () => {
   test("defaults to interactive mode with no prompt", async () => {
     const command = await Effect.runPromise(Args.parse([]))
 
-    expect(command).toEqual({ type: "interactive", ephemeral: false })
+    expect(command).toEqual({ type: "interactive", orb: false, ephemeral: false })
   })
 
   test("parses run commands through Effect CLI definitions", async () => {
@@ -30,6 +30,7 @@ describe("CLI args", () => {
     expect(command).toEqual({
       type: "execute",
       prompt: "ship it",
+      orb: false,
       stream_json: false,
       stream_json_input: false,
       mode: "rush",
@@ -49,12 +50,39 @@ describe("CLI args", () => {
     expect(modeAlias).toMatchObject({ type: "execute", prompt: "alias mode", mode: "rush", ephemeral: false })
   })
 
+  test("parses orb execute and interactive flags", async () => {
+    const compact = await Effect.runPromise(Args.parse(["-ox", "hello"]))
+    const project = await Effect.runPromise(Args.parse(["--execute", "--orb", "--project", "demo", "hello"]))
+    const run = await Effect.runPromise(Args.parse(["run", "--orb", "--project", "demo", "ship", "it"]))
+    const interactive = await Effect.runPromise(Args.parse(["interactive", "--orb"]))
+    const rootInteractive = await Effect.runPromise(Args.parse(["--orb"]))
+
+    expect(compact).toMatchObject({ type: "execute", prompt: "hello", orb: true, ephemeral: false })
+    expect(project).toMatchObject({
+      type: "execute",
+      prompt: "hello",
+      orb: true,
+      project_name: "demo",
+      ephemeral: false,
+    })
+    expect(run).toMatchObject({
+      type: "execute",
+      prompt: "ship it",
+      orb: true,
+      project_name: "demo",
+      ephemeral: false,
+    })
+    expect(interactive).toMatchObject({ type: "interactive", orb: true, ephemeral: false })
+    expect(rootInteractive).toMatchObject({ type: "interactive", orb: true, ephemeral: false })
+  })
+
   test("allows execute without a prompt so piped stdin can supply it", async () => {
     const command = await Effect.runPromise(Args.parse(["-x"]))
 
     expect(command).toMatchObject({
       type: "execute",
       prompt: "",
+      orb: false,
       stream_json: false,
       stream_json_input: false,
       ephemeral: false,
@@ -68,6 +96,7 @@ describe("CLI args", () => {
     expect(command).toMatchObject({
       type: "execute",
       prompt: "2+2?",
+      orb: false,
       stream_json: true,
       stream_json_input: false,
       ephemeral: false,
@@ -75,6 +104,7 @@ describe("CLI args", () => {
     expect(run).toMatchObject({
       type: "execute",
       prompt: "ship it",
+      orb: false,
       stream_json: true,
       stream_json_input: false,
       ephemeral: false,
@@ -386,6 +416,7 @@ describe("CLI args", () => {
 
     expect(command).toEqual({
       type: "interactive",
+      orb: false,
       mode: "rush",
       workspace_root: "/workspace/rika",
       thread_id: threadId,

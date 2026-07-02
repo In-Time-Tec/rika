@@ -22,6 +22,7 @@
     "@rika/core": "workspace:*",
     "@rika/ide": "workspace:*",
     "@rika/llm": "workspace:*",
+    "@rika/orb": "workspace:*",
     "@rika/persistence": "workspace:*",
     "@rika/plugin": "workspace:*",
     "@rika/schema": "workspace:*",
