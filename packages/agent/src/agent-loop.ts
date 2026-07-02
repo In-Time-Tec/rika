@@ -1,10 +1,12 @@
 import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
-import { Provider, Router } from "@rika/llm"
+import { Errors, Provider, Router, Tokens } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, ErrorEnvelope, Event, Ide, Ids, Message, Tool } from "@rika/schema"
 import { Cause, Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
 import { AiError, Prompt } from "effect/unstable/ai"
+import * as CompactionService from "./compaction-service"
 import * as ContextResolver from "./context-resolver"
+import * as ContextBudget from "./context-budget"
 import * as ModelContext from "./model-context"
 import * as SkillRegistry from "./skill-registry"
 import * as Toolkit from "./toolkit"
@@ -64,6 +66,8 @@ export type RunError =
   | ThreadProjection.ThreadProjectionError
   | Router.RouterError
   | Provider.ProviderError
+  | CompactionService.RunError
+  | ContextBudget.Error
   | ContextResolver.ContextResolverError
   | SkillRegistry.SkillRegistryError
   | ToolExecutor.ToolExecutorError
@@ -86,6 +90,8 @@ interface Dependencies {
   readonly idGenerator: IdGenerator.Interface
   readonly time: Time.Interface
   readonly router: Router.Interface
+  readonly contextBudget: ContextBudget.Interface
+  readonly compaction: CompactionService.Interface
   readonly contextResolver: ContextResolver.Interface
   readonly skillRegistry: SkillRegistry.Interface
   readonly toolExecutor: ToolExecutor.Interface
@@ -130,6 +136,8 @@ export const layer = Layer.effect(
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
     const router = yield* Router.Service
+    const contextBudget = yield* ContextBudget.Service
+    const compaction = yield* CompactionService.Service
     const contextResolver = yield* ContextResolver.Service
     const skillRegistry = yield* SkillRegistry.Service
     const toolExecutor = yield* ToolExecutor.Service
@@ -144,6 +152,8 @@ export const layer = Layer.effect(
       idGenerator,
       time,
       router,
+      contextBudget,
+      compaction,
       contextResolver,
       skillRegistry,
       toolExecutor,
@@ -192,7 +202,7 @@ export const layer = Layer.effect(
       }),
     })
   }),
-).pipe(Layer.provideMerge(Toolkit.layer))
+).pipe(Layer.provideMerge(Toolkit.layer), Layer.provide(ContextBudget.layer), Layer.provide(CompactionService.layer))
 
 export const runTurn = Effect.fn("AgentLoop.runTurn.call")(function* (input: RunTurnInput) {
   const agentLoop = yield* Service
@@ -256,6 +266,14 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
       return appended
     })
 
+    const emitExternalAppend = Effect.fn("AgentLoop.emitExternalAppend")(function* (event: Event.Event) {
+      sequence = event.sequence
+      if (collectAppendedEvents) appendedEvents.push(event)
+      yield* emitEventDiagnostic(dependencies, event)
+      yield* emit(event)
+      return event
+    })
+
     if (existingEvents.length === 0) {
       yield* append(yield* makeThreadCreated(dependencies, input, 1))
     }
@@ -290,17 +308,108 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
       return
     }
 
+    const preTurnCompaction = yield* maybeAutoCompactBeforeTurn(
+      dependencies,
+      input,
+      existingEvents.length > 0,
+      emitExternalAppend,
+    )
+
     const history = [...existingEvents, ...appendedEvents]
     let modelInput: ModelInput = yield* contextModelInput(dependencies, history, skillSelection)
+    if (
+      preTurnCompaction.compacted &&
+      preTurnCompaction.usable !== undefined &&
+      Tokens.estimateMessages(modelInput.messages) >= preTurnCompaction.usable
+    ) {
+      fields.status = "failed"
+      fields.stop_reason = "context_window_exceeded"
+      yield* append(
+        yield* makeTurnFailed(dependencies, input.thread_id, turnId, sequence + 1, contextOverflowEnvelope()),
+      )
+      return
+    }
     collectAppendedEvents = false
     let emptyRetries = 0
     let latestCompletion: TurnCompletionData | undefined
+    let midTurnCompacted = false
+    let overflowCompacted = false
+
+    const compactAndRebuild = (
+      trigger: Event.ContextCompactionTrigger,
+      excludedToolIds: ReadonlySet<Ids.ToolCallId> = new Set(),
+    ) =>
+      Effect.gen(function* () {
+        const beforeEvents =
+          excludedToolIds.size === 0 ? [] : yield* readThread(dependencies, { thread_id: input.thread_id })
+        const preserveFromSequence =
+          excludedToolIds.size === 0 ? undefined : earliestToolEventSequence(beforeEvents, excludedToolIds)
+        const result = yield* dependencies.compaction.compact({
+          thread_id: input.thread_id,
+          trigger,
+          ...(preserveFromSequence === undefined ? {} : { preserve_from_sequence: preserveFromSequence }),
+        })
+        sequence = result.event.sequence
+        yield* emitEventDiagnostic(dependencies, result.event)
+        const events = yield* readThread(dependencies, { thread_id: input.thread_id })
+        const filtered =
+          excludedToolIds.size === 0 ? events : events.filter((event) => !eventReferencesTool(event, excludedToolIds))
+        const rebuilt = yield* contextModelInput(dependencies, filtered, skillSelection)
+        yield* emitCompactionDiagnostic(dependencies, result.event, Tokens.estimateMessages(rebuilt.messages))
+        yield* emit(result.event)
+        return rebuilt
+      })
 
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration += 1) {
-      const modelTurn =
-        iteration === 0
-          ? yield* streamModelResponseWithRecovery(dependencies, input, turnId, modelInput, append, nextSequence)
-          : yield* streamModelResponse(dependencies, input, turnId, modelInput, append, nextSequence)
+      const modelTurn = yield* streamModelResponse(dependencies, input, turnId, modelInput, append, nextSequence).pipe(
+        Effect.catch((error: RunError) => {
+          if (Errors.isContextOverflow(error)) {
+            if (overflowCompacted) {
+              return Effect.fail(
+                new AgentLoopError({
+                  message: "context window exceeded; compaction insufficient",
+                  operation: "contextOverflow",
+                  thread_id: input.thread_id,
+                  turn_id: turnId,
+                }),
+              )
+            }
+            overflowCompacted = true
+            return compactAndRebuild("overflow").pipe(
+              Effect.flatMap((rebuilt) => {
+                modelInput = rebuilt
+                return streamModelResponse(dependencies, input, turnId, modelInput, append, nextSequence)
+              }),
+              Effect.catch((retryError: RunError) =>
+                Errors.isContextOverflow(retryError)
+                  ? Effect.fail(
+                      new AgentLoopError({
+                        message: "context window exceeded; compaction insufficient",
+                        operation: "contextOverflow",
+                        thread_id: input.thread_id,
+                        turn_id: turnId,
+                      }),
+                    )
+                  : Effect.fail(retryError),
+              ),
+            )
+          }
+          return iteration === 0 && isModelError(error)
+            ? emitModelRecoveryDiagnostic(dependencies, input, turnId, error).pipe(
+                Effect.andThen(
+                  streamModelResponse(
+                    dependencies,
+                    input,
+                    turnId,
+                    appendModelError(modelInput, error),
+                    append,
+                    nextSequence,
+                  ),
+                ),
+              )
+            : Effect.fail(error)
+        }),
+      )
       const response = modelTurn.response
       llmCallCount += 1
       toolCallCount += modelTurn.toolCalls.length
@@ -312,6 +421,21 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
       if (response.usage?.input_tokens !== undefined) fields.token_in = response.usage.input_tokens
       if (response.usage?.output_tokens !== undefined) fields.token_out = response.usage.output_tokens
       latestCompletion = turnCompletionData(response)
+
+      if (Errors.isZeroProgressLengthResponse(response)) {
+        if (overflowCompacted) {
+          yield* new AgentLoopError({
+            message: "context window exceeded; compaction insufficient",
+            operation: "contextOverflow",
+            thread_id: input.thread_id,
+            turn_id: turnId,
+          })
+          return
+        }
+        overflowCompacted = true
+        modelInput = yield* compactAndRebuild("overflow")
+        continue
+      }
 
       if (modelTurn.toolCalls.length === 0) {
         if (response.content.trim().length === 0 && emptyRetries < MAX_EMPTY_ANSWER_RETRIES) {
@@ -334,6 +458,18 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
           thread_id: input.thread_id,
           turn_id: turnId,
         })
+      }
+
+      if (!midTurnCompacted && (yield* shouldCompactAfterResponse(dependencies, input, response))) {
+        midTurnCompacted = true
+        const excludedToolIds = new Set(modelTurn.toolCalls.map((call) => call.id))
+        modelInput = appendToolResults(
+          yield* compactAndRebuild("auto", excludedToolIds),
+          response.content,
+          modelTurn.toolCalls,
+          modelTurn.toolResults,
+        )
+        continue
       }
 
       modelInput = appendToolResults(modelInput, response.content, modelTurn.toolCalls, modelTurn.toolResults)
@@ -586,33 +722,6 @@ const streamModelResponse = (
 
     return { response: completed, toolCalls, toolResults } satisfies ModelTurn
   })
-
-const streamModelResponseWithRecovery = (
-  dependencies: Dependencies,
-  input: RunTurnInput,
-  turnId: Ids.TurnId,
-  modelInput: ModelInput,
-  append: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
-  nextSequence: NextSequence,
-) =>
-  streamModelResponse(dependencies, input, turnId, modelInput, append, nextSequence).pipe(
-    Effect.catch((error: RunError) =>
-      isModelError(error)
-        ? emitModelRecoveryDiagnostic(dependencies, input, turnId, error).pipe(
-            Effect.andThen(
-              streamModelResponse(
-                dependencies,
-                input,
-                turnId,
-                appendModelError(modelInput, error),
-                append,
-                nextSequence,
-              ),
-            ),
-          )
-        : Effect.fail(error),
-    ),
-  )
 
 const contextModelInput = (
   dependencies: Dependencies,
@@ -886,6 +995,87 @@ const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
 
 const readThread = (dependencies: Dependencies, input: ThreadEventLog.ReadThreadInput) =>
   dependencies.eventLog.readThread(input).pipe(Effect.provideService(Database.Service, dependencies.database))
+
+const budgetStateForTurn = (dependencies: Dependencies, input: RunTurnInput) =>
+  Effect.gen(function* () {
+    const config = yield* dependencies.config.get
+    const mode = input.mode ?? config.default_mode
+    return yield* dependencies.contextBudget.state({
+      thread_id: input.thread_id,
+      mode,
+      ...(config.compaction_reserved === undefined ? {} : { reserved: config.compaction_reserved }),
+    })
+  })
+
+const maybeAutoCompactBeforeTurn = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  wasExistingThread: boolean,
+  emitExternalAppend: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
+) =>
+  Effect.gen(function* () {
+    if (!wasExistingThread) return { compacted: false } as const
+    const config = yield* dependencies.config.get
+    if (config.compaction_auto === false) return { compacted: false } as const
+    const state = yield* budgetStateForTurn(dependencies, input)
+    if (state.used < state.usable) return { compacted: false } as const
+
+    const result = yield* dependencies.compaction.compact({ thread_id: input.thread_id, trigger: "auto" })
+    yield* emitExternalAppend(result.event)
+    const events = yield* readThread(dependencies, { thread_id: input.thread_id })
+    yield* emitCompactionDiagnostic(
+      dependencies,
+      result.event,
+      Tokens.estimateMessages(ModelContext.messagesFromEvents(events)),
+    )
+    return { compacted: true, usable: state.usable } as const
+  })
+
+const shouldCompactAfterResponse = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  response: Provider.GenerateResponse,
+) =>
+  Effect.gen(function* () {
+    if (response.usage?.input_tokens === undefined) return false
+    const config = yield* dependencies.config.get
+    if (config.compaction_auto === false) return false
+    const state = yield* budgetStateForTurn(dependencies, input)
+    return response.usage.input_tokens >= state.usable
+  })
+
+const emitCompactionDiagnostic = (dependencies: Dependencies, event: Event.ContextCompacted, tokensAfter: number) =>
+  dependencies.diagnostics
+    .emit({
+      level: "info",
+      message: "context.compacted",
+      data: {
+        op: "context.compacted",
+        event_id: event.id,
+        thread_id: event.thread_id,
+        trigger: event.data.trigger,
+        ...(event.data.tokens_before === undefined ? {} : { tokens_before: event.data.tokens_before }),
+        tokens_after: tokensAfter,
+      },
+    })
+    .pipe(Effect.catch(() => Effect.void))
+
+const eventReferencesTool = (event: Event.Event, toolIds: ReadonlySet<Ids.ToolCallId>) => {
+  const toolId = Event.references(event).tool_call_id
+  return toolId !== undefined && toolIds.has(toolId)
+}
+
+const earliestToolEventSequence = (
+  events: ReadonlyArray<Event.Event>,
+  toolIds: ReadonlySet<Ids.ToolCallId>,
+): number | undefined => {
+  let sequence: number | undefined
+  for (const event of events) {
+    if (!eventReferencesTool(event, toolIds)) continue
+    if (sequence === undefined || event.sequence < sequence) sequence = event.sequence
+  }
+  return sequence
+}
 
 const makeThreadCreated = (dependencies: Dependencies, input: RunTurnInput, sequence: number) =>
   Effect.gen(function* () {
@@ -1361,6 +1551,7 @@ const makeTurnFailed = (
   })
 
 const isTurnLevelError = (error: RunError): boolean =>
+  (error instanceof AgentLoopError && error.operation === "contextOverflow") ||
   AiError.isAiError(error) ||
   error instanceof Router.RouterError ||
   error instanceof ToolExecutor.ToolExecutorError ||
@@ -1381,7 +1572,15 @@ const modelErrorMessage = (error: AiError.AiError | Router.RouterError): Provide
 
 const cancelledEnvelope = (message: string): ErrorEnvelope.Envelope => ({ kind: "cancelled", message })
 
+const contextOverflowEnvelope = (): ErrorEnvelope.Envelope => ({
+  kind: "model",
+  message: "context window exceeded; compaction insufficient",
+  code: "contextOverflow",
+  retryable: false,
+})
+
 const envelopeFromRunError = (error: RunError): ErrorEnvelope.Envelope => {
+  if (error instanceof AgentLoopError && error.operation === "contextOverflow") return contextOverflowEnvelope()
   if (error instanceof AgentLoopError) return { kind: "unknown", message: error.message, code: error.operation }
   if (error instanceof Config.ConfigError) return { kind: "validation", message: error.message, code: error.key }
   if (error instanceof Database.DatabaseError)
@@ -1391,6 +1590,12 @@ const envelopeFromRunError = (error: RunError): ErrorEnvelope.Envelope => {
   }
   if (error instanceof ThreadProjection.ThreadProjectionError) {
     return { kind: "persistence", message: error.message, code: error.operation }
+  }
+  if (error instanceof ContextBudget.ContextBudgetError) {
+    return { kind: "validation", message: error.message, code: error.operation }
+  }
+  if (error instanceof CompactionService.CompactionError) {
+    return { kind: "model", message: error.message, code: error.operation }
   }
   if (error instanceof ContextResolver.ContextResolverError) {
     return { kind: "validation", message: error.message, code: error.operation }

@@ -61,6 +61,51 @@ describe("ContextBudget", () => {
     const used = Tokens.estimateMessages(ModelContext.messagesFromEvents([event]))
     expect(state).toEqual({ used, usable: 180_000, fraction: used / 180_000 })
   })
+
+  test("applies an explicit reserved token buffer to the usable budget", async () => {
+    const state = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
+        for (const event of [modelChunk(), turnCompletedWithUsage()]) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        return yield* ContextBudget.state({ thread_id: threadId, mode: "deep1", reserved: 50_000 })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(state).toEqual({ used: 42_000, usable: 350_000, fraction: 42_000 / 350_000 })
+  })
+
+  test("estimates folded events when compaction is newer than the usage sample", async () => {
+    const compaction = contextCompacted()
+    const events = [modelChunk(), turnCompletedWithUsage(), compaction]
+    const state = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
+        for (const event of events) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        return yield* ContextBudget.state({ thread_id: threadId, mode: "deep1" })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const used = Tokens.estimateMessages(ModelContext.messagesFromEvents([threadCreated(), ...events]))
+    expect(state).toEqual({ used, usable: 380_000, fraction: used / 380_000 })
+  })
+})
+
+const threadCreated = (): Event.ThreadCreated => ({
+  id: Ids.EventId.make("context_budget_thread_created"),
+  thread_id: threadId,
+  sequence: 1,
+  version: 1,
+  created_at: now,
+  type: "thread.created",
+  data: { workspace_id: workspaceId },
 })
 
 const modelChunk = (): Event.ModelStreamChunk => ({
@@ -83,6 +128,22 @@ const turnCompletedWithUsage = (): Event.TurnCompleted => ({
   created_at: now,
   type: "turn.completed",
   data: { usage: { input_tokens: 42_000, output_tokens: 100, total_tokens: 42_100 } },
+})
+
+const contextCompacted = (): Event.ContextCompacted => ({
+  id: Ids.EventId.make("context_budget_compacted"),
+  thread_id: threadId,
+  sequence: 4,
+  version: 1,
+  created_at: now,
+  type: "context.compacted",
+  data: {
+    summary: "folded context summary",
+    tail_start_sequence: 4,
+    trigger: "auto",
+    tokens_before: 42_000,
+    model: "gpt-5.5",
+  },
 })
 
 const messageAdded = (): Event.MessageAdded => ({

@@ -40,10 +40,11 @@ const makeLayer = (
     { name: "anthropic", responses },
   ]),
   diagnosticsLayer = Diagnostics.memoryLayer([]),
+  activeConfigLayer = configLayer,
 ) => {
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerLayer))
+  const llmLayer = Router.layer.pipe(Layer.provideMerge(activeConfigLayer), Layer.provideMerge(providerLayer))
   const services = Layer.mergeAll(
-    configLayer,
+    activeConfigLayer,
     Database.memoryLayer,
     Migration.layer,
     ThreadEventLog.layer,
@@ -651,6 +652,312 @@ describe("AgentLoop", () => {
     expect(promptText).not.toContain("old message must be folded")
   })
 
+  test("auto-compacts before the model call when prior usage reaches the usable budget", async () => {
+    const diagnostics: Array<Diagnostics.Entry> = []
+    const compactingThread = Ids.ThreadId.make("thread_agent_pre_turn_auto_compact")
+    const compactingWorkspace = Ids.WorkspaceId.make("workspace_agent_pre_turn_auto_compact")
+    const captured: Array<Provider.GenerateRequest> = []
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.preTurnAuto.complete")(function* (request: Provider.GenerateRequest) {
+          return fakeResponse(request, "pre-turn summary")
+        }),
+        stream: (request: Provider.GenerateRequest) => {
+          captured.push(request)
+          return Stream.fromIterable(Provider.streamEventsFromResponse(fakeResponse(request, "after auto compaction")))
+        },
+      }),
+    )
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(providerLayer),
+      Diagnostics.memoryLayer(diagnostics),
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* appendSeed(
+          usageSeed({
+            prefix: "pre_turn_auto",
+            threadId: compactingThread,
+            workspaceId: compactingWorkspace,
+            inputTokens: 380_000,
+          }),
+        )
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: compactingThread,
+          workspace_id: compactingWorkspace,
+          content: "continue after automatic compaction",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: compactingThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const currentRunTypes = result.turn.events.map((event) => event.type)
+    const requestText = JSON.stringify(captured[0]?.messages)
+    expect(result.turn.status).toBe("completed")
+    expect(currentRunTypes).toEqual([
+      "turn.started",
+      "message.added",
+      "context.resolved",
+      "context.compacted",
+      "model.stream.chunk",
+      "message.added",
+      "turn.completed",
+    ])
+    expect(result.events.map((event) => event.sequence)).toEqual(
+      Array.from({ length: result.events.length }, (_, index) => index + 1),
+    )
+    expect(result.events[7]).toMatchObject({
+      type: "context.compacted",
+      data: { trigger: "auto", summary: "pre-turn summary" },
+    })
+    expect(result.events[8]).toMatchObject({ type: "model.stream.chunk" })
+    expect(requestText).toContain("[Conversation summary")
+    expect(requestText).toContain("pre-turn summary")
+    expect(requestText).toContain("continue after automatic compaction")
+    const compactionDiagnostic = diagnostics.find((entry) => entry.message === "context.compacted")
+    if (compactionDiagnostic === undefined) throw new Error("missing compaction diagnostic")
+    expect(typeof dataField(compactionDiagnostic, "tokens_before")).toBe("number")
+    expect(typeof dataField(compactionDiagnostic, "tokens_after")).toBe("number")
+  })
+
+  test("does not auto-compact when compaction auto is disabled", async () => {
+    const disabledThread = Ids.ThreadId.make("thread_agent_pre_turn_auto_disabled")
+    const disabledWorkspace = Ids.WorkspaceId.make("workspace_agent_pre_turn_auto_disabled")
+    const captured: Array<Provider.GenerateRequest> = []
+    let completeCalls = 0
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.preTurnDisabled.complete")(function* (request: Provider.GenerateRequest) {
+          completeCalls += 1
+          return fakeResponse(request, "unexpected summary")
+        }),
+        stream: (request: Provider.GenerateRequest) => {
+          captured.push(request)
+          return Stream.fromIterable(Provider.streamEventsFromResponse(fakeResponse(request, "without compaction")))
+        },
+      }),
+    )
+    const disabledConfigLayer = Config.layerFromValues({
+      workspace_root: "/workspace/rika-test",
+      data_dir: "/workspace/rika-test/.rika",
+      default_mode: "rush",
+      compaction_auto: false,
+    })
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(providerLayer),
+      Diagnostics.memoryLayer([]),
+      disabledConfigLayer,
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* appendSeed(
+          usageSeed({
+            prefix: "pre_turn_disabled",
+            threadId: disabledThread,
+            workspaceId: disabledWorkspace,
+            inputTokens: 380_000,
+          }),
+        )
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: disabledThread,
+          workspace_id: disabledWorkspace,
+          content: "continue without automatic compaction",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: disabledThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.turn.status).toBe("completed")
+    expect(completeCalls).toBe(0)
+    expect(result.turn.events.map((event) => event.type)).toEqual([
+      "turn.started",
+      "message.added",
+      "context.resolved",
+      "model.stream.chunk",
+      "message.added",
+      "turn.completed",
+    ])
+    expect(result.events.map((event) => event.type)).not.toContain("context.compacted")
+    expect(JSON.stringify(captured[0]?.messages)).toContain("old pre_turn_disabled context")
+  })
+
+  test("uses the reserved compaction buffer when deciding pre-model auto-compaction", async () => {
+    const reservedThread = Ids.ThreadId.make("thread_agent_pre_turn_reserved")
+    const reservedWorkspace = Ids.WorkspaceId.make("workspace_agent_pre_turn_reserved")
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.preTurnReserved.complete")(function* (request: Provider.GenerateRequest) {
+          return fakeResponse(request, "reserved summary")
+        }),
+        stream: (request: Provider.GenerateRequest) =>
+          Stream.fromIterable(Provider.streamEventsFromResponse(fakeResponse(request, "reserved answer"))),
+      }),
+    )
+    const reservedConfigLayer = Config.layerFromValues({
+      workspace_root: "/workspace/rika-test",
+      data_dir: "/workspace/rika-test/.rika",
+      default_mode: "rush",
+      compaction_reserved: 50_000,
+    })
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(providerLayer),
+      Diagnostics.memoryLayer([]),
+      reservedConfigLayer,
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* appendSeed(
+          usageSeed({
+            prefix: "pre_turn_reserved",
+            threadId: reservedThread,
+            workspaceId: reservedWorkspace,
+            inputTokens: 360_000,
+          }),
+        )
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: reservedThread,
+          workspace_id: reservedWorkspace,
+          content: "continue with reserved budget",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: reservedThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.turn.status).toBe("completed")
+    expect(result.events.find((event) => event.type === "context.compacted")).toMatchObject({
+      data: { trigger: "auto", summary: "reserved summary" },
+    })
+  })
+
+  test("auto-compacts mid-turn and rebuilds the next request with pending tool results", async () => {
+    const midThread = Ids.ThreadId.make("thread_agent_mid_turn_auto_compact")
+    const captured: Array<Provider.GenerateRequest> = []
+    const providerLayer = midTurnCompactingProviderLayer(captured)
+    const largeToolLayer = ToolExecutor.fakeLayer({
+      fake_echo: () => Effect.succeed({ echoed: `PENDING_TOOL_OUTPUT ${"x".repeat(24_000)}` }),
+    })
+    const layer = makeLayer([], largeToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: midThread,
+          workspace_id: workspaceId,
+          content: "call the tool and continue after compaction",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: midThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const types = result.events.map((event) => event.type)
+    const compactedIndex = types.indexOf("context.compacted")
+    const toolCompletedIndex = types.indexOf("tool.call.completed")
+    const secondPromptText = JSON.stringify(captured[1]?.prompt)
+    expect(result.turn.status).toBe("completed")
+    expect(compactedIndex).toBeGreaterThan(toolCompletedIndex)
+    expect(result.events[compactedIndex]).toMatchObject({
+      type: "context.compacted",
+      data: { trigger: "auto", summary: "mid-turn summary" },
+    })
+    expect(secondPromptText).toContain("[Conversation summary")
+    expect(secondPromptText).toContain("mid-turn summary")
+    expect(secondPromptText).not.toContain("SUMMARY_INCLUDED_PENDING_TOOL_RESULT")
+    expect(secondPromptText).toContain("assistant prefix")
+    expect(secondPromptText).toContain('"type":"tool-call"')
+    expect(secondPromptText).toContain('"type":"tool-result"')
+    expect(secondPromptText).toContain("echoed")
+    expect(secondPromptText.match(/PENDING_TOOL_OUTPUT/g)).toHaveLength(1)
+    expect(secondPromptText.match(/call_mid_turn_compact/g)).toHaveLength(2)
+  })
+
+  test("compacts and retries once on context overflow without appending model error", async () => {
+    const overflowThread = Ids.ThreadId.make("thread_agent_overflow_retry")
+    const captured: Array<Provider.GenerateRequest> = []
+    const providerLayer = overflowRecoveringProviderLayer(captured, false)
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: overflowThread,
+          workspace_id: workspaceId,
+          content: "recover from context overflow",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: overflowThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const types = result.events.map((event) => event.type)
+    expect(result.turn.status).toBe("completed")
+    expect(types).toContain("context.compacted")
+    expect(result.events.find((event) => event.type === "context.compacted")).toMatchObject({
+      data: { trigger: "overflow", summary: "overflow summary" },
+    })
+    expect(JSON.stringify(captured[0]?.messages)).toContain("overflow summary")
+    expect(JSON.stringify(captured[0]?.messages)).not.toContain("model.error")
+    expect(JSON.stringify(captured[0]?.prompt)).not.toContain("model.error")
+  })
+
+  test("fails cleanly when context overflow repeats after compaction", async () => {
+    const overflowThread = Ids.ThreadId.make("thread_agent_overflow_double")
+    const providerLayer = overflowRecoveringProviderLayer([], true)
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: overflowThread,
+          workspace_id: workspaceId,
+          content: "fail after repeated context overflow",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: overflowThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.turn.status).toBe("failed")
+    expect(result.events.filter((event) => event.type === "context.compacted")).toHaveLength(1)
+    expect(result.events.at(-1)).toMatchObject({
+      type: "turn.failed",
+      data: { error: { message: "context window exceeded; compaction insufficient" } },
+    })
+  })
+
   test("records permission-blocked tool calls as structured tool results", async () => {
     const toolLayer = ToolExecutor.layer.pipe(
       Layer.provideMerge(ToolRegistry.fakeLayer({ fake_echo: (call) => Effect.succeed({ echoed: call.input }) })),
@@ -1190,6 +1497,141 @@ const recoveringProviderLayer = (error: Provider.ProviderError, captured: Array<
     }),
   )
 }
+
+const appendSeed = (events: ReadonlyArray<Event.Event>) =>
+  Effect.gen(function* () {
+    for (const event of events) {
+      const appended = yield* ThreadEventLog.append(event)
+      yield* ThreadProjection.apply(appended)
+    }
+  })
+
+const usageSeed = (input: {
+  readonly prefix: string
+  readonly threadId: Ids.ThreadId
+  readonly workspaceId: Ids.WorkspaceId
+  readonly inputTokens: number
+}): ReadonlyArray<Event.Event> => {
+  const turnId = Ids.TurnId.make(`turn_${input.prefix}_prior`)
+  const now = Common.TimestampMillis.make(1_900_000_000_000)
+  return [
+    {
+      id: Ids.EventId.make(`event_${input.prefix}_thread_created`),
+      thread_id: input.threadId,
+      sequence: 1,
+      version: 1,
+      created_at: now,
+      type: "thread.created",
+      data: { workspace_id: input.workspaceId },
+    },
+    {
+      id: Ids.EventId.make(`event_${input.prefix}_turn_started`),
+      thread_id: input.threadId,
+      turn_id: turnId,
+      sequence: 2,
+      version: 1,
+      created_at: now,
+      type: "turn.started",
+      data: {},
+    },
+    {
+      id: Ids.EventId.make(`event_${input.prefix}_message_added`),
+      thread_id: input.threadId,
+      turn_id: turnId,
+      sequence: 3,
+      version: 1,
+      created_at: now,
+      type: "message.added",
+      data: {
+        message: Message.user({
+          id: Ids.MessageId.make(`message_${input.prefix}_old`),
+          thread_id: input.threadId,
+          turn_id: turnId,
+          created_at: now,
+          content: `old ${input.prefix} context`,
+        }),
+      },
+    },
+    {
+      id: Ids.EventId.make(`event_${input.prefix}_turn_completed`),
+      thread_id: input.threadId,
+      turn_id: turnId,
+      sequence: 4,
+      version: 1,
+      created_at: now,
+      type: "turn.completed",
+      data: { usage: { input_tokens: input.inputTokens, output_tokens: 1, total_tokens: input.inputTokens + 1 } },
+    },
+  ]
+}
+
+const midTurnCompactingProviderLayer = (captured: Array<Provider.GenerateRequest>) => {
+  let streamCalls = 0
+  return Layer.succeed(
+    Provider.Service,
+    Provider.Service.of({
+      name: "openai",
+      complete: Effect.fn("AgentLoop.test.midTurnAuto.complete")(function* (request: Provider.GenerateRequest) {
+        const sawPendingToolOutput = JSON.stringify(request.messages).includes("PENDING_TOOL_OUTPUT")
+        return fakeResponse(request, sawPendingToolOutput ? "SUMMARY_INCLUDED_PENDING_TOOL_RESULT" : "mid-turn summary")
+      }),
+      stream: (request: Provider.GenerateRequest) => {
+        streamCalls += 1
+        captured.push(request)
+        if (streamCalls === 1) {
+          return Stream.fromIterable<Provider.StreamEvent>([
+            { type: "response.started", provider: request.provider, model: request.model },
+            { type: "content.delta", text: "assistant prefix" },
+            { type: "tool.call", id: "call_mid_turn_compact", name: "fake_echo", input: { text: "mid" } },
+            {
+              type: "response.completed",
+              response: {
+                provider: request.provider,
+                model: request.model,
+                content: "assistant prefix",
+                finish_reason: "tool-call",
+                usage: { input_tokens: 380_000, output_tokens: 0, total_tokens: 380_000 },
+              },
+            },
+          ])
+        }
+        return Stream.fromIterable(
+          Provider.streamEventsFromResponse(fakeResponse(request, "after mid-turn compaction")),
+        )
+      },
+    }),
+  )
+}
+
+const overflowRecoveringProviderLayer = (captured: Array<Provider.GenerateRequest>, failRetry: boolean) => {
+  let streamCalls = 0
+  return Layer.succeed(
+    Provider.Service,
+    Provider.Service.of({
+      name: "openai",
+      complete: Effect.fn("AgentLoop.test.overflow.complete")(function* (request: Provider.GenerateRequest) {
+        return fakeResponse(request, "overflow summary")
+      }),
+      stream: (request: Provider.GenerateRequest) => {
+        streamCalls += 1
+        if (streamCalls === 1) return Stream.fail(contextOverflowError())
+        if (failRetry) return Stream.fail(contextOverflowError())
+        captured.push(request)
+        return Stream.fromIterable(Provider.streamEventsFromResponse(fakeResponse(request, "recovered after overflow")))
+      },
+    }),
+  )
+}
+
+const contextOverflowError = () =>
+  AiError.make({
+    module: "OpenAiLanguageModel",
+    method: "streamText",
+    reason: new AiError.InvalidRequestError({
+      description:
+        "This model's maximum context length is 400000 tokens. However, your messages resulted in 401000 tokens.",
+    }),
+  })
 
 const skill = (name: string, description: string, instructions: string): SkillRegistry.Skill => ({
   summary: {

@@ -12,6 +12,8 @@ export const Values = Schema.Struct({
   default_mode: Mode,
   database_url: Schema.optional(Schema.String),
   backend_id: Schema.optional(Schema.String),
+  compaction_auto: Schema.optional(Schema.Boolean),
+  compaction_reserved: Schema.optional(Schema.Int),
 }).annotate({ identifier: "Rika.Config.Values" })
 
 export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigError", {
@@ -46,10 +48,17 @@ export const layerFromEnv = (env: Record<string, string | undefined>, cwd: strin
     Service,
     Effect.gen(function* () {
       const defaultMode = yield* parseMode(env.RIKA_MODE ?? "smart")
+      const compactionAuto = yield* parseBooleanOption(env.RIKA_COMPACTION_AUTO, "RIKA_COMPACTION_AUTO")
+      const compactionReserved = yield* parseNonNegativeIntOption(
+        env.RIKA_COMPACTION_RESERVED,
+        "RIKA_COMPACTION_RESERVED",
+      )
       const base: Values = {
         workspace_root: env.RIKA_WORKSPACE_ROOT ?? cwd,
         data_dir: env.RIKA_DATA_DIR ?? `${cwd}/.rika`,
         default_mode: defaultMode,
+        ...(compactionAuto === undefined ? {} : { compaction_auto: compactionAuto }),
+        ...(compactionReserved === undefined ? {} : { compaction_reserved: compactionReserved }),
       }
       const values: Values =
         env.RIKA_DATABASE_URL === undefined ? base : { ...base, database_url: env.RIKA_DATABASE_URL }
@@ -85,4 +94,19 @@ const parseMode = (value: string) => {
   const decoded = Schema.decodeUnknownOption(Mode)(value)
   if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
   return new ConfigError({ message: `Invalid RIKA_MODE ${value}`, key: "RIKA_MODE" })
+}
+
+const parseBooleanOption = (value: string | undefined, key: string) => {
+  if (value === undefined) return Effect.succeed(undefined)
+  if (value === "true") return Effect.succeed(true)
+  if (value === "false") return Effect.succeed(false)
+  return new ConfigError({ message: `Invalid ${key} ${value}`, key })
+}
+
+const parseNonNegativeIntOption = (value: string | undefined, key: string) => {
+  if (value === undefined) return Effect.succeed(undefined)
+  if (!/^\d+$/.test(value)) return new ConfigError({ message: `Invalid ${key} ${value}`, key })
+  const parsed = Number(value)
+  if (Number.isSafeInteger(parsed)) return Effect.succeed(parsed)
+  return new ConfigError({ message: `Invalid ${key} ${value}`, key })
 }

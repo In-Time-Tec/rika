@@ -1,5 +1,5 @@
 import { Config, IdGenerator, Time } from "@rika/core"
-import { ModelInfo, Modes, Provider, Router, Tokens } from "@rika/llm"
+import { Errors, ModelInfo, Modes, Provider, Router, Tokens } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message, Tool } from "@rika/schema"
 import { Context, Effect, Layer, Schema } from "effect"
@@ -14,6 +14,7 @@ export interface CompactInput extends Schema.Schema.Type<typeof CompactInput> {}
 export const CompactInput = Schema.Struct({
   thread_id: Ids.ThreadId,
   trigger: Event.ContextCompactionTrigger,
+  preserve_from_sequence: Schema.optional(Schema.Int),
 }).annotate({ identifier: "Rika.Agent.CompactionService.CompactInput" })
 
 export interface CompactionResult extends Schema.Schema.Type<typeof CompactionResult> {}
@@ -94,7 +95,12 @@ const compactThread = (dependencies: Dependencies, input: CompactInput) =>
 
     const previous = latestCompaction(events)
     const tokensBefore = Tokens.estimateMessages(ModelContext.messagesFromEvents(events))
-    const tailStartSequence = yield* selectTailStartSequence(dependencies, events, previous)
+    const tailStartSequence = yield* selectTailStartSequence(
+      dependencies,
+      events,
+      previous,
+      input.preserve_from_sequence,
+    )
     const summarizerMessages = summarizerInput(events, previous, tailStartSequence)
     const response = yield* completeWithOverflowRetry(dependencies, input.thread_id, summarizerMessages)
     const event = yield* makeCompactedEvent(
@@ -135,6 +141,7 @@ const selectTailStartSequence = (
   dependencies: Dependencies,
   events: ReadonlyArray<Event.Event>,
   previous: Event.ContextCompacted | undefined,
+  preserveFromSequence: number | undefined,
 ) =>
   Effect.gen(function* () {
     const config = yield* dependencies.config.get
@@ -152,7 +159,10 @@ const selectTailStartSequence = (
     const selected = !trimmed
       ? (tail[0]?.sequence ?? latestSequence(events) + 1)
       : (tail.find((event) => event.type === "message.added")?.sequence ?? latestSequence(events) + 1)
-    return previous === undefined ? selected : Math.max(selected, previous.data.tail_start_sequence)
+    const anchored = previous === undefined ? selected : Math.max(selected, previous.data.tail_start_sequence)
+    const previousTail = previous?.data.tail_start_sequence ?? 1
+    if (preserveFromSequence === undefined || preserveFromSequence < previousTail) return anchored
+    return Math.min(anchored, preserveFromSequence)
   })
 
 const turnTailStartSequence = (events: ReadonlyArray<Event.Event>, tailTurns: number) => {
@@ -255,22 +265,36 @@ const completeWithOverflowRetry = (
   messages: ReadonlyArray<Provider.Message>,
 ): Effect.Effect<Provider.GenerateResponse, RunError> =>
   dependencies.router.complete({ profile: "compaction", messages }).pipe(
+    Effect.flatMap((response) =>
+      Errors.isZeroProgressLengthResponse(response)
+        ? retryCompactionAfterOverflow(dependencies, threadId, messages, response)
+        : Effect.succeed(response),
+    ),
     Effect.catch((error) => {
-      if (!isContextOverflow(error)) return Effect.fail(error)
-      const retryMessages = dropOldestConversationMessage(messages)
-      if (retryMessages === undefined) {
-        return Effect.fail(
-          new CompactionError({
-            message: "thread too large to compact",
-            operation: "compact",
-            thread_id: threadId,
-            cause: error,
-          }),
-        )
-      }
-      return completeWithOverflowRetry(dependencies, threadId, retryMessages)
+      if (!Errors.isContextOverflow(error)) return Effect.fail(error)
+      return retryCompactionAfterOverflow(dependencies, threadId, messages, error)
     }),
   )
+
+const retryCompactionAfterOverflow = (
+  dependencies: Dependencies,
+  threadId: Ids.ThreadId,
+  messages: ReadonlyArray<Provider.Message>,
+  cause: unknown,
+): Effect.Effect<Provider.GenerateResponse, RunError> => {
+  const retryMessages = dropOldestConversationMessage(messages)
+  if (retryMessages === undefined) {
+    return Effect.fail(
+      new CompactionError({
+        message: "thread too large to compact",
+        operation: "compact",
+        thread_id: threadId,
+        cause,
+      }),
+    )
+  }
+  return completeWithOverflowRetry(dependencies, threadId, retryMessages)
+}
 
 const dropOldestConversationMessage = (
   messages: ReadonlyArray<Provider.Message>,
@@ -293,9 +317,6 @@ const textContent = (content: Provider.MessageContent) =>
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("\n")
-
-const isContextOverflow = (error: Router.RouterError | Provider.ProviderError) =>
-  /context|prompt is too long|maximum.*tokens|token limit/i.test(error.message)
 
 const makeCompactedEvent = (
   dependencies: Dependencies,

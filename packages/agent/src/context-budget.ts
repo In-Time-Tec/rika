@@ -1,7 +1,7 @@
 import { Config } from "@rika/core"
 import { ModelInfo, Modes, Tokens } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Ids } from "@rika/schema"
+import { Event, Ids } from "@rika/schema"
 import { Context, Effect, Layer, Schema } from "effect"
 import * as ModelContext from "./model-context"
 
@@ -9,6 +9,7 @@ export interface StateInput extends Schema.Schema.Type<typeof StateInput> {}
 export const StateInput = Schema.Struct({
   thread_id: Ids.ThreadId,
   mode: Config.Mode,
+  reserved: Schema.optional(Schema.Int),
 }).annotate({ identifier: "Rika.Agent.ContextBudget.StateInput" })
 
 export interface BudgetState extends Schema.Schema.Type<typeof BudgetState> {}
@@ -76,16 +77,29 @@ const stateForThread = (dependencies: Dependencies, input: StateInput) =>
       })
     }
 
-    const used = summary.context_tokens ?? (yield* estimateFromEvents(dependencies, input.thread_id))
+    const events = yield* readThread(dependencies, input.thread_id)
+    const used =
+      summary.context_tokens !== undefined && !hasNewerCompactionThanUsage(events)
+        ? summary.context_tokens
+        : estimateFromEvents(events)
     const model = Modes.primaryModel(Modes.get(input.mode))
-    const usable = Math.max(1, ModelInfo.usableBudget(ModelInfo.modelInfo(model)))
+    const usable = Math.max(1, ModelInfo.usableBudget(ModelInfo.modelInfo(model), input.reserved))
     return { used, usable, fraction: used / usable }
   })
 
-const estimateFromEvents = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
-  Effect.gen(function* () {
-    const events = yield* dependencies.eventLog
-      .readThread({ thread_id: threadId })
-      .pipe(Effect.provideService(Database.Service, dependencies.database))
-    return Tokens.estimateMessages(ModelContext.messagesFromEvents(events))
-  })
+const readThread = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
+  dependencies.eventLog
+    .readThread({ thread_id: threadId })
+    .pipe(Effect.provideService(Database.Service, dependencies.database))
+
+const estimateFromEvents = (events: ReadonlyArray<Event.Event>) =>
+  Tokens.estimateMessages(ModelContext.messagesFromEvents(events))
+
+const hasNewerCompactionThanUsage = (events: ReadonlyArray<Event.Event>) => {
+  const latestCompaction = events.findLast((event) => event.type === "context.compacted")
+  if (latestCompaction === undefined) return false
+  const latestUsage = events.findLast(
+    (event): event is Event.TurnCompleted => event.type === "turn.completed" && event.data.usage !== undefined,
+  )
+  return latestUsage === undefined || latestCompaction.sequence > latestUsage.sequence
+}

@@ -1,4 +1,5 @@
 export * as Anthropic from "./anthropic"
+export * as Errors from "./errors"
 export * as Live from "./live"
 export * as ModelInfo from "./model-info"
 export * as Modes from "./modes"

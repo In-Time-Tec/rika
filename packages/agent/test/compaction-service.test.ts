@@ -131,6 +131,36 @@ describe("CompactionService", () => {
     expect(JSON.stringify(captured[1]?.messages)).toContain("second user message")
   })
 
+  test("drops the oldest summarizer message and retries after zero-progress length response", async () => {
+    const captured: Array<Router.Request> = []
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* seedThread()
+        const result = yield* CompactionService.compact({ thread_id: threadId, trigger: "manual" })
+        const events = yield* ThreadEventLog.readThread({ thread_id: threadId })
+        return { result, events }
+      }).pipe(
+        Effect.provide(
+          makeLayer(captured, [
+            {
+              provider: "openai",
+              model: "gpt-5.5",
+              content: "",
+              finish_reason: "length",
+            },
+            responseWith("Recovered length summary"),
+          ]),
+        ),
+      ),
+    )
+
+    expect(captured).toHaveLength(2)
+    expect(JSON.stringify(captured[0]?.messages)).toContain("first user message")
+    expect(JSON.stringify(captured[1]?.messages)).not.toContain("first user message")
+    expect(JSON.stringify(captured[1]?.messages)).toContain("second user message")
+  })
+
   test("strips image content and caps oversized tool output before summarizing", async () => {
     const captured: Array<Router.Request> = []
     await Effect.runPromise(
