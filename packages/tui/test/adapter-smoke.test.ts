@@ -269,6 +269,29 @@ describe("adapter Surface (headless)", () => {
     }
   })
 
+  test("renders context usage near the mode label", async () => {
+    const setup = await createTestRenderer({ width: 100, height: 16 })
+    try {
+      const surface = new Adapter.Surface(setup.renderer)
+      const state = ViewState.initial({
+        thread_id: threadId,
+        workspace_path: "/workspace/rika",
+        mode: "deep3",
+        context_tokens: 280_000,
+        context_window: 400_000,
+      })
+
+      surface.update(state)
+      await setup.renderOnce()
+      const frame = setup.captureCharFrame()
+
+      expect(frame).toContain("ctx 70%")
+      expect(frame).toContain("deep³")
+    } finally {
+      setup.renderer.destroy()
+    }
+  })
+
   test("selected prior user messages render an edit frame without inline hints", async () => {
     const setup = await createTestRenderer({ width: 100, height: 24 })
     try {

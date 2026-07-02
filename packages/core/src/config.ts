@@ -14,6 +14,9 @@ export const Values = Schema.Struct({
   backend_id: Schema.optional(Schema.String),
   compaction_auto: Schema.optional(Schema.Boolean),
   compaction_reserved: Schema.optional(Schema.Int),
+  compaction_prune: Schema.optional(Schema.Boolean),
+  compaction_prune_protect: Schema.optional(Schema.Int),
+  compaction_prune_minimum: Schema.optional(Schema.Int),
 }).annotate({ identifier: "Rika.Config.Values" })
 
 export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigError", {
@@ -53,12 +56,24 @@ export const layerFromEnv = (env: Record<string, string | undefined>, cwd: strin
         env.RIKA_COMPACTION_RESERVED,
         "RIKA_COMPACTION_RESERVED",
       )
+      const compactionPrune = yield* parseBooleanOption(env.RIKA_COMPACTION_PRUNE, "RIKA_COMPACTION_PRUNE")
+      const compactionPruneProtect = yield* parseNonNegativeIntOption(
+        env.RIKA_COMPACTION_PRUNE_PROTECT,
+        "RIKA_COMPACTION_PRUNE_PROTECT",
+      )
+      const compactionPruneMinimum = yield* parseNonNegativeIntOption(
+        env.RIKA_COMPACTION_PRUNE_MINIMUM,
+        "RIKA_COMPACTION_PRUNE_MINIMUM",
+      )
       const base: Values = {
         workspace_root: env.RIKA_WORKSPACE_ROOT ?? cwd,
         data_dir: env.RIKA_DATA_DIR ?? `${cwd}/.rika`,
         default_mode: defaultMode,
         ...(compactionAuto === undefined ? {} : { compaction_auto: compactionAuto }),
         ...(compactionReserved === undefined ? {} : { compaction_reserved: compactionReserved }),
+        ...(compactionPrune === undefined ? {} : { compaction_prune: compactionPrune }),
+        ...(compactionPruneProtect === undefined ? {} : { compaction_prune_protect: compactionPruneProtect }),
+        ...(compactionPruneMinimum === undefined ? {} : { compaction_prune_minimum: compactionPruneMinimum }),
       }
       const values: Values =
         env.RIKA_DATABASE_URL === undefined ? base : { ...base, database_url: env.RIKA_DATABASE_URL }

@@ -43,6 +43,62 @@ describe("ModelContext", () => {
     expect(JSON.stringify(prompt)).not.toContain("old user message")
     expect(JSON.stringify(prompt)).not.toContain("skip before tail")
   })
+
+  test("folds pruned tool outputs after the latest compaction for both prompt paths", () => {
+    const pruned = Ids.ToolCallId.make("tool_pruned")
+    const retained = Ids.ToolCallId.make("tool_retained")
+    const preCompaction = Ids.ToolCallId.make("tool_pre_compaction")
+    const events: ReadonlyArray<Event.Event> = [
+      threadCreated(1),
+      toolCompleted(2, preCompaction, "read", { content: "pre compacted output" }),
+      contextPruned(3, [preCompaction], 30_000),
+      compacted(4, "Goal\n- Keep this summary", 5),
+      toolCompleted(5, pruned, "search", { content: "secret old payload".repeat(400) }),
+      toolCompleted(6, retained, "read", { content: "visible payload" }),
+      contextPruned(7, [pruned], 24_000),
+    ]
+
+    const messages = ModelContext.messagesFromEvents(events)
+    const prompt = ModelContext.promptMessagesFromEvents(events)
+    const serializedMessages = JSON.stringify(messages)
+    const serializedPrompt = JSON.stringify(prompt)
+
+    expect(serializedMessages).toContain("output elided to save context")
+    expect(serializedMessages).toContain("tool_pruned")
+    expect(serializedMessages).toContain("search")
+    expect(serializedMessages).toContain("visible payload")
+    expect(serializedMessages).not.toContain("secret old payload")
+    expect(serializedMessages).not.toContain("pre compacted output")
+
+    expect(serializedPrompt).toContain("output elided to save context")
+    expect(serializedPrompt).toContain("tool_pruned")
+    expect(serializedPrompt).toContain("search")
+    expect(serializedPrompt).toContain("visible payload")
+    expect(serializedPrompt).not.toContain("secret old payload")
+    expect(serializedPrompt).not.toContain("pre compacted output")
+  })
+
+  test("only folds tool outputs that occur before the pruning event", () => {
+    const reused = Ids.ToolCallId.make("tool_reused")
+    const events: ReadonlyArray<Event.Event> = [
+      threadCreated(1),
+      toolCompleted(2, reused, "read", { content: "old reused payload" }),
+      contextPruned(3, [reused], 24_000),
+      toolCompleted(4, reused, "read", { content: "fresh reused payload" }),
+    ]
+
+    const messages = ModelContext.messagesFromEvents(events)
+    const prompt = ModelContext.promptMessagesFromEvents(events)
+    const serializedMessages = JSON.stringify(messages)
+    const serializedPrompt = JSON.stringify(prompt)
+
+    expect(serializedMessages).toContain("output elided to save context")
+    expect(serializedMessages).toContain("fresh reused payload")
+    expect(serializedMessages).not.toContain("old reused payload")
+    expect(serializedPrompt).toContain("output elided to save context")
+    expect(serializedPrompt).toContain("fresh reused payload")
+    expect(serializedPrompt).not.toContain("old reused payload")
+  })
 })
 
 const fields = (sequence: number): Omit<Event.TurnStarted, "type" | "data"> => ({
@@ -90,6 +146,23 @@ const compacted = (sequence: number, summary: string, tailStartSequence: number)
     tail_start_sequence: tailStartSequence,
     trigger: "manual",
     model: "gpt-5.5",
+  },
+})
+
+const contextPruned = (
+  sequence: number,
+  toolCallIds: ReadonlyArray<Ids.ToolCallId>,
+  estimatedTokensFreed: number,
+): Event.ContextPruned => ({
+  id: Ids.EventId.make(`event_model_context_${sequence}`),
+  thread_id: threadId,
+  sequence,
+  version: 1,
+  created_at: now,
+  type: "context.pruned",
+  data: {
+    tool_call_ids: [...toolCallIds],
+    estimated_tokens_freed: estimatedTokensFreed,
   },
 })
 

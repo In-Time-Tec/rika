@@ -9,8 +9,10 @@ import {
   ClickedThread,
   ConfirmedKillOrb,
   SubmittedDraft,
+  contextUsage,
   eventRows,
   type AppMessage,
+  type ContextUsage,
   type Model,
   type TranscriptRow,
 } from "./app"
@@ -76,7 +78,10 @@ const workspace = (model: Model): Html =>
         [H.Class("workspace-header")],
         [
           H.div([], [H.p([H.Class("eyebrow")], ["Local development sync"]), H.h2([], [activeTitle(model)])]),
-          H.div([H.Class("sequence")], [`seq ${model.last_sequence}`]),
+          H.div(
+            [H.Class("header-status")],
+            [contextMeter(model), H.div([H.Class("sequence")], [`seq ${model.last_sequence}`])],
+          ),
         ],
       ),
       orbHeader(model),
@@ -85,6 +90,27 @@ const workspace = (model: Model): Html =>
       composer(model),
     ],
   )
+
+const contextMeter = (model: Model): Html => {
+  const usage = contextUsage(model)
+  if (usage === undefined) return Ui.empty
+  return H.div(
+    [H.Class(Ui.cn("context-meter", contextMeterToneClass(usage)))],
+    [
+      H.span([], [`ctx ${usage.percent}%`]),
+      H.progress(
+        [H.Class("context-meter-bar"), H.Max("100"), H.Value(String(usage.percent)), H.AriaLabel("Context usage")],
+        [],
+      ),
+    ],
+  )
+}
+
+const contextMeterToneClass = (usage: ContextUsage) => {
+  if (usage.tone === "danger") return "context-meter-danger"
+  if (usage.tone === "warning") return "context-meter-warning"
+  return "context-meter-normal"
+}
 
 const orbHeader = (model: Model): Html => {
   const orb = model.selected_orb

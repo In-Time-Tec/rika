@@ -87,6 +87,8 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
               mode,
               events: record.events,
               ...(activeOrb === undefined ? {} : { active_orb: activeOrb }),
+              ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+              ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
             }),
           ),
         }
@@ -147,7 +149,14 @@ const makeBackend = (client: Client.Interface): Backend.SessionBackend<RunError>
     client.previewThread(thread_id).pipe(
       Effect.map((record) => ({
         thread_id,
-        state: ViewState.initial({ thread_id, workspace_path, mode, events: record.events }),
+        state: ViewState.initial({
+          thread_id,
+          workspace_path,
+          mode,
+          events: record.events,
+          ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+          ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
+        }),
       })),
       Effect.mapError(previewError),
     ),
@@ -271,6 +280,8 @@ const handleCommand = (
           thread_id: nextThreadId,
           events: record.events,
           ...(activeOrb === undefined ? {} : { active_orb: activeOrb }),
+          ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+          ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
         }),
       )
       return Backend.commandResult(context, {
@@ -290,6 +301,8 @@ const handleCommand = (
               thread_id: target,
               events: record.events,
               notice: `${name.slice(1)}d ${target}`,
+              ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+              ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
             })
       return Backend.commandResult(context, {
         state: ViewState.withNotice(nextState, `${summary.archived ? "Archived" : "Unarchived"} ${target}`),

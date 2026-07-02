@@ -16,6 +16,7 @@
   "dependencies": {
     "@rika/agent": "workspace:*",
     "@rika/core": "workspace:*",
+    "@rika/llm": "workspace:*",
     "@rika/persistence": "workspace:*",
     "@rika/sdk": "workspace:*",
     "@rika/schema": "workspace:*",

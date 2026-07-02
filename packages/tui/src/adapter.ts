@@ -1023,10 +1023,21 @@ const modeIndicatorContent = (state: ViewState.ViewState): StyledText => {
   const chunks: TextChunk[] = [fg(color.text)(" ")]
   if (state.cost_usd > 0) chunks.push(fg(color.dim)(`${costLabel(state.cost_usd)} `), fg(color.faint)("— "))
   if (state.remoteArm.enabled) chunks.push(fg(color.green)("[orb] "), fg(color.faint)("— "))
+  if (state.context_usage !== undefined)
+    chunks.push(
+      fg(contextUsageColor(state.context_usage))(ViewState.contextUsageLabel(state.context_usage)),
+      fg(color.faint)(" — "),
+    )
   if (state.fast_mode) chunks.push(fg(color.yellow)("↯"))
   for (const chunk of modeLabelChunks(state)) chunks.push(chunk)
   chunks.push(fg(color.text)(" "))
   return new StyledText(chunks)
+}
+
+const contextUsageColor = (usage: ViewState.ContextUsage) => {
+  if (usage.tone === "danger") return color.red
+  if (usage.tone === "warning") return color.yellow
+  return color.dim
 }
 
 const costLabel = (cost: number): string => `$${cost < 0.01 ? cost.toFixed(3) : cost.toFixed(2)}`

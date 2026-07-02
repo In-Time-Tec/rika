@@ -115,6 +115,16 @@ export const ContextCompacted = Schema.Struct({
   }),
 }).annotate({ identifier: "Rika.Event.ContextCompacted" })
 
+export interface ContextPruned extends Schema.Schema.Type<typeof ContextPruned> {}
+export const ContextPruned = Schema.Struct({
+  ...fields,
+  type: Schema.Literal("context.pruned"),
+  data: Schema.Struct({
+    tool_call_ids: Schema.Array(ToolCallId),
+    estimated_tokens_freed: Schema.Int,
+  }),
+}).annotate({ identifier: "Rika.Event.ContextPruned" })
+
 export interface SkillLoaded extends Schema.Schema.Type<typeof SkillLoaded> {}
 export const SkillLoaded = Schema.Struct({
   ...fields,
@@ -251,6 +261,7 @@ export type Event =
   | ModelReasoningDelta
   | ContextResolved
   | ContextCompacted
+  | ContextPruned
   | SkillLoaded
   | SubagentCompleted
   | ToolCallInputStarted
@@ -272,6 +283,7 @@ export const Event = Schema.Union([
   ModelReasoningDelta,
   ContextResolved,
   ContextCompacted,
+  ContextPruned,
   SkillLoaded,
   SubagentCompleted,
   ToolCallInputStarted,

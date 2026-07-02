@@ -6,6 +6,8 @@ import { Context, Effect, Layer, Schema } from "effect"
 import * as ModelContext from "./model-context"
 
 const defaultTailTurns = 2
+const defaultPruneProtectTokens = 40_000
+const defaultPruneMinimumTokens = 20_000
 const toolOutputMaxChars = 2_000
 const minimumTailBudget = 2_000
 const maximumTailBudget = 8_000
@@ -22,6 +24,18 @@ export const CompactionResult = Schema.Struct({
   event: Event.ContextCompacted,
   tokens_before: Schema.Int,
 }).annotate({ identifier: "Rika.Agent.CompactionService.CompactionResult" })
+
+export interface PruneInput extends Schema.Schema.Type<typeof PruneInput> {}
+export const PruneInput = Schema.Struct({
+  thread_id: Ids.ThreadId,
+}).annotate({ identifier: "Rika.Agent.CompactionService.PruneInput" })
+
+export interface PruneResult extends Schema.Schema.Type<typeof PruneResult> {}
+export const PruneResult = Schema.Struct({
+  tool_call_ids: Schema.Array(Ids.ToolCallId),
+  estimated_tokens_freed: Schema.Int,
+  event: Schema.optional(Event.ContextPruned),
+}).annotate({ identifier: "Rika.Agent.CompactionService.PruneResult" })
 
 export class CompactionError extends Schema.TaggedErrorClass<CompactionError>()("CompactionError", {
   message: Schema.String,
@@ -41,6 +55,7 @@ export type RunError =
 
 export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<CompactionResult, RunError>
+  readonly prune: (input: PruneInput) => Effect.Effect<PruneResult, RunError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/agent/CompactionService") {}
@@ -71,15 +86,30 @@ export const layer = Layer.effect(
       compact: Effect.fn("CompactionService.compact")(function* (input: CompactInput) {
         return yield* compactThread(dependencies, input)
       }),
+      prune: Effect.fn("CompactionService.prune")(function* (input: PruneInput) {
+        return yield* pruneThread(dependencies, input)
+      }),
     })
   }),
 )
 
-export const fakeLayer = (implementation: Interface) => Layer.succeed(Service, Service.of(implementation))
+export const fakeLayer = (implementation: Pick<Interface, "compact"> & Partial<Pick<Interface, "prune">>) =>
+  Layer.succeed(
+    Service,
+    Service.of({
+      compact: implementation.compact,
+      prune: implementation.prune ?? (() => Effect.succeed({ tool_call_ids: [], estimated_tokens_freed: 0 })),
+    }),
+  )
 
 export const compact = Effect.fn("CompactionService.compact.call")(function* (input: CompactInput) {
   const service = yield* Service
   return yield* service.compact(input)
+})
+
+export const prune = Effect.fn("CompactionService.prune.call")(function* (input: PruneInput) {
+  const service = yield* Service
+  return yield* service.prune(input)
 })
 
 const compactThread = (dependencies: Dependencies, input: CompactInput) =>
@@ -116,6 +146,30 @@ const compactThread = (dependencies: Dependencies, input: CompactInput) =>
     return { event: appended, tokens_before: tokensBefore }
   })
 
+const pruneThread = (dependencies: Dependencies, input: PruneInput) =>
+  Effect.gen(function* () {
+    const events = yield* readThread(dependencies, input.thread_id)
+    if (events.length === 0) {
+      return yield* new CompactionError({
+        message: `Thread ${input.thread_id} does not exist`,
+        operation: "prune",
+        thread_id: input.thread_id,
+      })
+    }
+
+    const config = yield* dependencies.config.get
+    const protect = config.compaction_prune_protect ?? defaultPruneProtectTokens
+    const minimum = config.compaction_prune_minimum ?? defaultPruneMinimumTokens
+    const selection = selectPrunedToolOutputs(events, protect)
+    if (selection.estimated_tokens_freed < minimum || selection.tool_call_ids.length === 0) {
+      return { tool_call_ids: [], estimated_tokens_freed: 0 }
+    }
+
+    const event = yield* makePrunedEvent(dependencies, input, latestSequence(events) + 1, selection)
+    const appended = yield* appendPrunedAndProject(dependencies, event)
+    return { ...selection, event: appended }
+  })
+
 const readThread = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
   dependencies.eventLog
     .readThread({ thread_id: threadId })
@@ -136,6 +190,61 @@ const appendAndProject = (dependencies: Dependencies, event: Event.ContextCompac
     }
     return appended
   })
+
+const appendPrunedAndProject = (dependencies: Dependencies, event: Event.ContextPruned) =>
+  Effect.gen(function* () {
+    const appended = yield* dependencies.eventLog
+      .append(event)
+      .pipe(Effect.provideService(Database.Service, dependencies.database))
+    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
+    if (appended.type !== "context.pruned") {
+      return yield* new CompactionError({
+        message: `Expected context.pruned event, received ${appended.type}`,
+        operation: "prune",
+        thread_id: event.thread_id,
+      })
+    }
+    return appended
+  })
+
+const selectPrunedToolOutputs = (
+  events: ReadonlyArray<Event.Event>,
+  protectedTokens: number,
+): Omit<PruneResult, "event"> => {
+  const boundary = latestCompaction(events)
+  const contextStartSequence = boundary?.data.tail_start_sequence ?? 1
+  const recentStart = turnTailStartSequence(events, defaultTailTurns)
+  const alreadyPruned = prunedToolIds(events.filter((event) => event.sequence >= contextStartSequence))
+  let protectedTotal = 0
+  const toolCallIds: Array<Ids.ToolCallId> = []
+  let estimatedTokensFreed = 0
+
+  for (const event of events.toReversed()) {
+    if (event.sequence < contextStartSequence) break
+    if (event.sequence >= recentStart) continue
+    if (event.type !== "tool.call.completed") continue
+    const result = event.data.result
+    if (alreadyPruned.has(String(result.id))) continue
+    const outputTokens = toolOutputTokens(result)
+    if (outputTokens <= 0) continue
+    protectedTotal += outputTokens
+    if (protectedTotal <= protectedTokens) continue
+    toolCallIds.push(result.id)
+    estimatedTokensFreed += outputTokens
+  }
+
+  return { tool_call_ids: toolCallIds, estimated_tokens_freed: estimatedTokensFreed }
+}
+
+const prunedToolIds = (events: ReadonlyArray<Event.Event>): ReadonlySet<string> =>
+  new Set(
+    events.flatMap((event) =>
+      event.type === "context.pruned" ? event.data.tool_call_ids.map((toolCallId) => String(toolCallId)) : [],
+    ),
+  )
+
+const toolOutputTokens = (result: Tool.Result) =>
+  result.output === undefined ? 0 : Tokens.estimateTokens(JSON.stringify(result.output))
 
 const selectTailStartSequence = (
   dependencies: Dependencies,
@@ -350,6 +459,30 @@ const makeCompactedEvent = (
         trigger: input.trigger,
         tokens_before: tokensBefore,
         model,
+      },
+    }
+    return event
+  })
+
+const makePrunedEvent = (
+  dependencies: Dependencies,
+  input: PruneInput,
+  sequence: number,
+  result: Omit<PruneResult, "event">,
+) =>
+  Effect.gen(function* () {
+    const createdAt = yield* dependencies.time.nowMillis
+    const id = Ids.EventId.make(yield* dependencies.idGenerator.next("event"))
+    const event: Event.ContextPruned = {
+      id,
+      thread_id: input.thread_id,
+      sequence,
+      version: 1,
+      created_at: Common.TimestampMillis.make(createdAt),
+      type: "context.pruned",
+      data: {
+        tool_call_ids: [...result.tool_call_ids],
+        estimated_tokens_freed: result.estimated_tokens_freed,
       },
     }
     return event

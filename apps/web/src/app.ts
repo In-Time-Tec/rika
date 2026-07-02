@@ -1,5 +1,6 @@
 import { Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
 import { Client } from "@rika/sdk"
+import { ModelInfo } from "@rika/llm"
 import * as Command from "foldkit/command"
 import { m } from "foldkit/message"
 import * as Subscription from "foldkit/subscription"
@@ -38,6 +39,15 @@ export interface TranscriptRow {
   readonly kind: "message" | "event" | "tool" | "error"
   readonly title: string
   readonly body: string
+}
+
+export type ContextUsageTone = "normal" | "warning" | "danger"
+
+export interface ContextUsage {
+  readonly tokens: number
+  readonly window: number
+  readonly percent: number
+  readonly tone: ContextUsageTone
 }
 
 export const LoadedBackendHealth = m("LoadedBackendHealth", { health: Remote.BackendHealth })
@@ -413,6 +423,14 @@ export const eventRows = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Tra
           title: "Context compacted",
           body: `${event.data.trigger} · tail starts at ${event.data.tail_start_sequence}`,
         }
+      case "context.pruned":
+        return {
+          id: event.id,
+          sequence: event.sequence,
+          kind: "event",
+          title: "Context pruned",
+          body: `${event.data.tool_call_ids.length} tools · ${event.data.estimated_tokens_freed} tokens`,
+        }
       case "skill.loaded":
         return { id: event.id, sequence: event.sequence, kind: "event", title: "Skill loaded", body: event.data.name }
       case "subagent.completed":
@@ -464,6 +482,25 @@ export const eventRows = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Tra
     }
     return unreachableEventRow(event)
   })
+
+export const contextUsage = (model: Model): ContextUsage | undefined => {
+  const latest = model.events.findLast(
+    (event): event is Event.TurnCompleted =>
+      event.type === "turn.completed" && event.data.usage?.input_tokens !== undefined,
+  )
+  const selected = model.threads.find((thread) => thread.thread_id === model.selected_thread_id)
+  const tokens = latest?.data.usage?.input_tokens ?? selected?.context_tokens
+  const window =
+    latest?.data.model === undefined ? selected?.context_window : ModelInfo.modelInfo(latest.data.model).context_window
+  if (tokens === undefined || window === undefined) return undefined
+  const percent = Math.min(100, Math.max(0, Math.round((tokens / window) * 100)))
+  return {
+    tokens,
+    window,
+    percent,
+    tone: percent >= 90 ? "danger" : percent >= 70 ? "warning" : "normal",
+  }
+}
 
 const sdk = (apiBaseUrl: string) => Client.make(Client.fetchTransport({ base_url: apiBaseUrl }))
 

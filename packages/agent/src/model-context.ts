@@ -5,15 +5,15 @@ import { Prompt } from "effect/unstable/ai"
 export const summaryPrefix = "[Conversation summary — earlier context was compacted]"
 
 export const messagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Provider.Message> =>
-  withCompaction(events, (compaction, tail) => [
+  withCompaction(events, (compaction, tail, prunedToolSequences) => [
     ...(compaction === undefined ? [] : [summaryProviderMessage(compaction)]),
-    ...tail.flatMap((event) => providerMessagesFromEvent(event)),
+    ...tail.flatMap((event) => providerMessagesFromEvent(event, prunedToolSequences)),
   ])
 
 export const promptMessagesFromEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Prompt.MessageEncoded> =>
-  withCompaction(events, (compaction, tail) => [
+  withCompaction(events, (compaction, tail, prunedToolSequences) => [
     ...(compaction === undefined ? [] : [summaryPromptMessage(compaction)]),
-    ...tail.flatMap((event) => promptMessagesFromEvent(event)),
+    ...tail.flatMap((event) => promptMessagesFromEvent(event, prunedToolSequences)),
   ])
 
 export const providerMessageToPromptMessage = (message: Provider.Message): Prompt.MessageEncoded => {
@@ -32,22 +32,44 @@ export const providerMessageToPromptMessage = (message: Provider.Message): Promp
 
 const withCompaction = <A>(
   events: ReadonlyArray<Event.Event>,
-  assemble: (compaction: Event.ContextCompacted | undefined, tail: ReadonlyArray<Event.Event>) => ReadonlyArray<A>,
+  assemble: (
+    compaction: Event.ContextCompacted | undefined,
+    tail: ReadonlyArray<Event.Event>,
+    prunedToolSequences: ReadonlySet<number>,
+  ) => ReadonlyArray<A>,
 ): ReadonlyArray<A> => {
   const compaction = events.findLast((event): event is Event.ContextCompacted => event.type === "context.compacted")
-  if (compaction === undefined) return assemble(undefined, events)
-  return assemble(
-    compaction,
-    events.filter((event) => event.sequence >= compaction.data.tail_start_sequence),
-  )
+  const tail =
+    compaction === undefined ? events : events.filter((event) => event.sequence >= compaction.data.tail_start_sequence)
+  return assemble(compaction, tail, prunedToolSequences(tail))
 }
 
-const providerMessagesFromEvent = (event: Event.Event): ReadonlyArray<Provider.Message> => {
+const prunedToolSequences = (events: ReadonlyArray<Event.Event>): ReadonlySet<number> => {
+  const prunedIds = new Set<string>()
+  const sequences = new Set<number>()
+  for (const event of events.toReversed()) {
+    if (event.type === "context.pruned") {
+      for (const toolCallId of event.data.tool_call_ids) prunedIds.add(String(toolCallId))
+      continue
+    }
+    if (event.type !== "tool.call.completed") continue
+    if (prunedIds.has(String(event.data.result.id))) sequences.add(event.sequence)
+  }
+  return sequences
+}
+
+const providerMessagesFromEvent = (
+  event: Event.Event,
+  prunedSequences: ReadonlySet<number>,
+): ReadonlyArray<Provider.Message> => {
   switch (event.type) {
     case "message.added":
       return messageToProviderMessages(event.data.message)
     case "tool.call.completed": {
-      const message: Provider.Message = { role: "tool", content: JSON.stringify(event.data.result) }
+      const message: Provider.Message = {
+        role: "tool",
+        content: JSON.stringify(foldPrunedToolResult(event, prunedSequences)),
+      }
       return [message]
     }
     default:
@@ -55,16 +77,34 @@ const providerMessagesFromEvent = (event: Event.Event): ReadonlyArray<Provider.M
   }
 }
 
-const promptMessagesFromEvent = (event: Event.Event): ReadonlyArray<Prompt.MessageEncoded> => {
+const promptMessagesFromEvent = (
+  event: Event.Event,
+  prunedSequences: ReadonlySet<number>,
+): ReadonlyArray<Prompt.MessageEncoded> => {
   switch (event.type) {
     case "message.added":
       return messageToPromptMessages(event.data.message)
     case "tool.call.requested":
       return [toolCallPromptMessage(event.data.call)]
     case "tool.call.completed":
-      return [toolResultPromptMessage([event.data.result])]
+      return [toolResultPromptMessage([foldPrunedToolResult(event, prunedSequences)])]
     default:
       return []
+  }
+}
+
+const foldPrunedToolResult = (event: Event.ToolCallCompleted, prunedSequences: ReadonlySet<number>): Tool.Result => {
+  const result = event.data.result
+  if (!prunedSequences.has(event.sequence)) return result
+  const chars = result.output === undefined ? 0 : JSON.stringify(result.output).length
+  return {
+    ...result,
+    output: {
+      pruned: true,
+      note: `output elided to save context (${chars} chars)`,
+      name: result.name,
+      status: result.status,
+    },
   }
 }
 

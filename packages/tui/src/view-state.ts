@@ -1,4 +1,5 @@
 import { Config } from "@rika/core"
+import { ModelInfo } from "@rika/llm"
 import { Common, Event, Ids, Message, Orb } from "@rika/schema"
 import { isAbsolute, relative } from "node:path"
 
@@ -39,6 +40,8 @@ export interface Input {
   readonly mode: Config.Mode
   readonly events?: ReadonlyArray<Event.Event>
   readonly active_orb?: ActiveOrb
+  readonly context_tokens?: number
+  readonly context_window?: number
 }
 
 export interface ActiveOrb {
@@ -127,6 +130,15 @@ export interface RemoteArmState {
   readonly project_name?: string
 }
 
+export type ContextUsageTone = "normal" | "warning" | "danger"
+
+export interface ContextUsage {
+  readonly tokens: number
+  readonly window: number
+  readonly percent: number
+  readonly tone: ContextUsageTone
+}
+
 export interface ViewState {
   readonly thread_id: Ids.ThreadId
   readonly active_orb?: ActiveOrb
@@ -167,6 +179,7 @@ export interface ViewState {
   readonly threadswitcher: ThreadSwitcherState
   readonly remoteArm: RemoteArmState
   readonly shortcuts_open: boolean
+  readonly context_usage?: ContextUsage
 }
 
 export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
@@ -234,6 +247,7 @@ const initialSeed = (input: Input): ViewState => ({
   entries: [],
   streaming_text: "",
   generated_text_chars: 0,
+  ...initialContextUsage(input),
   ...interactionDefaults,
 })
 
@@ -251,6 +265,8 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
       return tick({ ...state, activity: "thinking", active: true })
     case "context.compacted":
       return pushCard(state, systemCard("Context compacted", event.data.trigger, event.id))
+    case "context.pruned":
+      return pushCard(state, systemCard("Context pruned", contextPrunedSubtitle(event), event.id))
     case "skill.loaded":
       return tick(pushCard({ ...state, activity: "thinking", active: true }, skillCard(event)))
     case "subagent.completed":
@@ -288,7 +304,7 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
     case "artifact.created":
       return pushCard(state, systemCard("Artifact created", event.data.artifact.kind, event.id))
     case "turn.completed":
-      return finishTurn(state)
+      return finishTurn(withContextUsageFromTurn(state, event))
     case "turn.failed":
       return pushCard(finishTurn(state, "failed"), errorCard(event))
     case "thread.archived":
@@ -345,6 +361,8 @@ export const withActiveOrb = (state: ViewState, activeOrb: ActiveOrb): ViewState
   active_orb: activeOrb,
 })
 
+export const contextUsageLabel = (usage: ContextUsage): string => `ctx ${usage.percent}%`
+
 export const withThread = (
   state: ViewState,
   input: {
@@ -352,6 +370,8 @@ export const withThread = (
     readonly events: ReadonlyArray<Event.Event>
     readonly notice?: string
     readonly active_orb?: ActiveOrb
+    readonly context_tokens?: number
+    readonly context_window?: number
   },
 ): ViewState => {
   const base = initialSeed({
@@ -359,6 +379,8 @@ export const withThread = (
     workspace_path: state.workspace_path,
     mode: state.mode,
     ...(input.active_orb === undefined ? {} : { active_orb: input.active_orb }),
+    ...(input.context_tokens === undefined ? {} : { context_tokens: input.context_tokens }),
+    ...(input.context_window === undefined ? {} : { context_window: input.context_window }),
   })
   const next = fromEvents(
     {
@@ -367,6 +389,8 @@ export const withThread = (
       mode: state.mode,
       events: input.events,
       ...(input.active_orb === undefined ? {} : { active_orb: input.active_orb }),
+      ...(input.context_tokens === undefined ? {} : { context_tokens: input.context_tokens }),
+      ...(input.context_window === undefined ? {} : { context_window: input.context_window }),
     },
     base,
   )
@@ -416,6 +440,35 @@ const withoutNotice = (state: ViewState): ViewState => {
   const { notice: _notice, ...rest } = state
   return rest
 }
+
+const initialContextUsage = (input: Input) => {
+  if (input.context_tokens === undefined || input.context_window === undefined) return {}
+  return { context_usage: contextUsage(input.context_tokens, input.context_window) }
+}
+
+const withContextUsageFromTurn = (state: ViewState, event: Event.TurnCompleted): ViewState => {
+  const tokens = event.data.usage?.input_tokens
+  if (tokens === undefined) return state
+  const window = contextWindowForTurn(state, event)
+  if (window === undefined) return state
+  return { ...state, context_usage: contextUsage(tokens, window) }
+}
+
+const contextWindowForTurn = (state: ViewState, event: Event.TurnCompleted): number | undefined =>
+  event.data.model === undefined ? state.context_usage?.window : ModelInfo.modelInfo(event.data.model).context_window
+
+const contextUsage = (tokens: number, window: number): ContextUsage => {
+  const percent = Math.min(100, Math.max(0, Math.round((tokens / window) * 100)))
+  return {
+    tokens,
+    window,
+    percent,
+    tone: percent >= 90 ? "danger" : percent >= 70 ? "warning" : "normal",
+  }
+}
+
+const contextPrunedSubtitle = (event: Event.ContextPruned): string =>
+  `${event.data.tool_call_ids.length} tools · ${event.data.estimated_tokens_freed} tokens`
 
 export const insertText = (state: ViewState, text: string): ViewState => {
   const { text: current, cursor } = state.input

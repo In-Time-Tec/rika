@@ -130,6 +130,38 @@ describe("ViewState focus + expansion", () => {
 })
 
 describe("ViewState queue + thinking", () => {
+  test("context usage stays hidden until usage arrives and shifts thresholds", () => {
+    const hidden = base()
+    const initial = ViewState.initial({
+      thread_id: threadId,
+      workspace_path: "/workspace/rika",
+      mode: "smart",
+      context_tokens: 280_000,
+      context_window: 400_000,
+    })
+    const normal = ViewState.applyEvent(base(), turnCompletedWithUsage(1, 120_000))
+    const warning = ViewState.applyEvent(base(), turnCompletedWithUsage(2, 280_000))
+    const danger = ViewState.applyEvent(base(), turnCompletedWithUsage(3, 360_000))
+
+    expect(hidden.context_usage).toBeUndefined()
+    expect(initial.context_usage).toEqual({ tokens: 280_000, window: 400_000, percent: 70, tone: "warning" })
+    expect(normal.context_usage).toEqual({ tokens: 120_000, window: 400_000, percent: 30, tone: "normal" })
+    expect(ViewState.contextUsageLabel(normal.context_usage!)).toBe("ctx 30%")
+    expect(warning.context_usage).toEqual({ tokens: 280_000, window: 400_000, percent: 70, tone: "warning" })
+    expect(danger.context_usage).toEqual({ tokens: 360_000, window: 400_000, percent: 90, tone: "danger" })
+  })
+
+  test("context pruning renders as a concise system card", () => {
+    const state = ViewState.applyEvent(base(), contextPruned(1))
+
+    expect(state.cards.at(-1)).toMatchObject({
+      kind: "system",
+      title: "Context pruned",
+      subtitle: "2 tools · 24000 tokens",
+      status: "info",
+    })
+  })
+
   test("reasoning tiers apply only to deep mode", () => {
     let smart = base()
     expect(smart.reasoning_effort).toBe(0)
@@ -509,6 +541,26 @@ const toolCompleted = (
   type: "tool.call.completed",
   data: {
     result: { id: Ids.ToolCallId.make(id), name, status: "success", output },
+  },
+})
+
+const turnCompletedWithUsage = (sequence: number, inputTokens: number): Event.TurnCompleted => ({
+  ...eventBase(sequence),
+  turn_id: turnId,
+  type: "turn.completed",
+  data: {
+    provider: "openai",
+    model: "gpt-5.5",
+    usage: { input_tokens: inputTokens, output_tokens: 100, total_tokens: inputTokens + 100 },
+  },
+})
+
+const contextPruned = (sequence: number): Event.ContextPruned => ({
+  ...eventBase(sequence),
+  type: "context.pruned",
+  data: {
+    tool_call_ids: [Ids.ToolCallId.make("tool_pruned_a"), Ids.ToolCallId.make("tool_pruned_b")],
+    estimated_tokens_freed: 24_000,
   },
 })
 

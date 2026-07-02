@@ -79,7 +79,7 @@ const stateForThread = (dependencies: Dependencies, input: StateInput) =>
 
     const events = yield* readThread(dependencies, input.thread_id)
     const used =
-      summary.context_tokens !== undefined && !hasNewerCompactionThanUsage(events)
+      summary.context_tokens !== undefined && !hasNewerContextReductionThanUsage(events)
         ? summary.context_tokens
         : estimateFromEvents(events)
     const model = Modes.primaryModel(Modes.get(input.mode))
@@ -95,11 +95,13 @@ const readThread = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
 const estimateFromEvents = (events: ReadonlyArray<Event.Event>) =>
   Tokens.estimateMessages(ModelContext.messagesFromEvents(events))
 
-const hasNewerCompactionThanUsage = (events: ReadonlyArray<Event.Event>) => {
-  const latestCompaction = events.findLast((event) => event.type === "context.compacted")
-  if (latestCompaction === undefined) return false
+const hasNewerContextReductionThanUsage = (events: ReadonlyArray<Event.Event>) => {
+  const latestReduction = events.findLast(
+    (event) => event.type === "context.compacted" || event.type === "context.pruned",
+  )
+  if (latestReduction === undefined) return false
   const latestUsage = events.findLast(
     (event): event is Event.TurnCompleted => event.type === "turn.completed" && event.data.usage !== undefined,
   )
-  return latestUsage === undefined || latestCompaction.sequence > latestUsage.sequence
+  return latestUsage === undefined || latestReduction.sequence > latestUsage.sequence
 }

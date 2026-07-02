@@ -24,6 +24,7 @@
       "name": "@rika/web",
       "version": "0.0.0",
       "dependencies": {
+        "@rika/llm": "workspace:*",
         "@rika/schema": "workspace:*",
         "@rika/sdk": "workspace:*",
         "effect": "catalog:",
@@ -35,7 +36,6 @@
         "@rika/cli": "workspace:*",
         "@rika/core": "workspace:*",
         "@rika/ide": "workspace:*",
-        "@rika/llm": "workspace:*",
         "@rika/orb": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/server": "workspace:*",
@@ -271,6 +271,7 @@
         "@pierre/diffs": "1.2.11",
         "@rika/agent": "workspace:*",
         "@rika/core": "workspace:*",
+        "@rika/llm": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",
         "@rika/sdk": "workspace:*",

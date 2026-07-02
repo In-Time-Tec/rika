@@ -278,6 +278,7 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
       yield* append(yield* makeThreadCreated(dependencies, input, 1))
     }
 
+    yield* maybeAutoPruneBeforeTurn(dependencies, input, existingEvents.length > 0, emitExternalAppend)
     yield* append(yield* makeTurnStarted(dependencies, input.thread_id, turnId, sequence + 1))
     yield* append(yield* makeUserMessageAdded(dependencies, input, turnId, sequence + 1))
     const resolvedContext = yield* dependencies.contextResolver.resolve({
@@ -1029,6 +1030,22 @@ const maybeAutoCompactBeforeTurn = (
       Tokens.estimateMessages(ModelContext.messagesFromEvents(events)),
     )
     return { compacted: true, usable: state.usable } as const
+  })
+
+const maybeAutoPruneBeforeTurn = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  wasExistingThread: boolean,
+  emitExternalAppend: (event: Event.Event) => Effect.Effect<Event.Event, RunError>,
+) =>
+  Effect.gen(function* () {
+    if (!wasExistingThread) return { pruned: false } as const
+    const config = yield* dependencies.config.get
+    if (config.compaction_prune === false) return { pruned: false } as const
+    const result = yield* dependencies.compaction.prune({ thread_id: input.thread_id })
+    if (result.event === undefined) return { pruned: false } as const
+    yield* emitExternalAppend(result.event)
+    return { pruned: true } as const
   })
 
 const shouldCompactAfterResponse = (

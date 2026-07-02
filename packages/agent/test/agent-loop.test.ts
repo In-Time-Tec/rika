@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
-import { Provider, Router } from "@rika/llm"
+import { Provider, Router, Tokens } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
 import { Effect, Exit, Fiber, Layer, Queue, Scope, Stream } from "effect"
@@ -727,6 +727,94 @@ describe("AgentLoop", () => {
     if (compactionDiagnostic === undefined) throw new Error("missing compaction diagnostic")
     expect(typeof dataField(compactionDiagnostic, "tokens_before")).toBe("number")
     expect(typeof dataField(compactionDiagnostic, "tokens_after")).toBe("number")
+  })
+
+  test("prunes old tool output before current turn assembly and before pre-turn compaction", async () => {
+    const pruneThread = Ids.ThreadId.make("thread_agent_pre_turn_prune")
+    const pruneWorkspace = Ids.WorkspaceId.make("workspace_agent_pre_turn_prune")
+    const captured: Array<Provider.GenerateRequest> = []
+    const oldOutput = { content: "OLD_TOOL_OUTPUT ".repeat(16) }
+    const protectedOutput = { content: "PROTECTED_TOOL_OUTPUT ".repeat(16) }
+    const oldTokens = outputTokens(oldOutput)
+    let completeCalls = 0
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      Provider.Service.of({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.preTurnPrune.complete")(function* (request: Provider.GenerateRequest) {
+          completeCalls += 1
+          return fakeResponse(request, "unexpected compaction")
+        }),
+        stream: (request: Provider.GenerateRequest) => {
+          captured.push(request)
+          return Stream.fromIterable(Provider.streamEventsFromResponse(fakeResponse(request, "after prune")))
+        },
+      }),
+    )
+    const pruningConfigLayer = Config.layerFromValues({
+      workspace_root: "/workspace/rika-test",
+      data_dir: "/workspace/rika-test/.rika",
+      default_mode: "rush",
+      compaction_prune_protect: outputTokens(protectedOutput),
+      compaction_prune_minimum: oldTokens,
+    })
+    const layer = makeLayer(
+      [],
+      defaultToolLayer,
+      SkillRegistry.emptyLayer,
+      registryFromProviderLayer(providerLayer),
+      Diagnostics.memoryLayer([]),
+      pruningConfigLayer,
+    )
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* appendSeed(
+          pruneSeed({
+            threadId: pruneThread,
+            workspaceId: pruneWorkspace,
+            oldOutput,
+            protectedOutput,
+          }),
+        )
+        const turn = yield* AgentLoop.runTurn({
+          thread_id: pruneThread,
+          workspace_id: pruneWorkspace,
+          content: "continue after pruning",
+          mode: "rush",
+        })
+        const events = yield* ThreadEventLog.readThread({ thread_id: pruneThread })
+        return { turn, events }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const requestText = JSON.stringify(captured[0]?.messages)
+    const promptText = JSON.stringify(captured[0]?.prompt)
+    expect(result.turn.status).toBe("completed")
+    expect(completeCalls).toBe(0)
+    expect(result.turn.events.map((event) => event.type)).toEqual([
+      "context.pruned",
+      "turn.started",
+      "message.added",
+      "context.resolved",
+      "model.stream.chunk",
+      "message.added",
+      "turn.completed",
+    ])
+    expect(result.turn.events[0]).toMatchObject({
+      type: "context.pruned",
+      data: {
+        tool_call_ids: [Ids.ToolCallId.make("tool_pre_turn_prune_old")],
+        estimated_tokens_freed: oldTokens,
+      },
+    })
+    expect(requestText).toContain("output elided to save context")
+    expect(requestText).toContain("PROTECTED_TOOL_OUTPUT")
+    expect(requestText).toContain("RECENT_TOOL_OUTPUT")
+    expect(requestText).not.toContain("OLD_TOOL_OUTPUT")
+    expect(promptText).toContain("output elided to save context")
+    expect(promptText).not.toContain("OLD_TOOL_OUTPUT")
   })
 
   test("does not auto-compact when compaction auto is disabled", async () => {
@@ -1564,6 +1652,103 @@ const usageSeed = (input: {
     },
   ]
 }
+
+const pruneSeed = (input: {
+  readonly threadId: Ids.ThreadId
+  readonly workspaceId: Ids.WorkspaceId
+  readonly oldOutput: Common.JsonValue
+  readonly protectedOutput: Common.JsonValue
+}): ReadonlyArray<Event.Event> => {
+  const now = Common.TimestampMillis.make(1_900_000_000_000)
+  const oldTurn = Ids.TurnId.make("turn_pre_turn_prune_old")
+  const protectedTurn = Ids.TurnId.make("turn_pre_turn_prune_protected")
+  const recentOne = Ids.TurnId.make("turn_pre_turn_prune_recent_one")
+  const recentTwo = Ids.TurnId.make("turn_pre_turn_prune_recent_two")
+  return [
+    {
+      id: Ids.EventId.make("event_pre_turn_prune_thread_created"),
+      thread_id: input.threadId,
+      sequence: 1,
+      version: 1,
+      created_at: now,
+      type: "thread.created",
+      data: { workspace_id: input.workspaceId },
+    },
+    turnStartedSeed(input.threadId, oldTurn, 2),
+    toolCompletedSeed(input.threadId, oldTurn, 3, "tool_pre_turn_prune_old", input.oldOutput),
+    turnCompletedSeed(input.threadId, oldTurn, 4),
+    turnStartedSeed(input.threadId, protectedTurn, 5),
+    toolCompletedSeed(input.threadId, protectedTurn, 6, "tool_pre_turn_prune_protected", input.protectedOutput),
+    turnCompletedSeed(input.threadId, protectedTurn, 7),
+    turnStartedSeed(input.threadId, recentOne, 8),
+    toolCompletedSeed(input.threadId, recentOne, 9, "tool_pre_turn_prune_recent_one", {
+      content: "RECENT_TOOL_OUTPUT one",
+    }),
+    turnCompletedSeed(input.threadId, recentOne, 10),
+    turnStartedSeed(input.threadId, recentTwo, 11),
+    toolCompletedSeed(input.threadId, recentTwo, 12, "tool_pre_turn_prune_recent_two", {
+      content: "RECENT_TOOL_OUTPUT two",
+    }),
+    turnCompletedSeed(input.threadId, recentTwo, 13, {
+      input_tokens: 380_000,
+      output_tokens: 1,
+      total_tokens: 380_001,
+    }),
+  ]
+}
+
+const turnStartedSeed = (targetThreadId: Ids.ThreadId, turnId: Ids.TurnId, sequence: number): Event.TurnStarted => ({
+  id: Ids.EventId.make(`event_seed_${sequence}`),
+  thread_id: targetThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: Common.TimestampMillis.make(1_900_000_000_000),
+  type: "turn.started",
+  data: {},
+})
+
+const toolCompletedSeed = (
+  targetThreadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  sequence: number,
+  id: string,
+  output: Common.JsonValue,
+): Event.ToolCallCompleted => ({
+  id: Ids.EventId.make(`event_seed_${sequence}`),
+  thread_id: targetThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: Common.TimestampMillis.make(1_900_000_000_000),
+  type: "tool.call.completed",
+  data: {
+    result: {
+      id: Ids.ToolCallId.make(id),
+      name: "read",
+      status: "success",
+      output,
+    },
+  },
+})
+
+const turnCompletedSeed = (
+  targetThreadId: Ids.ThreadId,
+  turnId: Ids.TurnId,
+  sequence: number,
+  usage?: Event.TokenUsage,
+): Event.TurnCompleted => ({
+  id: Ids.EventId.make(`event_seed_${sequence}`),
+  thread_id: targetThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: Common.TimestampMillis.make(1_900_000_000_000),
+  type: "turn.completed",
+  data: { provider: "openai", model: "gpt-5.5", ...(usage === undefined ? {} : { usage }) },
+})
+
+const outputTokens = (output: Common.JsonValue): number => Tokens.estimateTokens(JSON.stringify(output))
 
 const midTurnCompactingProviderLayer = (captured: Array<Provider.GenerateRequest>) => {
   let streamCalls = 0

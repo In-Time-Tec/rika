@@ -12,6 +12,7 @@
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
+    "@rika/llm": "workspace:*",
     "@rika/schema": "workspace:*",
     "@rika/sdk": "workspace:*",
     "effect": "catalog:",
@@ -23,7 +24,6 @@
     "@rika/cli": "workspace:*",
     "@rika/core": "workspace:*",
     "@rika/ide": "workspace:*",
-    "@rika/llm": "workspace:*",
     "@rika/orb": "workspace:*",
     "@rika/persistence": "workspace:*",
     "@rika/server": "workspace:*",

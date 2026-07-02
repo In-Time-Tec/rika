@@ -275,6 +275,23 @@ describe("Rika protocol schemas", () => {
     expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
   })
 
+  test("round-trips context pruning events", () => {
+    const event: Event.Event = {
+      id: Ids.EventId.make("event_context_pruned"),
+      thread_id: threadId,
+      sequence: 6,
+      version: 1,
+      created_at: now,
+      type: "context.pruned",
+      data: {
+        tool_call_ids: [toolCallId],
+        estimated_tokens_freed: 24_000,
+      },
+    }
+
+    expect(Codec.decode(Event.Event)(Codec.encode(Event.Event)(event))).toEqual(event)
+  })
+
   test("round-trips skill loaded events", () => {
     const event: Event.Event = {
       id: eventId,

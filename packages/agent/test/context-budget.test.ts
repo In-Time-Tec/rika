@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Tokens } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
-import { Common, Event, Ids, Message } from "@rika/schema"
+import { Common, Event, Ids, Message, Tool } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { ContextBudget, ModelContext, ThreadService } from "../src/index"
 
@@ -96,6 +96,29 @@ describe("ContextBudget", () => {
     const used = Tokens.estimateMessages(ModelContext.messagesFromEvents([threadCreated(), ...events]))
     expect(state).toEqual({ used, usable: 380_000, fraction: used / 380_000 })
   })
+
+  test("estimates folded events when pruning is newer than the usage sample", async () => {
+    const events = [
+      toolCompletedWithOutput({ content: "bulky output ".repeat(200) }),
+      turnCompletedWithUsage(),
+      contextPruned(),
+    ]
+    const state = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
+        for (const event of events) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        return yield* ContextBudget.state({ thread_id: threadId, mode: "deep1" })
+      }).pipe(Effect.provide(layer)),
+    )
+
+    const used = Tokens.estimateMessages(ModelContext.messagesFromEvents([threadCreated(), ...events]))
+    expect(state).toEqual({ used, usable: 380_000, fraction: used / 380_000 })
+    expect(state.used).not.toBe(42_000)
+  })
 })
 
 const threadCreated = (): Event.ThreadCreated => ({
@@ -143,6 +166,37 @@ const contextCompacted = (): Event.ContextCompacted => ({
     trigger: "auto",
     tokens_before: 42_000,
     model: "gpt-5.5",
+  },
+})
+
+const contextPruned = (): Event.ContextPruned => ({
+  id: Ids.EventId.make("context_budget_pruned"),
+  thread_id: threadId,
+  sequence: 4,
+  version: 1,
+  created_at: now,
+  type: "context.pruned",
+  data: {
+    tool_call_ids: [Ids.ToolCallId.make("context_budget_tool")],
+    estimated_tokens_freed: 10_000,
+  },
+})
+
+const toolCompletedWithOutput = (output: NonNullable<Tool.Result["output"]>): Event.ToolCallCompleted => ({
+  id: Ids.EventId.make("context_budget_tool_completed"),
+  thread_id: threadId,
+  turn_id: turnId,
+  sequence: 2,
+  version: 1,
+  created_at: now,
+  type: "tool.call.completed",
+  data: {
+    result: {
+      id: Ids.ToolCallId.make("context_budget_tool"),
+      name: "read",
+      status: "success",
+      output,
+    },
   },
 })
 

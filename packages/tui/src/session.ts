@@ -80,10 +80,26 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
   loadInitial: ({ thread_id, workspace_path, mode }) =>
     Effect.gen(function* () {
       const threadId = thread_id ?? Ids.ThreadId.make(yield* dependencies.idGenerator.next("thread"))
-      const events = yield* readThreadEvents(dependencies, threadId).pipe(Effect.catch(() => Effect.succeed([])))
+      const record =
+        thread_id === undefined
+          ? undefined
+          : yield* dependencies.threadService
+              .open({ thread_id: threadId })
+              .pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const events =
+        record?.events ?? (yield* readThreadEvents(dependencies, threadId).pipe(Effect.catch(() => Effect.succeed([]))))
       return {
         thread_id: threadId,
-        state: ViewState.beginConnecting(ViewState.initial({ thread_id: threadId, workspace_path, mode, events })),
+        state: ViewState.beginConnecting(
+          ViewState.initial({
+            thread_id: threadId,
+            workspace_path,
+            mode,
+            events,
+            ...(record?.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+            ...(record?.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
+          }),
+        ),
         last_sequence: events.at(-1)?.sequence ?? 0,
       }
     }),
@@ -106,7 +122,14 @@ const makeBackend = (dependencies: Dependencies): Backend.SessionBackend<RunErro
     dependencies.threadService.preview({ thread_id }).pipe(
       Effect.map((record) => ({
         thread_id,
-        state: ViewState.initial({ thread_id, workspace_path, mode, events: record.events }),
+        state: ViewState.initial({
+          thread_id,
+          workspace_path,
+          mode,
+          events: record.events,
+          ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+          ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
+        }),
       })),
     ),
 })
@@ -201,6 +224,8 @@ const handleCommand = (
         ViewState.withThread(state, {
           thread_id: nextThreadId,
           events: record.events,
+          ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+          ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
         }),
       )
       return Backend.commandResult(context, {
@@ -223,6 +248,8 @@ const handleCommand = (
               thread_id: target,
               events: record.events,
               notice: `${name.slice(1)}d ${target}`,
+              ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
+              ...(record.summary.context_window === undefined ? {} : { context_window: record.summary.context_window }),
             })
       return Backend.commandResult(context, {
         state: ViewState.withNotice(nextState, `${summary.archived ? "Archived" : "Unarchived"} ${target}`),

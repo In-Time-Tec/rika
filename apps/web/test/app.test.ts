@@ -12,6 +12,7 @@ import {
   ReceivedThreadEvent,
   SubmittedDraft,
   UpdatedSelectedOrb,
+  contextUsage,
   eventRows,
   init,
   initialModel,
@@ -99,6 +100,35 @@ describe("web app state", () => {
         body: "manual · tail starts at 2",
       },
     ])
+  })
+
+  test("renders context pruning into a concise event row", () => {
+    expect(eventRows([contextPruned(4)])).toEqual([
+      {
+        id: "event-4",
+        sequence: 4,
+        kind: "event",
+        title: "Context pruned",
+        body: "2 tools · 24000 tokens",
+      },
+    ])
+  })
+
+  test("computes context usage from summary and latest turn events", () => {
+    const hidden = initialModel({ api_base_url: "/api/rika" })
+    const fromSummary = {
+      ...hidden,
+      selected_thread_id: threadId,
+      threads: [summary(threadId, { context_tokens: 280_000, context_window: 400_000 })],
+    }
+    const fromEvent = {
+      ...fromSummary,
+      events: [turnCompletedWithUsage(5, 360_000)],
+    }
+
+    expect(contextUsage(hidden)).toBeUndefined()
+    expect(contextUsage(fromSummary)).toEqual({ tokens: 280_000, window: 400_000, percent: 70, tone: "warning" })
+    expect(contextUsage(fromEvent)).toEqual({ tokens: 360_000, window: 400_000, percent: 90, tone: "danger" })
   })
 
   test("auto-opens the newest thread after loading the thread list", () => {
@@ -233,5 +263,33 @@ const contextCompacted = (sequence: number): Event.ContextCompacted => ({
     trigger: "manual",
     tokens_before: 4096,
     tail_start_sequence: 2,
+  },
+})
+
+const contextPruned = (sequence: number): Event.ContextPruned => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "context.pruned",
+  data: {
+    tool_call_ids: [Ids.ToolCallId.make("tool-web-a"), Ids.ToolCallId.make("tool-web-b")],
+    estimated_tokens_freed: 24_000,
+  },
+})
+
+const turnCompletedWithUsage = (sequence: number, inputTokens: number): Event.TurnCompleted => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-web"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "turn.completed",
+  data: {
+    provider: "openai",
+    model: "gpt-5.5",
+    usage: { input_tokens: inputTokens, output_tokens: 100, total_tokens: inputTokens + 100 },
   },
 })
