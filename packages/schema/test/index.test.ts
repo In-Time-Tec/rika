@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Schema } from "effect"
-import { Artifact, Codec, ErrorEnvelope, Event, Ide, Ids, Message, Remote, Tool, Workspace } from "../src/index"
+import { Artifact, Codec, ErrorEnvelope, Event, Ide, Ids, Message, Orb, Remote, Tool, Workspace } from "../src/index"
 
 const now = 1_765_000_000_000
 const threadId = Ids.ThreadId.make("thread_1")
@@ -10,6 +10,8 @@ const eventId = Ids.EventId.make("event_1")
 const toolCallId = Ids.ToolCallId.make("tool_1")
 const artifactId = Ids.ArtifactId.make("artifact_1")
 const workspaceId = Ids.WorkspaceId.make("workspace_1")
+const orbId = Ids.OrbId.make("orb_1")
+const projectId = Ids.ProjectId.make("project_1")
 
 describe("Rika protocol schemas", () => {
   test("round-trips messages", () => {
@@ -317,6 +319,77 @@ describe("Rika protocol schemas", () => {
     ).toEqual(subscription)
     expect(Codec.decode(Remote.StreamFrame)(Codec.encode(Remote.StreamFrame)(summaryError(401)))).toEqual(
       summaryError(401),
+    )
+  })
+
+  test("round-trips orb protocol payloads", () => {
+    const orb: Orb.OrbRecord = {
+      orb_id: orbId,
+      thread_id: threadId,
+      project_id: projectId,
+      sandbox_id: "sandbox_1",
+      status: "running",
+      base_commit: "abc123",
+      endpoint_url: "https://orb.example.test",
+      created_at: now,
+      last_active_at: now,
+    }
+    const project: Orb.ProjectRecord = {
+      project_id: projectId,
+      name: "demo",
+      repo_origin: "https://github.com/example/rika.git",
+      default_branch: "main",
+      template_id: null,
+      env: { RIKA_ENV: "test" },
+      secret_names: ["OPENAI_API_KEY"],
+      created_at: now,
+      updated_at: now,
+    }
+    const changes: Remote.OrbChangesResponse = {
+      base_commit: "abc123",
+      head_commit: "def456",
+      diff: "diff --git a/file b/file",
+      dirty: true,
+    }
+
+    expect(Schema.decodeUnknownSync(Orb.OrbRecord)(Schema.encodeSync(Orb.OrbRecord)(orb))).toEqual(orb)
+    expect(Schema.decodeUnknownSync(Orb.ProjectRecord)(Schema.encodeSync(Orb.ProjectRecord)(project))).toEqual(project)
+    expect(
+      Schema.decodeUnknownSync(Remote.OrbChangesResponse)(Schema.encodeSync(Remote.OrbChangesResponse)(changes)),
+    ).toEqual(changes)
+  })
+
+  test("round-trips orb remote-control payloads", () => {
+    const create: Remote.CreateOrbThreadRequest = {
+      project_id: projectId,
+      thread_id: threadId,
+      mode: "deep1",
+    }
+    const summary: Remote.ThreadSummary = {
+      thread_id: threadId,
+      workspace_id: workspaceId,
+      diff: { additions: 0, modifications: 0, deletions: 0 },
+      orb_status: "running",
+      archived: false,
+      created_at: now,
+      updated_at: now,
+    }
+    const orbSummary: Remote.OrbSummary = {
+      thread_id: threadId,
+      project_id: projectId,
+      status: "running",
+      endpoint_url: "https://orb.example.test",
+      last_active_at: now,
+    }
+
+    expect(
+      Schema.decodeUnknownSync(Remote.CreateOrbThreadRequest)(Schema.encodeSync(Remote.CreateOrbThreadRequest)(create)),
+    ).toEqual(create)
+    expect(Schema.decodeUnknownSync(Remote.ThreadSummary)(Schema.encodeSync(Remote.ThreadSummary)(summary))).toEqual(
+      summary,
+    )
+    expect(Schema.decodeUnknownSync(Remote.OrbSummary)(Schema.encodeSync(Remote.OrbSummary)(orbSummary))).toEqual(
+      orbSummary,
     )
   })
 

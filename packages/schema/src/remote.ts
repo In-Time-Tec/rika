@@ -3,8 +3,9 @@ import { Kind as ArtifactKind } from "./artifact"
 import { JsonValue, TimestampMillis } from "./common"
 import { Event } from "./event"
 import { ContextSnapshot as IdeContextSnapshot } from "./ide"
-import { ArtifactId, ThreadId, TurnId, UserId, WorkspaceId } from "./ids"
+import { ArtifactId, ProjectId, ThreadId, TurnId, UserId, WorkspaceId } from "./ids"
 import { ContentPart } from "./message"
+import { OrbStatus } from "./orb"
 
 export const BackendStatus = Schema.Literals(["healthy", "starting", "stale", "disconnected", "remote"]).annotate({
   identifier: "Rika.Remote.BackendStatus",
@@ -49,6 +50,7 @@ export const ThreadSummary = Schema.Struct({
   diff: ThreadDiffStats,
   active_turn_id: Schema.optional(TurnId),
   active_turn_status: Schema.optional(TurnStatus),
+  orb_status: Schema.optional(OrbStatus),
   archived: Schema.Boolean,
   created_at: TimestampMillis,
   updated_at: TimestampMillis,
@@ -66,6 +68,13 @@ export const CreateThreadRequest = Schema.Struct({
   workspace_id: Schema.optional(WorkspaceId),
   user_id: Schema.optional(UserId),
 }).annotate({ identifier: "Rika.Remote.CreateThreadRequest" })
+
+export interface CreateOrbThreadRequest extends Schema.Schema.Type<typeof CreateOrbThreadRequest> {}
+export const CreateOrbThreadRequest = Schema.Struct({
+  project_id: ProjectId,
+  thread_id: Schema.optional(ThreadId),
+  mode: Schema.optional(AgentMode),
+}).annotate({ identifier: "Rika.Remote.CreateOrbThreadRequest" })
 
 export interface ListThreadsRequest extends Schema.Schema.Type<typeof ListThreadsRequest> {}
 export const ListThreadsRequest = Schema.Struct({
@@ -177,6 +186,23 @@ export const InterruptTurnRequest = Schema.Struct({
   user_id: Schema.optional(UserId),
   reason: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Remote.InterruptTurnRequest" })
+
+export interface OrbChangesResponse extends Schema.Schema.Type<typeof OrbChangesResponse> {}
+export const OrbChangesResponse = Schema.Struct({
+  base_commit: Schema.String,
+  head_commit: Schema.String,
+  diff: Schema.String,
+  dirty: Schema.Boolean,
+}).annotate({ identifier: "Rika.Remote.OrbChangesResponse" })
+
+export interface OrbSummary extends Schema.Schema.Type<typeof OrbSummary> {}
+export const OrbSummary = Schema.Struct({
+  thread_id: ThreadId,
+  project_id: ProjectId,
+  status: OrbStatus,
+  endpoint_url: Schema.String,
+  last_active_at: TimestampMillis,
+}).annotate({ identifier: "Rika.Remote.OrbSummary" })
 
 export interface ListArtifactsRequest extends Schema.Schema.Type<typeof ListArtifactsRequest> {}
 export const ListArtifactsRequest = Schema.Struct({

@@ -28,6 +28,10 @@ _Avoid_: Prompt stuffing, hidden instructions, implicit context
 The filesystem and repository context where a thread is allowed to inspect and modify code.
 _Avoid_: Project, cwd, folder
 
+**Project**:
+An orb provisioning profile that binds a repository origin to default branch, sandbox template, environment variables, and secret names.
+_Avoid_: Workspace, checkout, folder
+
 **Workspace Membership**:
 A durable association between a user and a workspace that grants hosted read/write access, with an owner role for administrative actions.
 _Avoid_: ACL row, permission record, team user

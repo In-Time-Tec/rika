@@ -22,6 +22,12 @@ export type IdeClientId = typeof IdeClientId.Type
 export const MessageId = id("Rika.MessageId")
 export type MessageId = typeof MessageId.Type
 
+export const OrbId = id("Rika.OrbId")
+export type OrbId = typeof OrbId.Type
+
+export const ProjectId = id("Rika.ProjectId")
+export type ProjectId = typeof ProjectId.Type
+
 export const ThreadId = id("Rika.ThreadId")
 export type ThreadId = typeof ThreadId.Type
 
