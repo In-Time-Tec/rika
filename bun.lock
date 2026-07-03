@@ -149,6 +149,7 @@
         "@rika/core": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",
+        "@rika/tools": "workspace:*",
         "e2b": "catalog:",
         "effect": "catalog:",
       },

@@ -2,8 +2,9 @@ import { readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Config, Diagnostics, SecretRedactor, Settings } from "@rika/core"
-import { OrbStore, ProjectStore } from "@rika/persistence"
+import { McpApprovalStore, OrbStore, ProjectStore } from "@rika/persistence"
 import { Ids, Orb } from "@rika/schema"
+import { McpClient } from "@rika/tools"
 import { Context, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
 import * as SandboxClient from "./sandbox-client"
 
@@ -68,6 +69,7 @@ export const layerWithSystem = (system: System) =>
       const config = yield* Config.Service
       const projects = yield* ProjectStore.Service
       const orbs = yield* OrbStore.Service
+      const approvals = yield* McpApprovalStore.Service
       const sandbox = yield* SandboxClient.Service
       const diagnostics = yield* Diagnostics.Service
       const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
@@ -148,6 +150,15 @@ export const layerWithSystem = (system: System) =>
 
           const baseCommit = yield* readBaseCommit(sandbox, sandboxId, orbId)
           yield* step("base_commit", orbs.setBaseCommit(orbId, baseCommit), { orbId, sandboxId })
+          yield* propagateMcpServers({
+            approvals,
+            diagnostics,
+            input,
+            orbId,
+            sandbox,
+            sandboxId: createdSandbox.sandboxId,
+            processEnv,
+          }).pipe((effect) => step("mcp", effect, { orbId, sandboxId: createdSandbox.sandboxId }))
           yield* runSetup(sandbox, diagnostics, sandboxId, processEnv, orbId)
           const token = yield* step("token", system.randomToken, { orbId, sandboxId })
           yield* registerSecrets([{ label: "RIKA_ORB_TOKEN", value: token }])
@@ -626,6 +637,165 @@ const waitForHealth: (
     ),
   )
 })
+
+const propagateMcpServers: (input: {
+  readonly approvals: McpApprovalStore.Interface
+  readonly diagnostics: Diagnostics.Interface
+  readonly input: ProvisionInput
+  readonly orbId: Ids.OrbId
+  readonly sandbox: SandboxClient.Interface
+  readonly sandboxId: string
+  readonly processEnv: Record<string, string>
+}) => Effect.Effect<void, McpClient.RunError | SandboxClient.RunError | OrbProvisionError> = Effect.fn(
+  "OrbManager.propagateMcpServers",
+)(function* (input) {
+  const source = yield* McpClient.readWorkspaceSettingsSource(input.input.workspace_root)
+  if (source === undefined) return
+  const configured = McpClient.configuredServersFromSources([source], input.input.workspace_root)
+  if (configured.length === 0) return
+  const approved = yield* Effect.forEach(
+    configured,
+    (server) =>
+      Effect.gen(function* () {
+        if (
+          server.source === "workspace" &&
+          McpClient.serverConfigKind(server.config) === "command" &&
+          !(yield* input.approvals.isApproved(McpClient.approvalInputForServer(server)))
+        ) {
+          return undefined
+        }
+        const resolved = resolveMcpServerConfig(server.config, input.processEnv)
+        if (resolved._tag === "missing") {
+          yield* emitMcpWarning(input.diagnostics, input.sandboxId, server.name, unresolvedMessage(resolved.variables))
+          return undefined
+        }
+        return { name: server.name, config: resolved.config }
+      }),
+    { concurrency: 1 },
+  )
+  const servers = Object.fromEntries(
+    approved.flatMap((entry) => (entry === undefined ? [] : [[entry.name, entry.config] as const])),
+  )
+  yield* runExec(
+    input.sandbox,
+    input.sandboxId,
+    ["mkdir", "-p", `${repoRoot}/.rika`],
+    {},
+    "mcp_settings_dir",
+    input.orbId,
+  )
+  const settings = yield* sandboxSettings(input.sandbox, input.sandboxId)
+  yield* input.sandbox.writeFile(input.sandboxId, `${repoRoot}/.rika/settings.json`, encodeSettings(settings, servers))
+  yield* Effect.forEach(
+    Object.entries(servers),
+    ([name, config]) =>
+      "command" in config
+        ? runExec(
+            input.sandbox,
+            input.sandboxId,
+            ["rika", "mcp", "approve", name],
+            {
+              cwd: repoRoot,
+              envs: {
+                RIKA_DATA_DIR: `${repoRoot}/.rika`,
+                RIKA_WORKSPACE_ROOT: repoRoot,
+              },
+            },
+            "mcp_approve",
+            input.orbId,
+          )
+        : Effect.void,
+    { concurrency: 1, discard: true },
+  )
+})
+
+type ResolvedMcpServerConfig =
+  | { readonly _tag: "resolved"; readonly config: McpClient.ServerConfig }
+  | { readonly _tag: "missing"; readonly variables: ReadonlyArray<string> }
+
+const sandboxSettings = (sandbox: SandboxClient.Interface, sandboxId: string) =>
+  sandbox.readFile(sandboxId, `${repoRoot}/.rika/settings.json`).pipe(
+    Effect.matchEffect({
+      onFailure: () => Effect.succeed({} as Record<string, unknown>),
+      onSuccess: (bytes) =>
+        Effect.try({
+          try: () => {
+            const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+            return isUnknownRecord(parsed) ? { ...parsed } : {}
+          },
+          catch: (cause) =>
+            new McpClient.McpClientError({ message: messageFromUnknown(cause), operation: "parseSandboxSettings" }),
+        }),
+    }),
+  )
+
+const encodeSettings = (
+  settings: Record<string, unknown>,
+  servers: Readonly<Record<string, McpClient.ServerConfig>>,
+): Uint8Array =>
+  new TextEncoder().encode(`${JSON.stringify({ ...settings, [McpClient.settingsKey]: servers }, null, 2)}\n`)
+
+const resolveMcpServerConfig = (
+  config: McpClient.ServerConfig,
+  env: Record<string, string>,
+): ResolvedMcpServerConfig => {
+  const missing = new Set<string>()
+  const resolve = (value: string) => resolveMcpString(value, env, missing)
+  const resolved =
+    "command" in config
+      ? {
+          command: resolve(config.command),
+          ...(config.args === undefined ? {} : { args: config.args.map(resolve) }),
+          ...(config.env === undefined ? {} : { env: resolveStringRecord(config.env, resolve) }),
+          ...(config.cwd === undefined ? {} : { cwd: resolve(config.cwd) }),
+          ...(config.includeTools === undefined ? {} : { includeTools: [...config.includeTools] }),
+          ...(config.excludeTools === undefined ? {} : { excludeTools: [...config.excludeTools] }),
+        }
+      : {
+          url: resolve(config.url),
+          ...(config.headers === undefined ? {} : { headers: resolveStringRecord(config.headers, resolve) }),
+          ...(config.includeTools === undefined ? {} : { includeTools: [...config.includeTools] }),
+          ...(config.excludeTools === undefined ? {} : { excludeTools: [...config.excludeTools] }),
+        }
+  return missing.size === 0
+    ? { _tag: "resolved", config: resolved }
+    : { _tag: "missing", variables: [...missing].toSorted() }
+}
+
+const resolveMcpString = (value: string, env: Record<string, string>, missing: Set<string>) =>
+  value.replaceAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, variable: string) => {
+    const resolved = env[variable]
+    if (resolved === undefined) {
+      missing.add(variable)
+      return match
+    }
+    return resolved
+  })
+
+const resolveStringRecord = (
+  record: Readonly<Record<string, string>>,
+  resolve: (value: string) => string,
+): Record<string, string> => Object.fromEntries(Object.entries(record).map(([key, value]) => [key, resolve(value)]))
+
+const isUnknownRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const emitMcpWarning = (
+  diagnostics: Diagnostics.Interface,
+  sandboxId: string,
+  serverName: string,
+  reason: string,
+): Effect.Effect<void> =>
+  diagnostics.emit({
+    level: "warn",
+    message: "orb.mcp.warning",
+    data: { sandbox_id: sandboxId, server_name: serverName, reason },
+  })
+
+const unresolvedMessage = (variables: ReadonlyArray<string>) =>
+  variables.length === 1
+    ? `Unresolved MCP config variable ${variables[0]}`
+    : `Unresolved MCP config variables ${variables.join(", ")}`
 
 const resumeEndpoint = Effect.fn("OrbManager.resumeEndpoint")(function* (
   orbs: OrbStore.Interface,

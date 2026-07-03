@@ -516,6 +516,7 @@ export const orbExecuteLiveLayer = (
   const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -533,6 +534,7 @@ export const orbExecuteLiveLayer = (
     databaseLayer,
     redactorLayer,
     settingsLayer,
+    mcpApprovalLayer,
     Migration.layer,
     timeLayer,
     IdGenerator.layer,
@@ -689,6 +691,7 @@ const interactiveRemoteLiveLayerFromTui = (
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
   const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -705,6 +708,7 @@ const interactiveRemoteLiveLayerFromTui = (
     configLayer,
     databaseLayer,
     artifactLayer,
+    mcpApprovalLayer,
     redactorLayer,
     settingsLayer,
     Migration.layer,
@@ -1388,6 +1392,7 @@ export const orbLiveLayer = (
   const redactorLayer = secretRedactorLayer(env)
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -1405,6 +1410,7 @@ export const orbLiveLayer = (
     Input.layer,
     databaseLayer,
     artifactLayer,
+    mcpApprovalLayer,
     projectStoreLayer,
     orbStoreLayer,
     Migration.layer,
@@ -1793,6 +1799,7 @@ export const syncLiveLayer = (
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
   const { diagnosticsLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const timeLayer = Time.layer
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -1810,6 +1817,7 @@ export const syncLiveLayer = (
     databaseLayer,
     redactorLayer,
     settingsLayer,
+    mcpApprovalLayer,
     Migration.layer,
     timeLayer,
     IdGenerator.layer,

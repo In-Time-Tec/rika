@@ -13,6 +13,7 @@ import { join } from "node:path"
 
 const rikaSettingsKey = "rika.mcpServers"
 const legacySettingsKey = "mcpServers"
+export const settingsKey = rikaSettingsKey
 
 const StringRecord = Schema.Record(Schema.String, Schema.String)
 
@@ -169,6 +170,23 @@ export const callTool = Effect.fn("McpClient.callTool.call")(function* (
   const service = yield* Service
   return yield* service.callTool(serverName, toolName, input)
 })
+
+export const workspaceSettingsPath = (workspaceRoot: string) => join(workspaceRoot, ".rika", "settings.json")
+
+export const readWorkspaceSettingsSource = (workspaceRoot: string) =>
+  readSettingsFile(workspaceSettingsPath(workspaceRoot), "workspace")
+
+export const configuredServersFromSources = (
+  sources: ReadonlyArray<SettingsSource>,
+  workspaceRoot: string,
+): ReadonlyArray<ConfiguredServer> => mergeSources(sources, workspaceRoot)
+
+export const approvalInputForServer = (server: ConfiguredServer): McpApprovalStore.ApprovalInput =>
+  approvalInput(server)
+
+export const serverConfigKind = (config: ServerConfig): ServerKind => serverKind(config)
+
+export const fingerprintServerConfig = (config: ServerConfig): string => fingerprintServer(config)
 
 const layerWith = (loadSettings: SettingsLoader, connector: Connector) =>
   Layer.effect(
@@ -401,7 +419,7 @@ const liveSettingsLoader: SettingsLoader = (config) =>
         home === undefined
           ? Effect.succeed(undefined)
           : readSettingsFile(join(home, ".config", "rika", "settings.json"), "user"),
-        readSettingsFile(join(config.workspace_root, ".rika", "settings.json"), "workspace"),
+        readSettingsFile(workspaceSettingsPath(config.workspace_root), "workspace"),
       ],
       { concurrency: 1 },
     )

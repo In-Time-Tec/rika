@@ -18,6 +18,12 @@ For private origin clones, store a Project secret named `GIT_TOKEN`. Rika passes
 
 The orb server token is generated per provisioning run and stored only through `OrbStore.endpointCredentials`. Normal orb record reads omit the token.
 
+## MCP Servers
+
+During provisioning, Rika copies approved workspace MCP servers from `<workspace>/.rika/settings.json` into `/home/user/repo/.rika/settings.json` inside the sandbox and seeds matching approval rows there. Unapproved workspace command servers are omitted. MCP config values that reference unresolved project env or secret variables are omitted with a provisioning warning.
+
+Remote URL MCP servers are sandbox-safe when their headers and network endpoint are valid from the sandbox. Local command MCP servers are sandbox-safe only when the command binary and its runtime dependencies are installed in the orb template.
+
 ## Sync
 
 `rika sync <thread-id>` mirrors a running orb thread's workspace changes into a local dedicated worktree at `<workspace>/.rika/worktrees/<thread-id>`. The CLI resolves the thread's orb endpoint, fetches `/v1/orb/changes`, verifies the orb base commit exists locally, then resets and cleans the worktree before applying the binary patch.

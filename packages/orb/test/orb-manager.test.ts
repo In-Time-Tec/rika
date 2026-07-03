@@ -1,9 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { createHash } from "node:crypto"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Config, Diagnostics, IdGenerator, SecretRedactor, Settings, Time } from "@rika/core"
-import { Database, Migration, OrbStore, ProjectStore } from "@rika/persistence"
+import { Database, McpApprovalStore, Migration, OrbStore, ProjectStore } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { OrbManager, SandboxClient, SandboxClientFake } from "../src/index"
@@ -233,6 +234,113 @@ describe("OrbManager", () => {
     expect(JSON.stringify(diagnostics)).toContain("[REDACTED:OPENAI_API_KEY]")
     expect(JSON.stringify(diagnostics)).not.toContain("secret-openai")
     await rm(dataDir, { force: true, recursive: true })
+  })
+
+  test("propagates approved workspace MCP servers into sandbox settings and approval rows", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "rika-orb-manager-mcp-workspace-"))
+    const dataDir = await mkdtemp(join(tmpdir(), "rika-orb-manager-mcp-data-"))
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    const approvedConfig = { command: "node", args: ["approved.js"], env: { API_TOKEN: "${MCP_TOKEN}" } }
+    await writeFile(
+      join(workspace, ".rika", "settings.json"),
+      JSON.stringify({
+        "mode.default": "deep3",
+        "rika.mcpServers": {
+          approved: approvedConfig,
+          blocked: { command: "node", args: ["blocked.js"] },
+          missingEnv: { url: "https://missing.example/mcp", headers: { authorization: "Bearer ${MISSING_TOKEN}" } },
+          remote: { url: "https://remote.example/mcp", headers: { authorization: "Bearer ${REMOTE_TOKEN}" } },
+        },
+      }),
+    )
+    const sandbox = SandboxClientFake.makeState({
+      execResults: [
+        [{ type: "exit", exitCode: 0 }],
+        [
+          { type: "stdout", data: "abc123\n" },
+          { type: "exit", exitCode: 0 },
+        ],
+        [{ type: "exit", exitCode: 0 }],
+        [{ type: "exit", exitCode: 0 }],
+        [{ type: "exit", exitCode: 0 }],
+        [{ type: "started", pid: 4587 }],
+      ],
+    })
+    sandbox.files.set(
+      "sandbox_1\0/home/user/repo/.rika/settings.json",
+      new TextEncoder().encode(
+        JSON.stringify({
+          "mode.default": "rush",
+          "rika.mcpServers": {
+            old: { url: "https://old.example/mcp" },
+          },
+        }),
+      ),
+    )
+    const diagnostics: Array<Diagnostics.Entry> = []
+    const system = makeSystem()
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          yield* ProjectStore.create({
+            name: "demo",
+            repo_origin: "https://github.com/example/rika.git",
+            template_id: "project-template",
+            env: { MCP_TOKEN: "project-token", REMOTE_TOKEN: "remote-token" },
+          })
+          yield* McpApprovalStore.approve({
+            workspace_root: workspace,
+            server_name: "approved",
+            fingerprint: mcpFingerprint(approvedConfig),
+          })
+          yield* OrbManager.provisionForThread({
+            thread_id: threadId,
+            project_id: projectId,
+            workspace_root: workspace,
+          })
+        }).pipe(Effect.provide(makeLayer({ sandbox, diagnostics, system, dataDir, workspaceRoot: workspace }))),
+      )
+
+      const settingsWrite = sandbox.calls.writeFile.find((call) => call.path === "/home/user/repo/.rika/settings.json")
+      if (settingsWrite === undefined) throw new Error("missing sandbox settings write")
+      const settings = expectRecord(JSON.parse(new TextDecoder().decode(settingsWrite.bytes)), "sandbox settings")
+      expect(settings["mode.default"]).toBe("rush")
+      expect(expectRecord(settings["rika.mcpServers"], "sandbox MCP servers")).toEqual({
+        approved: { command: "node", args: ["approved.js"], env: { API_TOKEN: "project-token" } },
+        remote: { url: "https://remote.example/mcp", headers: { authorization: "Bearer remote-token" } },
+      })
+      expect(sandbox.calls.exec).toContainEqual({
+        sandboxId: "sandbox_1",
+        cmd: ["rika", "mcp", "approve", "approved"],
+        opts: {
+          cwd: "/home/user/repo",
+          envs: {
+            RIKA_DATA_DIR: "/home/user/repo/.rika",
+            RIKA_WORKSPACE_ROOT: "/home/user/repo",
+          },
+        },
+      })
+      const approvalIndex = sandbox.calls.exec.findIndex((call) => call.cmd.join(" ") === "rika mcp approve approved")
+      const setupIndex = sandbox.calls.exec.findIndex((call) => call.cmd.join(" ").includes(".agents/setup"))
+      const serverIndex = sandbox.calls.exec.findIndex((call) => call.cmd.join(" ").startsWith("rika server"))
+      expect(approvalIndex).toBeGreaterThan(0)
+      expect(approvalIndex).toBeLessThan(setupIndex)
+      expect(setupIndex).toBeLessThan(serverIndex)
+      expect(diagnostics).toContainEqual({
+        level: "warn",
+        message: "orb.mcp.warning",
+        data: {
+          sandbox_id: "sandbox_1",
+          server_name: "missingEnv",
+          reason: "Unresolved MCP config variable MISSING_TOKEN",
+        },
+      })
+    } finally {
+      await rm(dataDir, { force: true, recursive: true })
+      await rm(workspace, { force: true, recursive: true })
+    }
   })
 
   test("kills the sandbox and marks the orb killed when setup fails", async () => {
@@ -659,6 +767,10 @@ describe("OrbManager", () => {
     const databaseLayer = Database.memoryLayer
     const timeLayer = Time.fixedLayer(now)
     const idLayer = IdGenerator.sequenceLayer(1)
+    const mcpApprovalLayer = McpApprovalStore.layer.pipe(
+      Layer.provideMerge(databaseLayer),
+      Layer.provideMerge(timeLayer),
+    )
     const projectStoreLayer = ProjectStore.layer.pipe(
       Layer.provideMerge(configLayer),
       Layer.provideMerge(databaseLayer),
@@ -674,6 +786,7 @@ describe("OrbManager", () => {
     const diagnosticsLayer = Diagnostics.memoryLayer(diagnostics)
     const managerLayer = OrbManager.layer.pipe(
       Layer.provideMerge(configLayer),
+      Layer.provideMerge(mcpApprovalLayer),
       Layer.provideMerge(projectStoreLayer),
       Layer.provideMerge(orbStoreLayer),
       Layer.provideMerge(sandboxLayer),
@@ -685,6 +798,7 @@ describe("OrbManager", () => {
       Migration.layer,
       timeLayer,
       idLayer,
+      mcpApprovalLayer,
       projectStoreLayer,
       orbStoreLayer,
       sandboxLayer,
@@ -759,6 +873,7 @@ const makeLayer = (input: {
   const idLayer = IdGenerator.sequenceLayer(1)
   const redactorLayer = SecretRedactor.layer
   const diagnosticsLayer = Diagnostics.memoryLayer(input.diagnostics)
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -773,6 +888,7 @@ const makeLayer = (input: {
   const managerLayer = OrbManager.layerWithSystem(input.system).pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(settingsLayer),
+    Layer.provideMerge(mcpApprovalLayer),
     Layer.provideMerge(projectStoreLayer),
     Layer.provideMerge(orbStoreLayer),
     Layer.provideMerge(SandboxClientFake.layer(input.sandbox)),
@@ -787,6 +903,7 @@ const makeLayer = (input: {
     idLayer,
     redactorLayer,
     settingsLayer,
+    mcpApprovalLayer,
     projectStoreLayer,
     orbStoreLayer,
     SandboxClientFake.layer(input.sandbox),
@@ -844,6 +961,27 @@ const makeSystem = (
       }),
   }
 }
+
+const mcpFingerprint = (config: unknown) => createHash("sha256").update(stableJson(config)).digest("hex")
+
+const stableJson = (value: unknown): string => {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .toSorted()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`
+  }
+  return JSON.stringify(value)
+}
+
+const expectRecord = (value: unknown, name: string): Record<string, unknown> => {
+  if (!isRecord(value)) throw new Error(`${name} must be an object`)
+  return value
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const runGit = async (cwd: string, args: ReadonlyArray<string>) => {
   const subprocess = Bun.spawn(["git", ...args], { cwd, stdout: "pipe", stderr: "pipe" })

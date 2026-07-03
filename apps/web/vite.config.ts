@@ -171,6 +171,10 @@ async function makeProxyResolver(loadModules: LoadProxyModules = loadProxyModule
   )
   const databaseLayer = Persistence.Database.layer.pipe(EffectRuntime.Layer.provideMerge(configLayer))
   const timeLayer = Core.Time.layer
+  const mcpApprovalLayer = Persistence.McpApprovalStore.layer.pipe(
+    EffectRuntime.Layer.provideMerge(databaseLayer),
+    EffectRuntime.Layer.provideMerge(timeLayer),
+  )
   const projectStoreLayer = Persistence.ProjectStore.layer.pipe(
     EffectRuntime.Layer.provideMerge(configLayer),
     EffectRuntime.Layer.provideMerge(databaseLayer),
@@ -188,6 +192,7 @@ async function makeProxyResolver(loadModules: LoadProxyModules = loadProxyModule
     databaseLayer,
     Persistence.Migration.layer,
     timeLayer,
+    mcpApprovalLayer,
     Core.IdGenerator.layer,
     projectStoreLayer,
     orbStoreLayer,

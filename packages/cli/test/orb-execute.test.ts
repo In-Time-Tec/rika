@@ -18,6 +18,7 @@ import { OrbManager, SandboxClientFake } from "@rika/orb"
 import {
   ArtifactStore,
   Database,
+  McpApprovalStore,
   Migration,
   OrbStore,
   ProjectStore,
@@ -359,6 +360,7 @@ const makeOrbLayer = (input: {
   const databaseLayer = Database.memoryLayer
   const timeLayer = Time.fixedLayer(now)
   const idLayer = IdGenerator.sequenceLayer(1)
+  const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
@@ -376,6 +378,7 @@ const makeOrbLayer = (input: {
     Migration.layer,
     timeLayer,
     idLayer,
+    mcpApprovalLayer,
     projectStoreLayer,
     orbStoreLayer,
   )
