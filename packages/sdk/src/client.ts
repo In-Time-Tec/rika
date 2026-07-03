@@ -2,7 +2,7 @@ import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
 import { Effect, Schedule, Schema, Stream } from "effect"
 
 export interface RequestInput {
-  readonly method: "GET" | "POST"
+  readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT"
   readonly path: string
   readonly body?: unknown
 }
@@ -43,7 +43,21 @@ export interface Interface {
   readonly resumeOrb: (orbId: Ids.OrbId) => Effect.Effect<Remote.OrbSummary, SdkError>
   readonly killOrb: (orbId: Ids.OrbId) => Effect.Effect<Remote.OrbSummary, SdkError>
   readonly listProjects: () => Effect.Effect<ReadonlyArray<Remote.ProjectSummary>, SdkError>
-  readonly createProject: (input: Remote.CreateProjectRequest) => Effect.Effect<Remote.ProjectSummary, SdkError>
+  readonly createProject: (input: Remote.CreateProjectRequest) => Effect.Effect<Remote.ProjectDetail, SdkError>
+  readonly getProject: (projectId: Ids.ProjectId) => Effect.Effect<Remote.ProjectDetail, SdkError>
+  readonly updateProject: (
+    projectId: Ids.ProjectId,
+    input: Remote.UpdateProjectRequest,
+  ) => Effect.Effect<Remote.ProjectDetail, SdkError>
+  readonly setProjectSecret: (
+    projectId: Ids.ProjectId,
+    name: string,
+    input: Remote.SetProjectSecretRequest,
+  ) => Effect.Effect<Remote.ProjectDetail, SdkError>
+  readonly deleteProjectSecret: (
+    projectId: Ids.ProjectId,
+    name: string,
+  ) => Effect.Effect<Remote.ProjectDetail, SdkError>
   readonly listThreads: (
     input?: Remote.ListThreadsRequest,
   ) => Effect.Effect<ReadonlyArray<Remote.ThreadSummary>, SdkError>
@@ -156,7 +170,34 @@ export const make = (transport: Transport): Interface => ({
   createProject: (input: Remote.CreateProjectRequest) =>
     transport
       .requestJson({ method: "POST", path: "/v1/projects", body: Codec.encode(Remote.CreateProjectRequest)(input) })
-      .pipe(Effect.flatMap(decodeEffect(Remote.ProjectSummary, "createProject"))),
+      .pipe(Effect.flatMap(decodeEffect(Remote.ProjectDetail, "createProject"))),
+  getProject: (projectId: Ids.ProjectId) =>
+    transport
+      .requestJson({ method: "GET", path: `/v1/projects/${encodeURIComponent(projectId)}` })
+      .pipe(Effect.flatMap(decodeEffect(Remote.ProjectDetail, "getProject"))),
+  updateProject: (projectId: Ids.ProjectId, input: Remote.UpdateProjectRequest) =>
+    transport
+      .requestJson({
+        method: "PATCH",
+        path: `/v1/projects/${encodeURIComponent(projectId)}`,
+        body: Codec.encode(Remote.UpdateProjectRequest)(input),
+      })
+      .pipe(Effect.flatMap(decodeEffect(Remote.ProjectDetail, "updateProject"))),
+  setProjectSecret: (projectId: Ids.ProjectId, name: string, input: Remote.SetProjectSecretRequest) =>
+    transport
+      .requestJson({
+        method: "PUT",
+        path: `/v1/projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(name)}`,
+        body: Codec.encode(Remote.SetProjectSecretRequest)(input),
+      })
+      .pipe(Effect.flatMap(decodeEffect(Remote.ProjectDetail, "setProjectSecret"))),
+  deleteProjectSecret: (projectId: Ids.ProjectId, name: string) =>
+    transport
+      .requestJson({
+        method: "DELETE",
+        path: `/v1/projects/${encodeURIComponent(projectId)}/secrets/${encodeURIComponent(name)}`,
+      })
+      .pipe(Effect.flatMap(decodeEffect(Remote.ProjectDetail, "deleteProjectSecret"))),
   listThreads: (input: Remote.ListThreadsRequest = {}) =>
     transport
       .requestJson({ method: "GET", path: `/v1/threads${query(withUserId(transport, input))}` })

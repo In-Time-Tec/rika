@@ -398,6 +398,7 @@ const projectStoreFakeLayer = () =>
     ProjectStore.Service.of({
       create: () => Effect.never,
       get: () => Effect.never,
+      update: () => Effect.never,
       getByName: (name) =>
         name === "demo"
           ? Effect.succeed({

@@ -189,7 +189,9 @@ const threadOptionFromSummary = (summary: Remote.ThreadSummary): Backend.ThreadO
     diff: summary.diff,
   })
 
-const projectOptionFromRecord = (project: Remote.ProjectSummary): Backend.ProjectOption => ({
+const projectOptionFromRecord = (
+  project: Pick<Remote.ProjectSummary, "name" | "project_id" | "repo_origin">,
+): Backend.ProjectOption => ({
   project_id: project.project_id,
   name: project.name,
   repo_origin: project.repo_origin,

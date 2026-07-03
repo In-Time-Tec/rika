@@ -341,7 +341,14 @@ const fakeBackend = (): FakeBackend => {
     resumeOrb: (orbId) => lifecycleOrb(orbs, threads, orbActions, orbId, "running", "resume"),
     killOrb: (orbId) => lifecycleOrb(orbs, threads, orbActions, orbId, "killed", "kill"),
     listProjects: () => Effect.succeed([projectRecord("demo", "https://github.com/example/rika.git")]),
-    createProject: (input) => Effect.succeed(projectRecord(input.name, input.repo_origin)),
+    createProject: (input) => Effect.succeed(projectDetail(input.name, input.repo_origin)),
+    getProject: () => Effect.fail(new Client.SdkError({ message: "missing", operation: "getProject", status: 404 })),
+    updateProject: () =>
+      Effect.fail(new Client.SdkError({ message: "missing", operation: "updateProject", status: 404 })),
+    setProjectSecret: () =>
+      Effect.fail(new Client.SdkError({ message: "missing", operation: "setProjectSecret", status: 404 })),
+    deleteProjectSecret: () =>
+      Effect.fail(new Client.SdkError({ message: "missing", operation: "deleteProjectSecret", status: 404 })),
     listThreads: (input) =>
       Effect.sync(() => {
         workspaceIds.push(input?.workspace_id)
@@ -524,6 +531,18 @@ const projectRecord = (name: string, repoOrigin: string): Remote.ProjectSummary 
   default_branch: "main",
   template_id: null,
   env_keys: [],
+  secret_names: [],
+  created_at: Common.TimestampMillis.make(1),
+  updated_at: Common.TimestampMillis.make(2),
+})
+
+const projectDetail = (name: string, repoOrigin: string): Remote.ProjectDetail => ({
+  project_id: Ids.ProjectId.make(`project_${name}`),
+  name,
+  repo_origin: repoOrigin,
+  default_branch: "main",
+  template_id: null,
+  env: {},
   secret_names: [],
   created_at: Common.TimestampMillis.make(1),
   updated_at: Common.TimestampMillis.make(2),

@@ -112,6 +112,23 @@ describe("web app view", () => {
     )
   })
 
+  test("renders projects settings with env values and write-only secrets", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with(projectsModel()),
+      Scene.expect(Scene.role("button", { name: "Projects" })).toExist(),
+      Scene.expect(Scene.text("demo")).toExist(),
+      Scene.expect(Scene.text("NODE_ENV")).toExist(),
+      Scene.expect(Scene.displayValue("development")).toExist(),
+      Scene.expect(Scene.text("OPENAI_API_KEY")).toExist(),
+      Scene.expect(Scene.text("****")).toExist(),
+      Scene.expect(Scene.displayValue("secret-value")).not.toExist(),
+      Scene.click(Scene.role("button", { name: "Delete" })),
+      Scene.expect(Scene.role("button", { name: "Confirm delete" })).toExist(),
+      Scene.expect(Scene.role("button", { name: "Cancel" })).toExist(),
+    )
+  })
+
   test("renders unrenderable orb changes as skipped rows", () => {
     Scene.scene(
       { update, view: View.view },
@@ -272,6 +289,56 @@ const terminalModelForThread = (selected_thread_id: Ids.ThreadId): Model => ({
     summary(threadId, { orb_status: "running" }),
     summary(selected_thread_id, { orb_status: "running", title_text: "Second thread" }),
   ],
+})
+
+const projectsModel = (): Model =>
+  ({
+    ...initialModel({ api_base_url: "/api/rika" }),
+    active_view: "projects",
+    projects: [projectSummary()],
+    selected_project_id: projectId,
+    selected_project: projectDetail(),
+    project_form: {
+      name: "demo",
+      repo_origin: "https://github.com/example/rika.git",
+      default_branch: "main",
+      template_id: "",
+      env: { NODE_ENV: "development" },
+    },
+    new_project_form: {
+      name: "",
+      repo_origin: "",
+      default_branch: "main",
+      template_id: "",
+      env_key: "",
+      env_value: "",
+    },
+    project_secret_name: "OPENAI_API_KEY",
+    project_secret_value: "",
+  }) as Model
+
+const projectSummary = (): Remote.ProjectSummary => ({
+  project_id: projectId,
+  name: "demo",
+  repo_origin: "https://github.com/example/rika.git",
+  default_branch: "main",
+  template_id: null,
+  env_keys: ["NODE_ENV"],
+  secret_names: ["OPENAI_API_KEY"],
+  created_at: 1,
+  updated_at: 2,
+})
+
+const projectDetail = (): Remote.ProjectDetail => ({
+  project_id: projectId,
+  name: "demo",
+  repo_origin: "https://github.com/example/rika.git",
+  default_branch: "main",
+  template_id: null,
+  env: { NODE_ENV: "development" },
+  secret_names: ["OPENAI_API_KEY"],
+  created_at: 1,
+  updated_at: 2,
 })
 
 const terminalMountKey = (html: Html): string | undefined => {

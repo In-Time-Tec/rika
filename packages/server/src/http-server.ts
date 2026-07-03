@@ -475,7 +475,52 @@ const dispatch = (
 
     if (request.method === "POST" && segments[1] === "projects" && segments.length === 2) {
       const input = yield* decodeBody(request, Remote.CreateProjectRequest)
-      return yield* remote.createProject(input).pipe(jsonEffect(Remote.ProjectSummary))
+      return yield* remote.createProject(input).pipe(jsonEffect(Remote.ProjectDetail))
+    }
+
+    if (request.method === "GET" && segments[1] === "projects" && segments[2] !== undefined && segments.length === 3) {
+      return yield* remote
+        .getProject(Ids.ProjectId.make(decodeURIComponent(segments[2])))
+        .pipe(jsonEffect(Remote.ProjectDetail))
+    }
+
+    if (
+      request.method === "PATCH" &&
+      segments[1] === "projects" &&
+      segments[2] !== undefined &&
+      segments.length === 3
+    ) {
+      const input = yield* decodeBody(request, Remote.UpdateProjectRequest)
+      return yield* remote
+        .updateProject(Ids.ProjectId.make(decodeURIComponent(segments[2])), input)
+        .pipe(jsonEffect(Remote.ProjectDetail))
+    }
+
+    if (
+      request.method === "PUT" &&
+      segments[1] === "projects" &&
+      segments[2] !== undefined &&
+      segments[3] === "secrets" &&
+      segments[4] !== undefined &&
+      segments.length === 5
+    ) {
+      const input = yield* decodeBody(request, Remote.SetProjectSecretRequest)
+      return yield* remote
+        .setProjectSecret(Ids.ProjectId.make(decodeURIComponent(segments[2])), decodeURIComponent(segments[4]), input)
+        .pipe(jsonEffect(Remote.ProjectDetail))
+    }
+
+    if (
+      request.method === "DELETE" &&
+      segments[1] === "projects" &&
+      segments[2] !== undefined &&
+      segments[3] === "secrets" &&
+      segments[4] !== undefined &&
+      segments.length === 5
+    ) {
+      return yield* remote
+        .deleteProjectSecret(Ids.ProjectId.make(decodeURIComponent(segments[2])), decodeURIComponent(segments[4]))
+        .pipe(jsonEffect(Remote.ProjectDetail))
     }
 
     if (request.method === "GET" && segments[1] === "threads" && segments[2] === "search" && segments.length === 3) {

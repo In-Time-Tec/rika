@@ -43,7 +43,21 @@ export interface Interface {
   readonly resumeOrb: (orbId: Ids.OrbId) => Effect.Effect<Remote.OrbSummary, RunError>
   readonly killOrb: (orbId: Ids.OrbId) => Effect.Effect<Remote.OrbSummary, RunError>
   readonly listProjects: () => Effect.Effect<ReadonlyArray<Remote.ProjectSummary>, RunError>
-  readonly createProject: (input: Remote.CreateProjectRequest) => Effect.Effect<Remote.ProjectSummary, RunError>
+  readonly createProject: (input: Remote.CreateProjectRequest) => Effect.Effect<Remote.ProjectDetail, RunError>
+  readonly getProject: (projectId: Ids.ProjectId) => Effect.Effect<Remote.ProjectDetail, RunError>
+  readonly updateProject: (
+    projectId: Ids.ProjectId,
+    input: Remote.UpdateProjectRequest,
+  ) => Effect.Effect<Remote.ProjectDetail, RunError>
+  readonly setProjectSecret: (
+    projectId: Ids.ProjectId,
+    name: string,
+    input: Remote.SetProjectSecretRequest,
+  ) => Effect.Effect<Remote.ProjectDetail, RunError>
+  readonly deleteProjectSecret: (
+    projectId: Ids.ProjectId,
+    name: string,
+  ) => Effect.Effect<Remote.ProjectDetail, RunError>
   readonly listThreads: (
     input?: Remote.ListThreadsRequest,
   ) => Effect.Effect<ReadonlyArray<Remote.ThreadSummary>, RunError>
@@ -239,8 +253,42 @@ export const layerWithLive = Layer.effect(
           repo_origin: publicRepoOrigin(input.repo_origin),
           ...(input.default_branch === undefined ? {} : { default_branch: input.default_branch }),
           ...(input.template_id === undefined ? {} : { template_id: input.template_id }),
+          ...(input.env === undefined ? {} : { env: input.env }),
         })
-        return toProjectSummary(project)
+        return toProjectDetail(project)
+      }),
+      getProject: Effect.fn("RemoteControl.getProject")(function* (projectId: Ids.ProjectId) {
+        const project = yield* projects.get(projectId)
+        if (project === undefined) return yield* projectNotFound(projectId, "getProject")
+        return toProjectDetail(project)
+      }),
+      updateProject: Effect.fn("RemoteControl.updateProject")(function* (
+        projectId: Ids.ProjectId,
+        input: Remote.UpdateProjectRequest,
+      ) {
+        const project = yield* projects.update(projectId, {
+          ...(input.name === undefined ? {} : { name: input.name }),
+          ...(input.repo_origin === undefined ? {} : { repo_origin: publicRepoOrigin(input.repo_origin) }),
+          ...(input.default_branch === undefined ? {} : { default_branch: input.default_branch }),
+          ...(input.template_id === undefined ? {} : { template_id: input.template_id }),
+          ...(input.env === undefined ? {} : { env: input.env }),
+        })
+        return toProjectDetail(project)
+      }),
+      setProjectSecret: Effect.fn("RemoteControl.setProjectSecret")(function* (
+        projectId: Ids.ProjectId,
+        name: string,
+        input: Remote.SetProjectSecretRequest,
+      ) {
+        const project = yield* projects.setSecret(projectId, name, input.value)
+        return toProjectDetail(project)
+      }),
+      deleteProjectSecret: Effect.fn("RemoteControl.deleteProjectSecret")(function* (
+        projectId: Ids.ProjectId,
+        name: string,
+      ) {
+        const project = yield* projects.unsetSecret(projectId, name)
+        return toProjectDetail(project)
       }),
       listThreads: Effect.fn("RemoteControl.listThreads")(function* (input: Remote.ListThreadsRequest = {}) {
         const summaries = yield* threads.list({
@@ -489,6 +537,36 @@ export const createProject = Effect.fn("RemoteControl.createProject.call")(funct
   return yield* service.createProject(input)
 })
 
+export const getProject = Effect.fn("RemoteControl.getProject.call")(function* (projectId: Ids.ProjectId) {
+  const service = yield* Service
+  return yield* service.getProject(projectId)
+})
+
+export const updateProject = Effect.fn("RemoteControl.updateProject.call")(function* (
+  projectId: Ids.ProjectId,
+  input: Remote.UpdateProjectRequest,
+) {
+  const service = yield* Service
+  return yield* service.updateProject(projectId, input)
+})
+
+export const setProjectSecret = Effect.fn("RemoteControl.setProjectSecret.call")(function* (
+  projectId: Ids.ProjectId,
+  name: string,
+  input: Remote.SetProjectSecretRequest,
+) {
+  const service = yield* Service
+  return yield* service.setProjectSecret(projectId, name, input)
+})
+
+export const deleteProjectSecret = Effect.fn("RemoteControl.deleteProjectSecret.call")(function* (
+  projectId: Ids.ProjectId,
+  name: string,
+) {
+  const service = yield* Service
+  return yield* service.deleteProjectSecret(projectId, name)
+})
+
 export const backendHealth = Effect.fn("RemoteControl.backendHealth.call")(function* (url: string) {
   const service = yield* Service
   return yield* service.backendHealth(url)
@@ -658,6 +736,7 @@ export const statusFromError = (error: RunError) => {
   if (error instanceof ThreadService.ThreadForkError) return error.reason === "turn_open" ? 409 : 404
   if (error instanceof OrbStore.OrbStoreError) return statusFromOrbStoreError(error)
   if (error instanceof OrbManager.OrbProvisionError) return statusFromOrbProvisionError(error)
+  if (error instanceof ProjectStore.ProjectStoreError) return statusFromProjectStoreError(error)
   if (error instanceof WorkspaceAccess.WorkspaceAccessDenied) return 403
   if (error instanceof WorkspaceAccess.WorkspaceAccessError) return 404
   return 500
@@ -711,6 +790,18 @@ const toProjectSummary = (project: Orb.ProjectRecord): Remote.ProjectSummary => 
   updated_at: project.updated_at,
 })
 
+const toProjectDetail = (project: Orb.ProjectRecord): Remote.ProjectDetail => ({
+  project_id: project.project_id,
+  name: project.name,
+  repo_origin: publicRepoOrigin(project.repo_origin),
+  default_branch: project.default_branch,
+  template_id: project.template_id,
+  env: project.env,
+  secret_names: project.secret_names,
+  created_at: project.created_at,
+  updated_at: project.updated_at,
+})
+
 const publicRepoOrigin = (repoOrigin: string): string => {
   try {
     const url = new URL(repoOrigin)
@@ -726,6 +817,9 @@ const publicRepoOrigin = (repoOrigin: string): string => {
 
 const statusFromOrbStoreError = (error: OrbStore.OrbStoreError) =>
   error.reason === "not_found" ? 404 : error.reason === "invalid_transition" ? 409 : 500
+
+const statusFromProjectStoreError = (error: ProjectStore.ProjectStoreError) =>
+  error.message.toLowerCase().includes("not found") ? 404 : 500
 
 const statusFromCompactionError = (error: CompactionService.CompactionError) =>
   error.message.includes("does not exist") ? 404 : 500
@@ -743,6 +837,13 @@ const orbNotFound = (input: { readonly orb_id?: Ids.OrbId; readonly thread_id?: 
       input.orb_id === undefined
         ? `Orb for thread ${input.thread_id} was not found`
         : `Orb ${input.orb_id} was not found`,
+    operation,
+    status: 404,
+  })
+
+const projectNotFound = (projectId: Ids.ProjectId, operation: string) =>
+  new RemoteControlError({
+    message: `Project ${projectId} was not found`,
     operation,
     status: 404,
   })

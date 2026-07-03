@@ -16,6 +16,15 @@ export const CreateInput = Schema.Struct({
   env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 }).annotate({ identifier: "Rika.Persistence.ProjectStore.CreateInput" })
 
+export interface UpdateInput extends Schema.Schema.Type<typeof UpdateInput> {}
+export const UpdateInput = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  repo_origin: Schema.optional(Schema.String),
+  default_branch: Schema.optional(Schema.String),
+  template_id: Schema.optional(Schema.NullOr(Schema.String)),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+}).annotate({ identifier: "Rika.Persistence.ProjectStore.UpdateInput" })
+
 const SecretValues = Schema.Record(Schema.String, Schema.String)
 
 export class ProjectStoreError extends Schema.TaggedErrorClass<ProjectStoreError>()("ProjectStoreError", {
@@ -37,6 +46,10 @@ export interface Interface {
     repoOrigin: string,
   ) => Effect.Effect<Orb.ProjectRecord | undefined, Database.DatabaseError | ProjectStoreError>
   readonly list: () => Effect.Effect<ReadonlyArray<Orb.ProjectRecord>, Database.DatabaseError | ProjectStoreError>
+  readonly update: (
+    projectId: Ids.ProjectId,
+    input: UpdateInput,
+  ) => Effect.Effect<Orb.ProjectRecord, Database.DatabaseError | ProjectStoreError>
   readonly setEnv: (
     projectId: Ids.ProjectId,
     key: string,
@@ -144,6 +157,16 @@ export const layer = Layer.effect(
         )
         return yield* Effect.forEach(records, (project) => withSecretNames(project, secretsDirectory))
       }),
+      update: Effect.fn("ProjectStore.update")(function* (projectId: Ids.ProjectId, input: UpdateInput) {
+        const now = yield* time.nowMillis
+        const updated = yield* databaseService.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => updateProject(database, projectId, now, input),
+            catch: (cause) => toError(cause, "update", projectId),
+          }),
+        )
+        return yield* withSecretNames(updated, secretsDirectory)
+      }),
       setEnv: Effect.fn("ProjectStore.setEnv")(function* (projectId: Ids.ProjectId, key: string, value: string) {
         const now = yield* time.nowMillis
         const updated = yield* databaseService.withDatabaseEffect((database) =>
@@ -221,6 +244,11 @@ export const getByRepoOrigin = Effect.fn("ProjectStore.getByRepoOrigin.call")(fu
 export const list = Effect.fn("ProjectStore.list.call")(function* () {
   const store = yield* Service
   return yield* store.list()
+})
+
+export const update = Effect.fn("ProjectStore.update.call")(function* (projectId: Ids.ProjectId, input: UpdateInput) {
+  const store = yield* Service
+  return yield* store.update(projectId, input)
 })
 
 export const setEnv = Effect.fn("ProjectStore.setEnv.call")(function* (
@@ -304,7 +332,7 @@ const updateEnv = (
   database: Pick<Database.DrizzleDatabase, "get" | "run">,
   projectId: Ids.ProjectId,
   updatedAt: Common.TimestampMillis,
-  update: (env: Record<string, string>) => Record<string, string>,
+  transformEnv: (env: Record<string, string>) => Record<string, string>,
 ) => {
   const existing = rowToProject(
     database.get<ProjectRow>(sql`select * from projects where project_id = ${projectId} limit 1`),
@@ -316,9 +344,47 @@ const updateEnv = (
       project_id: projectId,
     })
   }
-  const next: Orb.ProjectRecord = { ...existing, env: update(existing.env), updated_at: updatedAt }
+  const next: Orb.ProjectRecord = { ...existing, env: transformEnv(existing.env), updated_at: updatedAt }
   database.run(
     sql`update projects set env = ${JSON.stringify(next.env)}, updated_at = ${updatedAt} where project_id = ${projectId}`,
+  )
+  return next
+}
+
+const updateProject = (
+  database: Pick<Database.DrizzleDatabase, "get" | "run">,
+  projectId: Ids.ProjectId,
+  updatedAt: Common.TimestampMillis,
+  input: UpdateInput,
+) => {
+  const existing = rowToProject(
+    database.get<ProjectRow>(sql`select * from projects where project_id = ${projectId} limit 1`),
+  )
+  if (existing === undefined) {
+    throw new ProjectStoreError({
+      message: `Project ${projectId} not found`,
+      operation: "updateProject",
+      project_id: projectId,
+    })
+  }
+  const next: Orb.ProjectRecord = {
+    ...existing,
+    name: input.name ?? existing.name,
+    repo_origin: input.repo_origin ?? existing.repo_origin,
+    default_branch: input.default_branch ?? existing.default_branch,
+    template_id: input.template_id === undefined ? existing.template_id : input.template_id,
+    env: input.env ?? existing.env,
+    updated_at: updatedAt,
+  }
+  database.run(
+    sql`update projects set
+      name = ${next.name},
+      repo_origin = ${next.repo_origin},
+      default_branch = ${next.default_branch},
+      template_id = ${next.template_id},
+      env = ${JSON.stringify(next.env)},
+      updated_at = ${updatedAt}
+      where project_id = ${projectId}`,
   )
   return next
 }

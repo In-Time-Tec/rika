@@ -1054,6 +1054,11 @@ export const reconnectingClient = (input: ReconnectingClientInput): Client.Inter
     killOrb: (orbId) => request({}, (remote) => remote.killOrb(orbId)),
     listProjects: () => request({}, (remote) => remote.listProjects()),
     createProject: (project) => request({}, (remote) => remote.createProject(project)),
+    getProject: (projectId) => request({}, (remote) => remote.getProject(projectId)),
+    updateProject: (projectId, project) => request({}, (remote) => remote.updateProject(projectId, project)),
+    setProjectSecret: (projectId, name, secret) =>
+      request({}, (remote) => remote.setProjectSecret(projectId, name, secret)),
+    deleteProjectSecret: (projectId, name) => request({}, (remote) => remote.deleteProjectSecret(projectId, name)),
     listThreads: (thread) => request({}, (remote) => remote.listThreads(thread)),
     openThread: (threadId, userId) => request({ thread_id: threadId }, (remote) => remote.openThread(threadId, userId)),
     previewThread: (threadId, preview) =>

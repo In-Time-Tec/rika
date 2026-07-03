@@ -216,16 +216,21 @@ describe("SDK client", () => {
 
   test("uses shared schemas for project and orb-thread requests", async () => {
     const calls: Array<Client.RequestInput> = []
-    const project: Remote.ProjectSummary = {
+    const project = {
       project_id: projectId,
       name: "demo",
       repo_origin: "https://github.com/example/rika.git",
       default_branch: "main",
       template_id: null,
-      env_keys: [],
+      env: { NODE_ENV: "development" },
       secret_names: [],
       created_at: now,
       updated_at: now,
+    }
+    const projectSummary = {
+      ...project,
+      env_keys: ["NODE_ENV"],
+      env: undefined,
     }
     const summary: Remote.ThreadSummary = {
       thread_id: threadId,
@@ -240,10 +245,23 @@ describe("SDK client", () => {
       requestJson: (input) => {
         calls.push(input)
         if (input.method === "GET" && input.path === "/v1/projects") {
-          return Effect.succeed(Codec.encode(Schema.Array(Remote.ProjectSummary))([project]))
+          const { env: _env, ...projectSummaryPayload } = projectSummary
+          return Effect.succeed(Codec.encode(Schema.Array(Remote.ProjectSummary))([projectSummaryPayload]))
         }
         if (input.method === "POST" && input.path === "/v1/projects") {
-          return Effect.succeed(Codec.encode(Remote.ProjectSummary)(project))
+          return Effect.succeed(project)
+        }
+        if (input.method === "GET" && input.path === `/v1/projects/${projectId}`) {
+          return Effect.succeed(project)
+        }
+        if (input.method === "PATCH" && input.path === `/v1/projects/${projectId}`) {
+          return Effect.succeed({ ...project, name: "renamed", env: { NODE_ENV: "test" } })
+        }
+        if (input.method === "PUT" && input.path === `/v1/projects/${projectId}/secrets/OPENAI_API_KEY`) {
+          return Effect.succeed({ ...project, secret_names: ["OPENAI_API_KEY"] })
+        }
+        if (input.method === "DELETE" && input.path === `/v1/projects/${projectId}/secrets/OPENAI_API_KEY`) {
+          return Effect.succeed({ ...project, secret_names: [] })
         }
         if (input.method === "POST" && input.path === "/v1/orbs") {
           return Effect.succeed(Codec.encode(Remote.ThreadSummary)(summary))
@@ -255,22 +273,56 @@ describe("SDK client", () => {
 
     const projects = await Effect.runPromise(client.listProjects())
     const createdProject = await Effect.runPromise(
-      client.createProject({ name: "demo", repo_origin: "https://github.com/example/rika.git" }),
+      client.createProject({
+        name: "demo",
+        repo_origin: "https://github.com/example/rika.git",
+        env: { NODE_ENV: "development" },
+      }),
     )
+    const projectDetail = await Effect.runPromise(client.getProject(projectId))
+    const updatedProject = await Effect.runPromise(
+      client.updateProject(projectId, { name: "renamed", env: { NODE_ENV: "test" } }),
+    )
+    const withSecret = await Effect.runPromise(
+      client.setProjectSecret(projectId, "OPENAI_API_KEY", { value: "secret-value" }),
+    )
+    const withoutSecret = await Effect.runPromise(client.deleteProjectSecret(projectId, "OPENAI_API_KEY"))
     const createdOrb = await Effect.runPromise(
       client.createOrbThread({ project_id: projectId, thread_id: threadId, mode: "smart" }),
     )
 
-    expect(projects).toEqual([project])
+    const { env: _env, ...expectedSummary } = projectSummary
+    expect(projects).toEqual([expectedSummary])
     expect(createdProject).toEqual(project)
+    expect(projectDetail).toEqual(project)
+    expect(updatedProject).toEqual({ ...project, name: "renamed", env: { NODE_ENV: "test" } })
+    expect(withSecret.secret_names).toEqual(["OPENAI_API_KEY"])
+    expect(JSON.stringify(withSecret)).not.toContain("secret-value")
+    expect(withoutSecret.secret_names).toEqual([])
     expect(createdOrb).toEqual(summary)
     expect(calls).toEqual([
       { method: "GET", path: "/v1/projects" },
       {
         method: "POST",
         path: "/v1/projects",
-        body: { name: "demo", repo_origin: "https://github.com/example/rika.git" },
+        body: {
+          name: "demo",
+          repo_origin: "https://github.com/example/rika.git",
+          env: { NODE_ENV: "development" },
+        },
       },
+      { method: "GET", path: `/v1/projects/${projectId}` },
+      {
+        method: "PATCH",
+        path: `/v1/projects/${projectId}`,
+        body: { name: "renamed", env: { NODE_ENV: "test" } },
+      },
+      {
+        method: "PUT",
+        path: `/v1/projects/${projectId}/secrets/OPENAI_API_KEY`,
+        body: { value: "secret-value" },
+      },
+      { method: "DELETE", path: `/v1/projects/${projectId}/secrets/OPENAI_API_KEY` },
       {
         method: "POST",
         path: "/v1/orbs",

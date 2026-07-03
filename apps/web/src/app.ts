@@ -95,11 +95,45 @@ export const OrbChangesModel = S.Union([
 export type OrbChangesModel = typeof OrbChangesModel.Type
 
 export const OrbTerminalStatusSchema = S.Literals(["idle", "connecting", "connected", "disconnected", "failed"])
+export const ActiveView = S.Literals(["threads", "projects"])
+export type ActiveView = typeof ActiveView.Type
+export const ProjectField = S.Literals(["name", "repo_origin", "default_branch", "template_id"])
+export type ProjectField = typeof ProjectField.Type
+export const ProjectSecretField = S.Literals(["name", "value"])
+export type ProjectSecretField = typeof ProjectSecretField.Type
+
+export const ProjectForm = S.Struct({
+  name: S.String,
+  repo_origin: S.String,
+  default_branch: S.String,
+  template_id: S.String,
+  env: S.Record(S.String, S.String),
+})
+export type ProjectForm = typeof ProjectForm.Type
+
+export const NewProjectForm = S.Struct({
+  name: S.String,
+  repo_origin: S.String,
+  default_branch: S.String,
+  template_id: S.String,
+  env_key: S.String,
+  env_value: S.String,
+})
+export type NewProjectForm = typeof NewProjectForm.Type
 
 export const Model = S.Struct({
   api_base_url: S.String,
+  active_view: ActiveView,
   connection: Connection,
   threads: S.Array(Remote.ThreadSummary),
+  projects: S.Array(Remote.ProjectSummary),
+  selected_project_id: S.optional(Ids.ProjectId),
+  selected_project: S.optional(Remote.ProjectDetail),
+  project_form: ProjectForm,
+  new_project_form: NewProjectForm,
+  project_secret_name: S.String,
+  project_secret_value: S.String,
+  pending_secret_delete_name: S.optional(S.String),
   events: S.Array(Event.Event),
   last_sequence: S.Int,
   subscription_after_sequence: S.Int,
@@ -203,8 +237,30 @@ export const FailedRenderPierreTree = m("FailedRenderPierreTree", { message: S.S
 export const TerminalStatusChanged = m("TerminalStatusChanged", { status: OrbTerminalStatusSchema })
 export const TerminalFailed = m("TerminalFailed", { message: S.String })
 export const RequestedTerminalReconnect = m("RequestedTerminalReconnect")
+export const ClickedThreads = m("ClickedThreads")
+export const ClickedProjects = m("ClickedProjects")
+export const LoadedProjects = m("LoadedProjects", { projects: S.Array(Remote.ProjectSummary) })
+export const FailedLoadProjects = m("FailedLoadProjects", { message: S.String })
+export const ClickedProject = m("ClickedProject", { project_id: Ids.ProjectId })
+export const LoadedProject = m("LoadedProject", { project: Remote.ProjectDetail })
+export const FailedLoadProject = m("FailedLoadProject", { message: S.String })
+export const ChangedNewProjectField = m("ChangedNewProjectField", { field: ProjectField, value: S.String })
+export const ChangedNewProjectEnvKey = m("ChangedNewProjectEnvKey", { value: S.String })
+export const ChangedNewProjectEnvValue = m("ChangedNewProjectEnvValue", { value: S.String })
+export const SubmittedNewProject = m("SubmittedNewProject")
+export const ChangedProjectField = m("ChangedProjectField", { field: ProjectField, value: S.String })
+export const ChangedProjectEnvValue = m("ChangedProjectEnvValue", { key: S.String, value: S.String })
+export const RemovedProjectEnv = m("RemovedProjectEnv", { key: S.String })
+export const SubmittedProjectSettings = m("SubmittedProjectSettings")
+export const SavedProject = m("SavedProject", { project: Remote.ProjectDetail })
+export const FailedSaveProject = m("FailedSaveProject", { message: S.String })
+export const ChangedProjectSecretField = m("ChangedProjectSecretField", { field: ProjectSecretField, value: S.String })
+export const SubmittedProjectSecret = m("SubmittedProjectSecret")
+export const ClickedDeleteProjectSecret = m("ClickedDeleteProjectSecret", { name: S.String })
+export const CancelledDeleteProjectSecret = m("CancelledDeleteProjectSecret")
+export const ConfirmedDeleteProjectSecret = m("ConfirmedDeleteProjectSecret")
 
-export const AppMessage = S.Union([
+const BackendMessage = S.Union([
   LoadedBackendHealth,
   FailedBackendHealth,
   LoadedThreads,
@@ -215,6 +271,9 @@ export const AppMessage = S.Union([
   FailedCreateThread,
   OpenedThread,
   FailedOpenThread,
+])
+
+const OrbControlMessage = S.Union([
   LoadedSelectedOrb,
   FailedLoadSelectedOrb,
   GotOrbTabsMessage,
@@ -225,6 +284,9 @@ export const AppMessage = S.Union([
   ConfirmedKillOrb,
   UpdatedSelectedOrb,
   FailedOrbAction,
+])
+
+const OrbWorkspaceMessage = S.Union([
   LoadedOrbDirectory,
   FailedLoadOrbDirectory,
   SelectedOrbFile,
@@ -250,7 +312,36 @@ export const AppMessage = S.Union([
   TerminalStatusChanged,
   TerminalFailed,
   RequestedTerminalReconnect,
-]).pipe(S.toTaggedUnion("_tag"))
+])
+
+const ProjectMessage = S.Union([
+  ClickedThreads,
+  ClickedProjects,
+  LoadedProjects,
+  FailedLoadProjects,
+  ClickedProject,
+  LoadedProject,
+  FailedLoadProject,
+  ChangedNewProjectField,
+  ChangedNewProjectEnvKey,
+  ChangedNewProjectEnvValue,
+  SubmittedNewProject,
+  ChangedProjectField,
+  ChangedProjectEnvValue,
+  RemovedProjectEnv,
+  SubmittedProjectSettings,
+  SavedProject,
+  FailedSaveProject,
+  ChangedProjectSecretField,
+  SubmittedProjectSecret,
+  ClickedDeleteProjectSecret,
+  CancelledDeleteProjectSecret,
+  ConfirmedDeleteProjectSecret,
+])
+
+export const AppMessage = S.Union([BackendMessage, OrbControlMessage, OrbWorkspaceMessage, ProjectMessage]).pipe(
+  S.toTaggedUnion("_tag"),
+)
 export type AppMessage = typeof AppMessage.Type
 
 type PierreTreeMessage =
@@ -425,6 +516,105 @@ export const LoadThreads = Command.define(
     ),
 )
 
+export const LoadProjects = Command.define(
+  "LoadProjects",
+  { api_base_url: S.String },
+  LoadedProjects,
+  FailedLoadProjects,
+)(({ api_base_url }) =>
+  sdk(api_base_url)
+    .listProjects()
+    .pipe(
+      Effect.map((projects) => LoadedProjects({ projects })),
+      Effect.catch((error) => Effect.succeed(FailedLoadProjects({ message: error.message }))),
+    ),
+)
+
+export const LoadProject = Command.define(
+  "LoadProject",
+  { api_base_url: S.String, project_id: Ids.ProjectId },
+  LoadedProject,
+  FailedLoadProject,
+)(({ api_base_url, project_id }) =>
+  sdk(api_base_url)
+    .getProject(project_id)
+    .pipe(
+      Effect.map((project) => LoadedProject({ project })),
+      Effect.catch((error) => Effect.succeed(FailedLoadProject({ message: error.message }))),
+    ),
+)
+
+export const CreateProjectSettings = Command.define(
+  "CreateProjectSettings",
+  {
+    api_base_url: S.String,
+    name: S.String,
+    repo_origin: S.String,
+    default_branch: S.String,
+    template_id: S.NullOr(S.String),
+    env: S.Record(S.String, S.String),
+  },
+  SavedProject,
+  FailedSaveProject,
+)(({ api_base_url, name, repo_origin, default_branch, template_id, env }) =>
+  sdk(api_base_url)
+    .createProject({ name, repo_origin, default_branch, template_id, env })
+    .pipe(
+      Effect.map((project) => SavedProject({ project })),
+      Effect.catch((error) => Effect.succeed(FailedSaveProject({ message: error.message }))),
+    ),
+)
+
+export const UpdateProjectSettings = Command.define(
+  "UpdateProjectSettings",
+  {
+    api_base_url: S.String,
+    project_id: Ids.ProjectId,
+    name: S.String,
+    repo_origin: S.String,
+    default_branch: S.String,
+    template_id: S.NullOr(S.String),
+    env: S.Record(S.String, S.String),
+  },
+  SavedProject,
+  FailedSaveProject,
+)(({ api_base_url, project_id, name, repo_origin, default_branch, template_id, env }) =>
+  sdk(api_base_url)
+    .updateProject(project_id, { name, repo_origin, default_branch, template_id, env })
+    .pipe(
+      Effect.map((project) => SavedProject({ project })),
+      Effect.catch((error) => Effect.succeed(FailedSaveProject({ message: error.message }))),
+    ),
+)
+
+export const SetProjectSecret = Command.define(
+  "SetProjectSecret",
+  { api_base_url: S.String, project_id: Ids.ProjectId, name: S.String, value: S.String },
+  SavedProject,
+  FailedSaveProject,
+)(({ api_base_url, project_id, name, value }) =>
+  sdk(api_base_url)
+    .setProjectSecret(project_id, name, { value })
+    .pipe(
+      Effect.map((project) => SavedProject({ project })),
+      Effect.catch((error) => Effect.succeed(FailedSaveProject({ message: error.message }))),
+    ),
+)
+
+export const DeleteProjectSecret = Command.define(
+  "DeleteProjectSecret",
+  { api_base_url: S.String, project_id: Ids.ProjectId, name: S.String },
+  SavedProject,
+  FailedSaveProject,
+)(({ api_base_url, project_id, name }) =>
+  sdk(api_base_url)
+    .deleteProjectSecret(project_id, name)
+    .pipe(
+      Effect.map((project) => SavedProject({ project })),
+      Effect.catch((error) => Effect.succeed(FailedSaveProject({ message: error.message }))),
+    ),
+)
+
 export const CreateThread = Command.define(
   "CreateThread",
   { api_base_url: S.String },
@@ -594,8 +784,15 @@ export const ReconnectOrbTerminal = Command.define(
 
 export const initialModel = (config: RuntimeConfig): Model => ({
   api_base_url: config.api_base_url,
+  active_view: "threads",
   connection: "idle",
   threads: [],
+  projects: [],
+  project_form: emptyProjectForm(),
+  new_project_form: emptyNewProjectForm(),
+  project_secret_name: "",
+  project_secret_value: "",
+  pending_secret_delete_name: undefined,
   events: [],
   last_sequence: 0,
   subscription_after_sequence: 0,
@@ -753,6 +950,115 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
             { ...model, orb_terminal_status: "connecting", orb_terminal_error: undefined },
             [ReconnectOrbTerminal({ thread_id: model.selected_thread_id })],
           ]
+    case "ClickedThreads":
+      return [{ ...model, active_view: "threads", notice: undefined }, []]
+    case "ClickedProjects":
+      return [
+        { ...model, active_view: "projects", notice: undefined },
+        model.projects.length === 0 ? [LoadProjects({ api_base_url: model.api_base_url })] : [],
+      ]
+    case "LoadedProjects":
+      return [{ ...model, projects: message.projects, notice: undefined }, []]
+    case "FailedLoadProjects":
+      return [{ ...model, notice: message.message }, []]
+    case "ClickedProject":
+      return [
+        {
+          ...model,
+          active_view: "projects",
+          selected_project_id: message.project_id,
+          selected_project: undefined,
+          project_form: emptyProjectForm(),
+          project_secret_name: "",
+          project_secret_value: "",
+          notice: undefined,
+        },
+        [LoadProject({ api_base_url: model.api_base_url, project_id: message.project_id })],
+      ]
+    case "LoadedProject":
+      return [projectLoadedModel(model, message.project), []]
+    case "FailedLoadProject":
+      return [{ ...model, notice: message.message }, []]
+    case "ChangedNewProjectField":
+      return [
+        {
+          ...model,
+          new_project_form: { ...model.new_project_form, [message.field]: message.value },
+        },
+        [],
+      ]
+    case "ChangedNewProjectEnvKey":
+      return [{ ...model, new_project_form: { ...model.new_project_form, env_key: message.value } }, []]
+    case "ChangedNewProjectEnvValue":
+      return [{ ...model, new_project_form: { ...model.new_project_form, env_value: message.value } }, []]
+    case "SubmittedNewProject":
+      return submittedNewProjectModel(model)
+    case "ChangedProjectField":
+      return [{ ...model, project_form: { ...model.project_form, [message.field]: message.value } }, []]
+    case "ChangedProjectEnvValue":
+      return [
+        {
+          ...model,
+          project_form: { ...model.project_form, env: { ...model.project_form.env, [message.key]: message.value } },
+        },
+        [],
+      ]
+    case "RemovedProjectEnv":
+      return [
+        { ...model, project_form: { ...model.project_form, env: withoutKey(model.project_form.env, message.key) } },
+        [],
+      ]
+    case "SubmittedProjectSettings":
+      return submittedProjectSettingsModel(model)
+    case "SavedProject":
+      return [
+        {
+          ...projectLoadedModel(model, message.project),
+          projects: newestProjectFirst([projectSummaryFromDetail(message.project), ...model.projects]),
+          new_project_form: emptyNewProjectForm(),
+          project_secret_value: "",
+          pending_secret_delete_name: undefined,
+          notice: undefined,
+        },
+        [],
+      ]
+    case "FailedSaveProject":
+      return [{ ...model, notice: message.message }, []]
+    case "ChangedProjectSecretField":
+      return [
+        message.field === "name"
+          ? { ...model, project_secret_name: message.value }
+          : { ...model, project_secret_value: message.value },
+        [],
+      ]
+    case "SubmittedProjectSecret":
+      return submittedProjectSecretModel(model)
+    case "ClickedDeleteProjectSecret":
+      return [
+        {
+          ...model,
+          pending_secret_delete_name: model.pending_secret_delete_name === message.name ? undefined : message.name,
+          notice: undefined,
+        },
+        [],
+      ]
+    case "CancelledDeleteProjectSecret":
+      return [{ ...model, pending_secret_delete_name: undefined, notice: undefined }, []]
+    case "ConfirmedDeleteProjectSecret": {
+      const name = model.pending_secret_delete_name
+      return model.selected_project_id === undefined || name === undefined
+        ? [model, []]
+        : [
+            { ...model, pending_secret_delete_name: undefined, notice: undefined },
+            [
+              DeleteProjectSecret({
+                api_base_url: model.api_base_url,
+                project_id: model.selected_project_id,
+                name,
+              }),
+            ],
+          ]
+    }
   }
   return [model, []]
 }
@@ -959,6 +1265,137 @@ const sdk = (apiBaseUrl: string) => Client.make(Client.fetchTransport({ base_url
 
 const orbSdk = (apiBaseUrl: string, threadId: Ids.ThreadId) =>
   sdk(`${apiBaseUrl.replace(/\/$/, "")}/orb/by-thread/${encodeURIComponent(threadId)}`)
+
+const emptyProjectForm = (): ProjectForm => ({
+  name: "",
+  repo_origin: "",
+  default_branch: "main",
+  template_id: "",
+  env: {},
+})
+
+const emptyNewProjectForm = (): NewProjectForm => ({
+  name: "",
+  repo_origin: "",
+  default_branch: "main",
+  template_id: "",
+  env_key: "",
+  env_value: "",
+})
+
+const projectFormFromDetail = (project: Remote.ProjectDetail): ProjectForm => ({
+  name: project.name,
+  repo_origin: project.repo_origin,
+  default_branch: project.default_branch,
+  template_id: project.template_id ?? "",
+  env: project.env,
+})
+
+const projectSummaryFromDetail = (project: Remote.ProjectDetail): Remote.ProjectSummary => ({
+  project_id: project.project_id,
+  name: project.name,
+  repo_origin: project.repo_origin,
+  default_branch: project.default_branch,
+  template_id: project.template_id,
+  env_keys: Object.keys(project.env).toSorted(),
+  secret_names: project.secret_names,
+  created_at: project.created_at,
+  updated_at: project.updated_at,
+})
+
+const projectLoadedModel = (model: Model, project: Remote.ProjectDetail): Model => ({
+  ...model,
+  active_view: "projects",
+  selected_project_id: project.project_id,
+  selected_project: project,
+  project_form: projectFormFromDetail(project),
+  project_secret_name: project.secret_names[0] ?? "",
+  project_secret_value: "",
+  pending_secret_delete_name: undefined,
+  projects: newestProjectFirst([projectSummaryFromDetail(project), ...model.projects]),
+  notice: undefined,
+})
+
+const submittedNewProjectModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const form = model.new_project_form
+  const name = form.name.trim()
+  const repoOrigin = form.repo_origin.trim()
+  if (name.length === 0 || repoOrigin.length === 0) return [model, []]
+  const envKey = form.env_key.trim()
+  const env = envKey.length === 0 ? {} : { [envKey]: form.env_value }
+  return [
+    { ...model, notice: undefined },
+    [
+      CreateProjectSettings({
+        api_base_url: model.api_base_url,
+        name,
+        repo_origin: repoOrigin,
+        default_branch: nonEmptyOr(form.default_branch, "main"),
+        template_id: nullableText(form.template_id),
+        env,
+      }),
+    ],
+  ]
+}
+
+const submittedProjectSettingsModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.selected_project_id === undefined) return [model, []]
+  const form = model.project_form
+  const name = form.name.trim()
+  const repoOrigin = form.repo_origin.trim()
+  if (name.length === 0 || repoOrigin.length === 0) return [model, []]
+  return [
+    { ...model, notice: undefined },
+    [
+      UpdateProjectSettings({
+        api_base_url: model.api_base_url,
+        project_id: model.selected_project_id,
+        name,
+        repo_origin: repoOrigin,
+        default_branch: nonEmptyOr(form.default_branch, "main"),
+        template_id: nullableText(form.template_id),
+        env: form.env,
+      }),
+    ],
+  ]
+}
+
+const submittedProjectSecretModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.selected_project_id === undefined) return [model, []]
+  const name = model.project_secret_name.trim()
+  const value = model.project_secret_value
+  if (name.length === 0 || value.length === 0) return [model, []]
+  return [
+    { ...model, project_secret_value: "", notice: undefined },
+    [SetProjectSecret({ api_base_url: model.api_base_url, project_id: model.selected_project_id, name, value })],
+  ]
+}
+
+const newestProjectFirst = (projects: ReadonlyArray<Remote.ProjectSummary>) => {
+  const seen = new Set<Ids.ProjectId>()
+  const unique = projects.filter((project) => {
+    if (seen.has(project.project_id)) return false
+    seen.add(project.project_id)
+    return true
+  })
+  return unique.toSorted((left, right) => right.updated_at - left.updated_at || left.name.localeCompare(right.name))
+}
+
+const nullableText = (value: string) => {
+  const trimmed = value.trim()
+  return trimmed.length === 0 ? null : trimmed
+}
+
+const nonEmptyOr = (value: string, fallback: string) => {
+  const trimmed = value.trim()
+  return trimmed.length === 0 ? fallback : trimmed
+}
+
+const withoutKey = (input: Record<string, string>, key: string) => {
+  const next = { ...input }
+  delete next[key]
+  return next
+}
 
 const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model, ReadonlyArray<AppCommand>] => [
   {

@@ -4,19 +4,35 @@ import {
   CancelledKillOrb,
   ChangedDraft,
   ChangedDraftMode,
+  ChangedNewProjectEnvKey,
+  ChangedNewProjectEnvValue,
+  ChangedNewProjectField,
+  ChangedProjectEnvValue,
+  ChangedProjectField,
+  ChangedProjectSecretField,
   ClickedInterrupt,
+  ClickedDeleteProjectSecret,
+  ClickedProject,
+  ClickedProjects,
   ClickedTogglePierreDiff,
   ClickedKillOrb,
   ClickedNewThread,
   ClickedPauseOrb,
   ClickedResumeOrb,
+  ClickedThreads,
   ClickedThread,
+  CancelledDeleteProjectSecret,
   ConfirmedKillOrb,
+  ConfirmedDeleteProjectSecret,
   GotOrbTabsMessage,
   MountPierreDiff,
   MountPierreTree,
   MountOrbTerminal,
   RequestedTerminalReconnect,
+  RemovedProjectEnv,
+  SubmittedNewProject,
+  SubmittedProjectSecret,
+  SubmittedProjectSettings,
   SubmittedDraft,
   contextUsage,
   eventRows,
@@ -53,7 +69,14 @@ const sidebar = (model: Model): Html =>
         [H.Class("brand")],
         [H.div([H.Class("brand-mark")], ["R"]), H.div([], [H.h1([], ["Rika"]), statusLine(model)])],
       ),
-      H.div([H.Class("sidebar-actions")], [Ui.button([H.OnClick(ClickedNewThread())], ["New thread"], "ghost")]),
+      H.div(
+        [H.Class("sidebar-actions")],
+        [
+          Ui.button([H.Type("button"), H.OnClick(ClickedThreads())], ["Threads"], "ghost"),
+          Ui.button([H.Type("button"), H.OnClick(ClickedProjects())], ["Projects"], "ghost"),
+          Ui.button([H.Type("button"), H.OnClick(ClickedNewThread())], ["New thread"], "ghost"),
+        ],
+      ),
       H.nav(
         [H.Class("thread-list"), H.AriaLabel("Threads")],
         model.threads.map((thread) => threadButton(model, thread)),
@@ -104,11 +127,216 @@ const workspace = (model: Model): Html =>
           ),
         ],
       ),
-      orbHeader(model),
-      model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
-      hasOrbWorkspace(model) ? orbTabs(model) : transcript(model),
-      composer(model),
+      model.active_view === "projects"
+        ? projectsWorkspace(model)
+        : H.div(
+            [H.Class("thread-workspace")],
+            [
+              orbHeader(model),
+              model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
+              hasOrbWorkspace(model) ? orbTabs(model) : transcript(model),
+              composer(model),
+            ],
+          ),
     ],
+  )
+
+const projectsWorkspace = (model: Model): Html =>
+  H.div(
+    [H.Class("projects-workspace")],
+    [
+      model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
+      H.div([H.Class("projects-layout")], [projectsListPanel(model), projectDetailPanel(model)]),
+    ],
+  )
+
+const projectsListPanel = (model: Model): Html =>
+  Ui.card(
+    [H.Class("projects-list-card")],
+    [
+      H.div([H.Class("projects-section-header")], [H.h3([], ["Projects"])]),
+      model.projects.length === 0
+        ? H.div([H.Class("empty-state")], ["No projects"])
+        : H.div(
+            [H.Class("projects-list")],
+            model.projects.map((project) => projectListButton(model, project)),
+          ),
+      newProjectForm(model),
+    ],
+  )
+
+const projectListButton = (model: Model, project: Model["projects"][number]): Html =>
+  H.button(
+    [
+      H.Type("button"),
+      H.Class(Ui.cn("project-list-button", model.selected_project_id === project.project_id && "project-selected")),
+      H.OnClick(ClickedProject({ project_id: project.project_id })),
+    ],
+    [
+      H.span([H.Class("project-name")], [project.name]),
+      H.span([H.Class("project-repo")], [project.repo_origin]),
+      project.env_keys.length === 0 ? Ui.empty : Ui.badge([`${project.env_keys.length} env`], "default"),
+      project.secret_names.length === 0 ? Ui.empty : Ui.badge([`${project.secret_names.length} secrets`], "warning"),
+    ],
+  )
+
+const newProjectForm = (model: Model): Html =>
+  H.form(
+    [H.Class("project-form new-project-form"), H.OnSubmit(SubmittedNewProject())],
+    [
+      H.h3([], ["New project"]),
+      textInput("new-project-name", "Name", model.new_project_form.name, (value) =>
+        ChangedNewProjectField({ field: "name", value }),
+      ),
+      textInput("new-project-repo", "Repository", model.new_project_form.repo_origin, (value) =>
+        ChangedNewProjectField({ field: "repo_origin", value }),
+      ),
+      textInput("new-project-branch", "Branch", model.new_project_form.default_branch, (value) =>
+        ChangedNewProjectField({ field: "default_branch", value }),
+      ),
+      textInput("new-project-template", "Template", model.new_project_form.template_id, (value) =>
+        ChangedNewProjectField({ field: "template_id", value }),
+      ),
+      H.div(
+        [H.Class("env-pair")],
+        [
+          textInput("new-project-env-key", "Env key", model.new_project_form.env_key, (value) =>
+            ChangedNewProjectEnvKey({ value }),
+          ),
+          textInput("new-project-env-value", "Env value", model.new_project_form.env_value, (value) =>
+            ChangedNewProjectEnvValue({ value }),
+          ),
+        ],
+      ),
+      Ui.button(
+        [
+          H.Type("submit"),
+          H.Disabled(
+            model.new_project_form.name.trim().length === 0 || model.new_project_form.repo_origin.trim().length === 0,
+          ),
+        ],
+        ["Create"],
+      ),
+    ],
+  )
+
+const projectDetailPanel = (model: Model): Html => {
+  const project = model.selected_project
+  if (project === undefined) {
+    return Ui.card([H.Class("project-detail-card")], [H.div([H.Class("empty-state")], ["Select a project"])])
+  }
+  return Ui.card(
+    [H.Class("project-detail-card")],
+    [
+      H.div([H.Class("projects-section-header")], [H.h3([], [project.name]), Ui.badge(["details"], "success")]),
+      H.form(
+        [H.Class("project-form"), H.OnSubmit(SubmittedProjectSettings())],
+        [
+          textInput("project-name", "Name", model.project_form.name, (value) =>
+            ChangedProjectField({ field: "name", value }),
+          ),
+          textInput("project-repo", "Repository", model.project_form.repo_origin, (value) =>
+            ChangedProjectField({ field: "repo_origin", value }),
+          ),
+          textInput("project-branch", "Branch", model.project_form.default_branch, (value) =>
+            ChangedProjectField({ field: "default_branch", value }),
+          ),
+          textInput("project-template", "Template", model.project_form.template_id, (value) =>
+            ChangedProjectField({ field: "template_id", value }),
+          ),
+          envEditor(model),
+          Ui.button([H.Type("submit")], ["Save"]),
+        ],
+      ),
+      secretsPanel(model, project),
+    ],
+  )
+}
+
+const envEditor = (model: Model): Html =>
+  H.div(
+    [H.Class("env-editor")],
+    [
+      H.h4([], ["Environment"]),
+      ...Object.entries(model.project_form.env).map(([key, value]) =>
+        H.div(
+          [H.Key(key), H.Class("env-row")],
+          [
+            H.span([H.Class("env-key")], [key]),
+            H.input([
+              H.Type("text"),
+              H.Value(value),
+              H.AriaLabel(`${key} value`),
+              H.OnInput((next) => ChangedProjectEnvValue({ key, value: next })),
+            ]),
+            Ui.button([H.Type("button"), H.OnClick(RemovedProjectEnv({ key }))], ["Remove"], "ghost"),
+          ],
+        ),
+      ),
+    ],
+  )
+
+const secretsPanel = (model: Model, project: NonNullable<Model["selected_project"]>): Html =>
+  H.section(
+    [H.Class("secrets-panel")],
+    [
+      H.h4([], ["Secrets"]),
+      project.secret_names.length === 0
+        ? H.div([H.Class("empty-state")], ["No secrets"])
+        : H.div(
+            [H.Class("secret-list")],
+            project.secret_names.map((name) => secretRow(model, name)),
+          ),
+      H.form(
+        [H.Class("secret-form"), H.OnSubmit(SubmittedProjectSecret())],
+        [
+          textInput("project-secret-name", "Secret name", model.project_secret_name, (value) =>
+            ChangedProjectSecretField({ field: "name", value }),
+          ),
+          textInput(
+            "project-secret-value",
+            "Secret value",
+            model.project_secret_value,
+            (value) => ChangedProjectSecretField({ field: "value", value }),
+            "password",
+          ),
+          Ui.button(
+            [
+              H.Type("submit"),
+              H.Disabled(model.project_secret_name.trim().length === 0 || model.project_secret_value.length === 0),
+            ],
+            ["Set value"],
+          ),
+        ],
+      ),
+    ],
+  )
+
+const secretRow = (model: Model, name: string): Html =>
+  H.div(
+    [H.Key(name), H.Class("secret-row")],
+    [
+      H.span([H.Class("secret-name")], [name]),
+      H.span([H.Class("secret-mask")], ["****"]),
+      model.pending_secret_delete_name === name
+        ? Ui.button([H.Type("button"), H.OnClick(ConfirmedDeleteProjectSecret())], ["Confirm delete"], "danger")
+        : Ui.button([H.Type("button"), H.OnClick(ClickedDeleteProjectSecret({ name }))], ["Delete"], "ghost"),
+      model.pending_secret_delete_name === name
+        ? Ui.button([H.Type("button"), H.OnClick(CancelledDeleteProjectSecret())], ["Cancel"], "ghost")
+        : Ui.empty,
+    ],
+  )
+
+const textInput = (
+  id: string,
+  label: string,
+  value: string,
+  onInput: (value: string) => AppMessage,
+  type = "text",
+): Html =>
+  H.label(
+    [H.Class("field")],
+    [H.span([], [label]), H.input([H.Id(id), H.Type(type), H.Value(value), H.OnInput(onInput), H.AriaLabel(label)])],
   )
 
 const contextMeter = (model: Model): Html => {
@@ -480,6 +708,7 @@ const composer = (model: Model): Html => {
 }
 
 const activeTitle = (model: Model) => {
+  if (model.active_view === "projects") return "Projects"
   const thread = model.threads.find((item) => item.thread_id === model.selected_thread_id)
   return (
     thread?.title_text ??

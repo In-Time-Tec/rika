@@ -579,6 +579,24 @@ describe("Rika protocol schemas", () => {
     ).toEqual(binaryFile)
   })
 
+  test("round-trips project detail payloads without secret values", () => {
+    const project: Remote.ProjectDetail = {
+      project_id: projectId,
+      name: "demo",
+      repo_origin: "https://github.com/example/rika.git",
+      default_branch: "main",
+      template_id: null,
+      env: { NODE_ENV: "development" },
+      secret_names: ["OPENAI_API_KEY"],
+      created_at: now,
+      updated_at: now,
+    }
+
+    const encoded = Codec.encode(Remote.ProjectDetail)(project)
+    expect(Codec.decode(Remote.ProjectDetail)(encoded)).toEqual(project)
+    expect(JSON.stringify(encoded)).not.toContain("secret-value")
+  })
+
   test("round-trips orb remote-control payloads", () => {
     const create: Remote.CreateOrbThreadRequest = {
       project_id: projectId,

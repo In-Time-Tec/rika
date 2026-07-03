@@ -26,7 +26,7 @@ import {
   WorkspaceStore,
 } from "@rika/persistence"
 import { Client } from "@rika/sdk"
-import { Artifact, Common, Event, Ide, Ids, Orb, Remote } from "@rika/schema"
+import { Artifact, Codec, Common, Event, Ide, Ids, Orb, Remote } from "@rika/schema"
 import { Effect, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import { HttpServer, OrbMirror, PresenceHub, RemoteControl } from "../src/index"
 
@@ -398,6 +398,23 @@ const makeClient = (handle: (request: Request) => Promise<Response>) =>
     }),
   )
 
+const requestJson = async (
+  handle: (request: Request) => Promise<Response>,
+  method: string,
+  path: string,
+  body?: unknown,
+) => {
+  const response = await handle(
+    new Request(`http://rika.test${path}`, {
+      method,
+      ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    }),
+  )
+  const text = await response.text()
+  const json = text.length === 0 ? null : (JSON.parse(text) as unknown)
+  return { status: response.status, json, text }
+}
+
 describe("remote control API and SDK", () => {
   test("SDK starts a thread, sends a turn, streams events, interrupts, and reads artifacts", async () => {
     const runtime = ManagedRuntime.make(makeLayer())
@@ -622,6 +639,87 @@ describe("remote control API and SDK", () => {
       orb_status: "running",
       archived: false,
     })
+  })
+
+  test("project settings API returns redacted lists and env-visible details", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "rika-project-api-"))
+    const runtime = ManagedRuntime.make(
+      makeLayer(defaultContextLayer, fakeOrbManagerLayer(), fakeOrbMirrorLayer(), { dataDir }),
+    )
+
+    try {
+      const handle = (request: Request) => runtime.runPromise(HttpServer.handle(request))
+      const created = await requestJson(handle, "POST", "/v1/projects", {
+        name: "demo",
+        repo_origin: "https://token@example.com/org/rika.git?private=1",
+        default_branch: "main",
+        env: { NODE_ENV: "development" },
+      })
+      expect(created.status).toBe(200)
+      expect(created.json).toMatchObject({
+        name: "demo",
+        repo_origin: "https://example.com/org/rika.git",
+        env: { NODE_ENV: "development" },
+        secret_names: [],
+      })
+
+      const createdProject = Codec.decode(Remote.ProjectDetail)(created.json)
+      const createdProjectId = createdProject.project_id
+      const secret = await requestJson(handle, "PUT", `/v1/projects/${createdProjectId}/secrets/OPENAI_API_KEY`, {
+        value: "secret-value",
+      })
+      const listed = await requestJson(handle, "GET", "/v1/projects")
+      const detail = await requestJson(handle, "GET", `/v1/projects/${createdProjectId}`)
+      const renamed = await requestJson(handle, "PATCH", `/v1/projects/${createdProjectId}`, {
+        name: "renamed",
+        repo_origin: "https://github.com/example/renamed.git",
+        default_branch: "trunk",
+        template_id: "template-next",
+        env: { NODE_ENV: "test", FEATURE_FLAG: "on" },
+      })
+      const deleted = await requestJson(handle, "DELETE", `/v1/projects/${createdProjectId}/secrets/OPENAI_API_KEY`)
+
+      expect(secret.status).toBe(200)
+      expect(secret.json).toMatchObject({ secret_names: ["OPENAI_API_KEY"] })
+      expect(JSON.stringify(secret.json)).not.toContain("secret-value")
+      expect(listed.status).toBe(200)
+      expect(listed.json).toEqual([
+        {
+          project_id: createdProjectId,
+          name: "demo",
+          repo_origin: "https://example.com/org/rika.git",
+          default_branch: "main",
+          template_id: null,
+          env_keys: ["NODE_ENV"],
+          secret_names: ["OPENAI_API_KEY"],
+          created_at: now,
+          updated_at: now,
+        },
+      ])
+      expect(JSON.stringify(listed.json)).not.toContain("development")
+      expect(JSON.stringify(listed.json)).not.toContain("secret-value")
+      expect(detail.status).toBe(200)
+      expect(detail.json).toMatchObject({
+        env: { NODE_ENV: "development" },
+        secret_names: ["OPENAI_API_KEY"],
+      })
+      expect(JSON.stringify(detail.json)).not.toContain("secret-value")
+      expect(renamed.status).toBe(200)
+      expect(renamed.json).toMatchObject({
+        name: "renamed",
+        repo_origin: "https://github.com/example/renamed.git",
+        default_branch: "trunk",
+        template_id: "template-next",
+        env: { NODE_ENV: "test", FEATURE_FLAG: "on" },
+        secret_names: ["OPENAI_API_KEY"],
+      })
+      expect(deleted.status).toBe(200)
+      expect(deleted.json).toMatchObject({ secret_names: [] })
+      expect(JSON.stringify(deleted.json)).not.toContain("secret-value")
+    } finally {
+      await runtime.dispose()
+      await rm(dataDir, { force: true, recursive: true })
+    }
   })
 
   test("orb lifecycle API lists token-free summaries and drives manager transitions", async () => {
@@ -1001,14 +1099,20 @@ describe("remote control API and SDK", () => {
     expect(created).toMatchObject({
       name: "credentialed",
       repo_origin: "https://github.com/example/private.git",
-      env_keys: [],
+      env: {},
       secret_names: [],
     })
     expect(stored?.repo_origin).toBe("https://github.com/example/private.git")
     expect(projects).toEqual([
       {
-        ...created,
+        project_id: created.project_id,
+        name: created.name,
+        repo_origin: created.repo_origin,
+        default_branch: created.default_branch,
+        template_id: created.template_id,
         env_keys: ["TOKEN"],
+        secret_names: created.secret_names,
+        created_at: created.created_at,
         updated_at: now,
       },
     ])
@@ -1016,7 +1120,7 @@ describe("remote control API and SDK", () => {
     expect(payload).not.toContain("query-leak-123")
     expect(payload).not.toContain("fragment-leak-123")
     expect(payload).not.toContain("env-secret-123")
-    expect(payload).not.toContain('"env"')
+    expect(JSON.stringify(projects)).not.toContain('"env"')
   })
 
   test("local token auth blocks unauthorized HTTP calls", async () => {

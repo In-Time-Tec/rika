@@ -97,6 +97,7 @@ export const CreateProjectRequest = Schema.Struct({
   repo_origin: Schema.String,
   default_branch: Schema.optional(Schema.String),
   template_id: Schema.optional(Schema.NullOr(Schema.String)),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 }).annotate({ identifier: "Rika.Remote.CreateProjectRequest" })
 
 export interface ProjectSummary extends Schema.Schema.Type<typeof ProjectSummary> {}
@@ -111,6 +112,33 @@ export const ProjectSummary = Schema.Struct({
   created_at: TimestampMillis,
   updated_at: TimestampMillis,
 }).annotate({ identifier: "Rika.Remote.ProjectSummary" })
+
+export interface ProjectDetail extends Schema.Schema.Type<typeof ProjectDetail> {}
+export const ProjectDetail = Schema.Struct({
+  project_id: ProjectId,
+  name: Schema.String,
+  repo_origin: Schema.String,
+  default_branch: Schema.String,
+  template_id: Schema.NullOr(Schema.String),
+  env: Schema.Record(Schema.String, Schema.String),
+  secret_names: Schema.Array(Schema.String),
+  created_at: TimestampMillis,
+  updated_at: TimestampMillis,
+}).annotate({ identifier: "Rika.Remote.ProjectDetail" })
+
+export interface UpdateProjectRequest extends Schema.Schema.Type<typeof UpdateProjectRequest> {}
+export const UpdateProjectRequest = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  repo_origin: Schema.optional(Schema.String),
+  default_branch: Schema.optional(Schema.String),
+  template_id: Schema.optional(Schema.NullOr(Schema.String)),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+}).annotate({ identifier: "Rika.Remote.UpdateProjectRequest" })
+
+export interface SetProjectSecretRequest extends Schema.Schema.Type<typeof SetProjectSecretRequest> {}
+export const SetProjectSecretRequest = Schema.Struct({
+  value: Schema.String,
+}).annotate({ identifier: "Rika.Remote.SetProjectSecretRequest" })
 
 export interface ListThreadsRequest extends Schema.Schema.Type<typeof ListThreadsRequest> {}
 export const ListThreadsRequest = Schema.Struct({

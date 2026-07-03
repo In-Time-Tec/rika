@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import {
   AgentLoop,
   CompactionService,
@@ -35,6 +38,16 @@ import {
   ClickedResumeOrb,
   ConfirmedKillOrb,
   SubmittedDraft,
+  ChangedNewProjectEnvKey,
+  ChangedNewProjectEnvValue,
+  ChangedNewProjectField,
+  ChangedProjectEnvValue,
+  ChangedProjectSecretField,
+  ClickedProject,
+  ClickedProjects,
+  SubmittedNewProject,
+  SubmittedProjectSecret,
+  SubmittedProjectSettings,
   eventRows,
   init,
   subscriptions,
@@ -270,6 +283,54 @@ describe("web local sync e2e", () => {
       await runtime.dispose()
     }
   })
+
+  test("projects settings round-trip env values and write-only secrets through the web model", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "rika-web-projects-"))
+    const runtime = ManagedRuntime.make(makeLayer(Time.fixedLayer(now), undefined, dataDir))
+    const handle = await runtime.runPromise(HttpServer.serve({ host: "127.0.0.1", port: 0 }))
+    try {
+      let webModel = await runCommands(...init({ api_base_url: handle.url }))
+      const [projectsView, loadCommands] = update(webModel, ClickedProjects())
+      webModel = await runCommands(projectsView, loadCommands)
+      ;[webModel] = update(webModel, ChangedNewProjectField({ field: "name", value: "demo" }))
+      ;[webModel] = update(
+        webModel,
+        ChangedNewProjectField({ field: "repo_origin", value: "https://github.com/example/rika.git" }),
+      )
+      ;[webModel] = update(webModel, ChangedNewProjectEnvKey({ value: "NODE_ENV" }))
+      ;[webModel] = update(webModel, ChangedNewProjectEnvValue({ value: "development" }))
+      const [creating, createCommands] = update(webModel, SubmittedNewProject())
+      webModel = await runCommands(creating, createCommands)
+      const projectId = webModel.selected_project_id
+      if (projectId === undefined) throw new Error("expected created project")
+      ;[webModel] = update(webModel, ChangedProjectEnvValue({ key: "NODE_ENV", value: "test" }))
+      const [saving, saveCommands] = update(webModel, SubmittedProjectSettings())
+      webModel = await runCommands(saving, saveCommands)
+      ;[webModel] = update(webModel, ChangedProjectSecretField({ field: "name", value: "OPENAI_API_KEY" }))
+      ;[webModel] = update(webModel, ChangedProjectSecretField({ field: "value", value: "secret-value" }))
+      const [settingSecret, secretCommands] = update(webModel, SubmittedProjectSecret())
+      webModel = await runCommands(settingSecret, secretCommands)
+
+      const [reloading, reloadCommands] = update(webModel, ClickedProject({ project_id: projectId }))
+      webModel = await runCommands(reloading, reloadCommands)
+      const api = client(handle.url)
+      const listed = await Effect.runPromise(api.listProjects())
+      const detail = await Effect.runPromise(api.getProject(projectId))
+
+      expect(webModel.selected_project?.env).toEqual({ NODE_ENV: "test" })
+      expect(webModel.selected_project?.secret_names).toEqual(["OPENAI_API_KEY"])
+      expect(webModel.project_secret_value).toBe("")
+      expect(listed[0]).toMatchObject({ env_keys: ["NODE_ENV"], secret_names: ["OPENAI_API_KEY"] })
+      expect(JSON.stringify(listed)).not.toContain("test")
+      expect(detail.env).toEqual({ NODE_ENV: "test" })
+      expect(JSON.stringify(detail)).not.toContain("secret-value")
+      expect(JSON.stringify(webModel)).not.toContain("secret-value")
+    } finally {
+      await Effect.runPromise(handle.close())
+      await runtime.dispose()
+      await rm(dataDir, { force: true, recursive: true })
+    }
+  })
 })
 
 const makeLayer = (
@@ -278,10 +339,11 @@ const makeLayer = (
     { name: "anthropic", responses: ["remote hello", "web hello"] },
     { name: "openai", responses: ["remote hello", "web hello"] },
   ]),
+  dataDir = "/workspace/rika-web-e2e/.rika",
 ) => {
   const configLayer = Config.layerFromValues({
     workspace_root: "/workspace/rika-web-e2e",
-    data_dir: "/workspace/rika-web-e2e/.rika",
+    data_dir: dataDir,
     default_mode: "smart",
   })
   const databaseLayer = Database.memoryLayer

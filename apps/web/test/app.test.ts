@@ -3,21 +3,35 @@ import { describe, expect, test } from "bun:test"
 import {
   ChangedDraft,
   ChangedDraftMode,
+  ChangedProjectEnvValue,
+  ChangedProjectField,
+  ChangedProjectSecretField,
+  CancelledDeleteProjectSecret,
   CancelledKillOrb,
   ClickedInterrupt,
+  ClickedDeleteProjectSecret,
+  ClickedProject,
+  ClickedProjects,
   ClickedThread,
   ClickedKillOrb,
   ClickedNewThread,
   ClickedPauseOrb,
   ConfirmedKillOrb,
+  ConfirmedDeleteProjectSecret,
+  FailedSaveProject,
   GotOrbTabsMessage,
   LoadedOrbChanges,
   LoadedOrbDirectory,
   LoadedOrbFile,
+  LoadedProject,
+  LoadedProjects,
   LoadedThreads,
   OpenedThread,
   ReceivedThreadEvent,
   RequestedTerminalReconnect,
+  SavedProject,
+  SubmittedProjectSecret,
+  SubmittedProjectSettings,
   SelectedOrbFile,
   SubmittedDraft,
   TerminalFailed,
@@ -202,6 +216,77 @@ describe("web app state", () => {
     expect(reconnecting.orb_terminal_error).toBeUndefined()
     expect(commands.map((command) => command.name)).toEqual(["ReconnectOrbTerminal"])
     expect(commands[0]?.args).toEqual({ thread_id: threadId })
+  })
+
+  test("loads and edits project settings without retaining secret values", () => {
+    const project = projectSummary()
+    const detail = projectDetail()
+    const [projectsView, loadCommands] = update(initialModel({ api_base_url: "/api/rika" }), ClickedProjects())
+    const [listed] = update(projectsView, LoadedProjects({ projects: [project] }))
+    const [selecting, selectCommands] = update(listed, ClickedProject({ project_id: project.project_id }))
+    const [loaded] = update(selecting, LoadedProject({ project: detail }))
+    const [renamed] = update(loaded, ChangedProjectField({ field: "name", value: "renamed" }))
+    const [withEnv] = update(renamed, ChangedProjectEnvValue({ key: "NODE_ENV", value: "test" }))
+    const [saving, saveCommands] = update(withEnv, SubmittedProjectSettings())
+    const savedDetail = { ...detail, name: "renamed", env: { NODE_ENV: "test" } }
+    const [saved] = update(saving, SavedProject({ project: savedDetail }))
+    const [secretDrafted] = update(saved, ChangedProjectSecretField({ field: "value", value: "secret-value" }))
+    const [settingSecret, secretCommands] = update(secretDrafted, SubmittedProjectSecret())
+    const [failedSecret] = update(settingSecret, FailedSaveProject({ message: "network failed" }))
+    const [secretSaved] = update(
+      settingSecret,
+      SavedProject({ project: { ...savedDetail, secret_names: ["OPENAI_API_KEY"] } }),
+    )
+    const [confirmingDelete, deleteClickCommands] = update(
+      secretSaved,
+      ClickedDeleteProjectSecret({ name: "OPENAI_API_KEY" }),
+    )
+    const [cancelledDelete, cancelCommands] = update(confirmingDelete, CancelledDeleteProjectSecret())
+    const [confirmingDeleteAgain] = update(cancelledDelete, ClickedDeleteProjectSecret({ name: "OPENAI_API_KEY" }))
+    const [deletingSecret, deleteCommands] = update(confirmingDeleteAgain, ConfirmedDeleteProjectSecret())
+
+    expect(projectsView.active_view).toBe("projects")
+    expect(loadCommands.map((command) => command.name)).toEqual(["LoadProjects"])
+    expect(listed.projects).toEqual([project])
+    expect(selectCommands.map((command) => command.name)).toEqual(["LoadProject"])
+    expect(selectCommands[0]?.args).toEqual({ api_base_url: "/api/rika", project_id: project.project_id })
+    expect(loaded.project_form.name).toBe("demo")
+    expect(loaded.project_form.env).toEqual({ NODE_ENV: "development" })
+    expect(saveCommands.map((command) => command.name)).toEqual(["UpdateProjectSettings"])
+    expect(saveCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      project_id: project.project_id,
+      name: "renamed",
+      repo_origin: "https://github.com/example/rika.git",
+      default_branch: "main",
+      template_id: null,
+      env: { NODE_ENV: "test" },
+    })
+    expect(saved.projects[0]).toMatchObject({ name: "renamed", env_keys: ["NODE_ENV"] })
+    expect(secretCommands.map((command) => command.name)).toEqual(["SetProjectSecret"])
+    expect(secretCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      project_id: project.project_id,
+      name: "OPENAI_API_KEY",
+      value: "secret-value",
+    })
+    expect(settingSecret.project_secret_value).toBe("")
+    expect(failedSecret.project_secret_value).toBe("")
+    expect(JSON.stringify(failedSecret)).not.toContain("secret-value")
+    expect(secretSaved.project_secret_value).toBe("")
+    expect(secretSaved.selected_project?.secret_names).toEqual(["OPENAI_API_KEY"])
+    expect(JSON.stringify(secretSaved)).not.toContain("secret-value")
+    expect(confirmingDelete.pending_secret_delete_name).toBe("OPENAI_API_KEY")
+    expect(deleteClickCommands).toEqual([])
+    expect(cancelledDelete.pending_secret_delete_name).toBeUndefined()
+    expect(cancelCommands).toEqual([])
+    expect(deleteCommands.map((command) => command.name)).toEqual(["DeleteProjectSecret"])
+    expect(deleteCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      project_id: project.project_id,
+      name: "OPENAI_API_KEY",
+    })
+    expect(deletingSecret.pending_secret_delete_name).toBeUndefined()
   })
 
   test("keeps unrenderable orb change files as skipped rows", () => {
@@ -583,6 +668,30 @@ const orbSummary = (status: Remote.OrbSummary["status"]): Remote.OrbSummary => (
   base_commit: "abc123",
   created_at: 1,
   last_active_at: 121_001,
+})
+
+const projectSummary = (): Remote.ProjectSummary => ({
+  project_id: projectId,
+  name: "demo",
+  repo_origin: "https://github.com/example/rika.git",
+  default_branch: "main",
+  template_id: null,
+  env_keys: ["NODE_ENV"],
+  secret_names: ["OPENAI_API_KEY"],
+  created_at: 1,
+  updated_at: 2,
+})
+
+const projectDetail = (): Remote.ProjectDetail => ({
+  project_id: projectId,
+  name: "demo",
+  repo_origin: "https://github.com/example/rika.git",
+  default_branch: "main",
+  template_id: null,
+  env: { NODE_ENV: "development" },
+  secret_names: ["OPENAI_API_KEY"],
+  created_at: 1,
+  updated_at: 2,
 })
 
 const messageAdded = (sequence: number, role: RikaMessage.Role, text: string): Event.MessageAdded => ({
