@@ -3,6 +3,7 @@ export * as OrbFiles from "./orb-files"
 export * as OrbActivity from "./orb-activity"
 export * as OrbPty from "./orb-pty"
 export * as OrbManager from "./orb-manager"
+export * as OrbManagerHttpClientSpike from "./orb-manager-http-client-spike"
 export * as SandboxClient from "./sandbox-client"
 export * as SandboxClientFake from "./sandbox-client-fake"
 
