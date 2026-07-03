@@ -24,6 +24,7 @@
       "name": "@rika/web",
       "version": "0.0.0",
       "dependencies": {
+        "@foldkit/ui": "catalog:",
         "@rika/llm": "workspace:*",
         "@rika/schema": "workspace:*",
         "@rika/sdk": "workspace:*",
@@ -290,6 +291,7 @@
     "@effect/platform-bun": "4.0.0-beta.90",
     "@effect/platform-node": "4.0.0-beta.90",
     "@effect/sql-sqlite-bun": "4.0.0-beta.90",
+    "@foldkit/ui": "0.120.0",
     "@foldkit/vite-plugin": "0.10.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/api-logs": "0.219.0",
@@ -428,6 +430,14 @@
     "@ff-labs/fff-bin-win32-x64": ["@ff-labs/fff-bin-win32-x64@0.9.6", "", { "os": "win32", "cpu": "x64" }, "sha512-fkD3e6FmfR3i5Ymv14gfPT1FeJpnAXwe9Fu0r4sSDhvSE0x0ADQKEvwjMUBosb02O8XB9wWURx9cov1rCHVTnA=="],
 
     "@ff-labs/fff-bun": ["@ff-labs/fff-bun@0.9.6", "", { "optionalDependencies": { "@ff-labs/fff-bin-darwin-arm64": "0.9.6", "@ff-labs/fff-bin-darwin-x64": "0.9.6", "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.6", "@ff-labs/fff-bin-linux-arm64-musl": "0.9.6", "@ff-labs/fff-bin-linux-x64-gnu": "0.9.6", "@ff-labs/fff-bin-linux-x64-musl": "0.9.6", "@ff-labs/fff-bin-win32-arm64": "0.9.6", "@ff-labs/fff-bin-win32-x64": "0.9.6" }, "os": [ "linux", "win32", "darwin", ], "cpu": [ "x64", "arm64", ] }, "sha512-+cAZwgXKyw7dHmyd9qJEtq60B0rUXofqKX6b3lBvUznvN7wV0Or6BfLGIbBKbrE4lLMCvOb0PE02ylDUOFdcMw=="],
+
+    "@floating-ui/core": ["@floating-ui/core@1.7.5", "", { "dependencies": { "@floating-ui/utils": "^0.2.11" } }, "sha512-1Ih4WTWyw0+lKyFMcBHGbb5U5FtuHJuujoyyr5zTaWS5EYMeT6Jb2AuDeftsCsEuchO+mM2ij5+q9crhydzLhQ=="],
+
+    "@floating-ui/dom": ["@floating-ui/dom@1.7.6", "", { "dependencies": { "@floating-ui/core": "^1.7.5", "@floating-ui/utils": "^0.2.11" } }, "sha512-9gZSAI5XM36880PPMm//9dfiEngYoC6Am2izES1FF406YFsjvyBMmeJ2g4SAju3xWwtuynNRFL2s9hgxpLI5SQ=="],
+
+    "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
+
+    "@foldkit/ui": ["@foldkit/ui@0.120.0", "", { "dependencies": { "@floating-ui/dom": "^1.7.6" }, "peerDependencies": { "effect": "4.0.0-beta.88", "foldkit": "^0" } }, "sha512-KncNx3UJRYTr4W6XuS8c9o+Q2UnO1aSEYOyqpWFJQgWTrmrW1npktqmk226X7B1vE+0appbfgjWLtJTKJ7C9YQ=="],
 
     "@foldkit/vite-plugin": ["@foldkit/vite-plugin@0.10.0", "", { "dependencies": { "ws": "^8.21.0" }, "peerDependencies": { "effect": "4.0.0-beta.88", "foldkit": "^0", "vite": "^7.0.0 || ^8.0.0" } }, "sha512-nCDb8GiIBG3va6sUKHHCw1w0fSFnAvjKEMi75nsRAnIxh0sSUi3hrZfMTVFnl991ZM9d7INmCa2y7DodYvXZKQ=="],
 

@@ -5,8 +5,10 @@ import {
   CancelledKillOrb,
   ClickedThread,
   ClickedKillOrb,
+  ClickedNewThread,
   ClickedPauseOrb,
   ConfirmedKillOrb,
+  GotOrbTabsMessage,
   LoadedThreads,
   OpenedThread,
   ReceivedThreadEvent,
@@ -31,7 +33,41 @@ describe("web app state", () => {
 
     expect(model.api_base_url).toBe("/api/rika")
     expect(model.selected_thread_id).toBe(threadId)
+    expect(model.selected_orb_tab).toBe("transcript")
+    expect(model.orb_tabs.activeIndex).toBe(0)
     expect(commands.map((command) => command.name)).toEqual(["LoadBackendHealth", "LoadThreads", "OpenThread"])
+  })
+
+  test("routes orb tab selections through Foldkit tab state", () => {
+    const [next, commands] = update(
+      initialModel({ api_base_url: "/api/rika" }),
+      GotOrbTabsMessage({ message: { _tag: "SelectedTab", value: "files", index: 1 } }),
+    )
+
+    expect(next.selected_orb_tab).toBe("files")
+    expect(next.orb_tabs.activeIndex).toBe(1)
+    expect(next.orb_tabs.focusedIndex).toBe(1)
+    expect(commands.map((command) => command.name)).toEqual(["FocusTab"])
+  })
+
+  test("resets orb tab state when changing thread scope", () => {
+    const activeFiles = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      selected_thread_id: threadId,
+      selected_orb_tab: "files" as const,
+      orb_tabs: tabModel(1),
+    }
+
+    const [newThread] = update(activeFiles, ClickedNewThread())
+    const [opened] = update(
+      activeFiles,
+      OpenedThread({ record: { summary: summary(Ids.ThreadId.make("thread-next")), events: [] } }),
+    )
+
+    expect(newThread.selected_orb_tab).toBe("transcript")
+    expect(newThread.orb_tabs.activeIndex).toBe(0)
+    expect(opened.selected_orb_tab).toBe("transcript")
+    expect(opened.orb_tabs.activeIndex).toBe(0)
   })
 
   test("opens a thread from durable events before starting the live subscription", () => {
@@ -220,6 +256,13 @@ const summary = (id: Ids.ThreadId, input: Partial<Remote.ThreadSummary> = {}): R
   created_at: 1,
   updated_at: 2,
   ...input,
+})
+
+const tabModel = (activeIndex: number) => ({
+  id: "orb-tabs",
+  activeIndex,
+  focusedIndex: activeIndex,
+  activationMode: "Automatic" as const,
 })
 
 const orbSummary = (status: Remote.OrbSummary["status"]): Remote.OrbSummary => ({

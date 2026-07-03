@@ -8,17 +8,21 @@ import {
   ClickedResumeOrb,
   ClickedThread,
   ConfirmedKillOrb,
+  GotOrbTabsMessage,
   SubmittedDraft,
   contextUsage,
   eventRows,
+  OrbTabItems,
   type AppMessage,
   type ContextUsage,
   type Model,
+  type OrbTab,
   type TranscriptRow,
 } from "./app"
 import * as Ui from "./ui"
 
 const H = html<AppMessage>()
+const OrbTabsView = Ui.Tabs.create<OrbTab>()
 
 export const view = (model: Model): Document => ({
   title: model.selected_thread_id === undefined ? "Rika" : `Rika · ${shortId(model.selected_thread_id)}`,
@@ -86,7 +90,7 @@ const workspace = (model: Model): Html =>
       ),
       orbHeader(model),
       model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
-      transcript(model),
+      hasOrbWorkspace(model) ? orbTabs(model) : transcript(model),
       composer(model),
     ],
   )
@@ -172,6 +176,29 @@ const transcript = (model: Model): Html => {
   )
 }
 
+const orbTabs = (model: Model): Html =>
+  H.submodel({
+    slotId: "orb-tabs",
+    model: model.orb_tabs,
+    view: OrbTabsView.view,
+    viewInputs: {
+      items: OrbTabItems,
+      ariaLabel: "Orb workspace",
+      panel: (tab) => orbTabPanel(model, tab),
+    },
+    toParentMessage: (message) => GotOrbTabsMessage({ message }),
+  })
+
+const orbTabPanel = (model: Model, tab: OrbTab): Html => {
+  if (tab === "transcript") return transcript(model)
+  if (tab === "files") return downstreamPanel("Files arrive with #58")
+  if (tab === "changes") return downstreamPanel("Changes arrive with #58")
+  return downstreamPanel("Terminal arrives with #59")
+}
+
+const downstreamPanel = (label: string): Html =>
+  Ui.card([H.Class("placeholder-card")], [H.div([H.Class("empty-state")], [label])])
+
 const rowView = (row: TranscriptRow): Html =>
   H.article(
     [
@@ -189,15 +216,14 @@ const composer = (model: Model): Html =>
   H.form(
     [H.Class("composer"), H.OnSubmit(SubmittedDraft())],
     [
-      Ui.textarea([
-        H.Value(model.draft),
-        H.OnInput((value) => ChangedDraft({ value })),
-        H.Placeholder(
-          model.selected_thread_id === undefined ? "Start a new Rika thread" : "Send a turn to this thread",
-        ),
-        H.Rows(3),
-        H.AriaLabel("Turn input"),
-      ]),
+      Ui.textarea({
+        id: "turn-input",
+        value: model.draft,
+        onInput: (value) => ChangedDraft({ value }),
+        placeholder: model.selected_thread_id === undefined ? "Start a new Rika thread" : "Send a turn to this thread",
+        rows: 3,
+        attributes: [H.AriaLabel("Turn input")],
+      }),
       H.div(
         [H.Class("composer-footer")],
         [
@@ -220,6 +246,11 @@ const activeTitle = (model: Model) => {
     thread?.title_text ??
     (model.selected_thread_id === undefined ? "No thread selected" : shortId(model.selected_thread_id))
   )
+}
+
+const hasOrbWorkspace = (model: Model) => {
+  const thread = model.threads.find((item) => item.thread_id === model.selected_thread_id)
+  return model.selected_orb !== undefined || thread?.orb_status !== undefined
 }
 
 const orbBadgeTone = (status: Model["threads"][number]["orb_status"]) => {

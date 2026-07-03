@@ -12,6 +12,7 @@
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
+    "@foldkit/ui": "catalog:",
     "@rika/llm": "workspace:*",
     "@rika/schema": "workspace:*",
     "@rika/sdk": "workspace:*",

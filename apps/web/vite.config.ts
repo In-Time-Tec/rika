@@ -32,6 +32,9 @@ interface ProxyResolver {
 
 export default defineConfig({
   plugins: [foldkit(), localBackendProxy()],
+  resolve: {
+    alias: [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }],
+  },
 })
 
 function localBackendProxy(): Plugin {

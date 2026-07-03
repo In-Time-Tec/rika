@@ -4,6 +4,9 @@
     "declaration": false,
     "declarationMap": false,
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "paths": {
+      "@/*": ["./src/*"]
+    },
     "types": ["bun", "node"],
     "noEmit": true
   },

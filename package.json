@@ -54,6 +54,7 @@
       "@tsconfig/bun": "1.0.9",
       "@types/bun": "1.3.13",
       "@types/node": "24.12.2",
+      "@foldkit/ui": "0.120.0",
       "drizzle-kit": "1.0.0-rc.2",
       "drizzle-orm": "1.0.0-rc.2",
       "e2b": "2.31.0",

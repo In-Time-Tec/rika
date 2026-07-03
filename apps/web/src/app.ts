@@ -4,10 +4,22 @@ import { ModelInfo } from "@rika/llm"
 import * as Command from "foldkit/command"
 import { m } from "foldkit/message"
 import * as Subscription from "foldkit/subscription"
-import { Effect, Schema as S, Stream } from "effect"
+import { Effect, Option, Schema as S, Stream } from "effect"
+import * as Tabs from "./components/ui/tabs-state"
 
 export const Connection = S.Literals(["idle", "loading", "connected", "failed"])
 export type Connection = typeof Connection.Type
+export const OrbTab = S.Literals(["transcript", "files", "changes", "terminal"])
+export type OrbTab = typeof OrbTab.Type
+
+export const OrbTabItems: ReadonlyArray<Tabs.TabItem<OrbTab>> = [
+  { value: "transcript", label: "Transcript" },
+  { value: "files", label: "Files" },
+  { value: "changes", label: "Changes" },
+  { value: "terminal", label: "Terminal" },
+]
+
+export const OrbTabs = Tabs.create()
 
 export const Model = S.Struct({
   api_base_url: S.String,
@@ -21,6 +33,8 @@ export const Model = S.Struct({
   selected_thread_id: S.optional(Ids.ThreadId),
   subscribed_thread_id: S.optional(Ids.ThreadId),
   selected_orb: S.optional(Remote.OrbSummary),
+  selected_orb_tab: OrbTab,
+  orb_tabs: Tabs.Model,
   confirm_kill_orb_id: S.optional(Ids.OrbId),
   backend: S.optional(Remote.BackendHealth),
   notice: S.optional(S.String),
@@ -62,6 +76,7 @@ export const OpenedThread = m("OpenedThread", { record: Remote.ThreadRecord })
 export const FailedOpenThread = m("FailedOpenThread", { message: S.String })
 export const LoadedSelectedOrb = m("LoadedSelectedOrb", { orb: Remote.OrbSummary })
 export const FailedLoadSelectedOrb = m("FailedLoadSelectedOrb", { message: S.String })
+export const GotOrbTabsMessage = m("GotOrbTabsMessage", { message: Tabs.Message })
 export const ClickedPauseOrb = m("ClickedPauseOrb")
 export const ClickedResumeOrb = m("ClickedResumeOrb")
 export const ClickedKillOrb = m("ClickedKillOrb")
@@ -89,6 +104,7 @@ export const AppMessage = S.Union([
   FailedOpenThread,
   LoadedSelectedOrb,
   FailedLoadSelectedOrb,
+  GotOrbTabsMessage,
   ClickedPauseOrb,
   ClickedResumeOrb,
   ClickedKillOrb,
@@ -242,6 +258,7 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   subscription_after_sequence: 0,
   draft: "",
   pending_turn: false,
+  ...initialOrbTabs(),
   ...(config.thread_id === undefined ? {} : { selected_thread_id: config.thread_id }),
 })
 
@@ -282,6 +299,7 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
           selected_thread_id: undefined,
           subscribed_thread_id: undefined,
           selected_orb: undefined,
+          ...initialOrbTabs(),
           confirm_kill_orb_id: undefined,
           events: [],
           last_sequence: 0,
@@ -306,6 +324,8 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
       return selectedOrbLoadedModel(model, message.orb)
     case "FailedLoadSelectedOrb":
       return [{ ...model, notice: message.message }, []]
+    case "GotOrbTabsMessage":
+      return orbTabsModel(model, message.message)
     case "ClickedPauseOrb":
       return selectedOrbActionModel(model, "pause")
     case "ClickedResumeOrb":
@@ -510,6 +530,7 @@ const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model,
     selected_thread_id: threadId,
     subscribed_thread_id: undefined,
     selected_orb: undefined,
+    ...initialOrbTabs(),
     confirm_kill_orb_id: undefined,
     events: [],
     last_sequence: 0,
@@ -530,6 +551,7 @@ const createdThreadModel = (
     selected_thread_id: summary.thread_id,
     subscribed_thread_id: summary.thread_id,
     selected_orb: undefined,
+    ...initialOrbTabs(),
     confirm_kill_orb_id: undefined,
     events: [],
     last_sequence: 0,
@@ -552,6 +574,7 @@ const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly 
     selected_thread_id: record.summary.thread_id,
     subscribed_thread_id: record.summary.thread_id,
     selected_orb: undefined,
+    ...initialOrbTabs(),
     confirm_kill_orb_id: undefined,
     threads: newestFirst([
       record.summary,
@@ -583,6 +606,18 @@ const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCo
   return [
     { ...model, draft: "", pending_turn: true, notice: undefined },
     [StartTurn({ api_base_url: model.api_base_url, thread_id: model.selected_thread_id, content })],
+  ]
+}
+
+const orbTabsModel = (model: Model, message: Tabs.Message): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [orb_tabs, commands, maybeOutMessage] = OrbTabs.update(model.orb_tabs, message)
+  const selected_orb_tab = Option.match(maybeOutMessage, {
+    onNone: () => model.selected_orb_tab,
+    onSome: (outMessage) => (isOrbTab(outMessage.value) ? outMessage.value : model.selected_orb_tab),
+  })
+  return [
+    { ...model, selected_orb_tab, orb_tabs },
+    Command.mapMessages(commands, (childMessage) => GotOrbTabsMessage({ message: childMessage })),
   ]
 }
 
@@ -645,6 +680,14 @@ const newestFirst = (threads: ReadonlyArray<Remote.ThreadSummary>): ReadonlyArra
   threads.toSorted((left, right) => right.updated_at - left.updated_at)
 
 const lastEventSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.sequence ?? 0
+
+const initialOrbTabs = () => ({
+  selected_orb_tab: "transcript" as const,
+  orb_tabs: Tabs.init({ id: "orb-tabs" }),
+})
+
+const isOrbTab = (value: string): value is OrbTab =>
+  value === "transcript" || value === "files" || value === "changes" || value === "terminal"
 
 const unreachableEventRow = (_event: never): TranscriptRow => ({
   id: "unreachable",
