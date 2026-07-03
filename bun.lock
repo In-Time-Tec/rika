@@ -32,6 +32,8 @@
         "@rika/sdk": "workspace:*",
         "effect": "catalog:",
         "foldkit": "catalog:",
+        "ghostty-web": "0.4.0",
+        "ws": "8.21.0",
       },
       "devDependencies": {
         "@foldkit/vite-plugin": "catalog:",
@@ -44,6 +46,7 @@
         "@rika/persistence": "workspace:*",
         "@rika/server": "workspace:*",
         "@types/bun": "catalog:",
+        "@types/ws": "8.18.1",
         "typescript": "catalog:",
         "vite": "catalog:",
       },
@@ -953,6 +956,8 @@
     "get-proto": ["get-proto@1.0.1", "", { "dependencies": { "dunder-proto": "^1.0.1", "es-object-atoms": "^1.0.0" } }, "sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g=="],
 
     "get-tsconfig": ["get-tsconfig@4.14.0", "", { "dependencies": { "resolve-pkg-maps": "^1.0.0" } }, "sha512-yTb+8DXzDREzgvYmh6s9vHsSVCHeC0G3PI5bEXNBHtmshPnO+S5O7qgLEOn0I5QvMy6kpZN8K1NKGyilLb93wA=="],
+
+    "ghostty-web": ["ghostty-web@0.4.0", "", {}, "sha512-0puDBik2qapbD/QQBW9o5ZHfXnZBqZWx/ctBiVtKZ6ZLds4NYb+wZuw1cRLXZk9zYovIQ908z3rvFhexAvc5Hg=="],
 
     "github-from-package": ["github-from-package@0.0.0", "", {}, "sha512-SyHy3T1v2NUXn29OsWdxmK6RwHD+vkj3v8en8AOBZ1wBQ/hCAQ5bAQTD02kW4W9tUp/3Qh6J8r9EvntiyCmOOw=="],
 

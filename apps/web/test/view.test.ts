@@ -1,15 +1,18 @@
 import { Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
-import { describe, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
+import type { Html } from "foldkit/html"
 import {
   initialModel,
   LoadedOrbChanges,
   LoadedOrbDirectory,
   LoadedOrbFile,
+  MountOrbTerminal,
   MountPierreDiff,
   MountPierreTree,
   RenderedPierreDiff,
   RenderedPierreTree,
   SelectedOrbFile,
+  TerminalStatusChanged,
   update,
   type Model,
   type OrbTab,
@@ -25,6 +28,7 @@ Object.assign(globalThis, {
 const [Scene, View] = await Promise.all([import("foldkit/scene"), import("../src/view")])
 
 const threadId = Ids.ThreadId.make("thread-view")
+const secondThreadId = Ids.ThreadId.make("thread-view-second")
 const workspaceId = Ids.WorkspaceId.make("workspace-view")
 const messageId = Ids.MessageId.make("message-view")
 const orbId = Ids.OrbId.make("orb-view")
@@ -67,6 +71,44 @@ describe("web app view", () => {
       Scene.expect(Scene.selector('[data-orb-change-diff-id="orb-changes:0:0"]')).toExist(),
       Scene.Mount.expectHas(MountPierreDiff),
       Scene.Mount.resolve(MountPierreDiff, RenderedPierreDiff({ payload_id: "orb-changes:0:0" })),
+    )
+  })
+
+  test("renders the orb terminal mount and reconnect control", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with(terminalModel()),
+      Scene.expect(Scene.role("tab", { name: "Terminal", selected: true })).toExist(),
+      Scene.expect(Scene.role("button", { name: "Reconnect" })).toExist(),
+      Scene.expect(Scene.selector("[data-orb-terminal]")).toExist(),
+      Scene.Mount.expectHas(MountOrbTerminal),
+      Scene.Mount.resolve(MountOrbTerminal, TerminalStatusChanged({ status: "connected" })),
+      Scene.expect(Scene.role("tabpanel")).toContainText("connected"),
+    )
+  })
+
+  test("keys the orb terminal mount by selected thread", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with(terminalModel()),
+      Scene.tap((simulation) => expect(terminalMountKey(simulation.html)).toBe(`orb-terminal:${threadId}`)),
+      Scene.Mount.resolve(MountOrbTerminal, TerminalStatusChanged({ status: "connected" })),
+    )
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with(terminalModelForThread(secondThreadId)),
+      Scene.tap((simulation) => expect(terminalMountKey(simulation.html)).toBe(`orb-terminal:${secondThreadId}`)),
+      Scene.Mount.resolve(MountOrbTerminal, TerminalStatusChanged({ status: "connected" })),
+    )
+  })
+
+  test("renders terminal failure status from the model", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({ ...terminalModel(), orb_terminal_status: "failed" as const, orb_terminal_error: "socket closed" }),
+      Scene.expect(Scene.role("tabpanel")).toContainText("failed"),
+      Scene.expect(Scene.role("tabpanel")).toContainText("socket closed"),
+      Scene.Mount.resolve(MountOrbTerminal, TerminalStatusChanged({ status: "failed" })),
     )
   })
 
@@ -216,6 +258,34 @@ const skippedChangesModel = (): Model => {
     }),
   )
   return loaded
+}
+
+const terminalModel = (): Model => ({
+  ...orbModel("terminal", 3),
+})
+
+const terminalModelForThread = (selected_thread_id: Ids.ThreadId): Model => ({
+  ...orbModel("terminal", 3),
+  selected_thread_id,
+  selected_orb: { ...orbSummary("running"), thread_id: selected_thread_id },
+  threads: [
+    summary(threadId, { orb_status: "running" }),
+    summary(selected_thread_id, { orb_status: "running", title_text: "Second thread" }),
+  ],
+})
+
+const terminalMountKey = (html: Html): string | undefined => {
+  if (html === null) return undefined
+  if (html.data?.attrs?.["data-orb-terminal"] === "") {
+    return typeof html.data.key === "string" ? html.data.key : undefined
+  }
+  for (const child of html.children ?? []) {
+    if (typeof child !== "string") {
+      const key = terminalMountKey(child)
+      if (key !== undefined) return key
+    }
+  }
+  return undefined
 }
 
 const tabModel = (activeIndex: number) => ({

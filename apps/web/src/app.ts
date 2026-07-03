@@ -18,6 +18,7 @@ import {
   type WebPierreDiff,
 } from "./pierre-diff"
 import { mountPierreTree } from "./pierre-tree"
+import { mountOrbTerminal, reconnectOrbTerminal } from "./orb-terminal"
 
 export const Connection = S.Literals(["idle", "loading", "connected", "failed"])
 export type Connection = typeof Connection.Type
@@ -93,6 +94,8 @@ export const OrbChangesModel = S.Union([
 ])
 export type OrbChangesModel = typeof OrbChangesModel.Type
 
+export const OrbTerminalStatusSchema = S.Literals(["idle", "connecting", "connected", "disconnected", "failed"])
+
 export const Model = S.Struct({
   api_base_url: S.String,
   connection: Connection,
@@ -111,6 +114,8 @@ export const Model = S.Struct({
   orb_tabs: Tabs.Model,
   orb_files: OrbFilesModel,
   orb_changes: OrbChangesModel,
+  orb_terminal_status: OrbTerminalStatusSchema,
+  orb_terminal_error: S.optional(S.String),
   expanded_diff_ids: S.Array(S.String),
   confirm_kill_orb_id: S.optional(Ids.OrbId),
   backend: S.optional(Remote.BackendHealth),
@@ -195,6 +200,9 @@ export const RenderedPierreDiff = m("RenderedPierreDiff", { payload_id: S.String
 export const FailedRenderPierreDiff = m("FailedRenderPierreDiff", { payload_id: S.String, message: S.String })
 export const RenderedPierreTree = m("RenderedPierreTree", { selected_path: S.optional(S.String) })
 export const FailedRenderPierreTree = m("FailedRenderPierreTree", { message: S.String })
+export const TerminalStatusChanged = m("TerminalStatusChanged", { status: OrbTerminalStatusSchema })
+export const TerminalFailed = m("TerminalFailed", { message: S.String })
+export const RequestedTerminalReconnect = m("RequestedTerminalReconnect")
 
 export const AppMessage = S.Union([
   LoadedBackendHealth,
@@ -239,6 +247,9 @@ export const AppMessage = S.Union([
   FailedRenderPierreDiff,
   RenderedPierreTree,
   FailedRenderPierreTree,
+  TerminalStatusChanged,
+  TerminalFailed,
+  RequestedTerminalReconnect,
 ]).pipe(S.toTaggedUnion("_tag"))
 export type AppMessage = typeof AppMessage.Type
 
@@ -246,6 +257,8 @@ type PierreTreeMessage =
   | typeof RenderedPierreTree.Type
   | typeof SelectedOrbFile.Type
   | typeof FailedRenderPierreTree.Type
+
+type OrbTerminalMessage = typeof TerminalStatusChanged.Type | typeof TerminalFailed.Type
 
 export type AppCommand = Command.Command<AppMessage>
 
@@ -334,6 +347,48 @@ export const MountPierreTree = Mount.defineStream(
               Queue.offerUnsafe(
                 queue,
                 FailedRenderPierreTree({ message: cause instanceof Error ? cause.message : String(cause) }),
+              )
+              return yield* Effect.never
+            }),
+          ),
+        ),
+      ),
+)
+
+export const MountOrbTerminal = Mount.defineStream(
+  "MountOrbTerminal",
+  { thread_id: Ids.ThreadId },
+  TerminalStatusChanged,
+  TerminalFailed,
+)(
+  ({ thread_id }) =>
+    (element) =>
+      Stream.callback<OrbTerminalMessage>((queue) =>
+        Effect.gen(function* () {
+          if (!(element instanceof HTMLElement)) {
+            Queue.offerUnsafe(queue, TerminalFailed({ message: "terminal mount target unavailable" }))
+            return yield* Effect.never
+          }
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              const handle = mountOrbTerminal({
+                container: element,
+                thread_id,
+                onStatus: (status) => Queue.offerUnsafe(queue, TerminalStatusChanged({ status })),
+                onError: (message) => Queue.offerUnsafe(queue, TerminalFailed({ message })),
+              })
+              void handle.activate()
+              return handle
+            }),
+            (handle) => Effect.sync(() => handle.destroy()),
+          )
+          return yield* Effect.never
+        }).pipe(
+          Effect.catch((cause: unknown) =>
+            Effect.gen(function* () {
+              Queue.offerUnsafe(
+                queue,
+                TerminalFailed({ message: cause instanceof Error ? cause.message : String(cause) }),
               )
               return yield* Effect.never
             }),
@@ -524,6 +579,19 @@ export const InterruptTurn = Command.define(
     ),
 )
 
+export const ReconnectOrbTerminal = Command.define(
+  "ReconnectOrbTerminal",
+  { thread_id: Ids.ThreadId },
+  TerminalStatusChanged,
+  TerminalFailed,
+)(({ thread_id }) =>
+  Effect.sync(() =>
+    reconnectOrbTerminal(thread_id)
+      ? TerminalStatusChanged({ status: "connecting" })
+      : TerminalFailed({ message: "terminal is not mounted" }),
+  ),
+)
+
 export const initialModel = (config: RuntimeConfig): Model => ({
   api_base_url: config.api_base_url,
   connection: "idle",
@@ -664,6 +732,27 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
       return [model, []]
     case "FailedRenderPierreTree":
       return [{ ...model, notice: message.message }, []]
+    case "TerminalStatusChanged":
+      return [
+        {
+          ...model,
+          orb_terminal_status: message.status,
+          orb_terminal_error: message.status === "failed" ? model.orb_terminal_error : undefined,
+        },
+        [],
+      ]
+    case "TerminalFailed":
+      return [
+        { ...model, orb_terminal_status: "failed", orb_terminal_error: message.message, notice: message.message },
+        [],
+      ]
+    case "RequestedTerminalReconnect":
+      return model.selected_thread_id === undefined
+        ? [model, []]
+        : [
+            { ...model, orb_terminal_status: "connecting", orb_terminal_error: undefined },
+            [ReconnectOrbTerminal({ thread_id: model.selected_thread_id })],
+          ]
   }
   return [model, []]
 }
@@ -1295,6 +1384,8 @@ const initialOrbWorkspace = () => ({
   orb_tabs: Tabs.init({ id: "orb-tabs" }),
   orb_files: initialOrbFiles(),
   orb_changes: { state: "idle" as const },
+  orb_terminal_status: "idle" as const,
+  orb_terminal_error: undefined,
 })
 
 const initialOrbFiles = (): OrbFilesModel => ({

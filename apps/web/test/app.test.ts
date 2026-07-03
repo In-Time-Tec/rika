@@ -17,8 +17,11 @@ import {
   LoadedThreads,
   OpenedThread,
   ReceivedThreadEvent,
+  RequestedTerminalReconnect,
   SelectedOrbFile,
   SubmittedDraft,
+  TerminalFailed,
+  TerminalStatusChanged,
   UpdatedSelectedOrb,
   contextUsage,
   eventRows,
@@ -48,6 +51,7 @@ describe("web app state", () => {
     expect(model.selected_thread_id).toBe(threadId)
     expect(model.selected_orb_tab).toBe("transcript")
     expect(model.orb_tabs.activeIndex).toBe(0)
+    expect(model.orb_terminal_status).toBe("idle")
     expect(commands.map((command) => command.name)).toEqual(["LoadBackendHealth", "LoadThreads", "OpenThread"])
   })
 
@@ -176,6 +180,28 @@ describe("web app state", () => {
       additions: 1,
       deletions: 0,
     })
+  })
+
+  test("tracks terminal status and reconnects the selected thread terminal", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      selected_thread_id: threadId,
+      selected_orb: orbSummary("running"),
+      threads: [summary(threadId, { orb_status: "running" })],
+    }
+
+    const [connected] = update(model, TerminalStatusChanged({ status: "connected" }))
+    const [failed] = update(connected, TerminalFailed({ message: "socket closed" }))
+    const [reconnecting, commands] = update(failed, RequestedTerminalReconnect())
+
+    expect(connected.orb_terminal_status).toBe("connected")
+    expect(connected.orb_terminal_error).toBeUndefined()
+    expect(failed.orb_terminal_status).toBe("failed")
+    expect(failed.orb_terminal_error).toBe("socket closed")
+    expect(reconnecting.orb_terminal_status).toBe("connecting")
+    expect(reconnecting.orb_terminal_error).toBeUndefined()
+    expect(commands.map((command) => command.name)).toEqual(["ReconnectOrbTerminal"])
+    expect(commands[0]?.args).toEqual({ thread_id: threadId })
   })
 
   test("keeps unrenderable orb change files as skipped rows", () => {

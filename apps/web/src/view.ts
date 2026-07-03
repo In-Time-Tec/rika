@@ -15,6 +15,8 @@ import {
   GotOrbTabsMessage,
   MountPierreDiff,
   MountPierreTree,
+  MountOrbTerminal,
+  RequestedTerminalReconnect,
   SubmittedDraft,
   contextUsage,
   eventRows,
@@ -207,11 +209,44 @@ const orbTabPanel = (model: Model, tab: OrbTab): Html => {
   if (tab === "transcript") return transcript(model)
   if (tab === "files") return orbFilesPanel(model)
   if (tab === "changes") return orbChangesPanel(model)
-  return downstreamPanel("Terminal arrives with #59")
+  return orbTerminalPanel(model)
 }
 
-const downstreamPanel = (label: string): Html =>
-  Ui.card([H.Class("placeholder-card")], [H.div([H.Class("empty-state")], [label])])
+const orbTerminalPanel = (model: Model): Html =>
+  Ui.card(
+    [H.Class("orb-terminal-card")],
+    [
+      H.div(
+        [H.Class("orb-terminal-toolbar")],
+        [
+          Ui.badge([model.orb_terminal_status], terminalStatusTone(model.orb_terminal_status)),
+          model.orb_terminal_error === undefined
+            ? Ui.empty
+            : H.span([H.Class("orb-terminal-error")], [model.orb_terminal_error]),
+          Ui.button(
+            [
+              H.Type("button"),
+              H.Disabled(model.selected_thread_id === undefined),
+              H.OnClick(RequestedTerminalReconnect()),
+            ],
+            ["Reconnect"],
+            "ghost",
+          ),
+        ],
+      ),
+      model.selected_thread_id === undefined
+        ? H.div([H.Class("empty-state")], ["No thread selected"])
+        : H.div(
+            [
+              H.Key(orbTerminalKey(model.selected_thread_id)),
+              H.Class("orb-terminal-mount"),
+              H.DataAttribute("orb-terminal", ""),
+              H.OnMount(MountOrbTerminal({ thread_id: model.selected_thread_id })),
+            ],
+            [],
+          ),
+    ],
+  )
 
 const orbFilesPanel = (model: Model): Html =>
   Ui.card(
@@ -468,6 +503,8 @@ const selectedTreePath = (model: Model) => {
 
 const orbTreeKey = (model: Model) => `${model.orb_files.paths.join("\n")}\n${selectedTreePath(model) ?? ""}`
 
+const orbTerminalKey = (thread_id: NonNullable<Model["selected_thread_id"]>) => `orb-terminal:${thread_id}`
+
 const orbDirectoryStatus = (model: Model, path: string) => {
   const status = model.orb_files.directories[path]
   if (status?.state === "loading") return "Loading files"
@@ -484,6 +521,13 @@ const orbBadgeTone = (status: Model["threads"][number]["orb_status"]) => {
   if (status === "running") return "success"
   if (status === "paused") return "warning"
   if (status === "killed") return "danger"
+  return "default"
+}
+
+const terminalStatusTone = (status: Model["orb_terminal_status"]) => {
+  if (status === "connected") return "success"
+  if (status === "connecting") return "warning"
+  if (status === "failed" || status === "disconnected") return "danger"
   return "default"
 }
 
