@@ -98,7 +98,7 @@ export const McpCommand = Schema.Struct({
   server_name: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Cli.Args.McpCommand" })
 
-export const ConfigAction = Schema.Literals(["keymap"]).annotate({
+export const ConfigAction = Schema.Literals(["keymap", "list", "edit"]).annotate({
   identifier: "Rika.Cli.Args.ConfigAction",
 })
 export type ConfigAction = typeof ConfigAction.Type
@@ -107,6 +107,7 @@ export interface ConfigCommand extends Schema.Schema.Type<typeof ConfigCommand> 
 export const ConfigCommand = Schema.Struct({
   type: Schema.Literal("config"),
   action: ConfigAction,
+  workspace: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "Rika.Cli.Args.ConfigCommand" })
 
 export const OrbAction = Schema.Literals(["list", "kill", "shell"]).annotate({
@@ -305,7 +306,9 @@ export const usage = [
   "  rika skills inspect <name>",
   "  rika mcp list",
   "  rika mcp approve <server-name>",
+  "  rika config list",
   "  rika config keymap",
+  "  rika config edit [--workspace]",
   "  rika orb list",
   "  rika orb kill <thread-id> [--force]",
   "  rika orb shell <thread-id>",
@@ -481,6 +484,10 @@ const mcpServerConfig = {
   serverName: Argument.string("server-name").pipe(Argument.withDescription("MCP server name")),
 }
 
+const configEditConfig = {
+  workspace: Flag.boolean("workspace").pipe(Flag.withDescription("Edit workspace settings instead of user settings")),
+}
+
 const reviewConfig = {
   workspace: Flag.string("workspace").pipe(Flag.optional, Flag.withDescription("Workspace root for the review")),
   staged: Flag.boolean("staged").pipe(Flag.withDescription("Review only staged changes")),
@@ -651,6 +658,10 @@ interface SkillNameInput {
 
 interface McpServerInput {
   readonly serverName: string
+}
+
+interface ConfigEditInput {
+  readonly workspace: boolean
 }
 
 interface ReviewInput {
@@ -989,17 +1000,26 @@ const makeConfigCommand = (
   parsedRef: Ref.Ref<Option.Option<Command>>,
   rejectedRef: Ref.Ref<Option.Option<ArgsError>>,
 ) => {
+  const list = CliCommand.make("list", {}, () => Ref.set(parsedRef, Option.some(toConfigListCommand()))).pipe(
+    CliCommand.withDescription("Print effective configuration with sources"),
+    CliCommand.withShortDescription("List config"),
+  )
+
   const keymap = CliCommand.make("keymap", {}, () => Ref.set(parsedRef, Option.some(toConfigKeymapCommand()))).pipe(
     CliCommand.withDescription("Print effective key bindings"),
     CliCommand.withShortDescription("Print keymap"),
   )
+
+  const edit = CliCommand.make("edit", configEditConfig, (input: ConfigEditInput) =>
+    Ref.set(parsedRef, Option.some(toConfigEditCommand(input))),
+  ).pipe(CliCommand.withDescription("Open settings in EDITOR"), CliCommand.withShortDescription("Edit config"))
 
   return CliCommand.make("config", {}, () =>
     Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a config subcommand", exit_code: 2, usage }))),
   ).pipe(
     CliCommand.withDescription("Inspect Rika configuration"),
     CliCommand.withShortDescription("Inspect config"),
-    CliCommand.withSubcommands([keymap]),
+    CliCommand.withSubcommands([list, keymap, edit]),
   )
 }
 
@@ -1317,6 +1337,14 @@ const toMcpApproveCommand = (input: McpServerInput): McpCommand => ({
 })
 
 const toConfigKeymapCommand = (): ConfigCommand => ({ type: "config", action: "keymap" })
+
+const toConfigListCommand = (): ConfigCommand => ({ type: "config", action: "list" })
+
+const toConfigEditCommand = (input: ConfigEditInput): ConfigCommand => ({
+  type: "config",
+  action: "edit",
+  ...(input.workspace ? { workspace: true } : {}),
+})
 
 const toVersionCommandValue = (): VersionCommand => ({ type: "version" })
 

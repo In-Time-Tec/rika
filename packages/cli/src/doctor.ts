@@ -138,7 +138,11 @@ const reportFromInput = (
     const rivetEndpoint = input.env.RIKA_RIVET_ENDPOINT ?? input.env.RIVET_ENDPOINT ?? "http://127.0.0.1:6420"
     const apiKeyConfigured = secretConfigured(input.env.RIKA_API_KEY)
     const embeddingsApiKeyConfigured = secretConfigured(input.env.RIKA_EMBEDDINGS_API_KEY)
-    const telemetry = Telemetry.fromEnv(input.env, input.version ?? "0.0.0")
+    const settingsSnapshot = dependencies.settings === undefined ? undefined : yield* dependencies.settings.snapshot
+    const telemetry =
+      settingsSnapshot === undefined
+        ? Telemetry.fromEnv(input.env, input.version ?? "0.0.0")
+        : Telemetry.fromSettingsSnapshot(settingsSnapshot, input.version ?? "0.0.0")
     const permissionConfig = PermissionPolicy.configFromEnv(input.env)
     const permissionSummary = PermissionPolicy.summary(permissionConfig)
     const backendStatus = yield* backend

@@ -1,9 +1,20 @@
 import { describe, expect, test } from "bun:test"
-import { mkdtemp, rm } from "node:fs/promises"
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { Args, Help, Output, Runtime } from "../src/index"
+
+const ConfigListReport = Schema.Struct({
+  entries: Schema.Array(
+    Schema.Struct({
+      key: Schema.String,
+      env: Schema.String,
+      value: Schema.Unknown,
+      source: Schema.String,
+    }),
+  ),
+})
 
 describe("CLI runtime", () => {
   const rawOutputLayer = (output: { stdout: Array<string>; stderr: Array<string> }) =>
@@ -432,6 +443,93 @@ describe("CLI runtime", () => {
       expect(output.stderr.join("")).toBe(Help.terminalResetText)
       expect(output.stdout.join("").endsWith("\n\n")).toBe(true)
       expect(output.stderr.join("").endsWith("\n")).toBe(false)
+    }
+  })
+
+  test("runs config list through the process entrypoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-config-list-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    await mkdir(join(home, ".config", "rika"), { recursive: true })
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    await writeFile(
+      join(home, ".config", "rika", "settings.json"),
+      JSON.stringify({
+        "mode.default": "deep1",
+        "telemetry.endpoint": "http://user-otel.test",
+      }),
+    )
+    await writeFile(
+      join(workspace, ".rika", "settings.json"),
+      JSON.stringify({
+        "telemetry.enabled": false,
+      }),
+    )
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["config", "list"],
+          env: { HOME: home, RIKA_WORKSPACE_ROOT: workspace, RIKA_MODE: "rush" },
+          cwd: workspace,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      const report = Schema.decodeUnknownSync(ConfigListReport)(JSON.parse(output.stdout[0] ?? "{}"))
+      expect(exitCode).toBe(0)
+      expect(output.stderr).toEqual([])
+      expect(report.entries).toEqual(
+        expect.arrayContaining([
+          { key: "mode.default", env: "RIKA_MODE", value: "rush", source: "env" },
+          { key: "telemetry.enabled", env: "RIKA_TELEMETRY", value: false, source: "workspace" },
+          {
+            key: "telemetry.endpoint",
+            env: "RIKA_TELEMETRY_ENDPOINT",
+            value: "http://user-otel.test",
+            source: "user",
+          },
+        ]),
+      )
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("runs workspace config edit through the process entrypoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-config-edit-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    const editor = join(root, "fake-editor.sh")
+    await mkdir(workspace, { recursive: true })
+    await writeFile(
+      editor,
+      ["#!/usr/bin/env bash", "cat > \"$1\" <<'JSON'", '{"mode.default":"deep2","unknown.key":true}', "JSON", ""].join(
+        "\n",
+      ),
+    )
+    await chmod(editor, 0o755)
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["config", "edit", "--workspace"],
+          env: { HOME: home, EDITOR: editor },
+          cwd: workspace,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      const target = join(workspace, ".rika", "settings.json")
+      expect(exitCode).toBe(0)
+      expect(JSON.parse(await readFile(target, "utf8"))).toEqual({
+        "mode.default": "deep2",
+        "unknown.key": true,
+      })
+      expect(output.stdout).toEqual([`edited ${target}`])
+      expect(output.stderr).toEqual([expect.stringContaining("unknown.key")])
+    } finally {
+      await rm(root, { force: true, recursive: true })
     }
   })
 

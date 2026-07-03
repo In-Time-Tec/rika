@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { OrbActivity, OrbManager } from "@rika/orb"
 import { Database, Migration, OrbStore } from "@rika/persistence"
@@ -207,6 +210,39 @@ describe("CLI backend endpoint resolver", () => {
     })
     expect(local.connects).toBe(1)
     expect(health.calls).toEqual([])
+  })
+
+  test("uses workspace settings mode when starting the local backend", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-backend-settings-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    await mkdir(join(home, ".config", "rika"), { recursive: true })
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    await writeFile(join(workspace, ".rika", "settings.json"), JSON.stringify({ "mode.default": "deep3" }))
+    const local = fakeLocalBackend()
+    const health = fakeHealth()
+
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          return yield* BackendEndpoint.resolveEndpoint({
+            workspace_root: workspace,
+            env: { HOME: home },
+          })
+        }).pipe(Effect.provide(makeLayer(local.service, health.service))),
+      )
+
+      expect(local.starts).toEqual([
+        {
+          workspace_root: workspace,
+          data_dir: `${workspace}/.rika`,
+          mode: "deep3",
+        },
+      ])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("reconnecting client resolves endpoints by request thread id", async () => {
@@ -505,16 +541,18 @@ const failingOrbResumer = () => {
 const fakeLocalBackend = () => {
   const state = {
     connects: 0,
+    starts: [] as Array<{ readonly workspace_root: string; readonly data_dir: string; readonly mode: Config.Mode }>,
     service: LocalBackend.Service.of({
-      connectOrStart: () =>
+      connectOrStart: (input) =>
         Effect.sync(() => {
           state.connects += 1
+          state.starts.push(input)
           return {
             kind: "local" as const,
             url: "http://127.0.0.1:45555",
             token: "local-token",
-            workspace_root: workspaceRoot,
-            data_dir: dataDir,
+            workspace_root: input.workspace_root,
+            data_dir: input.data_dir,
             pid: 123,
           }
         }),

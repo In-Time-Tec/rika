@@ -28,6 +28,8 @@ The local telemetry daemon listens on `http://127.0.0.1:27686` (`/v1/traces`, `/
 | `RIKA_TELEMETRY`          | on                       | `off`/`0`/`false`/`disabled` disables export; `on`/`1`/`true`/`enabled` forces it. |
 | `RIKA_TELEMETRY_ENDPOINT` | `http://127.0.0.1:27686` | OTLP base URL; `/v1/traces` and `/v1/logs` are appended.                           |
 
+The same values can be set in `~/.config/rika/settings.json` or `<workspace>/.rika/settings.json` as `telemetry.enabled` and `telemetry.endpoint`. Environment variables override workspace settings, which override user settings.
+
 Telemetry is **on by default in every mode, including the compiled binary**. The default endpoint is local (`127.0.0.1`), so data stays on the user's machine. `rika doctor` reports the effective state under `config.telemetry` / `config.telemetry_endpoint`.
 
 ## Hard constraints

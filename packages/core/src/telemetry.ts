@@ -16,9 +16,10 @@ import * as NodeSdk from "@effect/opentelemetry/NodeSdk"
 import * as Tracer from "@effect/opentelemetry/Tracer"
 import { Effect, Layer, Option } from "effect"
 import * as Diagnostics from "./diagnostics"
+import * as Settings from "./settings"
 
 export const serviceName = "rika"
-export const defaultEndpoint = "http://127.0.0.1:27686"
+export const defaultEndpoint = Settings.defaultTelemetryEndpoint
 
 export interface Options {
   readonly enabled: boolean
@@ -38,6 +39,13 @@ export const fromEnv = (env: Record<string, string | undefined>, version: string
     environment: compiled ? "production" : "development",
   }
 }
+
+export const fromSettingsSnapshot = (snapshot: Settings.Snapshot, version: string): Options => ({
+  enabled: snapshot.values.telemetry.enabled,
+  endpoint: trimTrailingSlash(snapshot.values.telemetry.endpoint),
+  version,
+  environment: isCompiledBinary() ? "production" : "development",
+})
 
 export const suppressDiagnostics = () => diag.disable()
 

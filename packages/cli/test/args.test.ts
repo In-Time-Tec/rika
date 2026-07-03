@@ -402,6 +402,16 @@ describe("CLI args", () => {
     expect(short).toEqual({ type: "help", topic: "config-edit" })
   })
 
+  test("parses config list and edit commands", async () => {
+    const list = await Effect.runPromise(Args.parse(["config", "list"]))
+    const editUser = await Effect.runPromise(Args.parse(["config", "edit"]))
+    const editWorkspace = await Effect.runPromise(Args.parse(["config", "edit", "--workspace"]))
+
+    expect(list).toEqual({ type: "config", action: "list" })
+    expect(editUser).toEqual({ type: "config", action: "edit" })
+    expect(editWorkspace).toEqual({ type: "config", action: "edit", workspace: true })
+  })
+
   test("parses Amp-compatible mcp help commands before Effect CLI globals", async () => {
     const long = await Effect.runPromise(Args.parse(["mcp", "--help"]))
     const short = await Effect.runPromise(Args.parse(["mcp", "-h"]))

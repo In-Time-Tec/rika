@@ -32,13 +32,23 @@ Rika reads optional JSON settings from `~/.config/rika/settings.json` and then `
 
 Recognized keys:
 
-| Setting                  | Environment override    | Default    |
-| ------------------------ | ----------------------- | ---------- |
-| `orb.template`           | `RIKA_ORB_TEMPLATE`     | `rika-orb` |
-| `orb.idleTimeoutSeconds` | `RIKA_ORB_IDLE_TIMEOUT` | `300`      |
-| `project.default`        | `RIKA_ORB_PROJECT`      | unset      |
+| Setting                   | Environment override            | Default                  |
+| ------------------------- | ------------------------------- | ------------------------ |
+| `orb.template`            | `RIKA_ORB_TEMPLATE`             | `rika-orb`               |
+| `orb.idleTimeoutSeconds`  | `RIKA_ORB_IDLE_TIMEOUT`         | `300`                    |
+| `project.default`         | `RIKA_ORB_PROJECT`              | unset                    |
+| `mode.default`            | `RIKA_MODE`                     | `smart`                  |
+| `compaction.auto`         | `RIKA_COMPACTION_AUTO`          | unset                    |
+| `compaction.reserved`     | `RIKA_COMPACTION_RESERVED`      | unset                    |
+| `compaction.prune`        | `RIKA_COMPACTION_PRUNE`         | unset                    |
+| `compaction.pruneProtect` | `RIKA_COMPACTION_PRUNE_PROTECT` | unset                    |
+| `compaction.pruneMinimum` | `RIKA_COMPACTION_PRUNE_MINIMUM` | unset                    |
+| `telemetry.enabled`       | `RIKA_TELEMETRY`                | `true`                   |
+| `telemetry.endpoint`      | `RIKA_TELEMETRY_ENDPOINT`       | `http://127.0.0.1:27686` |
 
 Malformed settings files produce doctor/runtime warnings where surfaced and fall back to the next source instead of crashing startup.
+
+Use `rika config list` to print the effective non-secret configuration with the source for each value. Use `rika config edit` for user settings and `rika config edit --workspace` for workspace settings. Unknown keys and wrong value types produce warnings after the editor exits, but do not block saving.
 
 ## Orb template
 
@@ -259,13 +269,13 @@ rika ide open-file --path packages/cli/src/main.ts --start-line 1 --end-line 5
 
 ## Configuration
 
-Rika reads configuration from three sources, in precedence order:
+Rika imports process environment from three sources, in precedence order:
 
 1. Process environment variables.
 2. Workspace `.env.local`.
-3. Global `~/.rika/settings.json`.
+3. Legacy global `~/.rika/settings.json`.
 
-Use `~/.rika/settings.json` for machine-wide model defaults:
+Use `~/.rika/settings.json` only for legacy machine-wide model credentials:
 
 ```json
 {
@@ -274,15 +284,19 @@ Use `~/.rika/settings.json` for machine-wide model defaults:
 }
 ```
 
-Use `.env.local` in a development checkout when that workspace needs different model settings.
+Use `.env.local` in a development checkout when that workspace needs different model credentials. Use `~/.config/rika/settings.json` and `<workspace>/.rika/settings.json` for general preferences such as default mode, compaction, telemetry, and orb defaults.
 
 Common environment variables:
 
 | Variable                                   | Purpose                                                     |
 | ------------------------------------------ | ----------------------------------------------------------- |
+| `RIKA_MODE`                                | Default agent mode when no command flag overrides it.       |
 | `RIKA_WORKSPACE_ROOT`                      | Default workspace root.                                     |
 | `RIKA_DATA_DIR`                            | Local data directory. Defaults to `<workspace>/.rika`.      |
 | `RIKA_DATABASE_URL`                        | Optional SQLite database URL/path override.                 |
+| `RIKA_TELEMETRY`                           | Enable or disable local OTLP telemetry export.              |
+| `RIKA_TELEMETRY_ENDPOINT`                  | OTLP base URL for traces and logs.                          |
+| `RIKA_COMPACTION_*`                        | Optional automatic compaction thresholds and pruning knobs. |
 | `RIKA_API_KEY`                             | Model provider credentials.                                 |
 | `RIKA_EMBEDDINGS_API_KEY`                  | Optional dedicated key for thread memory embeddings.        |
 | `RIKA_BASE_URL`                            | Optional model provider proxy endpoint.                     |

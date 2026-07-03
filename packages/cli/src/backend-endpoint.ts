@@ -24,6 +24,7 @@ export class BackendEndpointError extends Schema.TaggedErrorClass<BackendEndpoin
 
 export type ResolveError =
   | BackendEndpointError
+  | Config.ConfigError
   | Database.DatabaseError
   | LocalBackend.BackendError
   | OrbManager.OrbProvisionError
@@ -104,8 +105,9 @@ export const resolve = Effect.fn("Cli.BackendEndpoint.Resolver.resolve")(functio
 })
 
 export const resolveEndpoint = Effect.fn("Cli.BackendEndpoint.resolveEndpoint")(function* (input: ResolveInput) {
-  const dataDir = input.data_dir ?? input.env.RIKA_DATA_DIR ?? `${input.workspace_root}/.rika`
-  const mode = input.mode ?? modeFromEnv(input.env)
+  const configValues = yield* Config.valuesFromEnv(input.env, input.workspace_root)
+  const dataDir = input.data_dir ?? configValues.data_dir
+  const mode = input.mode ?? configValues.default_mode
   const localBackend = yield* LocalBackend.Service
   const orbs = yield* OrbStore.Service
   const health = yield* Health
@@ -166,10 +168,4 @@ const endpointFromEnv = (env: Record<string, string | undefined>): BackendEndpoi
     url: env.RIKA_BACKEND_URL.replace(/\/$/, ""),
     token: env.RIKA_BACKEND_TOKEN ?? "",
   }
-}
-
-const modeFromEnv = (env: Record<string, string | undefined>): Config.Mode => {
-  const value = env.RIKA_MODE
-  if (value === "rush" || value === "smart" || value === "deep1" || value === "deep2" || value === "deep3") return value
-  return "smart"
 }

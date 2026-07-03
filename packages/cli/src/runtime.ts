@@ -116,7 +116,9 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
                                     Effect.provide(mcpLiveLayer(command, env, input.cwd)),
                                   )
                                 : command.type === "config"
-                                  ? CliConfig.executeCommand(command)
+                                  ? CliConfig.executeCommand(command).pipe(
+                                      Effect.provide(configLiveLayer(env, input.cwd)),
+                                    )
                                   : command.type === "orb"
                                     ? Orb.executeCommand(command).pipe(
                                         Effect.provide(orbLiveLayer(command, env, input.cwd)),
@@ -196,6 +198,7 @@ type RuntimeError =
   | Extensions.ExtensionsError
   | FffSearch.FffSearchError
   | Client.SdkError
+  | CliConfig.ConfigCommandError
   | Ide.IdeError
   | IdeBridge.IdeBridgeError
   | Input.InputError
@@ -246,6 +249,7 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof Extensions.ExtensionsError) return Extensions.formatError(error)
   if (error instanceof FffSearch.FffSearchError) return `Rika failed: ${error.message}`
   if (error instanceof Client.SdkError) return `Rika failed: ${error.message}`
+  if (error instanceof CliConfig.ConfigCommandError) return CliConfig.formatError(error)
   if (error instanceof Ide.IdeError) return Ide.formatError(error)
   if (error instanceof IdeBridge.IdeBridgeError) return `Rika failed: ${error.message}`
   if (error instanceof Input.InputError) return `Rika failed: ${error.message}`
@@ -341,16 +345,40 @@ export const secretRedactorLayer = (
 
 const telemetryLayers = (
   env: Record<string, string | undefined>,
-  configLayer: Layer.Layer<Config.Service>,
+  workspaceRoot: string,
+  configLayer: Layer.Layer<Config.Service, Config.ConfigError>,
   redactorLayer: Layer.Layer<SecretRedactor.Service> = secretRedactorLayer(env),
 ) => {
-  const options = Telemetry.fromEnv(env, Version.version)
-  const diagnosticsLayer = (options.enabled ? Telemetry.diagnosticsLayer(options) : Diagnostics.layer).pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(redactorLayer),
+  const options = Settings.loadSnapshotFromEnv(env, workspaceRoot).pipe(
+    Effect.map((snapshot) => Telemetry.fromSettingsSnapshot(snapshot, Version.version)),
   )
-  const telemetryLayer = options.enabled ? Telemetry.layer(options) : Layer.empty
+  const diagnosticsLayer = Layer.unwrap(
+    options.pipe(
+      Effect.map((resolved) =>
+        (resolved.enabled ? Telemetry.diagnosticsLayer(resolved) : Diagnostics.layer).pipe(
+          Layer.provideMerge(configLayer),
+          Layer.provideMerge(redactorLayer),
+        ),
+      ),
+    ),
+  )
+  const telemetryLayer = Layer.unwrap(
+    options.pipe(Effect.map((resolved) => (resolved.enabled ? Telemetry.layer(resolved) : Layer.empty))),
+  )
   return { diagnosticsLayer, telemetryLayer }
+}
+
+const runtimeConfigLayer = (
+  env: Record<string, string | undefined>,
+  workspaceRoot: string,
+  modeOverride?: Config.Mode,
+): Layer.Layer<Config.Service, Config.ConfigError> => {
+  const configEnv = {
+    ...env,
+    RIKA_WORKSPACE_ROOT: workspaceRoot,
+    ...(modeOverride === undefined ? {} : { RIKA_MODE: modeOverride }),
+  }
+  return Config.layerFromEnv(configEnv, workspaceRoot)
 }
 
 export const liveLayer = (
@@ -359,19 +387,10 @@ export const liveLayer = (
   cwd: string,
 ): Layer.Layer<LiveLayerOutput, LiveLayerError> => {
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: command.mode ?? "smart",
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot, command.mode)
   const redactorLayer = secretRedactorLayer(env)
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -486,19 +505,10 @@ export const orbExecuteLiveLayer = (
   cwd: string,
 ): Layer.Layer<OrbExecuteLayerOutput, LiveLayerError, Output.Service> => {
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: command.mode ?? "smart",
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot, command.mode)
   const redactorLayer = secretRedactorLayer(env)
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const projectStoreLayer = ProjectStore.layer.pipe(
@@ -555,18 +565,9 @@ const interactiveLiveLayerFromTui = (
 ): Layer.Layer<InteractiveLayerOutput, LiveLayerError> => {
   const { Adapter, Session, Ticker } = tui
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: command.mode ?? "smart",
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot, command.mode)
   const redactorLayer = secretRedactorLayer(env)
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -670,16 +671,8 @@ const interactiveRemoteLiveLayerFromTui = (
   const { Adapter, RemoteSession, Ticker } = tui
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
   const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const mode = command.mode ?? "smart"
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: mode,
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const mode = command.mode
+  const configLayer = runtimeConfigLayer(env, workspaceRoot, mode)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const redactorLayer = secretRedactorLayer(env)
@@ -743,7 +736,7 @@ const interactiveRemoteLiveLayerFromTui = (
           ...endpointInput,
           workspace_root: workspaceRoot,
           data_dir: dataDir,
-          mode,
+          ...(mode === undefined ? {} : { mode }),
           env,
         }).pipe(
           Effect.provideService(LocalBackend.Service, backend),
@@ -823,7 +816,7 @@ const localTournamentTurnControlLayer = Layer.effect(
 
 const remoteTournamentLayerFromClient = (
   client: Client.Interface,
-  configLayer: Layer.Layer<Config.Service>,
+  configLayer: Layer.Layer<Config.Service, Config.ConfigError>,
   llmLayer: Layer.Layer<Router.Service, LiveLayerError>,
   artifactStore: ArtifactStore.Interface,
   idGenerator: IdGenerator.Interface,
@@ -1098,17 +1091,7 @@ export const skillsLiveLayer = (
   cwd: string,
 ): Layer.Layer<SkillsLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_BACKEND_ID === undefined ? {} : { backend_id: env.RIKA_BACKEND_ID }),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
 
   return Skills.layer.pipe(
     Layer.provideMerge(Output.layer),
@@ -1123,16 +1106,7 @@ export const memoryLiveLayer = (
   cwd: string,
 ): Layer.Layer<MemoryLayerOutput, LiveLayerError> => {
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const redactorLayer = secretRedactorLayer(env)
@@ -1170,16 +1144,7 @@ export const threadsLiveLayer = (
 ): Layer.Layer<Threads.Service, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
   const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_BACKEND_ID === undefined ? {} : { backend_id: env.RIKA_BACKEND_ID }),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const redactorLayer = secretRedactorLayer(env)
@@ -1343,7 +1308,6 @@ export const threadsLiveLayer = (
           ...input,
           workspace_root: workspaceRoot,
           data_dir: dataDir,
-          mode: defaultModeFromEnv(env),
           env,
         }).pipe(
           Effect.provideService(LocalBackend.Service, backend),
@@ -1378,16 +1342,7 @@ export const orbLiveLayer = (
   cwd: string,
 ): Layer.Layer<OrbLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const redactorLayer = secretRedactorLayer(env)
@@ -1469,16 +1424,7 @@ export const projectLiveLayer = (
   cwd: string,
 ): Layer.Layer<ProjectLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const projectStoreLayer = ProjectStore.layer.pipe(
@@ -1509,16 +1455,7 @@ export const mcpLiveLayer = (
   cwd: string,
 ): Layer.Layer<McpLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
@@ -1543,16 +1480,7 @@ export const reviewLiveLayer = (
   cwd: string,
 ): Layer.Layer<ReviewLayerOutput, LiveLayerError> => {
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -1591,16 +1519,7 @@ export const extensionsLiveLayer = (
   cwd: string,
 ): Layer.Layer<ExtensionsLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -1626,21 +1545,18 @@ export const ideLiveLayer = (
   _cwd: string,
 ): Layer.Layer<IdeLayerOutput, LiveLayerError> => Ide.layer.pipe(Layer.provideMerge(Output.layer))
 
+export const configLiveLayer = (
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Layer.Layer<CliConfig.Service, CliConfig.ConfigCommandError, Output.Service> =>
+  CliConfig.layerFromInput({ env, cwd })
+
 export const doctorLiveLayer = (
   env: Record<string, string | undefined>,
   cwd: string,
 ): Layer.Layer<DoctorLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const storageLayer = Layer.mergeAll(configLayer, databaseLayer, Migration.layer, Time.layer, IdGenerator.layer)
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
@@ -1664,23 +1580,13 @@ export const serverLiveLayer = (
   cwd: string,
 ): Layer.Layer<ServerLayerOutput, LiveLayerError> => {
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_BACKEND_ID === undefined ? {} : { backend_id: env.RIKA_BACKEND_ID }),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const redactorLayer = secretRedactorLayer(
     env,
     command.token === undefined ? [] : [{ label: "RIKA_SERVER_TOKEN", value: command.token }],
   )
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
-  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, configLayer, redactorLayer)
+  const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
@@ -1814,20 +1720,11 @@ export const syncLiveLayer = (
   cwd: string,
 ): Layer.Layer<SyncLayerOutput, LiveLayerError, Output.Service> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-  const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
-  const configLayer = Config.layerFromValues(
-    {
-      workspace_root: workspaceRoot,
-      data_dir: dataDir,
-      default_mode: defaultModeFromEnv(env),
-      ...(env.RIKA_DATABASE_URL === undefined ? {} : { database_url: env.RIKA_DATABASE_URL }),
-    },
-    env,
-  )
+  const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const databaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
   const redactorLayer = secretRedactorLayer(env)
   const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
-  const { diagnosticsLayer } = telemetryLayers(env, configLayer, redactorLayer)
+  const { diagnosticsLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const timeLayer = Time.layer
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
@@ -2171,9 +2068,3 @@ export type LiveLayerError =
   | ThreadEventLog.ThreadEventLogError
   | ThreadMemoryStore.ThreadMemoryStoreError
   | ThreadProjection.ThreadProjectionError
-
-const defaultModeFromEnv = (env: Record<string, string | undefined>): Config.Mode => {
-  const value = env.RIKA_MODE
-  if (value === "rush" || value === "smart" || value === "deep1" || value === "deep2" || value === "deep3") return value
-  return "smart"
-}

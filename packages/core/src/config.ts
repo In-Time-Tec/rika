@@ -1,4 +1,5 @@
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import * as Settings from "./settings"
 
 export const Mode = Schema.Literals(["rush", "smart", "deep1", "deep2", "deep3"]).annotate({
   identifier: "Rika.Config.Mode",
@@ -46,42 +47,56 @@ export const layerFromValues = (values: Values, env: Record<string, string | und
     }),
   )
 
+export const valuesFromEnv = (
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Effect.Effect<Values, ConfigError> =>
+  Effect.gen(function* () {
+    const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
+    const settings = yield* Settings.loadSnapshotFromEnv(env, workspaceRoot)
+    const defaultMode = env.RIKA_MODE === undefined ? settings.values.mode.default : yield* parseMode(env.RIKA_MODE)
+    const compactionAuto =
+      env.RIKA_COMPACTION_AUTO === undefined
+        ? settings.values.compaction.auto
+        : yield* parseBooleanOption(env.RIKA_COMPACTION_AUTO, "RIKA_COMPACTION_AUTO")
+    const compactionReserved =
+      env.RIKA_COMPACTION_RESERVED === undefined
+        ? settings.values.compaction.reserved
+        : yield* parseNonNegativeIntOption(env.RIKA_COMPACTION_RESERVED, "RIKA_COMPACTION_RESERVED")
+    const compactionPrune =
+      env.RIKA_COMPACTION_PRUNE === undefined
+        ? settings.values.compaction.prune
+        : yield* parseBooleanOption(env.RIKA_COMPACTION_PRUNE, "RIKA_COMPACTION_PRUNE")
+    const compactionPruneProtect =
+      env.RIKA_COMPACTION_PRUNE_PROTECT === undefined
+        ? settings.values.compaction.pruneProtect
+        : yield* parseNonNegativeIntOption(env.RIKA_COMPACTION_PRUNE_PROTECT, "RIKA_COMPACTION_PRUNE_PROTECT")
+    const compactionPruneMinimum =
+      env.RIKA_COMPACTION_PRUNE_MINIMUM === undefined
+        ? settings.values.compaction.pruneMinimum
+        : yield* parseNonNegativeIntOption(env.RIKA_COMPACTION_PRUNE_MINIMUM, "RIKA_COMPACTION_PRUNE_MINIMUM")
+    const base: Values = {
+      workspace_root: workspaceRoot,
+      data_dir: env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`,
+      default_mode: defaultMode,
+      ...(compactionAuto === undefined ? {} : { compaction_auto: compactionAuto }),
+      ...(compactionReserved === undefined ? {} : { compaction_reserved: compactionReserved }),
+      ...(compactionPrune === undefined ? {} : { compaction_prune: compactionPrune }),
+      ...(compactionPruneProtect === undefined ? {} : { compaction_prune_protect: compactionPruneProtect }),
+      ...(compactionPruneMinimum === undefined ? {} : { compaction_prune_minimum: compactionPruneMinimum }),
+    }
+    const values: Values = env.RIKA_DATABASE_URL === undefined ? base : { ...base, database_url: env.RIKA_DATABASE_URL }
+    return env.RIKA_BACKEND_ID === undefined ? values : { ...values, backend_id: env.RIKA_BACKEND_ID }
+  })
+
 export const layerFromEnv = (env: Record<string, string | undefined>, cwd: string) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
-      const defaultMode = yield* parseMode(env.RIKA_MODE ?? "smart")
-      const compactionAuto = yield* parseBooleanOption(env.RIKA_COMPACTION_AUTO, "RIKA_COMPACTION_AUTO")
-      const compactionReserved = yield* parseNonNegativeIntOption(
-        env.RIKA_COMPACTION_RESERVED,
-        "RIKA_COMPACTION_RESERVED",
-      )
-      const compactionPrune = yield* parseBooleanOption(env.RIKA_COMPACTION_PRUNE, "RIKA_COMPACTION_PRUNE")
-      const compactionPruneProtect = yield* parseNonNegativeIntOption(
-        env.RIKA_COMPACTION_PRUNE_PROTECT,
-        "RIKA_COMPACTION_PRUNE_PROTECT",
-      )
-      const compactionPruneMinimum = yield* parseNonNegativeIntOption(
-        env.RIKA_COMPACTION_PRUNE_MINIMUM,
-        "RIKA_COMPACTION_PRUNE_MINIMUM",
-      )
-      const base: Values = {
-        workspace_root: env.RIKA_WORKSPACE_ROOT ?? cwd,
-        data_dir: env.RIKA_DATA_DIR ?? `${cwd}/.rika`,
-        default_mode: defaultMode,
-        ...(compactionAuto === undefined ? {} : { compaction_auto: compactionAuto }),
-        ...(compactionReserved === undefined ? {} : { compaction_reserved: compactionReserved }),
-        ...(compactionPrune === undefined ? {} : { compaction_prune: compactionPrune }),
-        ...(compactionPruneProtect === undefined ? {} : { compaction_prune_protect: compactionPruneProtect }),
-        ...(compactionPruneMinimum === undefined ? {} : { compaction_prune_minimum: compactionPruneMinimum }),
-      }
-      const values: Values =
-        env.RIKA_DATABASE_URL === undefined ? base : { ...base, database_url: env.RIKA_DATABASE_URL }
-      const withBackendId: Values =
-        env.RIKA_BACKEND_ID === undefined ? values : { ...values, backend_id: env.RIKA_BACKEND_ID }
+      const values = yield* valuesFromEnv(env, cwd)
 
       return Service.of({
-        get: Effect.succeed(withBackendId),
+        get: Effect.succeed(values),
         requireEnv: Effect.fn("Config.requireEnv")(function* (key: string) {
           const value = env[key]
           if (value === undefined || value.length === 0) {

@@ -644,13 +644,14 @@ Global options:
 
 `
 
-export const configHelpStdoutText = (homeDir = homedir()) => `Usage: amp config [options] [command]
+export const configHelpStdoutText = (homeDir = homedir()) => `Usage: rika config [options] [command]
 
-Manage Amp configuration
+Manage Rika configuration
 
 Commands:
 
-  edit    Open the Amp settings file in $EDITOR
+  list    Print effective configuration with sources
+  edit    Open the Rika settings file in $EDITOR
   keymap  List command keymap entries
 
 Global options:
@@ -662,7 +663,7 @@ Global options:
   -v
       Alias for --version
   --settings-file <value>
-      Custom settings file path (overrides the default location ${homeDir}/.config/amp/settings.json)
+      Custom settings file path (overrides the default location ${homeDir}/.config/rika/settings.json)
   --log-level <value>
       Set log level (parent, children, category, sinks, parentSinks, filters, lowestLevel, contextLocalStorage)
   --log-file <value>
@@ -687,14 +688,12 @@ Global options:
 
 `
 
-export const configEditHelpStdoutText = (homeDir = homedir()) => `Usage: amp config edit [options]
+export const configEditHelpStdoutText = (homeDir = homedir()) => `Usage: rika config edit [options]
 
-Open the Amp settings file in $EDITOR. By default, this opens user settings. Use --workspace to edit the workspace-specific .amp/settings.json file.
+Open the Rika settings file in $EDITOR. By default, this opens user settings. Use --workspace to edit the workspace-specific .rika/settings.json file.
 
 Options:
 
-  --global
-      Edit user settings (default)
   --workspace
       Edit workspace settings
 
@@ -707,7 +706,7 @@ Global options:
   -v
       Alias for --version
   --settings-file <value>
-      Custom settings file path (overrides the default location ${homeDir}/.config/amp/settings.json)
+      Custom settings file path (overrides the default location ${homeDir}/.config/rika/settings.json)
   --log-level <value>
       Set log level (parent, children, category, sinks, parentSinks, filters, lowestLevel, contextLocalStorage)
   --log-file <value>
@@ -732,7 +731,7 @@ Global options:
 
 `
 
-export const configKeymapHelpStdoutText = (homeDir = homedir()) => `Usage: amp config keymap [options]
+export const configKeymapHelpStdoutText = (homeDir = homedir()) => `Usage: rika config keymap [options]
 
 List all command IDs, descriptions, and effective keymap entries
 
@@ -745,7 +744,7 @@ Global options:
   -v
       Alias for --version
   --settings-file <value>
-      Custom settings file path (overrides the default location ${homeDir}/.config/amp/settings.json)
+      Custom settings file path (overrides the default location ${homeDir}/.config/rika/settings.json)
   --log-level <value>
       Set log level (parent, children, category, sinks, parentSinks, filters, lowestLevel, contextLocalStorage)
   --log-file <value>
@@ -1172,8 +1171,9 @@ Commands:
       status    Show OAuth status for an MCP server
     doctor      Check MCP server status
     approve     Approve a workspace MCP server
-  config        Manage Amp configuration
-    edit        Open the Amp settings file in $EDITOR
+  config        Manage Rika configuration
+    list        Print effective configuration with sources
+    edit        Open the Rika settings file in $EDITOR
     keymap      List command keymap entries
   project       Project management commands
     create      Create a project for a repository
