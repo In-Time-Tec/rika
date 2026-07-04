@@ -32,6 +32,7 @@ import { HttpServer, OrbMirror, PresenceHub, RemoteControl } from "@rika/server"
 import {
   ChangedDraft,
   ChangedDraftMode,
+  ChangedThreadSearchQuery,
   ClickedInterrupt,
   ClickedKillOrb,
   ClickedPauseOrb,
@@ -263,6 +264,46 @@ describe("web local sync e2e", () => {
 
       const started = webModel.events.find(isTurnStartedEvent)
       expect(started?.data.mode).toBe("deep2")
+    } finally {
+      await Effect.runPromise(handle.close())
+      await runtime.dispose()
+    }
+  })
+
+  test("web sidebar search loads matching fixture threads through the HTTP server", async () => {
+    const searchMatchThreadId = Ids.ThreadId.make("thread_web_search_match")
+    const searchMissThreadId = Ids.ThreadId.make("thread_web_search_miss")
+    const runtime = ManagedRuntime.make(makeLayer())
+    const handle = await runtime.runPromise(HttpServer.serve({ host: "127.0.0.1", port: 0 }))
+    try {
+      const api = client(handle.url)
+      await Effect.runPromise(api.createThread({ thread_id: searchMatchThreadId, workspace_id: workspaceId }))
+      await Effect.runPromise(api.createThread({ thread_id: searchMissThreadId, workspace_id: workspaceId }))
+      const matchEvents = collectTurnForThread(api, searchMatchThreadId, 1)
+      await Effect.runPromise(
+        api.startTurn({
+          thread_id: searchMatchThreadId,
+          workspace_id: workspaceId,
+          content: "neural cache index",
+        }),
+      )
+      await matchEvents
+      const missEvents = collectTurnForThread(api, searchMissThreadId, 1)
+      await Effect.runPromise(
+        api.startTurn({
+          thread_id: searchMissThreadId,
+          workspace_id: workspaceId,
+          content: "unrelated settings",
+        }),
+      )
+      await missEvents
+
+      let webModel = await openWebModel(handle.url, searchMatchThreadId)
+      const [searching, commands] = update(webModel, ChangedThreadSearchQuery({ value: "neural" }))
+      webModel = await runCommands(searching, commands)
+
+      expect(commands.map((command) => command.name)).toEqual(["SearchThreads"])
+      expect(webModel.threads.map((thread) => thread.thread_id)).toEqual([searchMatchThreadId])
     } finally {
       await Effect.runPromise(handle.close())
       await runtime.dispose()
@@ -502,9 +543,11 @@ const toOrbProvisionError = (step: string, orbId: Ids.OrbId | undefined, error: 
     ...(orbId === undefined ? {} : { orb_id: orbId }),
   })
 
-const collectTurn = (sdk: Client.Interface, afterSequence: number) =>
+const collectTurn = (sdk: Client.Interface, afterSequence: number) => collectTurnForThread(sdk, threadId, afterSequence)
+
+const collectTurnForThread = (sdk: Client.Interface, targetThreadId: Ids.ThreadId, afterSequence: number) =>
   Effect.runPromise(
-    sdk.subscribeThreadEvents({ thread_id: threadId, after_sequence: afterSequence }).pipe(
+    sdk.subscribeThreadEvents({ thread_id: targetThreadId, after_sequence: afterSequence }).pipe(
       Stream.takeUntil((event) => event.type === "turn.completed" || event.type === "turn.failed"),
       Stream.runCollect,
       Effect.timeout("5 seconds"),

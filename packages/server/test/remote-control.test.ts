@@ -1610,6 +1610,56 @@ describe("remote control API and SDK", () => {
     expect(result.searched.map((item) => item.summary.thread_id)).toEqual([visibleThreadId])
   })
 
+  test("remote authenticated search honors archived query filters before visibility prefiltering", async () => {
+    const runtime = ManagedRuntime.make(makeLayer())
+    const archivedSearchThreadId = Ids.ThreadId.make("thread_remote_archived_search_filter")
+    const archivedSearchTurnId = Ids.TurnId.make("turn_remote_archived_search_filter")
+
+    const result = await runtime.runPromise(
+      Effect.gen(function* () {
+        const remote = yield* RemoteControl.Service
+        yield* remote.createThread({
+          thread_id: archivedSearchThreadId,
+          workspace_id: workspaceId,
+          user_id: ownerId,
+          authorization_user_id: ownerId,
+        })
+        yield* appendProjected({
+          id: Ids.EventId.make("event_remote_archived_search_message"),
+          thread_id: archivedSearchThreadId,
+          turn_id: archivedSearchTurnId,
+          sequence: 2,
+          version: 1,
+          created_at: now,
+          type: "message.added",
+          data: {
+            message: {
+              id: Ids.MessageId.make("message_remote_archived_search"),
+              thread_id: archivedSearchThreadId,
+              turn_id: archivedSearchTurnId,
+              role: "user",
+              created_at: now,
+              content: [{ type: "text", text: "needle archived remote search" }],
+            },
+          },
+        })
+        yield* remote.archiveThread({
+          thread_id: archivedSearchThreadId,
+          user_id: ownerId,
+          authorization_user_id: ownerId,
+        })
+        return yield* remote.searchThreads({
+          query: "needle archived:true",
+          include_archived: false,
+          user_id: ownerId,
+          authorization_user_id: ownerId,
+        })
+      }),
+    )
+
+    expect(result.map((item) => item.summary.thread_id)).toEqual([archivedSearchThreadId])
+  })
+
   test("remote thread visibility gates user writes", async () => {
     const runtime = ManagedRuntime.make(makeLayer())
     const result = await runtime.runPromise(

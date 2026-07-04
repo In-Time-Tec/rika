@@ -203,6 +203,22 @@ describe("web app view", () => {
       Scene.expect(Scene.text("sarah › hello from Sarah")).toExist(),
     )
   })
+
+  test("renders sidebar thread search controls", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({
+        ...initialModel({ api_base_url: "/api/rika" }),
+        threads: [summary(threadId)],
+        thread_search_query: "file:src/view.ts",
+        thread_search_window: "72h",
+      }),
+      Scene.expect(Scene.role("searchbox", { name: "Thread search" })).toExist(),
+      Scene.expect(Scene.displayValue("file:src/view.ts")).toExist(),
+      Scene.expect(Scene.role("combobox", { name: "Thread search window" })).toExist(),
+      Scene.expect(Scene.text("72h")).toExist(),
+    )
+  })
 })
 
 const orbModel = (selected_orb_tab: OrbTab, activeIndex: number): Model => {

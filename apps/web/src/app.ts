@@ -1,4 +1,4 @@
-import { Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
+import { Common, Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
 import { Client } from "@rika/sdk"
 import * as ModelInfo from "@rika/llm/model-info"
 import { parsePatchFiles } from "@pierre/diffs"
@@ -97,6 +97,8 @@ export type OrbChangesModel = typeof OrbChangesModel.Type
 export const OrbTerminalStatusSchema = S.Literals(["idle", "connecting", "connected", "disconnected", "failed"])
 export const ActiveView = S.Literals(["threads", "projects"])
 export type ActiveView = typeof ActiveView.Type
+export const ThreadSearchWindow = S.Literals(["24h", "72h", "7d", "all"])
+export type ThreadSearchWindow = typeof ThreadSearchWindow.Type
 export const ProjectField = S.Literals(["name", "repo_origin", "default_branch", "template_id"])
 export type ProjectField = typeof ProjectField.Type
 export const ProjectSecretField = S.Literals(["name", "value"])
@@ -126,6 +128,8 @@ export const Model = S.Struct({
   active_view: ActiveView,
   connection: Connection,
   threads: S.Array(Remote.ThreadSummary),
+  thread_search_query: S.String,
+  thread_search_window: ThreadSearchWindow,
   projects: S.Array(Remote.ProjectSummary),
   selected_project_id: S.optional(Ids.ProjectId),
   selected_project: S.optional(Remote.ProjectDetail),
@@ -200,6 +204,8 @@ export const LoadedBackendHealth = m("LoadedBackendHealth", { health: Remote.Bac
 export const FailedBackendHealth = m("FailedBackendHealth", { message: S.String })
 export const LoadedThreads = m("LoadedThreads", { threads: S.Array(Remote.ThreadSummary) })
 export const FailedLoadThreads = m("FailedLoadThreads", { message: S.String })
+export const ChangedThreadSearchQuery = m("ChangedThreadSearchQuery", { value: S.String })
+export const ChangedThreadSearchWindow = m("ChangedThreadSearchWindow", { value: S.String })
 export const ClickedThread = m("ClickedThread", { thread_id: Ids.ThreadId })
 export const ClickedNewThread = m("ClickedNewThread")
 export const CreatedThread = m("CreatedThread", { summary: Remote.ThreadSummary })
@@ -271,6 +277,8 @@ const BackendMessage = S.Union([
   FailedBackendHealth,
   LoadedThreads,
   FailedLoadThreads,
+  ChangedThreadSearchQuery,
+  ChangedThreadSearchWindow,
   ClickedThread,
   ClickedNewThread,
   CreatedThread,
@@ -520,6 +528,20 @@ export const LoadThreads = Command.define(
     .listThreads({ include_archived: false })
     .pipe(
       Effect.map((threads) => LoadedThreads({ threads })),
+      Effect.catch((error) => Effect.succeed(FailedLoadThreads({ message: error.message }))),
+    ),
+)
+
+export const SearchThreads = Command.define(
+  "SearchThreads",
+  { api_base_url: S.String, query: S.String, window: ThreadSearchWindow },
+  LoadedThreads,
+  FailedLoadThreads,
+)(({ api_base_url, query, window }) =>
+  sdk(api_base_url)
+    .searchThreads(searchThreadsRequest(query, window))
+    .pipe(
+      Effect.map((results) => LoadedThreads({ threads: results.map((result) => result.summary) })),
       Effect.catch((error) => Effect.succeed(FailedLoadThreads({ message: error.message }))),
     ),
 )
@@ -826,6 +848,8 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   active_view: "threads",
   connection: "idle",
   threads: [],
+  thread_search_query: "",
+  thread_search_window: "all",
   projects: [],
   project_form: emptyProjectForm(),
   new_project_form: emptyNewProjectForm(),
@@ -872,6 +896,19 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     }
     case "FailedLoadThreads":
       return [{ ...model, connection: "failed", notice: message.message }, []]
+    case "ChangedThreadSearchQuery": {
+      const next = { ...model, thread_search_query: message.value, active_view: "threads" as const, notice: undefined }
+      return [next, [searchThreadsCommand(next)]]
+    }
+    case "ChangedThreadSearchWindow": {
+      const next = {
+        ...model,
+        thread_search_window: threadSearchWindowFromValue(message.value),
+        active_view: "threads" as const,
+        notice: undefined,
+      }
+      return [next, [searchThreadsCommand(next)]]
+    }
     case "ClickedThread":
       return openThreadModel(model, message.thread_id)
     case "ClickedNewThread":
@@ -1335,6 +1372,31 @@ const sdk = (apiBaseUrl: string, userId?: Ids.UserId) =>
 
 const orbSdk = (apiBaseUrl: string, threadId: Ids.ThreadId) =>
   sdk(`${apiBaseUrl.replace(/\/$/, "")}/orb/by-thread/${encodeURIComponent(threadId)}`)
+
+const searchThreadsCommand = (model: Model): AppCommand =>
+  SearchThreads({
+    api_base_url: model.api_base_url,
+    query: model.thread_search_query,
+    window: model.thread_search_window,
+  })
+
+const searchThreadsRequest = (query: string, window: ThreadSearchWindow): Remote.SearchThreadsRequest => {
+  const trimmed = query.trim()
+  return {
+    ...(trimmed.length === 0 ? {} : { query: trimmed }),
+    include_archived: false,
+    ...searchWindowAfter(window),
+  }
+}
+
+const searchWindowAfter = (window: ThreadSearchWindow): Pick<Remote.SearchThreadsRequest, "after"> => {
+  if (window === "all") return {}
+  const delta = window === "24h" ? 24 : window === "72h" ? 72 : 7 * 24
+  return { after: Common.TimestampMillis.make(Date.now() - delta * 60 * 60 * 1_000) }
+}
+
+const threadSearchWindowFromValue = (value: string): ThreadSearchWindow =>
+  value === "24h" || value === "72h" || value === "7d" || value === "all" ? value : "all"
 
 const emptyProjectForm = (): ProjectForm => ({
   name: "",

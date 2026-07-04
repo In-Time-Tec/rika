@@ -415,9 +415,13 @@ describe("CLI runtime", () => {
       )
 
       expect(exitCode).toBe(0)
-      expect(output.stdout.join("")).toBe(Help.threadsSearchHelpStdoutText())
+      const stdout = output.stdout.join("")
+      expect(stdout).toBe(Help.threadsSearchHelpStdoutText())
+      expect(stdout).toContain("file:src/foo.ts after:7d archived:false project:backend")
+      expect(stdout).not.toContain("repo:")
+      expect(stdout).not.toContain("ref:")
       expect(output.stderr.join("")).toBe(Help.terminalResetText)
-      expect(output.stdout.join("").endsWith("\n\n")).toBe(true)
+      expect(stdout.endsWith("\n\n")).toBe(true)
       expect(output.stderr.join("").endsWith("\n")).toBe(false)
     }
   })

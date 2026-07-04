@@ -1,5 +1,5 @@
 import { Common, Event, Ids, Message } from "@rika/schema"
-import { Option } from "effect"
+import { Option, Schema } from "effect"
 
 export const maxDigestChars = 4_000
 
@@ -51,6 +51,11 @@ export const pathsFromEvent = (event: Event.Event): ReadonlyArray<string> => {
   if (event.type === "context.resolved") {
     return event.data.entries.flatMap((entry) => (entry.path === undefined ? [] : [entry.path]))
   }
+  if (event.type === "tool.call.requested") return pathsFromJson(event.data.call.input)
+  if (event.type === "tool.call.input.ended") {
+    const parsed = parseJson(event.data.input_text)
+    return parsed === undefined ? [] : pathsFromJson(parsed)
+  }
   if (event.type === "tool.call.completed" && event.data.result.output !== undefined) {
     return pathsFromJson(event.data.result.output)
   }
@@ -58,13 +63,11 @@ export const pathsFromEvent = (event: Event.Event): ReadonlyArray<string> => {
 }
 
 export const pathsFromJson = (value: Common.JsonValue): ReadonlyArray<string> => {
-  if (typeof value === "string") return looksLikePath(value) ? [value] : []
+  if (typeof value === "string") return looksLikePath(value) ? [normalizePath(value)] : []
   if (Array.isArray(value)) return value.flatMap(pathsFromJson)
   if (!isJsonObject(value)) return []
   return Object.entries(value).flatMap(([key, child]) =>
-    (key === "path" || key === "file" || key === "filename") && typeof child === "string" && looksLikePath(child)
-      ? [child]
-      : pathsFromJson(child),
+    isPathKey(key) && typeof child === "string" && looksLikePath(child) ? [normalizePath(child)] : pathsFromJson(child),
   )
 }
 
@@ -93,6 +96,22 @@ const truncateBody = (body: string, limit: number) => {
 
 const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim()
-const looksLikePath = (value: string) => value.includes("/") || /\.[A-Za-z0-9]+$/.test(value)
+const isPathKey = (key: string) =>
+  key === "path" || key === "file" || key === "filename" || key === "file_path" || key === "filepath"
+const normalizePath = (value: string) => value.trim().replace(/\\/g, "/").replace(/^\.\//, "")
+const looksLikePath = (value: string) => {
+  const normalized = normalizePath(value)
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) return false
+  return normalized.includes("/") || /\.[A-Za-z0-9]+$/.test(normalized)
+}
 const isJsonObject = (value: Common.JsonValue | undefined): value is Record<string, Common.JsonValue> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const parseJson = (value: string): Common.JsonValue | undefined => {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return Option.getOrUndefined(Schema.decodeUnknownOption(Common.JsonValue)(parsed))
+  } catch {
+    return undefined
+  }
+}

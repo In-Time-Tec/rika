@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { Config, IdGenerator, Time } from "@rika/core"
-import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { Database, Migration, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Artifact, Common, Event, Ids, Message } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { ThreadService } from "../src/index"
@@ -20,15 +20,25 @@ const configLayer = Config.layerFromValues({
   data_dir: "/workspace/rika-thread-service-test/.rika",
   default_mode: "smart",
 })
+const databaseLayer = Database.memoryLayer
+const timeLayer = Time.fixedLayer(now)
+const idLayer = IdGenerator.sequenceLayer(1)
+const projectStoreLayer = ProjectStore.layer.pipe(
+  Layer.provideMerge(configLayer),
+  Layer.provideMerge(databaseLayer),
+  Layer.provideMerge(timeLayer),
+  Layer.provideMerge(idLayer),
+)
 
 const services = Layer.mergeAll(
   configLayer,
-  Database.memoryLayer,
+  databaseLayer,
   Migration.layer,
+  projectStoreLayer,
   ThreadEventLog.layer,
   ThreadProjection.layer,
-  Time.fixedLayer(now),
-  IdGenerator.sequenceLayer(1),
+  timeLayer,
+  idLayer,
 )
 
 const layer = ThreadService.layer.pipe(Layer.provideMerge(services))
@@ -128,6 +138,55 @@ describe("ThreadService", () => {
 
     expect(result.candidateSearch).toEqual([])
     expect(result.fullSearch.map((item) => item.summary.thread_id)).toEqual([hiddenThreadId])
+  })
+
+  test("search consumes file, archived, project, and relative time filters from the query string", async () => {
+    const activeThreadId = Ids.ThreadId.make("thread_service_search_active")
+    const archivedThreadId = Ids.ThreadId.make("thread_service_search_archived")
+    const staleThreadId = Ids.ThreadId.make("thread_service_search_stale")
+    const otherWorkspaceThreadId = Ids.ThreadId.make("thread_service_search_other_workspace")
+    const recent = Common.TimestampMillis.make(now - 86_400_000)
+    const stale = Common.TimestampMillis.make(now - 10 * 86_400_000)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const project = yield* ProjectStore.create({
+          name: "backend",
+          repo_origin: "https://github.com/example/backend.git",
+        })
+        const projectWorkspaceId = Ids.WorkspaceId.make(`project:${project.project_id}`)
+        for (const event of [
+          searchThreadCreated(activeThreadId, projectWorkspaceId, recent, "active"),
+          toolRequestedForThread(activeThreadId, 2, recent, "packages/server/src/search.ts", "active"),
+          searchMessageAdded(activeThreadId, 3, recent, "needle active", "active"),
+          searchThreadCreated(archivedThreadId, projectWorkspaceId, recent, "archived"),
+          toolRequestedForThread(archivedThreadId, 2, recent, "packages/server/src/search.ts", "archived"),
+          searchMessageAdded(archivedThreadId, 3, recent, "needle archived", "archived"),
+          threadArchivedForThread(archivedThreadId, 4, recent, "archived"),
+          searchThreadCreated(staleThreadId, projectWorkspaceId, stale, "stale"),
+          toolRequestedForThread(staleThreadId, 2, stale, "packages/server/src/search.ts", "stale"),
+          searchMessageAdded(staleThreadId, 3, stale, "needle stale", "stale"),
+          searchThreadCreated(otherWorkspaceThreadId, workspaceId, recent, "other"),
+          toolRequestedForThread(otherWorkspaceThreadId, 2, recent, "packages/server/src/search.ts", "other"),
+          searchMessageAdded(otherWorkspaceThreadId, 3, recent, "needle other", "other"),
+        ]) {
+          yield* appendProjected(event)
+        }
+
+        const filtered = yield* ThreadService.search({
+          query: "needle file:packages/server/**/*.ts archived:false after:7d project:backend",
+        })
+        const archived = yield* ThreadService.search({
+          query: "needle archived:true",
+          include_archived: false,
+        })
+        return { filtered, archived }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.filtered.map((item) => item.summary.thread_id)).toEqual([activeThreadId])
+    expect(result.archived.map((item) => item.summary.thread_id)).toEqual([archivedThreadId])
   })
 
   test("enriches stored context usage with model context window", async () => {
@@ -465,4 +524,82 @@ const messageAdded = (
       content,
     }),
   },
+})
+
+const searchThreadCreated = (
+  searchThreadId: Ids.ThreadId,
+  searchWorkspaceId: Ids.WorkspaceId,
+  createdAt: Common.TimestampMillis,
+  suffix: string,
+): Event.ThreadCreated => ({
+  id: Ids.EventId.make(`thread_service_search_created_${suffix}`),
+  thread_id: searchThreadId,
+  sequence: 1,
+  version: 1,
+  created_at: createdAt,
+  type: "thread.created",
+  data: { workspace_id: searchWorkspaceId },
+})
+
+const searchMessageAdded = (
+  searchThreadId: Ids.ThreadId,
+  sequence: number,
+  createdAt: Common.TimestampMillis,
+  content: string,
+  suffix: string,
+): Event.MessageAdded => ({
+  id: Ids.EventId.make(`thread_service_search_message_${suffix}`),
+  thread_id: searchThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: createdAt,
+  type: "message.added",
+  data: {
+    message: Message.user({
+      id: Ids.MessageId.make(`thread_service_search_message_${suffix}`),
+      thread_id: searchThreadId,
+      turn_id: turnId,
+      created_at: createdAt,
+      content,
+    }),
+  },
+})
+
+const toolRequestedForThread = (
+  searchThreadId: Ids.ThreadId,
+  sequence: number,
+  createdAt: Common.TimestampMillis,
+  path: string,
+  suffix: string,
+): Event.ToolCallRequested => ({
+  id: Ids.EventId.make(`thread_service_search_tool_${suffix}`),
+  thread_id: searchThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: createdAt,
+  type: "tool.call.requested",
+  data: {
+    call: {
+      id: Ids.ToolCallId.make(`thread_service_search_tool_${suffix}`),
+      name: "edit",
+      input: { path, replacement: "ok" },
+    },
+  },
+})
+
+const threadArchivedForThread = (
+  searchThreadId: Ids.ThreadId,
+  sequence: number,
+  createdAt: Common.TimestampMillis,
+  suffix: string,
+): Event.ThreadArchived => ({
+  id: Ids.EventId.make(`thread_service_search_archived_${suffix}`),
+  thread_id: searchThreadId,
+  sequence,
+  version: 1,
+  created_at: createdAt,
+  type: "thread.archived",
+  data: {},
 })

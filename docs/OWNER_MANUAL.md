@@ -150,6 +150,8 @@ rika memory status
 rika memory index --workspace /repo
 ```
 
+Thread search treats bare words and quoted phrases as text terms. It also accepts inline filters: `file:<glob>`, `after:<ISO-date|24h|7d>`, `before:<ISO-date|24h|7d>`, `archived:true|false`, and `project:<name>`. In a shell command, escape literal quotes when the phrase itself must reach Rika, such as `rika threads search '"auth race"'`.
+
 Interactive slash commands mirror the core lifecycle: `/threads`, `/search`, `/thread`, `/new`, `/archive`, `/unarchive`, `/compact`, `/share`, and `/reference`.
 
 ## Files, images, and context

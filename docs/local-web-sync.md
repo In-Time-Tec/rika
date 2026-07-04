@@ -47,6 +47,8 @@ http://127.0.0.1:4590/?thread=<thread-id>
 
 Set the browser identity with `?user_id=<name>` or `VITE_RIKA_USER_ID`. The value is used for attribution and presence only; it is not an authorization credential.
 
+The sidebar search input calls `GET /v1/threads/search` and accepts the same thread search filters as the CLI. The adjacent window selector applies `24h`, `72h`, `7d`, or `all` by setting the search `after` bound.
+
 The Vite development server exposes `/api/rika/*`. That proxy reads `<workspace>/.rika/local-backend.json`, forwards requests to the current shared backend, injects the backend token server-side, and streams NDJSON responses through to the browser. The token is not exposed to browser code.
 
 Set `RIKA_WORKSPACE_ROOT` or `RIKA_DATA_DIR` when the web dev server should follow a workspace other than the repository root. Set `VITE_RIKA_API_BASE_URL` only when intentionally bypassing the local Vite proxy.

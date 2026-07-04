@@ -16,6 +16,7 @@ import {
   Database,
   McpApprovalStore,
   Migration,
+  ProjectStore,
   ThreadEventLog,
   ThreadMemoryStore,
   ThreadProjection,
@@ -49,6 +50,7 @@ type ServiceLayerOutput =
   | Migration.Service
   | McpApprovalStore.Service
   | PluginHost.Service
+  | ProjectStore.Service
   | Router.Service
   | SecretRedactor.Service
   | Settings.Service
@@ -75,6 +77,7 @@ type ServiceLayerError =
   | McpClient.RunError
   | Migration.MigrationError
   | PluginHost.RunError
+  | ProjectStore.ProjectStoreError
 
 export const serviceLayerFromEnv = (
   env: Record<string, string | undefined> = process.env,
@@ -91,6 +94,12 @@ export const serviceLayerFromEnv = (
   )
   const configuredWorkspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
   const configuredMemoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
+  const configuredProjectStoreLayer = ProjectStore.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(configuredDatabaseLayer),
+    Layer.provideMerge(configuredTimeLayer),
+    Layer.provideMerge(IdGenerator.layer),
+  )
   const configuredLlmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(Layer.provideMerge(configLayer))
   const configuredEmbeddingsLayer = Embeddings.layer(
     Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
@@ -114,6 +123,7 @@ export const serviceLayerFromEnv = (
     configuredSettingsLayer,
     ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     configuredMemoryStoreLayer,
+    configuredProjectStoreLayer,
     ThreadProjection.layer,
     configuredWorkspaceStoreLayer,
     configuredTimeLayer,

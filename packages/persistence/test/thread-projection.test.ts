@@ -109,6 +109,28 @@ describe("ThreadProjection", () => {
     })
   })
 
+  test("projects thread files from tool call input and rebuilds them from the event log", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        for (const event of [...projectionEvents(), toolRequestedEvent()]) {
+          const appended = yield* ThreadEventLog.append(event)
+          yield* ThreadProjection.apply(appended)
+        }
+        const applied = yield* ThreadProjection.listThreadFiles({ thread_id: threadId })
+        yield* ThreadProjection.clear()
+        const cleared = yield* ThreadProjection.listThreadFiles({ thread_id: threadId })
+        yield* ThreadProjection.rebuild()
+        const rebuilt = yield* ThreadProjection.listThreadFiles({ thread_id: threadId })
+        return { applied, cleared, rebuilt }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.applied.map((file) => file.path)).toEqual(["packages/server/src/search.ts"])
+    expect(result.cleared).toEqual([])
+    expect(result.rebuilt).toEqual(result.applied)
+  })
+
   test("projects latest context tokens and model attribution", async () => {
     const summary = await Effect.runPromise(
       Effect.gen(function* () {
@@ -346,6 +368,23 @@ const toolCompletedEvent = (): Event.ToolCallCompleted => ({
       name: "edit",
       status: "success",
       output: pierreDiff(),
+    },
+  },
+})
+
+const toolRequestedEvent = (): Event.ToolCallRequested => ({
+  id: Ids.EventId.make("projection_tool_requested"),
+  thread_id: threadId,
+  turn_id: turnId,
+  sequence: 5,
+  version: 1,
+  created_at: 5,
+  type: "tool.call.requested",
+  data: {
+    call: {
+      id: Ids.ToolCallId.make("projection_tool_requested"),
+      name: "edit",
+      input: { path: "packages/server/src/search.ts", replacement: "ok" },
     },
   },
 })

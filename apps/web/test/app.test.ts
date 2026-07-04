@@ -8,6 +8,8 @@ import {
   ChangedProjectSecretField,
   CancelledDeleteProjectSecret,
   CancelledKillOrb,
+  ChangedThreadSearchQuery,
+  ChangedThreadSearchWindow,
   ClickedInterrupt,
   ClickedDeleteProjectSecret,
   ClickedProject,
@@ -659,6 +661,31 @@ describe("web app state", () => {
 
     expect(next.selected_thread_id).toBe(threadId)
     expect(commands.map((command) => command.name)).toEqual(["OpenThread"])
+  })
+
+  test("searches threads with the sidebar query and time window", () => {
+    const [searched, searchCommands] = update(
+      initialModel({ api_base_url: "/api/rika" }),
+      ChangedThreadSearchQuery({ value: "file:src/app.ts auth" }),
+    )
+    const [windowed, windowCommands] = update(searched, ChangedThreadSearchWindow({ value: "24h" }))
+    const [loaded] = update(windowed, LoadedThreads({ threads: [summary(threadId)] }))
+
+    expect(searched.thread_search_query).toBe("file:src/app.ts auth")
+    expect(searchCommands.map((command) => command.name)).toEqual(["SearchThreads"])
+    expect(searchCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      query: "file:src/app.ts auth",
+      window: "all",
+    })
+    expect(windowed.thread_search_window).toBe("24h")
+    expect(windowCommands.map((command) => command.name)).toEqual(["SearchThreads"])
+    expect(windowCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      query: "file:src/app.ts auth",
+      window: "24h",
+    })
+    expect(loaded.threads.map((thread) => thread.thread_id)).toEqual([threadId])
   })
 
   test("clicking a thread resets subscription state until its durable record opens", () => {

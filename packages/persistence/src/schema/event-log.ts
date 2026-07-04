@@ -60,6 +60,24 @@ export const thread_projections = sqliteTable(
 export type ThreadProjectionRow = typeof thread_projections.$inferSelect
 export type NewThreadProjectionRow = typeof thread_projections.$inferInsert
 
+export const thread_files = sqliteTable(
+  "thread_files",
+  {
+    thread_id: text().notNull(),
+    path: text().notNull(),
+    first_seen_at: integer().notNull(),
+    last_seen_at: integer().notNull(),
+  },
+  (table) => [
+    uniqueIndex("thread_files_thread_path_idx").on(table.thread_id, table.path),
+    index("thread_files_path_idx").on(table.path),
+    index("thread_files_thread_idx").on(table.thread_id),
+  ],
+)
+
+export type ThreadFileRow = typeof thread_files.$inferSelect
+export type NewThreadFileRow = typeof thread_files.$inferInsert
+
 export const thread_memory_chunks = sqliteTable(
   "thread_memory_chunks",
   {

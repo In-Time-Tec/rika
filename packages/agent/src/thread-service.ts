@@ -1,9 +1,10 @@
 import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { ModelInfo } from "@rika/llm"
-import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { Database, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as ThreadDigest from "./thread-digest"
+import * as ThreadSearchQuery from "./thread-search-query"
 
 const defaultReferenceChars = 2_000
 const defaultSearchLimit = 20
@@ -143,6 +144,7 @@ export type Error =
   | ThreadForkError
   | Config.ConfigError
   | Database.DatabaseError
+  | ProjectStore.ProjectStoreError
   | ThreadEventLog.ThreadEventLogError
   | ThreadProjection.ThreadProjectionError
 
@@ -168,6 +170,7 @@ interface Dependencies {
   readonly database: Database.Interface
   readonly eventLog: ThreadEventLog.Interface
   readonly projection: ThreadProjection.Interface
+  readonly projectStore?: ProjectStore.Interface
   readonly idGenerator: IdGenerator.Interface
   readonly time: Time.Interface
 }
@@ -179,9 +182,18 @@ export const layer = Layer.effect(
     const database = yield* Database.Service
     const eventLog = yield* ThreadEventLog.Service
     const projection = yield* ThreadProjection.Service
+    const projectStore = Option.getOrUndefined(yield* Effect.serviceOption(ProjectStore.Service))
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
-    const dependencies: Dependencies = { config, database, eventLog, projection, idGenerator, time }
+    const dependencies: Dependencies = {
+      config,
+      database,
+      eventLog,
+      projection,
+      ...(projectStore === undefined ? {} : { projectStore }),
+      idGenerator,
+      time,
+    }
 
     return Service.of({
       create: Effect.fn("ThreadService.create")(function* (input: CreateInput) {
@@ -471,12 +483,40 @@ const setVisibilityInternal = (dependencies: Dependencies, input: SetVisibilityI
 
 const searchThreads = (dependencies: Dependencies, input: SearchInput) =>
   Effect.gen(function* () {
-    const summaries = yield* searchCandidateSummaries(dependencies, input)
-    const terms = tokenize(input.query ?? "")
+    const parsed = ThreadSearchQuery.parseThreadSearchQuery(input.query ?? "")
+    const now = yield* dependencies.time.nowMillis
+    const projectWorkspaceId = yield* resolveProjectWorkspaceId(dependencies, parsed.project)
+    if (parsed.project !== undefined && projectWorkspaceId === undefined) return []
+    if (
+      input.workspace_id !== undefined &&
+      projectWorkspaceId !== undefined &&
+      input.workspace_id !== projectWorkspaceId
+    ) {
+      return []
+    }
+    const fileThreadIds = yield* matchingFileThreadIds(dependencies, parsed.file_globs, input.thread_ids)
+    if (parsed.file_globs.length > 0 && fileThreadIds !== undefined && fileThreadIds.size === 0) return []
+    const threadIds = combineThreadIds(input.thread_ids, fileThreadIds)
+    if (parsed.file_globs.length > 0 && threadIds !== undefined && threadIds.length === 0) return []
+    const includeArchived = parsed.archived === true ? true : input.include_archived
+    const candidateInput: SearchInput = {
+      ...(input.query === undefined ? {} : { query: input.query }),
+      ...(includeArchived === undefined ? {} : { include_archived: includeArchived }),
+      ...(projectWorkspaceId === undefined && input.workspace_id === undefined
+        ? {}
+        : { workspace_id: projectWorkspaceId ?? input.workspace_id }),
+      ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
+      ...resolvedBound("after", input.after, parsed.after, now),
+      ...resolvedBound("before", input.before, parsed.before, now),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(threadIds === undefined ? {} : { thread_ids: threadIds }),
+    }
+    const summaries = yield* searchCandidateSummaries(dependencies, candidateInput, parsed.archived)
+    const terms = parsed.terms
     let scored: ReadonlyArray<SearchResult>
     if (terms.length === 0) {
       scored = summaries.map((summary) => scoreSummary(summary, [], terms))
-    } else if (input.thread_ids === undefined) {
+    } else if (candidateInput.thread_ids === undefined) {
       scored = yield* scoreSummariesFromAllEvents(dependencies, summaries, terms)
     } else {
       scored = yield* scoreSummariesFromThreadEvents(dependencies, summaries, terms)
@@ -487,7 +527,7 @@ const searchThreads = (dependencies: Dependencies, input: SearchInput) =>
     return results.slice(0, clamp(input.limit ?? defaultSearchLimit, 1, 1_000))
   })
 
-const searchCandidateSummaries = (dependencies: Dependencies, input: SearchInput) =>
+const searchCandidateSummaries = (dependencies: Dependencies, input: SearchInput, archived?: boolean) =>
   Effect.gen(function* () {
     const threadIds =
       input.thread_ids === undefined ? undefined : new Set(input.thread_ids.map((threadId) => String(threadId)))
@@ -496,6 +536,7 @@ const searchCandidateSummaries = (dependencies: Dependencies, input: SearchInput
       .pipe(Effect.provideService(Database.Service, dependencies.database))
     return summaries
       .filter((summary) => input.include_archived === true || !summary.archived)
+      .filter((summary) => archived === undefined || summary.archived === archived)
       .filter((summary) => input.workspace_id === undefined || summary.workspace_id === input.workspace_id)
       .filter((summary) => threadIds === undefined || threadIds.has(String(summary.thread_id)))
       .filter((summary) => input.user_id === undefined || summary.user_id === input.user_id)
@@ -573,7 +614,7 @@ const referenceThread = (dependencies: Dependencies, input: ReferenceInput) =>
   Effect.gen(function* () {
     const record = yield* openThread(dependencies, input.thread_id)
     const maxChars = clamp(input.max_chars ?? defaultReferenceChars, 400, 10_000)
-    const entries = referenceEntries(record, tokenize(input.query ?? ""))
+    const entries = referenceEntries(record, ThreadSearchQuery.parseThreadSearchQuery(input.query ?? "").terms)
     const rendered = capText(entries.join("\n"), maxChars)
     return {
       thread_id: input.thread_id,
@@ -633,6 +674,70 @@ const searchableFields = (summary: ThreadSummary, events: ReadonlyArray<Event.Ev
     ...ThreadDigest.toolEntries(events),
     ...events.map((event) => JSON.stringify(event.metadata ?? {})),
   ]).filter((value) => value.length > 0)
+
+const resolveProjectWorkspaceId = (dependencies: Dependencies, projectName: string | undefined) =>
+  Effect.gen(function* () {
+    if (projectName === undefined || dependencies.projectStore === undefined) return undefined
+    const project = yield* dependencies.projectStore.getByName(projectName)
+    return project === undefined ? undefined : Ids.WorkspaceId.make(`project:${project.project_id}`)
+  })
+
+const matchingFileThreadIds = (
+  dependencies: Dependencies,
+  fileGlobs: ReadonlyArray<string>,
+  threadIds: ReadonlyArray<Ids.ThreadId> | undefined,
+) =>
+  fileGlobs.length === 0
+    ? Effect.succeed(undefined)
+    : dependencies.projection.listThreadFiles(threadIds === undefined ? {} : { thread_ids: threadIds }).pipe(
+        Effect.provideService(Database.Service, dependencies.database),
+        Effect.map(
+          (files) =>
+            new Set(
+              files
+                .filter((file) => fileGlobs.some((glob) => ThreadSearchQuery.matchesFileGlob(file.path, glob)))
+                .map((file) => file.thread_id),
+            ),
+        ),
+      )
+
+const combineThreadIds = (
+  inputThreadIds: ReadonlyArray<Ids.ThreadId> | undefined,
+  fileThreadIds: ReadonlySet<Ids.ThreadId> | undefined,
+): ReadonlyArray<Ids.ThreadId> | undefined => {
+  if (fileThreadIds === undefined) return inputThreadIds
+  if (inputThreadIds === undefined) return [...fileThreadIds]
+  return inputThreadIds.filter((threadId) => fileThreadIds.has(threadId))
+}
+
+const resolvedBound = (
+  key: "after" | "before",
+  input: Common.TimestampMillis | undefined,
+  parsed: ThreadSearchQuery.DateFilter | undefined,
+  now: Common.TimestampMillis,
+) => {
+  const parsedMillis = parsed === undefined ? undefined : ThreadSearchQuery.resolveDateFilter(parsed, now)
+  const value = key === "after" ? maxTimestamp(input, parsedMillis) : minTimestamp(input, parsedMillis)
+  return value === undefined ? {} : { [key]: value }
+}
+
+const maxTimestamp = (
+  left: Common.TimestampMillis | undefined,
+  right: Common.TimestampMillis | undefined,
+): Common.TimestampMillis | undefined => {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return Common.TimestampMillis.make(Math.max(left, right))
+}
+
+const minTimestamp = (
+  left: Common.TimestampMillis | undefined,
+  right: Common.TimestampMillis | undefined,
+): Common.TimestampMillis | undefined => {
+  if (left === undefined) return right
+  if (right === undefined) return left
+  return Common.TimestampMillis.make(Math.min(left, right))
+}
 
 const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
   Effect.gen(function* () {
@@ -789,15 +894,6 @@ const groupEventsByThread = (events: ReadonlyArray<Event.Event>) => {
   }
   return grouped
 }
-
-const tokenize = (query: string) =>
-  uniqueStrings(
-    query
-      .toLowerCase()
-      .split(/\s+/)
-      .map((term) => term.trim())
-      .filter(Boolean),
-  )
 
 const firstAndLast = (values: ReadonlyArray<string>, limit: number) => {
   if (values.length <= limit) return values

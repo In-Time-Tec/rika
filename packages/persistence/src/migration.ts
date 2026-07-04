@@ -3,6 +3,7 @@ import { dirname, join } from "node:path"
 import { Context, Effect, Layer, Schema } from "effect"
 import { migrate as migrateDatabase } from "drizzle-orm/bun-sqlite/migrator"
 import { DatabaseError, Service as DatabaseService, withDatabaseEffect } from "./database"
+import * as ThreadFileProjection from "./thread-file-projection"
 
 export const sourceMigrationsFolder = fileURLToPath(new URL("../drizzle", import.meta.url))
 
@@ -35,7 +36,10 @@ export const layerFromFolder = (migrationsFolder = defaultMigrationsFolder) =>
       migrate: Effect.fn("Migration.migrate")(function* () {
         return yield* withDatabaseEffect((database) =>
           Effect.try({
-            try: () => migrateDatabase(database, { migrationsFolder }),
+            try: () => {
+              migrateDatabase(database, { migrationsFolder })
+              ThreadFileProjection.backfillThreadFiles(database)
+            },
             catch: (cause) =>
               new MigrationError({ message: describeCause(cause), migrations_folder: migrationsFolder }),
           }).pipe(Effect.asVoid),

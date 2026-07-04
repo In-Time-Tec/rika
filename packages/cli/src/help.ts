@@ -519,11 +519,12 @@ Search for threads using a query DSL.
 Query syntax:
 - Keywords: Bare words or quoted phrases for text search: auth or "race condition"
 - File filter: file:path to find threads that touched a file: file:src/auth/login.ts
-- Repo filter: repo:url to scope to a repository: repo:github.com/owner/repo
-- Ref filter: ref:name to scope to a git ref: ref:main
-- Combine filters: Use implicit AND: auth file:src/foo.ts repo:amp ref:main
+- Time filters: after:<ISO-date|24h|7d> and before:<ISO-date|24h|7d>
+- Archive filter: archived:true or archived:false
+- Project filter: project:name to scope to a project workspace
+- Combine filters: Use implicit AND: auth file:src/foo.ts after:7d archived:false project:backend
 
-All matching is case-insensitive. File paths use partial matching.
+Text matching is case-insensitive. File filters accept glob patterns. In a shell command, escape literal quotes when the phrase itself must reach Rika, such as '"race condition"'.
 
 Options:
 

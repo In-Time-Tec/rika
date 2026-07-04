@@ -1,4 +1,11 @@
-import { AgentLoop, CompactionService, ThreadService, WorkspaceAccess, WorkspaceIdentity } from "@rika/agent"
+import {
+  AgentLoop,
+  CompactionService,
+  ThreadSearchQuery,
+  ThreadService,
+  WorkspaceAccess,
+  WorkspaceIdentity,
+} from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { OrbManager } from "@rika/orb"
@@ -482,7 +489,11 @@ export const layerWithLive = Layer.effect(
             withOrbStatus(orbs, result.summary).pipe(Effect.map((summary) => ({ ...result, summary }))),
           )
         }
-        const summaries = yield* projectedThreadsForRequest(input)
+        const parsed = ThreadSearchQuery.parseThreadSearchQuery(input.query ?? "")
+        const summaries = yield* projectedThreadsForRequest({
+          ...input,
+          ...(parsed.archived === true ? { include_archived: true } : {}),
+        })
         const discoverableSummaries = yield* workspaceAccess.filterDiscoverableThreads(summaries, principalUserId)
         const results = yield* threads.search({
           ...(input.query === undefined ? {} : { query: input.query }),

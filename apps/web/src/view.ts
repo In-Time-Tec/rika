@@ -4,6 +4,8 @@ import {
   CancelledKillOrb,
   ChangedDraft,
   ChangedDraftMode,
+  ChangedThreadSearchQuery,
+  ChangedThreadSearchWindow,
   ChangedNewProjectEnvKey,
   ChangedNewProjectEnvValue,
   ChangedNewProjectField,
@@ -55,6 +57,12 @@ const modeOptions: ReadonlyArray<Ui.SelectOption> = [
   { value: "deep2", label: "deep2" },
   { value: "deep3", label: "deep3" },
 ]
+const searchWindowOptions: ReadonlyArray<Ui.SelectOption> = [
+  { value: "24h", label: "24h" },
+  { value: "72h", label: "72h" },
+  { value: "7d", label: "7d" },
+  { value: "all", label: "all" },
+]
 
 export const view = (model: Model): Document => ({
   title: model.selected_thread_id === undefined ? "Rika" : `Rika · ${shortId(model.selected_thread_id)}`,
@@ -77,10 +85,33 @@ const sidebar = (model: Model): Html =>
           Ui.button([H.Type("button"), H.OnClick(ClickedNewThread())], ["New thread"], "ghost"),
         ],
       ),
+      threadSearchControls(model),
       H.nav(
         [H.Class("thread-list"), H.AriaLabel("Threads")],
         model.threads.map((thread) => threadButton(model, thread)),
       ),
+    ],
+  )
+
+const threadSearchControls = (model: Model): Html =>
+  H.div(
+    [H.Class("thread-search")],
+    [
+      H.input([
+        H.Type("search"),
+        H.Value(model.thread_search_query),
+        H.Placeholder("Search threads"),
+        H.AriaLabel("Thread search"),
+        H.OnInput((value) => ChangedThreadSearchQuery({ value })),
+      ]),
+      Ui.select({
+        id: "thread-search-window",
+        value: model.thread_search_window,
+        options: searchWindowOptions,
+        onChange: (value) => ChangedThreadSearchWindow({ value }),
+        attributes: [H.AriaLabel("Thread search window")],
+        class: "thread-search-window",
+      }),
     ],
   )
 
