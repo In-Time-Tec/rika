@@ -171,7 +171,12 @@ CLI skill commands:
 ```bash
 rika skills list
 rika skills inspect <name>
+rika skills add owner/repo/path/to/skill
+rika skills add https://github.com/owner/repo --user
+rika skills remove <name>
 ```
+
+`rika skills add` clones the source with Git, validates `SKILL.md`, installs into `.agents/skills/<name>/` by default, and records provenance in `.agents/skills/skills-lock.json`. Use `--user` to install under `~/.config/rika/skills/<name>/`. Existing skills are not overwritten unless `--force` is set. `rika skills remove` deletes the selected skill directory and its lockfile entry.
 
 ## Code review
 

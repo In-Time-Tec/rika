@@ -620,9 +620,19 @@ describe("CLI args", () => {
   test("parses skill management commands", async () => {
     const list = await Effect.runPromise(Args.parse(["skills", "list"]))
     const inspect = await Effect.runPromise(Args.parse(["skills", "inspect", "deploy"]))
+    const add = await Effect.runPromise(Args.parse(["skills", "add", "owner/repo/path/to/skill", "--user", "--force"]))
+    const remove = await Effect.runPromise(Args.parse(["skills", "remove", "deploy", "--user"]))
 
     expect(list).toEqual({ type: "skills", action: "list" })
     expect(inspect).toEqual({ type: "skills", action: "inspect", name: "deploy" })
+    expect(add).toEqual({
+      type: "skills",
+      action: "add",
+      source: "owner/repo/path/to/skill",
+      user: true,
+      force: true,
+    })
+    expect(remove).toEqual({ type: "skills", action: "remove", name: "deploy", user: true })
   })
 
   test("parses MCP management commands", async () => {

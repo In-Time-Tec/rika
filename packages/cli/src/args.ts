@@ -76,7 +76,7 @@ export const ProjectCommand = Schema.Struct({
   secret_name: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Cli.Args.ProjectCommand" })
 
-export const SkillAction = Schema.Literals(["list", "inspect"]).annotate({
+export const SkillAction = Schema.Literals(["list", "inspect", "add", "remove"]).annotate({
   identifier: "Rika.Cli.Args.SkillAction",
 })
 export type SkillAction = typeof SkillAction.Type
@@ -86,6 +86,9 @@ export const SkillCommand = Schema.Struct({
   type: Schema.Literal("skills"),
   action: SkillAction,
   name: Schema.optional(Schema.String),
+  source: Schema.optional(Schema.String),
+  user: Schema.optional(Schema.Boolean),
+  force: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "Rika.Cli.Args.SkillCommand" })
 
 export const McpAction = Schema.Literals(["list", "approve", "add", "remove", "doctor"]).annotate({
@@ -510,6 +513,17 @@ const skillNameConfig = {
   name: Argument.string("name").pipe(Argument.withDescription("Skill name")),
 }
 
+const skillAddConfig = {
+  source: Argument.string("source").pipe(Argument.withDescription("GitHub source or git repository URL")),
+  user: Flag.boolean("user").pipe(Flag.withDescription("Install into the user skill directory")),
+  force: Flag.boolean("force").pipe(Flag.withDescription("Overwrite an existing skill")),
+}
+
+const skillRemoveConfig = {
+  ...skillNameConfig,
+  user: Flag.boolean("user").pipe(Flag.withDescription("Remove from the user skill directory")),
+}
+
 const mcpServerConfig = {
   serverName: Argument.string("server-name").pipe(Argument.withDescription("MCP server name")),
 }
@@ -704,6 +718,16 @@ interface ProjectSetSecretInput extends ProjectNameInput {
 
 interface SkillNameInput {
   readonly name: string
+}
+
+interface SkillAddInput {
+  readonly source: string
+  readonly user: boolean
+  readonly force: boolean
+}
+
+interface SkillRemoveInput extends SkillNameInput {
+  readonly user: boolean
 }
 
 interface McpServerInput {
@@ -1041,12 +1065,20 @@ const makeSkillsCommand = (
     Ref.set(parsedRef, Option.some(toSkillInspectCommand(input))),
   ).pipe(CliCommand.withDescription("Inspect a skill"), CliCommand.withShortDescription("Inspect skill"))
 
+  const add = CliCommand.make("add", skillAddConfig, (input: SkillAddInput) =>
+    Ref.set(parsedRef, Option.some(toSkillAddCommand(input))),
+  ).pipe(CliCommand.withDescription("Install a skill from a git source"), CliCommand.withShortDescription("Add skill"))
+
+  const remove = CliCommand.make("remove", skillRemoveConfig, (input: SkillRemoveInput) =>
+    Ref.set(parsedRef, Option.some(toSkillRemoveCommand(input))),
+  ).pipe(CliCommand.withDescription("Remove an installed skill"), CliCommand.withShortDescription("Remove skill"))
+
   return CliCommand.make("skills", {}, () =>
     Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a skills subcommand", exit_code: 2, usage }))),
   ).pipe(
-    CliCommand.withDescription("List and inspect installed Rika skills"),
+    CliCommand.withDescription("Manage installed Rika skills"),
     CliCommand.withShortDescription("Manage skills"),
-    CliCommand.withSubcommands([list, inspect]),
+    CliCommand.withSubcommands([list, inspect, add, remove]),
   )
 }
 
@@ -1433,6 +1465,21 @@ const toSkillInspectCommand = (input: SkillNameInput): SkillCommand => ({
   type: "skills",
   action: "inspect",
   name: input.name,
+})
+
+const toSkillAddCommand = (input: SkillAddInput): SkillCommand => ({
+  type: "skills",
+  action: "add",
+  source: input.source,
+  user: input.user,
+  force: input.force,
+})
+
+const toSkillRemoveCommand = (input: SkillRemoveInput): SkillCommand => ({
+  type: "skills",
+  action: "remove",
+  name: input.name,
+  user: input.user,
 })
 
 const toMcpListCommand = (): McpCommand => ({ type: "mcp", action: "list" })

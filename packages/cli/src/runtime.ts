@@ -60,6 +60,7 @@ import * as Project from "./project"
 import * as Review from "./review"
 import * as RuntimeEnv from "./runtime-env"
 import * as Server from "./server"
+import * as SkillInstaller from "./skill-installer"
 import * as Skills from "./skills"
 import * as Sync from "./sync"
 import * as Threads from "./threads"
@@ -232,6 +233,7 @@ type RuntimeError =
   | HttpServer.HttpServerError
   | Session.SessionError
   | SelfExtension.SelfExtensionError
+  | SkillInstaller.SkillInstallerError
   | SkillRegistry.SkillRegistryError
   | SubagentRuntime.RunError
   | Skills.SkillsError
@@ -299,6 +301,7 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (tagged(error, "RemoteSessionError")) return `Rika failed: ${error.message}`
   if (tagged(error, "SessionError")) return `Rika failed: ${error.message}`
   if (error instanceof SelfExtension.SelfExtensionError) return `Rika failed: ${error.message}`
+  if (error instanceof SkillInstaller.SkillInstallerError) return error.message
   if (error instanceof SkillRegistry.SkillRegistryError) return `Rika failed: ${error.message}`
   if (error instanceof SkillToolProvider.SkillToolProviderError) return `Rika failed: ${error.message}`
   if (error instanceof Skills.SkillsError) return Skills.formatError(error)
@@ -320,6 +323,7 @@ const runtimeExitCode = (error: RuntimeError) => {
   if (error instanceof Orb.OrbError) return error.exit_code
   if (error instanceof OrbExecute.OrbExecuteError) return error.exit_code
   if (error instanceof OrbShell.OrbShellError) return error.exit_code
+  if (error instanceof SkillInstaller.SkillInstallerError) return error.exit_code
   if (error instanceof Sync.SyncError) return error.exit_code
   return 1
 }
@@ -1143,11 +1147,15 @@ export const skillsLiveLayer = (
 ): Layer.Layer<SkillsLayerOutput, LiveLayerError> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
   const configLayer = runtimeConfigLayer(env, workspaceRoot)
+  const timeLayer = Time.layer
+  const installerLayer = SkillInstaller.liveLayer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(timeLayer))
 
   return Skills.layer.pipe(
     Layer.provideMerge(Output.layer),
     Layer.provideMerge(SkillRegistry.layer),
+    Layer.provideMerge(installerLayer),
     Layer.provideMerge(configLayer),
+    Layer.provideMerge(timeLayer),
   )
 }
 
@@ -2060,7 +2068,13 @@ export type ProjectLayerOutput =
   | ProjectStore.Service
   | Time.Service
 
-export type SkillsLayerOutput = Config.Service | Output.Service | SkillRegistry.Service | Skills.Service
+export type SkillsLayerOutput =
+  | Config.Service
+  | Output.Service
+  | SkillInstaller.Service
+  | SkillRegistry.Service
+  | Skills.Service
+  | Time.Service
 
 export type MemoryLayerOutput =
   | Config.Service

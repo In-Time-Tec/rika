@@ -248,7 +248,7 @@ const walkFiles = (
     return files
   })
 
-const parseSkillMarkdown = (content: string) => {
+export const parseSkillMarkdown = (content: string) => {
   const frontmatter = parseFrontmatter(content)
   if (frontmatter === undefined) return undefined
   const name = frontmatter.fields.get("name")?.trim()

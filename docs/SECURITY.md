@@ -74,6 +74,10 @@ Rules:
 
 Workspace command MCP servers require explicit approval before spawn. Approval is scoped by workspace root, server name, config fingerprint, and effective launch directory. Skill-bundled `mcp.json` command servers use the same approval store and are registered only when the skill is explicitly loaded. Remote MCP tools should be filtered before entering model context to reduce prompt bloat and accidental capability exposure.
 
+## Skills
+
+`rika skills add` clones Git sources and copies validated skill directories into project or user skill roots. Installed skills are prompt instructions and optional resources, not executable code by themselves. Treat their contents as untrusted workspace context until explicitly loaded; any bundled `mcp.json` still follows MCP approval before command-server execution. Provenance is recorded in `skills-lock.json` with source, commit, install time, scope, and directory.
+
 ## Remote control and hosted workspaces
 
 The HTTP server can require `Authorization: Bearer <token>`. That bearer token gates remote API access. `user_id` is a self-asserted participant identity for attribution, turn-conflict display, and presence; it is not an authorization secret and must not be treated as proof of workspace membership.

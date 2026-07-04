@@ -60,14 +60,14 @@ Status: `unverified` (claimed in code, not visually compared) · `partial` ·
 
 ## Guidance, skills, plugins, MCP
 
-| Feature              | Amp behavior                                           | Rika location                            | Status     |
-| -------------------- | ------------------------------------------------------ | ---------------------------------------- | ---------- |
-| AGENTS.md resolution | cwd+parents+subtree+global, globs, `@`-mentions        | `packages/agent/src/context-resolver.ts` | unverified |
-| Skills               | discovery/list/inspect/load, precedence order          | `packages/agent/src/skill-registry.ts`   | unverified |
-| Plugins              | TS plugin host: events/tools/commands/UI/ai.ask        | `packages/plugin/src/plugin-host.ts`     | unverified |
-| Self-extension       | generate/verify/enable/disable/rollback skills+plugins | `packages/plugin/src/self-extension.ts`  | unverified |
-| MCP                  | local+remote servers, approval, permissions            | `packages/tools/src/mcp-client.ts`       | unverified |
-| Permissions          | default allow-all; policy plugin overrides             | `packages/agent/` PermissionPolicy       | unverified |
+| Feature              | Amp behavior                                              | Rika location                                                                 | Status     |
+| -------------------- | --------------------------------------------------------- | ----------------------------------------------------------------------------- | ---------- |
+| AGENTS.md resolution | cwd+parents+subtree+global, globs, `@`-mentions           | `packages/agent/src/context-resolver.ts`                                      | unverified |
+| Skills               | discovery/list/inspect/load, add/remove, precedence order | `packages/agent/src/skill-registry.ts`, `packages/cli/src/skill-installer.ts` | unverified |
+| Plugins              | TS plugin host: events/tools/commands/UI/ai.ask           | `packages/plugin/src/plugin-host.ts`                                          | unverified |
+| Self-extension       | generate/verify/enable/disable/rollback skills+plugins    | `packages/plugin/src/self-extension.ts`                                       | unverified |
+| MCP                  | local+remote servers, approval, permissions               | `packages/tools/src/mcp-client.ts`                                            | unverified |
+| Permissions          | default allow-all; policy plugin overrides                | `packages/agent/` PermissionPolicy                                            | unverified |
 
 ## CLI & integrations
 
