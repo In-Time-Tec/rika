@@ -45,11 +45,13 @@ import {
   ChangedProjectSecretField,
   ClickedProject,
   ClickedProjects,
+  ReceivedPresence,
   SubmittedNewProject,
   SubmittedProjectSecret,
   SubmittedProjectSettings,
   eventRows,
   init,
+  initialModel,
   subscriptions,
   update,
 } from "../src/app"
@@ -163,6 +165,15 @@ describe("web local sync e2e", () => {
           secondTerminal.setThreadPresence({ thread_id: threadId, user_id: secondUserId, state: "typing" }),
         )
         await waitFor(() => hasPresence(firstSnapshots, secondUserId, "typing"))
+        const [webModel] = update(
+          initialModel({ api_base_url: handle.url, user_id: firstUserId }),
+          ReceivedPresence({ presence: lastSnapshot(firstSnapshots)! }),
+        )
+        expect(webModel.presence).toContainEqual({
+          user_id: secondUserId,
+          state: "typing",
+          last_seen: now,
+        })
         currentTime = Common.TimestampMillis.make(now + 46_000)
         await waitFor(() => lastSnapshot(firstSnapshots)?.users.length === 0)
       } finally {

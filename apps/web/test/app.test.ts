@@ -28,12 +28,14 @@ import {
   LoadedThreads,
   OpenedThread,
   ReceivedThreadEvent,
+  ReceivedPresence,
   RequestedTerminalReconnect,
   SavedProject,
   SubmittedProjectSecret,
   SubmittedProjectSettings,
   SelectedOrbFile,
   SubmittedDraft,
+  TypingPresenceReady,
   TerminalFailed,
   TerminalStatusChanged,
   UpdatedSelectedOrb,
@@ -49,6 +51,8 @@ const workspaceId = Ids.WorkspaceId.make("workspace-web")
 const messageId = Ids.MessageId.make("message-web")
 const orbId = Ids.OrbId.make("orb-web")
 const projectId = Ids.ProjectId.make("project-web")
+const userId = Ids.UserId.make("user_web")
+const otherUserId = Ids.UserId.make("sarah")
 
 describe("web app state", () => {
   test("imports only browser-safe LLM modules", async () => {
@@ -376,6 +380,65 @@ describe("web app state", () => {
     expect(commands.map((command) => command.name)).toEqual(["StartTurn"])
   })
 
+  test("sends user identity on turn submission and returns presence to active", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      draft: "run tests",
+    }
+
+    const [next, commands] = update(model, SubmittedDraft())
+
+    expect(next.draft).toBe("")
+    expect(next.pending_turn).toBe(true)
+    expect(commands.map((command) => command.name)).toEqual(["SetThreadPresence", "StartTurn"])
+    expect(commands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      thread_id: threadId,
+      user_id: userId,
+      state: "active",
+    })
+    expect(commands[1]?.args).toEqual({
+      api_base_url: "/api/rika",
+      thread_id: threadId,
+      user_id: userId,
+      content: "run tests",
+      mode: undefined,
+    })
+  })
+
+  test("draft input emits a throttled typing presence heartbeat", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+    }
+
+    const [typing, firstCommands] = update(model, ChangedDraft({ value: "h" }))
+    const [stillTyping, secondCommands] = update(typing, ChangedDraft({ value: "hi" }))
+    const [cleared, clearCommands] = update(stillTyping, ChangedDraft({ value: "" }))
+    const [ready] = update(cleared, TypingPresenceReady())
+    const [, thirdCommands] = update(ready, ChangedDraft({ value: "hit" }))
+
+    expect(firstCommands.map((command) => command.name)).toEqual(["SetThreadPresence"])
+    expect(firstCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      thread_id: threadId,
+      user_id: userId,
+      state: "typing",
+    })
+    expect(secondCommands).toEqual([])
+    expect(clearCommands.map((command) => command.name)).toEqual(["SetThreadPresence"])
+    expect(clearCommands[0]?.args).toEqual({
+      api_base_url: "/api/rika",
+      thread_id: threadId,
+      user_id: userId,
+      state: "active",
+    })
+    expect(thirdCommands.map((command) => command.name)).toEqual(["SetThreadPresence"])
+  })
+
   test("submits the selected mode with the next turn without changing the default backend mode", () => {
     const [opened] = update(
       initialModel({ api_base_url: "/api/rika" }),
@@ -456,10 +519,36 @@ describe("web app state", () => {
     expect(deduped.last_sequence).toBe(5)
   })
 
+  test("stores remote presence snapshots without the current user", () => {
+    const [next] = update(
+      initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      ReceivedPresence({
+        presence: {
+          thread_id: threadId,
+          users: [
+            { user_id: userId, state: "active", last_seen: 1 },
+            { user_id: otherUserId, state: "typing", last_seen: 2 },
+          ],
+        },
+      }),
+    )
+
+    expect(next.presence).toEqual([{ user_id: otherUserId, state: "typing", last_seen: 2 }])
+  })
+
   test("renders message events into readable transcript rows", () => {
     expect(eventRows([messageAdded(1, "user", "hi"), messageAdded(2, "assistant", "hello")])).toEqual([
       { id: "event-1", sequence: 1, kind: "message", title: "User", body: "hi" },
       { id: "event-2", sequence: 2, kind: "message", title: "Rika", body: "hello" },
+    ])
+  })
+
+  test("prefixes other users' message rows with attribution", () => {
+    expect(eventRows([messageAdded(1, "user", "hi", otherUserId)], new Set(), userId)).toEqual([
+      { id: "event-1", sequence: 1, kind: "message", title: "User", body: "sarah › hi" },
+    ])
+    expect(eventRows([messageAdded(2, "user", "mine", userId)], new Set(), userId)).toEqual([
+      { id: "event-2", sequence: 2, kind: "message", title: "User", body: "mine" },
     ])
   })
 
@@ -696,7 +785,12 @@ const projectDetail = (): Remote.ProjectDetail => ({
   updated_at: 2,
 })
 
-const messageAdded = (sequence: number, role: RikaMessage.Role, text: string): Event.MessageAdded => ({
+const messageAdded = (
+  sequence: number,
+  role: RikaMessage.Role,
+  text: string,
+  messageUserId?: Ids.UserId,
+): Event.MessageAdded => ({
   id: Ids.EventId.make(`event-${sequence}`),
   thread_id: threadId,
   sequence,
@@ -710,6 +804,7 @@ const messageAdded = (sequence: number, role: RikaMessage.Role, text: string): E
       role,
       content: [RikaMessage.text(text)],
       created_at: sequence,
+      ...(messageUserId === undefined ? {} : { metadata: { user_id: messageUserId } }),
     },
   },
 })

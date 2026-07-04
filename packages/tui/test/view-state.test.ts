@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { Common, Event, Ids } from "@rika/schema"
+import { Common, Event, Ids, Message } from "@rika/schema"
 import { ViewState } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_view_state")
 const turnId = Ids.TurnId.make("turn_view_state")
+const userId = Ids.UserId.make("user_view_state")
+const otherUserId = Ids.UserId.make("sarah")
 
 const base = (): ViewState.ViewState =>
   ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "smart" })
@@ -130,6 +132,26 @@ describe("ViewState focus + expansion", () => {
 })
 
 describe("ViewState queue + thinking", () => {
+  test("renders remote presence and attributed user messages", () => {
+    const state = ViewState.withPresence(
+      ViewState.applyEvent(
+        ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "smart", user_id: userId }),
+        messageAddedWithUser(1, "hello from Sarah", otherUserId),
+      ),
+      {
+        thread_id: threadId,
+        users: [
+          { user_id: userId, state: "active", last_seen: Common.TimestampMillis.make(1) },
+          { user_id: otherUserId, state: "typing", last_seen: Common.TimestampMillis.make(2) },
+        ],
+      },
+    )
+
+    expect(state.presence).toEqual([{ user_id: otherUserId, state: "typing" }])
+    expect(ViewState.presenceStatusLabel(state)).toMatchInlineSnapshot(`"◈ sarah is typing…"`)
+    expect(ViewState.messageDisplayText(state, state.messages[0]!)).toMatchInlineSnapshot(`"sarah › hello from Sarah"`)
+  })
+
   test("context usage stays hidden until usage arrives and shifts thresholds", () => {
     const hidden = base()
     const initial = ViewState.initial({
@@ -552,6 +574,27 @@ const turnCompletedWithUsage = (sequence: number, inputTokens: number): Event.Tu
     provider: "openai",
     model: "gpt-5.5",
     usage: { input_tokens: inputTokens, output_tokens: 100, total_tokens: inputTokens + 100 },
+  },
+})
+
+const messageAddedWithUser = (sequence: number, text: string, messageUserId: Ids.UserId): Event.MessageAdded => ({
+  id: Ids.EventId.make(`event_view_state_user_${sequence}`),
+  thread_id: threadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: Common.TimestampMillis.make(sequence),
+  type: "message.added",
+  data: {
+    message: {
+      id: Ids.MessageId.make(`message_view_state_user_${sequence}`),
+      thread_id: threadId,
+      turn_id: turnId,
+      role: "user",
+      content: [Message.text(text)],
+      created_at: Common.TimestampMillis.make(sequence),
+      metadata: { user_id: messageUserId },
+    },
   },
 })
 

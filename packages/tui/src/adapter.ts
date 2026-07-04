@@ -791,7 +791,12 @@ const transcriptBlocks = (
     }
     flush()
     if (entry.kind === "message") {
-      const block = messageBlock(renderer, entry.message, options.variant === "main" && entry.message.id === navId)
+      const block = messageBlock(
+        renderer,
+        state,
+        entry.message,
+        options.variant === "main" && entry.message.id === navId,
+      )
       if (block !== undefined) blocks.push(block)
     } else {
       blocks.push(...cardBlocks(renderer, state, entry.card, options, 1, false))
@@ -803,9 +808,11 @@ const transcriptBlocks = (
 
 const messageBlock = (
   renderer: CliRenderer,
+  state: ViewState.ViewState,
   message: ViewState.ThreadMessage,
   selected = false,
 ): BoxRenderable | TextRenderable | undefined => {
+  const displayText = ViewState.messageDisplayText(state, message)
   if (message.role === "user") {
     if (selected) {
       const box = new BoxRenderable(renderer, {
@@ -826,7 +833,7 @@ const messageBlock = (
         bg: cutoutBackground(renderer),
         selectable: false,
       })
-      box.add(selectableText(renderer, { content: t`${fg(color.green)(message.text)}`, selectable: false }))
+      box.add(selectableText(renderer, { content: t`${fg(color.green)(displayText)}`, selectable: false }))
       box.add(hint)
       return box
     }
@@ -837,7 +844,7 @@ const messageBlock = (
       paddingLeft: 1,
       marginTop: 1,
     })
-    box.add(selectableText(renderer, { content: t`${fg(color.green)(message.text)}` }))
+    box.add(selectableText(renderer, { content: t`${fg(color.green)(displayText)}` }))
     return box
   }
   const text = stripToolCalls(message.text)
@@ -1021,8 +1028,10 @@ const modeLabelChunks = (state: ViewState.ViewState): TextChunk[] => {
 
 const modeIndicatorContent = (state: ViewState.ViewState): StyledText => {
   const chunks: TextChunk[] = [fg(color.text)(" ")]
+  const presence = ViewState.presenceStatusLabel(state)
   if (state.cost_usd > 0) chunks.push(fg(color.dim)(`${costLabel(state.cost_usd)} `), fg(color.faint)("— "))
   if (state.remoteArm.enabled) chunks.push(fg(color.green)("[orb] "), fg(color.faint)("— "))
+  if (presence !== undefined) chunks.push(fg(color.green)(`${presence} `), fg(color.faint)("— "))
   if (state.context_usage !== undefined)
     chunks.push(
       fg(contextUsageColor(state.context_usage))(ViewState.contextUsageLabel(state.context_usage)),

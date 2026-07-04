@@ -1,12 +1,19 @@
 import { Config } from "@rika/core"
-import { Event, Ids, Message } from "@rika/schema"
+import { Event, Ids, Message, Remote } from "@rika/schema"
 import { Cause, Effect, Fiber, Queue, Schema, Stream } from "effect"
 import type { Dirent } from "node:fs"
 import { stat } from "node:fs/promises"
 import { readdir, readFile } from "node:fs/promises"
 import { extname, join, relative } from "node:path"
 import { splitCommand, splitFirst } from "./backend"
-import type { CommandResult, ProjectOption, SessionBackend, ThreadOption, TurnRequest } from "./backend"
+import type {
+  CommandResult,
+  PresenceRequest,
+  ProjectOption,
+  SessionBackend,
+  ThreadOption,
+  TurnRequest,
+} from "./backend"
 import * as Adapter from "./adapter"
 import * as Keymap from "./keymap"
 import * as Keys from "./keys"
@@ -19,6 +26,7 @@ export const RunInput = Schema.Struct({
   workspace_root: Schema.optional(Schema.String),
   workspace_id: Schema.optional(Ids.WorkspaceId),
   thread_id: Schema.optional(Ids.ThreadId),
+  user_id: Schema.optional(Ids.UserId),
 }).annotate({ identifier: "Rika.Tui.Controller.RunInput" })
 
 export interface Dependencies<E> {
@@ -35,10 +43,11 @@ type AppEvent =
   | { readonly _tag: "Ui"; readonly action: Adapter.Action }
   | { readonly _tag: "Tick" }
   | { readonly _tag: "ModelBatch"; readonly events: ReadonlyArray<Event.Event> }
+  | { readonly _tag: "Presence"; readonly presence: Remote.PresencePayload }
   | { readonly _tag: "ThreadPreviewLoaded"; readonly thread_id: Ids.ThreadId; readonly preview: ViewState.ViewState }
   | { readonly _tag: "ThreadPreviewFailed"; readonly thread_id: Ids.ThreadId; readonly message: string }
   | { readonly _tag: "ThreadEventsFailed"; readonly message: string }
-  | { readonly _tag: "TurnEnded"; readonly token: number; readonly error?: unknown }
+  | { readonly _tag: "TurnEnded"; readonly token: number; readonly submitted?: SubmittedTurn; readonly error?: unknown }
   | { readonly _tag: "Resize" }
   | { readonly _tag: "KeysDone" }
 
@@ -46,6 +55,7 @@ type SubmittedTurn = Pick<TurnRequest, "content" | "content_parts">
 
 const modelEventBatchSize = 64
 const modelEventBatchWindow = "16 millis"
+const typingHeartbeatTicks = 40
 
 export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<number, E> =>
   Effect.scoped(
@@ -53,10 +63,16 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       const workspacePath = input.workspace_root ?? deps.defaultWorkspace
       let workspaceId = input.workspace_id ?? Ids.WorkspaceId.make(workspacePath)
       let mode = input.mode ?? deps.defaultMode
+      const userId = input.user_id
 
       if (input.thread_id === undefined) {
         yield* deps.renderer.render(
-          ViewState.initial({ thread_id: Ids.ThreadId.make("pending"), workspace_path: workspacePath, mode }),
+          ViewState.initial({
+            thread_id: Ids.ThreadId.make("pending"),
+            workspace_path: workspacePath,
+            mode,
+            ...(userId === undefined ? {} : { user_id: userId }),
+          }),
         )
       }
 
@@ -66,8 +82,9 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           workspace_path: workspacePath,
           workspace_id: workspaceId,
           mode,
+          ...(userId === undefined ? {} : { user_id: userId }),
         })
-        .pipe(Effect.catchCause((cause) => freshThread(deps, workspacePath, mode, Cause.squash(cause))))
+        .pipe(Effect.catchCause((cause) => freshThread(deps, workspacePath, mode, userId, Cause.squash(cause))))
 
       const keymap = deps.keymap ?? Keymap.defaultEffectiveKeymap
       const keymapWarning = Keymap.warningLine(keymap.warnings)
@@ -86,6 +103,8 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       let currentTurnId: Ids.TurnId | undefined
       let activeThreadId: Ids.ThreadId | undefined
       let lastSequence = loaded.last_sequence ?? 0
+      let typingCooldownTicks = 0
+      let typingAnnounced = false
 
       const queue = yield* Queue.unbounded<AppEvent, Cause.Done>()
       const render = () => deps.renderer.render(state)
@@ -98,15 +117,22 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             yield* Effect.sync(() => threadEventsFiber?.interruptUnsafe())
           }
           threadEventsFiber = yield* Effect.forkScoped(
-            deps.backend.subscribeThreadEvents({ thread_id: nextThreadId, after_sequence: afterSequence }).pipe(
-              Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
-              Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
-              Effect.catchCause((cause) =>
-                Queue.offer(queue, { _tag: "ThreadEventsFailed", message: errorMessage(Cause.squash(cause)) }).pipe(
-                  Effect.asVoid,
+            deps.backend
+              .subscribeThreadEvents({
+                thread_id: nextThreadId,
+                after_sequence: afterSequence,
+                ...(userId === undefined ? {} : { user_id: userId }),
+                onPresence: (presence) => Queue.offerUnsafe(queue, { _tag: "Presence", presence }),
+              })
+              .pipe(
+                Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
+                Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
+                Effect.catchCause((cause) =>
+                  Queue.offer(queue, { _tag: "ThreadEventsFailed", message: errorMessage(Cause.squash(cause)) }).pipe(
+                    Effect.asVoid,
+                  ),
                 ),
               ),
-            ),
           )
         })
 
@@ -130,6 +156,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             thread_id: threadId,
             workspace_path: workspacePath,
             workspace_id: workspaceId,
+            ...(userId === undefined ? {} : { user_id: userId }),
             ...submitted,
             mode,
             fast_mode: state.fast_mode,
@@ -141,8 +168,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                 Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
                 Effect.matchCauseEffect({
                   onFailure: (cause: Cause.Cause<E>) =>
-                    Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
-                  onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token }).pipe(Effect.asVoid),
+                    Queue.offer(queue, { _tag: "TurnEnded", token, submitted, error: Cause.squash(cause) }).pipe(
+                      Effect.asVoid,
+                    ),
+                  onSuccess: () => Queue.offer(queue, { _tag: "TurnEnded", token, submitted }).pipe(Effect.asVoid),
                 }),
               ),
             )
@@ -152,7 +181,9 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               .submitTurn(request)
               .pipe(
                 Effect.catchCause((cause: Cause.Cause<E>) =>
-                  Queue.offer(queue, { _tag: "TurnEnded", token, error: Cause.squash(cause) }).pipe(Effect.asVoid),
+                  Queue.offer(queue, { _tag: "TurnEnded", token, submitted, error: Cause.squash(cause) }).pipe(
+                    Effect.asVoid,
+                  ),
                 ),
               )
           }
@@ -307,6 +338,8 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           })
           threadId = created.thread_id
           workspaceId = created.workspace_id
+          typingCooldownTicks = 0
+          typingAnnounced = false
           lastSequence = 0
           yield* restartThreadEvents(threadId, lastSequence)
           return true
@@ -431,6 +464,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           const raw = submitted.content
           const trimmed = raw.trim()
           state = ViewState.clearInput(state)
+          yield* syncTypingPresence()
           if (trimmed.length === 0) {
             yield* render()
             return
@@ -652,6 +686,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             case "Steer": {
               const steering = ViewState.submitText(state).trim()
               state = ViewState.clearInput(state)
+              yield* syncTypingPresence()
               if (steering.length > 0) state = ViewState.enqueueMessage(state, steering)
               state = ViewState.promoteSelectedOrNextQueued(state)
               break
@@ -697,7 +732,32 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               yield* maybeShutdown()
               return
           }
+          yield* syncTypingPresence()
           yield* render()
+        })
+
+      const setPresence = (presenceState: PresenceRequest["state"]) =>
+        userId === undefined || deps.backend.setThreadPresence === undefined
+          ? Effect.void
+          : deps.backend
+              .setThreadPresence({ thread_id: threadId, user_id: userId, state: presenceState })
+              .pipe(Effect.catchCause(() => Effect.void))
+
+      const syncTypingPresence = () =>
+        Effect.gen(function* () {
+          const pendingInput = ViewState.submitText(state).trim().length > 0
+          if (!pendingInput) {
+            if (typingAnnounced) {
+              yield* setPresence("active")
+              typingAnnounced = false
+            }
+            typingCooldownTicks = 0
+            return
+          }
+          if (typingCooldownTicks > 0) return
+          yield* setPresence("typing")
+          typingAnnounced = true
+          typingCooldownTicks = typingHeartbeatTicks
         })
 
       const handleThreadSwitcherKey = (key: Keys.Key) =>
@@ -798,13 +858,23 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           yield* applyAction(resolution.action)
         })
 
-      const handleTurnEnded = (token: number, error: unknown) =>
+      const handleTurnEnded = (token: number, submitted: SubmittedTurn | undefined, error: unknown) =>
         Effect.gen(function* () {
           if (token !== turnToken) return
           active = false
           turnFiber = undefined
           currentTurnId = undefined
           activeThreadId = undefined
+          const activeUserId = activeUserIdFromError(error)
+          if (activeUserId !== undefined && submitted !== undefined) {
+            state = ViewState.withNotice(
+              ViewState.enqueueMessage(ViewState.finishTurn(state), submitted.content.trim()),
+              `${activeUserId} is running a turn — message queued`,
+            )
+            yield* render()
+            yield* maybeShutdown()
+            return
+          }
           state = ViewState.finishTurn(state, error === undefined ? "idle" : "failed")
           if (error !== undefined) state = ViewState.withNotice(state, `Turn failed: ${errorMessage(error)}`)
           yield* drainQueuedTurn()
@@ -846,6 +916,8 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           switch (appEvent._tag) {
             case "Tick":
               state = ViewState.tickSpinner(state)
+              if (typingCooldownTicks > 0) typingCooldownTicks -= 1
+              yield* syncTypingPresence()
               yield* render()
               return
             case "Resize":
@@ -886,6 +958,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               }
               yield* render()
               return
+            case "Presence":
+              state = ViewState.withPresence(state, appEvent.presence)
+              yield* render()
+              return
             case "ThreadPreviewLoaded":
               state = ViewState.threadSwitcherPreviewReady(state, appEvent.thread_id, appEvent.preview)
               yield* render()
@@ -899,7 +975,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               yield* render()
               return
             case "TurnEnded":
-              yield* handleTurnEnded(appEvent.token, appEvent.error)
+              yield* handleTurnEnded(appEvent.token, appEvent.submitted, appEvent.error)
               return
             case "KeysDone":
               keysDone = true
@@ -944,12 +1020,24 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
     }),
   )
 
-const freshThread = <E>(_deps: Dependencies<E>, workspacePath: string, mode: Config.Mode, _cause: unknown) =>
+const freshThread = <E>(
+  _deps: Dependencies<E>,
+  workspacePath: string,
+  mode: Config.Mode,
+  userId: Ids.UserId | undefined,
+  _cause: unknown,
+) =>
   Effect.sync(() => {
     const threadId = Ids.ThreadId.make(`thread_${Date.now()}`)
     return {
       thread_id: threadId,
-      state: ViewState.initial({ thread_id: threadId, workspace_path: workspacePath, mode, events: [] }),
+      state: ViewState.initial({
+        thread_id: threadId,
+        workspace_path: workspacePath,
+        mode,
+        events: [],
+        ...(userId === undefined ? {} : { user_id: userId }),
+      }),
       last_sequence: 0,
     }
   })
@@ -1177,4 +1265,10 @@ const errorMessage = (value: unknown): string => {
     if (typeof message === "string") return message
   }
   return String(value)
+}
+
+const activeUserIdFromError = (value: unknown): Ids.UserId | undefined => {
+  if (typeof value !== "object" || value === null || !("active_user_id" in value)) return undefined
+  const activeUserId = (value as { readonly active_user_id?: unknown }).active_user_id
+  return typeof activeUserId === "string" ? Ids.UserId.make(activeUserId) : undefined
 }

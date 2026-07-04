@@ -1,6 +1,6 @@
 import { Config } from "@rika/core"
 import { ModelInfo } from "@rika/llm"
-import { Common, Event, Ids, Message, Orb } from "@rika/schema"
+import { Common, Event, Ids, Message, Orb, Remote } from "@rika/schema"
 import { isAbsolute, relative } from "node:path"
 
 export type Activity = "idle" | "thinking" | "streaming" | "running-tools" | "failed"
@@ -14,6 +14,12 @@ export interface ThreadMessage {
   readonly id: string
   readonly role: Message.Role
   readonly text: string
+  readonly user_id?: Ids.UserId
+}
+
+export interface PresenceUser {
+  readonly user_id: Ids.UserId
+  readonly state: Remote.PresenceState
 }
 
 export interface Card {
@@ -38,6 +44,7 @@ export interface Input {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
   readonly mode: Config.Mode
+  readonly user_id?: Ids.UserId
   readonly events?: ReadonlyArray<Event.Event>
   readonly active_orb?: ActiveOrb
   readonly context_tokens?: number
@@ -145,6 +152,7 @@ export interface ViewState {
   readonly workspace_path: string
   readonly git_branch?: string
   readonly mode: Config.Mode
+  readonly user_id?: Ids.UserId
   readonly cost_usd: number
   readonly reasoning_effort: number
   readonly fast_mode: boolean
@@ -179,6 +187,7 @@ export interface ViewState {
   readonly threadswitcher: ThreadSwitcherState
   readonly remoteArm: RemoteArmState
   readonly shortcuts_open: boolean
+  readonly presence: ReadonlyArray<PresenceUser>
   readonly context_usage?: ContextUsage
 }
 
@@ -217,6 +226,7 @@ const interactionDefaults = {
   remoteArm: remoteArmDefault,
   palette_open: false,
   shortcuts_open: false,
+  presence: [] as ReadonlyArray<PresenceUser>,
 }
 
 export const initial = (input: Input): ViewState =>
@@ -229,6 +239,7 @@ const modeDefaultEffort = deepModeTier
 
 const initialSeed = (input: Input): ViewState => ({
   thread_id: input.thread_id,
+  ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
   ...(input.active_orb === undefined ? {} : { active_orb: input.active_orb }),
   workspace_path: input.workspace_path,
   mode: input.mode,
@@ -378,6 +389,7 @@ export const withThread = (
     thread_id: input.thread_id,
     workspace_path: state.workspace_path,
     mode: state.mode,
+    ...(state.user_id === undefined ? {} : { user_id: state.user_id }),
     ...(input.active_orb === undefined ? {} : { active_orb: input.active_orb }),
     ...(input.context_tokens === undefined ? {} : { context_tokens: input.context_tokens }),
     ...(input.context_window === undefined ? {} : { context_window: input.context_window }),
@@ -387,6 +399,7 @@ export const withThread = (
       thread_id: input.thread_id,
       workspace_path: state.workspace_path,
       mode: state.mode,
+      ...(state.user_id === undefined ? {} : { user_id: state.user_id }),
       events: input.events,
       ...(input.active_orb === undefined ? {} : { active_orb: input.active_orb }),
       ...(input.context_tokens === undefined ? {} : { context_tokens: input.context_tokens }),
@@ -432,6 +445,32 @@ export const withRemoteArm = (state: ViewState, remoteArm: RemoteArmState): View
   ...state,
   remoteArm,
 })
+
+export const withPresence = (state: ViewState, presence: Remote.PresencePayload): ViewState => {
+  if (presence.thread_id !== state.thread_id) return state
+  return {
+    ...state,
+    presence: presence.users
+      .filter((user) => state.user_id === undefined || user.user_id !== state.user_id)
+      .map((user) => ({ user_id: user.user_id, state: user.state })),
+  }
+}
+
+export const presenceStatusLabel = (state: ViewState): string | undefined => {
+  if (state.presence.length === 0) return undefined
+  const typing = state.presence.find((user) => user.state === "typing")
+  if (typing !== undefined) return `◈ ${typing.user_id} is typing…`
+  const first = state.presence[0]
+  if (first === undefined) return undefined
+  return state.presence.length === 1 ? `◈ ${first.user_id}` : `◈ ${first.user_id} +${state.presence.length - 1}`
+}
+
+export const messageDisplayText = (state: ViewState, message: ThreadMessage): string =>
+  message.role === "user" &&
+  message.user_id !== undefined &&
+  (state.user_id === undefined || message.user_id !== state.user_id)
+    ? `${message.user_id} › ${message.text}`
+    : message.text
 
 const nextReasoningMode = (mode: Config.Mode): Config.Mode =>
   mode === "deep1" ? "deep2" : mode === "deep2" ? "deep3" : mode === "deep3" ? "deep1" : mode
@@ -1073,13 +1112,24 @@ const applyMessage = (state: ViewState, event: Event.MessageAdded): ViewState =>
   const message = event.data.message
   const text = messageText(message)
   if (text.length === 0) return state
-  const entry: ThreadMessage = { id: message.id, role: message.role, text }
+  const userId = messageUserId(message)
+  const entry: ThreadMessage = {
+    id: message.id,
+    role: message.role,
+    text,
+    ...(userId === undefined ? {} : { user_id: userId }),
+  }
   return {
     ...state,
     streaming_text: message.role === "assistant" ? "" : state.streaming_text,
     messages: [...state.messages, entry],
     entries: [...state.entries, { kind: "message", message: entry }],
   }
+}
+
+const messageUserId = (message: Message.Message): Ids.UserId | undefined => {
+  const value = message.metadata?.user_id
+  return typeof value === "string" ? Ids.UserId.make(value) : undefined
 }
 
 const skillCard = (event: Event.SkillLoaded): Card => ({

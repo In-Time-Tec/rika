@@ -120,7 +120,13 @@ const workspace = (model: Model): Html =>
       H.header(
         [H.Class("workspace-header")],
         [
-          H.div([], [H.p([H.Class("eyebrow")], ["Local development sync"]), H.h2([], [activeTitle(model)])]),
+          H.div(
+            [],
+            [
+              H.p([H.Class("eyebrow")], ["Local development sync"]),
+              H.div([H.Class("thread-title-row")], [H.h2([], [activeTitle(model)]), presenceAvatars(model)]),
+            ],
+          ),
           H.div(
             [H.Class("header-status")],
             [contextMeter(model), H.div([H.Class("sequence")], [`seq ${model.last_sequence}`])],
@@ -135,6 +141,7 @@ const workspace = (model: Model): Html =>
               orbHeader(model),
               model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
               hasOrbWorkspace(model) ? orbTabs(model) : transcript(model),
+              typingIndicator(model),
               composer(model),
             ],
           ),
@@ -406,7 +413,7 @@ const orbHeader = (model: Model): Html => {
 }
 
 const transcript = (model: Model): Html => {
-  const rows = eventRows(model.events, new Set(model.expanded_diff_ids))
+  const rows = eventRows(model.events, new Set(model.expanded_diff_ids), model.user_id)
   return Ui.card(
     [H.Class("transcript-card")],
     rows.length === 0
@@ -418,6 +425,21 @@ const transcript = (model: Model): Html => {
         ]
       : rows.map(rowView),
   )
+}
+
+const presenceAvatars = (model: Model): Html =>
+  model.presence.length === 0
+    ? Ui.empty
+    : H.div(
+        [H.Class("presence-avatars"), H.AriaLabel("Present users")],
+        model.presence.map((user) =>
+          H.span([H.Class("presence-avatar"), H.Title(user.user_id)], [initials(user.user_id)]),
+        ),
+      )
+
+const typingIndicator = (model: Model): Html => {
+  const typing = model.presence.find((user) => user.state === "typing")
+  return typing === undefined ? Ui.empty : H.div([H.Class("typing-indicator")], [`${typing.user_id} is typing`])
 }
 
 const orbTabs = (model: Model): Html =>
@@ -759,6 +781,14 @@ const terminalStatusTone = (status: Model["orb_terminal_status"]) => {
   if (status === "failed" || status === "disconnected") return "danger"
   return "default"
 }
+
+const initials = (value: string) =>
+  value
+    .split(/[_\s-]+/)
+    .filter((part) => part.length > 0)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("") || value.slice(0, 1).toUpperCase()
 
 const relativeTime = (timestamp: number) => {
   const delta = Date.now() - timestamp

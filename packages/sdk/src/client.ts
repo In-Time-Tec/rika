@@ -24,6 +24,7 @@ export class SdkError extends Schema.TaggedErrorClass<SdkError>()("SdkError", {
   message: Schema.String,
   operation: Schema.String,
   status: Schema.optional(Schema.Int),
+  active_user_id: Schema.optional(Ids.UserId),
 }) {}
 
 export interface SubscribeThreadEventsInput extends Remote.SubscribeThreadEventsRequest {
@@ -105,7 +106,10 @@ export interface Interface {
   readonly ideNavigationRequests: () => Effect.Effect<ReadonlyArray<Ide.OpenFileRequest>, SdkError>
 }
 
-const ApiErrorDetails = Schema.Struct({ status: Schema.Int })
+const ApiErrorDetails = Schema.Struct({
+  status: Schema.optional(Schema.Int),
+  active_user_id: Schema.optional(Ids.UserId),
+})
 
 const userIdFor = (transport: Transport, userId: Ids.UserId | undefined) => userId ?? transport.user_id
 
@@ -478,11 +482,13 @@ const parseJson = (text: string) => {
 const apiError = (body: unknown, operation: string, status?: number) => {
   const decoded = Schema.decodeUnknownOption(Remote.ApiError)(body)
   if (decoded._tag === "Some") {
-    const decodedStatus = status ?? apiErrorStatus(decoded.value)
+    const details = apiErrorDetails(decoded.value)
+    const decodedStatus = status ?? details.status
     return new SdkError({
       message: decoded.value.error.message,
       operation,
       ...(decodedStatus === undefined ? {} : { status: decodedStatus }),
+      ...(details.active_user_id === undefined ? {} : { active_user_id: details.active_user_id }),
     })
   }
   return new SdkError({
@@ -492,9 +498,15 @@ const apiError = (body: unknown, operation: string, status?: number) => {
   })
 }
 
-const apiErrorStatus = (error: Remote.ApiError) => {
+const apiErrorDetails = (
+  error: Remote.ApiError,
+): { readonly status?: number; readonly active_user_id?: Ids.UserId } => {
   const decoded = Schema.decodeUnknownOption(ApiErrorDetails)(error.error.details)
-  return decoded._tag === "Some" ? decoded.value.status : undefined
+  if (decoded._tag === "None") return {}
+  return {
+    ...(decoded.value.status === undefined ? {} : { status: decoded.value.status }),
+    ...(decoded.value.active_user_id === undefined ? {} : { active_user_id: decoded.value.active_user_id }),
+  }
 }
 
 const toSdkError = (cause: unknown, operation: string) => {

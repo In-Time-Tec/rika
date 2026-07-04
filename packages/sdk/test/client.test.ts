@@ -563,6 +563,32 @@ describe("SDK client", () => {
     expect(error).toMatchObject({ message: "Workspace denied", operation: "startTurn", status: 403 })
   })
 
+  test("turn submission preserves the active user on conflict API errors", async () => {
+    const activeUserId = Ids.UserId.make("user_sdk_active_turn")
+    const client = Client.make({
+      requestJson: () =>
+        Effect.succeed({
+          error: {
+            message: "Another user is running this thread",
+            code: "turn_conflict",
+            details: { status: 409, active_user_id: activeUserId },
+          },
+        }),
+      streamJson: () => Stream.empty,
+    })
+
+    const error = await Effect.runPromise(
+      client.startTurn({ thread_id: threadId, workspace_id: workspaceId, content: "ship" }).pipe(Effect.flip),
+    )
+
+    expect(error).toMatchObject({
+      message: "Another user is running this thread",
+      operation: "startTurn",
+      status: 409,
+      active_user_id: activeUserId,
+    })
+  })
+
   test("uses shared schemas for IDE endpoints", async () => {
     const calls: Array<Client.RequestInput> = []
     const context: Ide.ContextSnapshot = {

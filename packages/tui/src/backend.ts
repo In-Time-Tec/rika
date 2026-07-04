@@ -1,6 +1,6 @@
 import { Config } from "@rika/core"
 import { TournamentService } from "@rika/agent"
-import { Event, Ids, Message, Orb, Tool } from "@rika/schema"
+import { Event, Ids, Message, Orb, Remote, Tool } from "@rika/schema"
 import { Effect, Stream } from "effect"
 import * as ViewState from "./view-state"
 
@@ -9,6 +9,7 @@ export interface LoadInput {
   readonly workspace_path: string
   readonly workspace_id: Ids.WorkspaceId
   readonly mode: Config.Mode
+  readonly user_id?: Ids.UserId
 }
 
 export interface LoadedThread {
@@ -22,6 +23,7 @@ export interface TurnRequest {
   readonly thread_id: Ids.ThreadId
   readonly workspace_path: string
   readonly workspace_id: Ids.WorkspaceId
+  readonly user_id?: Ids.UserId
   readonly content: string
   readonly content_parts?: ReadonlyArray<Message.ContentPart>
   readonly mode: Config.Mode
@@ -32,6 +34,14 @@ export interface TurnRequest {
 export interface ThreadEventsRequest {
   readonly thread_id: Ids.ThreadId
   readonly after_sequence?: number
+  readonly user_id?: Ids.UserId
+  readonly onPresence?: (presence: Remote.PresencePayload) => void
+}
+
+export interface PresenceRequest {
+  readonly thread_id: Ids.ThreadId
+  readonly user_id: Ids.UserId
+  readonly state: Remote.PresenceState
 }
 
 export interface CancelRequest {
@@ -138,6 +148,7 @@ export interface SessionBackend<E> {
   readonly streamTurn: (input: TurnRequest) => Stream.Stream<Event.Event, E>
   readonly submitTurn?: (input: TurnRequest) => Effect.Effect<void, E>
   readonly subscribeThreadEvents?: (input: ThreadEventsRequest) => Stream.Stream<Event.Event, E>
+  readonly setThreadPresence?: (input: PresenceRequest) => Effect.Effect<void, E>
   readonly cancelTurn: (input: CancelRequest) => Effect.Effect<void, E>
   readonly runTournament?: (input: TournamentRequest) => Effect.Effect<TournamentService.TournamentResult, E>
   readonly runCommand: (context: CommandContext, command: string) => Effect.Effect<CommandResult, E>

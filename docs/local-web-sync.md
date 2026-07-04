@@ -19,10 +19,11 @@ Rika local development uses one shared backend per workspace. Interactive termin
 - `startTurn` is submit-only. A successful response means the backend accepted the turn; it does not return turn events.
 - `subscribeThreadEvents` is the shared source of UI truth. TUI and web clients render only events from initial thread open plus the live subscription.
 - Presence frames may share the same NDJSON stream, but they are not thread events and do not have event `sequence` values. SDK consumers receive them through `onPresence`.
+- TUI and web clients render other connected users from presence snapshots, show typing state, and prefix user messages from other `user_id` values.
 - `ThreadEventLog` remains canonical durable truth. `ThreadLive` is notification and catch-up plumbing, not a second store.
 - Clients subscribe with `after_sequence`. The server attaches to live events, catches up from the event log, deduplicates by `sequence`, and repairs gaps from the log.
 - Clients must dedupe by `sequence` and must not optimistically append their own submitted user messages.
-- Only one active turn per thread is accepted in the local MVP. A concurrent turn can return a typed `409` API error.
+- Only one active turn per thread is accepted in the local MVP. A concurrent turn can return a typed `409` API error with `active_user_id`; clients keep the submitted message queued instead of retrying immediately.
 
 ## Local web app
 
@@ -43,6 +44,8 @@ Open `http://127.0.0.1:4590`. The app loads the latest local thread automaticall
 ```text
 http://127.0.0.1:4590/?thread=<thread-id>
 ```
+
+Set the browser identity with `?user_id=<name>` or `VITE_RIKA_USER_ID`. The value is used for attribution and presence only; it is not an authorization credential.
 
 The Vite development server exposes `/api/rika/*`. That proxy reads `<workspace>/.rika/local-backend.json`, forwards requests to the current shared backend, injects the backend token server-side, and streams NDJSON responses through to the browser. The token is not exposed to browser code.
 

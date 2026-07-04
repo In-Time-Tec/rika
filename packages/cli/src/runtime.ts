@@ -809,9 +809,10 @@ const interactiveRemoteLiveLayerFromTui = (
           Effect.provideService(BackendEndpoint.Health, health),
           Effect.provideService(BackendEndpoint.OrbResumer, resumer),
         )
+      const userId = Ids.UserId.make(snapshot.values.user.name)
       const client = reconnectingClient({
         resolveEndpoint,
-        user_id: Ids.UserId.make(snapshot.values.user.name),
+        user_id: userId,
         touchOrb: (orbId) => activity.touch(orbId),
       })
       const runTournament = (input: {
@@ -825,7 +826,7 @@ const interactiveRemoteLiveLayerFromTui = (
           ),
           Effect.mapError((error) => tournamentRuntimeError(input.thread_id, error)),
         )
-      return RemoteSession.make(client, renderer, ticker.ticks, workspaceId, runTournament, keymap)
+      return RemoteSession.make(client, renderer, ticker.ticks, workspaceId, runTournament, keymap, userId)
     }),
   ).pipe(
     Layer.provideMerge(backendLayer),

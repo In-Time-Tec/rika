@@ -201,6 +201,32 @@ textarea {
   gap: 1rem;
 }
 
+.thread-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.presence-avatars {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.presence-avatar {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  place-items: center;
+  border: 1px solid rgba(34, 197, 94, 0.42);
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.14);
+  color: #bbf7d0;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
 .header-status {
   display: flex;
   align-items: center;
@@ -388,6 +414,11 @@ textarea {
 
 .event-body {
   white-space: pre-wrap;
+}
+
+.typing-indicator {
+  color: #86efac;
+  font-size: 0.8125rem;
 }
 
 .pierre-diff-summary {

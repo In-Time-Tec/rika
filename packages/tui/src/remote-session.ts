@@ -43,13 +43,18 @@ export const make = (
   workspaceId?: Ids.WorkspaceId,
   runTournament?: Backend.SessionBackend<RunError>["runTournament"],
   keymap?: Keymap.EffectiveKeymap,
+  userId?: Ids.UserId,
 ): Interface => {
   const backend = makeBackend(client, runTournament)
   return Service.of({
     run: Effect.fn("Tui.RemoteSession.run")(function* (input: RunInput) {
       const defaultWorkspace = input.workspace_root ?? process.cwd()
-      const runInput =
+      const workspaceInput =
         workspaceId === undefined || input.workspace_id !== undefined ? input : { ...input, workspace_id: workspaceId }
+      const runInput =
+        userId === undefined || workspaceInput.user_id !== undefined
+          ? workspaceInput
+          : { ...workspaceInput, user_id: userId }
       return yield* Controller.run(
         {
           backend,
@@ -75,15 +80,15 @@ const makeBackend = (
   runTournament?: Backend.SessionBackend<RunError>["runTournament"],
 ): Backend.SessionBackend<RunError> => ({
   ...(runTournament === undefined ? {} : { runTournament }),
-  loadInitial: ({ thread_id, workspace_path, workspace_id, mode }) =>
+  loadInitial: ({ thread_id, workspace_path, workspace_id, mode, user_id }) =>
     Effect.gen(function* () {
       if (thread_id !== undefined) {
         const record = yield* client
-          .openThread(thread_id)
+          .openThread(thread_id, user_id)
           .pipe(
             Effect.catchTag("SdkError", () =>
               client
-                .createThread({ thread_id, workspace_id })
+                .createThread({ thread_id, workspace_id, ...(user_id === undefined ? {} : { user_id }) })
                 .pipe(Effect.map((summary): Remote.ThreadRecord => ({ summary, events: [] }))),
             ),
           )
@@ -100,6 +105,7 @@ const makeBackend = (
               thread_id,
               workspace_path,
               mode,
+              ...(user_id === undefined ? {} : { user_id }),
               events: record.events,
               ...(activeOrb === undefined ? {} : { active_orb: activeOrb }),
               ...(record.summary.context_tokens === undefined ? {} : { context_tokens: record.summary.context_tokens }),
@@ -108,21 +114,28 @@ const makeBackend = (
           ),
         }
       }
-      const summary = yield* client.createThread({ workspace_id })
+      const summary = yield* client.createThread({ workspace_id, ...(user_id === undefined ? {} : { user_id }) })
       return {
         thread_id: summary.thread_id,
         last_sequence: 0,
         state: ViewState.beginConnecting(
-          ViewState.initial({ thread_id: summary.thread_id, workspace_path, mode, events: [] }),
+          ViewState.initial({
+            thread_id: summary.thread_id,
+            workspace_path,
+            mode,
+            events: [],
+            ...(user_id === undefined ? {} : { user_id }),
+          }),
         ),
       }
     }),
-  streamTurn: ({ thread_id, workspace_id, content, content_parts, mode, fast_mode, tool_access }) =>
+  streamTurn: ({ thread_id, workspace_id, user_id, content, content_parts, mode, fast_mode, tool_access }) =>
     Stream.unwrap(
       client
         .startTurn({
           thread_id,
           workspace_id,
+          ...(user_id === undefined ? {} : { user_id }),
           content,
           ...(content_parts === undefined ? {} : { content_parts }),
           mode,
@@ -131,11 +144,12 @@ const makeBackend = (
         })
         .pipe(Effect.as(Stream.empty)),
     ),
-  submitTurn: ({ thread_id, workspace_id, content, content_parts, mode, fast_mode, tool_access }) =>
+  submitTurn: ({ thread_id, workspace_id, user_id, content, content_parts, mode, fast_mode, tool_access }) =>
     client
       .startTurn({
         thread_id,
         workspace_id,
+        ...(user_id === undefined ? {} : { user_id }),
         content,
         ...(content_parts === undefined ? {} : { content_parts }),
         mode,
@@ -143,8 +157,14 @@ const makeBackend = (
         ...(tool_access === undefined ? {} : { tool_access }),
       })
       .pipe(Effect.asVoid),
-  subscribeThreadEvents: ({ thread_id, after_sequence }) =>
-    client.subscribeThreadEvents({ thread_id, ...(after_sequence === undefined ? {} : { after_sequence }) }),
+  subscribeThreadEvents: ({ thread_id, after_sequence, user_id, onPresence }) =>
+    client.subscribeThreadEvents({
+      thread_id,
+      ...(after_sequence === undefined ? {} : { after_sequence }),
+      ...(user_id === undefined ? {} : { user_id }),
+      ...(onPresence === undefined ? {} : { onPresence }),
+    }),
+  setThreadPresence: (input) => client.setThreadPresence(input).pipe(Effect.asVoid),
   cancelTurn: ({ thread_id, turn_id }) => client.interruptTurn({ thread_id, turn_id }).pipe(Effect.asVoid),
   runCommand: (context, command) => handleCommand(client, context, command, runTournament),
   listProjects: () => client.listProjects().pipe(Effect.map((projects) => projects.map(projectOptionFromRecord))),

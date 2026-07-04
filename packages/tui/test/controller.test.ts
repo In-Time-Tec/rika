@@ -12,6 +12,8 @@ const workspacePath = "/workspace/rika-controller-test"
 const threadId = Ids.ThreadId.make("thread_controller")
 const projectId = Ids.ProjectId.make("project_controller")
 const orbThreadId = Ids.ThreadId.make("thread_controller_orb")
+const userId = Ids.UserId.make("user_controller")
+const otherUserId = Ids.UserId.make("sarah")
 
 type Recorded = Array<ViewState.ViewState>
 
@@ -24,6 +26,7 @@ interface Harness {
   readonly previewLoads: Array<Ids.ThreadId>
   readonly createdProjects: Array<Backend.CreateProjectInput>
   readonly orbThreads: Array<Backend.CreateOrbThreadInput>
+  readonly presence: Array<Backend.PresenceRequest>
 }
 
 const run = (
@@ -37,6 +40,9 @@ const run = (
     threads?: ReadonlyArray<Backend.ThreadOption>
     projects?: ReadonlyArray<Backend.ProjectOption>
     keymap?: Keymap.EffectiveKeymap
+    ticks?: ReadonlyArray<void>
+    userId?: Ids.UserId
+    submitTurnError?: Error & { readonly active_user_id?: Ids.UserId }
   } = {},
 ) => {
   const runWorkspacePath = options.workspacePath ?? workspacePath
@@ -48,6 +54,7 @@ const run = (
   const previewLoads: Array<Ids.ThreadId> = []
   const createdProjects: Array<Backend.CreateProjectInput> = []
   const orbThreads: Array<Backend.CreateOrbThreadInput> = []
+  const presence: Array<Backend.PresenceRequest> = []
   let turnCount = 0
 
   const adapter: Adapter.Adapter = {
@@ -65,10 +72,16 @@ const run = (
   }
 
   const backend: Backend.SessionBackend<Error> = {
-    loadInitial: ({ workspace_path, mode }) =>
+    loadInitial: ({ workspace_path, mode, user_id }) =>
       Effect.succeed({
         thread_id: threadId,
-        state: ViewState.initial({ thread_id: threadId, workspace_path, mode, events: options.seedEvents ?? [] }),
+        state: ViewState.initial({
+          thread_id: threadId,
+          workspace_path,
+          mode,
+          events: options.seedEvents ?? [],
+          ...(user_id === undefined ? {} : { user_id }),
+        }),
       }),
     streamTurn: ({ content, content_parts }) =>
       Stream.suspend(() => {
@@ -101,6 +114,16 @@ const run = (
         orbThreads.push(input)
         return { thread_id: orbThreadId, workspace_id: Ids.WorkspaceId.make(`project:${input.project_id}`) }
       }),
+    ...(options.submitTurnError === undefined
+      ? {}
+      : {
+          submitTurn: () => Effect.fail(options.submitTurnError!),
+          subscribeThreadEvents: () => Stream.empty,
+        }),
+    setThreadPresence: (input) =>
+      Effect.sync(() => {
+        presence.push(input)
+      }),
     listThreads: () => Effect.succeed(options.threads ?? []),
     loadThreadPreview: ({ thread_id, workspace_path, mode }) =>
       Effect.sync(() => {
@@ -122,12 +145,16 @@ const run = (
       {
         backend,
         renderer: adapter,
-        ticks: Stream.empty,
+        ticks: options.ticks === undefined ? Stream.empty : Stream.fromIterable(options.ticks),
         defaultMode: "smart",
         defaultWorkspace: workspacePath,
         ...(options.keymap === undefined ? {} : { keymap: options.keymap }),
       },
-      { workspace_root: runWorkspacePath, mode: "smart" },
+      {
+        workspace_root: runWorkspacePath,
+        mode: "smart",
+        ...(options.userId === undefined ? {} : { user_id: options.userId }),
+      },
     ),
   ).then((exitCode): Harness & { exitCode: number } => ({
     exitCode,
@@ -139,6 +166,7 @@ const run = (
     previewLoads,
     createdProjects,
     orbThreads,
+    presence,
   }))
 }
 
@@ -165,6 +193,29 @@ describe("Controller", () => {
     expect(rendered.some((state) => state.messages.some((message) => message.text.includes("response to again")))).toBe(
       true,
     )
+  })
+
+  test("throttles typing presence and returns active presence on submit", async () => {
+    const keys = [...Keys.fromString("typing continuously"), Keys.enter, ...quit]
+    const ticks = Array.from({ length: 39 }, () => undefined)
+    const { presence } = await run(keys, { userId, ticks })
+
+    expect(presence.filter((item) => item.state === "typing")).toHaveLength(1)
+    expect(presence.at(-1)).toEqual({ thread_id: threadId, user_id: userId, state: "active" })
+  })
+
+  test("queues a turn when the remote backend reports an active user conflict", async () => {
+    const error = Object.assign(new Error("Turn already active"), { active_user_id: otherUserId })
+    const { rendered } = await run([...Keys.fromString("queue this"), Keys.enter, ...quit], {
+      userId,
+      submitTurnError: error,
+    })
+
+    expect(
+      rendered.some(
+        (state) => state.queued.includes("queue this") && state.notice === "sarah is running a turn — message queued",
+      ),
+    ).toBe(true)
   })
 
   test("Ctrl+O opens the command palette", async () => {

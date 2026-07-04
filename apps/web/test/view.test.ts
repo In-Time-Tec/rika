@@ -33,6 +33,8 @@ const workspaceId = Ids.WorkspaceId.make("workspace-view")
 const messageId = Ids.MessageId.make("message-view")
 const orbId = Ids.OrbId.make("orb-view")
 const projectId = Ids.ProjectId.make("project-view")
+const userId = Ids.UserId.make("user_view")
+const otherUserId = Ids.UserId.make("sarah")
 
 describe("web app view", () => {
   test("renders an accessible orb tab shell for orb-backed threads", () => {
@@ -179,6 +181,26 @@ describe("web app view", () => {
       Scene.with(terminalTurnModel()),
       Scene.expect(Scene.role("combobox", { name: "Mode" })).toExist(),
       Scene.expect(Scene.role("button", { name: "Stop" })).not.toExist(),
+    )
+  })
+
+  test("renders multiplayer presence and message attribution", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({
+        ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+        selected_thread_id: threadId,
+        subscribed_thread_id: threadId,
+        threads: [summary(threadId)],
+        events: [messageAdded(1, "user", "hello from Sarah", otherUserId)],
+        last_sequence: 1,
+        subscription_after_sequence: 1,
+        presence: [{ user_id: otherUserId, state: "typing", last_seen: 2 }],
+        connection: "connected",
+      }),
+      Scene.expect(Scene.text("S")).toExist(),
+      Scene.expect(Scene.text("sarah is typing")).toExist(),
+      Scene.expect(Scene.text("sarah › hello from Sarah")).toExist(),
     )
   })
 })
@@ -387,7 +409,12 @@ const orbSummary = (status: Remote.OrbSummary["status"]): Remote.OrbSummary => (
   running_minutes: 7,
 })
 
-const messageAdded = (sequence: number, role: RikaMessage.Role, text: string): Event.MessageAdded => ({
+const messageAdded = (
+  sequence: number,
+  role: RikaMessage.Role,
+  text: string,
+  messageUserId?: Ids.UserId,
+): Event.MessageAdded => ({
   id: Ids.EventId.make(`event-${sequence}`),
   thread_id: threadId,
   sequence,
@@ -401,6 +428,7 @@ const messageAdded = (sequence: number, role: RikaMessage.Role, text: string): E
       role,
       content: [RikaMessage.text(text)],
       created_at: sequence,
+      ...(messageUserId === undefined ? {} : { metadata: { user_id: messageUserId } }),
     },
   },
 })

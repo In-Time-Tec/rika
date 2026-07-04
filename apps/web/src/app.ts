@@ -156,12 +156,16 @@ export const Model = S.Struct({
   notice: S.optional(S.String),
   pending_submit: S.optional(S.String),
   pending_submit_mode: S.optional(Remote.AgentMode),
+  user_id: S.optional(Ids.UserId),
+  presence: S.Array(Remote.PresenceUser),
+  typing_presence_cooling: S.Boolean,
 })
 export type Model = typeof Model.Type
 
 export interface RuntimeConfig {
   readonly api_base_url: string
   readonly thread_id?: Ids.ThreadId
+  readonly user_id?: Ids.UserId
 }
 
 export type TranscriptRow = TextTranscriptRow | PierreDiffTranscriptRow
@@ -224,10 +228,12 @@ export const ChangedDraftMode = m("ChangedDraftMode", { value: S.String })
 export const SubmittedDraft = m("SubmittedDraft")
 export const AcceptedTurn = m("AcceptedTurn", { response: Remote.StartTurnResponse })
 export const FailedStartTurn = m("FailedStartTurn", { message: S.String })
+export const TypingPresenceReady = m("TypingPresenceReady")
 export const ClickedInterrupt = m("ClickedInterrupt")
 export const InterruptedTurn = m("InterruptedTurn", { event: Event.TurnFailed })
 export const FailedInterruptTurn = m("FailedInterruptTurn", { message: S.String })
 export const ReceivedThreadEvent = m("ReceivedThreadEvent", { event: Event.Event })
+export const ReceivedPresence = m("ReceivedPresence", { presence: Remote.PresencePayload })
 export const ThreadSubscriptionFailed = m("ThreadSubscriptionFailed", { message: S.String })
 export const ClickedTogglePierreDiff = m("ClickedTogglePierreDiff", { payload_id: S.String })
 export const RenderedPierreDiff = m("RenderedPierreDiff", { payload_id: S.String })
@@ -299,10 +305,12 @@ const OrbWorkspaceMessage = S.Union([
   SubmittedDraft,
   AcceptedTurn,
   FailedStartTurn,
+  TypingPresenceReady,
   ClickedInterrupt,
   InterruptedTurn,
   FailedInterruptTurn,
   ReceivedThreadEvent,
+  ReceivedPresence,
   ThreadSubscriptionFailed,
   ClickedTogglePierreDiff,
   RenderedPierreDiff,
@@ -743,15 +751,45 @@ export const KillSelectedOrb = Command.define(
 
 export const StartTurn = Command.define(
   "StartTurn",
-  { api_base_url: S.String, thread_id: Ids.ThreadId, content: S.String, mode: S.optional(Remote.AgentMode) },
+  {
+    api_base_url: S.String,
+    thread_id: Ids.ThreadId,
+    user_id: S.optional(Ids.UserId),
+    content: S.String,
+    mode: S.optional(Remote.AgentMode),
+  },
   AcceptedTurn,
   FailedStartTurn,
-)(({ api_base_url, thread_id, content, mode }) =>
-  sdk(api_base_url)
-    .startTurn({ thread_id, content, ...(mode === undefined ? {} : { mode }) })
+)(({ api_base_url, thread_id, user_id, content, mode }) =>
+  sdk(api_base_url, user_id)
+    .startTurn({
+      thread_id,
+      ...(user_id === undefined ? {} : { user_id }),
+      content,
+      ...(mode === undefined ? {} : { mode }),
+    })
     .pipe(
       Effect.map((response) => AcceptedTurn({ response })),
       Effect.catch((error) => Effect.succeed(FailedStartTurn({ message: error.message }))),
+    ),
+)
+
+export const SetThreadPresence = Command.define(
+  "SetThreadPresence",
+  {
+    api_base_url: S.String,
+    thread_id: Ids.ThreadId,
+    user_id: Ids.UserId,
+    state: Remote.PresenceState,
+  },
+  TypingPresenceReady,
+)(({ api_base_url, thread_id, user_id, state }) =>
+  sdk(api_base_url, user_id)
+    .setThreadPresence({ thread_id, user_id, state })
+    .pipe(
+      Effect.andThen(state === "typing" ? Effect.sleep("4 seconds") : Effect.void),
+      Effect.as(TypingPresenceReady()),
+      Effect.catch(() => Effect.succeed(TypingPresenceReady())),
     ),
 )
 
@@ -784,6 +822,7 @@ export const ReconnectOrbTerminal = Command.define(
 
 export const initialModel = (config: RuntimeConfig): Model => ({
   api_base_url: config.api_base_url,
+  ...(config.user_id === undefined ? {} : { user_id: config.user_id }),
   active_view: "threads",
   connection: "idle",
   threads: [],
@@ -798,6 +837,8 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   subscription_after_sequence: 0,
   draft: "",
   pending_turn: false,
+  presence: [],
+  typing_presence_cooling: false,
   expanded_diff_ids: [],
   ...initialOrbWorkspace(),
   ...(config.thread_id === undefined ? {} : { selected_thread_id: config.thread_id }),
@@ -847,6 +888,8 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
           events: [],
           last_sequence: 0,
           subscription_after_sequence: 0,
+          presence: [],
+          typing_presence_cooling: false,
           connection: "loading",
           notice: undefined,
         },
@@ -900,7 +943,7 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "FailedLoadOrbChanges":
       return [{ ...model, orb_changes: { state: "failed", message: message.message }, notice: message.message }, []]
     case "ChangedDraft":
-      return [{ ...model, draft: message.value }, []]
+      return changedDraftModel(model, message.value)
     case "ChangedDraftMode":
       return [{ ...model, draft_mode: agentModeFromValue(message.value) }, []]
     case "SubmittedDraft":
@@ -909,6 +952,8 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
       return [model, []]
     case "FailedStartTurn":
       return [{ ...model, pending_turn: false, notice: message.message }, []]
+    case "TypingPresenceReady":
+      return [{ ...model, typing_presence_cooling: false }, []]
     case "ClickedInterrupt":
       return interruptTurnModel(model)
     case "InterruptedTurn":
@@ -917,6 +962,8 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
       return [{ ...model, pending_interrupt_turn_id: undefined, notice: message.message }, []]
     case "ReceivedThreadEvent":
       return receivedEventModel(model, message.event)
+    case "ReceivedPresence":
+      return receivedPresenceModel(model, message.presence)
     case "ThreadSubscriptionFailed":
       return [{ ...model, connection: "failed", notice: message.message }, []]
     case "ClickedTogglePierreDiff":
@@ -1068,23 +1115,36 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
     {
       api_base_url: S.String,
       thread_id: S.optional(Ids.ThreadId),
+      user_id: S.optional(Ids.UserId),
       after_sequence: S.Int,
     },
     {
       modelToDependencies: (model) => ({
         api_base_url: model.api_base_url,
         ...(model.subscribed_thread_id === undefined ? {} : { thread_id: model.subscribed_thread_id }),
+        ...(model.user_id === undefined ? {} : { user_id: model.user_id }),
         after_sequence: model.subscription_after_sequence,
       }),
-      dependenciesToStream: ({ api_base_url, thread_id, after_sequence }) =>
+      dependenciesToStream: ({ api_base_url, thread_id, user_id, after_sequence }) =>
         thread_id === undefined
           ? Stream.empty
-          : sdk(api_base_url)
-              .subscribeThreadEvents({ thread_id, after_sequence })
-              .pipe(
-                Stream.map((event) => ReceivedThreadEvent({ event })),
-                Stream.catch((error) => Stream.make(ThreadSubscriptionFailed({ message: error.message }))),
-              ),
+          : Stream.unwrap(
+              Effect.gen(function* () {
+                const presence = yield* Queue.unbounded<AppMessage>()
+                return sdk(api_base_url, user_id)
+                  .subscribeThreadEvents({
+                    thread_id,
+                    after_sequence,
+                    ...(user_id === undefined ? {} : { user_id }),
+                    onPresence: (snapshot) => Queue.offerUnsafe(presence, ReceivedPresence({ presence: snapshot })),
+                  })
+                  .pipe(
+                    Stream.map((event) => ReceivedThreadEvent({ event })),
+                    Stream.catch((error) => Stream.make(ThreadSubscriptionFailed({ message: error.message }))),
+                    Stream.merge(Stream.fromQueue(presence)),
+                  )
+              }),
+            ),
     },
   ),
 }))
@@ -1092,6 +1152,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
 export const eventRows = (
   events: ReadonlyArray<Event.Event>,
   expandedDiffIds: ReadonlySet<string> = new Set(),
+  userId?: Ids.UserId,
 ): ReadonlyArray<TranscriptRow> =>
   events.flatMap((event) => {
     switch (event.type) {
@@ -1101,7 +1162,7 @@ export const eventRows = (
           sequence: event.sequence,
           kind: "message",
           title: roleLabel(event.data.message.role),
-          body: RikaMessage.displayText(event.data.message),
+          body: messageDisplayText(event.data.message, userId),
         }
       case "model.stream.chunk":
         return { id: event.id, sequence: event.sequence, kind: "message", title: "Rika", body: event.data.text }
@@ -1269,7 +1330,8 @@ export const contextUsage = (model: Model): ContextUsage | undefined => {
   }
 }
 
-const sdk = (apiBaseUrl: string) => Client.make(Client.fetchTransport({ base_url: apiBaseUrl }))
+const sdk = (apiBaseUrl: string, userId?: Ids.UserId) =>
+  Client.make(Client.fetchTransport({ base_url: apiBaseUrl, ...(userId === undefined ? {} : { user_id: userId }) }))
 
 const orbSdk = (apiBaseUrl: string, threadId: Ids.ThreadId) =>
   sdk(`${apiBaseUrl.replace(/\/$/, "")}/orb/by-thread/${encodeURIComponent(threadId)}`)
@@ -1418,6 +1480,8 @@ const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model,
     events: [],
     last_sequence: 0,
     subscription_after_sequence: 0,
+    presence: [],
+    typing_presence_cooling: false,
     connection: "loading",
     notice: undefined,
   },
@@ -1441,6 +1505,8 @@ const createdThreadModel = (
     events: [],
     last_sequence: 0,
     subscription_after_sequence: 0,
+    presence: [],
+    typing_presence_cooling: false,
     connection: "connected" as const,
     notice: undefined,
   }
@@ -1451,7 +1517,15 @@ const createdThreadModel = (
   }
   return [
     { ...next, pending_turn: true, pending_submit: undefined, pending_submit_mode: undefined },
-    [StartTurn({ api_base_url: model.api_base_url, thread_id: summary.thread_id, content, mode })],
+    [
+      StartTurn({
+        api_base_url: model.api_base_url,
+        thread_id: summary.thread_id,
+        user_id: model.user_id,
+        content,
+        mode,
+      }),
+    ],
   ]
 }
 
@@ -1473,6 +1547,8 @@ const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly 
     events: record.events,
     last_sequence: lastSequence,
     subscription_after_sequence: lastSequence,
+    presence: [],
+    typing_presence_cooling: false,
     connection: "connected" as const,
     notice: undefined,
   }
@@ -1482,6 +1558,17 @@ const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly 
       ? []
       : [LoadSelectedOrb({ api_base_url: model.api_base_url, thread_id: record.summary.thread_id })],
   ]
+}
+
+const changedDraftModel = (model: Model, value: string): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const next = { ...model, draft: value }
+  if (value.trim().length === 0) {
+    const command = model.typing_presence_cooling ? presenceCommand(model, "active") : undefined
+    return [{ ...next, typing_presence_cooling: false }, command === undefined ? [] : [command]]
+  }
+  if (model.typing_presence_cooling) return [next, []]
+  const command = presenceCommand(next, "typing")
+  return command === undefined ? [next, []] : [{ ...next, typing_presence_cooling: true }, [command]]
 }
 
 const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
@@ -1496,22 +1583,51 @@ const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCo
         pending_turn: true,
         pending_submit: content,
         pending_submit_mode: model.draft_mode,
+        typing_presence_cooling: false,
         connection: "loading",
         notice: undefined,
       },
       [CreateThread({ api_base_url: model.api_base_url })],
     ]
   }
+  const presence = presenceCommand(model, "active")
   return [
-    { ...model, draft: "", pending_turn: true, notice: undefined },
+    { ...model, draft: "", pending_turn: true, notice: undefined, typing_presence_cooling: false },
     [
+      ...(presence === undefined ? [] : [presence]),
       StartTurn({
         api_base_url: model.api_base_url,
         thread_id: model.selected_thread_id,
+        user_id: model.user_id,
         content,
         mode: model.draft_mode,
       }),
     ],
+  ]
+}
+
+const presenceCommand = (model: Model, state: Remote.PresenceState): AppCommand | undefined =>
+  model.selected_thread_id === undefined || model.user_id === undefined
+    ? undefined
+    : SetThreadPresence({
+        api_base_url: model.api_base_url,
+        thread_id: model.selected_thread_id,
+        user_id: model.user_id,
+        state,
+      })
+
+const receivedPresenceModel = (
+  model: Model,
+  presence: Remote.PresencePayload,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const threadId = model.subscribed_thread_id ?? model.selected_thread_id
+  if (threadId !== undefined && presence.thread_id !== threadId) return [model, []]
+  return [
+    {
+      ...model,
+      presence: presence.users.filter((user) => model.user_id === undefined || user.user_id !== model.user_id),
+    },
+    [],
   ]
 }
 
@@ -1901,4 +2017,17 @@ const roleLabel = (role: RikaMessage.Role) => {
   if (role === "user") return "User"
   if (role === "tool") return "Tool"
   return "System"
+}
+
+const messageDisplayText = (message: RikaMessage.Message, userId: Ids.UserId | undefined): string => {
+  const text = RikaMessage.displayText(message)
+  const messageUserId = messageUserIdFromMetadata(message)
+  return message.role === "user" && messageUserId !== undefined && (userId === undefined || messageUserId !== userId)
+    ? `${messageUserId} › ${text}`
+    : text
+}
+
+const messageUserIdFromMetadata = (message: RikaMessage.Message): Ids.UserId | undefined => {
+  const value = message.metadata?.user_id
+  return typeof value === "string" ? Ids.UserId.make(value) : undefined
 }
