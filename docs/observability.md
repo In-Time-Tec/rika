@@ -1,19 +1,22 @@
 # Observability (Telemetry + Logging)
 
-Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. Rika Inspect ships with the CLI and provides a local ingest daemon, SQLite store, and terminal telemetry viewer without requiring a separate install.
+Rika writes structured telemetry through OpenTelemetry traces and logs over local OTLP/HTTP. Rika exports OTLP traces and logs to a local endpoint, defaulting to `http://127.0.0.1:27686`; viewing and querying that telemetry is handled by the external motel server.
 
 ## Inspecting telemetry
 
-Use the inspect command to open telemetry without installing anything else:
+Run motel to receive Rika telemetry and expose the query API:
 
+```bash
+motel start
 ```
-rika inspect --all                 # all Rika traces and logs
-rika inspect --thread <thread-id>  # only one thread
+
+If `motel` is not on `PATH`, run it through Bun:
+
+```bash
+bunx @kitlangton/motel start
 ```
 
-The TUI command palette exposes the same telemetry surface in-process. On an empty landing screen it offers `/inspect all`; once a thread has activity it offers `/inspect thread` plus `/inspect all`. Thread inspect opens a full-screen Rika pane with `service.name=rika` and the `rika.thread_id=<thread-id>` filter applied.
-
-The local telemetry daemon listens on `http://127.0.0.1:27686` (`/v1/traces`, `/v1/logs`) and exposes a read API (`/api/services`, `/api/traces?service=rika`, `/api/logs?service=rika`, `/api/ai/calls`).
+Rika sends traces to `/v1/traces` and logs to `/v1/logs` under the configured OTLP base URL. Set `RIKA_TELEMETRY_ENDPOINT` only when motel is listening somewhere other than the default local endpoint. The full debugging workflow lives in `.agents/skills/motel-debug/SKILL.md`.
 
 ## How export is wired
 

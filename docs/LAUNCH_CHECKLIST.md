@@ -7,7 +7,7 @@ Issue #30 is the first launch hardening pass. This checklist records what is rea
 | Gate          | Command                 | Purpose                                              |
 | ------------- | ----------------------- | ---------------------------------------------------- |
 | Format        | `bun run format:check`  | Repository formatting.                               |
-| Lint          | `bun run lint`          | Oxlint repository lint.                              |
+| Lint          | `bun run lint`          | Oxlint and ast-grep repository lint.                 |
 | Typecheck     | `bun run typecheck`     | Package TypeScript contracts through Turbo.          |
 | Tests         | `bun run test`          | Unit/integration tests across packages.              |
 | Build         | `bun run build`         | Package build graph.                                 |

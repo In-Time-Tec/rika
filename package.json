@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "install:local": "bun run scripts/install-release.ts",
-    "lint": "oxlint .",
+    "lint": "oxlint . && ast-grep scan",
     "orb:template": "bun run scripts/build-orb-template.ts",
     "orb:template:contract": "bun test scripts/orb-template.test.ts",
     "orb:template:smoke": "bun run scripts/orb-template-smoke.ts",
@@ -34,6 +34,7 @@
       "apps/*"
     ],
     "catalog": {
+      "@ast-grep/cli": "0.44.0",
       "@effect/ai-openai": "4.0.0-beta.90",
       "@effect/ai-anthropic": "4.0.0-beta.90",
       "@effect/opentelemetry": "4.0.0-beta.90",
@@ -70,7 +71,11 @@
       "@foldkit/vite-plugin": "0.10.0"
     }
   },
+  "trustedDependencies": [
+    "@ast-grep/cli"
+  ],
   "devDependencies": {
+    "@ast-grep/cli": "catalog:",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",

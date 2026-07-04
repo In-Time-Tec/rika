@@ -8,9 +8,18 @@
     "suspicious": "warn"
   },
   "rules": {
+    "no-console": "error",
     "require-yield": "off",
     "typescript/no-floating-promises": "warn"
   },
+  "overrides": [
+    {
+      "files": ["scripts/**", "packages/core/src/diagnostics.ts", "**/test/**", "**/*.test.ts"],
+      "rules": {
+        "no-console": "off"
+      }
+    }
+  ],
   "ignorePatterns": [
     "**/node_modules/**",
     "**/dist/**",
