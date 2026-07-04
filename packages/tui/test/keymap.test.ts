@@ -18,6 +18,90 @@ const expectAction = (resolution: Keymap.Resolution): Keymap.Action => {
 }
 
 describe("keymap.resolve", () => {
+  test("settings override applies to a default action chord", () => {
+    const keymap = Keymap.effectiveKeymap({
+      entries: { "palette.open": "ctrl+p" },
+      sources: { "palette.open": "user" },
+    })
+
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("p"), keymap))._tag).toBe("OpenPalette")
+    expect(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("o"), keymap)).toEqual({ _tag: "Ignore" })
+  })
+
+  test("settings null unbinds a default action chord", () => {
+    const keymap = Keymap.effectiveKeymap({
+      entries: { "palette.open": null },
+      sources: { "palette.open": "user" },
+    })
+
+    expect(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("o"), keymap)).toEqual({ _tag: "Ignore" })
+    expect(keymap.entries.find((entry) => entry.id === "palette.open")).toMatchObject({
+      chord: null,
+      source: "user",
+    })
+  })
+
+  test("settings null unbinds fallback chords for the same action", () => {
+    const keymap = Keymap.effectiveKeymap({
+      entries: {
+        "modepicker.close": null,
+        "modepicker.next": null,
+        "palette.close": null,
+        "prompt.deleteWordBackward": null,
+      },
+      sources: {
+        "modepicker.close": "user",
+        "modepicker.next": "user",
+        "palette.close": "user",
+        "prompt.deleteWordBackward": "user",
+      },
+    })
+
+    expect(Keymap.resolve(inputCtx({ surface: "modepicker" }), undefined, Keys.escape, keymap)).toEqual({
+      _tag: "Ignore",
+    })
+    expect(Keymap.resolve(inputCtx({ surface: "modepicker" }), undefined, Keys.enter, keymap)).toEqual({
+      _tag: "Ignore",
+    })
+    expect(Keymap.resolve(inputCtx({ surface: "modepicker" }), undefined, Keys.make({ name: "down" }), keymap)).toEqual(
+      { _tag: "Ignore" },
+    )
+    expect(Keymap.resolve(inputCtx({ surface: "palette" }), undefined, Keys.escape, keymap)).toEqual({
+      _tag: "Ignore",
+    })
+    expect(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "backspace", ctrl: true }), keymap)).toEqual({
+      _tag: "Ignore",
+    })
+  })
+
+  test("bad override chord warns and keeps the default action chord", () => {
+    const keymap = Keymap.effectiveKeymap({
+      entries: { "palette.open": "ctrl+" },
+      sources: { "palette.open": "user" },
+    })
+
+    expect(keymap.warnings).toEqual([
+      expect.objectContaining({
+        action_id: "palette.open",
+        source: "user",
+      }),
+    ])
+    expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("o"), keymap))._tag).toBe("OpenPalette")
+  })
+
+  test("leader rebind cascades to leader-based action chords", () => {
+    const keymap = Keymap.effectiveKeymap({
+      entries: { leader: "ctrl+a" },
+      sources: { leader: "user" },
+    })
+
+    expect(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("x"), keymap)).toEqual({ _tag: "Ignore" })
+    expect(Keymap.resolve(inputCtx(), undefined, Keys.ctrl("a"), keymap)).toMatchObject({ _tag: "Pending" })
+    expect(
+      expectAction(Keymap.resolve(inputCtx(), "leader", Keys.make({ name: "r", sequence: "r" }), keymap))._tag,
+    ).toBe("ToggleRemoteArm")
+  })
+
   test("inserts printable characters", () => {
     expect(expectAction(Keymap.resolve(inputCtx(), undefined, Keys.make({ name: "a", sequence: "a" })))).toEqual({
       _tag: "Insert",

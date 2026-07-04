@@ -2,78 +2,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname } from "node:path"
 import { Config, Settings } from "@rika/core"
+import * as Keymap from "@rika/tui/keymap"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Args from "./args"
 import * as Output from "./output"
-
-export const keymapText = [
-  "{",
-  '  "leader": "ctrl+x", // Leader key for <leader> shortcuts',
-  '  "amp.disconnect": null, // Disconnect the active thread without reconnecting',
-  '  "amp.endCredits": null, // Roll the full-screen Amp credits',
-  '  "amp.help": null, // Show help & keymaps',
-  '  "amp.quit": "ctrl+c ctrl+c", // Quit',
-  '  "amp.reconnect": null, // Disconnect and reconnect the active thread',
-  '  "amp.relaunch": null, // Quit, reopen Amp, and resume active threads',
-  '  "amp.showVersion": null, // Show current Amp version',
-  '  "amp.showWelcome": null, // Show the welcome message again',
-  '  "feedback.sendReportWithDiagnostics": null, // Generate and send a diagnostic report for Amp support',
-  '  "ide.connect": null, // Connect to an IDE',
-  '  "label.add": null, // Add label to thread',
-  '  "label.remove": null, // Remove label from thread',
-  '  "mcp.authenticate": null, // Retry OAuth authentication for an MCP server',
-  '  "mcp.info": null, // Show MCP servers and tools',
-  '  "mode.toggle": "ctrl+s", // Switch to the next available mode',
-  '  "mode.toggleReasoningEffort": "alt+d", // Cycle reasoning effort for the active model',
-  '  "mode.use.deep1": null, // Enable deep1 mode',
-  '  "mode.use.deep2": null, // Enable deep2 mode',
-  '  "mode.use.deep3": null, // Enable deep3 mode',
-  '  "mode.use.large": null, // Enable large mode',
-  '  "mode.use.nostromo": null, // Enable nostromo mode',
-  '  "mode.use.review": null, // Enable review mode',
-  '  "mode.use.rush": null, // Enable rush mode',
-  '  "mode.use.smart": null, // Enable smart mode',
-  '  "news.open": null, // Open Amp Chronicle in browser',
-  '  "plugins.activity": null, // Show recent plugin activity triggered by hooks',
-  '  "plugins.list": null, // List all loaded plugins',
-  '  "plugins.reload": null, // Reload all plugins',
-  '  "prompt.clear": null, // Clear input',
-  '  "prompt.copySelection": null, // Copy selection',
-  '  "prompt.dequeue": null, // Dequeue prompts',
-  '  "prompt.history": "ctrl+r", // Restore a previous prompt',
-  '  "prompt.openInEditor": "ctrl+g", // Edit prompt in $EDITOR',
-  '  "prompt.pasteImageFromClipboard": "ctrl+v", // Paste image from clipboard',
-  '  "prompt.steerQueuedMessage": null, // Steer with the next queued prompt',
-  '  "settings.openInEditor": null, // Open CLI settings in $EDITOR',
-  '  "skills.list": null, // List available skills for this thread',
-  '  "speed.toggleFast": "alt+r", // Toggle fast speed for this thread',
-  '  "thread.analyzeContext": null, // Show token usage by prompt section for this thread',
-  '  "thread.archive": "ctrl+c ctrl+n", // Archive and new thread',
-  '  "thread.archiveAndQuit": "ctrl+c ctrl+e", // Archive and quit',
-  '  "thread.archiveSelectedInSidebar": "mod+shift+e", // Archive the selected sidebar thread',
-  '  "thread.copyID": null, // Copy thread ID',
-  '  "thread.copyMarkdown": null, // Copy thread as Markdown',
-  '  "thread.copyURL": null, // Copy thread URL',
-  '  "thread.mention": null, // Mention a thread',
-  '  "thread.new": null, // Start new thread',
-  '  "thread.newRemote": "<leader>r", // Toggle remote sandbox mode for the next thread',
-  '  "thread.openInBrowser": null, // Open thread in browser',
-  '  "thread.rename": null, // Rename thread title',
-  '  "thread.selectRemoteExecutor": null, // Choose whether the next remote thread runs in the Orb or a daemon',
-  '  "thread.selectRemoteProject": null, // Choose the project for the next remote thread',
-  '  "thread.showCost": null, // Show usage cost and entitlement for the active thread',
-  '  "thread.showHideSidebar": null, // Show or hide the thread sidebar',
-  '  "thread.switch": null, // Switch to existing thread',
-  '  "thread.switchToNext": null, // Switch to next thread',
-  '  "thread.switchToNextInSidebar": "ctrl+alt+down", // Switch to next thread in sidebar',
-  '  "thread.switchToPrevious": null, // Switch to previous thread',
-  '  "thread.switchToPreviousInSidebar": "ctrl+alt+up", // Switch to previous thread in sidebar',
-  '  "thread.toggleDetails": "alt+t", // Expand or collapse tool and activity details',
-  '  "thread.toggleOutline": null, // Toggle the outline for the visible assistant response',
-  '  "thread.toggleSidebar": "alt+s", // Show, focus, or hide the thread sidebar',
-  '  "threadStatus.toggleVisibility": null // Toggle thread status tab visibility',
-  "}",
-].join("\n")
 
 export interface Input {
   readonly env: Record<string, string | undefined>
@@ -116,17 +48,12 @@ export const layerFromInput = (input: Input) =>
         const system = input.system ?? liveSystem
         if (command.action === "list") return yield* executeList(input, output)
         if (command.action === "edit") return yield* executeEdit(command, input, output, system)
-        yield* output.stdout(keymapText)
-        return 0
+        return yield* executeKeymap(input, output)
       }),
     }),
   )
 
 export const executeCommand = Effect.fn("Cli.Config.executeCommand")(function* (command: Args.ConfigCommand) {
-  if (command.action === "keymap") {
-    yield* Output.stdout(keymapText)
-    return 0
-  }
   const service = Option.getOrUndefined(yield* Effect.serviceOption(Service))
   if (service === undefined) {
     return yield* new ConfigCommandError({ message: "Config service is required", action: command.action })
@@ -159,6 +86,15 @@ const executeList = (input: Input, output: Output.Interface): Effect.Effect<numb
       ...Settings.entries(snapshot),
     ]
     yield* output.stdout(formatJson({ entries, warnings: snapshot.warnings }))
+    return 0
+  })
+
+const executeKeymap = (input: Input, output: Output.Interface): Effect.Effect<number> =>
+  Effect.gen(function* () {
+    const workspaceRoot = input.env.RIKA_WORKSPACE_ROOT ?? input.cwd
+    const snapshot = yield* Settings.loadSnapshotFromEnv(input.env, workspaceRoot)
+    const keymap = Keymap.effectiveKeymap({ entries: snapshot.values.keymap, sources: snapshot.keymapSources })
+    yield* output.stdout(formatJson({ entries: keymap.entries, warnings: [...snapshot.warnings, ...keymap.warnings] }))
     return 0
   })
 

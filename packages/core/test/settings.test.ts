@@ -62,6 +62,7 @@ describe("Settings", () => {
           default: "smart",
         },
         compaction: {},
+        keymap: {},
         telemetry: {
           enabled: true,
           endpoint: "http://127.0.0.1:27686",
@@ -76,6 +77,7 @@ describe("Settings", () => {
         "telemetry.enabled": "default",
         "telemetry.endpoint": "default",
       })
+      expect(snapshot.keymapSources).toEqual({})
       expect(snapshot.warnings).toEqual([])
     } finally {
       await rm(root, { recursive: true, force: true })
@@ -109,6 +111,7 @@ describe("Settings", () => {
           default: "smart",
         },
         compaction: {},
+        keymap: {},
         telemetry: {
           enabled: true,
           endpoint: "http://127.0.0.1:27686",
@@ -121,6 +124,7 @@ describe("Settings", () => {
         "telemetry.enabled": "default",
         "telemetry.endpoint": "default",
       })
+      expect(snapshot.keymapSources).toEqual({})
       expect(snapshot.warnings).toHaveLength(1)
       expect(snapshot.warnings[0]).toMatchObject({
         path: userSettings,
@@ -179,6 +183,7 @@ describe("Settings", () => {
           reserved: 2_000,
           prune: false,
         },
+        keymap: {},
         telemetry: {
           enabled: false,
           endpoint: "http://env-otel.test/",
@@ -192,6 +197,7 @@ describe("Settings", () => {
         "telemetry.enabled": "workspace",
         "telemetry.endpoint": "env",
       })
+      expect(snapshot.keymapSources).toEqual({})
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -235,6 +241,83 @@ describe("Settings", () => {
       )
       expect(snapshot.warnings.some((warning) => warning.key === "mcpServers")).toBe(false)
       expect(snapshot.warnings.some((warning) => warning.key === "rika.mcpServers")).toBe(false)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("resolves keymap entries with user entries overriding workspace entries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-settings-keymap-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    await mkdir(join(home, ".config", "rika"), { recursive: true })
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    await writeFile(
+      join(home, ".config", "rika", "settings.json"),
+      JSON.stringify({
+        keymap: {
+          "palette.open": "ctrl+p",
+          "mode.next": null,
+        },
+      }),
+    )
+    await writeFile(
+      join(workspace, ".rika", "settings.json"),
+      JSON.stringify({
+        keymap: {
+          "palette.open": "ctrl+o",
+          "thread.newRemote": "ctrl+x u",
+        },
+      }),
+    )
+
+    try {
+      const snapshot = await Effect.runPromise(
+        Settings.snapshot.pipe(Effect.provide(Settings.layerFromEnv({ HOME: home }, workspace))),
+      )
+
+      expect(snapshot.values.keymap).toEqual({
+        "palette.open": "ctrl+p",
+        "mode.next": null,
+        "thread.newRemote": "ctrl+x u",
+      })
+      expect(snapshot.keymapSources).toEqual({
+        "palette.open": "user",
+        "mode.next": "user",
+        "thread.newRemote": "workspace",
+      })
+      expect(snapshot.warnings).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("warns on invalid keymap shapes without rejecting valid entries", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-settings-keymap-invalid-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    const workspaceSettings = join(workspace, ".rika", "settings.json")
+    await writeFile(
+      workspaceSettings,
+      JSON.stringify({
+        keymap: {
+          "palette.open": "ctrl+p",
+          "mode.next": false,
+        },
+      }),
+    )
+
+    try {
+      const snapshot = await Effect.runPromise(
+        Settings.snapshot.pipe(Effect.provide(Settings.layerFromEnv({ HOME: home }, workspace))),
+      )
+
+      expect(snapshot.values.keymap).toEqual({ "palette.open": "ctrl+p" })
+      expect(snapshot.keymapSources).toEqual({ "palette.open": "workspace" })
+      expect(snapshot.warnings).toEqual([
+        expect.objectContaining({ path: workspaceSettings, source: "workspace", key: "keymap.mode.next" }),
+      ])
     } finally {
       await rm(root, { recursive: true, force: true })
     }

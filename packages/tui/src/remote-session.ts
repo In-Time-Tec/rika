@@ -6,6 +6,7 @@ import { Context, Effect, Layer, Option, Schema, Stream } from "effect"
 import * as Adapter from "./adapter"
 import * as Backend from "./backend"
 import * as Controller from "./controller"
+import * as Keymap from "./keymap"
 import * as Ticker from "./ticker"
 import * as ViewState from "./view-state"
 
@@ -41,6 +42,7 @@ export const make = (
   ticks: Controller.Dependencies<RunError>["ticks"],
   workspaceId?: Ids.WorkspaceId,
   runTournament?: Backend.SessionBackend<RunError>["runTournament"],
+  keymap?: Keymap.EffectiveKeymap,
 ): Interface => {
   const backend = makeBackend(client, runTournament)
   return Service.of({
@@ -49,7 +51,14 @@ export const make = (
       const runInput =
         workspaceId === undefined || input.workspace_id !== undefined ? input : { ...input, workspace_id: workspaceId }
       return yield* Controller.run(
-        { backend, renderer, ticks, defaultMode: input.mode ?? "smart", defaultWorkspace },
+        {
+          backend,
+          renderer,
+          ticks,
+          defaultMode: input.mode ?? "smart",
+          defaultWorkspace,
+          ...(keymap === undefined ? {} : { keymap }),
+        },
         runInput,
       )
     }),

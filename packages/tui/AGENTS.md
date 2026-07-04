@@ -11,7 +11,7 @@ Do not put comments in code anywhere in this repo. Capture rationale here, in `C
 One pure model, one native adapter, one loop:
 
 - `src/view-state.ts` — the single source of truth. A pure `ViewState` + `applyEvent` reducer plus pure helpers (input editing, focus, expand, queue, thinking, palette, file picker, thread switcher). The transcript is ONE ordered `entries: TranscriptEntry[]` list so user messages interleave with tool/skill cards in the exact order events arrived. `messages`/`cards` are kept alongside for focus and tests. `hasActivity(state)` is true once `entries` is non-empty.
-- `src/keymap.ts` — pure `resolve(context, pending, key)` mapping keys and 2-key chords to `Action`s. No I/O.
+- `src/keymap.ts` — pure effective-keymap construction and `resolve(context, pending, key, keymap?)` mapping keys and space-separated chord sequences to `Action`s. No I/O.
 - `src/palette.ts` — pure command registry (`category` + `action` + slash `command`) and `filter`.
 - `src/keys.ts` — `Key` type + `fromOpenTui` (alt = meta || option).
 - `src/ticker.ts` — `Ticker.Service`, a fixed-interval `Stream<void>` driving spinner/orb animation.

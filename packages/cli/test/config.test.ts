@@ -17,18 +17,73 @@ const ConfigListReport = Schema.Struct({
   warnings: Schema.Array(Schema.Unknown),
 })
 
-describe("CLI config commands", () => {
-  test("prints the Amp-compatible keymap", async () => {
-    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
-    const exitCode = await Effect.runPromise(
-      CliConfig.executeCommand({ type: "config", action: "keymap" }).pipe(
-        Effect.provide(Layer.mergeAll(Output.memoryLayer(output))),
-      ),
-    )
+const ConfigKeymapReport = Schema.Struct({
+  entries: Schema.Array(
+    Schema.Struct({
+      id: Schema.String,
+      chord: Schema.NullOr(Schema.String),
+      description: Schema.String,
+      source: Schema.String,
+    }),
+  ),
+  warnings: Schema.Array(Schema.Unknown),
+})
 
-    expect(exitCode).toBe(0)
-    expect(output.stderr).toEqual([])
-    expect(output.stdout).toEqual([CliConfig.keymapText])
+describe("CLI config commands", () => {
+  test("prints the effective Rika keymap with settings override sources", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-cli-config-keymap-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    await mkdir(join(home, ".config", "rika"), { recursive: true })
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    await writeFile(
+      join(home, ".config", "rika", "settings.json"),
+      JSON.stringify({
+        keymap: {
+          "palette.open": "ctrl+p",
+        },
+      }),
+    )
+    await writeFile(
+      join(workspace, ".rika", "settings.json"),
+      JSON.stringify({
+        keymap: {
+          "thread.newRemote": "ctrl+x u",
+        },
+      }),
+    )
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        CliConfig.executeCommand({ type: "config", action: "keymap" }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              Output.memoryLayer(output),
+              CliConfig.layerFromInput({
+                env: { HOME: home },
+                cwd: workspace,
+              }),
+            ),
+          ),
+        ),
+      )
+
+      expect(exitCode).toBe(0)
+      expect(output.stderr).toEqual([])
+      const report = Schema.decodeUnknownSync(ConfigKeymapReport)(JSON.parse(output.stdout[0] ?? "{}"))
+      expect(report.entries.find((entry) => entry.id === "palette.open")).toMatchObject({
+        chord: "ctrl+p",
+        source: "user",
+      })
+      expect(report.entries.find((entry) => entry.id === "thread.newRemote")).toMatchObject({
+        chord: "ctrl+x u",
+        source: "workspace",
+      })
+      expect(report.warnings).toEqual([])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("prints effective config snapshot with sources", async () => {

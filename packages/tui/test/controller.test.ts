@@ -6,7 +6,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type * as Backend from "../src/backend"
 import type * as Adapter from "../src/adapter"
-import { Controller, Keys, ViewState } from "../src/index"
+import { Controller, Keymap, Keys, ViewState } from "../src/index"
 
 const workspacePath = "/workspace/rika-controller-test"
 const threadId = Ids.ThreadId.make("thread_controller")
@@ -36,6 +36,7 @@ const run = (
     turnEvents?: (content: string) => ReadonlyArray<Event.Event>
     threads?: ReadonlyArray<Backend.ThreadOption>
     projects?: ReadonlyArray<Backend.ProjectOption>
+    keymap?: Keymap.EffectiveKeymap
   } = {},
 ) => {
   const runWorkspacePath = options.workspacePath ?? workspacePath
@@ -118,7 +119,14 @@ const run = (
 
   return Effect.runPromise(
     Controller.run(
-      { backend, renderer: adapter, ticks: Stream.empty, defaultMode: "smart", defaultWorkspace: workspacePath },
+      {
+        backend,
+        renderer: adapter,
+        ticks: Stream.empty,
+        defaultMode: "smart",
+        defaultWorkspace: workspacePath,
+        ...(options.keymap === undefined ? {} : { keymap: options.keymap }),
+      },
       { workspace_root: runWorkspacePath, mode: "smart" },
     ),
   ).then((exitCode): Harness & { exitCode: number } => ({
@@ -137,6 +145,16 @@ const run = (
 const quit = [Keys.ctrl("c"), Keys.ctrl("c")]
 
 describe("Controller", () => {
+  test("renders keymap warnings in the startup status line", async () => {
+    const keymap = Keymap.effectiveKeymap({
+      entries: { "palette.open": "ctrl+" },
+      sources: { "palette.open": "user" },
+    })
+    const { rendered } = await run(quit, { keymap })
+
+    expect(rendered.some((state) => (state.notice ?? "").includes("Keymap warning: palette.open"))).toBe(true)
+  })
+
   test("contains a failing turn, renders the failure, runs the next turn, and exits 0", async () => {
     const keys = [...Keys.fromString("boom"), Keys.enter, ...Keys.fromString("again"), Keys.enter, ...quit]
     const { exitCode, rendered, turns } = await run(keys, { failFirstTurn: true })

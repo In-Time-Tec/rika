@@ -27,6 +27,7 @@ export interface Dependencies<E> {
   readonly ticks: Stream.Stream<void>
   readonly defaultMode: Config.Mode
   readonly defaultWorkspace: string
+  readonly keymap?: Keymap.EffectiveKeymap
 }
 
 type AppEvent =
@@ -68,7 +69,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
         })
         .pipe(Effect.catchCause((cause) => freshThread(deps, workspacePath, mode, Cause.squash(cause))))
 
+      const keymap = deps.keymap ?? Keymap.defaultEffectiveKeymap
+      const keymapWarning = Keymap.warningLine(keymap.warnings)
       let state = ViewState.withGitBranch(loaded.state, yield* resolveGitBranch(workspacePath))
+      if (keymapWarning !== undefined) state = ViewState.withNotice(state, keymapWarning)
       let threadId = loaded.thread_id
 
       let pending: Keymap.Pending | undefined
@@ -781,7 +785,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             queueSelected: state.queue_selected >= 0,
             navigating: state.nav_index >= 0,
           }
-          const resolution = Keymap.resolve(context, pending, key)
+          const resolution = Keymap.resolve(context, pending, key, keymap)
           if (resolution._tag === "Pending") {
             pending = resolution.chord
             return

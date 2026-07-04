@@ -67,6 +67,9 @@ export const envNameByKey: Record<SettingKey, string> = {
 }
 
 export type SettingValue = string | number | boolean | null
+export type KeymapValue = string | null
+export type KeymapEntries = Readonly<Record<string, KeymapValue>>
+export type KeymapSources = Readonly<Record<string, Exclude<SettingSource, "env" | "default">>>
 
 export interface Entry {
   readonly key: SettingKey
@@ -96,6 +99,7 @@ export interface Values {
     readonly pruneProtect?: number
     readonly pruneMinimum?: number
   }
+  readonly keymap: KeymapEntries
   readonly telemetry: {
     readonly enabled: boolean
     readonly endpoint: string
@@ -112,6 +116,7 @@ export interface Warning {
 export interface Snapshot {
   readonly values: Values
   readonly sources: Record<SettingKey, SettingSource>
+  readonly keymapSources: KeymapSources
   readonly warnings: ReadonlyArray<Warning>
 }
 
@@ -156,6 +161,7 @@ export const defaultValues = (): Values => ({
     default: defaultMode,
   },
   compaction: {},
+  keymap: {},
   telemetry: {
     enabled: true,
     endpoint: defaultTelemetryEndpoint,
@@ -179,11 +185,14 @@ export const validateSettingsText = (
 interface LoadedSettings {
   readonly user: Partial<Record<SettingKey, unknown>>
   readonly workspace: Partial<Record<SettingKey, unknown>>
+  readonly userKeymap: KeymapEntries
+  readonly workspaceKeymap: KeymapEntries
   readonly warnings: ReadonlyArray<Warning>
 }
 
 interface ParsedSettings {
   readonly values: Partial<Record<SettingKey, unknown>>
+  readonly keymap: KeymapEntries
   readonly warnings: ReadonlyArray<Warning>
 }
 
@@ -199,6 +208,8 @@ const loadFiles = (home: string, workspaceRoot: string): Effect.Effect<LoadedSet
     return {
       user: user.values,
       workspace: workspace.values,
+      userKeymap: user.keymap,
+      workspaceKeymap: workspace.keymap,
       warnings: [...user.warnings, ...workspace.warnings],
     }
   })
@@ -210,9 +221,10 @@ const loadFile = (path: string, source: Exclude<SettingSource, "env" | "default"
   }).pipe(
     Effect.map((content) => parseSettingsContent(content, path, source)),
     Effect.catch((cause) => {
-      if (isNotFound(cause)) return Effect.succeed({ values: {}, warnings: [] })
+      if (isNotFound(cause)) return Effect.succeed({ values: {}, keymap: {}, warnings: [] })
       return Effect.succeed({
         values: {},
+        keymap: {},
         warnings: [{ source, path, message: messageFromUnknown(cause) }],
       })
     }),
@@ -228,6 +240,7 @@ const parseSettingsContent = (
     if (!isRecord(parsed)) {
       return {
         values: {},
+        keymap: {},
         warnings: [{ source, path, message: "Settings file must contain a JSON object." }],
       }
     }
@@ -235,6 +248,7 @@ const parseSettingsContent = (
   } catch (cause) {
     return {
       values: {},
+      keymap: {},
       warnings: [{ source, path, message: messageFromUnknown(cause) }],
     }
   }
@@ -246,17 +260,22 @@ const validateRecord = (
   source: Exclude<SettingSource, "env" | "default">,
 ): ParsedSettings => {
   const values: Partial<Record<SettingKey, unknown>> = {}
+  const keymap: Record<string, KeymapValue> = {}
   const warnings: Array<Warning> = []
   for (const [key, value] of Object.entries(record)) {
     if (isSettingKey(key)) {
       const validated = validateSettingValue(key, value)
       if (validated.valid) values[key] = validated.value
       else warnings.push({ source, path, key, message: validated.message })
+    } else if (key === "keymap") {
+      const validated = validateKeymap(value, path, source)
+      Object.assign(keymap, validated.values)
+      warnings.push(...validated.warnings)
     } else if (!isOpaqueSettingKey(key)) {
       warnings.push({ source, path, key, message: `Unknown setting ${key}.` })
     }
   }
-  return { values, warnings }
+  return { values, keymap, warnings }
 }
 
 const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings): Snapshot => {
@@ -294,6 +313,7 @@ const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings
     loaded,
     defaultTelemetryEndpoint,
   )
+  const keymap = resolveKeymap(loaded)
 
   return {
     values: {
@@ -315,6 +335,7 @@ const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings
         ...(compactionPruneProtect.value === undefined ? {} : { pruneProtect: compactionPruneProtect.value }),
         ...(compactionPruneMinimum.value === undefined ? {} : { pruneMinimum: compactionPruneMinimum.value }),
       },
+      keymap: keymap.values,
       telemetry: {
         enabled: telemetryEnabled.value,
         endpoint: telemetryEndpoint.value,
@@ -334,6 +355,7 @@ const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings
       "telemetry.enabled": telemetryEnabled.source,
       "telemetry.endpoint": telemetryEndpoint.source,
     },
+    keymapSources: keymap.sources,
     warnings: loaded.warnings,
   }
 }
@@ -475,6 +497,36 @@ const validateSettingValue = (key: SettingKey, value: unknown): ValidationResult
     : { valid: true, value: integer }
 }
 
+const validateKeymap = (
+  value: unknown,
+  path: string,
+  source: Exclude<SettingSource, "env" | "default">,
+): { readonly values: KeymapEntries; readonly warnings: ReadonlyArray<Warning> } => {
+  if (!isRecord(value)) {
+    return {
+      values: {},
+      warnings: [{ source, path, key: "keymap", message: "Setting keymap must be a JSON object." }],
+    }
+  }
+  const values: Record<string, KeymapValue> = {}
+  const warnings: Array<Warning> = []
+  for (const [id, binding] of Object.entries(value)) {
+    if (typeof binding === "string") {
+      values[id] = binding
+    } else if (binding === null) {
+      values[id] = null
+    } else {
+      warnings.push({
+        source,
+        path,
+        key: `keymap.${id}`,
+        message: `Setting keymap.${id} must be a chord string or null.`,
+      })
+    }
+  }
+  return { values, warnings }
+}
+
 const valueForKey = (values: Values, key: SettingKey): SettingValue => {
   if (key === "orb.template") return values.orb.template
   if (key === "orb.idleTimeoutSeconds") return values.orb.idleTimeoutSeconds
@@ -488,6 +540,20 @@ const valueForKey = (values: Values, key: SettingKey): SettingValue => {
   if (key === "compaction.pruneMinimum") return values.compaction.pruneMinimum ?? null
   if (key === "telemetry.enabled") return values.telemetry.enabled
   return values.telemetry.endpoint
+}
+
+const resolveKeymap = (loaded: LoadedSettings): { readonly values: KeymapEntries; readonly sources: KeymapSources } => {
+  const values: Record<string, KeymapValue> = {}
+  const sources: Record<string, Exclude<SettingSource, "env" | "default">> = {}
+  for (const [key, value] of Object.entries(loaded.workspaceKeymap)) {
+    values[key] = value
+    sources[key] = "workspace"
+  }
+  for (const [key, value] of Object.entries(loaded.userKeymap)) {
+    values[key] = value
+    sources[key] = "user"
+  }
+  return { values, sources }
 }
 
 const settingKeySet = new Set<string>(settingKeys)

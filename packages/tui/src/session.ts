@@ -1,10 +1,11 @@
 import { AgentLoop, ReviewService, SkillRegistry, ThreadService, TournamentService } from "@rika/agent"
-import { Config, IdGenerator } from "@rika/core"
+import { Config, IdGenerator, Settings } from "@rika/core"
 import { Ids } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Adapter from "./adapter"
 import * as Backend from "./backend"
 import * as Controller from "./controller"
+import * as Keymap from "./keymap"
 import * as Ticker from "./ticker"
 import * as ViewState from "./view-state"
 
@@ -53,6 +54,15 @@ export const layer = Layer.effect(
     const renderer = yield* Adapter.Service
     const ticker = yield* Ticker.Service
     const configValues = yield* config.get
+    const settings = Option.getOrUndefined(yield* Effect.serviceOption(Settings.Service))
+    const settingsSnapshot = settings === undefined ? undefined : yield* settings.snapshot
+    const keymap =
+      settingsSnapshot === undefined
+        ? Keymap.defaultEffectiveKeymap
+        : Keymap.effectiveKeymap({
+            entries: settingsSnapshot.values.keymap,
+            sources: settingsSnapshot.keymapSources,
+          })
 
     const dependencies: Dependencies = {
       agentLoop,
@@ -73,6 +83,7 @@ export const layer = Layer.effect(
             ticks: ticker.ticks,
             defaultMode: configValues.default_mode,
             defaultWorkspace: configValues.workspace_root,
+            keymap,
           },
           input,
         )

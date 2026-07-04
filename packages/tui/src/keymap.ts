@@ -1,6 +1,8 @@
 import * as Keys from "./keys"
 
 export type Surface = "input" | "palette" | "modepicker" | "overlay"
+export type BindingSource = "default" | "workspace" | "user"
+export type OverrideSource = Exclude<BindingSource, "default">
 
 export interface Context {
   readonly surface: Surface
@@ -61,25 +63,588 @@ export type Action =
   | { readonly _tag: "NavNextMessage" }
   | { readonly _tag: "EditMessage" }
 
-export type Pending = "ctrl-c" | "esc" | "enter" | "leader"
+export type Pending = string
 
 export type Resolution =
   | { readonly _tag: "Action"; readonly action: Action }
   | { readonly _tag: "Pending"; readonly chord: Pending }
   | { readonly _tag: "Ignore" }
 
+export interface SettingsInput {
+  readonly entries: Readonly<Record<string, string | null>>
+  readonly sources: Readonly<Record<string, OverrideSource>>
+}
+
+export interface KeymapWarning {
+  readonly action_id: string
+  readonly source: OverrideSource
+  readonly message: string
+}
+
+export interface KeymapEntry {
+  readonly id: string
+  readonly chord: string | null
+  readonly description: string
+  readonly source: BindingSource
+}
+
+export interface EffectiveKeymap {
+  readonly entries: ReadonlyArray<KeymapEntry>
+  readonly warnings: ReadonlyArray<KeymapWarning>
+  readonly bindings: ReadonlyArray<ResolvedBinding>
+  readonly leader: KeyPattern
+}
+
+interface BindingDefinition {
+  readonly id: string
+  readonly defaultChord: string
+  readonly description: string
+  readonly surfaces: ReadonlyArray<Surface>
+  readonly action: Action
+  readonly when?: (context: Context) => boolean
+}
+
+interface ResolvedBinding {
+  readonly id: string
+  readonly keys: ReadonlyArray<KeyPattern>
+  readonly action: Action
+  readonly surfaces: ReadonlyArray<Surface>
+  readonly when?: (context: Context) => boolean
+}
+
+interface KeyPattern {
+  readonly name: string
+  readonly ctrl: boolean
+  readonly alt: boolean
+  readonly meta: boolean
+  readonly shift: boolean
+}
+
+type ParsedChord =
+  | { readonly _tag: "Valid"; readonly keys: ReadonlyArray<KeyPattern>; readonly chord: string }
+  | { readonly _tag: "Invalid"; readonly message: string }
+
 const action = (value: Action): Resolution => ({ _tag: "Action", action: value })
 const pending = (chord: Pending): Resolution => ({ _tag: "Pending", chord })
 const ignore: Resolution = { _tag: "Ignore" }
 
-const isEnter = (key: Keys.Key) => key.name === "return" || key.name === "enter"
-const isEscape = (key: Keys.Key) => key.name === "escape" || key.name === "esc"
+const leaderId = "leader"
+const defaultLeaderChord = "ctrl+x"
+const defaultLeaderPattern: KeyPattern = { name: "x", ctrl: true, alt: false, meta: false, shift: false }
 
-export const resolve = (context: Context, current: Pending | undefined, key: Keys.Key): Resolution => {
+const actionDefinitions: ReadonlyArray<BindingDefinition> = [
+  {
+    id: "app.quit",
+    defaultChord: "ctrl+c ctrl+c",
+    description: "Quit Rika",
+    surfaces: ["input"],
+    action: { _tag: "Quit" },
+  },
+  {
+    id: "thread.new",
+    defaultChord: "ctrl+c ctrl+n",
+    description: "Archive the current thread and start a new one",
+    surfaces: ["input"],
+    action: { _tag: "ArchiveNew" },
+  },
+  {
+    id: "thread.archiveAndQuit",
+    defaultChord: "ctrl+c ctrl+e",
+    description: "Archive the current thread and quit",
+    surfaces: ["input"],
+    action: { _tag: "ArchiveQuit" },
+  },
+  {
+    id: "thread.newRemote",
+    defaultChord: "<leader> r",
+    description: "Toggle orb-backed thread creation",
+    surfaces: ["input"],
+    action: { _tag: "ToggleRemoteArm" },
+  },
+  {
+    id: "palette.open",
+    defaultChord: "ctrl+o",
+    description: "Open the command palette",
+    surfaces: ["input"],
+    action: { _tag: "OpenPalette" },
+  },
+  {
+    id: "palette.close",
+    defaultChord: "ctrl+o",
+    description: "Close the command palette",
+    surfaces: ["palette"],
+    action: { _tag: "ClosePalette" },
+  },
+  {
+    id: "palette.close",
+    defaultChord: "escape",
+    description: "Close the command palette",
+    surfaces: ["palette"],
+    action: { _tag: "ClosePalette" },
+  },
+  {
+    id: "palette.run",
+    defaultChord: "enter",
+    description: "Run the selected palette command",
+    surfaces: ["palette"],
+    action: { _tag: "PaletteRun" },
+  },
+  {
+    id: "palette.up",
+    defaultChord: "up",
+    description: "Move command palette selection up",
+    surfaces: ["palette"],
+    action: { _tag: "PaletteUp" },
+  },
+  {
+    id: "palette.down",
+    defaultChord: "down",
+    description: "Move command palette selection down",
+    surfaces: ["palette"],
+    action: { _tag: "PaletteDown" },
+  },
+  {
+    id: "palette.backspace",
+    defaultChord: "backspace",
+    description: "Delete one character from the palette query",
+    surfaces: ["palette"],
+    action: { _tag: "PaletteBackspace" },
+  },
+  {
+    id: "mode.next",
+    defaultChord: "ctrl+s",
+    description: "Open mode selection",
+    surfaces: ["input"],
+    action: { _tag: "OpenModePicker" },
+  },
+  {
+    id: "modepicker.next",
+    defaultChord: "ctrl+s",
+    description: "Move mode selection forward",
+    surfaces: ["modepicker"],
+    action: { _tag: "ModePickerNext" },
+  },
+  {
+    id: "modepicker.next",
+    defaultChord: "down",
+    description: "Move mode selection forward",
+    surfaces: ["modepicker"],
+    action: { _tag: "ModePickerNext" },
+  },
+  {
+    id: "modepicker.previous",
+    defaultChord: "up",
+    description: "Move mode selection backward",
+    surfaces: ["modepicker"],
+    action: { _tag: "ModePickerPrev" },
+  },
+  {
+    id: "modepicker.close",
+    defaultChord: "escape",
+    description: "Close mode selection",
+    surfaces: ["modepicker"],
+    action: { _tag: "ModePickerClose" },
+  },
+  {
+    id: "modepicker.close",
+    defaultChord: "enter",
+    description: "Close mode selection",
+    surfaces: ["modepicker"],
+    action: { _tag: "ModePickerClose" },
+  },
+  {
+    id: "thread.toggleDetails",
+    defaultChord: "alt+t",
+    description: "Expand or collapse tool and activity details",
+    surfaces: ["input"],
+    action: { _tag: "ToggleDetails" },
+  },
+  {
+    id: "mode.reasoning.next",
+    defaultChord: "alt+d",
+    description: "Cycle reasoning effort",
+    surfaces: ["input"],
+    action: { _tag: "CycleReasoning" },
+  },
+  {
+    id: "speed.toggleFast",
+    defaultChord: "alt+r",
+    description: "Toggle fast speed for this thread",
+    surfaces: ["input"],
+    action: { _tag: "ToggleFastMode" },
+  },
+  {
+    id: "prompt.openEditor",
+    defaultChord: "ctrl+g",
+    description: "Edit the prompt in an external editor",
+    surfaces: ["input"],
+    action: { _tag: "OpenEditor" },
+  },
+  {
+    id: "prompt.pasteImage",
+    defaultChord: "ctrl+v",
+    description: "Paste an image from the clipboard",
+    surfaces: ["input"],
+    action: { _tag: "PasteImage" },
+  },
+  {
+    id: "prompt.history",
+    defaultChord: "ctrl+r",
+    description: "Restore a previous prompt",
+    surfaces: ["input"],
+    action: { _tag: "HistoryPrev" },
+  },
+  {
+    id: "prompt.newline",
+    defaultChord: "ctrl+j",
+    description: "Insert a newline in the prompt",
+    surfaces: ["input"],
+    action: { _tag: "Newline" },
+  },
+  {
+    id: "prompt.newline",
+    defaultChord: "linefeed",
+    description: "Insert a newline in the prompt",
+    surfaces: ["input"],
+    action: { _tag: "Newline" },
+  },
+  {
+    id: "prompt.newline",
+    defaultChord: "shift+enter",
+    description: "Insert a newline in the prompt",
+    surfaces: ["input"],
+    action: { _tag: "Newline" },
+  },
+  {
+    id: "prompt.newline",
+    defaultChord: "enter",
+    description: "Insert a newline in the prompt",
+    surfaces: ["input"],
+    action: { _tag: "Newline" },
+    when: (context) => context.trailingBackslash,
+  },
+  {
+    id: "prompt.steerQueuedMessage",
+    defaultChord: "enter enter",
+    description: "Steer with the next queued prompt",
+    surfaces: ["input"],
+    action: { _tag: "Steer" },
+  },
+  {
+    id: "prompt.steerQueuedMessage",
+    defaultChord: "enter",
+    description: "Steer with the next queued prompt",
+    surfaces: ["input"],
+    action: { _tag: "Steer" },
+    when: (context) => context.queueSelected,
+  },
+  {
+    id: "prompt.submit",
+    defaultChord: "enter",
+    description: "Submit the prompt",
+    surfaces: ["input"],
+    action: { _tag: "Submit" },
+    when: (context) => !context.queueSelected && !context.trailingBackslash,
+  },
+  {
+    id: "prompt.dequeueSelected",
+    defaultChord: "backspace",
+    description: "Dequeue the selected prompt",
+    surfaces: ["input"],
+    action: { _tag: "DequeueSelected" },
+    when: (context) => context.queueSelected,
+  },
+  {
+    id: "prompt.backspace",
+    defaultChord: "backspace",
+    description: "Delete the character before the cursor",
+    surfaces: ["input"],
+    action: { _tag: "Backspace" },
+  },
+  {
+    id: "prompt.deleteWordBackward",
+    defaultChord: "ctrl+w",
+    description: "Delete the word before the cursor",
+    surfaces: ["input"],
+    action: { _tag: "DeleteWordBackward" },
+  },
+  {
+    id: "prompt.deleteWordBackward",
+    defaultChord: "ctrl+backspace",
+    description: "Delete the word before the cursor",
+    surfaces: ["input"],
+    action: { _tag: "DeleteWordBackward" },
+  },
+  {
+    id: "prompt.deleteWordBackward",
+    defaultChord: "alt+backspace",
+    description: "Delete the word before the cursor",
+    surfaces: ["input"],
+    action: { _tag: "DeleteWordBackward" },
+  },
+  {
+    id: "prompt.deleteForward",
+    defaultChord: "ctrl+d",
+    description: "Delete the character after the cursor",
+    surfaces: ["input"],
+    action: { _tag: "DeleteForward" },
+  },
+  {
+    id: "prompt.deleteToLineStart",
+    defaultChord: "ctrl+u",
+    description: "Delete from cursor to line start",
+    surfaces: ["input"],
+    action: { _tag: "DeleteToLineStart" },
+  },
+  {
+    id: "prompt.deleteToLineEnd",
+    defaultChord: "ctrl+k",
+    description: "Delete from cursor to line end",
+    surfaces: ["input"],
+    action: { _tag: "DeleteToLineEnd" },
+  },
+  {
+    id: "prompt.deleteWordForward",
+    defaultChord: "ctrl+delete",
+    description: "Delete the word after the cursor",
+    surfaces: ["input"],
+    action: { _tag: "DeleteWordForward" },
+  },
+  {
+    id: "prompt.deleteWordForward",
+    defaultChord: "alt+delete",
+    description: "Delete the word after the cursor",
+    surfaces: ["input"],
+    action: { _tag: "DeleteWordForward" },
+  },
+  {
+    id: "prompt.wordLeft",
+    defaultChord: "alt+b",
+    description: "Move cursor one word left",
+    surfaces: ["input"],
+    action: { _tag: "WordLeft" },
+  },
+  {
+    id: "prompt.wordLeft",
+    defaultChord: "ctrl+left",
+    description: "Move cursor one word left",
+    surfaces: ["input"],
+    action: { _tag: "WordLeft" },
+  },
+  {
+    id: "prompt.wordLeft",
+    defaultChord: "alt+left",
+    description: "Move cursor one word left",
+    surfaces: ["input"],
+    action: { _tag: "WordLeft" },
+  },
+  {
+    id: "prompt.wordRight",
+    defaultChord: "alt+f",
+    description: "Move cursor one word right",
+    surfaces: ["input"],
+    action: { _tag: "WordRight" },
+  },
+  {
+    id: "prompt.wordRight",
+    defaultChord: "ctrl+right",
+    description: "Move cursor one word right",
+    surfaces: ["input"],
+    action: { _tag: "WordRight" },
+  },
+  {
+    id: "prompt.wordRight",
+    defaultChord: "alt+right",
+    description: "Move cursor one word right",
+    surfaces: ["input"],
+    action: { _tag: "WordRight" },
+  },
+  {
+    id: "prompt.cursorLeft",
+    defaultChord: "left",
+    description: "Move cursor left",
+    surfaces: ["input"],
+    action: { _tag: "CursorLeft" },
+  },
+  {
+    id: "prompt.cursorRight",
+    defaultChord: "right",
+    description: "Move cursor right",
+    surfaces: ["input"],
+    action: { _tag: "CursorRight" },
+  },
+  {
+    id: "prompt.cursorHome",
+    defaultChord: "home",
+    description: "Move cursor to line start",
+    surfaces: ["input"],
+    action: { _tag: "CursorHome" },
+  },
+  {
+    id: "prompt.cursorEnd",
+    defaultChord: "end",
+    description: "Move cursor to line end",
+    surfaces: ["input"],
+    action: { _tag: "CursorEnd" },
+  },
+  {
+    id: "focus.previous",
+    defaultChord: "up",
+    description: "Move focus up",
+    surfaces: ["input"],
+    action: { _tag: "FocusPrev" },
+  },
+  {
+    id: "focus.next",
+    defaultChord: "down",
+    description: "Move focus down",
+    surfaces: ["input"],
+    action: { _tag: "FocusNext" },
+  },
+  {
+    id: "message.navPrevious",
+    defaultChord: "tab",
+    description: "Navigate to the previous message",
+    surfaces: ["input"],
+    action: { _tag: "NavPrevMessage" },
+  },
+  {
+    id: "message.navNext",
+    defaultChord: "backtab",
+    description: "Navigate to the next message",
+    surfaces: ["input"],
+    action: { _tag: "NavNextMessage" },
+  },
+  {
+    id: "message.navNext",
+    defaultChord: "shift+tab",
+    description: "Navigate to the next message",
+    surfaces: ["input"],
+    action: { _tag: "NavNextMessage" },
+  },
+  {
+    id: "message.edit",
+    defaultChord: "e",
+    description: "Edit the selected message",
+    surfaces: ["input"],
+    action: { _tag: "EditMessage" },
+    when: (context) => context.navigating,
+  },
+  {
+    id: "app.forceInterrupt",
+    defaultChord: "escape escape",
+    description: "Force interrupt the active turn",
+    surfaces: ["input"],
+    action: { _tag: "ForceInterrupt" },
+  },
+  {
+    id: "shortcuts.open",
+    defaultChord: "?",
+    description: "Open keyboard shortcuts",
+    surfaces: ["input"],
+    action: { _tag: "OpenShortcuts" },
+    when: (context) => context.inputEmpty,
+  },
+  {
+    id: "file.mention",
+    defaultChord: "@",
+    description: "Mention a workspace file",
+    surfaces: ["input"],
+    action: { _tag: "FileMention" },
+  },
+]
+
+const definitionIds = Array.from(new Set(actionDefinitions.map((definition) => definition.id)))
+const actionDefinitionIds = new Set(definitionIds)
+const definitionsById = new Map(
+  definitionIds.map((id) => [id, actionDefinitions.filter((definition) => definition.id === id)] as const),
+)
+
+export const effectiveKeymap = (input: SettingsInput = { entries: {}, sources: {} }): EffectiveKeymap => {
+  const warnings: Array<KeymapWarning> = []
+  const leader = resolveLeader(input, warnings)
+  const entries: Array<KeymapEntry> = [
+    {
+      id: leaderId,
+      chord: leader.chord,
+      description: "Leader key for leader shortcuts",
+      source: leader.source,
+    },
+  ]
+  const bindings: Array<ResolvedBinding> = []
+
+  for (const id of definitionIds) {
+    const definitions = definitionsById.get(id) ?? []
+    const definition = definitions[0]
+    if (definition === undefined) continue
+    const override = input.entries[id]
+    const source = input.sources[id] ?? "user"
+    if (override === null) {
+      entries.push({ id, chord: null, description: definition.description, source })
+      continue
+    }
+    if (override !== undefined) {
+      const parsed = parseChord(override, leader.pattern)
+      if (parsed._tag === "Valid") {
+        entries.push({ id, chord: parsed.chord, description: definition.description, source })
+        bindings.push({ ...definition, keys: parsed.keys })
+        continue
+      }
+      warnings.push({ action_id: id, source, message: parsed.message })
+    }
+
+    const parsedDefault = parseChord(definition.defaultChord, leader.pattern)
+    if (parsedDefault._tag === "Valid") {
+      entries.push({
+        id,
+        chord: parsedDefault.chord,
+        description: definition.description,
+        source: "default",
+      })
+      for (const defaultDefinition of definitions) {
+        const parsedDefaultBinding = parseChord(defaultDefinition.defaultChord, leader.pattern)
+        if (parsedDefaultBinding._tag === "Valid") {
+          bindings.push({ ...defaultDefinition, keys: parsedDefaultBinding.keys })
+        }
+      }
+    }
+  }
+
+  for (const id of Object.keys(input.entries)) {
+    if (id !== leaderId && !actionDefinitionIds.has(id)) {
+      warnings.push({
+        action_id: id,
+        source: input.sources[id] ?? "user",
+        message: `Unknown keymap action ${id}.`,
+      })
+    }
+  }
+
+  return { entries, warnings, bindings, leader: leader.pattern }
+}
+
+export const warningLine = (warnings: ReadonlyArray<KeymapWarning>): string | undefined => {
+  if (warnings.length === 0) return undefined
+  const first = warnings[0]
+  if (first === undefined) return undefined
+  const rest = warnings.slice(1)
+  const suffix = rest.length === 0 ? "" : `; ${rest.length} more`
+  return `Keymap warning: ${first.action_id} (${first.source}) ${first.message}${suffix}`
+}
+
+export const resolve = (
+  context: Context,
+  current: Pending | undefined,
+  key: Keys.Key,
+  keymap: EffectiveKeymap = defaultEffectiveKeymap,
+): Resolution => {
   if (current !== undefined) {
-    const completion = resolveChord(current, key)
+    const completion = resolveConfigured(context, current, key, keymap)
     if (completion !== undefined) return completion
   }
+
+  const configured = resolveConfigured(context, undefined, key, keymap)
+  if (configured !== undefined) return configured
 
   switch (context.surface) {
     case "palette":
@@ -93,102 +658,213 @@ export const resolve = (context: Context, current: Pending | undefined, key: Key
   }
 }
 
-const resolveChord = (current: Pending, key: Keys.Key): Resolution | undefined => {
-  if (current === "ctrl-c") {
-    if (key.ctrl && key.name === "c") return action({ _tag: "Quit" })
-    if (key.ctrl && key.name === "n") return action({ _tag: "ArchiveNew" })
-    if (key.ctrl && key.name === "e") return action({ _tag: "ArchiveQuit" })
-    return undefined
-  }
-  if (current === "esc") {
-    if (isEscape(key)) return action({ _tag: "ForceInterrupt" })
-    return undefined
-  }
-  if (current === "leader") {
-    if (key.name === "r" || key.sequence.toLowerCase() === "r") return action({ _tag: "ToggleRemoteArm" })
-    return undefined
-  }
-  if (isEnter(key) && !key.shift) return action({ _tag: "Steer" })
-  return undefined
-}
-
 const resolvePalette = (key: Keys.Key): Resolution => {
-  if (key.ctrl && key.name === "o") return action({ _tag: "ClosePalette" })
-  if (isEscape(key)) return action({ _tag: "ClosePalette" })
-  if (isEnter(key)) return action({ _tag: "PaletteRun" })
-  if (key.name === "up") return action({ _tag: "PaletteUp" })
-  if (key.name === "down") return action({ _tag: "PaletteDown" })
-  if (key.name === "backspace") return action({ _tag: "PaletteBackspace" })
   if (Keys.isPrintable(key)) return action({ _tag: "PaletteInsert", text: Keys.char(key) })
   return ignore
 }
 
-const resolveModePicker = (key: Keys.Key): Resolution => {
-  if (key.ctrl && key.name === "s") return action({ _tag: "ModePickerNext" })
-  if (key.name === "down") return action({ _tag: "ModePickerNext" })
-  if (key.name === "up") return action({ _tag: "ModePickerPrev" })
-  if (isEnter(key) || isEscape(key)) return action({ _tag: "ModePickerClose" })
-  return ignore
-}
+const resolveModePicker = (_key: Keys.Key): Resolution => ignore
 
 const resolveOverlay = (_key: Keys.Key): Resolution => action({ _tag: "CloseOverlay" })
 
 const resolveInput = (context: Context, key: Keys.Key): Resolution => {
   if (key.name === "paste" && key.sequence.length > 0) return action({ _tag: "Paste", text: key.sequence })
 
-  if (key.ctrl && key.name === "c") return pending("ctrl-c")
-  if (key.ctrl && key.name === "x") return pending("leader")
-  if (key.ctrl && key.name === "o") return action({ _tag: "OpenPalette" })
-  if (key.ctrl && key.name === "s") return action({ _tag: "OpenModePicker" })
-  if (key.ctrl && key.name === "g") return action({ _tag: "OpenEditor" })
-  if (key.ctrl && key.name === "v") return action({ _tag: "PasteImage" })
-  if (key.ctrl && key.name === "r") return action({ _tag: "HistoryPrev" })
-  if (key.ctrl && key.name === "j") return action({ _tag: "Newline" })
-  if (key.name === "linefeed") return action({ _tag: "Newline" })
-
-  if (key.alt && key.name === "t") return action({ _tag: "ToggleDetails" })
-  if (key.alt && key.name === "d") return action({ _tag: "CycleReasoning" })
-  if (key.alt && key.name === "r") return action({ _tag: "ToggleFastMode" })
-
-  if (context.queueSelected) {
-    if (isEnter(key) && !key.shift) return action({ _tag: "Steer" })
-    if (key.name === "backspace") return action({ _tag: "DequeueSelected" })
-  }
-
-  if (key.ctrl && key.name === "w") return action({ _tag: "DeleteWordBackward" })
-  if (key.ctrl && key.name === "u") return action({ _tag: "DeleteToLineStart" })
-  if (key.ctrl && key.name === "k") return action({ _tag: "DeleteToLineEnd" })
-  if (key.ctrl && key.name === "d") return action({ _tag: "DeleteForward" })
-  if ((key.ctrl || key.alt) && key.name === "backspace") return action({ _tag: "DeleteWordBackward" })
-  if ((key.ctrl || key.alt) && key.name === "delete") return action({ _tag: "DeleteWordForward" })
-  if ((key.ctrl || key.alt) && key.name === "left") return action({ _tag: "WordLeft" })
-  if ((key.ctrl || key.alt) && key.name === "right") return action({ _tag: "WordRight" })
-  if (key.alt && key.name === "b") return action({ _tag: "WordLeft" })
-  if (key.alt && key.name === "f") return action({ _tag: "WordRight" })
-
-  if (context.navigating && key.sequence === "e") return action({ _tag: "EditMessage" })
-  if (key.name === "backtab") return action({ _tag: "NavNextMessage" })
-  if (key.name === "tab") return action(key.shift ? { _tag: "NavNextMessage" } : { _tag: "NavPrevMessage" })
-
-  if (isEscape(key)) return pending("esc")
-
-  if (isEnter(key)) {
-    if (key.shift) return action({ _tag: "Newline" })
-    if (context.trailingBackslash) return action({ _tag: "Newline" })
-    return action({ _tag: "Submit" })
-  }
-
-  if (key.name === "backspace") return action({ _tag: "Backspace" })
-  if (key.name === "left") return action({ _tag: "CursorLeft" })
-  if (key.name === "right") return action({ _tag: "CursorRight" })
-  if (key.name === "home") return action({ _tag: "CursorHome" })
-  if (key.name === "end") return action({ _tag: "CursorEnd" })
-  if (key.name === "up") return action({ _tag: "FocusPrev" })
-  if (key.name === "down") return action({ _tag: "FocusNext" })
-
-  if (key.sequence === "?" && context.inputEmpty) return action({ _tag: "OpenShortcuts" })
-  if (key.sequence === "@") return action({ _tag: "FileMention" })
-
   if (Keys.isPrintable(key)) return action({ _tag: "Insert", text: Keys.char(key) })
   return ignore
 }
+
+const resolveConfigured = (
+  context: Context,
+  current: Pending | undefined,
+  key: Keys.Key,
+  keymap: EffectiveKeymap,
+): Resolution | undefined => {
+  const prefix = current === undefined ? [] : pendingPatterns(current, keymap)
+  if (current !== undefined && prefix.length === 0) return undefined
+  const sequence = [...prefix, patternFromKey(key)]
+  const matches = keymap.bindings.filter(
+    (binding) =>
+      binding.surfaces.includes(context.surface) &&
+      (binding.when === undefined || binding.when(context)) &&
+      isPrefix(sequence, binding.keys),
+  )
+  const exact = matches.find((binding) => binding.keys.length === sequence.length)
+  if (exact !== undefined) return action(exact.action)
+  if (matches.length > 0) return pending(pendingLabel(sequence, keymap))
+  return undefined
+}
+
+const resolveLeader = (
+  input: SettingsInput,
+  warnings: Array<KeymapWarning>,
+): { readonly pattern: KeyPattern; readonly chord: string; readonly source: BindingSource } => {
+  const override = input.entries[leaderId]
+  if (override === undefined) return { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
+  const source = input.sources[leaderId] ?? "user"
+  if (override === null || containsLeaderToken(override)) {
+    warnings.push({ action_id: leaderId, source, message: "Leader must be a single non-leader chord." })
+    return { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
+  }
+  const parsed = parseChord(override, defaultLeaderPattern)
+  if (parsed._tag === "Invalid" || parsed.keys.length !== 1) {
+    warnings.push({ action_id: leaderId, source, message: "Leader must be a single non-leader chord." })
+    return { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
+  }
+  const [pattern] = parsed.keys
+  return pattern === undefined
+    ? { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
+    : { pattern, chord: parsed.chord, source }
+}
+
+const parseChord = (chord: string, leader: KeyPattern): ParsedChord => {
+  const tokens = chordTokens(chord)
+  if (tokens.length === 0) return { _tag: "Invalid", message: "Chord must contain at least one key." }
+  const parsed = tokens.map((token) => parseToken(token, leader))
+  const invalid = parsed.find((token) => token._tag === "Invalid")
+  if (invalid?._tag === "Invalid") return invalid
+  const valid = parsed.filter((token) => token._tag === "Valid")
+  return {
+    _tag: "Valid",
+    keys: valid.map((token) => token.pattern),
+    chord: valid.map((token) => token.label).join(" "),
+  }
+}
+
+const chordTokens = (chord: string): ReadonlyArray<string> => {
+  const trimmed = chord.trim().toLowerCase()
+  if (trimmed.length === 0) return []
+  return trimmed.replace(/<leader>(?=\S)/g, "<leader> ").split(/\s+/)
+}
+
+const containsLeaderToken = (chord: string) => chordTokens(chord).includes("<leader>")
+
+const parseToken = (
+  token: string,
+  leader: KeyPattern,
+):
+  | { readonly _tag: "Valid"; readonly pattern: KeyPattern; readonly label: string }
+  | { readonly _tag: "Invalid"; readonly message: string } => {
+  if (token === "<leader>") return { _tag: "Valid", pattern: leader, label: "<leader>" }
+  const parts = token.split("+")
+  if (parts.some((part) => part.length === 0)) return { _tag: "Invalid", message: `Invalid chord token ${token}.` }
+  const key = parts.at(-1)
+  if (key === undefined) return { _tag: "Invalid", message: `Invalid chord token ${token}.` }
+  const modifiers = parts.slice(0, -1)
+  let ctrl = false
+  let alt = false
+  let meta = false
+  let shift = false
+  for (const modifier of modifiers) {
+    if (modifier === "ctrl" || modifier === "control") ctrl = true
+    else if (modifier === "alt" || modifier === "option") alt = true
+    else if (
+      modifier === "meta" ||
+      modifier === "cmd" ||
+      modifier === "command" ||
+      modifier === "super" ||
+      modifier === "mod"
+    )
+      meta = true
+    else if (modifier === "shift") shift = true
+    else return { _tag: "Invalid", message: `Unknown chord modifier ${modifier}.` }
+  }
+  const name = keyName(key)
+  if (name === undefined) return { _tag: "Invalid", message: `Unknown chord key ${key}.` }
+  const pattern = { name, ctrl, alt, meta, shift }
+  return { _tag: "Valid", pattern, label: formatPattern(pattern) }
+}
+
+const keyName = (key: string): string | undefined => {
+  if (key === "enter") return "return"
+  if (key === "esc") return "escape"
+  if (key === "del") return "delete"
+  if (knownKeyNames.has(key)) return key
+  return key.length === 1 ? key : undefined
+}
+
+const knownKeyNames = new Set([
+  "backspace",
+  "backtab",
+  "delete",
+  "down",
+  "end",
+  "escape",
+  "home",
+  "left",
+  "linefeed",
+  "return",
+  "right",
+  "space",
+  "tab",
+  "up",
+])
+
+const patternFromKey = (key: Keys.Key): KeyPattern => ({
+  name: keyName(key.name.toLowerCase()) ?? key.name.toLowerCase(),
+  ctrl: key.ctrl,
+  alt: key.alt,
+  meta: key.meta,
+  shift: key.shift,
+})
+
+const pendingPatterns = (current: Pending, keymap: EffectiveKeymap): ReadonlyArray<KeyPattern> => {
+  if (current === "leader") return [keymap.leader]
+  if (current === "ctrl-c") return [{ name: "c", ctrl: true, alt: false, meta: false, shift: false }]
+  if (current === "esc") return [{ name: "escape", ctrl: false, alt: false, meta: false, shift: false }]
+  if (current === "enter") return [{ name: "return", ctrl: false, alt: false, meta: false, shift: false }]
+  const parsed = parseChord(current, keymap.leader)
+  return parsed._tag === "Valid" ? parsed.keys : []
+}
+
+const isPrefix = (candidate: ReadonlyArray<KeyPattern>, full: ReadonlyArray<KeyPattern>) =>
+  candidate.length <= full.length &&
+  candidate.every((pattern, index) => {
+    const expected = full[index]
+    return expected !== undefined && patternEquals(pattern, expected)
+  })
+
+const patternEquals = (left: KeyPattern, right: KeyPattern) =>
+  left.name === right.name &&
+  left.ctrl === right.ctrl &&
+  left.alt === right.alt &&
+  left.meta === right.meta &&
+  left.shift === right.shift
+
+const pendingLabel = (patterns: ReadonlyArray<KeyPattern>, keymap: EffectiveKeymap): Pending => {
+  if (patterns.length === 1) {
+    const pattern = patterns[0]
+    if (pattern !== undefined && patternEquals(pattern, keymap.leader)) return "leader"
+    if (
+      pattern !== undefined &&
+      patternEquals(pattern, { name: "c", ctrl: true, alt: false, meta: false, shift: false })
+    )
+      return "ctrl-c"
+    if (
+      pattern !== undefined &&
+      patternEquals(pattern, { name: "escape", ctrl: false, alt: false, meta: false, shift: false })
+    ) {
+      return "esc"
+    }
+    if (
+      pattern !== undefined &&
+      patternEquals(pattern, { name: "return", ctrl: false, alt: false, meta: false, shift: false })
+    ) {
+      return "enter"
+    }
+  }
+  return patterns.map(formatPattern).join(" ")
+}
+
+const formatPattern = (pattern: KeyPattern) => {
+  const modifiers = [
+    ...(pattern.ctrl ? ["ctrl"] : []),
+    ...(pattern.alt ? ["alt"] : []),
+    ...(pattern.meta ? ["meta"] : []),
+    ...(pattern.shift ? ["shift"] : []),
+  ]
+  const name = pattern.name === "return" ? "enter" : pattern.name
+  return [...modifiers, name].join("+")
+}
+
+export const defaultEffectiveKeymap = effectiveKeymap()

@@ -590,6 +590,7 @@ const interactiveLiveLayerFromTui = (
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
   const configLayer = runtimeConfigLayer(env, workspaceRoot, command.mode)
   const redactorLayer = secretRedactorLayer(env)
+  const settingsLayer = Settings.layerFromEnv(env, workspaceRoot)
   const { diagnosticsLayer, telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer, redactorLayer)
   const databaseLayer = command.ephemeral ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(configLayer))
   const timeLayer = Time.layer
@@ -683,7 +684,7 @@ const interactiveLiveLayerFromTui = (
   )
   const sessionLayer = Session.layer.pipe(Layer.provideMerge(agentLoopLayer), Layer.provideMerge(tournamentLayer))
 
-  return sessionLayer
+  return sessionLayer.pipe(Layer.provideMerge(settingsLayer))
 }
 
 export const interactiveRemoteLiveLayer = (
@@ -699,7 +700,7 @@ const interactiveRemoteLiveLayerFromTui = (
   cwd: string,
   tui: TuiModule,
 ): Layer.Layer<InteractiveRemoteLayerOutput, LiveLayerError> => {
-  const { Adapter, RemoteSession, Ticker } = tui
+  const { Adapter, Keymap, RemoteSession, Ticker } = tui
   const workspaceRoot = command.workspace_root ?? env.RIKA_WORKSPACE_ROOT ?? cwd
   const dataDir = env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
   const mode = command.mode
@@ -767,6 +768,7 @@ const interactiveRemoteLiveLayerFromTui = (
       const time = yield* Time.Service
       const settings = yield* Settings.Service
       const snapshot = yield* settings.snapshot
+      const keymap = Keymap.effectiveKeymap({ entries: snapshot.values.keymap, sources: snapshot.keymapSources })
       const workspaceId = yield* workspaceIdForRoot(workspaceRoot)
       const resolveEndpoint = (endpointInput: ReconnectingEndpointInput) =>
         BackendEndpoint.resolveEndpoint({
@@ -797,7 +799,7 @@ const interactiveRemoteLiveLayerFromTui = (
           ),
           Effect.mapError((error) => tournamentRuntimeError(input.thread_id, error)),
         )
-      return RemoteSession.make(client, renderer, ticker.ticks, workspaceId, runTournament)
+      return RemoteSession.make(client, renderer, ticker.ticks, workspaceId, runTournament, keymap)
     }),
   ).pipe(
     Layer.provideMerge(backendLayer),

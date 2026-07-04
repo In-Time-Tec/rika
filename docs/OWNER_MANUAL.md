@@ -28,7 +28,7 @@ For launch builds, `bun run package` writes the compiled artifact and manifest u
 
 ## Settings
 
-Rika reads optional JSON settings from `~/.config/rika/settings.json` and then `<workspace>/.rika/settings.json`. Workspace settings override user settings. Environment variables override both.
+Rika reads optional JSON settings from `~/.config/rika/settings.json` and then `<workspace>/.rika/settings.json`. Workspace settings override user settings for scalar settings. `keymap` is the documented exception: user keymap entries override workspace keymap entries. Environment variables override scalar settings only.
 
 Recognized keys:
 
@@ -43,12 +43,26 @@ Recognized keys:
 | `compaction.prune`        | `RIKA_COMPACTION_PRUNE`         | unset                    |
 | `compaction.pruneProtect` | `RIKA_COMPACTION_PRUNE_PROTECT` | unset                    |
 | `compaction.pruneMinimum` | `RIKA_COMPACTION_PRUNE_MINIMUM` | unset                    |
+| `keymap`                  | none                            | `{}`                     |
 | `telemetry.enabled`       | `RIKA_TELEMETRY`                | `true`                   |
 | `telemetry.endpoint`      | `RIKA_TELEMETRY_ENDPOINT`       | `http://127.0.0.1:27686` |
 
 Malformed settings files produce doctor/runtime warnings where surfaced and fall back to the next source instead of crashing startup.
 
-Use `rika config list` to print the effective non-secret configuration with the source for each value. Use `rika config edit` for user settings and `rika config edit --workspace` for workspace settings. Unknown keys and wrong value types produce warnings after the editor exits, but do not block saving.
+`keymap` is an object keyed by `rika config keymap` action id. Values are chord strings or `null`; `null` unbinds that action. Chords are space-separated sequences such as `ctrl+x u`; `<leader>` expands through the `leader` entry, which defaults to `ctrl+x`.
+
+```json
+{
+  "keymap": {
+    "leader": "ctrl+a",
+    "palette.open": "ctrl+p",
+    "thread.newRemote": "<leader> r",
+    "mode.next": null
+  }
+}
+```
+
+Use `rika config list` to print the effective non-secret configuration with the source for each scalar value. Use `rika config keymap` to print keymap entries with `id`, `chord`, `description`, and `source`. Use `rika config edit` for user settings and `rika config edit --workspace` for workspace settings. Unknown keys and wrong value types produce warnings after the editor exits, but do not block saving. Unknown keymap action ids and unparsable keymap chords produce a startup warning in the TUI status line, and the invalid binding is ignored.
 
 ## Orb template
 
