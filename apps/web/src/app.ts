@@ -6,7 +6,7 @@ import * as Command from "foldkit/command"
 import { m } from "foldkit/message"
 import * as Mount from "foldkit/mount"
 import * as Subscription from "foldkit/subscription"
-import { Duration, Effect, Option, Queue, Schedule, Schema as S, Scope, Stream } from "effect"
+import { Duration, Effect, Option, Queue, Schedule, Schema as S, Stream } from "effect"
 import * as AlertDialog from "./components/ui/dialog-state"
 import * as MessageScroller from "./components/ui/message-scroller-state"
 import * as Tabs from "./components/ui/tabs-state"
@@ -19,8 +19,8 @@ import {
   toWebPierreDiff,
   type WebPierreDiff,
 } from "./pierre-diff"
-import { PierreTreeRegistry, mountPierreTree, updatePierreTree } from "./pierre-tree"
-import { OrbTerminalRegistry, mountOrbTerminal, reconnectOrbTerminal } from "./orb-terminal"
+import { mountPierreTree, pierreTreeRegistry, updatePierreTree } from "./pierre-tree"
+import { mountOrbTerminal, orbTerminalRegistry, reconnectOrbTerminal } from "./orb-terminal"
 
 export const Connection = S.Literals(["idle", "loading", "connected", "failed"])
 export type Connection = typeof Connection.Type
@@ -125,6 +125,14 @@ export const QueuedMessage = S.Struct({
 })
 export type QueuedMessage = typeof QueuedMessage.Type
 
+export const PendingStartTurn = S.Struct({
+  thread_id: Ids.ThreadId,
+  request_token: S.Int,
+  content: S.String,
+  mode: S.optional(Remote.AgentMode),
+})
+export type PendingStartTurn = typeof PendingStartTurn.Type
+
 export const ProjectForm = S.Struct({
   name: S.String,
   repo_origin: S.String,
@@ -168,6 +176,7 @@ export const Model = S.Struct({
   pending_turn: S.Boolean,
   pending_interrupt_turn_id: S.optional(Ids.TurnId),
   queued_messages: S.Array(QueuedMessage),
+  pending_start_turns: S.Array(PendingStartTurn),
   creating_thread: S.Boolean,
   thread_request_token: S.Int,
   active_thread_request_token: S.optional(S.Int),
@@ -277,6 +286,7 @@ export const ChangedDraftMode = m("ChangedDraftMode", { value: S.String })
 export const SubmittedDraft = m("SubmittedDraft")
 export const AcceptedTurn = m("AcceptedTurn", { response: Remote.StartTurnResponse, request_token: S.Int })
 export const FailedStartTurn = m("FailedStartTurn", {
+  thread_id: Ids.ThreadId,
   message: S.String,
   request_token: S.Int,
   status: S.optional(S.Int),
@@ -420,7 +430,7 @@ type PierreTreeMessage =
 
 type OrbTerminalMessage = typeof TerminalStatusChanged.Type | typeof TerminalFailed.Type
 
-export type AppCommand = Command.Command<AppMessage, never, OrbTerminalRegistry | PierreTreeRegistry>
+export type AppCommand = Command.Command<AppMessage>
 
 export const MountPierreDiff = Mount.define(
   "MountPierreDiff",
@@ -482,13 +492,12 @@ export const MountPierreTree = Mount.defineStream(
 )(
   ({ mount_key, paths, selected_path, git_status }) =>
     (element) =>
-      Stream.callback<PierreTreeMessage, never, PierreTreeRegistry>((queue) =>
+      Stream.callback<PierreTreeMessage>((queue) =>
         Effect.gen(function* () {
           if (!(element instanceof HTMLElement)) {
             Queue.offerUnsafe(queue, FailedRenderPierreTree({ message: "tree mount target unavailable" }))
             return yield* Effect.never
           }
-          const registry = yield* PierreTreeRegistry
           yield* Effect.acquireRelease(
             Effect.gen(function* () {
               const handle = yield* Effect.try({
@@ -502,12 +511,12 @@ export const MountPierreTree = Mount.defineStream(
                   }),
                 catch: (cause: unknown) => cause,
               })
-              yield* registry.register(mount_key, handle)
+              yield* pierreTreeRegistry.register(mount_key, handle)
               return handle
             }),
             (handle) =>
               Effect.gen(function* () {
-                yield* registry.unregister(mount_key, handle)
+                yield* pierreTreeRegistry.unregister(mount_key, handle)
                 yield* Effect.sync(() => handle.destroy())
               }),
           )
@@ -527,7 +536,7 @@ export const MountPierreTree = Mount.defineStream(
             }),
           ),
         ),
-      ) as Stream.Stream<PierreTreeMessage>,
+      ),
 )
 
 export const MountOrbTerminal = Mount.defineStream(
@@ -538,43 +547,41 @@ export const MountOrbTerminal = Mount.defineStream(
 )(
   ({ thread_id }) =>
     (element) =>
-      Stream.callback<OrbTerminalMessage>(
-        (queue) =>
-          Effect.gen(function* () {
-            if (!(element instanceof HTMLElement)) {
-              Queue.offerUnsafe(queue, TerminalFailed({ message: "terminal mount target unavailable" }))
-              return yield* Effect.never
-            }
-            const registry = yield* OrbTerminalRegistry
-            yield* Effect.acquireRelease(
-              Effect.sync(() => {
-                const handle = mountOrbTerminal(
-                  {
-                    container: element,
-                    thread_id,
-                    onStatus: (status) => Queue.offerUnsafe(queue, TerminalStatusChanged({ status })),
-                    onError: (message) => Queue.offerUnsafe(queue, TerminalFailed({ message })),
-                  },
-                  undefined,
-                  registry,
-                )
-                void handle.activate()
-                return handle
-              }),
-              (handle) => Effect.sync(() => handle.destroy()),
-            )
+      Stream.callback<OrbTerminalMessage>((queue) =>
+        Effect.gen(function* () {
+          if (!(element instanceof HTMLElement)) {
+            Queue.offerUnsafe(queue, TerminalFailed({ message: "terminal mount target unavailable" }))
             return yield* Effect.never
-          }).pipe(
-            Effect.catch((cause: unknown) =>
-              Effect.gen(function* () {
-                Queue.offerUnsafe(
-                  queue,
-                  TerminalFailed({ message: cause instanceof Error ? cause.message : String(cause) }),
-                )
-                return yield* Effect.never
-              }),
-            ),
-          ) as Effect.Effect<never, never, Scope.Scope>,
+          }
+          yield* Effect.acquireRelease(
+            Effect.sync(() => {
+              const handle = mountOrbTerminal(
+                {
+                  container: element,
+                  thread_id,
+                  onStatus: (status) => Queue.offerUnsafe(queue, TerminalStatusChanged({ status })),
+                  onError: (message) => Queue.offerUnsafe(queue, TerminalFailed({ message })),
+                },
+                undefined,
+                orbTerminalRegistry,
+              )
+              void handle.activate()
+              return handle
+            }),
+            (handle) => Effect.sync(() => handle.destroy()),
+          )
+          return yield* Effect.never
+        }).pipe(
+          Effect.catch((cause: unknown) =>
+            Effect.gen(function* () {
+              Queue.offerUnsafe(
+                queue,
+                TerminalFailed({ message: cause instanceof Error ? cause.message : String(cause) }),
+              )
+              return yield* Effect.never
+            }),
+          ),
+        ),
       ),
 )
 
@@ -870,6 +877,7 @@ export const StartTurn = Command.define(
       Effect.catch((error) =>
         Effect.succeed(
           FailedStartTurn({
+            thread_id,
             message: error.message,
             request_token,
             status: error.status,
@@ -972,6 +980,7 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   draft: "",
   pending_turn: false,
   queued_messages: [],
+  pending_start_turns: [],
   creating_thread: false,
   thread_request_token: 0,
   active_thread_request_token: undefined,
@@ -1873,14 +1882,22 @@ const createdThreadModel = (
   }
   const turnRequestToken = next.turn_request_token + 1
   return [
-    {
-      ...next,
-      turn_request_token: turnRequestToken,
-      active_turn_request_token: turnRequestToken,
-      pending_turn: true,
-      pending_submit: content,
-      pending_submit_mode: mode,
-    },
+    trackPendingStartTurn(
+      {
+        ...next,
+        turn_request_token: turnRequestToken,
+        active_turn_request_token: turnRequestToken,
+        pending_turn: true,
+        pending_submit: content,
+        pending_submit_mode: mode,
+      },
+      {
+        thread_id: summary.thread_id,
+        request_token: turnRequestToken,
+        content,
+        mode,
+      },
+    ),
     [
       StartTurn({
         api_base_url: model.api_base_url,
@@ -2009,17 +2026,25 @@ const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCo
   const turnRequestToken = model.turn_request_token + 1
   const presence = presenceCommand(model, "active")
   return [
-    {
-      ...model,
-      turn_request_token: turnRequestToken,
-      active_turn_request_token: turnRequestToken,
-      draft: "",
-      pending_turn: true,
-      pending_submit: content,
-      pending_submit_mode: model.draft_mode,
-      notice: undefined,
-      typing_presence_cooling: false,
-    },
+    trackPendingStartTurn(
+      {
+        ...model,
+        turn_request_token: turnRequestToken,
+        active_turn_request_token: turnRequestToken,
+        draft: "",
+        pending_turn: true,
+        pending_submit: content,
+        pending_submit_mode: model.draft_mode,
+        notice: undefined,
+        typing_presence_cooling: false,
+      },
+      {
+        thread_id: model.selected_thread_id,
+        request_token: turnRequestToken,
+        content,
+        mode: model.draft_mode,
+      },
+    ),
     [
       ...(presence === undefined ? [] : [presence]),
       StartTurn({
@@ -2038,11 +2063,12 @@ const acceptedTurnModel = (
   model: Model,
   message: typeof AcceptedTurn.Type,
 ): readonly [Model, ReadonlyArray<AppCommand>] => {
-  if (model.active_turn_request_token !== message.request_token) return [model, []]
-  if (model.selected_thread_id !== message.response.thread_id) return [model, []]
+  const next = removePendingStartTurn(model, message.response.thread_id, message.request_token)
+  if (model.active_turn_request_token !== message.request_token) return [next, []]
+  if (model.selected_thread_id !== message.response.thread_id) return [next, []]
   return [
     {
-      ...model,
+      ...next,
       active_turn_request_token: undefined,
       pending_submit: undefined,
       pending_submit_mode: undefined,
@@ -2056,39 +2082,59 @@ const failedStartTurnModel = (
   model: Model,
   message: typeof FailedStartTurn.Type,
 ): readonly [Model, ReadonlyArray<AppCommand>] => {
-  if (model.active_turn_request_token !== message.request_token) return [model, []]
-  const pending = pendingQueuedMessage(model)
-  if (message.status === 409 && pending !== undefined) {
-    return queueSubmittedMessageModel(
-      {
-        ...model,
+  const pending = pendingStartTurn(model, message.thread_id, message.request_token)
+  if (model.active_turn_request_token !== message.request_token && pending === undefined) return [model, []]
+  const withoutPending = removePendingStartTurn(model, message.thread_id, message.request_token)
+  const isActiveFailure = model.active_turn_request_token === message.request_token
+  const cleared = isActiveFailure
+    ? {
+        ...withoutPending,
         active_turn_request_token: undefined,
         pending_turn: false,
         pending_submit: undefined,
         pending_submit_mode: undefined,
-      },
-      pending,
+      }
+    : withoutPending
+  if (message.status === 409 && pending !== undefined) {
+    return queueSubmittedMessageModel(
+      cleared,
+      queuedFromPendingStartTurn(pending),
       conflictNotice(message.active_user_id),
     )
   }
+  if (!isActiveFailure) {
+    return [{ ...cleared, notice: message.message }, []]
+  }
   return [
     {
-      ...model,
-      active_turn_request_token: undefined,
-      pending_turn: false,
-      pending_submit: undefined,
-      pending_submit_mode: undefined,
-      draft: model.pending_submit ?? model.draft,
+      ...cleared,
+      draft: pending?.content ?? model.pending_submit ?? model.draft,
       notice: message.message,
     },
     [],
   ]
 }
 
-const pendingQueuedMessage = (model: Model): QueuedMessage | undefined =>
-  model.pending_submit === undefined || model.selected_thread_id === undefined
-    ? undefined
-    : { thread_id: model.selected_thread_id, content: model.pending_submit, mode: model.pending_submit_mode }
+const trackPendingStartTurn = (model: Model, pending: PendingStartTurn): Model => ({
+  ...model,
+  pending_start_turns: [...model.pending_start_turns.filter((entry) => entry.thread_id !== pending.thread_id), pending],
+})
+
+const pendingStartTurn = (model: Model, threadId: Ids.ThreadId, requestToken: number): PendingStartTurn | undefined =>
+  model.pending_start_turns.find((entry) => entry.thread_id === threadId && entry.request_token === requestToken)
+
+const removePendingStartTurn = (model: Model, threadId: Ids.ThreadId, requestToken: number): Model => {
+  const pending_start_turns = model.pending_start_turns.filter(
+    (entry) => entry.thread_id !== threadId || entry.request_token !== requestToken,
+  )
+  return pending_start_turns.length === model.pending_start_turns.length ? model : { ...model, pending_start_turns }
+}
+
+const queuedFromPendingStartTurn = (pending: PendingStartTurn): QueuedMessage => ({
+  thread_id: pending.thread_id,
+  content: pending.content,
+  mode: pending.mode,
+})
 
 const queueSubmittedMessageModel = (
   model: Model,
@@ -2245,17 +2291,25 @@ const drainQueuedMessagesModel = (model: Model): readonly [Model, ReadonlyArray<
   const queued = model.queued_messages[queuedIndex]
   if (queued === undefined) return [model, []]
   const turnRequestToken = model.turn_request_token + 1
-  const next = {
-    ...model,
-    turn_request_token: turnRequestToken,
-    active_turn_request_token: turnRequestToken,
-    draft: "",
-    queued_messages: model.queued_messages.filter((_, index) => index !== queuedIndex),
-    pending_turn: true,
-    pending_submit: queued.content,
-    pending_submit_mode: queued.mode,
-    notice: undefined,
-  }
+  const next = trackPendingStartTurn(
+    {
+      ...model,
+      turn_request_token: turnRequestToken,
+      active_turn_request_token: turnRequestToken,
+      draft: "",
+      queued_messages: model.queued_messages.filter((_, index) => index !== queuedIndex),
+      pending_turn: true,
+      pending_submit: queued.content,
+      pending_submit_mode: queued.mode,
+      notice: undefined,
+    },
+    {
+      thread_id: threadId,
+      request_token: turnRequestToken,
+      content: queued.content,
+      mode: queued.mode,
+    },
+  )
   const presence = presenceCommand(next, "active")
   return [
     next,

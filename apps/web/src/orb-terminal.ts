@@ -92,35 +92,36 @@ const reconnectSchedule = Schedule.exponential("250 millis", 2).pipe(
   Schedule.modifyDelay((_output, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
 )
 
-export const orbTerminalRegistryLayer = Layer.effect(
-  OrbTerminalRegistry,
-  Effect.gen(function* () {
-    const emptyHandles: HashMap.HashMap<Ids.ThreadId, OrbTerminalHandle> = HashMap.empty()
-    const handles = yield* Ref.make(emptyHandles)
-    return OrbTerminalRegistry.of({
-      register: (threadId, handle) => Ref.update(handles, (current) => HashMap.set(current, threadId, handle)),
-      unregister: (threadId, handle) =>
-        Ref.update(handles, (current) =>
-          Option.match(HashMap.get(current, threadId), {
-            onNone: () => current,
-            onSome: (currentHandle) => (currentHandle === handle ? HashMap.remove(current, threadId) : current),
-          }),
+type OrbTerminalHandles = HashMap.HashMap<Ids.ThreadId, OrbTerminalHandle>
+
+const makeOrbTerminalRegistry = (handles: Ref.Ref<OrbTerminalHandles>): OrbTerminalRegistryInterface => ({
+  register: (threadId, handle) => Ref.update(handles, (current) => HashMap.set(current, threadId, handle)),
+  unregister: (threadId, handle) =>
+    Ref.update(handles, (current) =>
+      Option.match(HashMap.get(current, threadId), {
+        onNone: () => current,
+        onSome: (currentHandle) => (currentHandle === handle ? HashMap.remove(current, threadId) : current),
+      }),
+    ),
+  reconnect: (threadId) =>
+    Effect.gen(function* () {
+      const current = yield* Ref.get(handles)
+      const handle = Option.getOrUndefined(HashMap.get(current, threadId))
+      if (handle === undefined) return false
+      return yield* Effect.promise(() =>
+        handle.reconnect().then(
+          () => true,
+          () => false,
         ),
-      reconnect: (threadId) =>
-        Effect.gen(function* () {
-          const current = yield* Ref.get(handles)
-          const handle = Option.getOrUndefined(HashMap.get(current, threadId))
-          if (handle === undefined) return false
-          return yield* Effect.promise(() =>
-            handle.reconnect().then(
-              () => true,
-              () => false,
-            ),
-          )
-        }),
-    })
-  }),
-)
+      )
+    }),
+})
+
+const orbTerminalHandles: Ref.Ref<OrbTerminalHandles> = Ref.makeUnsafe(HashMap.empty())
+
+export const orbTerminalRegistry = makeOrbTerminalRegistry(orbTerminalHandles)
+
+export const orbTerminalRegistryLayer = Layer.succeed(OrbTerminalRegistry, OrbTerminalRegistry.of(orbTerminalRegistry))
 
 export const mountOrbTerminal = (
   input: OrbTerminalMountInput,
@@ -278,8 +279,7 @@ export const mountOrbTerminal = (
 
 export const reconnectOrbTerminal = (threadId: Ids.ThreadId) =>
   Effect.gen(function* () {
-    const registry = yield* OrbTerminalRegistry
-    return yield* registry.reconnect(threadId)
+    return yield* orbTerminalRegistry.reconnect(threadId)
   })
 
 export const orbPtyWebSocketUrl = (input: OrbPtyWebSocketUrlInput): string => {

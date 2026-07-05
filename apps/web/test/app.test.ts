@@ -494,6 +494,7 @@ describe("web app state", () => {
     const [conflicted, commands] = update(
       submitted,
       FailedStartTurn({
+        thread_id: threadId,
         message: "Another user is running this thread",
         request_token: submitted.active_turn_request_token ?? 0,
         status: 409,
@@ -505,6 +506,38 @@ describe("web app state", () => {
     expect(conflicted.pending_turn).toBe(false)
     expect(conflicted.pending_submit).toBeUndefined()
     expect(conflicted.queued_messages).toEqual([{ thread_id: threadId, content: "queue this", mode: undefined }])
+    expect(conflicted.notice).toBe("sarah is running a turn - message queued")
+  })
+
+  test("queues a stale active-user conflict for the original thread after navigation", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      draft: "queue after navigation",
+    }
+
+    const [submitted] = update(model, SubmittedDraft())
+    const requestToken = submitted.active_turn_request_token ?? 0
+    const [openingOther] = update(submitted, ClickedThread({ thread_id: alternateThreadId }))
+    const [conflicted, commands] = update(
+      openingOther,
+      FailedStartTurn({
+        thread_id: threadId,
+        message: "Another user is running this thread",
+        request_token: requestToken,
+        status: 409,
+        active_user_id: otherUserId,
+      }),
+    )
+
+    expect(commands).toEqual([])
+    expect(conflicted.selected_thread_id).toBe(alternateThreadId)
+    expect(conflicted.pending_turn).toBe(false)
+    expect(conflicted.pending_submit).toBeUndefined()
+    expect(conflicted.queued_messages).toEqual([
+      { thread_id: threadId, content: "queue after navigation", mode: undefined },
+    ])
     expect(conflicted.notice).toBe("sarah is running a turn - message queued")
   })
 
@@ -536,6 +569,38 @@ describe("web app state", () => {
     })
   })
 
+  test("queues a stale drained-message conflict for the original thread after navigation", () => {
+    const turnId = Ids.TurnId.make("turn-web-active")
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      events: [turnStarted(4, turnId)],
+      last_sequence: 4,
+      subscription_after_sequence: 4,
+      queued_messages: [{ thread_id: threadId, content: "queued drain", mode: "smart" as const }],
+    }
+
+    const [drained] = update(model, ReceivedThreadEvent({ event: turnCompleted(5, turnId) }))
+    const requestToken = drained.active_turn_request_token ?? 0
+    const [openingOther] = update(drained, ClickedThread({ thread_id: alternateThreadId }))
+    const [conflicted] = update(
+      openingOther,
+      FailedStartTurn({
+        thread_id: threadId,
+        message: "Another user is running this thread",
+        request_token: requestToken,
+        status: 409,
+        active_user_id: otherUserId,
+      }),
+    )
+
+    expect(conflicted.selected_thread_id).toBe(alternateThreadId)
+    expect(conflicted.pending_submit).toBeUndefined()
+    expect(conflicted.queued_messages).toEqual([{ thread_id: threadId, content: "queued drain", mode: "smart" }])
+    expect(conflicted.notice).toBe("sarah is running a turn - message queued")
+  })
+
   test("keeps queued conflict messages scoped to their original thread", () => {
     const activeTurnId = Ids.TurnId.make("turn-web-active")
     const otherTurnId = Ids.TurnId.make("turn-web-other")
@@ -550,6 +615,7 @@ describe("web app state", () => {
     const [conflicted] = update(
       submitted,
       FailedStartTurn({
+        thread_id: threadId,
         message: "Another user is running this thread",
         request_token: submitted.active_turn_request_token ?? 0,
         status: 409,

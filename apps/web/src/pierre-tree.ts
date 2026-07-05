@@ -34,43 +34,45 @@ export class PierreTreeRegistry extends Context.Service<PierreTreeRegistry, Pier
   "@rika/web/PierreTreeRegistry",
 ) {}
 
-export const pierreTreeRegistryLayer = Layer.effect(
-  PierreTreeRegistry,
-  Effect.gen(function* () {
-    const emptyHandles: HashMap.HashMap<string, PierreTreeHandle> = HashMap.empty()
-    const handles = yield* Ref.make(emptyHandles)
-    const register: PierreTreeRegistryInterface["register"] = Effect.fn("PierreTreeRegistry.register")(
-      (key: string, handle: PierreTreeHandle) => Ref.update(handles, (current) => HashMap.set(current, key, handle)),
-    )
-    const unregister: PierreTreeRegistryInterface["unregister"] = Effect.fn("PierreTreeRegistry.unregister")(
-      (key: string, handle: PierreTreeHandle) =>
-        Ref.update(handles, (current) =>
-          Option.match(HashMap.get(current, key), {
-            onNone: () => current,
-            onSome: (currentHandle) => (currentHandle === handle ? HashMap.remove(current, key) : current),
-          }),
-        ),
-    )
-    const update: PierreTreeRegistryInterface["update"] = Effect.fn("PierreTreeRegistry.update")(function* (
-      key: string,
-      input: PierreTreeInput,
-    ) {
-      const current = yield* Ref.get(handles)
-      const handle = Option.getOrUndefined(HashMap.get(current, key))
-      if (handle === undefined) return false
-      yield* Effect.sync(() => handle.update(input))
-      return true
-    })
-    return PierreTreeRegistry.of({ register, unregister, update })
-  }),
-)
+type PierreTreeHandles = HashMap.HashMap<string, PierreTreeHandle>
+
+const makePierreTreeRegistry = (handles: Ref.Ref<PierreTreeHandles>): PierreTreeRegistryInterface => {
+  const register: PierreTreeRegistryInterface["register"] = Effect.fn("PierreTreeRegistry.register")(
+    (key: string, handle: PierreTreeHandle) => Ref.update(handles, (current) => HashMap.set(current, key, handle)),
+  )
+  const unregister: PierreTreeRegistryInterface["unregister"] = Effect.fn("PierreTreeRegistry.unregister")(
+    (key: string, handle: PierreTreeHandle) =>
+      Ref.update(handles, (current) =>
+        Option.match(HashMap.get(current, key), {
+          onNone: () => current,
+          onSome: (currentHandle) => (currentHandle === handle ? HashMap.remove(current, key) : current),
+        }),
+      ),
+  )
+  const update: PierreTreeRegistryInterface["update"] = Effect.fn("PierreTreeRegistry.update")(function* (
+    key: string,
+    input: PierreTreeInput,
+  ) {
+    const current = yield* Ref.get(handles)
+    const handle = Option.getOrUndefined(HashMap.get(current, key))
+    if (handle === undefined) return false
+    yield* Effect.sync(() => handle.update(input))
+    return true
+  })
+  return { register, unregister, update }
+}
+
+const pierreTreeHandles: Ref.Ref<PierreTreeHandles> = Ref.makeUnsafe(HashMap.empty())
+
+export const pierreTreeRegistry = makePierreTreeRegistry(pierreTreeHandles)
+
+export const pierreTreeRegistryLayer = Layer.succeed(PierreTreeRegistry, PierreTreeRegistry.of(pierreTreeRegistry))
 
 export const updatePierreTree = Effect.fn("PierreTreeRegistry.update.call")(function* (
   key: string,
   input: PierreTreeInput,
 ) {
-  const registry = yield* PierreTreeRegistry
-  return yield* registry.update(key, input)
+  return yield* pierreTreeRegistry.update(key, input)
 })
 
 export const mountPierreTree = (input: PierreTreeMountInput): PierreTreeHandle => {
