@@ -1,6 +1,8 @@
-import { EnvConfig } from "@rika/core"
+import { Config, EnvConfig } from "@rika/core"
 import { Common, ErrorEnvelope, Tool } from "@rika/schema"
-import { Config as EffectConfig, Context, Effect, Layer, Schema } from "effect"
+import { Config as EffectConfig, Context, Effect, Layer, Option, Schema } from "effect"
+import { realpath } from "node:fs/promises"
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path"
 
 export const PermissionMode = Schema.Literals(["allow-all", "plugin", "configured"]).annotate({
   identifier: "Rika.Agent.PermissionPolicy.PermissionMode",
@@ -67,6 +69,10 @@ export class Service extends Context.Service<Service, Interface>()("@rika/agent/
 
 export type Decider = (call: Tool.Call) => Effect.Effect<Decision, PermissionPolicyError>
 
+export interface DecideOptions {
+  readonly workspace_root?: string
+}
+
 export const allow: Decision = { action: "allow" }
 
 export const defaultGuardedFiles = [".rika/plugins/**", "*/.rika/plugins/**"] as const
@@ -95,13 +101,18 @@ export const layerFromDecider = (decider: Decider, mode: PermissionMode = "confi
   )
 
 export const layerFromConfig = (config: PermissionConfig = defaultConfig) =>
-  Layer.succeed(
+  Layer.effect(
     Service,
-    Service.of({
-      mode: Effect.succeed(config.mode),
-      decide: Effect.fn("PermissionPolicy.decide.configured")(function* (call: Tool.Call) {
-        return yield* decideFromConfig(config, call)
-      }),
+    Effect.gen(function* () {
+      const configService = yield* Effect.serviceOption(Config.Service)
+      const values = Option.isSome(configService) ? yield* configService.value.get : undefined
+      const options = values === undefined ? {} : { workspace_root: values.workspace_root }
+      return Service.of({
+        mode: Effect.succeed(config.mode),
+        decide: Effect.fn("PermissionPolicy.decide.configured")(function* (call: Tool.Call) {
+          return yield* decideFromConfig(config, call, options)
+        }),
+      })
     }),
   )
 
@@ -137,9 +148,10 @@ export const summary = (config: PermissionConfig): PermissionSummary => ({
 export const decideFromConfig = (
   config: PermissionConfig,
   call: Tool.Call,
+  options: DecideOptions = {},
 ): Effect.Effect<Decision, PermissionPolicyError> =>
-  Effect.sync(() => {
-    const fileMatch = firstGuardedFileMatch(config.guarded_files ?? [], call.input)
+  Effect.gen(function* () {
+    const fileMatch = yield* firstGuardedFileMatch(config.guarded_files ?? [], call.input, options)
     if (fileMatch !== undefined) {
       return reject(`File ${fileMatch.path} is guarded by permission policy`, {
         permission_mode: config.mode,
@@ -211,19 +223,24 @@ const toolNamespaceAlias = (value: string) => value.replaceAll("_", ".").replace
 const firstGuardedFileMatch = (
   patterns: ReadonlyArray<string>,
   input: Common.JsonValue,
-): { readonly path: string; readonly pattern: string } | undefined => {
-  for (const path of filePathCandidates(input)) {
-    const pattern = firstMatchingPattern(patterns, path)
-    if (pattern !== undefined) return { path, pattern }
-  }
-  return undefined
-}
+  options: DecideOptions,
+): Effect.Effect<{ readonly path: string; readonly pattern: string } | undefined> =>
+  Effect.promise(async () => {
+    for (const candidate of filePathCandidates(input)) {
+      const paths = await guardedPathForms(candidate, options.workspace_root)
+      for (const path of paths) {
+        const pattern = firstMatchingPattern(patterns, path)
+        if (pattern !== undefined) return { path, pattern }
+      }
+    }
+    return undefined
+  })
 
 const filePathCandidates = (value: Common.JsonValue): ReadonlyArray<string> =>
   collectFilePathCandidates(value, undefined)
 
 const collectFilePathCandidates = (value: unknown, key: string | undefined): ReadonlyArray<string> => {
-  if (typeof value === "string") return key !== undefined && isPathKey(key) ? [value] : []
+  if (typeof value === "string") return isPathCandidate(value) || (key !== undefined && isPathKey(key)) ? [value] : []
   if (Array.isArray(value)) return value.flatMap((item) => collectFilePathCandidates(item, key))
   if (isRecord(value)) {
     return Object.entries(value).flatMap(([entryKey, entryValue]) => collectFilePathCandidates(entryValue, entryKey))
@@ -231,14 +248,76 @@ const collectFilePathCandidates = (value: unknown, key: string | undefined): Rea
   return []
 }
 
-const isPathKey = (key: string) =>
-  key === "path" ||
-  key === "file" ||
-  key === "filepath" ||
-  key === "file_path" ||
-  key === "absolute_path" ||
-  key === "relative_path" ||
-  key === "target_path"
+const isPathKey = (key: string) => {
+  const normalized = key.replaceAll("-", "_").toLowerCase()
+  const compact = normalized.replaceAll("_", "")
+  return (
+    normalized === "path" ||
+    normalized === "file" ||
+    normalized === "destination" ||
+    normalized === "dest" ||
+    normalized === "target" ||
+    normalized === "to" ||
+    normalized === "output" ||
+    normalized === "out" ||
+    compact === "filepath" ||
+    compact === "absolutepath" ||
+    compact === "relativepath" ||
+    compact === "targetpath" ||
+    compact === "destinationpath" ||
+    compact === "outputpath"
+  )
+}
+
+const isPathCandidate = (value: string) => {
+  const trimmed = value.trim()
+  return trimmed.length > 0 && (trimmed.includes("/") || trimmed.includes("\\") || trimmed.startsWith("."))
+}
+
+const guardedPathForms = async (
+  candidate: string,
+  workspaceRoot: string | undefined,
+): Promise<ReadonlyArray<string>> => {
+  const forms = [normalizePath(candidate)]
+  if (workspaceRoot === undefined) return unique(forms)
+  const root = resolve(workspaceRoot)
+  const rootReal = await realpathExistingPrefix(root)
+  const absolute = isAbsolute(candidate) ? candidate : resolve(root, candidate)
+  forms.push(normalizePath(absolute), ...relativeForms(root, absolute))
+  const resolved = await realpathExistingPrefix(absolute)
+  forms.push(...relativeForms(root, resolved), ...relativeForms(rootReal, resolved), normalizePath(resolved))
+  return unique(forms)
+}
+
+const realpathExistingPrefix = async (path: string): Promise<string> => {
+  let current = path
+  const suffix: Array<string> = []
+  while (true) {
+    try {
+      const resolved = await realpath(current)
+      return suffix.reduce((accumulator, part) => join(accumulator, part), resolved)
+    } catch {}
+    const parent = dirname(current)
+    if (parent === current) return path
+    suffix.unshift(basename(current))
+    current = parent
+  }
+}
+
+const relativeForms = (root: string, path: string): ReadonlyArray<string> => {
+  const form = relativeInside(root, path)
+  if (form === undefined) return []
+  return [form]
+}
+
+const relativeInside = (root: string, path: string): string | undefined => {
+  const next = relative(root, path)
+  if (next.length === 0) return "."
+  if (next.startsWith("..") || isAbsolute(next)) return undefined
+  return normalizePath(next)
+}
+
+const normalizePath = (value: string) => value.split(sep).join("/").replaceAll("\\", "/")
 
 const matchesPattern = (pattern: string, value: string) => {
   if (pattern === value) return true

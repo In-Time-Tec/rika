@@ -1663,6 +1663,7 @@ export const extensionsLiveLayer = (
     Output.layer,
     databaseLayer,
     Migration.layer,
+    ThreadProjection.layer,
     timeLayer,
     IdGenerator.layer,
     artifactLayer,
@@ -2201,6 +2202,7 @@ export type ExtensionsLayerOutput =
   | Migration.Service
   | Output.Service
   | SelfExtension.Service
+  | ThreadProjection.Service
   | Time.Service
 
 export type IdeLayerOutput = Output.Service | Ide.Service

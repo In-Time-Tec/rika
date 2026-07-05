@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { Common, Ids, Tool } from "@rika/schema"
 import { Effect } from "effect"
+import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { PermissionPolicy } from "../src/index"
 
 const call = (name: string, input: Common.JsonValue = {}): Tool.Call => ({
@@ -62,6 +65,58 @@ describe("PermissionPolicy", () => {
       },
     })
     expect(allowed).toEqual(PermissionPolicy.allow)
+  })
+
+  test("default config guards plugin paths reached through symlinked directories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-permission-policy-"))
+    await mkdir(join(root, ".rika", "plugins"), { recursive: true })
+    await symlink(join(root, ".rika", "plugins"), join(root, "plugin-link"), "dir")
+
+    const blocked = await Effect.runPromise(
+      PermissionPolicy.decideFromConfig(
+        PermissionPolicy.defaultConfig,
+        call("write", { destination: "plugin-link/untrusted.ts", content: "" }),
+        { workspace_root: root },
+      ),
+    )
+
+    expect(blocked).toMatchObject({
+      action: "reject-and-continue",
+      message: "File .rika/plugins/untrusted.ts is guarded by permission policy",
+      details: {
+        permission_mode: "allow-all",
+        matched: "file",
+        path: ".rika/plugins/untrusted.ts",
+        pattern: ".rika/plugins/**",
+      },
+    })
+  })
+
+  test("default config guards single-component symlink file targets under sink keys", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-permission-policy-"))
+    const pluginPath = join(root, ".rika", "plugins", "untrusted.ts")
+    await mkdir(join(root, ".rika", "plugins"), { recursive: true })
+    await writeFile(pluginPath, "")
+    await symlink(pluginPath, join(root, "plugin-link"))
+
+    const blocked = await Effect.runPromise(
+      PermissionPolicy.decideFromConfig(
+        PermissionPolicy.defaultConfig,
+        call("write", { destination: "plugin-link", content: "" }),
+        { workspace_root: root },
+      ),
+    )
+
+    expect(blocked).toMatchObject({
+      action: "reject-and-continue",
+      message: "File .rika/plugins/untrusted.ts is guarded by permission policy",
+      details: {
+        permission_mode: "allow-all",
+        matched: "file",
+        path: ".rika/plugins/untrusted.ts",
+        pattern: ".rika/plugins/**",
+      },
+    })
   })
 
   test("configured guarded tools reject through the normal decision type", async () => {

@@ -22,7 +22,14 @@ describe("ArtifactStore", () => {
       ...artifact,
       id: Ids.ArtifactId.make("artifact_review_2"),
       thread_id: Ids.ThreadId.make("thread_review_2"),
+      workspace_id: Ids.WorkspaceId.make("workspace_review_other"),
       created_at: Common.TimestampMillis.make(1235),
+    }
+    const workspaceArtifact = {
+      ...artifact,
+      id: Ids.ArtifactId.make("artifact_review_3"),
+      workspace_id: Ids.WorkspaceId.make("workspace_review"),
+      created_at: Common.TimestampMillis.make(1236),
     }
 
     const result = await Effect.runPromise(
@@ -30,15 +37,21 @@ describe("ArtifactStore", () => {
         yield* Migration.migrate()
         yield* ArtifactStore.put(artifact)
         yield* ArtifactStore.put(otherThreadArtifact)
+        yield* ArtifactStore.put(workspaceArtifact)
         const stored = yield* ArtifactStore.get(artifact.id)
         const listed = yield* ArtifactStore.list({ thread_id: artifact.thread_id, kind: "review" })
         const listedAll = yield* ArtifactStore.listAll({ kind: "review" })
-        return { stored, listed, listedAll }
+        const listedByWorkspace = yield* ArtifactStore.listAll({
+          workspace_id: Ids.WorkspaceId.make("workspace_review"),
+          kind: "review",
+        })
+        return { stored, listed, listedAll, listedByWorkspace }
       }).pipe(Effect.provide(layer)),
     )
 
     expect(Option.getOrUndefined(result.stored)).toEqual(artifact)
-    expect(result.listed).toEqual([artifact])
-    expect(result.listedAll).toEqual([otherThreadArtifact, artifact])
+    expect(result.listed).toEqual([workspaceArtifact, artifact])
+    expect(result.listedAll).toEqual([workspaceArtifact, otherThreadArtifact, artifact])
+    expect(result.listedByWorkspace).toEqual([workspaceArtifact])
   })
 })

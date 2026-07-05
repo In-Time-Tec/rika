@@ -1,4 +1,4 @@
-import { ArtifactStore } from "@rika/persistence"
+import { ArtifactStore, Database, ThreadProjection } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { mkdir, readFile, rename, stat, writeFile } from "node:fs/promises"
@@ -55,6 +55,7 @@ export const ExtensionChange = Schema.Struct({
   kind: ExtensionKind,
   action: ExtensionAction,
   name: Schema.String,
+  workspace_id: Ids.WorkspaceId,
   enabled: Schema.Boolean,
   artifact_id: Ids.ArtifactId,
   files: Schema.Array(FileChange),
@@ -126,12 +127,20 @@ interface Dependencies {
   readonly artifactStore: ArtifactStore.Interface
   readonly idGenerator: IdGenerator.Interface
   readonly time: Time.Interface
+  readonly resolveWorkspaceId: (
+    threadId: Ids.ThreadId | undefined,
+  ) => Effect.Effect<Ids.WorkspaceId, SelfExtensionError>
 }
 
 export const layer: Layer.Layer<
   Service,
   never,
-  Config.Service | ArtifactStore.Service | IdGenerator.Service | Time.Service
+  | Config.Service
+  | ArtifactStore.Service
+  | Database.Service
+  | IdGenerator.Service
+  | ThreadProjection.Service
+  | Time.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -140,6 +149,8 @@ export const layer: Layer.Layer<
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
     const values = yield* config.get
+    const database = yield* Database.Service
+    const projection = yield* ThreadProjection.Service
     return makeService({
       workspaceRoot: values.workspace_root,
       fileSystem: nodeFileSystem,
@@ -147,6 +158,7 @@ export const layer: Layer.Layer<
       artifactStore,
       idGenerator,
       time,
+      resolveWorkspaceId: workspaceResolver(values.workspace_root, database, projection),
     })
   }),
 )
@@ -155,6 +167,7 @@ export const layerFromAdapters = (input: {
   readonly workspaceRoot: string
   readonly fileSystem?: FileSystemAdapter
   readonly verifier?: VerificationRunner
+  readonly resolveWorkspaceId?: Dependencies["resolveWorkspaceId"]
 }) =>
   Layer.effect(
     Service,
@@ -169,6 +182,7 @@ export const layerFromAdapters = (input: {
         artifactStore,
         idGenerator,
         time,
+        resolveWorkspaceId: input.resolveWorkspaceId ?? unprojectedWorkspaceResolver(input.workspaceRoot),
       })
     }),
   )
@@ -209,6 +223,7 @@ const makeService = (dependencies: Dependencies): Interface =>
     createSkill: Effect.fn("SelfExtension.createSkill")(function* (input: CreateSkillInput) {
       const name = yield* validateName(input.name, "createSkill")
       const description = yield* nonEmpty(input.description, "description", "createSkill", name)
+      const workspaceId = yield* dependencies.resolveWorkspaceId(input.thread_id)
       const directory = join(dependencies.workspaceRoot, ".agents", "skills", name)
       const path = join(directory, "SKILL.md")
       yield* ensureMissing(dependencies, path, name, "createSkill")
@@ -220,6 +235,7 @@ const makeService = (dependencies: Dependencies): Interface =>
         action: "create-skill",
         name,
         enabled: true,
+        workspaceId,
         threadId: input.thread_id,
         files: [{ path: relativePath(dependencies.workspaceRoot, path), before: null, after: content }],
         trust: {
@@ -233,6 +249,7 @@ const makeService = (dependencies: Dependencies): Interface =>
     createPlugin: Effect.fn("SelfExtension.createPlugin")(function* (input: CreatePluginInput) {
       const name = yield* validateName(input.name, "createPlugin")
       const description = yield* nonEmpty(input.description, "description", "createPlugin", name)
+      const workspaceId = yield* dependencies.resolveWorkspaceId(input.thread_id)
       const directory = join(dependencies.workspaceRoot, ".rika", "plugins")
       const activePath = activePluginPath(dependencies.workspaceRoot, name)
       const disabledPath = disabledPluginPath(dependencies.workspaceRoot, name)
@@ -246,6 +263,7 @@ const makeService = (dependencies: Dependencies): Interface =>
         action: "create-plugin",
         name,
         enabled: false,
+        workspaceId,
         threadId: input.thread_id,
         files: [{ path: relativePath(dependencies.workspaceRoot, disabledPath), before: null, after: content }],
         trust: {
@@ -261,6 +279,7 @@ const makeService = (dependencies: Dependencies): Interface =>
     enablePlugin: Effect.fn("SelfExtension.enablePlugin")(function* (input: EnablePluginInput) {
       const name = yield* validateName(input.name, "enablePlugin")
       const command = yield* nonEmpty(input.verification_command, "verification_command", "enablePlugin", name)
+      const workspaceId = yield* dependencies.resolveWorkspaceId(input.thread_id)
       const disabledPath = disabledPluginPath(dependencies.workspaceRoot, name)
       const activePath = activePluginPath(dependencies.workspaceRoot, name)
       yield* ensureMissing(dependencies, activePath, name, "enablePlugin")
@@ -273,6 +292,7 @@ const makeService = (dependencies: Dependencies): Interface =>
         action: "enable-plugin",
         name,
         enabled: passed,
+        workspaceId,
         threadId: input.thread_id,
         files: passed
           ? [
@@ -306,6 +326,7 @@ const disableOrRollback = (
 ) =>
   Effect.gen(function* () {
     const name = yield* validateName(input.name, action)
+    const workspaceId = yield* dependencies.resolveWorkspaceId(input.thread_id)
     const activePath = activePluginPath(dependencies.workspaceRoot, name)
     const disabledPath = disabledPluginPath(dependencies.workspaceRoot, name)
     const active = yield* dependencies.fileSystem.readText(activePath)
@@ -316,6 +337,7 @@ const disableOrRollback = (
         action,
         name,
         enabled: false,
+        workspaceId,
         threadId: input.thread_id,
         files: [
           { path: relativePath(dependencies.workspaceRoot, activePath), before: active.value, after: null },
@@ -337,6 +359,7 @@ const disableOrRollback = (
         action,
         name,
         enabled: false,
+        workspaceId,
         threadId: input.thread_id,
         files: [
           {
@@ -362,6 +385,7 @@ interface RecordInput {
   readonly action: ExtensionAction
   readonly name: string
   readonly enabled: boolean
+  readonly workspaceId: Ids.WorkspaceId
   readonly threadId: Ids.ThreadId | undefined
   readonly files: ReadonlyArray<FileChange>
   readonly trust: TrustDecision
@@ -375,6 +399,7 @@ const recordChange = (dependencies: Dependencies, input: RecordInput) =>
       kind: input.kind,
       action: input.action,
       name: input.name,
+      workspace_id: input.workspaceId,
       enabled: input.enabled,
       artifact_id: artifactId,
       files: [...input.files],
@@ -384,6 +409,7 @@ const recordChange = (dependencies: Dependencies, input: RecordInput) =>
       .put({
         id: artifactId,
         thread_id: input.threadId ?? Ids.ThreadId.make("thread_self_extension"),
+        workspace_id: input.workspaceId,
         kind: "other",
         title: `Self-extension ${input.action}: ${input.name}`,
         content: extensionChangeToJson(change),
@@ -393,6 +419,7 @@ const recordChange = (dependencies: Dependencies, input: RecordInput) =>
           extension_kind: input.kind,
           action: input.action,
           name: input.name,
+          workspace_id: input.workspaceId,
           enabled: input.enabled,
         },
       })
@@ -479,10 +506,55 @@ const titleFromName = (name: string) =>
 
 const relativePath = (workspaceRoot: string, path: string) => relative(workspaceRoot, path).split(sep).join("/")
 
+const workspaceResolver = (
+  workspaceRoot: string,
+  database: Database.Interface,
+  projection: ThreadProjection.Interface,
+) =>
+  Effect.fn("SelfExtension.resolveWorkspaceId")(function* (threadId: Ids.ThreadId | undefined) {
+    const workspaceId = Ids.WorkspaceId.make(workspaceRoot)
+    if (threadId === undefined) return workspaceId
+    const summary = yield* projection.getThread(threadId).pipe(
+      Effect.provideService(Database.Service, database),
+      Effect.mapError(
+        (cause) =>
+          new SelfExtensionError({
+            message: cause.message,
+            operation: "resolveWorkspace",
+          }),
+      ),
+    )
+    if (summary === undefined) {
+      return yield* new SelfExtensionError({
+        message: `Thread ${threadId} is not present in the workspace projection`,
+        operation: "resolveWorkspace",
+      })
+    }
+    if (summary.workspace_id !== workspaceId) {
+      return yield* new SelfExtensionError({
+        message: `Thread ${threadId} belongs to workspace ${summary.workspace_id}, not ${workspaceId}`,
+        operation: "resolveWorkspace",
+      })
+    }
+    return summary.workspace_id
+  })
+
+const unprojectedWorkspaceResolver = (workspaceRoot: string): Dependencies["resolveWorkspaceId"] =>
+  Effect.fn("SelfExtension.resolveWorkspaceId.unprojected")(function* (threadId: Ids.ThreadId | undefined) {
+    if (threadId !== undefined) {
+      return yield* new SelfExtensionError({
+        message: `Thread ${threadId} cannot be scoped without the thread projection`,
+        operation: "resolveWorkspace",
+      })
+    }
+    return Ids.WorkspaceId.make(workspaceRoot)
+  })
+
 const extensionChangeToJson = (change: ExtensionChange): Common.JsonValue => ({
   kind: change.kind,
   action: change.action,
   name: change.name,
+  workspace_id: change.workspace_id,
   enabled: change.enabled,
   artifact_id: change.artifact_id,
   files: change.files.map((file): Common.JsonValue => ({ path: file.path, before: file.before, after: file.after })),

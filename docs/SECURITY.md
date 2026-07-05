@@ -18,6 +18,8 @@ Rika is a local-first coding agent that can inspect files, run commands, edit co
 
 Tool calls run through `ToolExecutor.Service`; plugins and MCP tools do not bypass the normal policy path. Rika's default policy is `allow-all` for unguarded paths, matching Amp's no-approval local workflow. Writes targeting `.rika/plugins/**` are guarded by default, including absolute paths matching `*/.rika/plugins/**`, so executable plugin source changes require policy review even when ambient mode is `allow-all`.
 
+`guarded_files` is a best-effort argument-path guard. It resolves path-like tool input strings against the workspace root before matching configured patterns, including symlinked directories, but it does not parse arbitrary shell command text. The plugin loader's workspace-scoped trust record and source hash verification are the security boundary for plugin execution.
+
 Subagents default to `RIKA_SUBAGENT_TOOLS=readonly` in local processes. `RIKA_SUBAGENT_TOOLS=full` gives subagents the standard tool surface except the recursive `task` tool; every subagent tool call still goes through `ToolExecutor.Service` and `PermissionPolicy.Service`. Orb servers are launched with full subagent tools because the workspace is already inside the sandbox boundary.
 
 The centralized `PermissionPolicy.Service` supports four decisions for every tool call:
@@ -67,8 +69,8 @@ Rules:
 
 - Generated plugins are written disabled first.
 - Enabling a generated plugin requires an explicit verification command.
-- SelfExtension records the enabled plugin source hash in its artifact trust decision.
-- PluginHost imports an active `.rika/plugins/*.ts` file only when the latest SelfExtension trust artifact for that plugin is enabled, verification passed, and the current file hash matches the recorded hash.
+- SelfExtension records the workspace id and enabled plugin source hash in its artifact trust decision.
+- PluginHost imports an active `.rika/plugins/*.ts` file only when the latest SelfExtension trust artifact for the loading workspace and plugin is enabled, verification passed, and the current file hash matches the recorded hash.
 - Missing trust records, stale hashes, disabled or rolled-back trust states, and same-timestamp trust ambiguity are rejected before plugin source is imported.
 - Rollback disables plugin execution without deleting source.
 - The MVP plugin loader is not a sandbox and must not be treated as isolation.

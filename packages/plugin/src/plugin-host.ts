@@ -1,7 +1,7 @@
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
 import { Config, Diagnostics } from "@rika/core"
 import { ArtifactStore } from "@rika/persistence"
-import { Common } from "@rika/schema"
+import { Common, Ids } from "@rika/schema"
 import { Call, Result } from "@rika/schema/tool"
 import { Tool } from "effect/unstable/ai"
 import { Context, Effect, Layer, Option, Schema } from "effect"
@@ -127,7 +127,11 @@ export const layer = Layer.effect(
     return yield* makeService(ui, () =>
       Effect.gen(function* () {
         const values = yield* config.get
-        return yield* discoverLocalPlugins(values.workspace_root, artifactStore)
+        return yield* discoverLocalPlugins(
+          values.workspace_root,
+          Ids.WorkspaceId.make(values.workspace_root),
+          artifactStore,
+        )
       }),
     )
   }),
@@ -190,6 +194,9 @@ export const permissionPolicyLayerFromConfig = (
     PermissionPolicy.Service,
     Effect.gen(function* () {
       const host = yield* Service
+      const configService = yield* Effect.serviceOption(Config.Service)
+      const values = Option.isSome(configService) ? yield* configService.value.get : undefined
+      const options = values === undefined ? {} : { workspace_root: values.workspace_root }
       return PermissionPolicy.Service.of({
         mode: Effect.gen(function* () {
           const hasToolCallHooks = yield* host.hasToolCallHooks
@@ -207,7 +214,7 @@ export const permissionPolicyLayerFromConfig = (
             ),
           )
           if (Option.isSome(override)) return override.value
-          return yield* PermissionPolicy.decideFromConfig(config, call)
+          return yield* PermissionPolicy.decideFromConfig(config, call, options)
         }),
       })
     }),
@@ -651,6 +658,7 @@ const emitVoidHandlers = <Event>(
 
 const discoverLocalPlugins = (
   workspaceRoot: string,
+  workspaceId: Ids.WorkspaceId,
   artifactStore: ArtifactStore.Interface,
 ): Effect.Effect<ReadonlyArray<PluginCandidate>, RunError> =>
   Effect.gen(function* () {
@@ -672,10 +680,10 @@ const discoverLocalPlugins = (
       ),
     )
     const pluginFiles = names.filter((name) => name.endsWith(".ts")).toSorted()
-    const trustRecords = yield* pluginTrustRecords(artifactStore)
+    const trustRecords = yield* pluginTrustRecords(artifactStore, workspaceId)
     return yield* Effect.forEach(
       pluginFiles,
-      (name) => trustedImportCandidate(workspaceRoot, join(directory, name), trustRecords),
+      (name) => trustedImportCandidate(workspaceRoot, workspaceId, join(directory, name), trustRecords),
       { concurrency: 1 },
     )
   })
@@ -692,8 +700,9 @@ type TrustLookup =
 
 const pluginTrustRecords = (
   artifactStore: ArtifactStore.Interface,
+  workspaceId: Ids.WorkspaceId,
 ): Effect.Effect<ReadonlyArray<PluginTrustRecord>, RunError> =>
-  artifactStore.listAll({ kind: "other", limit: 5_000 }).pipe(
+  artifactStore.listAll({ workspace_id: workspaceId, kind: "other", limit: 5_000 }).pipe(
     Effect.map((artifacts) =>
       artifacts.flatMap((artifact) => {
         const decoded = Schema.decodeUnknownOption(SelfExtension.ExtensionChange)(artifact.content)
@@ -712,22 +721,24 @@ const pluginTrustRecords = (
 
 const trustedImportCandidate = (
   workspaceRoot: string,
+  workspaceId: Ids.WorkspaceId,
   path: string,
   trustRecords: ReadonlyArray<PluginTrustRecord>,
 ): Effect.Effect<PluginCandidate> =>
   Effect.gen(function* () {
-    const source = yield* trustedPluginSource(workspaceRoot, path, trustRecords).pipe(Effect.result)
+    const source = yield* trustedPluginSource(workspaceRoot, workspaceId, path, trustRecords).pipe(Effect.result)
     if (source._tag === "Failure") return { name: pluginName(path), path, error: source.failure.message }
     return yield* importCandidate(path, source.success)
   })
 
 const trustedPluginSource = (
   workspaceRoot: string,
+  workspaceId: Ids.WorkspaceId,
   path: string,
   trustRecords: ReadonlyArray<PluginTrustRecord>,
 ): Effect.Effect<string, PluginHostError> =>
   Effect.gen(function* () {
-    const trustRecord = latestTrustRecord(workspaceRoot, path, trustRecords)
+    const trustRecord = latestTrustRecord(workspaceRoot, workspaceId, path, trustRecords)
     if (trustRecord._tag === "missing") {
       return yield* trustError(path, "Plugin file has no enabled SelfExtension trust record")
     }
@@ -754,13 +765,17 @@ const trustedPluginSource = (
 
 const latestTrustRecord = (
   workspaceRoot: string,
+  workspaceId: Ids.WorkspaceId,
   path: string,
   trustRecords: ReadonlyArray<PluginTrustRecord>,
 ): TrustLookup => {
   const name = pluginName(path)
   const pluginPath = relativePluginPath(workspaceRoot, path)
   const matching = trustRecords.filter(
-    (record) => record.change.name === name && record.change.files.some((file) => file.path === pluginPath),
+    (record) =>
+      record.change.workspace_id === workspaceId &&
+      record.change.name === name &&
+      record.change.files.some((file) => file.path === pluginPath),
   )
   if (matching.length === 0) return { _tag: "missing" }
   const latest = matching.reduce((current, record) => (record.created_at > current.created_at ? record : current))

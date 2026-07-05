@@ -16,6 +16,7 @@ export const ListInput = Schema.Struct({
 
 export interface ListAllInput extends Schema.Schema.Type<typeof ListAllInput> {}
 export const ListAllInput = Schema.Struct({
+  workspace_id: Schema.optional(Ids.WorkspaceId),
   kind: Schema.optional(Artifact.Kind),
   limit: Schema.optional(Schema.Int),
 }).annotate({ identifier: "Rika.Persistence.ArtifactStore.ListAllInput" })
@@ -108,6 +109,7 @@ export const fakeLayer = (initial: ReadonlyArray<Artifact.Artifact> = []) => {
       }),
       listAll: Effect.fn("ArtifactStore.listAll.fake")(function* (input: ListAllInput = {}) {
         return [...rows.values()]
+          .filter((artifact) => input.workspace_id === undefined || artifact.workspace_id === input.workspace_id)
           .filter((artifact) => input.kind === undefined || artifact.kind === input.kind)
           .toSorted(compareNewest)
           .slice(0, input.limit ?? 100)
@@ -141,6 +143,7 @@ type ArtifactDatabase = Pick<Database.DrizzleDatabase, "get" | "insert" | "all">
 interface ArtifactRow {
   readonly id: string
   readonly thread_id: string
+  readonly workspace_id: string | null
   readonly turn_id: string | null
   readonly kind: string
   readonly title: string | null
@@ -169,16 +172,30 @@ const listRows = (database: ArtifactDatabase, input: ListInput) => {
 
 const listAllRows = (database: ArtifactDatabase, input: ListAllInput) => {
   const limit = input.limit ?? 100
-  const rows =
-    input.kind === undefined
-      ? database.all<ArtifactRow>(sql`select * from artifacts order by created_at desc, id desc limit ${limit}`)
-      : database.all<ArtifactRow>(
-          sql`select * from artifacts where kind = ${input.kind} order by created_at desc, id desc limit ${limit}`,
-        )
+  const rows = listAllRowsByFilter(database, input, limit)
   return rows.flatMap((row) => {
     const artifact = rowToArtifact(row)
     return artifact === undefined ? [] : [artifact]
   })
+}
+
+const listAllRowsByFilter = (database: ArtifactDatabase, input: ListAllInput, limit: number) => {
+  if (input.workspace_id !== undefined && input.kind !== undefined) {
+    return database.all<ArtifactRow>(
+      sql`select * from artifacts where workspace_id = ${input.workspace_id} and kind = ${input.kind} order by created_at desc, id desc limit ${limit}`,
+    )
+  }
+  if (input.workspace_id !== undefined) {
+    return database.all<ArtifactRow>(
+      sql`select * from artifacts where workspace_id = ${input.workspace_id} order by created_at desc, id desc limit ${limit}`,
+    )
+  }
+  if (input.kind !== undefined) {
+    return database.all<ArtifactRow>(
+      sql`select * from artifacts where kind = ${input.kind} order by created_at desc, id desc limit ${limit}`,
+    )
+  }
+  return database.all<ArtifactRow>(sql`select * from artifacts order by created_at desc, id desc limit ${limit}`)
 }
 
 const compareNewest = (left: Artifact.Artifact, right: Artifact.Artifact) =>
@@ -187,6 +204,7 @@ const compareNewest = (left: Artifact.Artifact, right: Artifact.Artifact) =>
 const artifactToRow = (artifact: Artifact.Artifact) => ({
   id: artifact.id,
   thread_id: artifact.thread_id,
+  workspace_id: artifact.workspace_id ?? null,
   turn_id: artifact.turn_id ?? null,
   kind: artifact.kind,
   title: artifact.title ?? null,
@@ -206,6 +224,7 @@ const rowToArtifact = (row: ArtifactRow | undefined): Artifact.Artifact | undefi
   return {
     id: Ids.ArtifactId.make(row.id),
     thread_id: Ids.ThreadId.make(row.thread_id),
+    ...(row.workspace_id === null ? {} : { workspace_id: Ids.WorkspaceId.make(row.workspace_id) }),
     ...(row.turn_id === null ? {} : { turn_id: Ids.TurnId.make(row.turn_id) }),
     kind: kind.value,
     ...(row.title === null ? {} : { title: row.title }),
