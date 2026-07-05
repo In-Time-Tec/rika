@@ -57,6 +57,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@rika/core": "workspace:*",
+        "@rika/ide": "workspace:*",
         "@rika/llm": "workspace:*",
         "@rika/persistence": "workspace:*",
         "@rika/schema": "workspace:*",

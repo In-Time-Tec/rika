@@ -2,6 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
 import { Config, Settings } from "@rika/core"
+import { IdeBridge } from "@rika/ide"
 import { Embeddings } from "@rika/llm"
 import { ThreadMemoryStore } from "@rika/persistence"
 import { Common, Event, Ide, Ids } from "@rika/schema"
@@ -128,7 +129,7 @@ const makeService = (
         input.content,
       )
       const memoryEntries = yield* resolveAutoMemoryEntries(workspaceRoot, threadService, memory, input)
-      const ideEntries = input.ide_context === undefined ? [] : ideContextEntries(input.ide_context)
+      const ideEntries = input.ide_context === undefined ? [] : IdeBridge.contextEntries(input.ide_context)
       const entries = dedupeEntries([...guidanceEntries, ...mentionEntries, ...memoryEntries, ...ideEntries]).slice(
         0,
         maxEntries,
@@ -498,81 +499,6 @@ const workspaceIdForThread = (
     Effect.map((record) => record.summary.workspace_id),
     Effect.catch(() => Effect.succeed(WorkspaceIdentity.resolveWorkspaceId({ workspace_root: workspaceRoot }))),
   )
-
-const ideContextEntries = (context: Ide.ContextSnapshot): ReadonlyArray<Event.ContextEntry> => {
-  const entries: Array<Event.ContextEntry> = []
-  if (context.active_file !== undefined) entries.push(ideActiveFileEntry(context))
-  const diagnostics = context.diagnostics ?? []
-  if (diagnostics.length > 0) entries.push(ideDiagnosticsEntry(context.workspace_roots, diagnostics))
-  return entries
-}
-
-const ideActiveFileEntry = (context: Ide.ContextSnapshot): Event.ContextEntry => {
-  const activeFile = context.active_file
-  if (activeFile === undefined) {
-    return {
-      kind: "file",
-      source: "ide:active-file",
-      reason: "IDE active file context",
-      trusted: false,
-      metadata: { workspace_roots: context.workspace_roots },
-    }
-  }
-  return {
-    kind: "file",
-    source: "ide:active-file",
-    reason: "IDE active file and selection",
-    trusted: false,
-    path: activeFile.path,
-    content: ideActiveFileContent(activeFile),
-    metadata: ideActiveFileMetadata(context),
-  }
-}
-
-const ideActiveFileContent = (activeFile: Ide.ActiveFile) => {
-  const lines: Array<string> = [`Active file: ${activeFile.path}`]
-  if (activeFile.language_id !== undefined) lines.push(`Language: ${activeFile.language_id}`)
-  if (activeFile.selection !== undefined) {
-    lines.push(`Selection: lines ${activeFile.selection.range.start_line}-${activeFile.selection.range.end_line}`)
-    if (activeFile.selection.selected_text !== undefined) lines.push("", activeFile.selection.selected_text)
-  }
-  return lines.join("\n")
-}
-
-const ideActiveFileMetadata = (context: Ide.ContextSnapshot) => {
-  const activeFile = context.active_file
-  return {
-    workspace_roots: context.workspace_roots,
-    ...(activeFile?.language_id === undefined ? {} : { language_id: activeFile.language_id }),
-    ...(activeFile?.selection === undefined
-      ? {}
-      : {
-          selection: {
-            start_line: activeFile.selection.range.start_line,
-            end_line: activeFile.selection.range.end_line,
-          },
-        }),
-    diagnostics: (context.diagnostics ?? []).length,
-  }
-}
-
-const ideDiagnosticsEntry = (
-  workspaceRoots: ReadonlyArray<string>,
-  diagnostics: ReadonlyArray<Ide.Diagnostic>,
-): Event.ContextEntry => ({
-  kind: "file",
-  source: "ide:diagnostics",
-  reason: "IDE diagnostics for open workspace",
-  trusted: false,
-  content: diagnostics.map(formatIdeDiagnostic).join("\n"),
-  metadata: { workspace_roots: workspaceRoots, diagnostics: diagnostics.length },
-})
-
-const formatIdeDiagnostic = (diagnostic: Ide.Diagnostic) => {
-  const range = diagnostic.range === undefined ? "" : `:${diagnostic.range.start_line}-${diagnostic.range.end_line}`
-  const source = diagnostic.source === undefined ? "" : ` [${diagnostic.source}]`
-  return `${diagnostic.path}${range} ${diagnostic.severity}${source}: ${diagnostic.message}`
-}
 
 const expandMention = (
   fileSystem: FileSystemAdapter,

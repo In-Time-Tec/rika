@@ -1,29 +1,5 @@
-import {
-  AgentLoop,
-  ContextResolver,
-  SkillRegistry,
-  SkillToolProvider,
-  SubagentRuntime,
-  ThreadMemory,
-  ThreadService,
-  ToolExecutor,
-  WorkspaceAccess,
-} from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, SecretRedactor, Settings, Time } from "@rika/core"
-import { Embeddings, Live, Router } from "@rika/llm"
-import {
-  ArtifactStore,
-  Database,
-  McpApprovalStore,
-  Migration,
-  ProjectStore,
-  ThreadEventLog,
-  ThreadMemoryStore,
-  ThreadProjection,
-  WorkspaceStore,
-} from "@rika/persistence"
-import { PluginHost, PluginUi } from "@rika/plugin"
-import { BuiltInTools, FffSearch, McpClient, SpecialtyTools } from "@rika/tools"
+import { BaseServiceLayer } from "@rika/tools"
+import { Config, SecretRedactor } from "@rika/core"
 import { Client, Registry } from "@rivetkit/effect"
 import { Effect, Layer } from "effect"
 import * as HostConfig from "./host-config"
@@ -37,47 +13,9 @@ export const defaultEndpoint = HostConfig.defaultLocalEndpoint
 export const endpointFromEnv = (env: Record<string, string | undefined> = process.env) =>
   env.RIKA_RIVET_ENDPOINT ?? env.RIVET_ENDPOINT ?? defaultEndpoint
 
-const configuredTimeLayer = Time.layer
+type ServiceLayerOutput = BaseServiceLayer.CommonOutput
 
-type ServiceLayerOutput =
-  | AgentLoop.Service
-  | ArtifactStore.Service
-  | Config.Service
-  | ContextResolver.Service
-  | Database.Service
-  | Diagnostics.Service
-  | IdGenerator.Service
-  | Migration.Service
-  | McpApprovalStore.Service
-  | PluginHost.Service
-  | ProjectStore.Service
-  | Router.Service
-  | SecretRedactor.Service
-  | Settings.Service
-  | SkillRegistry.Service
-  | SkillToolProvider.Service
-  | SpecialtyTools.Service
-  | SubagentRuntime.Service
-  | ThreadEventLog.Service
-  | ThreadMemory.Service
-  | ThreadMemoryStore.Service
-  | ThreadProjection.Service
-  | ThreadService.Service
-  | Time.Service
-  | ToolExecutor.Service
-  | WorkspaceAccess.Service
-  | WorkspaceStore.Service
-
-type ServiceLayerError =
-  | Config.ConfigError
-  | ContextResolver.ContextResolverError
-  | Database.DatabaseError
-  | FffSearch.FffSearchError
-  | McpApprovalStore.McpApprovalStoreError
-  | McpClient.RunError
-  | Migration.MigrationError
-  | PluginHost.RunError
-  | ProjectStore.ProjectStoreError
+type ServiceLayerError = BaseServiceLayer.Error
 
 export const serviceLayerFromEnv = (
   env: Record<string, string | undefined> = process.env,
@@ -85,111 +23,8 @@ export const serviceLayerFromEnv = (
 ): Layer.Layer<ServiceLayerOutput, ServiceLayerError> => {
   const configLayer = Config.layerFromEnv(env, cwd)
   const redactorLayer = SecretRedactor.layerFromEnv(env)
-  const configuredSettingsLayer = Settings.layerFromEnv(env, cwd)
-  const configuredDatabaseLayer = Database.layer.pipe(Layer.provideMerge(configLayer))
-  const configuredArtifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
-  const configuredMcpApprovalLayer = McpApprovalStore.layer.pipe(
-    Layer.provideMerge(configuredDatabaseLayer),
-    Layer.provideMerge(configuredTimeLayer),
-  )
-  const configuredWorkspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
-  const configuredMemoryStoreLayer = ThreadMemoryStore.layer.pipe(Layer.provideMerge(configuredDatabaseLayer))
-  const configuredProjectStoreLayer = ProjectStore.layer.pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(configuredDatabaseLayer),
-    Layer.provideMerge(configuredTimeLayer),
-    Layer.provideMerge(IdGenerator.layer),
-  )
-  const configuredDiagnosticsLayer = Diagnostics.layer.pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(redactorLayer),
-  )
-  const configuredLlmLayer = Live.layer(Live.optionsFromEnv(env)).pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(configuredDiagnosticsLayer),
-  )
-  const configuredEmbeddingsLayer = Embeddings.layer(
-    Embeddings.optionsFromEnv(env, { openaiConfigured: Live.optionsFromEnv(env).openai !== undefined }),
-  )
-  const configuredSkillLayer = SkillRegistry.layer.pipe(Layer.provideMerge(configLayer))
-  const configuredPluginLayer = PluginHost.layer.pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(PluginUi.silentLayer),
-  )
-  const storageLayer = Layer.mergeAll(
-    configLayer,
-    configuredDatabaseLayer,
-    configuredArtifactLayer,
-    configuredMcpApprovalLayer,
-    Migration.layer,
-    redactorLayer,
-    configuredSettingsLayer,
-    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
-    configuredMemoryStoreLayer,
-    configuredProjectStoreLayer,
-    ThreadProjection.layer,
-    configuredWorkspaceStoreLayer,
-    configuredTimeLayer,
-    IdGenerator.layer,
-  )
-  const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const storageAndThreadLayer = ThreadService.layer.pipe(
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(configuredDiagnosticsLayer),
-  )
-  const configuredWorkspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
-  const configuredThreadMemoryLayer = ThreadMemory.layer.pipe(
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(storageAndThreadLayer),
-    Layer.provideMerge(configuredEmbeddingsLayer),
-    Layer.provideMerge(configuredTimeLayer),
-  )
-  const configuredContextResolverLayer = ContextResolver.layer.pipe(
-    Layer.provide(storageAndThreadLayer),
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(configuredEmbeddingsLayer),
-  )
-  const configuredSpecialtyToolLayer = SpecialtyTools.layer.pipe(
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(configuredLlmLayer),
-  )
-  const configuredSubagentToolLayer = BuiltInTools.subagentToolExecutorLayer.pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(configuredThreadMemoryLayer),
-    Layer.provideMerge(configuredPluginLayer),
-    Layer.provideMerge(configuredSpecialtyToolLayer),
-    Layer.provideMerge(configuredDiagnosticsLayer),
-  )
-  const configuredSubagentLayer = SubagentRuntime.layer.pipe(
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(configuredLlmLayer),
-    Layer.provideMerge(configuredSubagentToolLayer),
-  )
-  const configuredToolLayer = BuiltInTools.toolExecutorLayer.pipe(
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(configuredThreadMemoryLayer),
-    Layer.provideMerge(configuredPluginLayer),
-    Layer.provideMerge(configuredSpecialtyToolLayer),
-    Layer.provideMerge(configuredSubagentLayer),
-    Layer.provideMerge(configuredDiagnosticsLayer),
-  )
-  const configuredSkillToolProviderLayer = BuiltInTools.skillToolProviderLayer.pipe(
-    Layer.provideMerge(configLayer),
-    Layer.provideMerge(migratedStorageLayer),
-  )
-  const baseServiceLayer = Layer.mergeAll(
-    storageAndThreadLayer,
-    configuredWorkspaceAccessLayer,
-    configuredContextResolverLayer,
-    configuredSkillLayer,
-    configuredSkillToolProviderLayer,
-    configuredToolLayer,
-    configuredLlmLayer,
-    configuredDiagnosticsLayer,
-  )
 
-  return AgentLoop.layer.pipe(Layer.provideMerge(baseServiceLayer))
+  return BaseServiceLayer.fromEnv({ env, workspaceRoot: cwd, configLayer, redactorLayer }).agentLoopLayer
 }
 
 export const serviceLayer: Layer.Layer<ServiceLayerOutput, ServiceLayerError> = serviceLayerFromEnv()
