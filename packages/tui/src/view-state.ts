@@ -934,10 +934,13 @@ export const paletteMove = (state: ViewState, delta: number, count: number): Vie
 const familyOf = (mode: Config.Mode): ModePickerFamily =>
   mode === "rush" ? "rush" : mode === "smart" ? "smart" : "deep"
 
-export const openModePicker = (state: ViewState): ViewState => ({
-  ...withoutNotice(state),
-  modepicker: { open: true, selected: Math.max(0, modePickerFamilies.indexOf(familyOf(state.mode))) },
-})
+export const openModePicker = (state: ViewState): ViewState => {
+  if (hasActivity(state)) return state
+  return {
+    ...withoutNotice(state),
+    modepicker: { open: true, selected: Math.max(0, modePickerFamilies.indexOf(familyOf(state.mode))) },
+  }
+}
 
 export const closeModePicker = (state: ViewState): ViewState => ({
   ...state,
@@ -945,12 +948,14 @@ export const closeModePicker = (state: ViewState): ViewState => ({
 })
 
 export const modePickerMove = (state: ViewState, delta: number): ViewState => {
+  if (hasActivity(state)) return state
   const count = modePickerFamilies.length
   const selected = (((state.modepicker.selected + delta) % count) + count) % count
   return { ...state, modepicker: { ...state.modepicker, selected } }
 }
 
 export const modePickerApply = (state: ViewState): ViewState => {
+  if (hasActivity(state)) return state
   const family = modePickerFamilies[state.modepicker.selected] ?? "smart"
   if (family === "deep") return withMode(state, deepModeForTier(state.deep_tier))
   return withMode(state, family)

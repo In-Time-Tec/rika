@@ -207,6 +207,20 @@ describe("ViewState queue + thinking", () => {
     expect(deep.reasoning_effort).toBe(3)
   })
 
+  test("mode picker switches before activity and locks after activity", () => {
+    const idle = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "deep3" })
+    const switched = ViewState.modePickerApply(ViewState.modePickerMove(ViewState.openModePicker(idle), 1))
+
+    expect(switched.mode).toBe("rush")
+
+    const active = ViewState.applyEvent(idle, messageAddedWithUser(1, "hello", userId))
+    const locked = ViewState.modePickerApply(ViewState.modePickerMove(ViewState.openModePicker(active), 1))
+
+    expect(ViewState.hasActivity(locked)).toBe(true)
+    expect(locked.mode).toBe("deep3")
+    expect(locked.reasoning_effort).toBe(3)
+  })
+
   test("enqueue and dequeue messages in order", () => {
     let state = ViewState.enqueueMessage(ViewState.enqueueMessage(base(), "one"), "two")
     expect(state.queued).toEqual(["one", "two"])
