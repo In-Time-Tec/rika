@@ -2,7 +2,7 @@ import { Common, Event } from "@rika/schema"
 import { Option, Schema } from "effect"
 import { sql } from "drizzle-orm"
 import * as Database from "./database"
-import { decodePayload } from "./thread-event-log"
+import { decodePayload } from "./thread-event-codec"
 
 type ThreadFileWriter = Pick<Database.DrizzleDatabase, "run">
 type ThreadFileBackfillDatabase = Pick<Database.DrizzleDatabase, "all" | "run" | "transaction">

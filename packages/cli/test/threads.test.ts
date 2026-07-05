@@ -211,6 +211,26 @@ describe("CLI thread commands", () => {
     expect(summary).toMatchObject({ thread_id: threadId, visibility: "unlisted" })
   })
 
+  test("rebuilds thread projections from the event log", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadEventLog.append(threadCreated())
+        yield* ThreadEventLog.append(messageAdded())
+        const before = yield* ThreadProjection.getThread(threadId)
+        const exitCode = yield* Threads.executeCommand({ type: "threads", action: "rebuild-projection" })
+        const after = yield* ThreadProjection.getThread(threadId)
+        return { before, exitCode, after }
+      }).pipe(Effect.provide(makeLayer(output))),
+    )
+
+    expect(result.before).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(output.stdout[0] ?? "{}")).toEqual({ rebuilt: true })
+    expect(result.after?.latest_message_text).toBe("CLI thread command search body")
+  })
+
   test("prints a forked local thread id as JSON", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const result = await Effect.runPromise(
@@ -313,16 +333,14 @@ describe("CLI thread commands", () => {
 const seedThread = () =>
   Effect.gen(function* () {
     yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
-    const appended = yield* ThreadEventLog.append(messageAdded())
-    yield* ThreadProjection.apply(appended)
+    yield* ThreadEventLog.appendAndProject(messageAdded())
   })
 
 const seedThreadWithContextUsage = () =>
   Effect.gen(function* () {
     yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
     for (const event of [modelChunk(), turnCompletedWithUsage()]) {
-      const appended = yield* ThreadEventLog.append(event)
-      yield* ThreadProjection.apply(appended)
+      yield* ThreadEventLog.appendAndProject(event)
     }
   })
 
@@ -337,8 +355,7 @@ const seedForkableThread = () =>
   Effect.gen(function* () {
     yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
     for (const event of [forkTurnStarted(), forkMessageAdded(), forkTurnCompleted()]) {
-      const appended = yield* ThreadEventLog.append(event)
-      yield* ThreadProjection.apply(appended)
+      yield* ThreadEventLog.appendAndProject(event)
     }
   })
 
@@ -523,6 +540,16 @@ const tournamentResult = (input: TournamentService.RunInput): TournamentService.
 
 const unexpectedClientCall = () =>
   Effect.fail(new Client.SdkError({ message: "Unexpected SDK call", operation: "test" }))
+
+const threadCreated = (): Event.ThreadCreated => ({
+  id: Ids.EventId.make("thread_cli_threads_created"),
+  thread_id: threadId,
+  sequence: 1,
+  version: 1,
+  created_at: now,
+  type: "thread.created",
+  data: { workspace_id: workspaceId },
+})
 
 const modelChunk = (): Event.ModelStreamChunk => ({
   id: Ids.EventId.make("thread_cli_threads_model_chunk"),

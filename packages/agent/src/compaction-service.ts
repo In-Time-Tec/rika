@@ -64,7 +64,6 @@ interface Dependencies {
   readonly config: Config.Interface
   readonly database: Database.Interface
   readonly eventLog: ThreadEventLog.Interface
-  readonly projection: ThreadProjection.Interface
   readonly idGenerator: IdGenerator.Interface
   readonly time: Time.Interface
   readonly router: Router.Interface
@@ -76,11 +75,10 @@ export const layer = Layer.effect(
     const config = yield* Config.Service
     const database = yield* Database.Service
     const eventLog = yield* ThreadEventLog.Service
-    const projection = yield* ThreadProjection.Service
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
     const router = yield* Router.Service
-    const dependencies: Dependencies = { config, database, eventLog, projection, idGenerator, time, router }
+    const dependencies: Dependencies = { config, database, eventLog, idGenerator, time, router }
 
     return Service.of({
       compact: Effect.fn("CompactionService.compact")(function* (input: CompactInput) {
@@ -178,9 +176,8 @@ const readThread = (dependencies: Dependencies, threadId: Ids.ThreadId) =>
 const appendAndProject = (dependencies: Dependencies, event: Event.ContextCompacted) =>
   Effect.gen(function* () {
     const appended = yield* dependencies.eventLog
-      .append(event)
+      .appendAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
     if (appended.type !== "context.compacted") {
       return yield* new CompactionError({
         message: `Expected context.compacted event, received ${appended.type}`,
@@ -194,9 +191,8 @@ const appendAndProject = (dependencies: Dependencies, event: Event.ContextCompac
 const appendPrunedAndProject = (dependencies: Dependencies, event: Event.ContextPruned) =>
   Effect.gen(function* () {
     const appended = yield* dependencies.eventLog
-      .append(event)
+      .appendAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
     if (appended.type !== "context.pruned") {
       return yield* new CompactionError({
         message: `Expected context.pruned event, received ${appended.type}`,

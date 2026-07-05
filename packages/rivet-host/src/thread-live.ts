@@ -1,6 +1,6 @@
 import { AgentLoop, WorkspaceAccess } from "@rika/agent"
 import { IdGenerator, Time } from "@rika/core"
-import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
+import { Database, ThreadEventLog } from "@rika/persistence"
 import { Event, Ids } from "@rika/schema"
 import { Registry, State } from "@rivetkit/effect"
 import { Effect, Layer } from "effect"
@@ -25,13 +25,11 @@ export const layer: Layer.Layer<
   | IdGenerator.Service
   | Registry.Registry
   | ThreadEventLog.Service
-  | ThreadProjection.Service
   | Time.Service
   | WorkspaceAccess.Service
 > = ThreadActor.toLayer(
   Effect.fnUntraced(function* ({ state }) {
     const eventLog = yield* ThreadEventLog.Service
-    const projection = yield* ThreadProjection.Service
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
     const agentLoop = yield* AgentLoop.Service
@@ -47,9 +45,7 @@ export const layer: Layer.Layer<
 
     const appendAndProject = (event: Event.Event) =>
       Effect.gen(function* () {
-        const appended = yield* eventLog.append(event)
-        yield* projection.apply(appended)
-        return appended
+        return yield* eventLog.appendAndProject(event)
       })
 
     const ensureThread = (input: EnsureThreadPayload) =>

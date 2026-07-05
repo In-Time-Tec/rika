@@ -191,8 +191,8 @@ describe("OrbMirror", () => {
         Effect.gen(function* () {
           yield* Migration.migrate()
           const orbId = yield* createRunningOrb()
-          yield* ThreadEventLog.append(threadCreated(1))
-          yield* ThreadEventLog.append(messageAdded(2, "before resume"))
+          yield* ThreadEventLog.appendAndProject(threadCreated(1))
+          yield* ThreadEventLog.appendAndProject(messageAdded(2, "before resume"))
           yield* OrbMirror.mirror(orbId)
         }),
       )
@@ -233,8 +233,7 @@ describe("OrbMirror", () => {
         Effect.gen(function* () {
           yield* Migration.migrate()
           const orbId = yield* createRunningOrb()
-          const created = yield* ThreadEventLog.append(threadCreated(1))
-          yield* ThreadProjection.apply(created)
+          yield* ThreadEventLog.appendAndProject(threadCreated(1))
           yield* OrbMirror.flush(orbId)
         }),
       )
@@ -751,8 +750,7 @@ const createRunningOrb = (targetProjectId: Ids.ProjectId = projectId) =>
 const seedActiveTurn = () =>
   Effect.gen(function* () {
     for (const event of [threadCreated(1), turnStarted(2)]) {
-      const appended = yield* ThreadEventLog.append(event)
-      yield* ThreadProjection.apply(appended)
+      yield* ThreadEventLog.appendAndProject(event)
     }
   })
 

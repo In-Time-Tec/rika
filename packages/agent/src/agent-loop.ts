@@ -1092,16 +1092,15 @@ const statusFromEvents = (events: ReadonlyArray<Event.Event>, turnId: Ids.TurnId
 const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
   Effect.gen(function* () {
     const appended = yield* dependencies.eventLog
-      .append(event)
+      .appendAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
     return appended
   })
 
 const appendTurnFailedIfAbsentAndProject = (dependencies: Dependencies, event: Event.TurnFailed) =>
   Effect.gen(function* () {
     const result = yield* dependencies.eventLog
-      .appendIfAbsent(event)
+      .appendIfAbsentAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
     if (result.event.type !== "turn.failed") {
       return yield* new AgentLoopError({
@@ -1111,9 +1110,6 @@ const appendTurnFailedIfAbsentAndProject = (dependencies: Dependencies, event: E
         turn_id: event.turn_id,
       })
     }
-    yield* dependencies.projection
-      .apply(result.event)
-      .pipe(Effect.provideService(Database.Service, dependencies.database))
     return { ...result, event: result.event }
   })
 

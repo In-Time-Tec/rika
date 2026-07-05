@@ -375,8 +375,7 @@ const createPausedOrbRecord = (recordThreadId: Ids.ThreadId) =>
 
 const appendProjected = (event: Event.Event) =>
   Effect.gen(function* () {
-    const appended = yield* ThreadEventLog.append(event)
-    yield* ThreadProjection.apply(appended)
+    yield* ThreadEventLog.appendAndProject(event)
   })
 
 const orphanedThreadCreated = (): Event.ThreadCreated => ({

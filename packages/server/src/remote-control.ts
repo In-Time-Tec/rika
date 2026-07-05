@@ -245,7 +245,6 @@ export const layerWithLive = Layer.effect(
             thread_id: threadId,
             message: TurnInterruption.BackendRestartMessage,
             eventLog,
-            projection,
             live,
           }),
         { discard: true },

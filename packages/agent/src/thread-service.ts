@@ -601,15 +601,9 @@ const forkThread = (dependencies: Dependencies, input: ForkInput, fields: Diagno
         cutoff,
       }),
     )
-    const appended = yield* dependencies.eventLog
-      .appendMany(forkedEvents)
+    yield* dependencies.eventLog
+      .appendManyAndProject(forkedEvents)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* Effect.forEach(
-      appended,
-      (event) =>
-        dependencies.projection.apply(event).pipe(Effect.provideService(Database.Service, dependencies.database)),
-      { discard: true },
-    )
     fields.fork_thread_id = forkThreadId
     fields.cutoff_sequence = cutoff
     fields.event_count = forkedEvents.length
@@ -748,9 +742,8 @@ const minTimestamp = (
 const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
   Effect.gen(function* () {
     const appended = yield* dependencies.eventLog
-      .append(event)
+      .appendAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
     return appended
   })
 
