@@ -1186,6 +1186,50 @@ describe("remote control API and SDK", () => {
     }
   })
 
+  test("concurrent startTurn calls reserve a thread once", async () => {
+    const concurrentThreadId = Ids.ThreadId.make("thread_remote_concurrent_start")
+    const runtime = ManagedRuntime.make(
+      makeLayer(defaultContextLayer, fakeOrbManagerLayer(), fakeOrbMirrorLayer(), {
+        agentLayer: blockingAgentLoopLayer(),
+      }),
+    )
+    const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))
+
+    try {
+      await Effect.runPromise(client.createThread({ thread_id: concurrentThreadId, workspace_id: workspaceId }))
+      const results = await Promise.allSettled([
+        Effect.runPromise(
+          client.startTurn({
+            thread_id: concurrentThreadId,
+            workspace_id: workspaceId,
+            user_id: ownerId,
+            content: "first concurrent turn",
+          }),
+        ),
+        Effect.runPromise(
+          client.startTurn({
+            thread_id: concurrentThreadId,
+            workspace_id: workspaceId,
+            user_id: memberId,
+            content: "second concurrent turn",
+          }),
+        ),
+      ])
+      const accepted = results.filter(
+        (result): result is PromiseFulfilledResult<Remote.StartTurnResponse> => result.status === "fulfilled",
+      )
+      const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+
+      expect(accepted).toHaveLength(1)
+      expect(accepted[0]?.value).toEqual({ thread_id: concurrentThreadId, accepted: true })
+      expect(rejected).toHaveLength(1)
+      expect(rejected[0]?.reason).toBeInstanceOf(Client.SdkError)
+      expect(rejected[0]?.reason).toMatchObject({ status: 409 })
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   test("forks completed thread history over the remote API", async () => {
     const runtime = ManagedRuntime.make(makeLayer())
     const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))

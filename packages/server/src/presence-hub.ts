@@ -1,6 +1,6 @@
-import { Time } from "@rika/core"
+import { SynchronizedMap, Time } from "@rika/core"
 import { Common, Ids, Remote } from "@rika/schema"
-import { Context, Effect, Layer, PubSub, Queue, Semaphore, Stream } from "effect"
+import { Context, Effect, HashMap, Layer, Option, PubSub, Queue, Stream } from "effect"
 
 const ttlMillis = 45_000
 const sweepInterval = "1 second"
@@ -28,64 +28,67 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const time = yield* Time.Service
     const scope = yield* Effect.scope
-    const threads = new Map<Ids.ThreadId, ThreadState>()
-    const mutex = yield* Semaphore.make(1)
+    const threads = yield* SynchronizedMap.make<Ids.ThreadId, ThreadState>()
 
     const expireAll = Effect.fn("PresenceHub.expireAll")(function* () {
       const now = yield* time.nowMillis
-      yield* mutex.withPermit(
+      yield* SynchronizedMap.modifyEffect(threads, (entries) =>
         Effect.gen(function* () {
-          for (const [threadId, state] of threads) {
+          let next = entries
+          for (const [threadId, state] of entries) {
             if (sweep(state, now)) yield* PubSub.publish(state.topic, snapshot(threadId, state)).pipe(Effect.asVoid)
             if (state.users.size > 0 || state.subscribers > 0) continue
-            threads.delete(threadId)
+            next = HashMap.remove(next, threadId)
             yield* PubSub.shutdown(state.topic).pipe(Effect.ignore)
           }
+          return [undefined, next] as const
         }),
       )
     })
 
     yield* Effect.forkIn(Effect.forever(Effect.sleep(sweepInterval).pipe(Effect.andThen(expireAll))), scope)
 
-    const stateFor = (threadId: Ids.ThreadId) =>
+    const stateFor = (entries: HashMap.HashMap<Ids.ThreadId, ThreadState>, threadId: Ids.ThreadId) =>
       Effect.gen(function* () {
-        const existing = threads.get(threadId)
-        if (existing !== undefined) return existing
+        const existing = HashMap.get(entries, threadId)
+        if (Option.isSome(existing)) return [existing.value, entries] as const
         const topic = yield* PubSub.sliding<Remote.PresenceFrame>(1)
         const state: ThreadState = { users: new Map(), topic, subscribers: 0 }
-        threads.set(threadId, state)
-        return state
+        return [state, HashMap.set(entries, threadId, state)] as const
       })
 
     const releaseSubscriber = (threadId: Ids.ThreadId, state: ThreadState) =>
-      mutex.withPermit(
+      SynchronizedMap.modifyEffect(threads, (entries) =>
         Effect.gen(function* () {
           state.subscribers = Math.max(0, state.subscribers - 1)
-          if (state.users.size > 0 || state.subscribers > 0 || threads.get(threadId) !== state) return
-          threads.delete(threadId)
+          const current = HashMap.get(entries, threadId)
+          if (state.users.size > 0 || state.subscribers > 0 || Option.isNone(current) || current.value !== state) {
+            return [undefined, entries] as const
+          }
           yield* PubSub.shutdown(state.topic).pipe(Effect.ignore)
+          return [undefined, HashMap.remove(entries, threadId)] as const
         }),
       )
 
     const acquireSubscriber = (threadId: Ids.ThreadId) =>
-      mutex.withPermit(
+      SynchronizedMap.modifyEffect(threads, (entries) =>
         Effect.gen(function* () {
-          const state = yield* stateFor(threadId)
+          const [state, next] = yield* stateFor(entries, threadId)
           state.subscribers += 1
-          return state
+          return [state, next] as const
         }),
       )
 
     const heartbeat = Effect.fn("PresenceHub.heartbeat")(function* (input: Remote.SetThreadPresenceRequest) {
       const now = yield* time.nowMillis
-      return yield* mutex.withPermit(
+      return yield* SynchronizedMap.modifyEffect(threads, (entries) =>
         Effect.gen(function* () {
-          const state = yield* stateFor(input.thread_id)
+          const [state, next] = yield* stateFor(entries, input.thread_id)
           sweep(state, now)
           state.users.set(input.user_id, { state: input.state, last_seen: now })
           const frame = snapshot(input.thread_id, state)
           yield* PubSub.publish(state.topic, frame).pipe(Effect.asVoid)
-          return frame
+          return [frame, next] as const
         }),
       )
     })
@@ -100,13 +103,13 @@ export const layer = Layer.effect(
                 releaseSubscriber(threadId, acquired),
               )
               const now = yield* time.nowMillis
-              const result = yield* mutex.withPermit(
+              const result = yield* SynchronizedMap.modifyEffect(threads, (entries) =>
                 Effect.gen(function* () {
                   const expired = sweep(state, now)
                   const subscription = yield* PubSub.subscribe(state.topic)
                   const frame = snapshot(threadId, state)
                   if (expired) yield* PubSub.publish(state.topic, frame).pipe(Effect.asVoid)
-                  return { subscription, frame }
+                  return [{ subscription, frame }, entries] as const
                 }),
               )
               yield* Queue.offer(queue, result.frame).pipe(Effect.asVoid)

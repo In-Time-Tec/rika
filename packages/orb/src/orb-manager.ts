@@ -1,11 +1,11 @@
 import { readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Config, Diagnostics, SecretRedactor, Settings } from "@rika/core"
+import { Config, Diagnostics, KeyedSemaphore, SecretRedactor, Settings } from "@rika/core"
 import { McpApprovalStore, OrbStore, ProjectStore } from "@rika/persistence"
 import { Ids, Orb } from "@rika/schema"
 import { McpClient } from "@rika/tools"
-import { Context, Effect, Exit, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import { Context, Effect, Exit, Layer, Option, Schema, Stream } from "effect"
 import * as SandboxClient from "./sandbox-client"
 
 const repoRoot = "/home/user/repo"
@@ -76,18 +76,7 @@ export const layerWithSystem = (system: System) =>
       const settings = Option.getOrUndefined(yield* Effect.serviceOption(Settings.Service))
       const registerSecrets = (entries: ReadonlyArray<SecretRedactor.Entry>) =>
         redactor === undefined ? Effect.void : redactor.register(entries)
-      const resumeLocks = new Map<Ids.OrbId, Semaphore.Semaphore>()
-      const resumeLocksMutex = yield* Semaphore.make(1)
-      const resumeLockFor = (orbId: Ids.OrbId) =>
-        resumeLocksMutex.withPermit(
-          Effect.gen(function* () {
-            const existing = resumeLocks.get(orbId)
-            if (existing !== undefined) return existing
-            const lock = yield* Semaphore.make(1)
-            resumeLocks.set(orbId, lock)
-            return lock
-          }),
-        )
+      const resumeLocks = yield* KeyedSemaphore.make<Ids.OrbId>()
 
       const provisionForThread: Interface["provisionForThread"] = Effect.fn("OrbManager.provisionForThread")(function* (
         input: ProvisionInput,
@@ -254,8 +243,9 @@ export const layerWithSystem = (system: System) =>
           ).pipe(Effect.provideService(Diagnostics.Service, diagnostics))
         }),
         resume: Effect.fn("OrbManager.resume")(function* (orbId: Ids.OrbId) {
-          const resumeLock = yield* resumeLockFor(orbId)
-          return yield* resumeLock.withPermit(
+          return yield* KeyedSemaphore.withPermit(
+            resumeLocks,
+            orbId,
             Diagnostics.event(
               "orb.resume",
               (fields) =>

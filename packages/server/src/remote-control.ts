@@ -6,12 +6,12 @@ import {
   WorkspaceAccess,
   WorkspaceIdentity,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SynchronizedMap, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { OrbManager } from "@rika/orb"
 import { ArtifactStore, Database, OrbStore, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Artifact, Common, Event, Ide, Ids, Orb, Remote } from "@rika/schema"
-import { Cause, Context, Effect, FiberMap, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import { Cause, Context, Effect, FiberMap, HashMap, Layer, Option, Schema, Stream } from "effect"
 import * as OrbMirror from "./orb-mirror"
 import * as PresenceHub from "./presence-hub"
 import * as ThreadLive from "./thread-live"
@@ -148,6 +148,10 @@ interface ActiveThreadState {
   readonly turn_id?: Ids.TurnId
 }
 
+type ThreadReservation =
+  | { readonly reserved: true }
+  | { readonly reserved: false; readonly active_user_id?: Ids.UserId }
+
 const activeThreadState = (userId?: Ids.UserId): ActiveThreadState => (userId === undefined ? {} : { user_id: userId })
 
 export const layerWithLive = Layer.effect(
@@ -172,34 +176,29 @@ export const layerWithLive = Layer.effect(
     const orbMirror = yield* OrbMirror.Service
     const presence = yield* PresenceHub.Service
     const turnFibers = yield* FiberMap.make<Ids.ThreadId, void, never>()
-    const activeThreads = new Map<Ids.ThreadId, ActiveThreadState>()
-    const activeThreadsMutex = yield* Semaphore.make(1)
+    const activeThreads = yield* SynchronizedMap.make<Ids.ThreadId, ActiveThreadState>()
     const reserveThread = (threadId: Ids.ThreadId, userId?: Ids.UserId) =>
-      activeThreadsMutex.withPermit(
-        Effect.sync(() => {
-          const active = activeThreads.get(threadId)
-          if (active !== undefined) {
-            return { reserved: false as const, active_user_id: active.user_id }
-          }
-          activeThreads.set(threadId, activeThreadState(userId))
-          return { reserved: true as const }
-        }),
-      )
-    const releaseThread = (threadId: Ids.ThreadId) =>
-      activeThreadsMutex.withPermit(
-        Effect.sync(() => {
-          activeThreads.delete(threadId)
-        }),
-      )
+      SynchronizedMap.modify<Ids.ThreadId, ActiveThreadState, ThreadReservation>(activeThreads, (entries) => {
+        const active = HashMap.get(entries, threadId)
+        if (Option.isSome(active)) {
+          return [
+            active.value.user_id === undefined
+              ? { reserved: false as const }
+              : { reserved: false as const, active_user_id: active.value.user_id },
+            entries,
+          ] as const
+        }
+        return [{ reserved: true as const }, HashMap.set(entries, threadId, activeThreadState(userId))] as const
+      })
+    const releaseThread = (threadId: Ids.ThreadId) => SynchronizedMap.remove(activeThreads, threadId)
     const markTurnStarted = (threadId: Ids.ThreadId, turnId: Ids.TurnId) =>
-      activeThreadsMutex.withPermit(
-        Effect.sync(() => {
-          const active = activeThreads.get(threadId)
-          if (active !== undefined) activeThreads.set(threadId, { ...active, turn_id: turnId })
-        }),
-      )
+      SynchronizedMap.modify(activeThreads, (entries) => {
+        const active = HashMap.get(entries, threadId)
+        if (Option.isNone(active)) return [undefined, entries] as const
+        return [undefined, HashMap.set(entries, threadId, { ...active.value, turn_id: turnId })] as const
+      })
     const activeThread = (threadId: Ids.ThreadId) =>
-      activeThreadsMutex.withPermit(Effect.sync(() => activeThreads.get(threadId)))
+      SynchronizedMap.get(activeThreads, threadId).pipe(Effect.map(Option.getOrUndefined))
     const readLoggedEvents = (threadId: Ids.ThreadId, afterSequence: number) =>
       eventLog
         .readThread({ thread_id: threadId, after_sequence: afterSequence })

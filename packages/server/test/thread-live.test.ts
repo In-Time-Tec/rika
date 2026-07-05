@@ -9,6 +9,36 @@ const threadId = Ids.ThreadId.make("thread_live_topic_cleanup")
 const workspaceId = Ids.WorkspaceId.make("workspace_live_topic_cleanup")
 
 describe("ThreadLive", () => {
+  test("concurrent subscribers for one thread share one topic", async () => {
+    const created: Array<PubSub.PubSub<Event.Event>> = []
+    const lifecycle: ThreadLive.TopicLifecycle = {
+      created: (_threadId, topic) =>
+        Effect.sync(() => {
+          created.push(topic)
+        }).pipe(Effect.andThen(Effect.yieldNow), Effect.andThen(Effect.yieldNow)),
+    }
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* ThreadEventLog.append(threadCreated(1))
+        const collections = yield* Effect.all(
+          [
+            ThreadLive.subscribe({ thread_id: threadId }).pipe(Stream.take(1), Stream.runCollect),
+            ThreadLive.subscribe({ thread_id: threadId }).pipe(Stream.take(1), Stream.runCollect),
+          ],
+          { concurrency: "unbounded" },
+        )
+        return {
+          created: created.length,
+          sequences: collections.map((collection) => Array.from(collection).map((event) => event.sequence)),
+        }
+      }).pipe(Effect.provide(threadLiveLayer(lifecycle))),
+    )
+
+    expect(result.created).toBe(1)
+    expect(result.sequences).toEqual([[1], [1]])
+  })
+
   test("shuts down idle topics and recreates them for later subscribers", async () => {
     const firstCreated = Deferred.makeUnsafe<void>()
     const firstRemoved = Deferred.makeUnsafe<void>()

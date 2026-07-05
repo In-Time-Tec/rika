@@ -1,6 +1,7 @@
+import { SynchronizedMap } from "@rika/core"
 import { Database, ThreadEventLog } from "@rika/persistence"
 import { Event, Ids } from "@rika/schema"
-import { Context, Effect, Layer, PubSub, Queue, Semaphore, Stream } from "effect"
+import { Context, Effect, HashMap, Layer, Option, PubSub, Queue, Stream } from "effect"
 
 export interface SubscribeInput {
   readonly thread_id: Ids.ThreadId
@@ -33,47 +34,48 @@ export const layerWithTopicLifecycle = (lifecycle: TopicLifecycle = {}) =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const eventLog = yield* ThreadEventLog.Service
-      const topics = new Map<Ids.ThreadId, TopicState>()
-      const mutex = yield* Semaphore.make(1)
+      const topics = yield* SynchronizedMap.make<Ids.ThreadId, TopicState>()
 
-      const stateFor = (threadId: Ids.ThreadId) =>
+      const stateFor = (entries: HashMap.HashMap<Ids.ThreadId, TopicState>, threadId: Ids.ThreadId) =>
         Effect.gen(function* () {
-          const existing = topics.get(threadId)
-          if (existing !== undefined) return existing
+          const existing = HashMap.get(entries, threadId)
+          if (Option.isSome(existing)) return [existing.value, entries] as const
           const topic = yield* PubSub.unbounded<Event.Event>()
           const state: TopicState = { topic, subscribers: 0 }
-          topics.set(threadId, state)
           if (lifecycle.created !== undefined) yield* lifecycle.created(threadId, topic)
-          return state
+          return [state, HashMap.set(entries, threadId, state)] as const
         })
 
       const acquireSubscriber = (threadId: Ids.ThreadId) =>
-        mutex.withPermit(
+        SynchronizedMap.modifyEffect(topics, (entries) =>
           Effect.gen(function* () {
-            const state = yield* stateFor(threadId)
+            const [state, next] = yield* stateFor(entries, threadId)
             state.subscribers += 1
             const subscription = yield* PubSub.subscribe(state.topic)
-            return { state, subscription }
+            return [{ state, subscription }, next] as const
           }),
         )
 
       const releaseSubscriber = (threadId: Ids.ThreadId, state: TopicState) =>
-        mutex.withPermit(
+        SynchronizedMap.modifyEffect(topics, (entries) =>
           Effect.gen(function* () {
             state.subscribers = Math.max(0, state.subscribers - 1)
-            if (state.subscribers > 0 || topics.get(threadId) !== state) return
-            topics.delete(threadId)
+            const current = HashMap.get(entries, threadId)
+            if (state.subscribers > 0 || Option.isNone(current) || current.value !== state) {
+              return [undefined, entries] as const
+            }
             yield* PubSub.shutdown(state.topic).pipe(Effect.ignore)
             if (lifecycle.removed !== undefined) yield* lifecycle.removed(threadId, state.topic)
+            return [undefined, HashMap.remove(entries, threadId)] as const
           }),
         )
 
       const publishToTopic = (event: Event.Event) =>
-        mutex.withPermit(
+        SynchronizedMap.modifyEffect(topics, (entries) =>
           Effect.gen(function* () {
-            const state = topics.get(event.thread_id)
-            if (state === undefined) return
-            yield* PubSub.publish(state.topic, event).pipe(Effect.asVoid)
+            const state = HashMap.get(entries, event.thread_id)
+            if (Option.isSome(state)) yield* PubSub.publish(state.value.topic, event).pipe(Effect.asVoid)
+            return [undefined, entries] as const
           }),
         )
 

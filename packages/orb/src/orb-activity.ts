@@ -1,7 +1,7 @@
-import { Config, Settings, Time } from "@rika/core"
+import { Config, KeyedSemaphore, Settings, SynchronizedMap, Time } from "@rika/core"
 import { Database, OrbStore } from "@rika/persistence"
 import { Ids } from "@rika/schema"
-import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as SandboxClient from "./sandbox-client"
 
 const defaultIdleTimeoutSeconds = 300
@@ -39,19 +39,8 @@ export const layer: Layer.Layer<
     const sandbox = yield* SandboxClient.Service
     const time = yield* Time.Service
     const timeoutMs = yield* resolveTimeoutMs(config, settings)
-    const lastRefreshByOrb = new Map<Ids.OrbId, number>()
-    const refreshLocks = new Map<Ids.OrbId, Semaphore.Semaphore>()
-    const refreshLocksMutex = yield* Semaphore.make(1)
-    const refreshLockFor = (orbId: Ids.OrbId) =>
-      refreshLocksMutex.withPermit(
-        Effect.gen(function* () {
-          const existing = refreshLocks.get(orbId)
-          if (existing !== undefined) return existing
-          const lock = yield* Semaphore.make(1)
-          refreshLocks.set(orbId, lock)
-          return lock
-        }),
-      )
+    const lastRefreshByOrb = yield* SynchronizedMap.make<Ids.OrbId, number>()
+    const refreshLocks = yield* KeyedSemaphore.make<Ids.OrbId>()
 
     return Service.of({
       touch: Effect.fn("OrbActivity.touch")(function* (orbId: Ids.OrbId) {
@@ -78,14 +67,15 @@ export const layer: Layer.Layer<
           })
         }
         const sandboxId = record.sandbox_id
-        const refreshLock = yield* refreshLockFor(orbId)
-        yield* refreshLock.withPermit(
+        yield* KeyedSemaphore.withPermit(
+          refreshLocks,
+          orbId,
           Effect.gen(function* () {
             const now = yield* time.nowMillis
-            const previousRefresh = lastRefreshByOrb.get(orbId)
+            const previousRefresh = Option.getOrUndefined(yield* SynchronizedMap.get(lastRefreshByOrb, orbId))
             if (previousRefresh === undefined || now - previousRefresh >= refreshThrottleMillis) {
               yield* sandbox.setTimeout(sandboxId, timeoutMs)
-              lastRefreshByOrb.set(orbId, now)
+              yield* SynchronizedMap.set(lastRefreshByOrb, orbId, now)
             }
           }),
         )
