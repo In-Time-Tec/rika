@@ -1,6 +1,6 @@
 import { ToolRegistry } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
-import { Router } from "@rika/llm"
+import { Retry, Router } from "@rika/llm"
 import { ArtifactStore } from "@rika/persistence"
 import { Artifact, Common, Ids } from "@rika/schema"
 import type { Call } from "@rika/schema/tool"
@@ -497,7 +497,7 @@ const fromExternalError = (cause: unknown, operation: string) =>
   new SpecialtyToolsError({
     message: cause instanceof Error ? cause.message : String(cause),
     operation,
-    retryable: false,
+    retryable: Retry.isTransient(cause),
   })
 
 const jsonValue = (value: unknown) => {

@@ -4,7 +4,8 @@ import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/co
 import { Provider, Router } from "@rika/llm"
 import { ArtifactStore } from "@rika/persistence"
 import { Common, Ids, Tool } from "@rika/schema"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Layer, Option, Stream } from "effect"
+import { AiError } from "effect/unstable/ai"
 import { SpecialtyTools } from "../src/index"
 
 const workspaceRoot = "/workspace/rika-specialty"
@@ -35,16 +36,22 @@ const baseLayer = () =>
   Layer.mergeAll(configLayer, IdGenerator.sequenceLayer(1), Time.fixedLayer(now), ArtifactStore.fakeLayer())
 
 const modelLayer = (responses: ReadonlyArray<Provider.FakeResponse>) =>
+  modelLayerFromRegistry(
+    Provider.fakeRegistryLayer([
+      { name: "anthropic", responses },
+      { name: "openai", responses },
+    ]),
+  )
+
+const modelLayerFromProviders = (providers: ReadonlyArray<Provider.Interface>) =>
+  modelLayerFromRegistry(Provider.registryLayerFromProviders(providers))
+
+const modelLayerFromRegistry = (registryLayer: Layer.Layer<Provider.Registry>) =>
   SpecialtyTools.layer.pipe(
     Layer.provideMerge(baseLayer()),
     Layer.provideMerge(
       Router.layer.pipe(
-        Layer.provideMerge(
-          Provider.fakeRegistryLayer([
-            { name: "anthropic", responses },
-            { name: "openai", responses },
-          ]),
-        ),
+        Layer.provideMerge(registryLayer),
         Layer.provideMerge(configLayer),
         Layer.provideMerge(diagnosticsLayer()),
       ),
@@ -159,6 +166,36 @@ describe("SpecialtyTools", () => {
     expect(error.operation).toBe("librarian")
   })
 
+  test("specialty errors classify transient provider failures as retryable", async () => {
+    const error = await Effect.runPromise(
+      SpecialtyTools.librarian(
+        { question: "How does routing work?", repository: "github.com/example/framework" },
+        call("librarian", { question: "How does routing work?" }),
+      ).pipe(
+        Effect.provide(modelLayerFromProviders([failingProvider(aiError(new AiError.RateLimitError({})))])),
+        Effect.flip,
+      ),
+    )
+
+    expect(error.retryable).toBe(true)
+  })
+
+  test("specialty errors classify non-transient provider failures as non-retryable", async () => {
+    const error = await Effect.runPromise(
+      SpecialtyTools.librarian(
+        { question: "How does routing work?", repository: "github.com/example/framework" },
+        call("librarian", { question: "How does routing work?" }),
+      ).pipe(
+        Effect.provide(
+          modelLayerFromProviders([failingProvider(aiError(new AiError.AuthenticationError({ kind: "InvalidKey" })))]),
+        ),
+        Effect.flip,
+      ),
+    )
+
+    expect(error.retryable).toBe(false)
+  })
+
   test("painter is opt-in, artifact-backed, and backend-swappable", async () => {
     const layer = SpecialtyTools.layerWithBackend({
       oracle: () => Effect.succeed({ answer: "unused", findings: [] }),
@@ -235,3 +272,13 @@ const array = (value: unknown): ReadonlyArray<unknown> => {
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
+const aiError = (reason: AiError.AiErrorReason): AiError.AiError =>
+  AiError.make({ module: "LanguageModel", method: "generateObject", reason })
+
+const failingProvider = (error: Provider.ProviderError): Provider.Interface => ({
+  name: "openai",
+  complete: () => Effect.fail(error),
+  completeStructured: () => Effect.fail(error),
+  stream: () => Stream.fail(error),
+})

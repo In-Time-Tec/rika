@@ -60,15 +60,17 @@ export const languageModelLayer = (options: Options = {}) =>
 
 export const provider = (options: Options = {}) =>
   Provider.make({
-    completeMiddleware: (request) => withRequestConfig(request),
-    completeStructuredMiddleware: (request) => withRequestConfig(request),
+    completeMiddleware: (request) => (effect) => Retry.completeMiddleware(request)(withRequestConfig(request)(effect)),
+    completeStructuredMiddleware: (request) => (effect) =>
+      Retry.completeStructuredMiddleware(request)(withRequestConfig(request)(effect)),
     streamMiddleware: (request) => (stream) => Retry.middleware(request)(withStreamRequestConfig(request)(stream)),
   }).pipe(Effect.provide(languageModelLayer(options)), Effect.provide(clientLayer(options)))
 
 export const layer = (options: Options = {}) =>
   Provider.layer({
-    completeMiddleware: (request) => withRequestConfig(request),
-    completeStructuredMiddleware: (request) => withRequestConfig(request),
+    completeMiddleware: (request) => (effect) => Retry.completeMiddleware(request)(withRequestConfig(request)(effect)),
+    completeStructuredMiddleware: (request) => (effect) =>
+      Retry.completeStructuredMiddleware(request)(withRequestConfig(request)(effect)),
     streamMiddleware: (request) => (stream) => Retry.middleware(request)(withStreamRequestConfig(request)(stream)),
   }).pipe(Layer.provide(languageModelLayer(options)), Layer.provide(clientLayer(options)))
 
