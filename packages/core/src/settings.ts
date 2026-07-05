@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import { join } from "node:path"
-import { ConfigProvider, Context, Effect, Layer, Option, Result, Schema } from "effect"
+import { Config as EffectConfig, ConfigProvider, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import * as EnvConfig from "./env-config"
 
 const defaultOrbTemplate = "rika-orb"
@@ -127,8 +127,13 @@ export interface Snapshot {
   readonly warnings: ReadonlyArray<Warning>
 }
 
+export class SettingsError extends Schema.TaggedErrorClass<SettingsError>()("SettingsError", {
+  message: Schema.String,
+  key: Schema.optional(Schema.String),
+}) {}
+
 export interface Interface {
-  readonly snapshot: Effect.Effect<Snapshot>
+  readonly snapshot: Effect.Effect<Snapshot, SettingsError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/core/Settings") {}
@@ -150,7 +155,10 @@ export const layerFromEnv = (env: Record<string, string | undefined>, workspaceR
 
 export const layer = Layer.suspend(() => layerFromEnv(process.env, process.cwd()))
 
-export const snapshot: Effect.Effect<Snapshot, never, Service> = Effect.flatMap(Service, (service) => service.snapshot)
+export const snapshot: Effect.Effect<Snapshot, SettingsError, Service> = Effect.flatMap(
+  Service,
+  (service) => service.snapshot,
+)
 
 export const loadSnapshotFromEnv = (env: Record<string, string | undefined>, workspaceRoot: string) =>
   Effect.flatMap(loadFiles(env.HOME ?? homedir(), workspaceRoot), (loaded) => resolve(env, loaded))
@@ -316,7 +324,10 @@ const booleanEnvKeys = [
   "RIKA_TELEMETRY",
 ] as const
 
-const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings): Effect.Effect<Snapshot> =>
+const resolve = (
+  env: Record<string, string | undefined>,
+  loaded: LoadedSettings,
+): Effect.Effect<Snapshot, SettingsError> =>
   Effect.gen(function* () {
     const parsedEnv = yield* parseEnv(env)
     const template = resolveString("orb.template", parsedEnv.orbTemplate, loaded, defaultOrbTemplate)
@@ -405,33 +416,60 @@ const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings
     }
   })
 
-const parseEnv = (env: Record<string, string | undefined>): Effect.Effect<ParsedEnv> => {
+const parseEnv = (env: Record<string, string | undefined>): Effect.Effect<ParsedEnv, SettingsError> => {
   const provider = EnvConfig.providerFromEnv(env, { booleanKeys: booleanEnvKeys })
   return Effect.all({
-    orbTemplate: optionalString(provider, "RIKA_ORB_TEMPLATE"),
-    orbIdleTimeoutSeconds: optionalPositiveInteger(provider, "RIKA_ORB_IDLE_TIMEOUT"),
-    projectDefault: optionalString(provider, "RIKA_ORB_PROJECT"),
-    userName: optionalString(provider, "RIKA_USER"),
-    modeDefault: EnvConfig.optional(provider, EnvConfig.literals(modes, "RIKA_MODE")),
-    compactionAuto: EnvConfig.optional(provider, EnvConfig.boolean("RIKA_COMPACTION_AUTO")),
-    compactionReserved: optionalNonNegativeInteger(provider, "RIKA_COMPACTION_RESERVED"),
-    compactionPrune: EnvConfig.optional(provider, EnvConfig.boolean("RIKA_COMPACTION_PRUNE")),
-    compactionPruneProtect: optionalNonNegativeInteger(provider, "RIKA_COMPACTION_PRUNE_PROTECT"),
-    compactionPruneMinimum: optionalNonNegativeInteger(provider, "RIKA_COMPACTION_PRUNE_MINIMUM"),
-    memoryAutoContext: EnvConfig.optional(provider, EnvConfig.boolean("RIKA_MEMORY_AUTO_CONTEXT")),
-    telemetryEnabled: EnvConfig.optional(provider, EnvConfig.boolean("RIKA_TELEMETRY")),
-    telemetryEndpoint: optionalString(provider, "RIKA_TELEMETRY_ENDPOINT"),
+    orbTemplate: optionalString(env, provider, "RIKA_ORB_TEMPLATE"),
+    orbIdleTimeoutSeconds: optionalPositiveInteger(env, provider, "RIKA_ORB_IDLE_TIMEOUT"),
+    projectDefault: optionalString(env, provider, "RIKA_ORB_PROJECT"),
+    userName: optionalString(env, provider, "RIKA_USER"),
+    modeDefault: optionalEnv(env, provider, "RIKA_MODE", EnvConfig.literals(modes, "RIKA_MODE")),
+    compactionAuto: optionalEnv(env, provider, "RIKA_COMPACTION_AUTO", EnvConfig.boolean("RIKA_COMPACTION_AUTO")),
+    compactionReserved: optionalNonNegativeInteger(env, provider, "RIKA_COMPACTION_RESERVED"),
+    compactionPrune: optionalEnv(env, provider, "RIKA_COMPACTION_PRUNE", EnvConfig.boolean("RIKA_COMPACTION_PRUNE")),
+    compactionPruneProtect: optionalNonNegativeInteger(env, provider, "RIKA_COMPACTION_PRUNE_PROTECT"),
+    compactionPruneMinimum: optionalNonNegativeInteger(env, provider, "RIKA_COMPACTION_PRUNE_MINIMUM"),
+    memoryAutoContext: optionalEnv(
+      env,
+      provider,
+      "RIKA_MEMORY_AUTO_CONTEXT",
+      EnvConfig.boolean("RIKA_MEMORY_AUTO_CONTEXT"),
+    ),
+    telemetryEnabled: optionalEnv(env, provider, "RIKA_TELEMETRY", EnvConfig.boolean("RIKA_TELEMETRY")),
+    telemetryEndpoint: optionalString(env, provider, "RIKA_TELEMETRY_ENDPOINT"),
   })
 }
 
-const optionalString = (provider: ConfigProvider.ConfigProvider, key: string) =>
-  EnvConfig.optional(provider, EnvConfig.string(key)).pipe(Effect.map(validString))
+const optionalEnv = <A>(
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+  config: EffectConfig.Config<A>,
+) => EnvConfig.optional(provider, config).pipe(Effect.mapError(() => invalidEnvSetting(env, key)))
 
-const optionalPositiveInteger = (provider: ConfigProvider.ConfigProvider, key: string) =>
-  EnvConfig.optionalDecimalInteger(provider, key, { minimum: 1 })
+const optionalString = (
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+) => optionalEnv(env, provider, key, EnvConfig.string(key)).pipe(Effect.map(validString))
 
-const optionalNonNegativeInteger = (provider: ConfigProvider.ConfigProvider, key: string) =>
-  EnvConfig.optionalDecimalInteger(provider, key)
+const optionalPositiveInteger = (
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+) =>
+  EnvConfig.optionalDecimalInteger(provider, key, { minimum: 1 }).pipe(
+    Effect.mapError(() => invalidEnvSetting(env, key)),
+  )
+
+const optionalNonNegativeInteger = (
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+) => EnvConfig.optionalDecimalInteger(provider, key).pipe(Effect.mapError(() => invalidEnvSetting(env, key)))
+
+const invalidEnvSetting = (env: Record<string, string | undefined>, key: string) =>
+  new SettingsError({ message: `Invalid ${key} ${env[key] ?? ""}`, key })
 
 const resolvedOption = <A>(source: SettingSource, value: A | undefined): Option.Option<ResolvedValue<A>> =>
   value === undefined ? Option.none() : Option.some({ value, source })

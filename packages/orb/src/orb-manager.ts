@@ -378,7 +378,7 @@ const resolveTemplateId = Effect.fn("OrbManager.resolveTemplateId")(function* (
   if (Option.isSome(configured) && configured.value.trim().length > 0) return configured.value.trim()
   if (project.template_id !== null && project.template_id.trim().length > 0) return project.template_id.trim()
   if (settings !== undefined) {
-    const snapshot = yield* settings.snapshot
+    const snapshot = yield* settings.snapshot.pipe(Effect.mapError(settingsProvisionError))
     if (snapshot.values.orb.template.trim().length > 0) return snapshot.values.orb.template.trim()
   }
   return defaultTemplateId
@@ -391,7 +391,7 @@ const resolveTimeoutMs = Effect.fn("OrbManager.resolveTimeoutMs")(function* (
   const configured = yield* config.requireEnv("RIKA_ORB_IDLE_TIMEOUT").pipe(Effect.option)
   if (Option.isNone(configured)) {
     if (settings !== undefined) {
-      const snapshot = yield* settings.snapshot
+      const snapshot = yield* settings.snapshot.pipe(Effect.mapError(settingsProvisionError))
       return snapshot.values.orb.idleTimeoutSeconds * 1_000
     }
     return defaultIdleTimeoutSeconds * 1_000
@@ -405,6 +405,12 @@ const resolveTimeoutMs = Effect.fn("OrbManager.resolveTimeoutMs")(function* (
   }
   return seconds * 1_000
 })
+
+const settingsProvisionError = (error: Settings.SettingsError) =>
+  new OrbProvisionError({
+    message: error.message,
+    step: "settings",
+  })
 
 const placeRepo = Effect.fn("OrbManager.placeRepo")(function* (input: {
   readonly config: Config.Interface

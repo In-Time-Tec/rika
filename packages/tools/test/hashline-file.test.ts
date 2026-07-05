@@ -81,16 +81,29 @@ describe("HashlineFile", () => {
     expect(output.truncated).toBe(true)
   })
 
-  test("read reports a non-inverted empty range when start_line is beyond EOF", async () => {
+  test("read rejects start_line beyond EOF when end_line is omitted", async () => {
     const root = await tempWorkspace()
     await writeFile(join(root, "short.txt"), "one\ntwo\nthree\n")
+    await writeFile(join(root, "empty.txt"), "")
 
-    const output = object(await run(root, HashlineFile.read({ path: "short.txt", start_line: 100 })))
+    const error = await Effect.runPromise(
+      HashlineFile.read({ path: "short.txt", start_line: 4 }).pipe(
+        Effect.flip,
+        Effect.provide(HashlineFile.layer),
+        Effect.provide(configLayer(root)),
+      ),
+    )
+    const output = object(await run(root, HashlineFile.read({ path: "short.txt", start_line: 2 })))
+    const empty = object(await run(root, HashlineFile.read({ path: "empty.txt", start_line: 1 })))
 
-    expect(output.content).toBe("")
-    expect(output.anchors).toEqual([])
-    expect(output.range).toEqual({ start_line: 100, end_line: 100 })
+    expect(error.code).toBe("E_INVALID_RANGE")
+    expect(error.message).toBe("start_line must be within the file")
+    expect(String(output.content)).toContain("|two")
+    expect(String(output.content)).toContain("|three")
+    expect(output.range).toEqual({ start_line: 2, end_line: 3 })
     expect(output.truncated).toBe(false)
+    expect(empty.content).toBe("")
+    expect(empty.range).toEqual({ start_line: 1, end_line: 1 })
   })
 
   test("edit rejects stale anchors and returns nearby fresh anchors", async () => {

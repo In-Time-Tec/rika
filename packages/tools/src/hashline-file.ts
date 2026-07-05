@@ -381,6 +381,14 @@ const readRange = (input: ReadInput, totalLines: number, path: string) => {
       retryable: false,
     })
   }
+  if (startLine > Math.max(totalLines, 1)) {
+    return new HashlineFileError({
+      message: "start_line must be within the file",
+      code: "E_INVALID_RANGE",
+      path,
+      retryable: false,
+    })
+  }
   if (input.end_line !== undefined && input.end_line < 1) {
     return new HashlineFileError({
       message: "end_line must be at least 1",

@@ -17,7 +17,7 @@ import {
   WorkspaceAccess,
   WorkspaceIdentity,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, SecretRedactor, Settings, Telemetry, Time } from "@rika/core"
+import { Config, Diagnostics, EnvConfig, IdGenerator, SecretRedactor, Settings, Telemetry, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Embeddings, Live, Router } from "@rika/llm"
 import { OrbActivity, OrbManager, SandboxClient } from "@rika/orb"
@@ -87,74 +87,76 @@ export const runProcess: (input: ProcessInput) => Effect.Effect<number, never, O
             onFailure: (error: Args.ArgsError) =>
               Output.stderr(Execute.formatError(error)).pipe(Effect.as(error.exit_code)),
             onSuccess: (command) =>
-              (command.type === "invalid_execute_alias"
-                ? Output.stderrRaw(Args.invalidExecuteAliasErrorText).pipe(Effect.as(1))
-                : command.type === "help"
-                  ? Help.executeCommand(command)
-                  : command.type === "version"
-                    ? Version.executeCommand(command)
-                    : command.type === "execute"
-                      ? command.orb
-                        ? OrbExecute.executeCommand(command).pipe(
-                            Effect.provide(orbExecuteLiveLayer(command, env, input.cwd)),
-                          )
-                        : Execute.executeCommand(command).pipe(Effect.provide(liveLayer(command, env, input.cwd)))
-                      : command.type === "interactive"
-                        ? command.orb
-                          ? Output.stderr("orb interactive mode arrives with #49").pipe(Effect.as(2))
-                          : runInteractiveCommand(command, env, input.cwd)
-                        : command.type === "threads"
-                          ? Threads.executeCommand(command).pipe(
-                              Effect.provide(threadsLiveLayer(command, env, input.cwd)),
-                            )
-                          : command.type === "project"
-                            ? Project.executeCommand(command).pipe(
-                                Effect.provide(projectLiveLayer(command, env, input.cwd)),
+              validateRuntimeEnv(command, env, input.cwd).pipe(
+                Effect.flatMap(() =>
+                  command.type === "invalid_execute_alias"
+                    ? Output.stderrRaw(Args.invalidExecuteAliasErrorText).pipe(Effect.as(1))
+                    : command.type === "help"
+                      ? Help.executeCommand(command)
+                      : command.type === "version"
+                        ? Version.executeCommand(command)
+                        : command.type === "execute"
+                          ? command.orb
+                            ? OrbExecute.executeCommand(command).pipe(
+                                Effect.provide(orbExecuteLiveLayer(command, env, input.cwd)),
                               )
-                            : command.type === "skills"
-                              ? Skills.executeCommand(command).pipe(
-                                  Effect.provide(skillsLiveLayer(command, env, input.cwd)),
+                            : Execute.executeCommand(command).pipe(Effect.provide(liveLayer(command, env, input.cwd)))
+                          : command.type === "interactive"
+                            ? command.orb
+                              ? Output.stderr("orb interactive mode arrives with #49").pipe(Effect.as(2))
+                              : runInteractiveCommand(command, env, input.cwd)
+                            : command.type === "threads"
+                              ? Threads.executeCommand(command).pipe(
+                                  Effect.provide(threadsLiveLayer(command, env, input.cwd)),
                                 )
-                              : command.type === "mcp"
-                                ? Mcp.executeCommand(command).pipe(
-                                    Effect.provide(mcpLiveLayer(command, env, input.cwd)),
+                              : command.type === "project"
+                                ? Project.executeCommand(command).pipe(
+                                    Effect.provide(projectLiveLayer(command, env, input.cwd)),
                                   )
-                                : command.type === "config"
-                                  ? CliConfig.executeCommand(command).pipe(
-                                      Effect.provide(configLiveLayer(env, input.cwd)),
+                                : command.type === "skills"
+                                  ? Skills.executeCommand(command).pipe(
+                                      Effect.provide(skillsLiveLayer(command, env, input.cwd)),
                                     )
-                                  : command.type === "orb"
-                                    ? Orb.executeCommand(command).pipe(
-                                        Effect.provide(orbLiveLayer(command, env, input.cwd)),
+                                  : command.type === "mcp"
+                                    ? Mcp.executeCommand(command).pipe(
+                                        Effect.provide(mcpLiveLayer(command, env, input.cwd)),
                                       )
-                                    : command.type === "review"
-                                      ? Review.executeCommand(command).pipe(
-                                          Effect.provide(reviewLiveLayer(command, env, input.cwd)),
+                                    : command.type === "config"
+                                      ? CliConfig.executeCommand(command).pipe(
+                                          Effect.provide(configLiveLayer(env, input.cwd)),
                                         )
-                                      : command.type === "extensions"
-                                        ? Extensions.executeCommand(command).pipe(
-                                            Effect.provide(extensionsLiveLayer(command, env, input.cwd)),
+                                      : command.type === "orb"
+                                        ? Orb.executeCommand(command).pipe(
+                                            Effect.provide(orbLiveLayer(command, env, input.cwd)),
                                           )
-                                        : command.type === "ide"
-                                          ? Ide.executeCommand(command).pipe(
-                                              Effect.provide(ideLiveLayer(command, env, input.cwd)),
+                                        : command.type === "review"
+                                          ? Review.executeCommand(command).pipe(
+                                              Effect.provide(reviewLiveLayer(command, env, input.cwd)),
                                             )
-                                          : command.type === "doctor"
-                                            ? Doctor.executeCommand(command).pipe(
-                                                Effect.provide(doctorLiveLayer(env, input.cwd)),
+                                          : command.type === "extensions"
+                                            ? Extensions.executeCommand(command).pipe(
+                                                Effect.provide(extensionsLiveLayer(command, env, input.cwd)),
                                               )
-                                            : command.type === "sync"
-                                              ? Sync.executeCommand(command).pipe(
-                                                  Effect.provide(syncLiveLayer(command, env, input.cwd)),
+                                            : command.type === "ide"
+                                              ? Ide.executeCommand(command).pipe(
+                                                  Effect.provide(ideLiveLayer(command, env, input.cwd)),
                                                 )
-                                              : command.type === "memory"
-                                                ? Memory.executeCommand(command).pipe(
-                                                    Effect.provide(memoryLiveLayer(command, env, input.cwd)),
+                                              : command.type === "doctor"
+                                                ? Doctor.executeCommand(command).pipe(
+                                                    Effect.provide(doctorLiveLayer(env, input.cwd)),
                                                   )
-                                                : Server.executeCommand(command).pipe(
-                                                    Effect.provide(serverLiveLayer(command, env, input.cwd)),
-                                                  )
-              ).pipe(
+                                                : command.type === "sync"
+                                                  ? Sync.executeCommand(command).pipe(
+                                                      Effect.provide(syncLiveLayer(command, env, input.cwd)),
+                                                    )
+                                                  : command.type === "memory"
+                                                    ? Memory.executeCommand(command).pipe(
+                                                        Effect.provide(memoryLiveLayer(command, env, input.cwd)),
+                                                      )
+                                                    : Server.executeCommand(command).pipe(
+                                                        Effect.provide(serverLiveLayer(command, env, input.cwd)),
+                                                      ),
+                ),
                 Effect.matchEffect({
                   onFailure: (error: RuntimeError) =>
                     Output.stderr(formatRuntimeError(error)).pipe(Effect.as(runtimeExitCode(error))),
@@ -231,6 +233,7 @@ type RuntimeError =
   | Server.ServerError
   | SandboxClient.SandboxClientError
   | SandboxClient.OrbConfigError
+  | Settings.SettingsError
   | HttpServer.HttpServerError
   | Session.SessionError
   | SelfExtension.SelfExtensionError
@@ -297,6 +300,7 @@ const formatRuntimeError = (error: RuntimeError) => {
   if (error instanceof ProjectStore.ProjectStoreError) return `Rika failed: ${error.message}`
   if (error instanceof ContextResolver.ContextResolverError) return `Rika failed: ${error.message}`
   if (error instanceof Config.ConfigError) return `Rika failed: ${error.message}`
+  if (error instanceof Settings.SettingsError) return `Rika failed: ${error.message}`
   if (error instanceof Database.DatabaseError) return `Rika failed: ${error.message}`
   if (error instanceof Doctor.DoctorError) return Doctor.formatError(error)
   if (tagged(error, "RemoteSessionError")) return `Rika failed: ${error.message}`
@@ -389,6 +393,46 @@ const runtimeConfigLayer = (
     ...(modeOverride === undefined ? {} : { RIKA_MODE: modeOverride }),
   }
   return Config.layerFromEnv(configEnv, workspaceRoot)
+}
+
+const validateRuntimeEnv = (
+  command: Args.Command,
+  env: Record<string, string | undefined>,
+  cwd: string,
+): Effect.Effect<void, RuntimeError> => {
+  if (command.type === "invalid_execute_alias" || command.type === "help" || command.type === "version") {
+    return Effect.void
+  }
+  const workspaceRoot = commandWorkspaceRoot(command, env, cwd)
+  const modeOverride = "mode" in command ? command.mode : undefined
+  const configEnv = {
+    ...env,
+    RIKA_WORKSPACE_ROOT: workspaceRoot,
+    ...(modeOverride === undefined ? {} : { RIKA_MODE: modeOverride }),
+  }
+  return Effect.gen(function* () {
+    yield* Config.valuesFromEnv(configEnv, workspaceRoot)
+    const provider = EnvConfig.providerFromEnv(env)
+    yield* EnvConfig.optionalDecimalInteger(provider, "RIKA_MODEL_CONTEXT_WINDOW", {
+      minimum: 1,
+      allowLeadingZero: false,
+    }).pipe(Effect.mapError(() => invalidRuntimeEnv(env, "RIKA_MODEL_CONTEXT_WINDOW")))
+    yield* Effect.try({
+      try: () => PermissionPolicy.configFromEnv(env),
+      catch: () => invalidRuntimeEnv(env, "RIKA_PERMISSION_MODE"),
+    })
+  }).pipe(Effect.asVoid)
+}
+
+const invalidRuntimeEnv = (env: Record<string, string | undefined>, key: string) =>
+  new Config.ConfigError({
+    message: `Invalid ${key} ${env[key] ?? ""}`,
+    key,
+  })
+
+const commandWorkspaceRoot = (command: Args.Command, env: Record<string, string | undefined>, cwd: string) => {
+  const workspaceRoot = "workspace_root" in command ? command.workspace_root : undefined
+  return workspaceRoot ?? env.RIKA_WORKSPACE_ROOT ?? cwd
 }
 
 export const liveLayer = (
@@ -1695,7 +1739,7 @@ export const ideLiveLayer = (
 export const configLiveLayer = (
   env: Record<string, string | undefined>,
   cwd: string,
-): Layer.Layer<CliConfig.Service, CliConfig.ConfigCommandError, Output.Service> => {
+): Layer.Layer<CliConfig.Service, LiveLayerError, Output.Service> => {
   const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
   const configLayer = runtimeConfigLayer(env, workspaceRoot)
   const { telemetryLayer } = telemetryLayers(env, workspaceRoot, configLayer)
@@ -2280,6 +2324,7 @@ export type LiveLayerError =
   | ProjectStore.ProjectStoreError
   | ReviewService.RunError
   | SandboxClient.OrbConfigError
+  | Settings.SettingsError
   | ThreadEventLog.ThreadEventLogError
   | ThreadMemoryStore.ThreadMemoryStoreError
   | ThreadProjection.ThreadProjectionError

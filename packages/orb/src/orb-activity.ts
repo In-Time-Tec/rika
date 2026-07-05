@@ -108,7 +108,7 @@ const resolveTimeoutMs = Effect.fn("OrbActivity.resolveTimeoutMs")(function* (
   const configured = yield* config.requireEnv("RIKA_ORB_IDLE_TIMEOUT").pipe(Effect.option)
   if (Option.isNone(configured)) {
     if (settings !== undefined) {
-      const snapshot = yield* settings.snapshot
+      const snapshot = yield* settings.snapshot.pipe(Effect.mapError(settingsConfigError))
       return snapshot.values.orb.idleTimeoutSeconds * 1_000
     }
     return defaultIdleTimeoutSeconds * 1_000
@@ -122,3 +122,9 @@ const resolveTimeoutMs = Effect.fn("OrbActivity.resolveTimeoutMs")(function* (
   }
   return seconds * 1_000
 })
+
+const settingsConfigError = (error: Settings.SettingsError) =>
+  new Config.ConfigError({
+    message: error.message,
+    ...(error.key === undefined ? {} : { key: error.key }),
+  })

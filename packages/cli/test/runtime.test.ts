@@ -83,6 +83,96 @@ describe("CLI runtime", () => {
     expect(output.stderr).toEqual([Args.invalidExecuteAliasErrorText])
   })
 
+  test("formats invalid settings env before live layer startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-invalid-settings-"))
+    const home = join(root, "home")
+    const cwd = join(root, "workspace")
+    await mkdir(home, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-x", "hello"],
+          env: {
+            HOME: home,
+            RIKA_COMPACTION_AUTO: "sometimes",
+            RIKA_DATABASE_URL: "file::memory:",
+            RIKA_TELEMETRY: "0",
+          },
+          cwd,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["Rika failed: Invalid RIKA_COMPACTION_AUTO sometimes"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("formats invalid permission mode env before live layer startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-invalid-permission-"))
+    const home = join(root, "home")
+    const cwd = join(root, "workspace")
+    await mkdir(home, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-x", "hello"],
+          env: {
+            HOME: home,
+            RIKA_DATABASE_URL: "file::memory:",
+            RIKA_PERMISSION_MODE: "bogus",
+            RIKA_TELEMETRY: "0",
+          },
+          cwd,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["Rika failed: Invalid RIKA_PERMISSION_MODE bogus"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("formats invalid model context window env before live layer startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-invalid-model-context-"))
+    const home = join(root, "home")
+    const cwd = join(root, "workspace")
+    await mkdir(home, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-x", "hello"],
+          env: {
+            HOME: home,
+            RIKA_DATABASE_URL: "file::memory:",
+            RIKA_MODEL_CONTEXT_WINDOW: "1e3",
+            RIKA_TELEMETRY: "0",
+          },
+          cwd,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["Rika failed: Invalid RIKA_MODEL_CONTEXT_WINDOW 1e3"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("repairs orb usage intervals after migrations in every orb storage graph", async () => {
     expectOrbStoreMigrationsRepairUsage(
       "packages/cli/src/runtime.ts",

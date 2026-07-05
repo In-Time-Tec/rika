@@ -112,7 +112,16 @@ const parseModeFromEnv = (env: Record<string, string | undefined>, provider: Con
     )
 
 const noWelcomeFromEnv = (provider: ConfigProvider.ConfigProvider) =>
-  EnvConfig.optional(provider, EnvConfig.boolean("RIKA_RIVET_NO_WELCOME")).pipe(Effect.map((value) => value ?? true))
+  EnvConfig.optional(provider, EnvConfig.boolean("RIKA_RIVET_NO_WELCOME")).pipe(
+    Effect.map((value) => value ?? true),
+    Effect.mapError(
+      () =>
+        new HostConfigError({
+          message: "Invalid RIKA_RIVET_NO_WELCOME",
+          key: "RIKA_RIVET_NO_WELCOME",
+        }),
+    ),
+  )
 
 const optionString = (value: string | undefined) =>
   value === undefined || value.length === 0 ? Option.none<string>() : Option.some(value)

@@ -218,7 +218,7 @@ describe("Settings", () => {
     }
   })
 
-  test("keeps integer env parsing decimal-only", async () => {
+  test("rejects present invalid decimal integer env values", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-settings-decimal-env-"))
     const home = join(root, "home")
     const workspace = join(root, "workspace")
@@ -233,25 +233,25 @@ describe("Settings", () => {
     )
 
     try {
-      const snapshot = await Effect.runPromise(
+      const error = await Effect.runPromise(
         Settings.snapshot.pipe(
           Effect.provide(
             Settings.layerFromEnv(
               {
                 HOME: home,
-                RIKA_ORB_IDLE_TIMEOUT: "+5",
                 RIKA_COMPACTION_RESERVED: "1e3",
               },
               workspace,
             ),
           ),
+          Effect.flip,
         ),
       )
 
-      expect(snapshot.values.orb.idleTimeoutSeconds).toBe(111)
-      expect(snapshot.values.compaction.reserved).toBe(222)
-      expect(snapshot.sources["orb.idleTimeoutSeconds"]).toBe("user")
-      expect(snapshot.sources["compaction.reserved"]).toBe("user")
+      expect(error).toMatchObject({
+        key: "RIKA_COMPACTION_RESERVED",
+        message: "Invalid RIKA_COMPACTION_RESERVED 1e3",
+      })
     } finally {
       await rm(root, { recursive: true, force: true })
     }

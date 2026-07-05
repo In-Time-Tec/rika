@@ -1,4 +1,4 @@
-import { Config, ConfigProvider, Effect } from "effect"
+import { Config, ConfigProvider, Effect, Option } from "effect"
 
 export type Env = Readonly<Record<string, string | undefined>>
 
@@ -17,7 +17,10 @@ export const providerFromEnv = (
 export const optional = <A>(
   provider: ConfigProvider.ConfigProvider,
   config: Config.Config<A>,
-): Effect.Effect<A | undefined> => config.parse(provider).pipe(Effect.catch(() => Effect.succeed(undefined)))
+): Effect.Effect<A | undefined, Config.ConfigError> =>
+  Config.option(config)
+    .parse(provider)
+    .pipe(Effect.map((value) => Option.getOrUndefined(value)))
 
 export const optionalSync = <A>(provider: ConfigProvider.ConfigProvider, config: Config.Config<A>): A | undefined =>
   Effect.runSync(optional(provider, config))
@@ -34,8 +37,15 @@ export const optionalDecimalInteger = (
   provider: ConfigProvider.ConfigProvider,
   key: string,
   options: { readonly minimum?: 0 | 1; readonly allowLeadingZero?: boolean } = {},
-): Effect.Effect<number | undefined> =>
-  optional(provider, string(key)).pipe(Effect.map((value) => parseDecimalInteger(value, options)))
+): Effect.Effect<number | undefined, Config.ConfigError> =>
+  optional(provider, string(key)).pipe(
+    Effect.flatMap((value) => {
+      if (value === undefined) return Effect.succeed(undefined)
+      const parsed = parseDecimalInteger(value, options)
+      if (parsed !== undefined) return Effect.succeed(parsed)
+      return Effect.fail(new Config.ConfigError(new ConfigProvider.SourceError({ message: `Invalid ${key} ${value}` })))
+    }),
+  )
 
 export const optionalDecimalIntegerSync = (
   provider: ConfigProvider.ConfigProvider,

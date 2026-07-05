@@ -93,6 +93,7 @@ export type Error =
   | OrbStore.OrbStoreError
   | PluginHost.RunError
   | ProjectStore.ProjectStoreError
+  | Settings.SettingsError
   | ThreadEventLog.ThreadEventLogError
   | ThreadMemoryStore.ThreadMemoryStoreError
   | ThreadProjection.ThreadProjectionError

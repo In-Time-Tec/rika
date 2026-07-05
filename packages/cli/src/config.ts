@@ -31,7 +31,7 @@ export class ConfigCommandError extends Schema.TaggedErrorClass<ConfigCommandErr
   path: Schema.optional(Schema.String),
 }) {}
 
-export type RunError = ConfigCommandError | Config.ConfigError
+export type RunError = ConfigCommandError | Config.ConfigError | Settings.SettingsError
 
 export interface Interface {
   readonly executeCommand: (command: Args.ConfigCommand) => Effect.Effect<number, RunError, Output.Service>
@@ -67,7 +67,10 @@ export const formatError = (error: RunError) => {
   return `Rika failed: ${String(error)}`
 }
 
-const executeList = (input: Input, output: Output.Interface): Effect.Effect<number, Config.ConfigError> =>
+const executeList = (
+  input: Input,
+  output: Output.Interface,
+): Effect.Effect<number, Config.ConfigError | Settings.SettingsError> =>
   Effect.gen(function* () {
     const workspaceRoot = input.env.RIKA_WORKSPACE_ROOT ?? input.cwd
     const snapshot = yield* Settings.loadSnapshotFromEnv(input.env, workspaceRoot)
@@ -89,7 +92,7 @@ const executeList = (input: Input, output: Output.Interface): Effect.Effect<numb
     return 0
   })
 
-const executeKeymap = (input: Input, output: Output.Interface): Effect.Effect<number> =>
+const executeKeymap = (input: Input, output: Output.Interface): Effect.Effect<number, Settings.SettingsError> =>
   Effect.gen(function* () {
     const workspaceRoot = input.env.RIKA_WORKSPACE_ROOT ?? input.cwd
     const snapshot = yield* Settings.loadSnapshotFromEnv(input.env, workspaceRoot)

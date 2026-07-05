@@ -61,7 +61,7 @@ export const valuesFromEnv = (
 ): Effect.Effect<Values, ConfigError> =>
   Effect.gen(function* () {
     const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-    const settings = yield* Settings.loadSnapshotFromEnv(env, workspaceRoot)
+    const settings = yield* Settings.loadSnapshotFromEnv(env, workspaceRoot).pipe(Effect.mapError(settingsConfigError))
     const subagentTools = yield* parseSubagentTools(env)
     const base: Values = {
       workspace_root: workspaceRoot,
@@ -135,6 +135,12 @@ const parseSubagentTools = (env: Record<string, string | undefined>) =>
           }),
       ),
     )
+
+const settingsConfigError = (error: Settings.SettingsError) =>
+  new ConfigError({
+    message: error.message,
+    ...(error.key === undefined ? {} : { key: error.key }),
+  })
 
 const requireEnvValue = (env: Record<string, string | undefined>, key: string): Effect.Effect<string, ConfigError> => {
   const value = env[key]

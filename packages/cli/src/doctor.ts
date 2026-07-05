@@ -75,7 +75,7 @@ export class DoctorError extends Schema.TaggedErrorClass<DoctorError>()("DoctorE
   message: Schema.String,
 }) {}
 
-export type RunError = DoctorError
+export type RunError = DoctorError | Settings.SettingsError
 
 export interface Interface {
   readonly executeCommand: (command: Args.DoctorCommand) => Effect.Effect<number, RunError>
@@ -130,7 +130,7 @@ const reportFromInput = (
   input: Input,
   backend: LocalBackend.Interface,
   dependencies: Dependencies,
-): Effect.Effect<Report, DoctorError> =>
+): Effect.Effect<Report, RunError> =>
   Effect.gen(function* () {
     const workspaceRoot = input.env.RIKA_WORKSPACE_ROOT ?? input.cwd
     const dataDir = input.env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
@@ -208,7 +208,7 @@ const checks = (input: {
   readonly telemetry: Telemetry.Options
   readonly env: Record<string, string | undefined>
   readonly dependencies: Dependencies
-}): Effect.Effect<ReadonlyArray<Check>> =>
+}): Effect.Effect<ReadonlyArray<Check>, RunError> =>
   Effect.gen(function* () {
     const orb = yield* orbChecks(input.env, input.dependencies)
     return [
@@ -272,7 +272,7 @@ const checks = (input: {
 const orbChecks = (
   env: Record<string, string | undefined>,
   dependencies: Dependencies,
-): Effect.Effect<ReadonlyArray<Check>> =>
+): Effect.Effect<ReadonlyArray<Check>, RunError> =>
   Effect.gen(function* () {
     const e2bApiKeyConfigured = secretConfigured(env.E2B_API_KEY)
     const template = yield* configuredTemplate(dependencies.settings)
@@ -293,7 +293,7 @@ const orbChecks = (
     ]
   })
 
-const configuredTemplate = (settings: Settings.Interface | undefined): Effect.Effect<string> =>
+const configuredTemplate = (settings: Settings.Interface | undefined): Effect.Effect<string, Settings.SettingsError> =>
   settings === undefined
     ? Effect.succeed(Settings.defaultValues().orb.template)
     : settings.snapshot.pipe(Effect.map((snapshot) => snapshot.values.orb.template))

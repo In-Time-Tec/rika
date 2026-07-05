@@ -27,6 +27,7 @@ export type RunError =
   | OrbTournamentError
   | Project.ProjectError
   | ProjectStore.ProjectStoreError
+  | Settings.SettingsError
   | Sync.RunError
 
 export type ClientFactory = (endpointUrl: string, token: string) => Client.Interface

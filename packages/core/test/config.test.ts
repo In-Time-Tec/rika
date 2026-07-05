@@ -57,28 +57,35 @@ describe("Config", () => {
     expect(telemetry.enabled).toBe(true)
   })
 
-  test("invalid settings-backed env values resolve identically through settings and config", async () => {
+  test("invalid settings-backed env values fail fast through settings and config", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-config-invalid-shared-"))
     const home = join(root, "home")
     const workspace = join(root, "workspace")
     await mkdir(join(home, ".config", "rika"), { recursive: true })
     await mkdir(join(workspace, ".rika"), { recursive: true })
-    await writeFile(join(home, ".config", "rika", "settings.json"), JSON.stringify({ "compaction.auto": true }))
-
-    const env = {
-      HOME: home,
-      RIKA_COMPACTION_AUTO: "sometimes",
-    }
+    await writeFile(
+      join(home, ".config", "rika", "settings.json"),
+      JSON.stringify({ "mode.default": "deep1", "compaction.auto": true }),
+    )
+    const cases = [
+      { env: { RIKA_COMPACTION_AUTO: "sometimes" }, key: "RIKA_COMPACTION_AUTO", value: "sometimes" },
+      { env: { RIKA_MODE: "depe2" }, key: "RIKA_MODE", value: "depe2" },
+    ] as const
 
     try {
-      const values = await Effect.runPromise(Config.get().pipe(Effect.provide(Config.layerFromEnv(env, workspace))))
-      const snapshot = await Effect.runPromise(
-        Settings.snapshot.pipe(Effect.provide(Settings.layerFromEnv(env, workspace))),
-      )
+      for (const current of cases) {
+        const env = { HOME: home, ...current.env }
+        const configError = await Effect.runPromise(
+          Config.get().pipe(Effect.provide(Config.layerFromEnv(env, workspace)), Effect.flip),
+        )
+        const settingsError = await Effect.runPromise(
+          Settings.snapshot.pipe(Effect.provide(Settings.layerFromEnv(env, workspace)), Effect.flip),
+        )
+        const message = `Invalid ${current.key} ${current.value}`
 
-      expect(values.compaction_auto).toBe(true)
-      expect(snapshot.values.compaction.auto).toBe(true)
-      expect(snapshot.sources["compaction.auto"]).toBe("user")
+        expect(configError).toMatchObject({ key: current.key, message })
+        expect(settingsError).toMatchObject({ key: current.key, message })
+      }
     } finally {
       await rm(root, { recursive: true, force: true })
     }

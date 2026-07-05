@@ -456,7 +456,7 @@ const resolveAutoMemoryEntries = (
 ): Effect.Effect<ReadonlyArray<Event.ContextEntry>, ContextResolverError> =>
   Effect.gen(function* () {
     if (memory.settings === undefined || memory.embeddings === undefined || memory.memoryStore === undefined) return []
-    const snapshot = yield* memory.settings.snapshot
+    const snapshot = yield* memory.settings.snapshot.pipe(Effect.mapError((error) => contextError("autoMemory", error)))
     if (!snapshot.values.memory.autoContext) return []
     const vector = yield* memory.embeddings.embed([input.content]).pipe(
       Effect.map((vectors) => vectors[0]),
