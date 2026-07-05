@@ -1,20 +1,15 @@
-import { Context, Effect, Layer, Schema } from "effect"
-import { Client as RivetClient } from "@rivetkit/effect"
+import { Context, Effect, Layer, Schedule } from "effect"
+import { Client as RivetClient, RivetError } from "@rivetkit/effect"
 import {
   AcceptTurnPayload,
   EnsureThreadPayload,
   ThreadActor,
-  ThreadActorActionError,
+  ThreadActorError,
   ThreadActorSnapshot,
   ThreadIdPayload,
 } from "./thread-actor"
 
-export class ThreadClientError extends Schema.TaggedErrorClass<ThreadClientError>()("ThreadClientError", {
-  message: Schema.String,
-  operation: Schema.String,
-}) {}
-
-export type RunError = ThreadActorActionError | ThreadClientError
+export type RunError = ThreadActorError | RivetError.RivetError
 
 export interface Interface {
   readonly ensureThread: (input: EnsureThreadPayload) => Effect.Effect<ThreadActorSnapshot, RunError>
@@ -31,28 +26,16 @@ export const layer = Layer.effect(
     const accessor = yield* ThreadActor.client
     return Service.of({
       ensureThread: Effect.fn("ThreadClient.ensureThread")(function* (input: EnsureThreadPayload) {
-        return yield* accessor
-          .getOrCreate(input.thread_id)
-          .EnsureThread(input)
-          .pipe(Effect.mapError(toError("ensureThread")))
+        return yield* accessor.getOrCreate(input.thread_id).EnsureThread(input).pipe(retryTransientRivetErrors)
       }),
       acceptTurn: Effect.fn("ThreadClient.acceptTurn")(function* (input: AcceptTurnPayload) {
-        return yield* accessor
-          .getOrCreate(input.thread_id)
-          .AcceptTurn(input)
-          .pipe(Effect.mapError(toError("acceptTurn")))
+        return yield* accessor.getOrCreate(input.thread_id).AcceptTurn(input).pipe(retryTransientRivetErrors)
       }),
       replayThread: Effect.fn("ThreadClient.replayThread")(function* (input: ThreadIdPayload) {
-        return yield* accessor
-          .getOrCreate(input.thread_id)
-          .ReplayThread(input)
-          .pipe(Effect.mapError(toError("replayThread")))
+        return yield* accessor.getOrCreate(input.thread_id).ReplayThread(input).pipe(retryTransientRivetErrors)
       }),
       getSnapshot: Effect.fn("ThreadClient.getSnapshot")(function* (input: ThreadIdPayload) {
-        return yield* accessor
-          .getOrCreate(input.thread_id)
-          .GetSnapshot(input)
-          .pipe(Effect.mapError(toError("getSnapshot")))
+        return yield* accessor.getOrCreate(input.thread_id).GetSnapshot(input).pipe(retryTransientRivetErrors)
       }),
     })
   }),
@@ -78,12 +61,19 @@ export const getSnapshot = Effect.fn("ThreadClient.getSnapshot.call")(function* 
   return yield* service.getSnapshot(input)
 })
 
-const toError = (operation: string) => (cause: unknown) => {
-  if (cause instanceof ThreadActorActionError) return cause
-  return new ThreadClientError({
-    message: cause instanceof Error ? cause.message : String(cause),
-    operation,
-  })
-}
+const isRetryableRivetError = (error: unknown): error is RivetError.RivetError =>
+  RivetError.isRivetError(error) && error.isRetryable
+
+const retryAfter = (error: unknown) => (RivetError.isRivetError(error) ? error.retryAfter : undefined)
+
+const transientRivetSchedule = Schedule.exponential("50 millis", 2).pipe(
+  Schedule.both(Schedule.recurs(3)),
+  Schedule.collectWhile((metadata) => isRetryableRivetError(metadata.input)),
+  Schedule.passthrough,
+  Schedule.modifyDelay((error, delay) => Effect.succeed(retryAfter(error) ?? delay)),
+)
+
+const retryTransientRivetErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.retry(effect, transientRivetSchedule)
 
 export type Requirements = RivetClient.Client

@@ -3,13 +3,18 @@ import { AgentLoop, ContextResolver, SkillRegistry, ToolExecutor, WorkspaceAcces
 import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection, WorkspaceStore } from "@rika/persistence"
-import { Common, Event, Ids, Message } from "@rika/schema"
+import { Common, Event, Ids, Message, Workspace } from "@rika/schema"
 import { Registry } from "@rivetkit/effect"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer, Option } from "effect"
 import { ThreadLive } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_actor_smoke")
 const workspaceId = Ids.WorkspaceId.make("workspace_actor_smoke")
+const securedThreadId = Ids.ThreadId.make("thread_actor_secured")
+const securedWorkspaceId = Ids.WorkspaceId.make("workspace_actor_secured")
+const securedOwnerId = Ids.UserId.make("user_actor_secured_owner")
+const securedOutsiderId = Ids.UserId.make("user_actor_secured_outsider")
+const securedNow = Common.TimestampMillis.make(1_800_000_000_000)
 
 const configLayer = Config.layerFromValues({
   workspace_root: "/workspace/rika-actor-test",
@@ -83,7 +88,7 @@ describe("ThreadActorLive", () => {
         const replayed = yield* ThreadLive.replaySnapshot(threadId)
         const events = yield* ThreadEventLog.readThread({ thread_id: threadId })
         return { replayed, events }
-      }).pipe(Effect.provide(supportLayer)),
+      }).pipe(Effect.provide(workspaceAccessLayer)),
     )
 
     expect(result.replayed).toMatchObject({
@@ -94,6 +99,30 @@ describe("ThreadActorLive", () => {
       latest_message_text: "hello actor",
     })
     expect(result.events.map((event) => event.type)).toEqual(["thread.created", "turn.started", "message.added"])
+  })
+
+  test("denies replayed snapshots to non-members with verified hosted identity", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* WorkspaceStore.putMembership(membership(securedOwnerId, "owner", securedWorkspaceId))
+        yield* ThreadEventLog.appendAndProject(securedThreadCreated(1))
+        yield* ThreadEventLog.appendAndProject(securedThreadVisibilitySet(2))
+        yield* ThreadEventLog.appendAndProject(securedMessageAdded(3, "hosted secret"))
+
+        const snapshotExit = yield* ThreadLive.replaySnapshot(
+          securedThreadId,
+          verifiedIdentity(securedOutsiderId),
+        ).pipe(Effect.exit)
+        return Option.getOrUndefined(Exit.findErrorOption(snapshotExit))
+      }).pipe(Effect.provide(workspaceAccessLayer)),
+    )
+
+    expect(result).toMatchObject({
+      _tag: "WorkspaceAccessDenied",
+      action: "read",
+      workspace_id: securedWorkspaceId,
+      user_id: securedOutsiderId,
+    })
   })
 })
 
@@ -141,6 +170,62 @@ const messageAdded = (sequence: number, content: string): Event.MessageAdded => 
       turn_id: turnId,
       content,
       created_at: sequence,
+    }),
+  },
+})
+
+const membership = (
+  userId: Ids.UserId,
+  role: Workspace.MembershipRole,
+  workspaceIdValue: Ids.WorkspaceId,
+): Workspace.Membership => ({
+  workspace_id: workspaceIdValue,
+  user_id: userId,
+  role,
+  created_at: securedNow,
+})
+
+const verifiedIdentity = (userId: Ids.UserId) => ({
+  _tag: "VerifiedUserIdentity" as const,
+  user_id: userId,
+})
+
+const securedThreadCreated = (sequence: number): Event.ThreadCreated => ({
+  id: Ids.EventId.make(`secured_actor_event_${sequence}`),
+  thread_id: securedThreadId,
+  sequence,
+  version: 1,
+  created_at: securedNow,
+  type: "thread.created",
+  data: { workspace_id: securedWorkspaceId, user_id: securedOwnerId },
+})
+
+const securedThreadVisibilitySet = (sequence: number): Event.Event =>
+  ({
+    id: Ids.EventId.make(`secured_actor_event_${sequence}`),
+    thread_id: securedThreadId,
+    sequence,
+    version: 1,
+    created_at: securedNow,
+    type: "thread.visibility.set",
+    data: { visibility: "workspace" },
+  }) as Event.Event
+
+const securedMessageAdded = (sequence: number, content: string): Event.MessageAdded => ({
+  id: Ids.EventId.make(`secured_actor_event_${sequence}`),
+  thread_id: securedThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: securedNow,
+  type: "message.added",
+  data: {
+    message: Message.user({
+      id: Ids.MessageId.make("secured_actor_message_1"),
+      thread_id: securedThreadId,
+      turn_id: turnId,
+      content,
+      created_at: securedNow,
     }),
   },
 })

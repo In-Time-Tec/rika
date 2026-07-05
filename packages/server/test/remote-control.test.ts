@@ -1511,6 +1511,7 @@ describe("remote control API and SDK", () => {
     const ownerToken = `user:${ownerId}:owner-secret`
     const outsiderToken = `user:${outsiderId}:outsider-secret`
     const forgedThreadId = Ids.ThreadId.make("thread_remote_forged_creator")
+    const forgedWorkspaceId = Ids.WorkspaceId.make("workspace_remote_forged_creator")
     const ownerHandle = await runtime.runPromise(HttpServer.serve({ port: 0, token: ownerToken }))
     const outsiderHandle = await runtime.runPromise(HttpServer.serve({ port: 0, token: outsiderToken }))
 
@@ -1523,10 +1524,15 @@ describe("remote control API and SDK", () => {
       const forged = await fetch(`${outsiderHandle.url}/v1/threads/${threadId}?user_id=${ownerId}`, {
         headers: { authorization: `Bearer ${outsiderToken}` },
       })
-      const forgedCreate = await fetch(`${outsiderHandle.url}/v1/threads`, {
+      const forgedOwnedCreate = await fetch(`${outsiderHandle.url}/v1/threads`, {
         method: "POST",
         headers: { authorization: `Bearer ${outsiderToken}`, "content-type": "application/json" },
         body: JSON.stringify({ thread_id: forgedThreadId, workspace_id: workspaceId, user_id: ownerId }),
+      })
+      const forgedCreate = await fetch(`${outsiderHandle.url}/v1/threads`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${outsiderToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ thread_id: forgedThreadId, workspace_id: forgedWorkspaceId, user_id: ownerId }),
       })
       const forgedCreated = Schema.decodeUnknownSync(Remote.ThreadSummary)(await forgedCreate.json())
       const ownerForgedOpen = await fetch(`${ownerHandle.url}/v1/threads/${forgedThreadId}`, {
@@ -1539,6 +1545,8 @@ describe("remote control API and SDK", () => {
       expect(created.status).toBe(200)
       expect(forged.status).toBe(403)
       expect(await forged.json()).toMatchObject({ error: { code: "workspace_access_denied" } })
+      expect(forgedOwnedCreate.status).toBe(403)
+      expect(await forgedOwnedCreate.json()).toMatchObject({ error: { code: "workspace_access_denied" } })
       expect(forgedCreate.status).toBe(200)
       expect(forgedCreated.user_id).toBe(outsiderId)
       expect(ownerForgedOpen.status).toBe(403)
@@ -1801,17 +1809,14 @@ describe("remote control API and SDK", () => {
           user_id: outsiderId,
           authorization_user_id: outsiderId,
         })
-        const outsiderCreated = yield* remote.createThread({
-          thread_id: outsiderThreadId,
-          workspace_id: workspaceId,
-          user_id: outsiderId,
-          authorization_user_id: outsiderId,
-        })
-        const outsiderArchivedOwnThread = yield* remote.archiveThread({
-          thread_id: outsiderThreadId,
-          user_id: outsiderId,
-          authorization_user_id: outsiderId,
-        })
+        const outsiderCreateError = yield* remote
+          .createThread({
+            thread_id: outsiderThreadId,
+            workspace_id: workspaceId,
+            user_id: outsiderId,
+            authorization_user_id: outsiderId,
+          })
+          .pipe(Effect.flip)
         return {
           created,
           ownerThreads,
@@ -1827,8 +1832,7 @@ describe("remote control API and SDK", () => {
           outsiderPreview,
           outsiderUnlistedThreads,
           outsiderSearch,
-          outsiderCreated,
-          outsiderArchivedOwnThread,
+          outsiderCreateError,
         }
       }),
     )
@@ -1852,13 +1856,12 @@ describe("remote control API and SDK", () => {
     expect(result.outsiderPreview.summary.thread_id).toBe(threadId)
     expect(result.outsiderUnlistedThreads).toEqual([])
     expect(result.outsiderSearch).toEqual([])
-    expect(result.outsiderCreated).toMatchObject({
-      thread_id: outsiderThreadId,
+    expect(result.outsiderCreateError).toBeInstanceOf(WorkspaceAccess.WorkspaceAccessDenied)
+    expect(result.outsiderCreateError).toMatchObject({
+      action: "write",
       workspace_id: workspaceId,
       user_id: outsiderId,
-      visibility: "private",
     })
-    expect(result.outsiderArchivedOwnThread.archived).toBe(true)
   })
 
   test("remote thread visibility applies limits after filtering unreadable threads", async () => {
@@ -1867,6 +1870,7 @@ describe("remote control API and SDK", () => {
       Ids.ThreadId.make(`thread_remote_filter_${index.toString().padStart(4, "0")}`),
     )
     const visibleThreadId = Ids.ThreadId.make("thread_remote_filter_z_visible")
+    const visibleWorkspaceId = Ids.WorkspaceId.make("workspace_remote_filter_visible")
 
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -1883,7 +1887,7 @@ describe("remote control API and SDK", () => {
         )
         yield* remote.createThread({
           thread_id: visibleThreadId,
-          workspace_id: workspaceId,
+          workspace_id: visibleWorkspaceId,
           user_id: outsiderId,
           authorization_user_id: outsiderId,
         })

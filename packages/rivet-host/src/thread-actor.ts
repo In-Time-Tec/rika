@@ -1,4 +1,6 @@
 import { Action, Actor } from "@rivetkit/effect"
+import { AgentLoop, WorkspaceAccess } from "@rika/agent"
+import { Database, ThreadEventLog, ThreadProjection, WorkspaceStore } from "@rika/persistence"
 import { Event, Ids, Message } from "@rika/schema"
 import { Schema } from "effect"
 
@@ -33,18 +35,24 @@ export const ThreadActorState = Schema.Struct({
   latest_message_text: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.RivetHost.ThreadActor.State" })
 
+export interface VerifiedUserIdentity extends Schema.Schema.Type<typeof VerifiedUserIdentity> {}
+export const VerifiedUserIdentity = Schema.Struct({
+  _tag: Schema.Literal("VerifiedUserIdentity"),
+  user_id: Ids.UserId,
+}).annotate({ identifier: "Rika.RivetHost.ThreadActor.VerifiedUserIdentity" })
+
 export interface EnsureThreadPayload extends Schema.Schema.Type<typeof EnsureThreadPayload> {}
 export const EnsureThreadPayload = Schema.Struct({
   thread_id: Ids.ThreadId,
   workspace_id: Ids.WorkspaceId,
-  user_id: Schema.optional(Ids.UserId),
+  identity: Schema.optional(VerifiedUserIdentity),
 }).annotate({ identifier: "Rika.RivetHost.ThreadActor.EnsureThreadPayload" })
 
 export interface AcceptTurnPayload extends Schema.Schema.Type<typeof AcceptTurnPayload> {}
 export const AcceptTurnPayload = Schema.Struct({
   thread_id: Ids.ThreadId,
   workspace_id: Ids.WorkspaceId,
-  user_id: Schema.optional(Ids.UserId),
+  identity: Schema.optional(VerifiedUserIdentity),
   content: Schema.String,
   content_parts: Schema.optional(Schema.Array(Message.ContentPart)),
 }).annotate({ identifier: "Rika.RivetHost.ThreadActor.AcceptTurnPayload" })
@@ -52,6 +60,7 @@ export const AcceptTurnPayload = Schema.Struct({
 export interface ThreadIdPayload extends Schema.Schema.Type<typeof ThreadIdPayload> {}
 export const ThreadIdPayload = Schema.Struct({
   thread_id: Ids.ThreadId,
+  identity: Schema.optional(VerifiedUserIdentity),
 }).annotate({ identifier: "Rika.RivetHost.ThreadActor.ThreadIdPayload" })
 
 export class ThreadActorActionError extends Schema.TaggedErrorClass<ThreadActorActionError>()(
@@ -63,28 +72,40 @@ export class ThreadActorActionError extends Schema.TaggedErrorClass<ThreadActorA
   },
 ) {}
 
+export const ThreadActorError = Schema.Union([
+  ThreadActorActionError,
+  WorkspaceAccess.WorkspaceAccessError,
+  WorkspaceAccess.WorkspaceAccessDenied,
+  ThreadEventLog.ThreadEventLogError,
+  AgentLoop.AgentLoopError,
+  Database.DatabaseError,
+  ThreadProjection.ThreadProjectionError,
+  WorkspaceStore.WorkspaceStoreError,
+]).annotate({ identifier: "Rika.RivetHost.ThreadActor.Error" })
+export type ThreadActorError = typeof ThreadActorError.Type
+
 export const EnsureThread = Action.make("EnsureThread", {
   payload: EnsureThreadPayload,
   success: ThreadActorSnapshot,
-  error: ThreadActorActionError,
+  error: ThreadActorError,
 })
 
 export const AcceptTurn = Action.make("AcceptTurn", {
   payload: AcceptTurnPayload,
   success: ThreadActorSnapshot,
-  error: ThreadActorActionError,
+  error: ThreadActorError,
 })
 
 export const ReplayThread = Action.make("ReplayThread", {
   payload: ThreadIdPayload,
   success: ThreadActorSnapshot,
-  error: ThreadActorActionError,
+  error: ThreadActorError,
 })
 
 export const GetSnapshot = Action.make("GetSnapshot", {
   payload: ThreadIdPayload,
   success: ThreadActorSnapshot,
-  error: ThreadActorActionError,
+  error: ThreadActorError,
 })
 
 export const ThreadActor = Actor.make("ThreadActor", {

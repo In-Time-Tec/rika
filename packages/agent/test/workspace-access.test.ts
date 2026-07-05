@@ -207,11 +207,29 @@ describe("WorkspaceAccess", () => {
     expect(decisions.memberPrivateWrite.allowed).toBe(false)
   })
 
-  test("bootstraps an empty hosted workspace owner and leaves later create authorization open", async () => {
+  test("bootstraps the first writer of an empty hosted workspace as owner", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Migration.migrate()
         const owner = yield* WorkspaceAccess.ensureWorkspaceForCreate({
+          workspace_id: otherWorkspaceId,
+          user_id: ownerId,
+          action: "write",
+        })
+        const memberships = yield* WorkspaceStore.listMemberships(otherWorkspaceId)
+        return { owner, memberships }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.owner.allowed).toBe(true)
+    expect(result.memberships).toEqual([membership(ownerId, "owner", otherWorkspaceId)])
+  })
+
+  test("denies later create access to outsiders after a workspace has members", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* WorkspaceAccess.ensureWorkspaceForCreate({
           workspace_id: otherWorkspaceId,
           user_id: ownerId,
           action: "write",
@@ -225,15 +243,19 @@ describe("WorkspaceAccess", () => {
           workspace_id: otherWorkspaceId,
           user_id: outsiderId,
           action: "write",
-        })
+        }).pipe(Effect.flip)
         const memberships = yield* WorkspaceStore.listMemberships(otherWorkspaceId)
-        return { owner, outsider, outsiderCreate, memberships }
+        return { outsider, outsiderCreate, memberships }
       }).pipe(Effect.provide(layer)),
     )
 
-    expect(result.owner.allowed).toBe(true)
     expect(result.outsider.allowed).toBe(false)
-    expect(result.outsiderCreate.allowed).toBe(true)
+    expect(result.outsiderCreate).toBeInstanceOf(WorkspaceAccess.WorkspaceAccessDenied)
+    expect(result.outsiderCreate).toMatchObject({
+      action: "write",
+      workspace_id: otherWorkspaceId,
+      user_id: outsiderId,
+    })
     expect(result.memberships).toEqual([membership(ownerId, "owner", otherWorkspaceId)])
   })
 })
