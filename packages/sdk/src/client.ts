@@ -1,5 +1,5 @@
 import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
-import { Effect, Schedule, Schema, Stream } from "effect"
+import { Duration, Effect, Schedule, Schema, Stream } from "effect"
 
 export interface RequestInput {
   readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT"
@@ -122,6 +122,11 @@ const withUserId = <A extends { readonly user_id?: Ids.UserId | undefined }>(tra
   const userId = input.user_id ?? transport.user_id
   return userId === undefined ? input : ({ ...input, user_id: userId } as A)
 }
+
+const presenceHeartbeatRetrySchedule = Schedule.exponential("250 millis", 2).pipe(
+  Schedule.both(Schedule.recurs(3)),
+  Schedule.modifyDelay((_error, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
 
 export const make = (transport: Transport): Interface => ({
   backendHealth: () =>
@@ -308,7 +313,12 @@ export const make = (transport: Transport): Interface => ({
               thread_id: request.thread_id,
               user_id: request.user_id,
               state: "active",
-            }).pipe(Effect.repeat(Schedule.spaced("15 seconds")), Effect.asVoid),
+            }).pipe(
+              Effect.retry(presenceHeartbeatRetrySchedule),
+              Effect.ignore,
+              Effect.repeat(Schedule.spaced("15 seconds")),
+              Effect.asVoid,
+            ),
           ),
         )
   },

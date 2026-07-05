@@ -300,7 +300,7 @@ describe("web local sync e2e", () => {
       await missEvents
 
       let webModel = await openWebModel(handle.url, searchMatchThreadId)
-      const [searching, commands] = update(webModel, ChangedThreadSearchQuery({ value: "neural" }))
+      const [searching, commands] = update(webModel, ChangedThreadSearchQuery({ value: "neural", now }))
       webModel = await runCommands(searching, commands)
 
       expect(commands.map((command) => command.name)).toEqual(["SearchThreads"])

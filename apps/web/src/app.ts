@@ -6,7 +6,7 @@ import * as Command from "foldkit/command"
 import { m } from "foldkit/message"
 import * as Mount from "foldkit/mount"
 import * as Subscription from "foldkit/subscription"
-import { Effect, Option, Queue, Schema as S, Scope, Stream } from "effect"
+import { Duration, Effect, Option, Queue, Schedule, Schema as S, Scope, Stream } from "effect"
 import * as Tabs from "./components/ui/tabs-state"
 import {
   asFileDiffMetadata,
@@ -104,6 +104,13 @@ export type ProjectField = typeof ProjectField.Type
 export const ProjectSecretField = S.Literals(["name", "value"])
 export type ProjectSecretField = typeof ProjectSecretField.Type
 
+export const QueuedMessage = S.Struct({
+  thread_id: Ids.ThreadId,
+  content: S.String,
+  mode: S.optional(Remote.AgentMode),
+})
+export type QueuedMessage = typeof QueuedMessage.Type
+
 export const ProjectForm = S.Struct({
   name: S.String,
   repo_origin: S.String,
@@ -141,10 +148,17 @@ export const Model = S.Struct({
   events: S.Array(Event.Event),
   last_sequence: S.Int,
   subscription_after_sequence: S.Int,
+  subscription_retry: S.Int,
   draft: S.String,
   draft_mode: S.optional(Remote.AgentMode),
   pending_turn: S.Boolean,
   pending_interrupt_turn_id: S.optional(Ids.TurnId),
+  queued_messages: S.Array(QueuedMessage),
+  creating_thread: S.Boolean,
+  thread_request_token: S.Int,
+  active_thread_request_token: S.optional(S.Int),
+  turn_request_token: S.Int,
+  active_turn_request_token: S.optional(S.Int),
   selected_thread_id: S.optional(Ids.ThreadId),
   subscribed_thread_id: S.optional(Ids.ThreadId),
   selected_orb: S.optional(Remote.OrbSummary),
@@ -204,14 +218,17 @@ export const LoadedBackendHealth = m("LoadedBackendHealth", { health: Remote.Bac
 export const FailedBackendHealth = m("FailedBackendHealth", { message: S.String })
 export const LoadedThreads = m("LoadedThreads", { threads: S.Array(Remote.ThreadSummary) })
 export const FailedLoadThreads = m("FailedLoadThreads", { message: S.String })
-export const ChangedThreadSearchQuery = m("ChangedThreadSearchQuery", { value: S.String })
-export const ChangedThreadSearchWindow = m("ChangedThreadSearchWindow", { value: S.String })
+export const ChangedThreadSearchQuery = m("ChangedThreadSearchQuery", { value: S.String, now: Common.TimestampMillis })
+export const ChangedThreadSearchWindow = m("ChangedThreadSearchWindow", {
+  value: S.String,
+  now: Common.TimestampMillis,
+})
 export const ClickedThread = m("ClickedThread", { thread_id: Ids.ThreadId })
 export const ClickedNewThread = m("ClickedNewThread")
-export const CreatedThread = m("CreatedThread", { summary: Remote.ThreadSummary })
-export const FailedCreateThread = m("FailedCreateThread", { message: S.String })
-export const OpenedThread = m("OpenedThread", { record: Remote.ThreadRecord })
-export const FailedOpenThread = m("FailedOpenThread", { message: S.String })
+export const CreatedThread = m("CreatedThread", { summary: Remote.ThreadSummary, request_token: S.Int })
+export const FailedCreateThread = m("FailedCreateThread", { message: S.String, request_token: S.Int })
+export const OpenedThread = m("OpenedThread", { record: Remote.ThreadRecord, request_token: S.Int })
+export const FailedOpenThread = m("FailedOpenThread", { message: S.String, request_token: S.Int })
 export const LoadedSelectedOrb = m("LoadedSelectedOrb", { orb: Remote.OrbSummary })
 export const FailedLoadSelectedOrb = m("FailedLoadSelectedOrb", { message: S.String })
 export const GotOrbTabsMessage = m("GotOrbTabsMessage", { message: Tabs.Message })
@@ -232,8 +249,13 @@ export const FailedLoadOrbChanges = m("FailedLoadOrbChanges", { message: S.Strin
 export const ChangedDraft = m("ChangedDraft", { value: S.String })
 export const ChangedDraftMode = m("ChangedDraftMode", { value: S.String })
 export const SubmittedDraft = m("SubmittedDraft")
-export const AcceptedTurn = m("AcceptedTurn", { response: Remote.StartTurnResponse })
-export const FailedStartTurn = m("FailedStartTurn", { message: S.String })
+export const AcceptedTurn = m("AcceptedTurn", { response: Remote.StartTurnResponse, request_token: S.Int })
+export const FailedStartTurn = m("FailedStartTurn", {
+  message: S.String,
+  request_token: S.Int,
+  status: S.optional(S.Int),
+  active_user_id: S.optional(Ids.UserId),
+})
 export const TypingPresenceReady = m("TypingPresenceReady")
 export const ClickedInterrupt = m("ClickedInterrupt")
 export const InterruptedTurn = m("InterruptedTurn", { event: Event.TurnTerminal })
@@ -540,12 +562,12 @@ export const LoadThreads = Command.define(
 
 export const SearchThreads = Command.define(
   "SearchThreads",
-  { api_base_url: S.String, query: S.String, window: ThreadSearchWindow },
+  { api_base_url: S.String, query: S.String, window: ThreadSearchWindow, now: Common.TimestampMillis },
   LoadedThreads,
   FailedLoadThreads,
-)(({ api_base_url, query, window }) =>
+)(({ api_base_url, query, window, now }) =>
   sdk(api_base_url)
-    .searchThreads(searchThreadsRequest(query, window))
+    .searchThreads(searchThreadsRequest(query, window, now))
     .pipe(
       Effect.map((results) => LoadedThreads({ threads: results.map((result) => result.summary) })),
       Effect.catch((error) => Effect.succeed(FailedLoadThreads({ message: error.message }))),
@@ -653,29 +675,29 @@ export const DeleteProjectSecret = Command.define(
 
 export const CreateThread = Command.define(
   "CreateThread",
-  { api_base_url: S.String },
+  { api_base_url: S.String, request_token: S.Int },
   CreatedThread,
   FailedCreateThread,
-)(({ api_base_url }) =>
+)(({ api_base_url, request_token }) =>
   sdk(api_base_url)
     .createThread()
     .pipe(
-      Effect.map((summary) => CreatedThread({ summary })),
-      Effect.catch((error) => Effect.succeed(FailedCreateThread({ message: error.message }))),
+      Effect.map((summary) => CreatedThread({ summary, request_token })),
+      Effect.catch((error) => Effect.succeed(FailedCreateThread({ message: error.message, request_token }))),
     ),
 )
 
 export const OpenThread = Command.define(
   "OpenThread",
-  { api_base_url: S.String, thread_id: Ids.ThreadId },
+  { api_base_url: S.String, thread_id: Ids.ThreadId, request_token: S.Int },
   OpenedThread,
   FailedOpenThread,
-)(({ api_base_url, thread_id }) =>
+)(({ api_base_url, thread_id, request_token }) =>
   sdk(api_base_url)
     .openThread(thread_id)
     .pipe(
-      Effect.map((record) => OpenedThread({ record })),
-      Effect.catch((error) => Effect.succeed(FailedOpenThread({ message: error.message }))),
+      Effect.map((record) => OpenedThread({ record, request_token })),
+      Effect.catch((error) => Effect.succeed(FailedOpenThread({ message: error.message, request_token }))),
     ),
 )
 
@@ -785,10 +807,11 @@ export const StartTurn = Command.define(
     user_id: S.optional(Ids.UserId),
     content: S.String,
     mode: S.optional(Remote.AgentMode),
+    request_token: S.Int,
   },
   AcceptedTurn,
   FailedStartTurn,
-)(({ api_base_url, thread_id, user_id, content, mode }) =>
+)(({ api_base_url, thread_id, user_id, content, mode, request_token }) =>
   sdk(api_base_url, user_id)
     .startTurn({
       thread_id,
@@ -797,8 +820,17 @@ export const StartTurn = Command.define(
       ...(mode === undefined ? {} : { mode }),
     })
     .pipe(
-      Effect.map((response) => AcceptedTurn({ response })),
-      Effect.catch((error) => Effect.succeed(FailedStartTurn({ message: error.message }))),
+      Effect.map((response) => AcceptedTurn({ response, request_token })),
+      Effect.catch((error) =>
+        Effect.succeed(
+          FailedStartTurn({
+            message: error.message,
+            request_token,
+            status: error.status,
+            active_user_id: error.active_user_id,
+          }),
+        ),
+      ),
     ),
 )
 
@@ -867,8 +899,15 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   events: [],
   last_sequence: 0,
   subscription_after_sequence: 0,
+  subscription_retry: 0,
   draft: "",
   pending_turn: false,
+  queued_messages: [],
+  creating_thread: false,
+  thread_request_token: 0,
+  active_thread_request_token: undefined,
+  turn_request_token: 0,
+  active_turn_request_token: undefined,
   presence: [],
   typing_presence_cooling: false,
   expanded_diff_ids: [],
@@ -877,15 +916,32 @@ export const initialModel = (config: RuntimeConfig): Model => ({
 })
 
 export const init = (config: RuntimeConfig): readonly [Model, ReadonlyArray<AppCommand>] => {
-  const model = initialModel(config)
+  const base = initialModel(config)
+  const openRequestToken = config.thread_id === undefined ? undefined : base.thread_request_token + 1
+  const model =
+    openRequestToken === undefined
+      ? base
+      : {
+          ...base,
+          thread_request_token: openRequestToken,
+          active_thread_request_token: openRequestToken,
+        }
+  const openCommands =
+    config.thread_id === undefined || openRequestToken === undefined
+      ? []
+      : [
+          OpenThread({
+            api_base_url: config.api_base_url,
+            thread_id: config.thread_id,
+            request_token: openRequestToken,
+          }),
+        ]
   return [
     { ...model, connection: "loading" },
     [
       LoadBackendHealth({ api_base_url: config.api_base_url }),
       LoadThreads({ api_base_url: config.api_base_url }),
-      ...(config.thread_id === undefined
-        ? []
-        : [OpenThread({ api_base_url: config.api_base_url, thread_id: config.thread_id })]),
+      ...openCommands,
     ],
   ]
 }
@@ -899,14 +955,21 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "LoadedThreads": {
       const threads = newestFirst(message.threads)
       const next = { ...model, threads }
-      if (model.selected_thread_id !== undefined || threads[0] === undefined) return [next, []]
+      if (
+        model.selected_thread_id !== undefined ||
+        model.creating_thread ||
+        model.active_thread_request_token !== undefined ||
+        threads[0] === undefined
+      ) {
+        return [next, []]
+      }
       return openThreadModel(next, threads[0].thread_id)
     }
     case "FailedLoadThreads":
       return [{ ...model, connection: "failed", notice: message.message }, []]
     case "ChangedThreadSearchQuery": {
       const next = { ...model, thread_search_query: message.value, active_view: "threads" as const, notice: undefined }
-      return [next, [searchThreadsCommand(next)]]
+      return [next, [searchThreadsCommand(next, message.now)]]
     }
     case "ChangedThreadSearchWindow": {
       const next = {
@@ -915,14 +978,17 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
         active_view: "threads" as const,
         notice: undefined,
       }
-      return [next, [searchThreadsCommand(next)]]
+      return [next, [searchThreadsCommand(next, message.now)]]
     }
     case "ClickedThread":
       return openThreadModel(model, message.thread_id)
-    case "ClickedNewThread":
+    case "ClickedNewThread": {
+      const requestToken = model.thread_request_token + 1
       return [
         {
           ...model,
+          thread_request_token: requestToken,
+          active_thread_request_token: requestToken,
           selected_thread_id: undefined,
           subscribed_thread_id: undefined,
           selected_orb: undefined,
@@ -930,27 +996,31 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
           confirm_kill_orb_id: undefined,
           expanded_diff_ids: [],
           pending_interrupt_turn_id: undefined,
+          pending_turn: false,
+          pending_submit: undefined,
+          pending_submit_mode: undefined,
+          active_turn_request_token: undefined,
           events: [],
           last_sequence: 0,
           subscription_after_sequence: 0,
+          subscription_retry: 0,
           presence: [],
           typing_presence_cooling: false,
+          creating_thread: true,
           connection: "loading",
           notice: undefined,
         },
-        [CreateThread({ api_base_url: model.api_base_url })],
+        [CreateThread({ api_base_url: model.api_base_url, request_token: requestToken })],
       ]
+    }
     case "CreatedThread":
-      return createdThreadModel(model, message.summary)
+      return createdThreadModel(model, message.summary, message.request_token)
     case "FailedCreateThread":
-      return [
-        { ...model, connection: "failed", pending_turn: false, pending_submit: undefined, notice: message.message },
-        [],
-      ]
+      return failedCreateThreadModel(model, message)
     case "OpenedThread":
-      return openedThreadModel(model, message.record)
+      return openedThreadModel(model, message.record, message.request_token)
     case "FailedOpenThread":
-      return [{ ...model, connection: "failed", notice: message.message }, []]
+      return failedOpenThreadModel(model, message)
     case "LoadedSelectedOrb":
       return selectedOrbLoadedModel(model, message.orb)
     case "FailedLoadSelectedOrb":
@@ -994,9 +1064,9 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "SubmittedDraft":
       return submittedDraftModel(model)
     case "AcceptedTurn":
-      return [model, []]
+      return acceptedTurnModel(model, message)
     case "FailedStartTurn":
-      return [{ ...model, pending_turn: false, notice: message.message }, []]
+      return failedStartTurnModel(model, message)
     case "TypingPresenceReady":
       return [{ ...model, typing_presence_cooling: false }, []]
     case "ClickedInterrupt":
@@ -1010,7 +1080,16 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "ReceivedPresence":
       return receivedPresenceModel(model, message.presence)
     case "ThreadSubscriptionFailed":
-      return [{ ...model, connection: "failed", notice: message.message }, []]
+      return [
+        {
+          ...model,
+          connection: "failed",
+          subscription_after_sequence: model.last_sequence,
+          subscription_retry: model.subscription_retry + 1,
+          notice: message.message,
+        },
+        [],
+      ]
     case "ClickedTogglePierreDiff":
       return [{ ...model, expanded_diff_ids: toggleString(model.expanded_diff_ids, message.payload_id) }, []]
     case "RenderedPierreDiff":
@@ -1155,6 +1234,11 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
   return [model, []]
 }
 
+const threadSubscriptionRetrySchedule = Schedule.exponential("250 millis", 2).pipe(
+  Schedule.both(Schedule.recurs(3)),
+  Schedule.modifyDelay((_error, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
+
 export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => ({
   threadEvents: entry(
     {
@@ -1162,6 +1246,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
       thread_id: S.optional(Ids.ThreadId),
       user_id: S.optional(Ids.UserId),
       after_sequence: S.Int,
+      retry: S.Int,
     },
     {
       modelToDependencies: (model) => ({
@@ -1169,6 +1254,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
         ...(model.subscribed_thread_id === undefined ? {} : { thread_id: model.subscribed_thread_id }),
         ...(model.user_id === undefined ? {} : { user_id: model.user_id }),
         after_sequence: model.subscription_after_sequence,
+        retry: model.subscription_retry,
       }),
       dependenciesToStream: ({ api_base_url, thread_id, user_id, after_sequence }) =>
         thread_id === undefined
@@ -1184,6 +1270,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
                     onPresence: (snapshot) => Queue.offerUnsafe(presence, ReceivedPresence({ presence: snapshot })),
                   })
                   .pipe(
+                    Stream.retry(threadSubscriptionRetrySchedule),
                     Stream.map((event) => ReceivedThreadEvent({ event })),
                     Stream.catch((error) => Stream.make(ThreadSubscriptionFailed({ message: error.message }))),
                     Stream.merge(Stream.fromQueue(presence)),
@@ -1381,26 +1468,34 @@ const sdk = (apiBaseUrl: string, userId?: Ids.UserId) =>
 const orbSdk = (apiBaseUrl: string, threadId: Ids.ThreadId) =>
   sdk(`${apiBaseUrl.replace(/\/$/, "")}/orb/by-thread/${encodeURIComponent(threadId)}`)
 
-const searchThreadsCommand = (model: Model): AppCommand =>
+const searchThreadsCommand = (model: Model, now: Common.TimestampMillis): AppCommand =>
   SearchThreads({
     api_base_url: model.api_base_url,
     query: model.thread_search_query,
     window: model.thread_search_window,
+    now,
   })
 
-const searchThreadsRequest = (query: string, window: ThreadSearchWindow): Remote.SearchThreadsRequest => {
+const searchThreadsRequest = (
+  query: string,
+  window: ThreadSearchWindow,
+  now: Common.TimestampMillis,
+): Remote.SearchThreadsRequest => {
   const trimmed = query.trim()
   return {
     ...(trimmed.length === 0 ? {} : { query: trimmed }),
     include_archived: false,
-    ...searchWindowAfter(window),
+    ...searchWindowAfter(window, now),
   }
 }
 
-const searchWindowAfter = (window: ThreadSearchWindow): Pick<Remote.SearchThreadsRequest, "after"> => {
+const searchWindowAfter = (
+  window: ThreadSearchWindow,
+  now: Common.TimestampMillis,
+): Pick<Remote.SearchThreadsRequest, "after"> => {
   if (window === "all") return {}
   const delta = window === "24h" ? 24 : window === "72h" ? 72 : 7 * 24
-  return { after: Common.TimestampMillis.make(Date.now() - delta * 60 * 60 * 1_000) }
+  return { after: Common.TimestampMillis.make(now - delta * 60 * 60 * 1_000) }
 }
 
 const threadSearchWindowFromValue = (value: string): ThreadSearchWindow =>
@@ -1537,34 +1632,54 @@ const withoutKey = (input: Record<string, string>, key: string) => {
   return next
 }
 
-const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model, ReadonlyArray<AppCommand>] => [
-  {
-    ...model,
-    selected_thread_id: threadId,
-    subscribed_thread_id: undefined,
-    selected_orb: undefined,
-    ...initialOrbWorkspace(),
-    confirm_kill_orb_id: undefined,
-    expanded_diff_ids: [],
-    pending_interrupt_turn_id: undefined,
-    events: [],
-    last_sequence: 0,
-    subscription_after_sequence: 0,
-    presence: [],
-    typing_presence_cooling: false,
-    connection: "loading",
-    notice: undefined,
-  },
-  [OpenThread({ api_base_url: model.api_base_url, thread_id: threadId })],
-]
+const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const requestToken = model.thread_request_token + 1
+  return [
+    {
+      ...model,
+      thread_request_token: requestToken,
+      active_thread_request_token: requestToken,
+      selected_thread_id: threadId,
+      subscribed_thread_id: undefined,
+      selected_orb: undefined,
+      ...initialOrbWorkspace(),
+      confirm_kill_orb_id: undefined,
+      expanded_diff_ids: [],
+      pending_interrupt_turn_id: undefined,
+      events: [],
+      last_sequence: 0,
+      subscription_after_sequence: 0,
+      subscription_retry: 0,
+      presence: [],
+      typing_presence_cooling: false,
+      pending_turn: false,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      active_turn_request_token: undefined,
+      creating_thread: false,
+      connection: "loading",
+      notice: undefined,
+    },
+    [OpenThread({ api_base_url: model.api_base_url, thread_id: threadId, request_token: requestToken })],
+  ]
+}
 
 const createdThreadModel = (
   model: Model,
   summary: Remote.ThreadSummary,
+  requestToken: number,
 ): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (
+    !model.creating_thread ||
+    model.selected_thread_id !== undefined ||
+    model.active_thread_request_token !== requestToken
+  ) {
+    return [model, []]
+  }
   const next = {
     ...model,
     threads: newestFirst([summary, ...model.threads.filter((thread) => thread.thread_id !== summary.thread_id)]),
+    active_thread_request_token: undefined,
     selected_thread_id: summary.thread_id,
     subscribed_thread_id: summary.thread_id,
     selected_orb: undefined,
@@ -1575,8 +1690,10 @@ const createdThreadModel = (
     events: [],
     last_sequence: 0,
     subscription_after_sequence: 0,
+    subscription_retry: 0,
     presence: [],
     typing_presence_cooling: false,
+    creating_thread: false,
     connection: "connected" as const,
     notice: undefined,
   }
@@ -1585,8 +1702,16 @@ const createdThreadModel = (
   if (content === undefined || content.length === 0) {
     return [{ ...next, pending_submit: undefined, pending_submit_mode: undefined }, []]
   }
+  const turnRequestToken = next.turn_request_token + 1
   return [
-    { ...next, pending_turn: true, pending_submit: undefined, pending_submit_mode: undefined },
+    {
+      ...next,
+      turn_request_token: turnRequestToken,
+      active_turn_request_token: turnRequestToken,
+      pending_turn: true,
+      pending_submit: content,
+      pending_submit_mode: mode,
+    },
     [
       StartTurn({
         api_base_url: model.api_base_url,
@@ -1594,15 +1719,46 @@ const createdThreadModel = (
         user_id: model.user_id,
         content,
         mode,
+        request_token: turnRequestToken,
       }),
     ],
   ]
 }
 
-const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly [Model, ReadonlyArray<AppCommand>] => {
+const failedCreateThreadModel = (
+  model: Model,
+  message: typeof FailedCreateThread.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.active_thread_request_token !== message.request_token) return [model, []]
+  return [
+    {
+      ...model,
+      active_thread_request_token: undefined,
+      connection: "failed",
+      pending_turn: false,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      active_turn_request_token: undefined,
+      creating_thread: false,
+      draft: model.pending_submit ?? model.draft,
+      notice: message.message,
+    },
+    [],
+  ]
+}
+
+const openedThreadModel = (
+  model: Model,
+  record: Remote.ThreadRecord,
+  requestToken: number,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.selected_thread_id !== record.summary.thread_id || model.active_thread_request_token !== requestToken) {
+    return [model, []]
+  }
   const lastSequence = lastEventSequence(record.events)
   const next = {
     ...model,
+    active_thread_request_token: undefined,
     selected_thread_id: record.summary.thread_id,
     subscribed_thread_id: record.summary.thread_id,
     selected_orb: undefined,
@@ -1617,17 +1773,27 @@ const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly 
     events: record.events,
     last_sequence: lastSequence,
     subscription_after_sequence: lastSequence,
+    subscription_retry: 0,
     presence: [],
     typing_presence_cooling: false,
+    creating_thread: false,
     connection: "connected" as const,
     notice: undefined,
   }
-  return [
-    next,
+  const orbCommands =
     record.summary.orb_status === undefined
       ? []
-      : [LoadSelectedOrb({ api_base_url: model.api_base_url, thread_id: record.summary.thread_id })],
-  ]
+      : [LoadSelectedOrb({ api_base_url: model.api_base_url, thread_id: record.summary.thread_id })]
+  const [drained, drainCommands] = drainQueuedMessagesModel(next)
+  return [drained, [...orbCommands, ...drainCommands]]
+}
+
+const failedOpenThreadModel = (
+  model: Model,
+  message: typeof FailedOpenThread.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.active_thread_request_token !== message.request_token) return [model, []]
+  return [{ ...model, active_thread_request_token: undefined, connection: "failed", notice: message.message }, []]
 }
 
 const changedDraftModel = (model: Model, value: string): readonly [Model, ReadonlyArray<AppCommand>] => {
@@ -1644,25 +1810,46 @@ const changedDraftModel = (model: Model, value: string): readonly [Model, Readon
 const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
   const content = model.draft.trim()
   if (content.length === 0) return [model, []]
-  if (activeTurnId(model.events) !== undefined) return [model, []]
+  if (activeTurnId(model.events) !== undefined && model.selected_thread_id !== undefined) {
+    return queueSubmittedMessageModel(
+      model,
+      { thread_id: model.selected_thread_id, content, mode: model.draft_mode },
+      "Turn already active - message queued",
+    )
+  }
   if (model.selected_thread_id === undefined) {
+    const requestToken = model.thread_request_token + 1
     return [
       {
         ...model,
+        thread_request_token: requestToken,
+        active_thread_request_token: requestToken,
         draft: "",
         pending_turn: true,
         pending_submit: content,
         pending_submit_mode: model.draft_mode,
         typing_presence_cooling: false,
+        creating_thread: true,
         connection: "loading",
         notice: undefined,
       },
-      [CreateThread({ api_base_url: model.api_base_url })],
+      [CreateThread({ api_base_url: model.api_base_url, request_token: requestToken })],
     ]
   }
+  const turnRequestToken = model.turn_request_token + 1
   const presence = presenceCommand(model, "active")
   return [
-    { ...model, draft: "", pending_turn: true, notice: undefined, typing_presence_cooling: false },
+    {
+      ...model,
+      turn_request_token: turnRequestToken,
+      active_turn_request_token: turnRequestToken,
+      draft: "",
+      pending_turn: true,
+      pending_submit: content,
+      pending_submit_mode: model.draft_mode,
+      notice: undefined,
+      typing_presence_cooling: false,
+    },
     [
       ...(presence === undefined ? [] : [presence]),
       StartTurn({
@@ -1671,10 +1858,87 @@ const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCo
         user_id: model.user_id,
         content,
         mode: model.draft_mode,
+        request_token: turnRequestToken,
       }),
     ],
   ]
 }
+
+const acceptedTurnModel = (
+  model: Model,
+  message: typeof AcceptedTurn.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.active_turn_request_token !== message.request_token) return [model, []]
+  if (model.selected_thread_id !== message.response.thread_id) return [model, []]
+  return [
+    {
+      ...model,
+      active_turn_request_token: undefined,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      notice: undefined,
+    },
+    [],
+  ]
+}
+
+const failedStartTurnModel = (
+  model: Model,
+  message: typeof FailedStartTurn.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.active_turn_request_token !== message.request_token) return [model, []]
+  const pending = pendingQueuedMessage(model)
+  if (message.status === 409 && pending !== undefined) {
+    return queueSubmittedMessageModel(
+      {
+        ...model,
+        active_turn_request_token: undefined,
+        pending_turn: false,
+        pending_submit: undefined,
+        pending_submit_mode: undefined,
+      },
+      pending,
+      conflictNotice(message.active_user_id),
+    )
+  }
+  return [
+    {
+      ...model,
+      active_turn_request_token: undefined,
+      pending_turn: false,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      draft: model.pending_submit ?? model.draft,
+      notice: message.message,
+    },
+    [],
+  ]
+}
+
+const pendingQueuedMessage = (model: Model): QueuedMessage | undefined =>
+  model.pending_submit === undefined || model.selected_thread_id === undefined
+    ? undefined
+    : { thread_id: model.selected_thread_id, content: model.pending_submit, mode: model.pending_submit_mode }
+
+const queueSubmittedMessageModel = (
+  model: Model,
+  queued: QueuedMessage,
+  notice: string,
+): readonly [Model, ReadonlyArray<AppCommand>] => [
+  {
+    ...model,
+    draft: "",
+    queued_messages: [...model.queued_messages, queued],
+    typing_presence_cooling: false,
+    notice,
+  },
+  [],
+]
+
+const conflictNotice = (activeUserId: Ids.UserId | undefined) =>
+  activeUserId === undefined
+    ? "Another turn is running - message queued"
+    : `${activeUserId} is running a turn - message queued`
 
 const presenceCommand = (model: Model, state: Remote.PresenceState): AppCommand | undefined =>
   model.selected_thread_id === undefined || model.user_id === undefined
@@ -1737,16 +2001,51 @@ const receivedEventModel = (model: Model, event: Event.Event): readonly [Model, 
   const terminalForPendingInterrupt =
     (event.type === "turn.completed" || event.type === "turn.failed") &&
     event.turn_id === model.pending_interrupt_turn_id
+  const next = {
+    ...model,
+    events: [...model.events, event],
+    last_sequence: event.sequence,
+    connection: "connected" as const,
+    pending_turn: event.type === "turn.completed" || event.type === "turn.failed" ? false : model.pending_turn,
+    pending_interrupt_turn_id: terminalForPendingInterrupt ? undefined : model.pending_interrupt_turn_id,
+  }
+  return event.type === "turn.completed" || event.type === "turn.failed" ? drainQueuedMessagesModel(next) : [next, []]
+}
+
+const drainQueuedMessagesModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const threadId = model.selected_thread_id
+  if (threadId === undefined || activeTurnId(model.events) !== undefined) {
+    return [model, []]
+  }
+  const queuedIndex = model.queued_messages.findIndex((message) => message.thread_id === threadId)
+  const queued = model.queued_messages[queuedIndex]
+  if (queued === undefined) return [model, []]
+  const turnRequestToken = model.turn_request_token + 1
+  const next = {
+    ...model,
+    turn_request_token: turnRequestToken,
+    active_turn_request_token: turnRequestToken,
+    draft: "",
+    queued_messages: model.queued_messages.filter((_, index) => index !== queuedIndex),
+    pending_turn: true,
+    pending_submit: queued.content,
+    pending_submit_mode: queued.mode,
+    notice: undefined,
+  }
+  const presence = presenceCommand(next, "active")
   return [
-    {
-      ...model,
-      events: [...model.events, event],
-      last_sequence: event.sequence,
-      connection: "connected",
-      pending_turn: event.type === "turn.completed" || event.type === "turn.failed" ? false : model.pending_turn,
-      pending_interrupt_turn_id: terminalForPendingInterrupt ? undefined : model.pending_interrupt_turn_id,
-    },
-    [],
+    next,
+    [
+      ...(presence === undefined ? [] : [presence]),
+      StartTurn({
+        api_base_url: model.api_base_url,
+        thread_id: threadId,
+        user_id: model.user_id,
+        content: queued.content,
+        mode: queued.mode,
+        request_token: turnRequestToken,
+      }),
+    ],
   ]
 }
 

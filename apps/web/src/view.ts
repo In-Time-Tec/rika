@@ -1,3 +1,4 @@
+import { Common } from "@rika/schema"
 import { html, type Document, type Html } from "foldkit/html"
 import {
   activeTurnId,
@@ -64,6 +65,8 @@ const searchWindowOptions: ReadonlyArray<Ui.SelectOption> = [
   { value: "all", label: "all" },
 ]
 
+const currentTimestamp = () => Common.TimestampMillis.make(Date.now())
+
 export const view = (model: Model): Document => ({
   title: model.selected_thread_id === undefined ? "Rika" : `Rika · ${shortId(model.selected_thread_id)}`,
   body: H.main([H.Class("shell")], [sidebar(model), workspace(model)]),
@@ -102,13 +105,13 @@ const threadSearchControls = (model: Model): Html =>
         H.Value(model.thread_search_query),
         H.Placeholder("Search threads"),
         H.AriaLabel("Thread search"),
-        H.OnInput((value) => ChangedThreadSearchQuery({ value })),
+        H.OnInput((value) => ChangedThreadSearchQuery({ value, now: currentTimestamp() })),
       ]),
       Ui.select({
         id: "thread-search-window",
         value: model.thread_search_window,
         options: searchWindowOptions,
-        onChange: (value) => ChangedThreadSearchWindow({ value }),
+        onChange: (value) => ChangedThreadSearchWindow({ value, now: currentTimestamp() }),
         attributes: [H.AriaLabel("Thread search window")],
         class: "thread-search-window",
       }),

@@ -198,6 +198,42 @@ describe("SDK client", () => {
     })
   })
 
+  test("keeps the event stream alive when a presence heartbeat fails", async () => {
+    const heartbeatAttempted = Effect.runSync(Deferred.make<void>())
+    const releaseEvent = Effect.runSync(Deferred.make<void>())
+    const started: Event.TurnStarted = {
+      id: eventId,
+      thread_id: threadId,
+      turn_id: turnId,
+      sequence: 1,
+      version: 1,
+      created_at: now,
+      type: "turn.started",
+      data: { user_id: userId },
+    }
+    const client = Client.make({
+      user_id: userId,
+      requestJson: () =>
+        Deferred.succeed(heartbeatAttempted, undefined).pipe(
+          Effect.andThen(
+            Effect.fail(new Client.SdkError({ message: "heartbeat failed", operation: "setThreadPresence" })),
+          ),
+        ),
+      streamJson: () =>
+        Stream.fromEffect(Deferred.await(releaseEvent).pipe(Effect.as(Codec.encode(Event.Event)(started)))),
+    })
+
+    const fiber = Effect.runFork(
+      client.subscribeThreadEvents({ thread_id: threadId }).pipe(Stream.take(1), Stream.runCollect),
+    )
+
+    await Effect.runPromise(Deferred.await(heartbeatAttempted).pipe(Effect.timeout("1 second")))
+    await Effect.runPromise(Deferred.succeed(releaseEvent, undefined))
+    const events = await Effect.runPromise(Fiber.join(fiber).pipe(Effect.timeout("1 second")))
+
+    expect(events).toEqual([started])
+  })
+
   test("uses shared schemas for thread preview requests", async () => {
     const calls: Array<Client.RequestInput> = []
     const summary: Remote.ThreadSummary = {
