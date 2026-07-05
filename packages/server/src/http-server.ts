@@ -939,49 +939,15 @@ const json = (value: unknown, status = 200) =>
 
 const ndjson = (events: Stream.Stream<Remote.StreamFrame, RemoteControl.RunError>) => {
   const encoder = new TextEncoder()
-  let closed = false
-  let fiber: Fiber.Fiber<void> | undefined
-  const writeFrame = (controller: ReadableStreamDefaultController<Uint8Array>, frame: Remote.StreamFrame) => {
-    if (closed) return
-    try {
-      controller.enqueue(encoder.encode(`${JSON.stringify(Codec.encode(Remote.StreamFrame)(frame))}\n`))
-    } catch {
-      closed = true
-    }
-  }
-  const close = (controller: ReadableStreamDefaultController<Uint8Array>) => {
-    if (closed) return
-    closed = true
-    try {
-      controller.close()
-    } catch {
-      return
-    }
-  }
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      const pump = events.pipe(
-        Stream.runForEach((event) => Effect.sync(() => writeFrame(controller, event))),
-        Effect.catchCause((cause: Cause.Cause<RemoteControl.RunError>) =>
-          Cause.hasInterruptsOnly(cause)
-            ? Effect.void
-            : Effect.sync(() => writeFrame(controller, errorFrameFromCause(cause))),
-        ),
-        Effect.ensuring(Effect.sync(() => close(controller))),
-      )
-      fiber = Effect.runFork(pump)
-    },
-    cancel() {
-      closed = true
-      if (fiber !== undefined) {
-        return Effect.runPromise(Fiber.interrupt(fiber)).then(
-          () => undefined,
-          () => undefined,
-        )
-      }
-      return undefined
-    },
-  })
+  const encodeFrame = (frame: Remote.StreamFrame) =>
+    encoder.encode(`${JSON.stringify(Codec.encode(Remote.StreamFrame)(frame))}\n`)
+  const body = events.pipe(
+    Stream.catchCause((cause: Cause.Cause<RemoteControl.RunError>) =>
+      Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.make(errorFrameFromCause(cause)),
+    ),
+    Stream.map(encodeFrame),
+    Stream.toReadableStream,
+  )
   return new Response(body, { headers: { "content-type": "application/x-ndjson" } })
 }
 

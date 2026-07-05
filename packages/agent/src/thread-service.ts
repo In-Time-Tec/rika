@@ -1,4 +1,4 @@
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, StringArray, Time } from "@rika/core"
 import { ModelInfo } from "@rika/llm"
 import { Database, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
@@ -631,7 +631,7 @@ const referenceEntries = (record: ThreadRecord, terms: ReadonlyArray<string>) =>
     terms.length === 0
       ? messages
       : messages.filter((message) => terms.some((term) => message.toLowerCase().includes(term)))
-  const selected = uniqueStrings([
+  const selected = StringArray.uniqueNonEmptyStrings([
     `Thread ${record.summary.thread_id}`,
     `Workspace: ${record.summary.workspace_id}`,
     `Visibility: ${record.summary.visibility}`,
@@ -660,11 +660,11 @@ const scoreSummary = (
     terms.length === 0
       ? 0
       : terms.reduce((total, term) => total + fields.filter((field) => field.toLowerCase().includes(term)).length, 0)
-  return { summary, score, matched: uniqueStrings(matched).slice(0, 8) }
+  return { summary, score, matched: StringArray.uniqueNonEmptyStrings(matched).slice(0, 8) }
 }
 
 const searchableFields = (summary: ThreadSummary, events: ReadonlyArray<Event.Event>) =>
-  uniqueStrings([
+  StringArray.uniqueNonEmptyStrings([
     summary.thread_id,
     summary.workspace_id,
     summary.user_id ?? "",
@@ -908,5 +908,4 @@ const capText = (text: string, maxChars: number) =>
 
 const latestSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.sequence ?? 0
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(Math.floor(value), min), max)
-const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim()

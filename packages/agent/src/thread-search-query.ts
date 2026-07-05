@@ -1,3 +1,4 @@
+import { StringArray } from "@rika/core"
 import { Common } from "@rika/schema"
 
 export type RelativeDateUnit = "h" | "d" | "w"
@@ -50,8 +51,8 @@ export const parseThreadSearchQuery = (query: string): ParsedThreadSearchQuery =
   }
 
   return {
-    terms: unique(terms),
-    file_globs: unique(fileGlobs),
+    terms: StringArray.uniqueNonEmptyStrings(terms),
+    file_globs: StringArray.uniqueNonEmptyStrings(fileGlobs),
     ...(after === undefined ? {} : { after }),
     ...(before === undefined ? {} : { before }),
     ...(archived === undefined ? {} : { archived }),
@@ -177,4 +178,3 @@ const isRelativeDateUnit = (value: string | undefined): value is RelativeDateUni
 
 const normalizePath = (value: string) => value.trim().replace(/\\/g, "/").replace(/^\.\//, "")
 const escapeRegExp = (value: string) => value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
-const unique = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]

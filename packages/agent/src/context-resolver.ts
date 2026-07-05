@@ -1,7 +1,7 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { Config, Settings } from "@rika/core"
+import { Config, Settings, StringArray } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Embeddings } from "@rika/llm"
 import { ThreadMemoryStore } from "@rika/persistence"
@@ -114,7 +114,7 @@ const makeService = (
     resolve: Effect.fn("ContextResolver.resolve")(function* (input: ResolveInput) {
       const maxContentChars = clamp(input.max_content_chars ?? defaultMaxContentChars, 2_000, 80_000)
       const mentions = parseMentions(input.content)
-      const relevantPaths = uniqueStrings([
+      const relevantPaths = StringArray.uniqueNonEmptyStrings([
         ...mentions.files.map((mention) => mention.value),
         ...mentions.images.map((mention) => mention.value),
         ...observedPaths(input.history ?? []),
@@ -211,7 +211,7 @@ const threadReferences = (content: string): ReadonlyArray<string> => {
     const value = trimTrailingPunctuation((match[1] ?? "").split(/[/?#]/)[0] ?? "")
     if (isThreadReferenceId(value)) values.push(value)
   }
-  return uniqueStrings(values)
+  return StringArray.uniqueNonEmptyStrings(values)
 }
 
 const isThreadReferenceId = (value: string) => ampThreadId(value) || rikaThreadId(value)
@@ -228,7 +228,7 @@ const fileMentions = (content: string): ReadonlyArray<string> => {
     if (!looksLikePath(value)) continue
     values.push(trimTrailingPunctuation(value))
   }
-  return uniqueStrings(values)
+  return StringArray.uniqueNonEmptyStrings(values)
 }
 
 const looksLikePath = (value: string) =>
@@ -248,7 +248,7 @@ const resolveGuidanceEntries = (
   relevantPaths: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyArray<Event.ContextEntry>, ContextResolverError> =>
   Effect.gen(function* () {
-    const guidanceDirectories = uniqueStrings([
+    const guidanceDirectories = StringArray.uniqueNonEmptyStrings([
       ...ancestorDirectories(workspaceRoot),
       ...subtreeDirectories(workspaceRoot, relevantPaths),
     ])
@@ -257,7 +257,11 @@ const resolveGuidanceEntries = (
       const path = yield* firstExistingGuidance(fileSystem, directory)
       if (path !== undefined) localGuidance.push(path)
     }
-    const locations = uniqueStrings([...systemGuidancePaths(), ...userGuidancePaths(), ...localGuidance])
+    const locations = StringArray.uniqueNonEmptyStrings([
+      ...systemGuidancePaths(),
+      ...userGuidancePaths(),
+      ...localGuidance,
+    ])
 
     const entries: Array<Event.ContextEntry> = []
     for (const path of locations) {
@@ -318,7 +322,7 @@ const subtreeDirectories = (workspaceRoot: string, relevantPaths: ReadonlyArray<
       current = dirname(current)
     }
   }
-  return uniqueStrings(directories.toSorted((left, right) => left.length - right.length))
+  return StringArray.uniqueNonEmptyStrings(directories.toSorted((left, right) => left.length - right.length))
 }
 
 const systemGuidancePaths = () => [
@@ -552,7 +556,7 @@ const observedPaths = (events: ReadonlyArray<Event.Event>) => {
       paths.push(...pathsFromJson(event.data.result.output))
     }
   }
-  return uniqueStrings(paths).slice(0, 50)
+  return StringArray.uniqueNonEmptyStrings(paths).slice(0, 50)
 }
 
 const pathsFromJson = (value: Common.JsonValue): ReadonlyArray<string> => {
@@ -615,7 +619,7 @@ const parseGlobs = (yaml: string): ReadonlyArray<string> => {
     }
     if (inGlobs && line.trim().length > 0 && !line.startsWith(" ")) inGlobs = false
   }
-  return uniqueStrings(globs.filter(Boolean))
+  return StringArray.uniqueNonEmptyStrings(globs)
 }
 
 const inlineArray = (value: string) => {
@@ -725,8 +729,6 @@ const dedupeEntries = (entries: ReadonlyArray<Event.ContextEntry>) => {
   }
   return result
 }
-
-const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 
 const unquote = (value: string) => value.replace(/^['"]|['"]$/g, "")
 const slashPath = (path: string) => path.split(sep).join("/")

@@ -1,3 +1,4 @@
+import { StringArray } from "@rika/core"
 import { Common, Event, Ids, Message } from "@rika/schema"
 import { Option, Schema } from "effect"
 
@@ -30,7 +31,7 @@ export const toolEntries = (events: ReadonlyArray<Event.Event>) =>
   })
 
 export const toolNames = (events: ReadonlyArray<Event.Event>) =>
-  uniqueStrings(
+  StringArray.uniqueNonEmptyStrings(
     events.flatMap((event) => {
       if (event.type === "tool.call.requested") return [event.data.call.name]
       if (event.type === "tool.call.completed") return [event.data.result.name]
@@ -38,7 +39,8 @@ export const toolNames = (events: ReadonlyArray<Event.Event>) =>
     }),
   )
 
-export const fileEntries = (events: ReadonlyArray<Event.Event>) => uniqueStrings(events.flatMap(pathsFromEvent))
+export const fileEntries = (events: ReadonlyArray<Event.Event>) =>
+  StringArray.uniqueNonEmptyStrings(events.flatMap(pathsFromEvent))
 
 export const pathsFromEvent = (event: Event.Event): ReadonlyArray<string> => {
   if (event.type === "message.added") {
@@ -94,7 +96,6 @@ const truncateBody = (body: string, limit: number) => {
   return body.length <= limit ? body : body.slice(0, limit)
 }
 
-const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim()
 const isPathKey = (key: string) =>
   key === "path" || key === "file" || key === "filename" || key === "file_path" || key === "filepath"

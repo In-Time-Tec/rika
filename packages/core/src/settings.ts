@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import { join } from "node:path"
-import { ConfigProvider, Context, Effect, Layer, Schema } from "effect"
+import { ConfigProvider, Context, Effect, Layer, Option, Result, Schema } from "effect"
 import * as EnvConfig from "./env-config"
 
 const defaultOrbTemplate = "rika-orb"
@@ -274,9 +274,14 @@ const validateRecord = (
   const warnings: Array<Warning> = []
   for (const [key, value] of Object.entries(record)) {
     if (isSettingKey(key)) {
-      const validated = validateSettingValue(key, value)
-      if (validated.valid) values[key] = validated.value
-      else warnings.push({ source, path, key, message: validated.message })
+      Result.match(validateSettingValue(key, value), {
+        onSuccess: (validated) => {
+          values[key] = validated
+        },
+        onFailure: (message) => {
+          warnings.push({ source, path, key, message })
+        },
+      })
     } else if (key === "keymap") {
       const validated = validateKeymap(value, path, source)
       Object.assign(keymap, validated.values)
@@ -428,125 +433,120 @@ const optionalPositiveInteger = (provider: ConfigProvider.ConfigProvider, key: s
 const optionalNonNegativeInteger = (provider: ConfigProvider.ConfigProvider, key: string) =>
   EnvConfig.optionalDecimalInteger(provider, key)
 
+const resolvedOption = <A>(source: SettingSource, value: A | undefined): Option.Option<ResolvedValue<A>> =>
+  value === undefined ? Option.none() : Option.some({ value, source })
+
+const resolvePrecedence = <A>(
+  env: A | undefined,
+  workspace: A | undefined,
+  user: A | undefined,
+  fallback: ResolvedValue<A>,
+): ResolvedValue<A> =>
+  Option.getOrElse(
+    Option.firstSomeOf([
+      resolvedOption("env", env),
+      resolvedOption("workspace", workspace),
+      resolvedOption("user", user),
+    ]),
+    () => fallback,
+  )
+
 const resolveString = (
   key: SettingKey,
   envValue: string | undefined,
   loaded: LoadedSettings,
   fallback: string,
-): ResolvedValue<string> => {
-  const envString = validString(envValue)
-  if (envString !== undefined) return { value: envString, source: "env" }
-  const workspace = validString(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validString(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<string> =>
+  resolvePrecedence(validString(envValue), validString(loaded.workspace[key]), validString(loaded.user[key]), {
+    value: fallback,
+    source: "default",
+  })
 
 const resolveOptionalString = (
   key: SettingKey,
   envValue: string | undefined,
   loaded: LoadedSettings,
-): ResolvedValue<string | undefined> => {
-  const envString = validString(envValue)
-  if (envString !== undefined) return { value: envString, source: "env" }
-  const workspace = validString(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validString(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: undefined, source: "default" }
-}
+): ResolvedValue<string | undefined> =>
+  resolvePrecedence(validString(envValue), validString(loaded.workspace[key]), validString(loaded.user[key]), {
+    value: undefined,
+    source: "default",
+  })
 
 const resolveMode = (
   key: SettingKey,
   envValue: Mode | undefined,
   loaded: LoadedSettings,
   fallback: Mode,
-): ResolvedValue<Mode> => {
-  if (envValue !== undefined) return { value: envValue, source: "env" }
-  const workspace = validMode(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validMode(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<Mode> =>
+  resolvePrecedence(envValue, validMode(loaded.workspace[key]), validMode(loaded.user[key]), {
+    value: fallback,
+    source: "default",
+  })
 
 const resolvePositiveInteger = (
   key: SettingKey,
   envValue: number | undefined,
   loaded: LoadedSettings,
   fallback: number,
-): ResolvedValue<number> => {
-  if (envValue !== undefined) return { value: envValue, source: "env" }
-  const workspace = validPositiveIntegerSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validPositiveIntegerSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<number> =>
+  resolvePrecedence(
+    envValue,
+    validPositiveIntegerSetting(loaded.workspace[key]),
+    validPositiveIntegerSetting(loaded.user[key]),
+    {
+      value: fallback,
+      source: "default",
+    },
+  )
 
 const resolveNonNegativeIntegerOption = (
   key: SettingKey,
   envValue: number | undefined,
   loaded: LoadedSettings,
-): ResolvedValue<number | undefined> => {
-  if (envValue !== undefined) return { value: envValue, source: "env" }
-  const workspace = validNonNegativeIntegerSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validNonNegativeIntegerSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: undefined, source: "default" }
-}
+): ResolvedValue<number | undefined> =>
+  resolvePrecedence(
+    envValue,
+    validNonNegativeIntegerSetting(loaded.workspace[key]),
+    validNonNegativeIntegerSetting(loaded.user[key]),
+    {
+      value: undefined,
+      source: "default",
+    },
+  )
 
 const resolveBooleanOption = (
   key: SettingKey,
   envValue: boolean | undefined,
   loaded: LoadedSettings,
-): ResolvedValue<boolean | undefined> => {
-  if (envValue !== undefined) return { value: envValue, source: "env" }
-  const workspace = validBooleanSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validBooleanSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: undefined, source: "default" }
-}
+): ResolvedValue<boolean | undefined> =>
+  resolvePrecedence(envValue, validBooleanSetting(loaded.workspace[key]), validBooleanSetting(loaded.user[key]), {
+    value: undefined,
+    source: "default",
+  })
 
 const resolveBoolean = (
   key: SettingKey,
   envValue: boolean | undefined,
   loaded: LoadedSettings,
   fallback: boolean,
-): ResolvedValue<boolean> => {
-  if (envValue !== undefined) return { value: envValue, source: "env" }
-  const workspace = validBooleanSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validBooleanSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<boolean> =>
+  resolvePrecedence(envValue, validBooleanSetting(loaded.workspace[key]), validBooleanSetting(loaded.user[key]), {
+    value: fallback,
+    source: "default",
+  })
 
-type ValidationResult =
-  | { readonly valid: true; readonly value: unknown }
-  | { readonly valid: false; readonly message: string }
-
-const validateSettingValue = (key: SettingKey, value: unknown): ValidationResult => {
+const validateSettingValue = (key: SettingKey, value: unknown): Result.Result<unknown, string> => {
   if (key === "orb.template" || key === "project.default" || key === "user.name" || key === "telemetry.endpoint") {
     const string = validString(value)
-    return string === undefined
-      ? { valid: false, message: `Setting ${key} must be a non-empty string.` }
-      : { valid: true, value: string }
+    return string === undefined ? Result.fail(`Setting ${key} must be a non-empty string.`) : Result.succeed(string)
   }
   if (key === "orb.idleTimeoutSeconds") {
     const integer = validPositiveIntegerSetting(value)
-    return integer === undefined
-      ? { valid: false, message: `Setting ${key} must be a positive integer.` }
-      : { valid: true, value: integer }
+    return integer === undefined ? Result.fail(`Setting ${key} must be a positive integer.`) : Result.succeed(integer)
   }
   if (key === "mode.default") {
     const mode = validMode(value)
-    return mode === undefined
-      ? { valid: false, message: `Setting ${key} must be one of ${modes.join(", ")}.` }
-      : { valid: true, value: mode }
+    return mode === undefined ? Result.fail(`Setting ${key} must be one of ${modes.join(", ")}.`) : Result.succeed(mode)
   }
   if (
     key === "compaction.auto" ||
@@ -555,14 +555,10 @@ const validateSettingValue = (key: SettingKey, value: unknown): ValidationResult
     key === "telemetry.enabled"
   ) {
     const boolean = validBooleanSetting(value)
-    return boolean === undefined
-      ? { valid: false, message: `Setting ${key} must be a boolean.` }
-      : { valid: true, value: boolean }
+    return boolean === undefined ? Result.fail(`Setting ${key} must be a boolean.`) : Result.succeed(boolean)
   }
   const integer = validNonNegativeIntegerSetting(value)
-  return integer === undefined
-    ? { valid: false, message: `Setting ${key} must be a non-negative integer.` }
-    : { valid: true, value: integer }
+  return integer === undefined ? Result.fail(`Setting ${key} must be a non-negative integer.`) : Result.succeed(integer)
 }
 
 const validateKeymap = (

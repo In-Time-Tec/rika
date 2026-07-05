@@ -1,3 +1,4 @@
+import { Data, Equal, Result } from "effect"
 import * as Keys from "./keys"
 
 export type Surface = "input" | "palette" | "modepicker" | "overlay"
@@ -112,17 +113,16 @@ interface ResolvedBinding {
   readonly when?: (context: Context) => boolean
 }
 
-interface KeyPattern {
+class KeyPattern extends Data.Class<{
   readonly name: string
   readonly ctrl: boolean
   readonly alt: boolean
   readonly meta: boolean
   readonly shift: boolean
-}
+}> {}
 
-type ParsedChord =
-  | { readonly _tag: "Valid"; readonly keys: ReadonlyArray<KeyPattern>; readonly chord: string }
-  | { readonly _tag: "Invalid"; readonly message: string }
+type ParsedChord = Result.Result<{ readonly keys: ReadonlyArray<KeyPattern>; readonly chord: string }, string>
+type ParsedToken = Result.Result<{ readonly pattern: KeyPattern; readonly label: string }, string>
 
 const action = (value: Action): Resolution => ({ _tag: "Action", action: value })
 const pending = (chord: Pending): Resolution => ({ _tag: "Pending", chord })
@@ -130,7 +130,15 @@ const ignore: Resolution = { _tag: "Ignore" }
 
 const leaderId = "leader"
 const defaultLeaderChord = "ctrl+x"
-const defaultLeaderPattern: KeyPattern = { name: "x", ctrl: true, alt: false, meta: false, shift: false }
+const keyPattern = (input: {
+  readonly name: string
+  readonly ctrl: boolean
+  readonly alt: boolean
+  readonly meta: boolean
+  readonly shift: boolean
+}) => new KeyPattern(input)
+
+const defaultLeaderPattern = keyPattern({ name: "x", ctrl: true, alt: false, meta: false, shift: false })
 
 const actionDefinitions: ReadonlyArray<BindingDefinition> = [
   {
@@ -585,26 +593,32 @@ export const effectiveKeymap = (input: SettingsInput = { entries: {}, sources: {
     }
     if (override !== undefined) {
       const parsed = parseChord(override, leader.pattern)
-      if (parsed._tag === "Valid") {
-        entries.push({ id, chord: parsed.chord, description: definition.description, source })
-        bindings.push({ ...definition, keys: parsed.keys })
-        continue
-      }
-      warnings.push({ action_id: id, source, message: parsed.message })
+      const applied = Result.match(parsed, {
+        onSuccess: ({ chord, keys }) => {
+          entries.push({ id, chord, description: definition.description, source })
+          bindings.push({ ...definition, keys })
+          return true
+        },
+        onFailure: (message) => {
+          warnings.push({ action_id: id, source, message })
+          return false
+        },
+      })
+      if (applied) continue
     }
 
     const parsedDefault = parseChord(definition.defaultChord, leader.pattern)
-    if (parsedDefault._tag === "Valid") {
+    if (Result.isSuccess(parsedDefault)) {
       entries.push({
         id,
-        chord: parsedDefault.chord,
+        chord: parsedDefault.success.chord,
         description: definition.description,
         source: "default",
       })
       for (const defaultDefinition of definitions) {
         const parsedDefaultBinding = parseChord(defaultDefinition.defaultChord, leader.pattern)
-        if (parsedDefaultBinding._tag === "Valid") {
-          bindings.push({ ...defaultDefinition, keys: parsedDefaultBinding.keys })
+        if (Result.isSuccess(parsedDefaultBinding)) {
+          bindings.push({ ...defaultDefinition, keys: parsedDefaultBinding.success.keys })
         }
       }
     }
@@ -707,28 +721,27 @@ const resolveLeader = (
     return { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
   }
   const parsed = parseChord(override, defaultLeaderPattern)
-  if (parsed._tag === "Invalid" || parsed.keys.length !== 1) {
+  if (Result.isFailure(parsed) || parsed.success.keys.length !== 1) {
     warnings.push({ action_id: leaderId, source, message: "Leader must be a single non-leader chord." })
     return { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
   }
-  const [pattern] = parsed.keys
+  const [pattern] = parsed.success.keys
   return pattern === undefined
     ? { pattern: defaultLeaderPattern, chord: defaultLeaderChord, source: "default" }
-    : { pattern, chord: parsed.chord, source }
+    : { pattern, chord: parsed.success.chord, source }
 }
 
 const parseChord = (chord: string, leader: KeyPattern): ParsedChord => {
   const tokens = chordTokens(chord)
-  if (tokens.length === 0) return { _tag: "Invalid", message: "Chord must contain at least one key." }
+  if (tokens.length === 0) return Result.fail("Chord must contain at least one key.")
   const parsed = tokens.map((token) => parseToken(token, leader))
-  const invalid = parsed.find((token) => token._tag === "Invalid")
-  if (invalid?._tag === "Invalid") return invalid
-  const valid = parsed.filter((token) => token._tag === "Valid")
-  return {
-    _tag: "Valid",
+  const invalid = parsed.find(Result.isFailure)
+  if (invalid !== undefined) return Result.fail(invalid.failure)
+  const valid = parsed.filter(Result.isSuccess).map((token) => token.success)
+  return Result.succeed({
     keys: valid.map((token) => token.pattern),
     chord: valid.map((token) => token.label).join(" "),
-  }
+  })
 }
 
 const chordTokens = (chord: string): ReadonlyArray<string> => {
@@ -739,17 +752,12 @@ const chordTokens = (chord: string): ReadonlyArray<string> => {
 
 const containsLeaderToken = (chord: string) => chordTokens(chord).includes("<leader>")
 
-const parseToken = (
-  token: string,
-  leader: KeyPattern,
-):
-  | { readonly _tag: "Valid"; readonly pattern: KeyPattern; readonly label: string }
-  | { readonly _tag: "Invalid"; readonly message: string } => {
-  if (token === "<leader>") return { _tag: "Valid", pattern: leader, label: "<leader>" }
+const parseToken = (token: string, leader: KeyPattern): ParsedToken => {
+  if (token === "<leader>") return Result.succeed({ pattern: leader, label: "<leader>" })
   const parts = token.split("+")
-  if (parts.some((part) => part.length === 0)) return { _tag: "Invalid", message: `Invalid chord token ${token}.` }
+  if (parts.some((part) => part.length === 0)) return Result.fail(`Invalid chord token ${token}.`)
   const key = parts.at(-1)
-  if (key === undefined) return { _tag: "Invalid", message: `Invalid chord token ${token}.` }
+  if (key === undefined) return Result.fail(`Invalid chord token ${token}.`)
   const modifiers = parts.slice(0, -1)
   let ctrl = false
   let alt = false
@@ -767,12 +775,12 @@ const parseToken = (
     )
       meta = true
     else if (modifier === "shift") shift = true
-    else return { _tag: "Invalid", message: `Unknown chord modifier ${modifier}.` }
+    else return Result.fail(`Unknown chord modifier ${modifier}.`)
   }
   const name = keyName(key)
-  if (name === undefined) return { _tag: "Invalid", message: `Unknown chord key ${key}.` }
-  const pattern = { name, ctrl, alt, meta, shift }
-  return { _tag: "Valid", pattern, label: formatPattern(pattern) }
+  if (name === undefined) return Result.fail(`Unknown chord key ${key}.`)
+  const pattern = keyPattern({ name, ctrl, alt, meta, shift })
+  return Result.succeed({ pattern, label: formatPattern(pattern) })
 }
 
 const keyName = (key: string): string | undefined => {
@@ -800,21 +808,22 @@ const knownKeyNames = new Set([
   "up",
 ])
 
-const patternFromKey = (key: Keys.Key): KeyPattern => ({
-  name: keyName(key.name.toLowerCase()) ?? key.name.toLowerCase(),
-  ctrl: key.ctrl,
-  alt: key.alt,
-  meta: key.meta,
-  shift: key.shift,
-})
+const patternFromKey = (key: Keys.Key): KeyPattern =>
+  keyPattern({
+    name: keyName(key.name.toLowerCase()) ?? key.name.toLowerCase(),
+    ctrl: key.ctrl,
+    alt: key.alt,
+    meta: key.meta,
+    shift: key.shift,
+  })
 
 const pendingPatterns = (current: Pending, keymap: EffectiveKeymap): ReadonlyArray<KeyPattern> => {
   if (current === "leader") return [keymap.leader]
-  if (current === "ctrl-c") return [{ name: "c", ctrl: true, alt: false, meta: false, shift: false }]
-  if (current === "esc") return [{ name: "escape", ctrl: false, alt: false, meta: false, shift: false }]
-  if (current === "enter") return [{ name: "return", ctrl: false, alt: false, meta: false, shift: false }]
+  if (current === "ctrl-c") return [keyPattern({ name: "c", ctrl: true, alt: false, meta: false, shift: false })]
+  if (current === "esc") return [keyPattern({ name: "escape", ctrl: false, alt: false, meta: false, shift: false })]
+  if (current === "enter") return [keyPattern({ name: "return", ctrl: false, alt: false, meta: false, shift: false })]
   const parsed = parseChord(current, keymap.leader)
-  return parsed._tag === "Valid" ? parsed.keys : []
+  return Result.match(parsed, { onSuccess: ({ keys }) => keys, onFailure: () => [] })
 }
 
 const isPrefix = (candidate: ReadonlyArray<KeyPattern>, full: ReadonlyArray<KeyPattern>) =>
@@ -824,12 +833,7 @@ const isPrefix = (candidate: ReadonlyArray<KeyPattern>, full: ReadonlyArray<KeyP
     return expected !== undefined && patternEquals(pattern, expected)
   })
 
-const patternEquals = (left: KeyPattern, right: KeyPattern) =>
-  left.name === right.name &&
-  left.ctrl === right.ctrl &&
-  left.alt === right.alt &&
-  left.meta === right.meta &&
-  left.shift === right.shift
+const patternEquals = (left: KeyPattern, right: KeyPattern) => Equal.equals(left, right)
 
 const pendingLabel = (patterns: ReadonlyArray<KeyPattern>, keymap: EffectiveKeymap): Pending => {
   if (patterns.length === 1) {
@@ -837,18 +841,18 @@ const pendingLabel = (patterns: ReadonlyArray<KeyPattern>, keymap: EffectiveKeym
     if (pattern !== undefined && patternEquals(pattern, keymap.leader)) return "leader"
     if (
       pattern !== undefined &&
-      patternEquals(pattern, { name: "c", ctrl: true, alt: false, meta: false, shift: false })
+      patternEquals(pattern, keyPattern({ name: "c", ctrl: true, alt: false, meta: false, shift: false }))
     )
       return "ctrl-c"
     if (
       pattern !== undefined &&
-      patternEquals(pattern, { name: "escape", ctrl: false, alt: false, meta: false, shift: false })
+      patternEquals(pattern, keyPattern({ name: "escape", ctrl: false, alt: false, meta: false, shift: false }))
     ) {
       return "esc"
     }
     if (
       pattern !== undefined &&
-      patternEquals(pattern, { name: "return", ctrl: false, alt: false, meta: false, shift: false })
+      patternEquals(pattern, keyPattern({ name: "return", ctrl: false, alt: false, meta: false, shift: false }))
     ) {
       return "enter"
     }

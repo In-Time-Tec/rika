@@ -1,3 +1,4 @@
+import { StringArray } from "@rika/core"
 import { Common, Event } from "@rika/schema"
 import { Option, Schema } from "effect"
 import { sql } from "drizzle-orm"
@@ -55,7 +56,7 @@ const pathsFromJson = (value: Common.JsonValue): ReadonlyArray<string> => {
   if (typeof value === "string") return looksLikePath(value) ? [normalizePath(value)] : []
   if (Array.isArray(value)) return value.flatMap(pathsFromJson)
   if (!isJsonObject(value)) return []
-  return uniqueStrings(
+  return StringArray.uniqueNonEmptyStrings(
     Object.entries(value).flatMap(([key, child]) =>
       isPathKey(key) && typeof child === "string" && looksLikePath(child)
         ? [normalizePath(child)]
@@ -86,5 +87,3 @@ const looksLikePath = (value: string) => {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(normalized)) return false
   return normalized.includes("/") || /\.[A-Za-z0-9]+$/.test(normalized)
 }
-
-const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]

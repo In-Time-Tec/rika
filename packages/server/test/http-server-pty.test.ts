@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Diagnostics, SecretRedactor, Time } from "@rika/core"
 import { OrbChanges, OrbPty } from "@rika/orb"
+import { Codec, Common, Event, Ids, Remote } from "@rika/schema"
 import { Effect, Layer, ManagedRuntime, Stream } from "effect"
 import { HttpServer, PresenceHub, RemoteControl } from "../src/index"
 import {
@@ -17,6 +18,51 @@ const encoder = new TextEncoder()
 const decoder = new TextDecoder()
 
 describe("orb PTY WebSocket", () => {
+  test("writes thread event streams as newline-delimited JSON frames", async () => {
+    const streamThreadId = Ids.ThreadId.make("thread_http_ndjson")
+    const streamTurnId = Ids.TurnId.make("turn_http_ndjson")
+    const event: Event.TurnStarted = {
+      id: Ids.EventId.make("event_http_ndjson"),
+      thread_id: streamThreadId,
+      turn_id: streamTurnId,
+      sequence: 1,
+      version: 1,
+      created_at: Common.TimestampMillis.make(1),
+      type: "turn.started",
+      data: {},
+    }
+    let subscribed: Remote.SubscribeThreadEventsRequest | undefined
+    const runtime = ManagedRuntime.make(
+      makeLayer(
+        unavailablePtyLayer,
+        Layer.succeed(
+          RemoteControl.Service,
+          remoteService({
+            subscribeThreadEvents: (input) => {
+              subscribed = input
+              return Stream.make(event)
+            },
+          }),
+        ),
+      ),
+    )
+
+    try {
+      const response = await runtime.runPromise(
+        HttpServer.handle(new Request(`http://localhost/v1/threads/${streamThreadId}/events?after_sequence=0`)),
+      )
+      const body = await response.text()
+      const expectedLine = JSON.stringify(Codec.encode(Remote.StreamFrame)(event))
+
+      expect(response.headers.get("content-type")).toBe("application/x-ndjson")
+      expect(subscribed).toEqual({ thread_id: streamThreadId, after_sequence: 0 })
+      expect(body).toBe(`${expectedLine}\n`)
+      expect(body.split("\n")).toEqual([expectedLine, ""])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   test("is orb-only, authenticates with query token, and pipes binary frames through the PTY", async () => {
     const writes: Array<string> = []
     const resizes: Array<{ readonly cols: number; readonly rows: number }> = []
@@ -376,7 +422,10 @@ describe("orb PTY WebSocket", () => {
   }, 20_000)
 })
 
-const makeLayer = (pty: Layer.Layer<OrbPty.Service, never, Diagnostics.Service>) => {
+const makeLayer = (
+  pty: Layer.Layer<OrbPty.Service, never, Diagnostics.Service>,
+  remote: Layer.Layer<RemoteControl.Service> = remoteLayer,
+) => {
   const redactorLayer = SecretRedactor.layer
   const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const ptyLayer = pty.pipe(Layer.provideMerge(diagnosticsLayer))
@@ -386,14 +435,23 @@ const makeLayer = (pty: Layer.Layer<OrbPty.Service, never, Diagnostics.Service>)
     }),
   ).pipe(
     Layer.provideMerge(ptyLayer),
-    Layer.provideMerge(remoteLayer),
+    Layer.provideMerge(remote),
     Layer.provideMerge(PresenceHub.layer.pipe(Layer.provideMerge(Time.layer))),
     Layer.provideMerge(diagnosticsLayer),
   )
 }
 
-const remoteLayer = Layer.succeed(
-  RemoteControl.Service,
+const unavailablePtyLayer = OrbPty.testLayer({
+  open: () =>
+    Effect.fail(
+      new OrbPty.OrbPtyError({
+        message: "unexpected PTY open",
+        operation: "open",
+      }),
+    ),
+})
+
+const remoteService = (overrides: Partial<RemoteControl.Interface> = {}) =>
   RemoteControl.Service.of({
     backendHealth: () =>
       Effect.succeed({
@@ -441,8 +499,10 @@ const remoteLayer = Layer.succeed(
     ideStatus: () => unexpected("ideStatus"),
     openIdeFile: () => unexpected("openIdeFile"),
     ideNavigationRequests: () => unexpected("ideNavigationRequests"),
-  }),
-)
+    ...overrides,
+  })
+
+const remoteLayer = Layer.succeed(RemoteControl.Service, remoteService())
 
 const unexpected = <A>(operation: string): Effect.Effect<A, RemoteControl.RemoteControlError> =>
   Effect.fail(new RemoteControl.RemoteControlError({ message: `unexpected ${operation}`, operation, status: 500 }))
