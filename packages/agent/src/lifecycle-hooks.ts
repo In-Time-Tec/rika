@@ -49,6 +49,7 @@ export interface LayerOptions {
 
 const defaultSetupTimeout: Duration.Input = "5 minutes"
 const defaultResumeTimeout: Duration.Input = "10 seconds"
+const processTerminationGrace: Duration.Input = "1 second"
 
 export const layerWithOptions = (options: LayerOptions = {}) =>
   Layer.succeed(
@@ -308,12 +309,20 @@ const timeoutHookError = (hook: HookName, workspaceRoot: string, path: string) =
   })
 
 const terminateProcess = (process: SetupProcess) =>
-  Effect.sync(() => {
+  Effect.gen(function* () {
     killProcessGroup(process.process.pid, "SIGTERM")
     killProcess(process.process, "SIGTERM")
+    const exited = yield* Effect.race(
+      waitForProcessExit(process).pipe(Effect.as(true)),
+      Effect.sleep(processTerminationGrace).pipe(Effect.as(false)),
+    )
+    if (exited) return
     killProcessGroup(process.process.pid, "SIGKILL")
     killProcess(process.process, "SIGKILL")
   })
+
+const waitForProcessExit = (process: { readonly exited: Promise<number> }) =>
+  Effect.promise(() => process.exited).pipe(Effect.asVoid)
 
 const killProcessGroup = (pid: number, signal: NodeJS.Signals) => {
   if (!Number.isInteger(pid) || pid <= 0) return

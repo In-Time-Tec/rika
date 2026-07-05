@@ -381,6 +381,54 @@ describe("shell_command tool", () => {
     }
   })
 
+  test("timeout gives a SIGTERM grace window before SIGKILL", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-shell-grace-"))
+    const pidPath = join(root, "child.pid")
+    const termPath = join(root, "term.marker")
+    let pid: number | undefined
+
+    try {
+      const command = bunEval([
+        `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
+        `process.on("SIGTERM", () => { void Bun.write(${JSON.stringify(termPath)}, "term") })`,
+        "await Bun.sleep(30000)",
+      ])
+
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fiber = yield* ToolExecutor.execute(
+              call("shell_command", { command, timeout_ms: 1000, max_output_bytes: 1000 }),
+            ).pipe(Effect.forkScoped({ startImmediately: true }))
+            pid = Number(yield* Effect.promise(() => waitForText(pidPath)))
+            yield* TestClock.adjust("1 second")
+            yield* Effect.promise(() => waitForText(termPath))
+            const aliveDuringGrace = processAlive(pid)
+            yield* TestClock.adjust("999 millis")
+            const aliveBeforeKill = processAlive(pid)
+            yield* TestClock.adjust("1 millis")
+            const output = yield* Fiber.join(fiber)
+            return { aliveBeforeKill, aliveDuringGrace, output }
+          }),
+        ).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+      )
+
+      await Bun.sleep(250)
+
+      expect(result.output).toMatchObject({
+        name: "shell_command",
+        status: "error",
+        error: { kind: "tool", code: "shell_command", retryable: true, details: { timed_out: true } },
+      })
+      expect(result.aliveDuringGrace).toBe(true)
+      expect(result.aliveBeforeKill).toBe(true)
+      expect(processAlive(pid)).toBe(false)
+    } finally {
+      killProcess(pid)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("interrupting shell execution kills the shell process", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-shell-interrupt-"))
     const pidPath = join(root, "child.pid")

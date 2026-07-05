@@ -67,16 +67,25 @@ const makeLayer = (
 
 const line = (text: string): ReadonlyArray<Keys.Key> => [...Keys.fromString(text), Keys.enter]
 
-const runSession = (lines: ReadonlyArray<string>): Promise<Harness & { exitCode: number }> => {
+const runSessionKeys = (
+  keys: ReadonlyArray<Keys.Key>,
+  seedEvents: ReadonlyArray<Event.Event> = [],
+): Promise<Harness & { exitCode: number }> => {
   const rendered: Array<ViewState.ViewState> = []
-  const keys = lines.flatMap(line)
   return Effect.runPromise(
     Effect.gen(function* () {
       yield* Migration.migrate()
+      for (const event of seedEvents) {
+        const appended = yield* ThreadEventLog.append(event)
+        yield* ThreadProjection.apply(appended)
+      }
       return yield* Session.run({})
     }).pipe(Effect.provide(makeLayer(rendered, keys))),
   ).then((exitCode) => ({ exitCode, rendered }))
 }
+
+const runSession = (lines: ReadonlyArray<string>): Promise<Harness & { exitCode: number }> =>
+  runSessionKeys(lines.flatMap(line))
 
 const text = (rendered: ReadonlyArray<ViewState.ViewState>): string =>
   rendered
@@ -92,8 +101,8 @@ const text = (rendered: ReadonlyArray<ViewState.ViewState>): string =>
 describe("TUI session", () => {
   test("runs a turn, switches modes, runs a review, and starts a new thread through slash commands", async () => {
     const { exitCode, rendered } = await runSession([
-      "hello",
       "/mode rush",
+      "hello",
       "/review --staged src/app.ts",
       "/new",
       "/exit",
@@ -106,6 +115,21 @@ describe("TUI session", () => {
     expect(frames).toContain("Review completed: 1 findings across 1 files")
     expect(frames).toContain("Started new thread")
     expect(rendered.some((state) => (state.notice ?? "").includes("Goodbye"))).toBe(true)
+  })
+
+  test("locks mode slash and palette commands once the thread has activity", async () => {
+    const existingThread = Ids.ThreadId.make("thread_mode_locked_tui")
+    const seedEvents = [threadCreated(existingThread, 1), messageAdded(existingThread, 2, "locked thread")]
+    const direct = await runSessionKeys([`/thread ${existingThread}`, "/mode rush", "/exit"].flatMap(line), seedEvents)
+    const palette = await runSessionKeys(
+      [...line(`/thread ${existingThread}`), Keys.ctrl("o"), ...Keys.fromString("mode"), Keys.enter, ...line("/exit")],
+      seedEvents,
+    )
+
+    for (const rendered of [direct.rendered, palette.rendered]) {
+      expect(rendered.some((state) => state.notice === "Mode is locked once a thread is active.")).toBe(true)
+      expect(rendered.some((state) => state.mode === "rush")).toBe(false)
+    }
   })
 
   test("uses an explicit workspace identity for interactive turns", async () => {

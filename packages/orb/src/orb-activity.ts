@@ -22,6 +22,7 @@ export type RunError =
 
 export interface Interface {
   readonly touch: (orbId: Ids.OrbId) => Effect.Effect<void, RunError>
+  readonly release: (orbId: Ids.OrbId) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/orb/OrbActivity") {}
@@ -82,6 +83,10 @@ export const layer: Layer.Layer<
         yield* orbs.touch(orbId)
         return yield* Effect.void
       }),
+      release: Effect.fn("OrbActivity.release")(function* (orbId: Ids.OrbId) {
+        yield* KeyedSemaphore.withPermit(refreshLocks, orbId, SynchronizedMap.remove(lastRefreshByOrb, orbId))
+        yield* KeyedSemaphore.remove(refreshLocks, orbId)
+      }),
     })
   }),
 )
@@ -89,6 +94,11 @@ export const layer: Layer.Layer<
 export const touch = Effect.fn("OrbActivity.touch.call")(function* (orbId: Ids.OrbId) {
   const service = yield* Service
   return yield* service.touch(orbId)
+})
+
+export const release = Effect.fn("OrbActivity.release.call")(function* (orbId: Ids.OrbId) {
+  const service = yield* Service
+  return yield* service.release(orbId)
 })
 
 const resolveTimeoutMs = Effect.fn("OrbActivity.resolveTimeoutMs")(function* (

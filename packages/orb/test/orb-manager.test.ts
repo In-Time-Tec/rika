@@ -7,7 +7,7 @@ import { Config, Diagnostics, IdGenerator, SecretRedactor, Settings, Time } from
 import { Database, McpApprovalStore, Migration, OrbStore, ProjectStore } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
 import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
-import { OrbManager, SandboxClient, SandboxClientFake } from "../src/index"
+import { OrbActivity, OrbManager, SandboxClient, SandboxClientFake } from "../src/index"
 
 const now = Common.TimestampMillis.make(1_980_000_003_000)
 const workspaceRoot = "/workspace/rika-orb-manager-test"
@@ -785,6 +785,48 @@ describe("OrbManager", () => {
     await rm(dataDir, { force: true, recursive: true })
   })
 
+  test("kill releases activity state after the terminal transition", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "rika-orb-manager-"))
+    const sandbox = SandboxClientFake.makeState()
+    const diagnostics: Array<Diagnostics.Entry> = []
+    const system = makeSystem()
+    const releases: Array<Ids.OrbId> = []
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const created = yield* OrbStore.create({
+          thread_id: threadId,
+          project_id: projectId,
+          sandbox_id: "sandbox_1",
+          base_commit: "abc123",
+          endpoint_url: "https://sandbox_1-4587.fake.rika.local",
+          token: "server-token",
+        })
+        yield* OrbStore.setStatus(created.orb_id, "running")
+        yield* OrbManager.kill(created.orb_id)
+        const stored = yield* OrbStore.get(created.orb_id)
+        return { kill: sandbox.calls.kill, stored }
+      }).pipe(
+        Effect.provide(
+          makeLayer({
+            sandbox,
+            diagnostics,
+            system,
+            dataDir,
+            activityLayer: activityReleaseRecorderLayer(releases),
+          }),
+        ),
+      ),
+    )
+
+    expect(result.kill).toEqual(["sandbox_1"])
+    expect(result.stored).toMatchObject({ status: "killed" })
+    if (result.stored === undefined) throw new Error("Missing killed orb")
+    expect(releases).toEqual([result.stored.orb_id])
+    await rm(dataDir, { force: true, recursive: true })
+  })
+
   test("pause and kill reject provisioning orbs without mutating the sandbox", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "rika-orb-manager-"))
     const sandbox = SandboxClientFake.makeState()
@@ -1145,6 +1187,7 @@ const makeLayer = (input: {
   readonly env?: Record<string, string | undefined>
   readonly workspaceRoot?: string
   readonly sandboxLayer?: Layer.Layer<SandboxClient.Service>
+  readonly activityLayer?: Layer.Layer<OrbActivity.Service>
 }) => {
   const root = input.workspaceRoot ?? workspaceRoot
   const sandboxLayer = input.sandboxLayer ?? SandboxClientFake.layer(input.sandbox)
@@ -1174,6 +1217,15 @@ const makeLayer = (input: {
     Layer.provideMerge(timeLayer),
     Layer.provideMerge(idLayer),
   )
+  const activityLayer =
+    input.activityLayer ??
+    OrbActivity.layer.pipe(
+      Layer.provideMerge(configLayer),
+      Layer.provideMerge(settingsLayer),
+      Layer.provideMerge(orbStoreLayer),
+      Layer.provideMerge(sandboxLayer),
+      Layer.provideMerge(timeLayer),
+    )
   const managerLayer = OrbManager.layerWithSystem(input.system).pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(settingsLayer),
@@ -1181,6 +1233,7 @@ const makeLayer = (input: {
     Layer.provideMerge(projectStoreLayer),
     Layer.provideMerge(orbStoreLayer),
     Layer.provideMerge(sandboxLayer),
+    Layer.provideMerge(activityLayer),
     Layer.provideMerge(diagnosticsLayer),
     Layer.provideMerge(redactorLayer),
   )
@@ -1196,10 +1249,23 @@ const makeLayer = (input: {
     projectStoreLayer,
     orbStoreLayer,
     sandboxLayer,
+    activityLayer,
     diagnosticsLayer,
     managerLayer,
   )
 }
+
+const activityReleaseRecorderLayer = (releases: Array<Ids.OrbId>) =>
+  Layer.succeed(
+    OrbActivity.Service,
+    OrbActivity.Service.of({
+      touch: () => Effect.void,
+      release: (releasedOrbId) =>
+        Effect.sync(() => {
+          releases.push(releasedOrbId)
+        }),
+    }),
+  )
 
 const sandboxCreateFailureLayer = (message: string) => {
   const failure = (operation: string) =>

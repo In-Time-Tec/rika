@@ -474,6 +474,10 @@ const modeCommand = (context: Backend.CommandContext, argument: string | undefin
     return Backend.commandResult(context, {
       state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep1|deep2|deep3"),
     })
+  if (ViewState.hasActivity(context.state))
+    return Backend.commandResult(context, {
+      state: ViewState.withNotice(context.state, "Mode is locked once a thread is active."),
+    })
   return Backend.commandResult(context, {
     state: ViewState.withMode(context.state, nextMode),
     mode: nextMode,

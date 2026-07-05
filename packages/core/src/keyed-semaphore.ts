@@ -17,3 +17,6 @@ export const withPermit = <Key, Value, Error, Requirements>(
     const semaphore = yield* SynchronizedMap.getOrCreate(self.semaphores, key, () => Semaphore.make(1))
     return yield* Semaphore.withPermit(semaphore, effect)
   })
+
+export const remove = <Key>(self: KeyedSemaphore<Key>, key: Key): Effect.Effect<void> =>
+  SynchronizedMap.remove(self.semaphores, key)

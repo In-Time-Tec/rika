@@ -196,6 +196,8 @@ interface CollectedShellOutput {
   readonly stderr_truncated: boolean
 }
 
+const processTerminationGrace = "1 second"
+
 const runShell = (
   command: string,
   workspaceRoot: string,
@@ -262,12 +264,20 @@ const collectShellOutput = (
   })
 
 const terminateProcess = (process: ManagedShellProcess["process"]) =>
-  Effect.sync(() => {
+  Effect.gen(function* () {
     killProcessGroup(process.pid, "SIGTERM")
     killProcess(process, "SIGTERM")
+    const exited = yield* Effect.race(
+      waitForProcessExit(process).pipe(Effect.as(true)),
+      Effect.sleep(processTerminationGrace).pipe(Effect.as(false)),
+    )
+    if (exited) return
     killProcessGroup(process.pid, "SIGKILL")
     killProcess(process, "SIGKILL")
   })
+
+const waitForProcessExit = (process: { readonly exited: Promise<number> }) =>
+  Effect.promise(() => process.exited).pipe(Effect.asVoid)
 
 const killProcessGroup = (pid: number, signal: NodeJS.Signals) => {
   if (!Number.isInteger(pid) || pid <= 0) return

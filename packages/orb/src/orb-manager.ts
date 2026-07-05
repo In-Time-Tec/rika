@@ -6,6 +6,7 @@ import { McpApprovalStore, OrbStore, ProjectStore } from "@rika/persistence"
 import { Ids, Orb } from "@rika/schema"
 import { McpClient } from "@rika/tools"
 import { Context, Effect, Exit, Layer, Option, Schema, Stream } from "effect"
+import * as OrbActivity from "./orb-activity"
 import * as SandboxClient from "./sandbox-client"
 
 const repoRoot = "/home/user/repo"
@@ -74,8 +75,10 @@ export const layerWithSystem = (system: System) =>
       const diagnostics = yield* Diagnostics.Service
       const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
       const settings = Option.getOrUndefined(yield* Effect.serviceOption(Settings.Service))
+      const activity = Option.getOrUndefined(yield* Effect.serviceOption(OrbActivity.Service))
       const registerSecrets = (entries: ReadonlyArray<SecretRedactor.Entry>) =>
         redactor === undefined ? Effect.void : redactor.register(entries)
+      const releaseActivity = (orbId: Ids.OrbId) => (activity === undefined ? Effect.void : activity.release(orbId))
       const resumeLocks = yield* KeyedSemaphore.make<Ids.OrbId>()
 
       const provisionForThread: Interface["provisionForThread"] = Effect.fn("OrbManager.provisionForThread")(function* (
@@ -299,21 +302,31 @@ export const layerWithSystem = (system: System) =>
           )
         }),
         kill: Effect.fn("OrbManager.kill")(function* (orbId: Ids.OrbId) {
-          return yield* Diagnostics.event(
-            "orb.kill",
-            (fields) =>
-              Effect.gen(function* () {
-                const record = yield* requireControllableOrbRecord(orbId, "kill")
-                const sandboxId = record.sandbox_id
-                fields.sandbox_id = sandboxId
-                fields.previous_status = record.status
-                yield* step("kill", sandbox.kill(sandboxId), { orbId, sandboxId })
-                const killed = yield* step("kill_status", orbs.setStatus(orbId, "killed"), { orbId, sandboxId })
-                fields.status = killed.status
-                return killed
-              }),
-            { orb_id: orbId },
-          ).pipe(Effect.provideService(Diagnostics.Service, diagnostics))
+          const killed = yield* KeyedSemaphore.withPermit(
+            resumeLocks,
+            orbId,
+            Diagnostics.event(
+              "orb.kill",
+              (fields) =>
+                Effect.gen(function* () {
+                  const record = yield* requireControllableOrbRecord(orbId, "kill")
+                  const sandboxId = record.sandbox_id
+                  fields.sandbox_id = sandboxId
+                  fields.previous_status = record.status
+                  yield* step("kill", sandbox.kill(sandboxId), { orbId, sandboxId })
+                  const killedRecord = yield* step("kill_status", orbs.setStatus(orbId, "killed"), {
+                    orbId,
+                    sandboxId,
+                  })
+                  fields.status = killedRecord.status
+                  return killedRecord
+                }),
+              { orb_id: orbId },
+            ).pipe(Effect.provideService(Diagnostics.Service, diagnostics)),
+          )
+          yield* KeyedSemaphore.remove(resumeLocks, orbId)
+          yield* releaseActivity(orbId)
+          return killed
         }),
       })
     }),

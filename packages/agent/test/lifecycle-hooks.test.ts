@@ -135,6 +135,61 @@ describe("LifecycleHooks", () => {
     }
   })
 
+  test("runSetup timeout gives a SIGTERM grace window before SIGKILL", async () => {
+    const root = await tempRoot()
+    const pidPath = join(root, "setup.pid")
+    const termPath = join(root, "term.marker")
+    let pid: number | undefined
+    try {
+      await writeHook(
+        root,
+        "setup",
+        [
+          "#!/usr/bin/env bun",
+          `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
+          `process.on("SIGTERM", () => { void Bun.write(${JSON.stringify(termPath)}, "term") })`,
+          "await Bun.sleep(30000)",
+          "",
+        ].join("\n"),
+      )
+
+      const result = await Effect.runPromise(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const fiber = yield* LifecycleHooks.runSetup(root).pipe(
+              Stream.runCollect,
+              Effect.flip,
+              Effect.forkScoped({ startImmediately: true }),
+            )
+            pid = Number(yield* Effect.promise(() => waitForText(pidPath)))
+            yield* TestClock.adjust("1 second")
+            yield* Effect.promise(() => waitForText(termPath))
+            const aliveDuringGrace = processAlive(pid)
+            yield* TestClock.adjust("999 millis")
+            const aliveBeforeKill = processAlive(pid)
+            yield* TestClock.adjust("1 millis")
+            const error = yield* Fiber.join(fiber)
+            return { aliveBeforeKill, aliveDuringGrace, error }
+          }),
+        ).pipe(
+          Effect.provide(LifecycleHooks.layerWithOptions({ setupTimeout: "1 second" })),
+          Effect.provide(TestClock.layer()),
+        ),
+      )
+
+      await Bun.sleep(250)
+
+      expect(result.error.hook).toBe("setup")
+      expect(result.error.message).toContain("timed out")
+      expect(result.aliveDuringGrace).toBe(true)
+      expect(result.aliveBeforeKill).toBe(true)
+      expect(processAlive(pid)).toBe(false)
+    } finally {
+      killProcess(pid)
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("interrupting runSetup kills the hook process", async () => {
     const root = await tempRoot()
     const pidPath = join(root, "setup.pid")

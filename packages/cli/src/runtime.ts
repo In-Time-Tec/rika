@@ -697,6 +697,7 @@ const interactiveRemoteLiveLayerFromTui = (
   const managerLayer = OrbManager.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(sandboxLayer),
+    Layer.provideMerge(activityLayer),
     Layer.provideMerge(diagnosticsLayer),
   )
   const backendLayer = LocalBackend.layerFromInput({ env, cwd })
@@ -1448,6 +1449,7 @@ export const orbLiveLayer = (
   const managerLayer = OrbManager.layer.pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(sandboxLayer),
+    Layer.provideMerge(activityLayer),
     Layer.provideMerge(diagnosticsLayer),
   )
   const threadLiveLayer = ThreadLive.layer.pipe(Layer.provideMerge(migratedStorageLayer))
@@ -1860,16 +1862,17 @@ export const serverLiveLayer = (
     diagnosticsLayer,
     telemetryLayer,
   )
-  const managerLayer = OrbManager.layer.pipe(
-    Layer.provideMerge(migratedStorageLayer),
-    Layer.provideMerge(sandboxLayer),
-    Layer.provideMerge(diagnosticsLayer),
-  )
   const activityLayer = OrbActivity.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(sandboxLayer),
     Layer.provideMerge(timeLayer),
+  )
+  const managerLayer = OrbManager.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(sandboxLayer),
+    Layer.provideMerge(activityLayer),
+    Layer.provideMerge(diagnosticsLayer),
   )
   const threadLiveLayer = ThreadLive.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const presenceLayer = PresenceHub.layer.pipe(Layer.provideMerge(timeLayer))

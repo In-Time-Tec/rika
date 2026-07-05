@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Deferred, Effect, Fiber, Ref } from "effect"
+import { Deferred, Effect, Fiber, HashMap, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { KeyedSemaphore, SynchronizedMap } from "../src/index"
 
@@ -116,4 +116,67 @@ describe("KeyedSemaphore", () => {
     expect(result.finalEvents).toContain("first-exit")
     expect(result.finalEvents).toContain("second-exit")
   })
+
+  test("remove drops the cached semaphore for a key", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const locks = yield* KeyedSemaphore.make<string>()
+        yield* KeyedSemaphore.withPermit(locks, "orb", Effect.void)
+        const beforeRemove = yield* semaphoreCount(locks)
+        yield* KeyedSemaphore.remove(locks, "orb")
+        const afterRemove = yield* semaphoreCount(locks)
+        return { beforeRemove, afterRemove }
+      }),
+    )
+
+    expect(result.beforeRemove).toBe(1)
+    expect(result.afterRemove).toBe(0)
+  })
+
+  test("remove does not corrupt fibers already waiting on the removed semaphore", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const locks = yield* KeyedSemaphore.make<string>()
+        const events = yield* Ref.make<Array<string>>([])
+        const firstEntered = yield* Deferred.make<void>()
+        const secondEntered = yield* Deferred.make<void>()
+        const releaseFirst = yield* Deferred.make<void>()
+        const first = yield* KeyedSemaphore.withPermit(
+          locks,
+          "orb",
+          Ref.update(events, (items) => [...items, "first-enter"]).pipe(
+            Effect.andThen(Deferred.succeed(firstEntered, undefined)),
+            Effect.andThen(Deferred.await(releaseFirst)),
+            Effect.andThen(Ref.update(events, (items) => [...items, "first-exit"])),
+          ),
+        ).pipe(Effect.forkChild)
+        yield* Deferred.await(firstEntered)
+        const second = yield* KeyedSemaphore.withPermit(
+          locks,
+          "orb",
+          Ref.update(events, (items) => [...items, "second-enter"]).pipe(
+            Effect.andThen(Deferred.succeed(secondEntered, undefined)),
+            Effect.andThen(Ref.update(events, (items) => [...items, "second-exit"])),
+          ),
+        ).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        yield* Effect.yieldNow
+        yield* KeyedSemaphore.remove(locks, "orb")
+        const sizeAfterRemove = yield* semaphoreCount(locks)
+        const secondEnteredBeforeRelease = yield* Deferred.isDone(secondEntered)
+        yield* Deferred.succeed(releaseFirst, undefined)
+        yield* Fiber.join(first)
+        yield* Fiber.join(second)
+        const finalEvents = yield* Ref.get(events)
+        return { finalEvents, secondEnteredBeforeRelease, sizeAfterRemove }
+      }),
+    )
+
+    expect(result.sizeAfterRemove).toBe(0)
+    expect(result.secondEnteredBeforeRelease).toBe(false)
+    expect(result.finalEvents).toEqual(["first-enter", "first-exit", "second-enter", "second-exit"])
+  })
 })
+
+const semaphoreCount = <Key>(locks: KeyedSemaphore.KeyedSemaphore<Key>): Effect.Effect<number> =>
+  SynchronizedMap.modify(locks.semaphores, (entries) => [HashMap.size(entries), entries] as const)

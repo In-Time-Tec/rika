@@ -83,6 +83,26 @@ describe("OrbActivity", () => {
     expect(calls).toEqual([{ sandboxId: "sandbox_orb_activity", timeoutMs: 420_000 }])
   })
 
+  test("release evicts refresh state for the orb", async () => {
+    const sandbox = SandboxClientFake.makeState()
+
+    const calls = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* createRunningOrb()
+        yield* OrbActivity.touch(orbId)
+        yield* OrbActivity.release(orbId)
+        yield* OrbActivity.touch(orbId)
+        return sandbox.calls.setTimeout
+      }).pipe(Effect.provide(makeLayer(sandbox))),
+    )
+
+    expect(calls).toEqual([
+      { sandboxId: "sandbox_orb_activity", timeoutMs: 420_000 },
+      { sandboxId: "sandbox_orb_activity", timeoutMs: 420_000 },
+    ])
+  })
+
   test("fails when a cached orb is no longer running", async () => {
     const sandbox = SandboxClientFake.makeState()
 
