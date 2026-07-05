@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 import { toCodecOpenAI } from "effect/unstable/ai/OpenAiStructuredOutput"
-import { ToolRegistry } from "../src/index"
+import { Toolkit, ToolRegistry } from "../src/index"
 
 describe("Toolkit", () => {
   test("registered shell tool emits an OpenAI strict object schema", () => {
@@ -38,5 +38,24 @@ describe("Toolkit", () => {
       additionalProperties: false,
       properties: {},
     })
+  })
+
+  test("prepared toolkits expose schemas but fail loudly if provider-side handlers run", async () => {
+    const tool = Tool.make("manual_only", {
+      description: "Manual-only tool",
+      parameters: Schema.Struct({ text: Schema.String }),
+      success: Schema.Json,
+      failure: Schema.Json,
+      failureMode: "return",
+    })
+    const prepared = Toolkit.prepare([tool])
+    const withHandlers = Effect.isEffect(prepared.toolkit)
+      ? await Effect.runPromise(prepared.toolkit)
+      : prepared.toolkit
+    const error = await Effect.runPromise(withHandlers.handle("manual_only", { text: "hello" }).pipe(Effect.flip))
+
+    expect(Object.keys(withHandlers.tools)).toEqual(["manual_only"])
+    expect(error.message).toContain("Rika resolves model tool calls manually")
+    expect(error.reason._tag).toBe("ToolConfigurationError")
   })
 })

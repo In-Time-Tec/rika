@@ -50,6 +50,7 @@ CI runs the same launch gates except local database migration; migrations are co
 - No plugin sandbox isolation yet; plugins are trusted local code.
 - No App Store/Homebrew/npm distribution yet; first launch uses source/compiled artifacts.
 - No fully featured IDE extension packages yet; the shared protocol and CLI helpers are ready.
+- No live vector/TurboPuffer backend for `semantic_search` yet; the launch tool reports the local lexical backend as degraded until a real vector engine is wired.
 - No legal terms beyond repository usage notes; add formal terms before public SaaS launch.
 
 ## Release steps

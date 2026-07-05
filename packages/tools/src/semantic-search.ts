@@ -194,7 +194,7 @@ export const toolDefinitions = (service: Interface): ReadonlyArray<ToolRegistry.
   {
     tool: Tool.make("semantic_search_status", {
       description:
-        "Report whether semantic_search is enabled, which backend is active, index counts when available, and any missing configuration causing degraded local fallback.",
+        "Report whether semantic_search is enabled, which backend is active, index counts when available, and whether the live backend is the degraded local lexical fallback.",
       parameters: Tool.EmptyParams,
       success: Schema.Json,
       failure: Schema.Json,
@@ -307,9 +307,7 @@ const makeService = (engine: Engine): Interface =>
 
 const localEngine = (options: RuntimeOptions): Engine => {
   const degradedReason =
-    options.missingConfiguration.length === 0
-      ? undefined
-      : `semantic vector index is not configured; set ${options.missingConfiguration.join(", ")} to enable the external semantic-search/TurboPuffer backend. Using local lexical fallback.`
+    "semantic_search is currently backed by local lexical/token overlap search; no live vector backend is wired in this build."
 
   const makeStatus = (indexedFiles?: number): Status => ({
     enabled: true,
@@ -317,8 +315,8 @@ const localEngine = (options: RuntimeOptions): Engine => {
     workspaceRoot: options.workspaceRoot,
     namespace: options.namespace,
     projectName: basename(options.workspaceRoot),
-    degraded: degradedReason !== undefined,
-    ...(degradedReason === undefined ? {} : { degradedReason }),
+    degraded: true,
+    degradedReason,
     ...(options.missingConfiguration.length === 0 ? {} : { missingConfiguration: options.missingConfiguration }),
     ...(indexedFiles === undefined ? {} : { indexedFiles, indexedChunks: indexedFiles }),
   })
@@ -684,15 +682,8 @@ const runGit = (workspaceRoot: string, args: ReadonlyArray<string>, maxOutputCha
 
 const requiredConfiguration = (config: Config.Interface) =>
   Effect.gen(function* () {
-    const missing: Array<string> = []
-    for (const key of ["OPENROUTER_API_KEY", "TURBOPUFFER_API_KEY"] as const) {
-      const present = yield* config.requireSecret(key).pipe(
-        Effect.as(true),
-        Effect.catch(() => Effect.succeed(false)),
-      )
-      if (!present) missing.push(key)
-    }
-    return missing
+    yield* config.get
+    return []
   })
 
 const assertWorkspacePath = (workspaceRoot: string, path: string, label: string) =>
@@ -912,11 +903,11 @@ const toRegistryError = (name: string) => (error: SemanticSearchError) =>
   })
 
 const semanticSearchDescription =
-  "Search the project by MEANING in one call — the primary way to find code, trace a concept, behavior, feature, or data flow across files, and answer 'where is X' or 'how does X work' without running many grep and read calls. Returns ranked snippets with repository-relative file path and line range, so you can read or edit the right location directly. Prefer it over grep/read for discovery: one call replaces many round-trips and spends far less context.\n\n" +
+  "Search the project with the local lexical/token-overlap backend in one call — the primary way to find code, trace a concept, behavior, feature, or data flow across files, and answer 'where is X' or 'how does X work' without running many grep and read calls. Returns ranked snippets with repository-relative file path and line range, so you can read or edit the right location directly. Prefer it over broad grep/read for discovery, then use exact tools to verify concrete matches.\n\n" +
   "Config options (all optional):\n" +
   "- query: a single natural-language or symbol query.\n" +
   "- queries: 2-5 DISTINCT facets to retrieve and merge in one parallel call (use for multi-faceted tasks instead of several searches; never pass paraphrases).\n" +
-  "- mode: 'hybrid' (default — semantic + exact-token matching, best for an exact symbol/string) or 'semantic' (meaning only, fastest).\n" +
+  "- mode: 'hybrid' (default — path/text token matching, best for an exact symbol/string) or 'semantic' (same local lexical backend with semantic-style scoring weights).\n" +
   "- pathPrefix / language: scope to a directory prefix or language.\n" +
   "- limit: max snippets to return (default 8).\n" +
   "- source: force ['history'] (git commits) or ['conversation'] (past sessions). By default results are live code; for clearly historical 'why/when did this change' questions use file plus optional lines to get git diffs.\n\n" +

@@ -53,16 +53,43 @@ describe("HashlineFile", () => {
     expect(output.render).toMatchObject({ kind: "file", renderer: "@pierre/diffs", collapsed: true })
   })
 
-  test("read always returns the entire file", async () => {
+  test("read respects line range and max output bytes", async () => {
     const root = await tempWorkspace()
     await writeFile(join(root, "full.txt"), "one\ntwo\nthree\n")
 
     const output = object(
-      await run(root, HashlineFile.read({ path: "full.txt", start_line: 2, end_line: 2, max_output_bytes: 1 })),
+      await run(root, HashlineFile.read({ path: "full.txt", start_line: 2, end_line: 3, max_output_bytes: 9 })),
     )
 
-    expect(output.content).toMatch(/^1:[A-Za-z0-9_-]{4}\|one\n2:[A-Za-z0-9_-]{4}\|two\n3:[A-Za-z0-9_-]{4}\|three$/)
-    expect(output.range).toEqual({ start_line: 1, end_line: 3 })
+    expect(output.content).toMatch(/^2:[A-Za-z0-9_-]{4}\|tw$/)
+    expect(new TextEncoder().encode(String(output.content)).byteLength).toBeLessThanOrEqual(9)
+    expect(String(output.content)).not.toContain("|one")
+    expect(String(output.content)).not.toContain("|three")
+    expect(output.range).toEqual({ start_line: 2, end_line: 2 })
+    expect(output.truncated).toBe(true)
+    expect(object(object(output.render).file).contents).toBe("tw")
+  })
+
+  test("read hard-caps a single oversized line", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "long.txt"), `${"abcdef".repeat(20)}\n`)
+
+    const output = object(await run(root, HashlineFile.read({ path: "long.txt", max_output_bytes: 12 })))
+
+    expect(new TextEncoder().encode(String(output.content)).byteLength).toBeLessThanOrEqual(12)
+    expect(output.content).toMatch(/^1:[A-Za-z0-9_-]{4}\|abcde$/)
+    expect(output.truncated).toBe(true)
+  })
+
+  test("read reports a non-inverted empty range when start_line is beyond EOF", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "short.txt"), "one\ntwo\nthree\n")
+
+    const output = object(await run(root, HashlineFile.read({ path: "short.txt", start_line: 100 })))
+
+    expect(output.content).toBe("")
+    expect(output.anchors).toEqual([])
+    expect(output.range).toEqual({ start_line: 100, end_line: 100 })
     expect(output.truncated).toBe(false)
   })
 

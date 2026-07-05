@@ -1,21 +1,27 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtemp, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { PermissionPolicy, ToolExecutor } from "@rika/agent"
 import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { ArtifactStore } from "@rika/persistence"
 import { Common, Ids, Tool } from "@rika/schema"
-import { Effect, Layer, Option, Stream } from "effect"
+import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
 import { SpecialtyTools } from "../src/index"
 
 const workspaceRoot = "/workspace/rika-specialty"
 const now = Common.TimestampMillis.make(2_000_000_000_000)
 
-const configLayer = Config.layerFromValues({
-  workspace_root: workspaceRoot,
-  data_dir: `${workspaceRoot}/.rika`,
-  default_mode: "smart",
-})
+const tempWorkspace = () => mkdtemp(join(tmpdir(), "rika-specialty-"))
+
+const configLayer = (root = workspaceRoot) =>
+  Config.layerFromValues({
+    workspace_root: root,
+    data_dir: `${root}/.rika`,
+    default_mode: "smart",
+  })
 
 const diagnosticsLayer = () => {
   const redactorLayer = SecretRedactor.layer
@@ -32,27 +38,28 @@ const call = (name: string, input: Common.JsonValue): Tool.Call => ({
   },
 })
 
-const baseLayer = () =>
-  Layer.mergeAll(configLayer, IdGenerator.sequenceLayer(1), Time.fixedLayer(now), ArtifactStore.fakeLayer())
+const baseLayer = (root = workspaceRoot) =>
+  Layer.mergeAll(configLayer(root), IdGenerator.sequenceLayer(1), Time.fixedLayer(now), ArtifactStore.fakeLayer())
 
-const modelLayer = (responses: ReadonlyArray<Provider.FakeResponse>) =>
+const modelLayer = (responses: ReadonlyArray<Provider.FakeResponse>, root = workspaceRoot) =>
   modelLayerFromRegistry(
     Provider.fakeRegistryLayer([
       { name: "anthropic", responses },
       { name: "openai", responses },
     ]),
+    root,
   )
 
-const modelLayerFromProviders = (providers: ReadonlyArray<Provider.Interface>) =>
-  modelLayerFromRegistry(Provider.registryLayerFromProviders(providers))
+const modelLayerFromProviders = (providers: ReadonlyArray<Provider.Interface>, root = workspaceRoot) =>
+  modelLayerFromRegistry(Provider.registryLayerFromProviders(providers), root)
 
-const modelLayerFromRegistry = (registryLayer: Layer.Layer<Provider.Registry>) =>
+const modelLayerFromRegistry = (registryLayer: Layer.Layer<Provider.Registry>, root = workspaceRoot) =>
   SpecialtyTools.layer.pipe(
-    Layer.provideMerge(baseLayer()),
+    Layer.provideMerge(baseLayer(root)),
     Layer.provideMerge(
       Router.layer.pipe(
         Layer.provideMerge(registryLayer),
-        Layer.provideMerge(configLayer),
+        Layer.provideMerge(configLayer(root)),
         Layer.provideMerge(diagnosticsLayer()),
       ),
     ),
@@ -225,6 +232,85 @@ describe("SpecialtyTools", () => {
       kind: "image",
       metadata: { tool: "painter", images: 1 },
     })
+  })
+
+  test("painter attaches workspace reference image bytes to the model request", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "brand.png"), Buffer.from("png-reference"))
+    const capturedMessages: Array<ReadonlyArray<Provider.Message>> = []
+    const provider = (name: Provider.ProviderName): Provider.Interface => ({
+      name,
+      complete: () => Effect.succeed({ provider: name, model: "unused", content: "unused", finish_reason: "stop" }),
+      completeStructured: <A extends Record<string, any>>(request: Provider.StructuredRequest<A>) =>
+        Effect.sync(() => {
+          capturedMessages.push(request.messages)
+          return {
+            value: Schema.decodeUnknownSync(request.schema)({
+              prompt: "paint with reference",
+              images: [{ mime_type: "image/png", data_url: "data:image/png;base64,ZmFrZQ==" }],
+            }),
+            raw: { provider: name, model: request.model, content: "{}" },
+          }
+        }),
+      stream: () => Stream.empty,
+    })
+
+    const output = object(
+      await Effect.runPromise(
+        SpecialtyTools.painter(
+          { prompt: "Use the reference image", input_image_paths: ["brand.png"] },
+          call("painter", { prompt: "Use the reference image" }),
+        ).pipe(Effect.provide(modelLayerFromProviders([provider("anthropic"), provider("openai")], root))),
+      ),
+    )
+
+    const message = capturedMessages[0]?.[1]
+    if (message === undefined || typeof message.content === "string") throw new Error("Expected image message parts")
+    expect(output).toMatchObject({ type: "specialty.painter", artifact_id: "artifact_1" })
+    expect(message.content).toEqual([
+      {
+        type: "text",
+        text: "Prompt:\nUse the reference image\n\nReference image paths:\n- brand.png",
+      },
+      {
+        type: "file",
+        media_type: "image/png",
+        data: Buffer.from("png-reference").toString("base64"),
+        filename: "brand.png",
+      },
+    ])
+  })
+
+  test("painter rejects reference image symlinks that escape the workspace", async () => {
+    const root = await tempWorkspace()
+    const outside = await tempWorkspace()
+    await writeFile(join(outside, "secret.png"), Buffer.from("outside"))
+    await symlink(join(outside, "secret.png"), join(root, "linked.png"))
+
+    const error = await Effect.runPromise(
+      SpecialtyTools.painter(
+        { prompt: "Use the reference image", input_image_paths: ["linked.png"] },
+        call("painter", { prompt: "Use the reference image" }),
+      ).pipe(Effect.provide(modelLayer(['{"prompt":"unused","images":[]}'], root)), Effect.flip),
+    )
+
+    expect(error).toMatchObject({ operation: "painterReferenceImage", retryable: false })
+    expect(error.message).toContain("outside the workspace")
+  })
+
+  test("painter rejects oversized reference images before reading bytes", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "huge.png"), Buffer.alloc(8_000_001))
+
+    const error = await Effect.runPromise(
+      SpecialtyTools.painter(
+        { prompt: "Use the reference image", input_image_paths: ["huge.png"] },
+        call("painter", { prompt: "Use the reference image" }),
+      ).pipe(Effect.provide(modelLayer(['{"prompt":"unused","images":[]}'], root)), Effect.flip),
+    )
+
+    expect(error).toMatchObject({ operation: "painterReferenceImage", retryable: false })
+    expect(error.message).toContain("exceeds 8000000 bytes")
   })
 
   test("specialty tools still pass through normal permission policy", async () => {

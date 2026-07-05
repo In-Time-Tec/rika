@@ -13,6 +13,7 @@ import { isAbsolute, join, resolve } from "node:path"
 
 const rikaSettingsKey = "rika.mcpServers"
 const legacySettingsKey = "mcpServers"
+const discoveryConcurrency = 8
 export const settingsKey = rikaSettingsKey
 
 export type CommandServerConfig = Mcp.CommandServerConfig
@@ -400,7 +401,9 @@ const summarizeServer = (server: ConfiguredServer, approvals: McpApprovalStore.I
   }).pipe(Effect.mapError((error) => error as RunError))
 
 const summarizeServers = (configured: ReadonlyArray<ConfiguredServer>, approvals: McpApprovalStore.Interface) =>
-  Effect.forEach(configured, (server) => summarizeServer(server, approvals), { concurrency: 1 })
+  Effect.forEach(configured, (server) => summarizeServer(server, approvals), {
+    concurrency: discoveryConcurrency,
+  }).pipe(Effect.map(sortServerSummaries))
 
 const approveConfiguredServer = (
   serverName: string,
@@ -484,7 +487,10 @@ const checkServers = (
   configured: ReadonlyArray<ConfiguredServer>,
   approvals: McpApprovalStore.Interface,
   connector: Connector,
-) => Effect.forEach(configured, (server) => checkServer(server, approvals, connector), { concurrency: 1 })
+) =>
+  Effect.forEach(configured, (server) => checkServer(server, approvals, connector), {
+    concurrency: discoveryConcurrency,
+  }).pipe(Effect.map(sortServerHealth))
 
 const definitionsForServer = (server: ConfiguredServer, connector: Connector) =>
   withConnection(connector, server, (connection) => connection.listTools).pipe(
@@ -501,14 +507,16 @@ const definitionsForServers = (
   connector: Connector,
 ) =>
   Effect.gen(function* () {
-    const allowed = yield* Effect.forEach(configured, (server) => isRunnable(server, approvals), { concurrency: 1 })
+    const allowed = yield* Effect.forEach(configured, (server) => isRunnable(server, approvals), {
+      concurrency: discoveryConcurrency,
+    })
     const runnable = configured.filter((_server, index) => allowed[index] === true)
     const nested = yield* Effect.forEach(
       runnable,
       (server) => definitionsForServer(server, connector).pipe(Effect.catch(() => Effect.succeed([]))),
-      { concurrency: 1 },
+      { concurrency: discoveryConcurrency },
     )
-    return nested.flat()
+    return sortToolDefinitions(nested.flat())
   })
 
 const toolDefinition = (server: ConfiguredServer, tool: RemoteTool, connector: Connector): ToolRegistry.Definition => ({
@@ -790,6 +798,23 @@ const effectiveCommandCwd = (config: CommandServerConfig, defaultCwd: string) =>
   const cwd = config.cwd ?? defaultCwd
   return isAbsolute(cwd) ? cwd : resolve(defaultCwd, cwd)
 }
+
+const sortServerSummaries = (rows: ReadonlyArray<ServerSummary>) =>
+  rows.toSorted((left, right) => compareServerRows(left, right))
+
+const sortServerHealth = (rows: ReadonlyArray<ServerHealth>) =>
+  rows.toSorted((left, right) => compareServerRows(left, right))
+
+const compareServerRows = (
+  left: Pick<ServerSummary, "name" | "source" | "fingerprint">,
+  right: Pick<ServerSummary, "name" | "source" | "fingerprint">,
+) =>
+  left.name.localeCompare(right.name) ||
+  left.source.localeCompare(right.source) ||
+  left.fingerprint.localeCompare(right.fingerprint)
+
+const sortToolDefinitions = (definitions: ReadonlyArray<ToolRegistry.Definition>) =>
+  definitions.toSorted((left, right) => left.tool.name.localeCompare(right.tool.name))
 
 const stableJson = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`

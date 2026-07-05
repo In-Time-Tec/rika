@@ -281,6 +281,25 @@ describe("McpClient", () => {
     expect(definitions.map((definition) => definition.tool.name)).toEqual(["mcp.remote.read_file"])
   })
 
+  test("returns discovered MCP tool definitions in deterministic name order", async () => {
+    const runtime = layer(
+      [
+        userSource({
+          zed: { url: "https://example.com/zed" },
+          alpha: { url: "https://example.com/alpha" },
+        }),
+      ],
+      fakeConnector({
+        zed: { tools: [{ name: "write", inputSchema: { type: "object" } }] },
+        alpha: { tools: [{ name: "read", inputSchema: { type: "object" } }] },
+      }),
+    )
+
+    const definitions = await Effect.runPromise(McpClient.toolDefinitions().pipe(Effect.provide(runtime)))
+
+    expect(definitions.map((definition) => definition.tool.name)).toEqual(["mcp.alpha.read", "mcp.zed.write"])
+  })
+
   test("does not hide approval store failures when building MCP tool definitions", async () => {
     const approvals = Layer.succeed(
       McpApprovalStore.Service,

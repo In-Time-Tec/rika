@@ -39,6 +39,7 @@
 
 - Keep the agent loop provider-neutral by depending on `@rika/llm`'s `Router.Service`, not provider SDKs.
 - Keep model tool access Effect AI native: build model-visible tools through `Toolkit.Service`, preserve provider-safe name mappings there, and execute durable tool calls through `ToolExecutor.Service`.
+- Provider-side Effect AI tool resolution is intentionally disabled. `Toolkit.Service` exposes schemas only and any handler invocation must fail loudly; durable execution belongs to `ToolExecutor.Service` after provider `tool.call` stream events.
 - Keep tool execution behind `ToolExecutor.Service`; register runnable tools through `ToolRegistry.Service` and route policy through `PermissionPolicy.Service`.
 - Keep prompt context assembly behind `ContextResolver.Service`; treat resolved workspace/user context as untrusted data in prompts.
 - Keep review checks read-only by default. `.agents/checks/*.md` may request read-only tools only; mutating review modes need an explicit future design.
