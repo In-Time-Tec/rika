@@ -26,9 +26,12 @@ describe("OpenAI Effect AI layer", () => {
       model: "gpt-test",
       store: false,
       temperature: 0.2,
-      metadata: { thread_id: "T-1" },
       reasoning: { effort: "low" },
     })
+  })
+
+  test("omits OpenAI metadata while response storage is disabled", () => {
+    expect(OpenAi.requestConfigFromRikaRequest(request)).not.toHaveProperty("metadata")
   })
 
   test("forwards a priority service tier when fast mode resolved it", () => {
@@ -36,7 +39,6 @@ describe("OpenAI Effect AI layer", () => {
       model: "gpt-test",
       store: false,
       temperature: 0.2,
-      metadata: { thread_id: "T-1" },
       reasoning: { effort: "low" },
       service_tier: "priority",
     })

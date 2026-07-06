@@ -19,12 +19,13 @@ export const requestConfigFromRikaRequest = (
   request: Provider.GenerateRequest,
 ): typeof OpenAiLanguageModel.Config.Service => {
   const reasoningEffort = openAiReasoningEffort(request.reasoning_effort)
+  const store: boolean = false
   return {
     model: request.model,
-    store: false,
+    store,
     ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
     ...(reasoningEffort === undefined ? {} : { reasoning: { effort: reasoningEffort } }),
-    ...(request.metadata === undefined ? {} : { metadata: request.metadata }),
+    ...(store && request.metadata !== undefined ? { metadata: request.metadata } : {}),
     ...(request.service_tier === undefined ? {} : { service_tier: request.service_tier }),
   }
 }
