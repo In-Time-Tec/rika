@@ -1345,13 +1345,111 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
   ),
 }))
 
+export const foldStreamEvents = (events: ReadonlyArray<Event.Event>): ReadonlyArray<Event.Event> => {
+  const output: Array<Event.Event | undefined> = []
+  const openContent = new Map<string, number>()
+  const openReasoning = new Map<string, number>()
+  const openToolInput = new Map<string, number>()
+  const seal = (turnId: string | undefined) => {
+    if (turnId === undefined) {
+      openContent.clear()
+      openReasoning.clear()
+      return
+    }
+    openContent.delete(turnId)
+    openReasoning.delete(turnId)
+  }
+  for (const event of events) {
+    switch (event.type) {
+      case "model.stream.chunk": {
+        const index = openContent.get(event.turn_id)
+        const open = index === undefined ? undefined : output[index]
+        if (index !== undefined && open?.type === "model.stream.chunk") {
+          output[index] = { ...open, data: { ...open.data, text: `${open.data.text}${event.data.text}` } }
+        } else {
+          openContent.set(event.turn_id, output.length)
+          output.push(event)
+        }
+        break
+      }
+      case "model.reasoning.delta": {
+        const index = openReasoning.get(event.turn_id)
+        const open = index === undefined ? undefined : output[index]
+        if (index !== undefined && open?.type === "model.reasoning.delta") {
+          output[index] = { ...open, data: { ...open.data, text: `${open.data.text}${event.data.text}` } }
+        } else {
+          openReasoning.set(event.turn_id, output.length)
+          output.push(event)
+        }
+        break
+      }
+      case "tool.call.input.delta": {
+        const index = openToolInput.get(event.data.id)
+        const open = index === undefined ? undefined : output[index]
+        if (index !== undefined && open?.type === "tool.call.input.delta") {
+          output[index] = { ...open, data: { ...open.data, text: `${open.data.text}${event.data.text}` } }
+        } else {
+          openToolInput.set(event.data.id, output.length)
+          output.push(event)
+        }
+        break
+      }
+      case "tool.call.input.ended": {
+        seal(event.turn_id)
+        const index = openToolInput.get(event.data.id)
+        if (index !== undefined) {
+          output[index] = undefined
+          openToolInput.delete(event.data.id)
+        }
+        output.push(event)
+        break
+      }
+      case "message.added": {
+        const turnId = event.turn_id
+        if (event.data.message.role === "assistant" && turnId !== undefined) {
+          const index = openContent.get(turnId)
+          if (index !== undefined) {
+            output[index] = undefined
+            openContent.delete(turnId)
+          }
+          openReasoning.delete(turnId)
+        } else {
+          seal(turnId)
+        }
+        output.push(event)
+        break
+      }
+      case "turn.completed":
+      case "turn.failed": {
+        seal(event.turn_id)
+        openToolInput.clear()
+        output.push(event)
+        break
+      }
+      case "tool.call.input.started":
+      case "tool.call.requested":
+      case "tool.call.completed":
+      case "skill.loaded":
+      case "subagent.completed":
+      case "turn.started": {
+        seal(event.turn_id)
+        output.push(event)
+        break
+      }
+      default:
+        output.push(event)
+    }
+  }
+  return output.filter((event) => event !== undefined)
+}
+
 export const eventRows = (
   events: ReadonlyArray<Event.Event>,
   expandedDiffIds: ReadonlySet<string> = new Set(),
   userId?: Ids.UserId,
   collapsedTranscriptRowIds: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<TranscriptRow> =>
-  events.flatMap((event) => {
+  foldStreamEvents(events).flatMap((event) => {
     switch (event.type) {
       case "message.added": {
         const author = messageAuthor(event.data.message, userId)

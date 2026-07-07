@@ -287,6 +287,36 @@ describe("web app view", () => {
     )
   })
 
+  test("renders assistant markdown as semantic elements, not literal syntax", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({
+        ...orbModel("transcript", 0),
+        events: [messageAdded(1, "assistant", "## Title\n\nSome **bold** text.")],
+      }),
+      Scene.expect(Scene.role("heading", { name: "Title" })).toExist(),
+      Scene.expect(Scene.text("## Title")).toBeAbsent(),
+      Scene.expect(Scene.selector(".markdown-body strong")).toExist(),
+      Scene.expect(Scene.role("tabpanel")).toContainText("Some bold text."),
+      ...resolveTranscriptScroller(),
+    )
+  })
+
+  test("folds streamed chunks into a single assistant bubble", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({
+        ...orbModel("transcript", 0),
+        events: [streamChunk(2, "First sentence. "), streamChunk(3, "Second sentence.")],
+        last_sequence: 3,
+        subscription_after_sequence: 3,
+      }),
+      Scene.expectAll(Scene.all.selector('[data-slot="bubble"]')).toHaveCount(1),
+      Scene.expect(Scene.text("First sentence. Second sentence.")).toExist(),
+      ...resolveTranscriptScroller(),
+    )
+  })
+
   test("renders sidebar thread search controls", () => {
     Scene.scene(
       { update, view: View.view },
@@ -571,6 +601,17 @@ const messageAdded = (
       ...(messageUserId === undefined ? {} : { metadata: { user_id: messageUserId } }),
     },
   },
+})
+
+const streamChunk = (sequence: number, text: string): Event.ModelStreamChunk => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-view"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "model.stream.chunk",
+  data: { text, provider: "openai", model: "gpt-5.5" },
 })
 
 const toolCallCompleted = (

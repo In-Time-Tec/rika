@@ -51,6 +51,7 @@ import {
   type OrbTab,
   type TranscriptRow,
 } from "./app"
+import { codeBlock, markdownContent } from "./markdown"
 import * as Ui from "./ui"
 
 const H = html<AppMessage>()
@@ -727,7 +728,7 @@ const messageRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-dif
     ]),
     Ui.Message.messageContent({}, [
       Ui.Message.messageHeader({}, [H.span([], [`#${row.sequence}`]), H.strong([], [sender])]),
-      Ui.Bubble.bubble({ align, variant }, [Ui.Bubble.bubbleContent({}, textContent(row.body))]),
+      Ui.Bubble.bubble({ align, variant }, [Ui.Bubble.bubbleContent({}, markdownContent(row.body))]),
     ]),
   ])
 }
@@ -743,7 +744,7 @@ const reasoningRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-d
       },
       [],
     ),
-    isOpen ? Ui.Reasoning.reasoningContent({}, textContent(row.body)) : Ui.empty,
+    isOpen ? Ui.Reasoning.reasoningContent({}, markdownContent(row.body)) : Ui.empty,
   ])
 }
 
@@ -777,29 +778,6 @@ const eventRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff"
       H.p([H.Class("event-body")], [row.body]),
     ],
   )
-
-const textContent = (value: string): ReadonlyArray<Html | string> => {
-  const parts: Array<Html | string> = []
-  const fence = /```([^\n`]*)\n?([\s\S]*?)```/g
-  let index = 0
-  for (const match of value.matchAll(fence)) {
-    const start = match.index ?? 0
-    const text = value.slice(index, start)
-    if (text.length > 0) parts.push(H.span([H.Class("whitespace-pre-wrap")], [text]))
-    const language = match[1]?.trim() || "text"
-    parts.push(codeBlock(language, match[2] ?? "", language))
-    index = start + match[0].length
-  }
-  const tail = value.slice(index)
-  if (tail.length > 0) parts.push(H.span([H.Class("whitespace-pre-wrap")], [tail]))
-  return parts.length === 0 ? [""] : parts
-}
-
-const codeBlock = (language: string, code: string, title: string): Html =>
-  Ui.CodeBlock.codeBlock({ language, class: "my-1 max-w-full" }, [
-    Ui.CodeBlock.codeBlockHeader({}, [Ui.CodeBlock.codeBlockTitle({}, [Ui.CodeBlock.codeBlockFilename({}, [title])])]),
-    Ui.CodeBlock.codeBlockContent({ code }),
-  ])
 
 const toolName = (title: string): string => title.replace(/^Tool input:\s*/, "").replace(/^Tool:\s*/, "")
 

@@ -6,6 +6,7 @@ Foldkit local web UI for observing and steering shared Rika threads during devel
 
 - `src/app.ts` owns the Foldkit `Model`, `AppMessage`, commands, subscriptions, and pure `update` function.
 - `src/view.ts` owns browser presentation only. It renders state and dispatches messages; it does not call the SDK directly.
+- `src/markdown.ts` owns message-body markdown → Html mapping (marked lexer tokens to Foldkit nodes, fences delegated to the code block component). Never inject raw HTML from model output.
 - `components.json` and `foldcn.lock.json` are the canonical foldcn copy-in layer. Copied and ported components live under `src/components/ui/*`.
 - `src/ui.ts` is a thin re-export/adapter over `src/components/ui/*` for app call sites. Do not add hand-rolled primitives there.
 - `src/entry.ts` creates the Foldkit runtime, and `src/main.ts` reads browser/query/env flags.

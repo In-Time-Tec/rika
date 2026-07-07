@@ -847,6 +847,104 @@ describe("web app state", () => {
     ])
   })
 
+  test("folds consecutive stream chunks into a single message row", () => {
+    expect(eventRows([streamChunk(1, "Hello world. "), streamChunk(2, "Second sentence.")])).toEqual([
+      { id: "event-1", sequence: 1, kind: "message", title: "Rika", body: "Hello world. Second sentence." },
+    ])
+  })
+
+  test("supersedes streamed chunks with the final assistant message of the turn", () => {
+    const turnId = Ids.TurnId.make("turn-web")
+    expect(
+      eventRows([
+        streamChunk(1, "Hello ", turnId),
+        streamChunk(2, "world.", turnId),
+        messageAdded(3, "assistant", "Hello world.", undefined, turnId),
+      ]),
+    ).toEqual([{ id: "event-3", sequence: 3, kind: "message", title: "Rika", body: "Hello world." }])
+  })
+
+  test("keeps pre-tool prose when the final message supersedes only trailing chunks", () => {
+    const turnId = Ids.TurnId.make("turn-web")
+    const rows = eventRows([
+      streamChunk(1, "Let me ", turnId),
+      streamChunk(2, "check.", turnId),
+      toolCallRequested(3, "read"),
+      streamChunk(4, "Here is ", turnId),
+      streamChunk(5, "the answer.", turnId),
+      messageAdded(6, "assistant", "Here is the answer.", undefined, turnId),
+    ])
+
+    expect(rows.map((row) => [row.id, row.kind, "body" in row ? row.body : ""])).toEqual([
+      ["event-1", "message", "Let me check."],
+      ["event-3", "tool", "Running"],
+      ["event-6", "message", "Here is the answer."],
+    ])
+  })
+
+  test("folds interleaved reasoning deltas without splitting the content bubble", () => {
+    const rows = eventRows([
+      streamChunk(1, "First "),
+      reasoningDelta(2, "thinking "),
+      streamChunk(3, "and second."),
+      reasoningDelta(4, "more."),
+    ])
+
+    expect(rows).toEqual([
+      { id: "event-1", sequence: 1, kind: "message", title: "Rika", body: "First and second." },
+      { id: "event-2", sequence: 2, kind: "event", title: "Reasoning", body: "thinking more.", is_open: true },
+    ])
+  })
+
+  test("retains partial streamed text when the turn fails", () => {
+    const turnId = Ids.TurnId.make("turn-web")
+    const rows = eventRows([streamChunk(1, "Partial ", turnId), streamChunk(2, "reply", turnId), turnFailed(3, turnId)])
+
+    expect(rows.map((row) => [row.id, row.kind, "body" in row ? row.body : ""])).toEqual([
+      ["event-1", "message", "Partial reply"],
+      ["event-3", "error", "cancelled"],
+    ])
+  })
+
+  test("folds tool input deltas and removes them once input ends", () => {
+    const streaming = eventRows([
+      toolInputStarted(1, "write"),
+      toolInputDelta(2, "tool-web-1", '{"path":'),
+      toolInputDelta(3, "tool-web-1", '"a.ts"}'),
+    ])
+    expect(streaming.map((row) => [row.id, "body" in row ? row.body : ""])).toEqual([
+      ["event-1", "Started"],
+      ["event-2", '{"path":"a.ts"}'],
+    ])
+
+    const ended = eventRows([
+      toolInputStarted(1, "write"),
+      toolInputDelta(2, "tool-web-1", '{"path":'),
+      toolInputDelta(3, "tool-web-1", '"a.ts"}'),
+      toolInputEnded(4, "tool-web-1", "write", '{"path":"a.ts"}'),
+    ])
+    expect(ended.map((row) => [row.id, "body" in row ? row.body : ""])).toEqual([
+      ["event-1", "Started"],
+      ["event-4", '{"path":"a.ts"}'],
+    ])
+  })
+
+  test("does not cross-fold chunks from different turns", () => {
+    const firstTurn = Ids.TurnId.make("turn-web-a")
+    const secondTurn = Ids.TurnId.make("turn-web-b")
+    const rows = eventRows([
+      streamChunk(1, "First turn.", firstTurn),
+      turnCompleted(2, firstTurn),
+      streamChunk(3, "Second turn.", secondTurn),
+    ])
+
+    expect(rows.map((row) => [row.id, row.kind, "body" in row ? row.body : ""])).toEqual([
+      ["event-1", "message", "First turn."],
+      ["event-2", "event", firstTurn],
+      ["event-3", "message", "Second turn."],
+    ])
+  })
+
   test("keeps user message attribution separate from body text", () => {
     expect(eventRows([messageAdded(1, "user", "hi", otherUserId)], new Set(), userId)).toEqual([
       {
@@ -1363,9 +1461,11 @@ const messageAdded = (
   role: RikaMessage.Role,
   text: string,
   messageUserId?: Ids.UserId,
+  turnId?: Ids.TurnId,
 ): Event.MessageAdded => ({
   id: Ids.EventId.make(`event-${sequence}`),
   thread_id: threadId,
+  ...(turnId === undefined ? {} : { turn_id: turnId }),
   sequence,
   version: 1,
   created_at: sequence,
@@ -1380,6 +1480,54 @@ const messageAdded = (
       ...(messageUserId === undefined ? {} : { metadata: { user_id: messageUserId } }),
     },
   },
+})
+
+const streamChunk = (
+  sequence: number,
+  text: string,
+  turnId: Ids.TurnId = Ids.TurnId.make("turn-web"),
+): Event.ModelStreamChunk => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "model.stream.chunk",
+  data: { text, provider: "openai", model: "gpt-5.5" },
+})
+
+const toolCallRequested = (sequence: number, name: string): Event.ToolCallRequested => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-web"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "tool.call.requested",
+  data: { call: { id: Ids.ToolCallId.make(`tool-web-${sequence}`), name, input: {} } },
+})
+
+const toolInputDelta = (sequence: number, toolCallId: string, text: string): Event.ToolCallInputDelta => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-web"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "tool.call.input.delta",
+  data: { id: Ids.ToolCallId.make(toolCallId), text },
+})
+
+const toolInputEnded = (sequence: number, toolCallId: string, name: string, inputText: string): Event.ToolCallInputEnded => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-web"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "tool.call.input.ended",
+  data: { id: Ids.ToolCallId.make(toolCallId), name, input_text: inputText },
 })
 
 const contextCompacted = (sequence: number): Event.ContextCompacted => ({

@@ -23,6 +23,7 @@
     "effect": "catalog:",
     "foldkit": "catalog:",
     "ghostty-web": "0.4.0",
+    "marked": "17.0.1",
     "tailwind-merge": "catalog:",
     "tailwindcss": "catalog:",
     "ws": "8.21.0"
