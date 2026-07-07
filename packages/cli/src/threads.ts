@@ -1,6 +1,7 @@
+import { existsSync } from "node:fs"
 import { ThreadService, TournamentService } from "@rika/agent"
 import { Embeddings } from "@rika/llm"
-import { Database, OrbStore, ThreadMemoryStore, ThreadProjection } from "@rika/persistence"
+import { Database, OrbStore, ThreadImport, ThreadMemoryStore, ThreadProjection } from "@rika/persistence"
 import { Client } from "@rika/sdk"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Args from "./args"
@@ -157,6 +158,20 @@ export const layer = Layer.effect(
             yield* output.stdout(formatJson({ rebuilt: true }))
             return 0
           }
+          case "import": {
+            const sourceDataDir = yield* requireSourceDataDir(command)
+            const sourcePath = `${sourceDataDir}/rika.sqlite`
+            if (!existsSync(sourcePath)) {
+              return yield* new ThreadsError({
+                message: `Source database not found: ${sourcePath}`,
+                action: command.action,
+              })
+            }
+            const imported = yield* database.withDatabase((db) => ThreadImport.importFromSqlite(db, sourcePath))
+            yield* projection.rebuild().pipe(Effect.provideService(Database.Service, database))
+            yield* output.stdout(formatJson({ ...imported, rebuilt: true }))
+            return 0
+          }
         }
         return yield* new ThreadsError({
           message: "Unsupported thread action",
@@ -182,6 +197,13 @@ const requireThreadId = (command: Args.ThreadCommand) =>
   command.thread_id === undefined
     ? Effect.fail(new ThreadsError({ message: `Thread id is required for ${command.action}`, action: command.action }))
     : Effect.succeed(command.thread_id)
+
+const requireSourceDataDir = (command: Args.ThreadCommand) =>
+  command.source_data_dir === undefined
+    ? Effect.fail(
+        new ThreadsError({ message: "Source data directory is required for import", action: command.action }),
+      )
+    : Effect.succeed(command.source_data_dir)
 
 const requireVisibility = (command: Args.ThreadCommand) =>
   command.visibility === undefined

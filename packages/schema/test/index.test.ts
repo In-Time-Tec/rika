@@ -549,6 +549,21 @@ describe("Rika protocol schemas", () => {
     )
   })
 
+  test("ThreadSummary decode defaults a missing visibility key to private", () => {
+    const withoutVisibility = {
+      thread_id: "thread_1",
+      workspace_id: "workspace_1",
+      diff: { additions: 0, modifications: 0, deletions: 0 },
+      archived: false,
+      created_at: now,
+      updated_at: now,
+    }
+    expect(Schema.decodeUnknownSync(Remote.ThreadSummary)(withoutVisibility).visibility).toEqual("private")
+    expect(Schema.decodeUnknownSync(Schema.Array(Remote.ThreadSummary))([withoutVisibility])[0]?.visibility).toEqual(
+      "private",
+    )
+  })
+
   test("round-trips orb protocol payloads", () => {
     const orb: Orb.OrbRecord = {
       orb_id: orbId,

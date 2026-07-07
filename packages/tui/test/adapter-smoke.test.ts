@@ -169,7 +169,7 @@ describe("adapter Surface (headless)", () => {
       expectBackground("Backspace")
       expectBackground(" to dequeue")
       expectBackground("smart")
-      expectBackground("Thinking 0 tok")
+      expectBackground("Thinking")
       expectBackground("~/projects/rika (main)")
 
       const frame = setup.captureCharFrame()

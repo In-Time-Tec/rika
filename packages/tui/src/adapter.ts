@@ -1053,10 +1053,14 @@ const costLabel = (cost: number): string => `$${cost < 0.01 ? cost.toFixed(3) : 
 
 const activityLabel = (state: ViewState.ViewState): string => {
   switch (state.activity) {
-    case "thinking":
-      return `Thinking ${liveTokenCount(state)} tok`
-    case "streaming":
-      return `Streaming ${liveTokenCount(state)} tok`
+    case "thinking": {
+      const tokens = liveTokenCount(state)
+      return tokens === 0 ? "Thinking" : `Thinking ${tokens} tok`
+    }
+    case "streaming": {
+      const tokens = liveTokenCount(state)
+      return tokens === 0 ? "Streaming" : `Streaming ${tokens} tok`
+    }
     case "running-tools":
       return "Running tools"
     case "failed":

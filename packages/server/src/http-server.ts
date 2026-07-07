@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto"
 import { Diagnostics } from "@rika/core"
 import { OrbChanges, OrbFiles, OrbPty } from "@rika/orb"
 import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
-import { Cause, Context, Effect, Fiber, Layer, Option, Queue, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Stream } from "effect"
 import * as RemoteControl from "./remote-control"
 
 const defaultHost = "127.0.0.1"
@@ -508,7 +508,7 @@ const dispatch = (
   url: URL,
   requiredToken: string | undefined,
   orbMode: OrbRouteMode | undefined,
-): Effect.Effect<Response, RemoteControl.RunError> =>
+): Effect.Effect<Response, RemoteControl.RunError, Diagnostics.Service> =>
   Effect.gen(function* () {
     if (url.pathname === "/health")
       return isAuthorized(request, requiredToken)
@@ -778,7 +778,10 @@ const dispatch = (
       segments.length === 4
     ) {
       const input = withAuthorization(subscribeThreadEventsRequest(url, segments[2]), authorization)
+      const diagnostics = yield* Diagnostics.Service
       return ndjson(
+        diagnostics,
+        input.thread_id,
         Stream.merge(
           remote.subscribeThreadEvents(input).pipe(Stream.map((event): Remote.StreamFrame => event)),
           remote.subscribeThreadPresence(input).pipe(Stream.map((frame): Remote.StreamFrame => frame)),
@@ -949,15 +952,47 @@ const json = (value: unknown, status = 200) =>
     headers: { "content-type": "application/json" },
   })
 
-const ndjson = (events: Stream.Stream<Remote.StreamFrame, RemoteControl.RunError>) => {
+const ndjson = (
+  diagnostics: Diagnostics.Interface,
+  threadId: Ids.ThreadId,
+  events: Stream.Stream<Remote.StreamFrame, RemoteControl.RunError>,
+) => {
   const encoder = new TextEncoder()
-  const encodeFrame = (frame: Remote.StreamFrame) =>
-    encoder.encode(`${JSON.stringify(Codec.encode(Remote.StreamFrame)(frame))}\n`)
+  let frames = 0
+  let closeReason = "completed"
+  let closeDetail: string | undefined
+  const encodeFrame = (frame: Remote.StreamFrame) => {
+    frames += 1
+    return encoder.encode(`${JSON.stringify(Codec.encode(Remote.StreamFrame)(frame))}\n`)
+  }
+  const emitClose = (reason: string) =>
+    diagnostics
+      .emit({
+        level: reason === "error" ? "error" : "info",
+        message: `thread.stream ${reason}`,
+        data: {
+          op: "thread.stream",
+          thread_id: threadId,
+          close_reason: reason,
+          frames_sent: frames,
+          ...(closeDetail === undefined ? {} : { error: closeDetail }),
+        },
+      })
+      .pipe(Effect.catchCause(() => Effect.void))
   const body = events.pipe(
-    Stream.catchCause((cause: Cause.Cause<RemoteControl.RunError>) =>
-      Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.make(errorFrameFromCause(cause)),
-    ),
+    Stream.catchCause((cause: Cause.Cause<RemoteControl.RunError>) => {
+      if (Cause.hasInterruptsOnly(cause)) {
+        closeReason = "client_closed"
+        return Stream.empty
+      }
+      closeReason = "error"
+      closeDetail = Cause.pretty(cause)
+      return Stream.make(errorFrameFromCause(cause))
+    }),
     Stream.map(encodeFrame),
+    Stream.onExit((exit) =>
+      emitClose(Exit.isSuccess(exit) ? closeReason : Cause.hasInterruptsOnly(exit.cause) ? "client_closed" : "error"),
+    ),
     Stream.toReadableStream,
   )
   return new Response(body, { headers: { "content-type": "application/x-ndjson" } })

@@ -4,6 +4,7 @@ import { JsonValue, TimestampMillis } from "./common"
 import {
   Event,
   ThreadVisibility as EventThreadVisibility,
+  ThreadVisibilityDefaulted as EventThreadVisibilityDefaulted,
   type ThreadVisibility as EventThreadVisibilityType,
 } from "./event"
 import { ContextSnapshot as IdeContextSnapshot } from "./ide"
@@ -73,7 +74,7 @@ export const ThreadSummary = Schema.Struct({
   context_window: Schema.optional(Schema.Int),
   orb_status: Schema.optional(OrbStatus),
   archived: Schema.Boolean,
-  visibility: ThreadVisibility,
+  visibility: EventThreadVisibilityDefaulted,
   created_at: TimestampMillis,
   updated_at: TimestampMillis,
 }).annotate({ identifier: "Rika.Remote.ThreadSummary" })

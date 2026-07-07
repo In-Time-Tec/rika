@@ -236,7 +236,7 @@ describe("CLI backend endpoint resolver", () => {
       expect(local.starts).toEqual([
         {
           workspace_root: workspace,
-          data_dir: `${workspace}/.rika`,
+          data_dir: `${home}/.rika`,
           mode: "deep3",
         },
       ])

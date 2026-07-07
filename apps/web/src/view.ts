@@ -1,12 +1,9 @@
-import { Common } from "@rika/schema"
 import { html, type Document, type Html } from "foldkit/html"
 import {
   activeTurnId,
   CancelledKillOrb,
   ChangedDraft,
   ChangedDraftMode,
-  ChangedThreadSearchQuery,
-  ChangedThreadSearchWindow,
   ChangedNewProjectEnvKey,
   ChangedNewProjectEnvValue,
   ChangedNewProjectField,
@@ -17,6 +14,7 @@ import {
   ClickedDeleteProjectSecret,
   ClickedProject,
   ClickedProjects,
+  ClickedToggleTheme,
   ClickedTogglePierreDiff,
   ClickedKillOrb,
   ClickedNewThread,
@@ -41,12 +39,10 @@ import {
   SubmittedProjectSecret,
   SubmittedProjectSettings,
   SubmittedDraft,
-  contextUsage,
   eventRows,
   OrbTabItems,
   pierreTreeMountKey,
   type AppMessage,
-  type ContextUsage,
   type Model,
   type OrbTab,
   type TranscriptRow,
@@ -64,126 +60,318 @@ const modeOptions: ReadonlyArray<Ui.SelectOption> = [
   { value: "deep2", label: "deep2" },
   { value: "deep3", label: "deep3" },
 ]
-const searchWindowOptions: ReadonlyArray<Ui.SelectOption> = [
-  { value: "24h", label: "24h" },
-  { value: "72h", label: "72h" },
-  { value: "7d", label: "7d" },
-  { value: "all", label: "all" },
-]
+const svgIcon = (className: string, paths: ReadonlyArray<string>): Html =>
+  H.svg(
+    [
+      H.Attribute("xmlns", "http://www.w3.org/2000/svg"),
+      H.Attribute("viewBox", "0 0 24 24"),
+      H.Attribute("fill", "none"),
+      H.Attribute("stroke", "currentColor"),
+      H.Attribute("stroke-width", "1.75"),
+      H.Attribute("stroke-linecap", "round"),
+      H.Attribute("stroke-linejoin", "round"),
+      H.AriaHidden(true),
+      H.Class(className),
+    ],
+    paths.map((d) => H.path([H.Attribute("d", d)], [])),
+  )
 
-const currentTimestamp = () => Common.TimestampMillis.make(Date.now())
+const iconSearch = (c: string) => svgIcon(c, ["m21 21-4.35-4.35", "M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z"])
+const iconFilter = (c: string) => svgIcon(c, ["M3 6h18", "M7 12h10", "M10 18h4"])
+const iconCompose = (c: string) =>
+  svgIcon(c, [
+    "M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7",
+    "M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z",
+  ])
+const iconMonitor = (c: string) =>
+  svgIcon(c, ["M3 4h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z", "M8 20h8", "M12 16v4"])
+const iconActivity = (c: string) =>
+  svgIcon(c, [
+    "M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2",
+    "M18 14h-8",
+    "M15 18h-5",
+    "M10 6h8v4h-8V6Z",
+  ])
+const iconFolder = (c: string) =>
+  svgIcon(c, [
+    "M20 17a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3.9a2 2 0 0 1-1.69-.9l-.81-1.2a2 2 0 0 0-1.67-.9H8a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2Z",
+    "M2 8v11a2 2 0 0 0 2 2h14",
+  ])
+const iconChevrons = (c: string) => svgIcon(c, ["m7 15 5 5 5-5", "m7 9 5-5 5 5"])
+const iconPanel = (c: string) =>
+  svgIcon(c, ["M3 4h18a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z", "M9 4v16"])
+const iconImage = (c: string) =>
+  svgIcon(c, [
+    "M16 5h6",
+    "M19 2v6",
+    "M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5",
+    "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21",
+    "M9 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+  ])
+const iconPlugOff = (c: string) => svgIcon(c, ["M2 2l20 20", "M9 9v3a3 3 0 0 0 3 3", "M15 6.5V4a2 2 0 0 0-4 0v.5"])
+const iconMore = (c: string) =>
+  H.svg(
+    [
+      H.Attribute("xmlns", "http://www.w3.org/2000/svg"),
+      H.Attribute("viewBox", "0 0 24 24"),
+      H.Attribute("fill", "none"),
+      H.Attribute("stroke", "currentColor"),
+      H.Attribute("stroke-width", "3"),
+      H.Attribute("stroke-linecap", "round"),
+      H.Attribute("stroke-linejoin", "round"),
+      H.AriaHidden(true),
+      H.Class(c),
+    ],
+    ["M5 12h.01", "M12 12h.01", "M19 12h.01"].map((d) => H.path([H.Attribute("d", d)], [])),
+  )
+
+const projectTag = (thread: Model["threads"][number]): string => {
+  const segments = String(thread.workspace_id).split("/").filter(Boolean)
+  return segments[segments.length - 1] ?? ""
+}
+
+const compactAge = (timestamp: number): string => {
+  const delta = Date.now() - timestamp
+  const mins = Math.floor(delta / 60_000)
+  if (mins < 1) return "now"
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
+}
+
+const iconButton = (label: string, icon: Html, message: AppMessage, primary = false): Html =>
+  H.button(
+    [
+      H.Type("button"),
+      H.Class(
+        Ui.cn(
+          "grid size-7 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          primary && "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground",
+        ),
+      ),
+      H.AriaLabel(label),
+      H.Attribute("title", label),
+      H.OnClick(message),
+    ],
+    [icon],
+  )
+
+const threadActionsButton = (): Html =>
+  H.button(
+    [
+      H.Type("button"),
+      H.Class(
+        "grid size-6 shrink-0 cursor-pointer place-items-center rounded-md border-0 bg-transparent text-muted-foreground hover:bg-accent",
+      ),
+      H.AriaLabel("Thread actions"),
+    ],
+    [iconMore("size-4")],
+  )
+
+const accountLabel = (model: Model): string => (model.user_id === undefined ? "Rika" : String(model.user_id))
+
+const footerItemClass =
+  "flex h-8 w-full cursor-pointer items-center gap-1.5 rounded-md border-0 bg-transparent p-2 text-left text-[13px] font-medium text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+
+const noticeClass = "rounded-lg border border-destructive/40 bg-destructive/15 px-3.5 py-3 text-destructive"
+const emptyStateClass = "grid min-h-[18rem] place-items-center text-center text-muted-foreground"
+const emptyStateCompactClass = "grid min-h-20 place-items-center text-center text-muted-foreground"
+const sectionHeaderClass = "flex items-center justify-between gap-3"
+const formGridClass = "grid content-start gap-3"
+const inputClass =
+  "min-h-10 w-full min-w-0 rounded-lg border border-input bg-[color-mix(in_oklch,var(--background),var(--input)_18%)] px-3 py-[0.55rem] text-foreground outline-none focus:border-ring focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--ring),transparent_58%)]"
+const compactButtonsClass = "[&_[data-slot=button]]:h-8 [&_[data-slot=button]]:px-[0.7rem]"
+const eventRowClass = "grid gap-[0.45rem] border-b border-[color:var(--border-subtle)] p-3.5 last:border-b-0"
+const eventRowDiffClass = `${eventRowClass} border-l-[3px] border-l-[color:var(--info)]`
+const eventMetaClass =
+  "flex flex-wrap items-center gap-[0.55rem] text-xs text-muted-foreground [&_strong]:text-foreground"
+const monoTextClass = "font-mono text-[13px] [overflow-wrap:anywhere]"
+const pierreDiffMountClass = "max-w-full overflow-auto rounded-lg border border-border bg-background"
+const bareCardClass = "min-h-0 overflow-hidden p-0"
+const panelSectionHeaderClass = "flex items-center gap-3 border-b border-[color:var(--border-subtle)] p-3"
+const diffStatAddClass = "font-extrabold text-[color:var(--success)]"
+const diffStatDeleteClass = "font-extrabold text-destructive"
+const orbFileViewerEmptyClass = Ui.cn(emptyStateClass, "min-h-[28rem] min-w-0 overflow-auto")
+
+const sidebarFooter = (model: Model): Html =>
+  H.div(
+    [H.Class("mt-auto flex flex-col gap-0.5 border-t border-sidebar-border pt-2")],
+    [
+      H.button(
+        [H.Type("button"), H.Class(footerItemClass), H.OnClick(ClickedThreads())],
+        [iconActivity("size-4 shrink-0"), H.span([H.Class("truncate")], ["Activity"])],
+      ),
+      H.button(
+        [H.Type("button"), H.Class(footerItemClass), H.OnClick(ClickedProjects())],
+        [iconFolder("size-4 shrink-0"), H.span([H.Class("truncate")], ["Projects"])],
+      ),
+      H.button(
+        [
+          H.Type("button"),
+          H.Class(footerItemClass),
+          H.OnClick(ClickedToggleTheme()),
+          H.Attribute("title", "Toggle theme"),
+        ],
+        [
+          H.span(
+            [
+              H.Class(
+                "grid size-5 shrink-0 place-items-center rounded-full bg-[oklch(0.55_0.2_12)] text-[10px] font-bold text-white",
+              ),
+            ],
+            [initials(accountLabel(model))],
+          ),
+          H.span([H.Class("min-w-0 flex-1 truncate")], [accountLabel(model)]),
+          iconChevrons("size-3 shrink-0"),
+        ],
+      ),
+    ],
+  )
+
+const connectionStatus = (model: Model): Html =>
+  model.connection === "connected"
+    ? Ui.empty
+    : H.span(
+        [H.Class("inline-flex items-center gap-1.5 text-[13px] text-muted-foreground")],
+        [iconPlugOff("size-3.5 shrink-0"), "Not Connected"],
+      )
 
 export const view = (model: Model): Document => ({
   title: model.selected_thread_id === undefined ? "Rika" : `Rika · ${shortId(model.selected_thread_id)}`,
-  body: H.main([H.Class("dark shell")], [sidebar(model), workspace(model)]),
+  body: H.main(
+    [
+      H.Class(
+        Ui.cn(
+          model.theme === "dark" && "dark",
+          "box-border flex h-dvh overflow-hidden bg-background p-[13px] text-foreground",
+        ),
+      ),
+    ],
+    [
+      H.div(
+        [H.Class("grid min-w-0 flex-1 grid-cols-[256px_minmax(0,1fr)] overflow-hidden rounded-md bg-card")],
+        [sidebar(model), workspace(model)],
+      ),
+    ],
+  ),
 })
 
 const sidebar = (model: Model): Html =>
   H.aside(
-    [H.Class("sidebar")],
+    [H.Class("flex min-h-0 flex-col gap-2 border-r border-border/60 px-2 py-1.5")],
     [
       H.div(
-        [H.Class("brand")],
-        [H.div([H.Class("brand-mark")], ["R"]), H.div([], [H.h1([], ["Rika"]), statusLine(model)])],
-      ),
-      H.div(
-        [H.Class("sidebar-actions")],
+        [H.Class("-mx-2 flex items-center justify-between gap-2 border-b border-border/60 px-3 pt-1 pb-2")],
         [
-          Ui.button([H.Type("button"), H.OnClick(ClickedThreads())], ["Threads"], "ghost"),
-          Ui.button([H.Type("button"), H.OnClick(ClickedProjects())], ["Projects"], "ghost"),
-          Ui.button([H.Type("button"), H.OnClick(ClickedNewThread())], ["New thread"], "ghost"),
+          H.span([H.Class("text-[15px] font-semibold tracking-tight text-foreground")], ["Rika"]),
+          H.div(
+            [H.Class("flex items-center gap-0.5")],
+            [
+              iconButton("Search threads", iconSearch("size-4"), ClickedThreads()),
+              iconButton("Filter", iconFilter("size-4"), ClickedThreads()),
+              iconButton("New thread", iconCompose("size-4"), ClickedNewThread(), true),
+            ],
+          ),
         ],
       ),
-      threadSearchControls(model),
       H.nav(
-        [H.Class("thread-list"), H.AriaLabel("Threads")],
-        model.threads.map((thread) => threadButton(model, thread)),
+        [H.Class("flex min-h-0 flex-1 flex-col gap-0.5 overflow-auto"), H.AriaLabel("Threads")],
+        model.threads.length === 0
+          ? [H.p([H.Class("m-0 px-2 py-1.5 text-xs text-muted-foreground")], ["No threads yet"])]
+          : threadListChildren(model),
+      ),
+      sidebarFooter(model),
+    ],
+  )
+
+const threadGroupHeader = (label: string): Html =>
+  H.p(
+    [
+      H.Class(
+        "mx-0 mt-1.5 mb-0.5 flex h-5 shrink-0 items-center gap-2 px-2 text-[10px] font-normal text-muted-foreground/50 after:flex-1 after:border-t after:border-border after:content-['']",
       ),
     ],
+    [label],
   )
 
-const threadSearchControls = (model: Model): Html =>
-  H.div(
-    [H.Class("thread-search")],
-    [
-      H.input([
-        H.Type("search"),
-        H.Value(model.thread_search_query),
-        H.Placeholder("Search threads"),
-        H.AriaLabel("Thread search"),
-        H.OnInput((value) => ChangedThreadSearchQuery({ value, now: currentTimestamp() })),
-      ]),
-      Ui.select({
-        id: "thread-search-window",
-        value: model.thread_search_window,
-        options: searchWindowOptions,
-        onChange: (value) => ChangedThreadSearchWindow({ value, now: currentTimestamp() }),
-        attributes: [H.AriaLabel("Thread search window")],
-        class: "thread-search-window",
-      }),
-    ],
-  )
-
-const statusLine = (model: Model): Html =>
-  H.p(
-    [H.Class("muted")],
-    [
-      model.backend === undefined ? "Local backend" : model.backend.workspace_root,
-      " · ",
-      model.connection === "connected"
-        ? Ui.badge(["live"], "success")
-        : model.connection === "failed"
-          ? Ui.badge(["offline"], "danger")
-          : Ui.badge([model.connection]),
-    ],
-  )
+const threadListChildren = (model: Model): ReadonlyArray<Html> => {
+  const cutoff = Date.now() - 86_400_000
+  const recent = model.threads.filter((thread) => thread.updated_at >= cutoff)
+  const inactive = model.threads.filter((thread) => thread.updated_at < cutoff)
+  return [
+    ...(recent.length === 0 ? [] : [threadGroupHeader("Recent"), ...recent.map((t) => threadButton(model, t))]),
+    ...(inactive.length === 0
+      ? []
+      : [threadGroupHeader("Inactive Last 24h"), ...inactive.map((t) => threadButton(model, t))]),
+  ]
+}
 
 const threadButton = (model: Model, thread: Model["threads"][number]): Html =>
   H.button(
     [
-      H.Class(Ui.cn("thread-button", model.selected_thread_id === thread.thread_id && "thread-button-selected")),
+      H.Class(
+        Ui.cn(
+          "flex h-8 w-full cursor-pointer items-center gap-[5px] rounded-md border-0 bg-transparent px-2 py-1.5 text-left text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          model.selected_thread_id === thread.thread_id && "bg-sidebar-accent text-sidebar-accent-foreground",
+        ),
+      ),
       H.OnClick(ClickedThread({ thread_id: thread.thread_id })),
     ],
     [
-      H.span([H.Class("thread-title")], [thread.title_text ?? shortId(thread.thread_id)]),
-      H.span([H.Class("thread-preview")], [thread.latest_message_text ?? "No messages yet"]),
-      thread.orb_status === undefined
-        ? Ui.empty
-        : Ui.badge([`orb ${thread.orb_status}`], orbBadgeTone(thread.orb_status)),
+      iconMonitor("size-3.5 shrink-0"),
+      H.span(
+        [H.Class("min-w-0 flex-1 truncate text-xs font-medium")],
+        [thread.title_text ?? shortId(thread.thread_id)],
+      ),
+      H.span([H.Class("shrink-0 text-[10px]")], [projectTag(thread)]),
+      H.span([H.Class("shrink-0 text-[10px]")], [compactAge(thread.updated_at)]),
     ],
   )
 
 const workspace = (model: Model): Html =>
   H.section(
-    [H.Class("workspace")],
+    [H.Class("grid min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] gap-3 px-4 py-3")],
     [
       H.header(
-        [H.Class("workspace-header")],
+        [H.Class("flex items-center justify-between gap-3")],
         [
           H.div(
-            [],
+            [H.Class("flex min-w-0 items-center gap-2.5")],
             [
-              H.p([H.Class("eyebrow")], ["Local development sync"]),
-              H.div([H.Class("thread-title-row")], [H.h2([], [activeTitle(model)]), presenceAvatars(model)]),
+              iconPanel("size-4 shrink-0 text-muted-foreground"),
+              model.selected_thread_id === undefined && model.active_view !== "projects"
+                ? Ui.empty
+                : H.h2([H.Class("m-0 truncate text-[15px] font-semibold")], [activeTitle(model)]),
+              model.selected_thread_id === undefined ? Ui.empty : threadActionsButton(),
+              presenceAvatars(model),
             ],
           ),
           H.div(
-            [H.Class("header-status")],
-            [contextMeter(model), H.div([H.Class("sequence")], [`seq ${model.last_sequence}`])],
+            [H.Class("flex items-center gap-3 text-[13px] text-muted-foreground")],
+            [
+              model.selected_thread_id === undefined
+                ? Ui.empty
+                : H.span(
+                    [H.Class("inline-flex items-center gap-1")],
+                    [iconFolder("size-3.5 shrink-0"), selectedThreadProject(model)],
+                  ),
+              model.selected_thread_id === undefined ? Ui.empty : H.span([], [model.draft_mode ?? "smart"]),
+            ],
           ),
         ],
       ),
       model.active_view === "projects"
         ? projectsWorkspace(model)
         : H.div(
-            [H.Class("thread-workspace")],
+            [H.Class("grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)_auto] gap-3")],
             [
               orbHeader(model),
               killOrbDialog(model),
-              model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
+              model.notice === undefined ? Ui.empty : H.div([H.Class(noticeClass)], [model.notice]),
               hasOrbWorkspace(model) ? orbTabs(model) : transcript(model),
               typingIndicator(model),
-              composer(model),
+              model.selected_thread_id === undefined ? Ui.empty : composer(model),
             ],
           ),
     ],
@@ -191,21 +379,24 @@ const workspace = (model: Model): Html =>
 
 const projectsWorkspace = (model: Model): Html =>
   H.div(
-    [H.Class("projects-workspace")],
+    [H.Class("grid min-h-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-4")],
     [
-      model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
+      model.notice === undefined ? Ui.empty : H.div([H.Class(noticeClass)], [model.notice]),
       deleteSecretDialog(model),
-      H.div([H.Class("projects-layout")], [projectsListPanel(model), projectDetailPanel(model)]),
+      H.div(
+        [H.Class("grid min-h-0 grid-cols-[minmax(16rem,24rem)_minmax(0,1fr)] gap-4 max-[820px]:grid-cols-1")],
+        [projectsListPanel(model), projectDetailPanel(model)],
+      ),
     ],
   )
 
 const projectsListPanel = (model: Model): Html =>
-  Ui.Card.card({ class: "projects-list-card" }, [
-    H.div([H.Class("projects-section-header")], [H.h3([], ["Projects"])]),
+  Ui.Card.card({ class: "grid min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-3.5 overflow-auto p-[0.9rem]" }, [
+    H.div([H.Class(sectionHeaderClass)], [H.h3([H.Class("m-0")], ["Projects"])]),
     model.projects.length === 0
-      ? H.div([H.Class("empty-state")], ["No projects"])
+      ? H.div([H.Class(emptyStateCompactClass)], ["No projects"])
       : H.div(
-          [H.Class("projects-list")],
+          [H.Class("grid min-h-0 content-start gap-2 overflow-auto")],
           model.projects.map((project) => projectListButton(model, project)),
         ),
     newProjectForm(model),
@@ -215,12 +406,18 @@ const projectListButton = (model: Model, project: Model["projects"][number]): Ht
   H.button(
     [
       H.Type("button"),
-      H.Class(Ui.cn("project-list-button", model.selected_project_id === project.project_id && "project-selected")),
+      H.Class(
+        Ui.cn(
+          "grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-x-[0.45rem] gap-y-1 rounded-lg border border-transparent bg-transparent p-3 text-left hover:border-ring hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+          model.selected_project_id === project.project_id &&
+            "border-ring bg-sidebar-accent text-sidebar-accent-foreground",
+        ),
+      ),
       H.OnClick(ClickedProject({ project_id: project.project_id })),
     ],
     [
-      H.span([H.Class("project-name")], [project.name]),
-      H.span([H.Class("project-repo")], [project.repo_origin]),
+      H.span([H.Class("col-span-full min-w-0 truncate font-extrabold")], [project.name]),
+      H.span([H.Class("min-w-0 truncate text-[13px] text-muted-foreground")], [project.repo_origin]),
       project.env_keys.length === 0 ? Ui.empty : Ui.badge([`${project.env_keys.length} env`], "default"),
       project.secret_names.length === 0 ? Ui.empty : Ui.badge([`${project.secret_names.length} secrets`], "warning"),
     ],
@@ -228,9 +425,12 @@ const projectListButton = (model: Model, project: Model["projects"][number]): Ht
 
 const newProjectForm = (model: Model): Html =>
   H.form(
-    [H.Class("project-form new-project-form"), H.OnSubmit(SubmittedNewProject())],
     [
-      H.h3([], ["New project"]),
+      H.Class(Ui.cn(formGridClass, "border-t border-[color:var(--border-subtle)] pt-3.5")),
+      H.OnSubmit(SubmittedNewProject()),
+    ],
+    [
+      H.h3([H.Class("m-0")], ["New project"]),
       textInput("new-project-name", "Name", model.new_project_form.name, (value) =>
         ChangedNewProjectField({ field: "name", value }),
       ),
@@ -244,7 +444,7 @@ const newProjectForm = (model: Model): Html =>
         ChangedNewProjectField({ field: "template_id", value }),
       ),
       H.div(
-        [H.Class("env-pair")],
+        [H.Class("grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 max-[820px]:grid-cols-1")],
         [
           textInput("new-project-env-key", "Env key", model.new_project_form.env_key, (value) =>
             ChangedNewProjectEnvKey({ value }),
@@ -266,15 +466,17 @@ const newProjectForm = (model: Model): Html =>
     ],
   )
 
+const projectDetailCardClass = "grid min-h-0 content-start gap-3 overflow-auto p-[0.9rem]"
+
 const projectDetailPanel = (model: Model): Html => {
   const project = model.selected_project
   if (project === undefined) {
-    return Ui.Card.card({ class: "project-detail-card" }, [H.div([H.Class("empty-state")], ["Select a project"])])
+    return Ui.Card.card({ class: projectDetailCardClass }, [H.div([H.Class(emptyStateClass)], ["Select a project"])])
   }
-  return Ui.Card.card({ class: "project-detail-card" }, [
-    H.div([H.Class("projects-section-header")], [H.h3([], [project.name]), Ui.badge(["details"], "success")]),
+  return Ui.Card.card({ class: projectDetailCardClass }, [
+    H.div([H.Class(sectionHeaderClass)], [H.h3([H.Class("m-0")], [project.name]), Ui.badge(["details"], "success")]),
     H.form(
-      [H.Class("project-form"), H.OnSubmit(SubmittedProjectSettings())],
+      [H.Class(formGridClass), H.OnSubmit(SubmittedProjectSettings())],
       [
         textInput("project-name", "Name", model.project_form.name, (value) =>
           ChangedProjectField({ field: "name", value }),
@@ -298,17 +500,26 @@ const projectDetailPanel = (model: Model): Html => {
 
 const envEditor = (model: Model): Html =>
   H.div(
-    [H.Class("env-editor")],
+    [H.Class(formGridClass)],
     [
-      H.h4([], ["Environment"]),
+      H.h4([H.Class("m-0")], ["Environment"]),
       ...Object.entries(model.project_form.env).map(([key, value]) =>
         H.div(
-          [H.Key(key), H.Class("env-row")],
           [
-            H.span([H.Class("env-key")], [key]),
+            H.Key(key),
+            H.Class(
+              Ui.cn(
+                "grid grid-cols-[minmax(8rem,14rem)_minmax(0,1fr)_auto] items-center gap-2 max-[820px]:grid-cols-1",
+                compactButtonsClass,
+              ),
+            ),
+          ],
+          [
+            H.span([H.Class(Ui.cn(monoTextClass, "min-w-0 text-foreground"))], [key]),
             H.input([
               H.Type("text"),
               H.Value(value),
+              H.Class(inputClass),
               H.AriaLabel(`${key} value`),
               H.OnInput((next) => ChangedProjectEnvValue({ key, value: next })),
             ]),
@@ -321,17 +532,17 @@ const envEditor = (model: Model): Html =>
 
 const secretsPanel = (model: Model, project: NonNullable<Model["selected_project"]>): Html =>
   H.section(
-    [H.Class("secrets-panel")],
+    [H.Class(Ui.cn(formGridClass, "border-t border-[color:var(--border-subtle)] pt-4"))],
     [
-      H.h4([], ["Secrets"]),
+      H.h4([H.Class("m-0")], ["Secrets"]),
       project.secret_names.length === 0
-        ? H.div([H.Class("empty-state")], ["No secrets"])
+        ? H.div([H.Class(emptyStateCompactClass)], ["No secrets"])
         : H.div(
-            [H.Class("secret-list")],
+            [H.Class(formGridClass)],
             project.secret_names.map((name) => secretRow(model, name)),
           ),
       H.form(
-        [H.Class("secret-form"), H.OnSubmit(SubmittedProjectSecret())],
+        [H.Class(formGridClass), H.OnSubmit(SubmittedProjectSecret())],
         [
           textInput("project-secret-name", "Secret name", model.project_secret_name, (value) =>
             ChangedProjectSecretField({ field: "name", value }),
@@ -357,10 +568,18 @@ const secretsPanel = (model: Model, project: NonNullable<Model["selected_project
 
 const secretRow = (model: Model, name: string): Html =>
   H.div(
-    [H.Key(name), H.Class("secret-row")],
     [
-      H.span([H.Class("secret-name")], [name]),
-      H.span([H.Class("secret-mask")], ["****"]),
+      H.Key(name),
+      H.Class(
+        Ui.cn(
+          "grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border border-[color:var(--border-subtle)] bg-[color:var(--panel-muted)] p-2.5",
+          compactButtonsClass,
+        ),
+      ),
+    ],
+    [
+      H.span([H.Class(Ui.cn(monoTextClass, "min-w-0 text-foreground"))], [name]),
+      H.span([H.Class(Ui.cn(monoTextClass, "text-muted-foreground"))], ["****"]),
       Ui.button([H.Type("button"), H.OnClick(ClickedDeleteProjectSecret({ name }))], ["Delete"], "ghost"),
     ],
   )
@@ -400,39 +619,30 @@ const textInput = (
   type = "text",
 ): Html =>
   H.label(
-    [H.Class("field")],
-    [H.span([], [label]), H.input([H.Id(id), H.Type(type), H.Value(value), H.OnInput(onInput), H.AriaLabel(label)])],
-  )
-
-const contextMeter = (model: Model): Html => {
-  const usage = contextUsage(model)
-  if (usage === undefined) return Ui.empty
-  return H.div(
-    [H.Class(Ui.cn("context-meter", contextMeterToneClass(usage)))],
+    [H.Class("grid min-w-0 gap-1.5 text-[13px] font-bold text-muted-foreground")],
     [
-      H.span([], [`ctx ${usage.percent}%`]),
-      H.progress(
-        [H.Class("context-meter-bar"), H.Max("100"), H.Value(String(usage.percent)), H.AriaLabel("Context usage")],
-        [],
-      ),
+      H.span([], [label]),
+      H.input([H.Id(id), H.Type(type), H.Value(value), H.Class(inputClass), H.OnInput(onInput), H.AriaLabel(label)]),
     ],
   )
-}
 
-const contextMeterToneClass = (usage: ContextUsage) => {
-  if (usage.tone === "danger") return "context-meter-danger"
-  if (usage.tone === "warning") return "context-meter-warning"
-  return "context-meter-normal"
+const selectedThreadProject = (model: Model): string => {
+  const thread = model.threads.find((item) => item.thread_id === model.selected_thread_id)
+  return thread === undefined ? "" : projectTag(thread)
 }
 
 const orbHeader = (model: Model): Html => {
   const orb = model.selected_orb
   if (orb === undefined) return Ui.empty
   return H.section(
-    [H.Class("orb-header")],
+    [
+      H.Class(
+        "flex items-center justify-between gap-3 rounded-lg border border-border bg-[color:var(--panel)] p-3 max-[820px]:flex-col max-[820px]:items-start",
+      ),
+    ],
     [
       H.div(
-        [H.Class("orb-status")],
+        [H.Class("flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground")],
         [
           Ui.badge([orb.status], orbBadgeTone(orb.status)),
           H.span([], [`last active ${relativeTime(orb.last_active_at)}`]),
@@ -441,7 +651,7 @@ const orbHeader = (model: Model): Html => {
         ],
       ),
       H.div(
-        [H.Class("orb-actions")],
+        [H.Class(Ui.cn("flex flex-wrap items-center gap-2", compactButtonsClass))],
         [
           Ui.button(
             [H.Type("button"), H.Disabled(orb.status !== "running"), H.OnClick(ClickedPauseOrb())],
@@ -496,28 +706,21 @@ const transcript = (model: Model): Html => {
     model.user_id,
     new Set(model.collapsed_transcript_row_ids),
   )
-  return Ui.Card.card({ class: "transcript-card" }, [
-    Ui.Conversation.conversation({ class: "transcript-conversation" }, [
+  if (rows.length === 0) {
+    return H.div(
+      [H.Class("grid h-full min-h-0 w-full place-items-center")],
+      [H.span([H.Class("select-none text-[13rem] font-extrabold tracking-tighter text-foreground/[0.05]")], ["Rika"])],
+    )
+  }
+  return Ui.Card.card({ class: "min-h-0 overflow-hidden border-0 bg-transparent p-0 shadow-none" }, [
+    Ui.Conversation.conversation({ class: "min-h-0" }, [
       Ui.Conversation.conversationContent(
         {
           model: model.transcript_scroller,
           toParentMessage: (message) => GotTranscriptScrollerMessage({ message }),
-          class: "transcript-content",
+          class: "gap-4 p-3",
         },
-        rows.length === 0
-          ? [
-              Ui.MessageScroller.item({}, [
-                Ui.Conversation.conversationEmptyState(
-                  {
-                    title: "No events yet",
-                    description:
-                      "Open a CLI thread or submit a turn. Events will appear here from the shared subscription.",
-                  },
-                  [],
-                ),
-              ]),
-            ]
-          : rows.map((row) => Ui.MessageScroller.item({ attributes: [H.Key(row.id)] }, [rowView(row)])),
+        rows.map((row) => Ui.MessageScroller.item({ attributes: [H.Key(row.id)] }, [rowView(row)])),
       ),
       Ui.Conversation.conversationScrollButton({
         model: model.transcript_scroller,
@@ -531,15 +734,25 @@ const presenceAvatars = (model: Model): Html =>
   model.presence.length === 0
     ? Ui.empty
     : H.div(
-        [H.Class("presence-avatars"), H.AriaLabel("Present users")],
+        [H.Class("flex flex-wrap items-center gap-2"), H.AriaLabel("Present users")],
         model.presence.map((user) =>
-          H.span([H.Class("presence-avatar"), H.Title(user.user_id)], [initials(user.user_id)]),
+          H.span(
+            [
+              H.Class(
+                "grid size-7 place-items-center rounded-full border border-ring bg-[color-mix(in_oklch,var(--ring),transparent_82%)] text-[0.7rem] font-extrabold text-foreground",
+              ),
+              H.Title(user.user_id),
+            ],
+            [initials(user.user_id)],
+          ),
         ),
       )
 
 const typingIndicator = (model: Model): Html => {
   const typing = model.presence.find((user) => user.state === "typing")
-  return typing === undefined ? Ui.empty : H.div([H.Class("typing-indicator")], [`${typing.user_id} is typing`])
+  return typing === undefined
+    ? Ui.empty
+    : H.div([H.Class("text-[13px] text-muted-foreground")], [`${typing.user_id} is typing`])
 }
 
 const orbTabs = (model: Model): Html =>
@@ -563,14 +776,17 @@ const orbTabPanel = (model: Model, tab: OrbTab): Html => {
 }
 
 const orbTerminalPanel = (model: Model): Html =>
-  Ui.Card.card({ class: "orb-terminal-card" }, [
+  Ui.Card.card({ class: "grid min-h-[28rem] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-0" }, [
     H.div(
-      [H.Class("orb-terminal-toolbar")],
+      [H.Class(Ui.cn(panelSectionHeaderClass, compactButtonsClass))],
       [
         Ui.badge([model.orb_terminal_status], terminalStatusTone(model.orb_terminal_status)),
         model.orb_terminal_error === undefined
           ? Ui.empty
-          : H.span([H.Class("orb-terminal-error")], [model.orb_terminal_error]),
+          : H.span(
+              [H.Class("min-w-0 flex-1 text-[13px] text-destructive [overflow-wrap:anywhere]")],
+              [model.orb_terminal_error],
+            ),
         Ui.button(
           [
             H.Type("button"),
@@ -583,11 +799,11 @@ const orbTerminalPanel = (model: Model): Html =>
       ],
     ),
     model.selected_thread_id === undefined
-      ? H.div([H.Class("empty-state")], ["No thread selected"])
+      ? H.div([H.Class(emptyStateClass)], ["No thread selected"])
       : H.div(
           [
             H.Key(orbTerminalKey(model.selected_thread_id)),
-            H.Class("orb-terminal-mount"),
+            H.Class("min-h-0 min-w-0 max-w-full overflow-hidden rounded-lg bg-background"),
             H.DataAttribute("orb-terminal", ""),
             H.OnMount(MountOrbTerminal({ thread_id: model.selected_thread_id })),
           ],
@@ -596,16 +812,18 @@ const orbTerminalPanel = (model: Model): Html =>
   ])
 
 const orbFilesPanel = (model: Model): Html =>
-  Ui.Card.card({ class: "orb-files-card" }, [
+  Ui.Card.card({ class: bareCardClass }, [
     model.orb_files.paths.length === 0
-      ? H.div([H.Class("empty-state")], [orbDirectoryStatus(model, "")])
+      ? H.div([H.Class(emptyStateClass)], [orbDirectoryStatus(model, "")])
       : H.div(
-          [H.Class("orb-files-layout")],
+          [H.Class("grid min-h-[28rem] grid-cols-[minmax(14rem,20rem)_minmax(0,1fr)] max-[820px]:grid-cols-1")],
           [
             H.div(
               [
                 H.Key(orbTreeKey(model)),
-                H.Class("orb-file-tree"),
+                H.Class(
+                  "min-w-0 overflow-auto border-r border-[color:var(--border-subtle)] p-3 max-[820px]:max-h-64 max-[820px]:border-r-0 max-[820px]:border-b",
+                ),
                 H.DataAttribute("pierre-tree", ""),
                 H.OnMount(MountPierreTree(orbTreeMountArgs(model))),
               ],
@@ -618,18 +836,28 @@ const orbFilesPanel = (model: Model): Html =>
 
 const orbFileViewer = (model: Model): Html => {
   const opened = model.orb_files.opened_file
-  if (opened.state === "idle") return H.div([H.Class("orb-file-viewer empty-state")], ["Select a file"])
-  if (opened.state === "loading") return H.div([H.Class("orb-file-viewer empty-state")], [`Loading ${opened.path}`])
-  if (opened.state === "binary") return H.div([H.Class("orb-file-viewer empty-state")], [`${opened.path} is binary`])
-  if (opened.state === "failed") return H.div([H.Class("orb-file-viewer empty-state")], [opened.message])
+  if (opened.state === "idle") return H.div([H.Class(orbFileViewerEmptyClass)], ["Select a file"])
+  if (opened.state === "loading") return H.div([H.Class(orbFileViewerEmptyClass)], [`Loading ${opened.path}`])
+  if (opened.state === "binary") return H.div([H.Class(orbFileViewerEmptyClass)], [`${opened.path} is binary`])
+  if (opened.state === "failed") return H.div([H.Class(orbFileViewerEmptyClass)], [opened.message])
   return H.div(
-    [H.Class("orb-file-viewer")],
+    [H.Class("min-w-0 overflow-auto")],
     [
       H.div(
-        [H.Class("orb-file-viewer-header")],
-        [H.strong([], [opened.path]), opened.truncated ? Ui.badge(["truncated"], "warning") : Ui.empty],
+        [H.Class(panelSectionHeaderClass)],
+        [
+          H.strong([H.Class(monoTextClass)], [opened.path]),
+          opened.truncated ? Ui.badge(["truncated"], "warning") : Ui.empty,
+        ],
       ),
-      H.pre([H.Class("orb-file-content")], [opened.content]),
+      H.pre(
+        [
+          H.Class(
+            Ui.cn(monoTextClass, "m-0 overflow-auto p-[0.9rem] leading-normal whitespace-pre-wrap text-foreground"),
+          ),
+        ],
+        [opened.content],
+      ),
     ],
   )
 }
@@ -637,14 +865,14 @@ const orbFileViewer = (model: Model): Html => {
 const orbChangesPanel = (model: Model): Html => {
   const changes = model.orb_changes
   if (changes.state === "idle")
-    return Ui.Card.card({ class: "orb-changes-card" }, [H.div([H.Class("empty-state")], ["Changes not loaded"])])
+    return Ui.Card.card({ class: bareCardClass }, [H.div([H.Class(emptyStateClass)], ["Changes not loaded"])])
   if (changes.state === "loading")
-    return Ui.Card.card({ class: "orb-changes-card" }, [H.div([H.Class("empty-state")], ["Loading changes"])])
+    return Ui.Card.card({ class: bareCardClass }, [H.div([H.Class(emptyStateClass)], ["Loading changes"])])
   if (changes.state === "failed")
-    return Ui.Card.card({ class: "orb-changes-card" }, [H.div([H.Class("empty-state")], [changes.message])])
-  return Ui.Card.card({ class: "orb-changes-card" }, [
+    return Ui.Card.card({ class: bareCardClass }, [H.div([H.Class(emptyStateClass)], [changes.message])])
+  return Ui.Card.card({ class: bareCardClass }, [
     H.div(
-      [H.Class("orb-changes-summary")],
+      [H.Class(panelSectionHeaderClass)],
       [
         Ui.badge([changes.dirty ? "dirty" : "clean"], changes.dirty ? "warning" : "success"),
         H.span([], [`base ${shortId(changes.base_commit)}`]),
@@ -652,8 +880,8 @@ const orbChangesPanel = (model: Model): Html => {
       ],
     ),
     changes.diffs.length === 0
-      ? H.div([H.Class("empty-state")], [changes.dirty ? "No renderable file diffs" : "Workspace clean"])
-      : H.div([H.Class("orb-change-list")], changes.diffs.map(orbChangeRowView)),
+      ? H.div([H.Class(emptyStateClass)], [changes.dirty ? "No renderable file diffs" : "Workspace clean"])
+      : H.div([H.Class("grid")], changes.diffs.map(orbChangeRowView)),
   ])
 }
 
@@ -664,10 +892,10 @@ const orbChangeSkippedView = (
   row: Extract<Model["orb_changes"], { readonly state: "loaded" }>["diffs"][number] & { readonly kind: "skipped" },
 ): Html =>
   H.article(
-    [H.Key(row.payload_id), H.Class("event-row event-row-diff")],
+    [H.Key(row.payload_id), H.Class(eventRowDiffClass)],
     [
       H.div(
-        [H.Class("event-meta")],
+        [H.Class(eventMetaClass)],
         [H.strong([], [row.file_name]), Ui.badge(["skipped"], "warning"), H.span([], [row.reason])],
       ),
     ],
@@ -677,25 +905,25 @@ const orbChangeDiffView = (
   diff: Extract<Model["orb_changes"], { readonly state: "loaded" }>["diffs"][number] & { readonly kind: "diff" },
 ): Html =>
   H.article(
-    [H.Key(diff.payload_id), H.Class("event-row event-row-diff")],
+    [H.Key(diff.payload_id), H.Class(eventRowDiffClass)],
     [
       H.div(
-        [H.Class("event-meta")],
+        [H.Class(eventMetaClass)],
         [
           H.strong([], [diff.file_name]),
-          H.span([H.Class("diff-stat diff-stat-add")], [`+${diff.additions}`]),
-          H.span([H.Class("diff-stat diff-stat-delete")], [`-${diff.deletions}`]),
+          H.span([H.Class(diffStatAddClass)], [`+${diff.additions}`]),
+          H.span([H.Class(diffStatDeleteClass)], [`-${diff.deletions}`]),
         ],
       ),
       H.div(
         [
-          H.Class("pierre-diff-mount"),
+          H.Class(pierreDiffMountClass),
           H.DataAttribute("orb-change-diff-id", diff.payload_id),
           H.OnMount(
             MountPierreDiff({
               payload_id: diff.payload_id,
               file_diff: diff.file_diff,
-              theme_type: "dark",
+              theme_type: "light",
             }),
           ),
         ],
@@ -719,16 +947,15 @@ const textRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" 
 
 const messageRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): Html => {
   const localUser = row.author?.is_local ?? row.title === "User"
-  const sender = row.author?.label ?? row.title
-  const align = localUser ? "end" : "start"
-  const variant = row.title === "Rika" ? "secondary" : localUser ? "default" : "muted"
-  return Ui.Message.message({ align, attributes: [H.DataAttribute("transcript-row-kind", "message")] }, [
-    Ui.Message.messageAvatar({}, [
-      Ui.Avatar.avatar({ size: "sm" }, [Ui.Avatar.avatarFallback({}, [messageInitial(row)])]),
-    ]),
+  if (!localUser) {
+    return H.article(
+      [H.Class("min-w-0 text-[13px] leading-relaxed"), H.DataAttribute("transcript-row-kind", "message")],
+      markdownContent(row.body),
+    )
+  }
+  return Ui.Message.message({ align: "end", attributes: [H.DataAttribute("transcript-row-kind", "message")] }, [
     Ui.Message.messageContent({}, [
-      Ui.Message.messageHeader({}, [H.span([], [`#${row.sequence}`]), H.strong([], [sender])]),
-      Ui.Bubble.bubble({ align, variant }, [Ui.Bubble.bubbleContent({}, markdownContent(row.body))]),
+      Ui.Bubble.bubble({ align: "end", variant: "default" }, [Ui.Bubble.bubbleContent({}, markdownContent(row.body))]),
     ]),
   ])
 }
@@ -769,13 +996,17 @@ const eventRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff"
   H.article(
     [
       H.Class(
-        Ui.cn("event-row", row.kind === "message" && "event-row-message", row.kind === "error" && "event-row-error"),
+        Ui.cn(
+          eventRowClass,
+          row.kind === "message" && "border-l-[3px] border-l-[color:var(--success)]",
+          row.kind === "error" && "border-l-[3px] border-l-destructive",
+        ),
       ),
       H.DataAttribute("transcript-row-kind", row.kind),
     ],
     [
-      H.div([H.Class("event-meta")], [H.span([], [`#${row.sequence}`]), H.strong([], [row.title])]),
-      H.p([H.Class("event-body")], [row.body]),
+      H.div([H.Class(eventMetaClass)], [H.span([], [`#${row.sequence}`]), H.strong([], [row.title])]),
+      H.p([H.Class("m-0 whitespace-pre-wrap")], [row.body]),
     ],
   )
 
@@ -784,28 +1015,23 @@ const toolName = (title: string): string => title.replace(/^Tool input:\s*/, "")
 const toolStatus = (body: string): Ui.Tool.ToolStatus =>
   body === "Running" || body === "Started" ? "input-available" : "output-available"
 
-const messageInitial = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): string => {
-  const sender = row.author?.label ?? row.title
-  return initials(sender)
-}
-
 const pierreDiffRowView = (row: Extract<TranscriptRow, { readonly kind: "pierre-diff" }>): Html =>
   H.article(
-    [H.Key(row.id), H.Class("event-row event-row-diff")],
+    [H.Key(row.id), H.Class(eventRowDiffClass)],
     [
       H.div(
-        [H.Class("event-meta")],
+        [H.Class(eventMetaClass)],
         [
           H.span([], [`#${row.sequence}`]),
           H.strong([], [row.title]),
-          H.span([H.Class("diff-stat diff-stat-add")], [`+${row.diff.additions}`]),
-          H.span([H.Class("diff-stat diff-stat-delete")], [`-${row.diff.deletions}`]),
+          H.span([H.Class(diffStatAddClass)], [`+${row.diff.additions}`]),
+          H.span([H.Class(diffStatDeleteClass)], [`-${row.diff.deletions}`]),
         ],
       ),
       H.div(
-        [H.Class("pierre-diff-summary")],
+        [H.Class(Ui.cn(sectionHeaderClass, compactButtonsClass))],
         [
-          H.span([H.Class("pierre-diff-file")], [row.diff.file_name]),
+          H.span([H.Class(monoTextClass)], [row.diff.file_name]),
           Ui.button(
             [H.Type("button"), H.OnClick(ClickedTogglePierreDiff({ payload_id: row.diff.payload_id }))],
             [row.expanded ? "Hide diff" : "Show diff"],
@@ -816,13 +1042,13 @@ const pierreDiffRowView = (row: Extract<TranscriptRow, { readonly kind: "pierre-
       row.expanded
         ? H.div(
             [
-              H.Class("pierre-diff-mount"),
+              H.Class(pierreDiffMountClass),
               H.DataAttribute("pierre-diff-id", row.diff.payload_id),
               H.OnMount(
                 MountPierreDiff({
                   payload_id: row.diff.payload_id,
                   file_diff: row.diff.file_diff,
-                  theme_type: "dark",
+                  theme_type: "light",
                 }),
               ),
             ],
@@ -834,60 +1060,72 @@ const pierreDiffRowView = (row: Extract<TranscriptRow, { readonly kind: "pierre-
 
 const composer = (model: Model): Html => {
   const active = activeTurnId(model.events)
-  return Ui.PromptInput.promptInput({ class: "composer", onSubmitted: SubmittedDraft() }, [
-    Ui.PromptInput.promptInputTextarea({
-      id: "turn-input",
-      value: model.draft,
-      onInput: (value) => ChangedDraft({ value }),
-      placeholder: model.selected_thread_id === undefined ? "Start a new Rika thread" : "Send a turn to this thread",
-      rows: 3,
-      attributes: [H.AriaLabel("Turn input")],
-    }),
-    Ui.PromptInput.promptInputToolbar({ class: "composer-footer" }, [
-      H.span(
-        [H.Class("muted")],
-        [model.pending_turn ? "Waiting for the shared event stream" : "Rendered only from durable thread events"],
-      ),
-      Ui.PromptInput.promptInputTools({ class: "composer-controls" }, [
-        Ui.select({
-          id: "turn-mode",
-          value: model.draft_mode ?? "",
-          options: modeOptions,
-          onChange: (value) => ChangedDraftMode({ value }),
-          attributes: [H.AriaLabel("Mode")],
-          class: "mode-select",
-        }),
-        active === undefined
-          ? Ui.empty
-          : Ui.PromptInput.promptInputButton(
-              {
-                type: "button",
-                variant: "destructive",
-                disabled: model.pending_interrupt_turn_id === active,
-                onClick: ClickedInterrupt(),
-              },
-              ["Stop"],
-            ),
-        Ui.PromptInput.promptInputSubmit(
-          {
-            type: "submit",
-            disabled: model.draft.trim().length === 0 || model.pending_turn || active !== undefined,
-            status: model.pending_turn || active !== undefined ? "submitted" : "idle",
-          },
-          [model.pending_turn || active !== undefined ? "Running" : "Send"],
-        ),
+  return Ui.PromptInput.promptInput(
+    {
+      class: "grid gap-2 rounded-2xl border border-border bg-card px-3.5 py-3 shadow-sm",
+      onSubmitted: SubmittedDraft(),
+    },
+    [
+      Ui.PromptInput.promptInputTextarea({
+        id: "turn-input",
+        value: model.draft,
+        onInput: (value) => ChangedDraft({ value }),
+        placeholder: model.selected_thread_id === undefined ? "Start a new Rika thread" : "Send a turn to this thread",
+        rows: 3,
+        attributes: [H.AriaLabel("Turn input")],
+      }),
+      Ui.PromptInput.promptInputToolbar({ class: "flex items-center justify-between gap-4" }, [
+        Ui.PromptInput.promptInputTools({ class: "flex items-center gap-1" }, [
+          H.button(
+            [
+              H.Type("button"),
+              H.Class(
+                "grid size-7 cursor-pointer place-items-center rounded-full border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              ),
+              H.AriaLabel("Attach image"),
+            ],
+            [iconImage("size-4")],
+          ),
+        ]),
+        Ui.PromptInput.promptInputTools({ class: "flex items-center gap-2" }, [
+          connectionStatus(model),
+          Ui.select({
+            id: "turn-mode",
+            value: model.draft_mode ?? "",
+            options: modeOptions,
+            onChange: (value) => ChangedDraftMode({ value }),
+            attributes: [H.AriaLabel("Mode")],
+            class: "w-28",
+          }),
+          active === undefined
+            ? Ui.empty
+            : Ui.PromptInput.promptInputButton(
+                {
+                  type: "button",
+                  variant: "destructive",
+                  disabled: model.pending_interrupt_turn_id === active,
+                  onClick: ClickedInterrupt(),
+                },
+                ["Stop"],
+              ),
+          Ui.PromptInput.promptInputSubmit(
+            {
+              type: "submit",
+              disabled: model.draft.trim().length === 0 || model.pending_turn || active !== undefined,
+              status: model.pending_turn || active !== undefined ? "submitted" : "idle",
+            },
+            [],
+          ),
+        ]),
       ]),
-    ]),
-  ])
+    ],
+  )
 }
 
 const activeTitle = (model: Model) => {
   if (model.active_view === "projects") return "Projects"
   const thread = model.threads.find((item) => item.thread_id === model.selected_thread_id)
-  return (
-    thread?.title_text ??
-    (model.selected_thread_id === undefined ? "No thread selected" : shortId(model.selected_thread_id))
-  )
+  return thread?.title_text ?? (model.selected_thread_id === undefined ? "" : shortId(model.selected_thread_id))
 }
 
 const orbTreeMountArgs = (model: Model) => {

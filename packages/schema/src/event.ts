@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { Artifact } from "./artifact"
 import { JsonValue, Metadata, ProtocolVersion, TimestampMillis } from "./common"
 import { Envelope } from "./error"
@@ -37,6 +37,11 @@ export const ThreadVisibility = Schema.Literals(["private", "workspace", "unlist
   identifier: "Rika.Event.ThreadVisibility",
 })
 export type ThreadVisibility = typeof ThreadVisibility.Type
+
+export const ThreadVisibilityDefaulted = ThreadVisibility.pipe(
+  Schema.optional,
+  Schema.withDecodingDefault(Effect.succeed("private" as const)),
+).annotate({ identifier: "Rika.Event.ThreadVisibilityDefaulted" })
 
 export interface TurnStarted extends Schema.Schema.Type<typeof TurnStarted> {}
 export const TurnMode = Schema.Literals(["rush", "smart", "deep1", "deep2", "deep3"]).annotate({

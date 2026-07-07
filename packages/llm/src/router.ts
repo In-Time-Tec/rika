@@ -320,17 +320,21 @@ const instrumentStream = (
     Effect.map(Clock.currentTimeMillis, (startedAt) => {
       const fields = llmCallSeed(routed, "stream")
       let toolCalls = 0
+      let eventCount = 0
+      let completed = false
       return source.pipe(
         Stream.tap((event) =>
           Effect.sync(() => {
+            eventCount += 1
             if (event.type === "tool.call") toolCalls += 1
             if (event.type === "response.completed") {
+              completed = true
               fields.tool_call_count = toolCalls
               enrichResponseFields(fields, event.response)
             }
           }),
         ),
-        Stream.onExit((exit) => emitLlmCall(diagnostics, startedAt, fields, exit)),
+        Stream.onExit((exit) => emitLlmCall(diagnostics, startedAt, fields, exit, { eventCount, completed })),
       )
     }),
   )
@@ -340,18 +344,24 @@ const emitLlmCall = <A>(
   startedAt: number,
   fields: Diagnostics.Fields,
   exit: Exit.Exit<A, Provider.ProviderError>,
+  streamStats?: { readonly eventCount: number; readonly completed: boolean },
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
     const endedAt = yield* Clock.currentTimeMillis
-    const outcome = Exit.isSuccess(exit) ? "success" : "error"
+    const empty =
+      Exit.isSuccess(exit) && streamStats !== undefined && (streamStats.eventCount === 0 || !streamStats.completed)
+    const outcome = Exit.isFailure(exit) ? "error" : empty ? "empty" : "success"
     yield* diagnostics.emit({
-      level: outcome === "error" ? "error" : "info",
+      level: outcome === "success" ? "info" : outcome === "empty" ? "warn" : "error",
       message: `llm.call ${outcome}`,
       data: {
         ...fields,
         op: "llm.call",
         outcome,
         duration_ms: endedAt - startedAt,
+        ...(streamStats === undefined
+          ? {}
+          : { stream_events: streamStats.eventCount, stream_completed: streamStats.completed }),
         ...(Exit.isSuccess(exit) ? {} : { error: Cause.pretty(exit.cause) }),
       },
     })

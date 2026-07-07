@@ -164,7 +164,7 @@ describe("Config", () => {
 
       expect(values).toMatchObject({
         workspace_root: workspace,
-        data_dir: `${workspace}/.rika`,
+        data_dir: `${home}/.rika`,
         default_mode: "deep2",
         compaction_auto: true,
         compaction_reserved: 2_000,

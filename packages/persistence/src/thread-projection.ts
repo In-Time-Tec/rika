@@ -36,7 +36,7 @@ export const ThreadSummary = Schema.Struct({
   context_tokens: Schema.optional(Schema.Int),
   last_model: Schema.optional(Schema.String),
   archived: Schema.Boolean,
-  visibility: Event.ThreadVisibility,
+  visibility: Event.ThreadVisibilityDefaulted,
   created_at: Schema.Int,
   updated_at: Schema.Int,
 }).annotate({ identifier: "Rika.ThreadProjection.ThreadSummary" })
@@ -252,8 +252,8 @@ const turnStatusOrUndefined = (value: string | null) => {
   return Schema.decodeUnknownSync(TurnStatus)(value)
 }
 
-const visibilityOrDefault = (value: string | null) => {
-  if (value === null) return "private"
+const visibilityOrDefault = (value: string | null | undefined) => {
+  if (value == null) return "private"
   return Schema.decodeUnknownSync(Event.ThreadVisibility)(value)
 }
 

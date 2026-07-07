@@ -1,3 +1,4 @@
+import { homedir } from "node:os"
 import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
 import * as EnvConfig from "./env-config"
 import * as Settings from "./settings"
@@ -65,7 +66,7 @@ export const valuesFromEnv = (
     const subagentTools = yield* parseSubagentTools(env)
     const base: Values = {
       workspace_root: workspaceRoot,
-      data_dir: env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`,
+      data_dir: env.RIKA_DATA_DIR ?? `${env.HOME ?? homedir()}/.rika`,
       default_mode: settings.values.mode.default,
       ...(settings.values.compaction.auto === undefined ? {} : { compaction_auto: settings.values.compaction.auto }),
       ...(settings.values.compaction.reserved === undefined

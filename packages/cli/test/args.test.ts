@@ -121,6 +121,12 @@ describe("CLI args", () => {
     })
   })
 
+  test("parses thread import commands", async () => {
+    const command = await Effect.runPromise(Args.parse(["threads", "import", "/old/project/.rika"]))
+
+    expect(command).toEqual({ type: "threads", action: "import", source_data_dir: "/old/project/.rika" })
+  })
+
   test("parses memory commands", async () => {
     const index = await Effect.runPromise(Args.parse(["memory", "index", "--workspace", "/workspace/rika"]))
     const status = await Effect.runPromise(Args.parse(["memory", "status"]))

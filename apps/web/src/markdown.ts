@@ -76,10 +76,23 @@ const tableNode = (token: Tokens.Table | Tokens.Generic): Html => {
   return H.table(
     [],
     [
-      H.thead([], [H.tr([], header.map((cell) => H.th([], inlineTokens(cell.tokens))))]),
+      H.thead(
+        [],
+        [
+          H.tr(
+            [],
+            header.map((cell) => H.th([], inlineTokens(cell.tokens))),
+          ),
+        ],
+      ),
       H.tbody(
         [],
-        rows.map((row) => H.tr([], row.map((cell) => H.td([], inlineTokens(cell.tokens))))),
+        rows.map((row) =>
+          H.tr(
+            [],
+            row.map((cell) => H.td([], inlineTokens(cell.tokens))),
+          ),
+        ),
       ),
     ],
   )

@@ -801,7 +801,7 @@ const trustError = (path: string, message: string) =>
 const importCandidate = (path: string, source: string): Effect.Effect<PluginCandidate> =>
   Effect.gen(function* () {
     const imported = yield* Effect.tryPromise({
-      try: async (): Promise<unknown> => import(moduleUrl(source)),
+      try: async (): Promise<unknown> => import(/* @vite-ignore */ moduleUrl(source)),
       catch: (cause) => cause,
     }).pipe(Effect.result)
     if (imported._tag === "Failure") {

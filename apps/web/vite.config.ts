@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer"
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from "node:http"
+import { homedir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import type { Duplex } from "node:stream"
 import { fileURLToPath } from "node:url"
@@ -12,7 +13,7 @@ import WebSocket, { WebSocketServer } from "ws"
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const workspaceRoot = process.env.RIKA_WORKSPACE_ROOT ?? rootDir
-const dataDir = process.env.RIKA_DATA_DIR ?? join(workspaceRoot, ".rika")
+const dataDir = process.env.RIKA_DATA_DIR ?? join(process.env.HOME ?? homedir(), ".rika")
 const cliEntryScript = join(rootDir, "packages", "cli", "src", "main.ts")
 const apiPrefix = "/api/rika"
 const bridgeHighWaterBytes = 1024 * 1024
@@ -611,6 +612,7 @@ const httpStatusText = (status: number) => {
 }
 
 const writeJson = (response: ServerResponse, status: number, value: unknown) => {
+  if (response.headersSent || response.writableEnded) return
   response.statusCode = status
   response.setHeader("content-type", "application/json")
   response.end(JSON.stringify(value))

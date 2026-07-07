@@ -3,7 +3,10 @@ language: TypeScript
 severity: error
 message: No code comments — put rationale in AGENTS.md/CONTEXT.md/skills.
 rule:
-  kind: comment
+  all:
+    - kind: comment
+    - not:
+        regex: "@(vite-ignore|ts-expect-error|ts-ignore|ts-nocheck)"
 files:
   - "packages/*/src/**/*.ts"
   - "packages/*/test/**/*.ts"

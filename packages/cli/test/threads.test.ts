@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { ThreadService, TournamentService } from "@rika/agent"
 import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Embeddings } from "@rika/llm"
@@ -13,6 +16,8 @@ const workspaceId = Ids.WorkspaceId.make("workspace_cli_threads")
 const projectId = Ids.ProjectId.make("project_cli_threads")
 const turnId = Ids.TurnId.make("turn_cli_threads")
 const forkTurnId = Ids.TurnId.make("turn_cli_threads_fork")
+const importThreadId = Ids.ThreadId.make("thread_cli_threads_import")
+const importTurnId = Ids.TurnId.make("turn_cli_threads_import")
 const now = Common.TimestampMillis.make(1_965_000_000_000)
 
 const configLayer = Config.layerFromValues({
@@ -298,6 +303,76 @@ describe("CLI thread commands", () => {
     expect(Schema.decodeUnknownSync(Event.ContextCompacted)(JSON.parse(output.stdout[0] ?? "{}"))).toEqual(event)
   })
 
+  test("imports threads from another data dir and re-imports idempotently", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const sourceDataDir = mkdtempSync(join(tmpdir(), "rika-cli-threads-import-"))
+    try {
+      await Effect.runPromise(seedSourceDataDir(sourceDataDir))
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          const firstExitCode = yield* Threads.executeCommand({
+            type: "threads",
+            action: "import",
+            source_data_dir: sourceDataDir,
+          })
+          const summaries = yield* ThreadProjection.listThreads()
+          const secondExitCode = yield* Threads.executeCommand({
+            type: "threads",
+            action: "import",
+            source_data_dir: sourceDataDir,
+          })
+          const after = yield* ThreadProjection.listThreads()
+          return { firstExitCode, summaries, secondExitCode, after }
+        }).pipe(Effect.provide(makeLayer(output))),
+      )
+
+      expect(result.firstExitCode).toBe(0)
+      expect(result.secondExitCode).toBe(0)
+      expect(result.summaries.map((summary) => summary.thread_id)).toEqual([importThreadId])
+      expect(result.summaries[0]?.latest_message_text).toBe("Imported thread body")
+      expect(result.after.map((summary) => summary.thread_id)).toEqual([importThreadId])
+      expect(JSON.parse(output.stdout[0] ?? "{}")).toEqual({
+        imported_events: 2,
+        skipped_events: 0,
+        imported_artifacts: 0,
+        skipped_artifacts: 0,
+        rebuilt: true,
+      })
+      expect(JSON.parse(output.stdout[1] ?? "{}")).toEqual({
+        imported_events: 0,
+        skipped_events: 2,
+        imported_artifacts: 0,
+        skipped_artifacts: 0,
+        rebuilt: true,
+      })
+    } finally {
+      rmSync(sourceDataDir, { recursive: true, force: true })
+    }
+  })
+
+  test("fails thread import when the source database is missing", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const sourceDataDir = mkdtempSync(join(tmpdir(), "rika-cli-threads-import-missing-"))
+    try {
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          return yield* Threads.executeCommand({
+            type: "threads",
+            action: "import",
+            source_data_dir: sourceDataDir,
+          }).pipe(Effect.flip)
+        }).pipe(Effect.provide(makeLayer(output))),
+      )
+
+      expect(result).toBeInstanceOf(Threads.ThreadsError)
+      expect(Threads.formatError(result)).toContain("Source database not found")
+    } finally {
+      rmSync(sourceDataDir, { recursive: true, force: true })
+    }
+  })
+
   test("runs a thread tournament with stdin message and prints the ranking", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const inputs: Array<TournamentService.RunInput> = []
@@ -350,6 +425,19 @@ const seedThreadWithOrbStatus = () =>
     const orb = yield* OrbStore.create({ thread_id: threadId, project_id: projectId })
     yield* OrbStore.setStatus(orb.orb_id, "running")
   })
+
+const seedSourceDataDir = (dataDir: string) =>
+  Effect.gen(function* () {
+    yield* Migration.migrate()
+    yield* ThreadEventLog.append(importThreadCreated())
+    yield* ThreadEventLog.append(importMessageAdded())
+  }).pipe(
+    Effect.provide(
+      Layer.mergeAll(Migration.layer, ThreadEventLog.layer).pipe(
+        Layer.provideMerge(Database.layerFromPath(join(dataDir, "rika.sqlite"))),
+      ),
+    ),
+  )
 
 const seedForkableThread = () =>
   Effect.gen(function* () {
@@ -588,6 +676,35 @@ const messageAdded = (): Event.MessageAdded => ({
       turn_id: turnId,
       created_at: now,
       content: "CLI thread command search body",
+    }),
+  },
+})
+
+const importThreadCreated = (): Event.ThreadCreated => ({
+  id: Ids.EventId.make("thread_cli_threads_import_created"),
+  thread_id: importThreadId,
+  sequence: 1,
+  version: 1,
+  created_at: now,
+  type: "thread.created",
+  data: { workspace_id: workspaceId },
+})
+
+const importMessageAdded = (): Event.MessageAdded => ({
+  id: Ids.EventId.make("thread_cli_threads_import_message_event"),
+  thread_id: importThreadId,
+  turn_id: importTurnId,
+  sequence: 2,
+  version: 1,
+  created_at: now,
+  type: "message.added",
+  data: {
+    message: Message.user({
+      id: Ids.MessageId.make("thread_cli_threads_import_message"),
+      thread_id: importThreadId,
+      turn_id: importTurnId,
+      created_at: now,
+      content: "Imported thread body",
     }),
   },
 })

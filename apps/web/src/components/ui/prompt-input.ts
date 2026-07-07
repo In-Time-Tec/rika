@@ -23,18 +23,7 @@ const sendIcon = (): Html => {
       H.Attribute("stroke-linejoin", "round"),
       H.AriaHidden(true),
     ],
-    [
-      H.path(
-        [
-          H.Attribute(
-            "d",
-            "M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z",
-          ),
-        ],
-        [],
-      ),
-      H.path([H.Attribute("d", "m21.854 2.147-10.94 10.939")], []),
-    ],
+    [H.path([H.Attribute("d", "M12 19V5")], []), H.path([H.Attribute("d", "m5 12 7-7 7 7")], [])],
   )
 }
 
@@ -202,7 +191,7 @@ export const promptInputSubmit = <Message>(
       variant: config.variant ?? "default",
       size: config.size ?? "icon",
       type: config.type ?? "submit",
-      class: cn("gap-1.5 rounded-lg", config.class),
+      class: cn("gap-1.5 rounded-full", config.class),
       dataSlot: "prompt-input-submit",
       attributes: [
         ...(config.attributes ?? []),

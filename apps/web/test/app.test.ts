@@ -940,7 +940,6 @@ describe("web app state", () => {
 
     expect(rows.map((row) => [row.id, row.kind, "body" in row ? row.body : ""])).toEqual([
       ["event-1", "message", "First turn."],
-      ["event-2", "event", firstTurn],
       ["event-3", "message", "Second turn."],
     ])
   })
@@ -1519,7 +1518,12 @@ const toolInputDelta = (sequence: number, toolCallId: string, text: string): Eve
   data: { id: Ids.ToolCallId.make(toolCallId), text },
 })
 
-const toolInputEnded = (sequence: number, toolCallId: string, name: string, inputText: string): Event.ToolCallInputEnded => ({
+const toolInputEnded = (
+  sequence: number,
+  toolCallId: string,
+  name: string,
+  inputText: string,
+): Event.ToolCallInputEnded => ({
   id: Ids.EventId.make(`event-${sequence}`),
   thread_id: threadId,
   turn_id: Ids.TurnId.make("turn-web"),

@@ -111,6 +111,9 @@ export type OrbChangesModel = typeof OrbChangesModel.Type
 export const OrbTerminalStatusSchema = S.Literals(["idle", "connecting", "connected", "disconnected", "failed"])
 export const ActiveView = S.Literals(["threads", "projects"])
 export type ActiveView = typeof ActiveView.Type
+
+export const Theme = S.Literals(["light", "dark"])
+export type Theme = typeof Theme.Type
 export const ThreadSearchWindow = S.Literals(["24h", "72h", "7d", "all"])
 export type ThreadSearchWindow = typeof ThreadSearchWindow.Type
 export const ProjectField = S.Literals(["name", "repo_origin", "default_branch", "template_id"])
@@ -154,6 +157,7 @@ export type NewProjectForm = typeof NewProjectForm.Type
 
 export const Model = S.Struct({
   api_base_url: S.String,
+  theme: Theme,
   active_view: ActiveView,
   connection: Connection,
   threads: S.Array(Remote.ThreadSummary),
@@ -309,6 +313,7 @@ export const TerminalFailed = m("TerminalFailed", { message: S.String })
 export const RequestedTerminalReconnect = m("RequestedTerminalReconnect")
 export const ClickedThreads = m("ClickedThreads")
 export const ClickedProjects = m("ClickedProjects")
+export const ClickedToggleTheme = m("ClickedToggleTheme")
 export const LoadedProjects = m("LoadedProjects", { projects: S.Array(Remote.ProjectSummary) })
 export const FailedLoadProjects = m("FailedLoadProjects", { message: S.String })
 export const ClickedProject = m("ClickedProject", { project_id: Ids.ProjectId })
@@ -395,6 +400,7 @@ const OrbWorkspaceMessage = S.Union([
 const ProjectMessage = S.Union([
   ClickedThreads,
   ClickedProjects,
+  ClickedToggleTheme,
   LoadedProjects,
   FailedLoadProjects,
   ClickedProject,
@@ -963,6 +969,7 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   api_base_url: config.api_base_url,
   ...(config.user_id === undefined ? {} : { user_id: config.user_id }),
   active_view: "threads",
+  theme: "light",
   connection: "idle",
   threads: [],
   thread_search_query: "",
@@ -1211,6 +1218,8 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
           ]
     case "ClickedThreads":
       return [{ ...model, active_view: "threads", notice: undefined }, []]
+    case "ClickedToggleTheme":
+      return [{ ...model, theme: model.theme === "dark" ? "light" : "dark" }, []]
     case "ClickedProjects":
       return [
         { ...model, active_view: "projects", notice: undefined },
@@ -1502,9 +1511,9 @@ export const eventRows = (
           }
         )
       case "turn.started":
-        return { id: event.id, sequence: event.sequence, kind: "event", title: "Turn started", body: event.turn_id }
+        return []
       case "turn.completed":
-        return { id: event.id, sequence: event.sequence, kind: "event", title: "Turn completed", body: event.turn_id }
+        return []
       case "turn.failed":
         return {
           id: event.id,
@@ -1514,13 +1523,7 @@ export const eventRows = (
           body: event.data.error.message,
         }
       case "context.resolved":
-        return {
-          id: event.id,
-          sequence: event.sequence,
-          kind: "event",
-          title: "Context resolved",
-          body: `${event.data.entries.length} entries · ${event.data.total_chars} chars`,
-        }
+        return []
       case "context.compacted":
         return {
           id: event.id,
@@ -1566,13 +1569,7 @@ export const eventRows = (
           }
         )
       case "thread.created":
-        return {
-          id: event.id,
-          sequence: event.sequence,
-          kind: "event",
-          title: "Thread created",
-          body: event.data.workspace_id,
-        }
+        return []
       case "thread.archived":
         return { id: event.id, sequence: event.sequence, kind: "event", title: "Thread archived", body: "Archived" }
       case "thread.unarchived":

@@ -2,6 +2,9 @@ import { AgentLoop, ReviewService, SkillRegistry, ThreadService, TournamentServi
 import { Config, IdGenerator, Settings } from "@rika/core"
 import { Ids } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
+import { mkdir, readFile, writeFile } from "node:fs/promises"
+import { homedir } from "node:os"
+import { dirname } from "node:path"
 import * as Adapter from "./adapter"
 import * as Backend from "./backend"
 import * as Controller from "./controller"
@@ -41,6 +44,18 @@ interface Dependencies {
   readonly tournamentService?: TournamentService.Interface
 }
 
+const isSettingsRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const readUserSettings = async (path: string): Promise<Record<string, unknown>> => {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"))
+    return isSettingsRecord(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -64,6 +79,19 @@ export const layer = Layer.effect(
             sources: settingsSnapshot.keymapSources,
           })
 
+    const persistMode = (mode: Config.Mode) =>
+      Effect.tryPromise({
+        try: async () => {
+          if (process.env.RIKA_MODE !== undefined && process.env.RIKA_MODE.length > 0) return
+          const path = Settings.userSettingsPath(process.env.HOME ?? homedir())
+          const current = await readUserSettings(path)
+          current["mode.default"] = mode
+          await mkdir(dirname(path), { recursive: true })
+          await writeFile(path, `${JSON.stringify(current, null, 2)}\n`)
+        },
+        catch: (cause) => cause,
+      }).pipe(Effect.ignore)
+
     const dependencies: Dependencies = {
       agentLoop,
       idGenerator,
@@ -83,6 +111,7 @@ export const layer = Layer.effect(
             ticks: ticker.ticks,
             defaultMode: configValues.default_mode,
             defaultWorkspace: configValues.workspace_root,
+            persistMode,
             keymap,
           },
           input,

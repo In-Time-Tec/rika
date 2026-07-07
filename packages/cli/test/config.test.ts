@@ -135,7 +135,7 @@ describe("CLI config commands", () => {
       expect(report).toEqual({
         entries: [
           { key: "workspace.root", env: "RIKA_WORKSPACE_ROOT", value: workspace, source: "default" },
-          { key: "data.dir", env: "RIKA_DATA_DIR", value: `${workspace}/.rika`, source: "default" },
+          { key: "data.dir", env: "RIKA_DATA_DIR", value: `${home}/.rika`, source: "default" },
           { key: "database.url", env: "RIKA_DATABASE_URL", value: null, source: "default" },
           { key: "backend.id", env: "RIKA_BACKEND_ID", value: null, source: "default" },
           { key: "subagent.tools", env: "RIKA_SUBAGENT_TOOLS", value: "readonly", source: "default" },

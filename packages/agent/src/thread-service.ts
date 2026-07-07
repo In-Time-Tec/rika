@@ -85,7 +85,7 @@ export const ThreadSummary = Schema.Struct({
   context_tokens: Schema.optional(Schema.Int),
   context_window: Schema.optional(Schema.Int),
   archived: Schema.Boolean,
-  visibility: Event.ThreadVisibility,
+  visibility: Event.ThreadVisibilityDefaulted,
   created_at: Schema.Int,
   updated_at: Schema.Int,
 }).annotate({ identifier: "Rika.Agent.ThreadService.ThreadSummary" })

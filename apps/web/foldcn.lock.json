@@ -133,7 +133,7 @@
       "name": "prompt-input",
       "path": "src/components/ui/prompt-input.ts",
       "source": "local-registry:ui/prompt-input.ts",
-      "sha256": "dc693548d94e694847dfa86393c408881fa92989da8bb63655eb24f317f79daf"
+      "sha256": "33232b936be3ba248e2b7ade7cd3026e089e1b10623d4e58fe92aa48e48380cc"
     },
     {
       "name": "chain-of-thought",

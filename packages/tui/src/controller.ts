@@ -1,6 +1,6 @@
 import { Config } from "@rika/core"
 import { Event, Ids, Message, Remote } from "@rika/schema"
-import { Cause, Effect, Fiber, Queue, Schema, Stream } from "effect"
+import { Cause, Duration, Effect, Fiber, Queue, Schedule, Schema, Stream } from "effect"
 import type { Dirent } from "node:fs"
 import { stat } from "node:fs/promises"
 import { readdir, readFile } from "node:fs/promises"
@@ -36,6 +36,7 @@ export interface Dependencies<E> {
   readonly defaultMode: Config.Mode
   readonly defaultWorkspace: string
   readonly keymap?: Keymap.EffectiveKeymap
+  readonly persistMode?: (mode: Config.Mode) => Effect.Effect<void>
 }
 
 type AppEvent =
@@ -56,6 +57,10 @@ type SubmittedTurn = Pick<TurnRequest, "content" | "content_parts">
 const modelEventBatchSize = 64
 const modelEventBatchWindow = "16 millis"
 const typingHeartbeatTicks = 40
+
+const threadSubscriptionRetrySchedule = Schedule.exponential("250 millis", 2).pipe(
+  Schedule.modifyDelay((_error, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
 
 export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<number, E> =>
   Effect.scoped(
@@ -110,29 +115,39 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       const render = () => deps.renderer.render(state)
       const useThreadEvents = deps.backend.submitTurn !== undefined && deps.backend.subscribeThreadEvents !== undefined
 
-      const restartThreadEvents = (nextThreadId: Ids.ThreadId, afterSequence: number) =>
+      const persistSelectedMode = (next: Config.Mode) =>
+        deps.persistMode === undefined ? Effect.void : deps.persistMode(next).pipe(Effect.ignore)
+
+      const restartThreadEvents = (nextThreadId: Ids.ThreadId) =>
         Effect.gen(function* () {
-          if (deps.backend.subscribeThreadEvents === undefined) return
+          const subscribe = deps.backend.subscribeThreadEvents
+          if (subscribe === undefined) return
           if (threadEventsFiber !== undefined && (activeThreadId === undefined || activeThreadId === nextThreadId)) {
             yield* Effect.sync(() => threadEventsFiber?.interruptUnsafe())
           }
           threadEventsFiber = yield* Effect.forkScoped(
-            deps.backend
-              .subscribeThreadEvents({
-                thread_id: nextThreadId,
-                after_sequence: afterSequence,
-                ...(userId === undefined ? {} : { user_id: userId }),
-                onPresence: (presence) => Queue.offerUnsafe(queue, { _tag: "Presence", presence }),
-              })
-              .pipe(
-                Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
-                Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
-                Effect.catchCause((cause) =>
-                  Queue.offer(queue, { _tag: "ThreadEventsFailed", message: errorMessage(Cause.squash(cause)) }).pipe(
-                    Effect.asVoid,
-                  ),
-                ),
+            Stream.unwrap(
+              Effect.sync(() =>
+                subscribe({
+                  thread_id: nextThreadId,
+                  after_sequence: lastSequence,
+                  ...(userId === undefined ? {} : { user_id: userId }),
+                  onPresence: (presence) => Queue.offerUnsafe(queue, { _tag: "Presence", presence }),
+                }),
               ),
+            ).pipe(
+              Stream.retry(threadSubscriptionRetrySchedule),
+              Stream.groupedWithin(modelEventBatchSize, modelEventBatchWindow),
+              Stream.runForEach((events) => Queue.offer(queue, { _tag: "ModelBatch", events }).pipe(Effect.asVoid)),
+              Effect.catchCause((cause) =>
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Queue.offer(queue, {
+                      _tag: "ThreadEventsFailed",
+                      message: errorMessage(Cause.squash(cause)),
+                    }).pipe(Effect.asVoid),
+              ),
+            ),
           )
         })
 
@@ -341,7 +356,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           typingCooldownTicks = 0
           typingAnnounced = false
           lastSequence = 0
-          yield* restartThreadEvents(threadId, lastSequence)
+          yield* restartThreadEvents(threadId)
           return true
         })
 
@@ -412,8 +427,9 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           const previousThreadId = threadId
           threadId = result.thread_id
           if (result.last_sequence !== undefined) lastSequence = result.last_sequence
+          if (result.mode !== mode) yield* persistSelectedMode(result.mode)
           mode = result.mode
-          if (threadId !== previousThreadId) yield* restartThreadEvents(threadId, lastSequence)
+          if (threadId !== previousThreadId) yield* restartThreadEvents(threadId)
           if (result.exit) {
             quitRequested = true
             exitCode = 0
@@ -532,6 +548,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       const cycleModePicker = (delta: number) =>
         Effect.gen(function* () {
           state = ViewState.modePickerApply(ViewState.modePickerMove(state, delta))
+          if (state.mode !== mode) yield* persistSelectedMode(state.mode)
           mode = state.mode
           yield* render()
         })
@@ -662,6 +679,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               break
             case "CycleReasoning":
               state = ViewState.cycleReasoning(state)
+              if (state.mode !== mode) yield* persistSelectedMode(state.mode)
               mode = state.mode
               break
             case "ToggleFastMode":
@@ -978,8 +996,9 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               yield* render()
               return
             case "ThreadEventsFailed":
-              state = ViewState.withNotice(state, `Thread sync failed: ${appEvent.message}`)
+              state = ViewState.withNotice(state, `Thread sync interrupted: ${appEvent.message} — reconnecting…`)
               yield* render()
+              yield* Effect.forkScoped(restartThreadEvents(threadId).pipe(Effect.delay("2 seconds")))
               return
             case "TurnEnded":
               yield* handleTurnEnded(appEvent.token, appEvent.submitted, appEvent.error)
@@ -1014,7 +1033,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       yield* Effect.forkScoped(
         deps.renderer.resizes.pipe(Stream.runForEach(() => Queue.offer(queue, { _tag: "Resize" }).pipe(Effect.asVoid))),
       )
-      yield* restartThreadEvents(threadId, lastSequence)
+      yield* restartThreadEvents(threadId)
 
       yield* render()
       yield* Stream.fromQueue(queue).pipe(Stream.runForEach(handle))

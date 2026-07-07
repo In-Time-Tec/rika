@@ -41,6 +41,7 @@ export const ThreadAction = Schema.Literals([
   "reference",
   "delete",
   "rebuild-projection",
+  "import",
 ]).annotate({ identifier: "Rika.Cli.Args.ThreadAction" })
 export type ThreadAction = typeof ThreadAction.Type
 
@@ -59,6 +60,7 @@ export const ThreadCommand = Schema.Struct({
   include_archived: Schema.optional(Schema.Boolean),
   limit: Schema.optional(Schema.Int),
   semantic: Schema.optional(Schema.Boolean),
+  source_data_dir: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Cli.Args.ThreadCommand" })
 
 export const ProjectAction = Schema.Literals(["create", "list", "show", "set-env", "set-secret"]).annotate({
@@ -319,6 +321,7 @@ export const usage = [
   "  rika threads share <thread-id>",
   "  rika threads reference <thread-id> [query]",
   "  rika threads rebuild-projection",
+  "  rika threads import <source-data-dir>",
   "  rika project create <name> [--repo <origin>] [--branch <branch>] [--template <id>]",
   "  rika project list",
   "  rika project show <name>",
@@ -489,6 +492,12 @@ const threadReferenceConfig = {
   query: Argument.string("query").pipe(
     Argument.variadic({ min: 0 }),
     Argument.withDescription("Optional reference query"),
+  ),
+}
+
+const threadImportConfig = {
+  source: Argument.string("source-data-dir").pipe(
+    Argument.withDescription("Rika data directory containing rika.sqlite"),
   ),
 }
 
@@ -700,6 +709,10 @@ interface ThreadTournamentInput extends ThreadIdInput {
 
 interface ThreadReferenceInput extends ThreadIdInput {
   readonly query: ReadonlyArray<string>
+}
+
+interface ThreadImportInput {
+  readonly source: string
 }
 
 interface ProjectCreateInput {
@@ -1009,6 +1022,13 @@ const makeThreadsCommand = (
     CliCommand.withShortDescription("Rebuild thread projections"),
   )
 
+  const importThreads = CliCommand.make("import", threadImportConfig, (input: ThreadImportInput) =>
+    Ref.set(parsedRef, Option.some(toThreadImportCommand(input))),
+  ).pipe(
+    CliCommand.withDescription("Import threads from another Rika data directory"),
+    CliCommand.withShortDescription("Import threads"),
+  )
+
   return CliCommand.make("threads", {}, () =>
     Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a threads subcommand", exit_code: 2, usage }))),
   ).pipe(
@@ -1027,6 +1047,7 @@ const makeThreadsCommand = (
       reference,
       deleteThread,
       rebuildProjection,
+      importThreads,
     ]),
   )
 }
@@ -1419,6 +1440,12 @@ const toThreadReferenceCommand = (input: ThreadReferenceInput): ThreadCommand =>
 const toThreadRebuildProjectionCommand = (): ThreadCommand => ({
   type: "threads",
   action: "rebuild-projection",
+})
+
+const toThreadImportCommand = (input: ThreadImportInput): ThreadCommand => ({
+  type: "threads",
+  action: "import",
+  source_data_dir: input.source,
 })
 
 const parseModeList = (value: string | undefined): ReadonlyArray<Config.Mode> | undefined | ArgsError => {

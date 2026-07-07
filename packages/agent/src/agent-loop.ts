@@ -243,6 +243,8 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
     fields.turn_index = existingEvents.filter((event) => event.type === "turn.started").length + 1
     let llmCallCount = 0
     let toolCallCount = 0
+    let tokenInTotal = 0
+    let tokenOutTotal = 0
 
     const append = Effect.fn("AgentLoop.appendTurnEvent")(function* (event: Event.Event) {
       const appended = yield* appendAndProject(dependencies, event)
@@ -417,8 +419,14 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
       fields.provider = response.provider
       fields.model = response.model
       if (response.finish_reason !== undefined) fields.stop_reason = response.finish_reason
-      if (response.usage?.input_tokens !== undefined) fields.token_in = response.usage.input_tokens
-      if (response.usage?.output_tokens !== undefined) fields.token_out = response.usage.output_tokens
+      if (response.usage?.input_tokens !== undefined) {
+        tokenInTotal += response.usage.input_tokens
+        fields.token_in = tokenInTotal
+      }
+      if (response.usage?.output_tokens !== undefined) {
+        tokenOutTotal += response.usage.output_tokens
+        fields.token_out = tokenOutTotal
+      }
       latestCompletion = turnCompletionData(response)
 
       if (Errors.isZeroProgressLengthResponse(response)) {
