@@ -3,7 +3,7 @@ import { mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PermissionPolicy, SubagentRuntime, ThreadMemory, ToolExecutor } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { ArtifactStore } from "@rika/persistence"
 import { PluginHost } from "@rika/plugin"
 import { Common, Ids, Tool } from "@rika/schema"
@@ -26,6 +26,11 @@ const configLayer = (workspaceRoot: string) =>
     data_dir: join(workspaceRoot, ".rika"),
     default_mode: "smart",
   })
+
+const diagnosticsLayer = () => {
+  const redactorLayer = SecretRedactor.layer
+  return Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+}
 
 const fakeFiles = [
   { path: "packages/core/src/config.ts", content: "export const Config = 1\nconst target = 'alpha'\n" },
@@ -65,6 +70,7 @@ const runTool = <A, E>(workspaceRoot: string, effect: Effect.Effect<A, E, ToolEx
   const executorLayer = ToolExecutor.layer.pipe(
     Layer.provideMerge(registryLayer),
     Layer.provideMerge(PermissionPolicy.allowLayer),
+    Layer.provideMerge(diagnosticsLayer()),
   )
   return Effect.runPromise(effect.pipe(Effect.provide(executorLayer)))
 }

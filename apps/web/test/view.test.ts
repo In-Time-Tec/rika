@@ -6,6 +6,8 @@ import {
   LoadedOrbChanges,
   LoadedOrbDirectory,
   LoadedOrbFile,
+  GotDeleteSecretDialogMessage,
+  GotTranscriptScrollerMessage,
   MountOrbTerminal,
   MountPierreDiff,
   MountPierreTree,
@@ -17,6 +19,15 @@ import {
   type Model,
   type OrbTab,
 } from "../src/app"
+import { CompletedShowDialog, ShowDialog } from "../src/components/ui/alert-dialog"
+import {
+  CompletedScrollToBottom,
+  GrewContent,
+  ObserveContentGrowth,
+  ScrolledViewport,
+  ScrollToBottom,
+  TrackViewportScroll,
+} from "../src/components/ui/message-scroller-state"
 
 Object.assign(globalThis, {
   window: {
@@ -48,6 +59,7 @@ describe("web app view", () => {
       Scene.expect(Scene.role("tab", { name: "Terminal" })).toExist(),
       Scene.expect(Scene.role("tabpanel")).toContainText("hello from view"),
       Scene.expect(Scene.text("runtime 7m")).toExist(),
+      ...resolveTranscriptScroller(),
     )
   })
 
@@ -105,6 +117,43 @@ describe("web app view", () => {
     )
   })
 
+  test("keys the Pierre tree mount by selected thread and orb", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with(filesModel()),
+      Scene.tap((simulation) => expect(treeMountKey(simulation.html)).toBe(`orb-tree:${threadId}:${orbId}`)),
+      Scene.Mount.resolve(MountPierreTree, RenderedPierreTree({ selected_path: "README.md" })),
+    )
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({
+        ...filesModel(),
+        selected_thread_id: secondThreadId,
+        selected_orb: {
+          ...orbSummary("running"),
+          orb_id: Ids.OrbId.make("orb-view-second"),
+          thread_id: secondThreadId,
+        },
+      }),
+      Scene.tap((simulation) =>
+        expect(treeMountKey(simulation.html)).toBe(`orb-tree:${secondThreadId}:orb-view-second`),
+      ),
+      Scene.Mount.resolve(MountPierreTree, RenderedPierreTree({ selected_path: "README.md" })),
+    )
+  })
+
+  test("passes git status markers into the Pierre tree mount", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with(filesWithChangesModel()),
+      Scene.tap(({ mounts }) => {
+        const tree = mounts.find((mount) => mount.name === "MountPierreTree")
+        expect(tree?.args?.git_status).toEqual([{ path: "README.md", status: "modified" }])
+      }),
+      Scene.Mount.resolve(MountPierreTree, RenderedPierreTree({ selected_path: "README.md" })),
+    )
+  })
+
   test("renders terminal failure status from the model", () => {
     Scene.scene(
       { update, view: View.view },
@@ -127,8 +176,10 @@ describe("web app view", () => {
       Scene.expect(Scene.text("****")).toExist(),
       Scene.expect(Scene.displayValue("secret-value")).not.toExist(),
       Scene.click(Scene.role("button", { name: "Delete" })),
-      Scene.expect(Scene.role("button", { name: "Confirm delete" })).toExist(),
+      Scene.expect(Scene.role("alertdialog")).toContainText("Delete secret?"),
+      Scene.expect(Scene.role("button", { name: "Delete" })).toExist(),
       Scene.expect(Scene.role("button", { name: "Cancel" })).toExist(),
+      Scene.Command.resolve(ShowDialog, CompletedShowDialog(), (message) => GotDeleteSecretDialogMessage({ message })),
     )
   })
 
@@ -149,6 +200,7 @@ describe("web app view", () => {
       Scene.with(diffModel([])),
       Scene.expect(Scene.text("src/view-diff.ts")).toExist(),
       Scene.expect(Scene.role("button", { name: "Show diff" })).toExist(),
+      ...resolveTranscriptScroller(),
       Scene.click(Scene.role("button", { name: "Show diff" })),
       Scene.expect(Scene.role("button", { name: "Hide diff" })).toExist(),
       Scene.expect(Scene.selector('[data-pierre-diff-id="event-2:diff:0"]')).toExist(),
@@ -164,6 +216,7 @@ describe("web app view", () => {
       Scene.expect(Scene.selector('[data-pierre-diff-id="event-2:diff:0"]')).toExist(),
       Scene.Mount.expectHas(MountPierreDiff),
       Scene.Mount.resolve(MountPierreDiff, RenderedPierreDiff({ payload_id: "event-2:diff:0" })),
+      ...resolveTranscriptScroller(),
     )
   })
 
@@ -174,6 +227,7 @@ describe("web app view", () => {
       Scene.expect(Scene.role("combobox", { name: "Mode" })).toExist(),
       Scene.expect(Scene.text("deep2")).toExist(),
       Scene.expect(Scene.role("button", { name: "Stop" })).toExist(),
+      ...resolveTranscriptScroller(),
     )
 
     Scene.scene(
@@ -181,6 +235,7 @@ describe("web app view", () => {
       Scene.with(terminalTurnModel()),
       Scene.expect(Scene.role("combobox", { name: "Mode" })).toExist(),
       Scene.expect(Scene.role("button", { name: "Stop" })).not.toExist(),
+      ...resolveTranscriptScroller(),
     )
   })
 
@@ -200,7 +255,35 @@ describe("web app view", () => {
       }),
       Scene.expect(Scene.text("S")).toExist(),
       Scene.expect(Scene.text("sarah is typing")).toExist(),
-      Scene.expect(Scene.text("sarah › hello from Sarah")).toExist(),
+      Scene.expect(Scene.text("sarah")).toExist(),
+      Scene.expect(Scene.text("hello from Sarah")).toExist(),
+      ...resolveTranscriptScroller(),
+    )
+  })
+
+  test("renders transcript rows through foldcn chat components", () => {
+    Scene.scene(
+      { update, view: View.view },
+      Scene.with({
+        ...orbModel("transcript", 0),
+        events: [
+          messageAdded(1, "user", "hello from user", userId),
+          messageAdded(2, "assistant", "```ts\nconst value = 1\n```"),
+          reasoningDelta(3, "checking files"),
+          toolCallCompleted(4, "read", { ok: true }),
+        ],
+        last_sequence: 4,
+        subscription_after_sequence: 4,
+      }),
+      Scene.expect(Scene.selector('[data-slot="message-scroller"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="message"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="bubble"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="reasoning"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="tool"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="code-block"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="prompt-input"]')).toExist(),
+      Scene.expect(Scene.selector('[data-slot="prompt-input-textarea"]')).toExist(),
+      ...resolveTranscriptScroller(),
     )
   })
 
@@ -217,9 +300,21 @@ describe("web app view", () => {
       Scene.expect(Scene.displayValue("file:src/view.ts")).toExist(),
       Scene.expect(Scene.role("combobox", { name: "Thread search window" })).toExist(),
       Scene.expect(Scene.text("72h")).toExist(),
+      ...resolveTranscriptScroller(),
     )
   })
 })
+
+const resolveTranscriptScroller = () =>
+  [
+    Scene.Mount.resolve(TrackViewportScroll, ScrolledViewport({ isAtBottom: true }), (message) =>
+      GotTranscriptScrollerMessage({ message }),
+    ),
+    Scene.Mount.resolve(ObserveContentGrowth, GrewContent(), (message) => GotTranscriptScrollerMessage({ message })),
+    Scene.Command.resolve(ScrollToBottom, CompletedScrollToBottom(), (message) =>
+      GotTranscriptScrollerMessage({ message }),
+    ),
+  ] as const
 
 const orbModel = (selected_orb_tab: OrbTab, activeIndex: number): Model => {
   const model: Model = {
@@ -284,6 +379,21 @@ const filesModel = (): Model => {
     }),
   )
   return opened
+}
+
+const filesWithChangesModel = (): Model => {
+  const [loaded] = update(
+    filesModel(),
+    LoadedOrbChanges({
+      response: {
+        base_commit: "abc123",
+        head_commit: "def456",
+        dirty: true,
+        diff: gitPatch("README.md"),
+      },
+    }),
+  )
+  return loaded
 }
 
 const changesModel = (): Model => {
@@ -394,6 +504,20 @@ const terminalMountKey = (html: Html): string | undefined => {
   return undefined
 }
 
+const treeMountKey = (html: Html): string | undefined => {
+  if (html === null) return undefined
+  if (html.data?.attrs?.["data-pierre-tree"] === "") {
+    return typeof html.data.key === "string" ? html.data.key : undefined
+  }
+  for (const child of html.children ?? []) {
+    if (typeof child !== "string") {
+      const key = treeMountKey(child)
+      if (key !== undefined) return key
+    }
+  }
+  return undefined
+}
+
 const tabModel = (activeIndex: number) => ({
   id: "orb-tabs",
   activeIndex,
@@ -491,6 +615,17 @@ const turnFailed = (sequence: number, turnId: Ids.TurnId): Event.TurnFailed => (
   created_at: sequence,
   type: "turn.failed",
   data: { error: { kind: "cancelled", message: "cancelled" } },
+})
+
+const reasoningDelta = (sequence: number, text: string): Event.ModelReasoningDelta => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-view"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "model.reasoning.delta",
+  data: { text, provider: "openai", model: "gpt-5.5" },
 })
 
 const pierreDiff = (name: string, additions: number, deletions: number) => ({

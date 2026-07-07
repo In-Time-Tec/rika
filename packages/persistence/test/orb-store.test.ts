@@ -104,6 +104,30 @@ describe("OrbStore", () => {
     expect(error.thread_id).toBe(threadId)
   })
 
+  test("allows a new active orb for a thread after the previous orb is terminal", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const first = yield* OrbStore.create(createInput())
+        const killed = yield* OrbStore.setStatus(first.orb_id, "killed")
+        const second = yield* OrbStore.create({ ...createInput(), sandbox_id: "sandbox_orb_store_retry" })
+        const byThread = yield* OrbStore.getByThread(threadId)
+        const listed = yield* OrbStore.list()
+        return { killed, second, byThread, listed }
+      }).pipe(Effect.provide(makeLayer({ times: [createdAt, touchedAt, statusAt] }))),
+    )
+
+    expect(result.killed).toMatchObject({ orb_id: orbId, status: "killed" })
+    expect(result.second).toMatchObject({
+      orb_id: Ids.OrbId.make("orb_2"),
+      thread_id: threadId,
+      status: "provisioning",
+      sandbox_id: "sandbox_orb_store_retry",
+    })
+    expect(result.byThread).toEqual(result.second)
+    expect(result.listed.map((record) => record.orb_id)).toEqual([Ids.OrbId.make("orb_2"), orbId])
+  })
+
   test("stores endpoint tokens behind a narrow credential accessor", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {

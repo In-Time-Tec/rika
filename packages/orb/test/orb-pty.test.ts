@@ -22,7 +22,9 @@ describe("OrbPty", () => {
 
     const calls: Array<Call> = []
     const output: Array<string> = []
+    const exits: Array<OrbPty.PtyExit> = []
     let emitData: ((bytes: Uint8Array) => Effect.Effect<void>) | undefined
+    let emitExit: ((exit: OrbPty.PtyExit) => Effect.Effect<void>) | undefined
 
     const result = await Effect.runPromise(
       Effect.gen(function* () {
@@ -34,6 +36,10 @@ describe("OrbPty", () => {
             Effect.sync(() => {
               output.push(decoder.decode(bytes))
             }),
+          onExit: (exit) =>
+            Effect.sync(() => {
+              exits.push(exit)
+            }),
         })
 
         yield* session.write(encoder.encode("pwd\n"))
@@ -41,7 +47,9 @@ describe("OrbPty", () => {
         yield* session.close
 
         if (emitData === undefined) throw new Error("missing terminal callback")
+        if (emitExit === undefined) throw new Error("missing exit callback")
         yield* emitData(encoder.encode("hello from tmux"))
+        yield* emitExit({ source: "process", exit_code: 0, signal: null })
 
         return output
       }).pipe(
@@ -59,6 +67,7 @@ describe("OrbPty", () => {
                     env: input.env,
                   })
                   emitData = input.onData
+                  emitExit = input.onExit
                   return {
                     write: (bytes) =>
                       Effect.sync(() => {
@@ -94,5 +103,6 @@ describe("OrbPty", () => {
       { type: "close" },
     ])
     expect(result).toEqual(["hello from tmux"])
+    expect(exits).toEqual([{ source: "process", exit_code: 0, signal: null }])
   })
 })

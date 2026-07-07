@@ -207,6 +207,53 @@ describe("ViewState queue + thinking", () => {
     expect(deep.reasoning_effort).toBe(3)
   })
 
+  test("reasoning tier cycling locks once the thread has activity", () => {
+    const idle = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "deep3" })
+    const cycled = ViewState.cycleReasoning(idle)
+
+    expect(cycled.mode).toBe("deep1")
+    expect(cycled.reasoning_effort).toBe(1)
+
+    const active = ViewState.applyEvent(idle, messageAddedWithUser(1, "hello", userId))
+    const locked = ViewState.cycleReasoning(active)
+
+    expect(ViewState.hasActivity(locked)).toBe(true)
+    expect(locked.mode).toBe("deep3")
+    expect(locked.reasoning_effort).toBe(3)
+  })
+
+  test("mode switches lock while a turn is active before transcript entries arrive", () => {
+    const idle = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "deep3" })
+    const active = ViewState.applyEvent(idle, turnStarted(1))
+
+    const direct = ViewState.withMode(active, "rush")
+    const cycled = ViewState.cycleReasoning(active)
+    const picked = ViewState.modePickerApply(ViewState.modePickerMove(ViewState.openModePicker(active), 1))
+
+    expect(active.active).toBe(true)
+    expect(ViewState.hasActivity(active)).toBe(false)
+    expect(direct.mode).toBe("deep3")
+    expect(direct.reasoning_effort).toBe(3)
+    expect(cycled.mode).toBe("deep3")
+    expect(cycled.reasoning_effort).toBe(3)
+    expect(picked.mode).toBe("deep3")
+    expect(picked.reasoning_effort).toBe(3)
+  })
+
+  test("mode picker switches before activity and locks after activity", () => {
+    const idle = ViewState.initial({ thread_id: threadId, workspace_path: "/workspace/rika", mode: "deep3" })
+    const switched = ViewState.modePickerApply(ViewState.modePickerMove(ViewState.openModePicker(idle), 1))
+
+    expect(switched.mode).toBe("rush")
+
+    const active = ViewState.applyEvent(idle, messageAddedWithUser(1, "hello", userId))
+    const locked = ViewState.modePickerApply(ViewState.modePickerMove(ViewState.openModePicker(active), 1))
+
+    expect(ViewState.hasActivity(locked)).toBe(true)
+    expect(locked.mode).toBe("deep3")
+    expect(locked.reasoning_effort).toBe(3)
+  })
+
   test("enqueue and dequeue messages in order", () => {
     let state = ViewState.enqueueMessage(ViewState.enqueueMessage(base(), "one"), "two")
     expect(state.queued).toEqual(["one", "two"])
@@ -540,6 +587,13 @@ const eventBase = (sequence: number): Omit<Event.Event, "type" | "data"> => ({
   sequence,
   version: 1,
   created_at: Common.TimestampMillis.make(sequence),
+})
+
+const turnStarted = (sequence: number): Event.TurnStarted => ({
+  ...eventBase(sequence),
+  turn_id: turnId,
+  type: "turn.started",
+  data: {},
 })
 
 const toolRequested = (

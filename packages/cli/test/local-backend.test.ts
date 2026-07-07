@@ -67,6 +67,37 @@ describe("CLI local backend", () => {
     expect(system.spawns[0]?.backend_id).toBe(LocalBackend.backendId(env, workspaceRoot))
   })
 
+  test("adopts a healthy backend from a different frontend when explicitly enabled", async () => {
+    const system = fakeSystem()
+    const record: LocalBackend.BackendRecord = {
+      url: "http://127.0.0.1:65001",
+      token: "installed-token",
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      backend_id: "installed-rika",
+      pid: 322,
+      started_at: 1,
+    }
+    system.files.set(LocalBackend.recordPath(dataDir), JSON.stringify(record))
+    system.healthy.set(healthKey(record.url, record.token), health(record))
+
+    const endpoint = await Effect.runPromise(
+      LocalBackend.connectOrStart({ workspace_root: workspaceRoot, data_dir: dataDir, mode: "smart" }).pipe(
+        Effect.provide(LocalBackend.layerFromInput({ env: {}, cwd: workspaceRoot, system, adoptHealthyRecord: true })),
+      ),
+    )
+
+    expect(endpoint).toEqual({
+      kind: "local",
+      url: record.url,
+      token: record.token,
+      workspace_root: workspaceRoot,
+      data_dir: dataDir,
+      pid: 322,
+    })
+    expect(system.spawns).toHaveLength(0)
+  })
+
   test("starts one backend for concurrent callers and hides tokens from redaction", async () => {
     const system = fakeSystem()
     const layer = LocalBackend.layerFromInput({ env: { RIKA_BACKEND_PORT: "45678" }, cwd: workspaceRoot, system })

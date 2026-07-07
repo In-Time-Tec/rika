@@ -56,7 +56,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 - Bind services to named variables in `Effect.gen` before calling methods; do not use nested service yields.
 - Keep infrastructure swappable. Runtime code depends on service interfaces; tests provide in-memory or fake layers.
 - Package tests live under `test/` and mirror the relative `src/` path for the module under test.
-- Use Bun as the runtime/package manager, Turbo for monorepo task orchestration, and oxlint for linting once the scaffold exists.
+- Use Bun as the runtime/package manager, Turbo for monorepo task orchestration, oxlint for general linting, and ast-grep for structural linting.
 - Use Drizzle only behind persistence services. Raw Drizzle handles do not cross into CLI, TUI, LLM, or actor orchestration modules.
 - Treat the append-only event log as canonical durable truth. Projections and actor state are rebuildable.
 - Use Rivet actors from day one for active thread orchestration. Keep Rivet-specific code in the Rivet host layer.
@@ -97,7 +97,7 @@ Do not put comments in code (no inline `//`, no JSDoc `/** */`, no block comment
 - `bun run db:generate`: generate Drizzle SQL migrations from the persistence schema.
 - `bun run db:migrate`: apply committed Drizzle migrations to the configured local SQLite database.
 - `bun run docs:check`: verify documented scripts and guidance files still exist.
-- `bun run lint`: run oxlint across the repository.
+- `bun run lint`: run oxlint and ast-grep across the repository.
 - `bun run typecheck`: run package type checks through Turbo.
 - `bun run test`: run package tests through Turbo.
 - `bun run build`: build package entrypoints through Turbo.

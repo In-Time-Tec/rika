@@ -27,6 +27,7 @@ export type RunError =
   | OrbTournamentError
   | Project.ProjectError
   | ProjectStore.ProjectStoreError
+  | Settings.SettingsError
   | Sync.RunError
 
 export type ClientFactory = (endpointUrl: string, token: string) => Client.Interface
@@ -40,6 +41,7 @@ export class Service extends Context.Service<Service, Interface>()("@rika/cli/Or
 interface CandidateOutcome {
   readonly index: number
   readonly thread_id: Ids.ThreadId
+  readonly workspace_id?: Ids.WorkspaceId
   readonly orb_id?: Ids.OrbId
   readonly mode: Config.Mode
   readonly status: "completed" | "failed"
@@ -52,6 +54,7 @@ interface CandidateOutcome {
 
 interface CompletedCandidate extends CandidateOutcome {
   readonly orb_id: Ids.OrbId
+  readonly workspace_id: Ids.WorkspaceId
   readonly status: "completed"
   readonly candidate_id: string
   readonly content: string
@@ -130,6 +133,7 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
                 idGenerator,
                 time,
                 winner.thread_id,
+                winner.workspace_id,
                 judged.success.verdict,
                 survivors.length,
               )
@@ -266,6 +270,7 @@ const runJudgedPhase = Effect.fn("Cli.OrbTournament.runJudgedPhase")(function* (
     })),
     ...(input.input.rubric === undefined ? {} : { rubric: input.input.rubric }),
     thread_id: firstSurvivor.thread_id,
+    workspace_id: firstSurvivor.workspace_id,
   })
   const ranking = rankingRows(verdict, input.survivors)
   const winner = input.survivors.find((candidate) => candidate.candidate_id === verdict.winner_id) ?? firstSurvivor
@@ -345,7 +350,7 @@ const runProvisionedCandidate = (input: {
       )
     }
     const client = input.clientFactory(endpoint.endpoint_url, endpoint.token)
-    yield* client.createThread({ thread_id: input.threadId, project_id: input.project.project_id })
+    const thread = yield* client.createThread({ thread_id: input.threadId, project_id: input.project.project_id })
     yield* input.output.stderr(`[orb ${input.ordinal}/${input.input.branchCount}] turn running...`)
     const start = yield* Effect.result(
       client.startTurn({
@@ -391,6 +396,7 @@ const runProvisionedCandidate = (input: {
     return {
       index: input.ordinal,
       thread_id: input.threadId,
+      workspace_id: thread.workspace_id,
       orb_id: input.orb.orb_id,
       mode: input.mode,
       status: "completed",
@@ -493,8 +499,15 @@ const cleanupLosers = (
       keepLosers
         ? manager.pause(outcome.orb_id)
         : Effect.gen(function* () {
-            if (outcome.changes !== undefined) {
-              yield* storeFinalDiff(artifacts, idGenerator, time, outcome.thread_id, outcome.changes)
+            if (isCompleted(outcome)) {
+              yield* storeFinalDiff(
+                artifacts,
+                idGenerator,
+                time,
+                outcome.thread_id,
+                outcome.workspace_id,
+                outcome.changes,
+              )
             }
             return yield* manager.kill(outcome.orb_id)
           }),
@@ -506,6 +519,7 @@ const storeFinalDiff = (
   idGenerator: IdGenerator.Interface,
   time: Time.Interface,
   threadId: Ids.ThreadId,
+  workspaceId: Ids.WorkspaceId,
   changes: Remote.OrbChangesResponse,
 ) =>
   Effect.gen(function* () {
@@ -514,6 +528,7 @@ const storeFinalDiff = (
     yield* artifacts.put({
       id: artifactId,
       thread_id: threadId,
+      workspace_id: workspaceId,
       kind: "orb-final-diff",
       title: "Orb final diff",
       content: changes,
@@ -526,6 +541,7 @@ const storeWinnerVerdict = (
   idGenerator: IdGenerator.Interface,
   time: Time.Interface,
   threadId: Ids.ThreadId,
+  workspaceId: Ids.WorkspaceId,
   verdict: JudgeService.Verdict,
   candidateCount: number,
 ) =>
@@ -535,6 +551,7 @@ const storeWinnerVerdict = (
     yield* artifacts.put({
       id: artifactId,
       thread_id: threadId,
+      workspace_id: workspaceId,
       kind: "verdict",
       title: "Orb tournament verdict",
       content: verdict,

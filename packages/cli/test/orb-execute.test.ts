@@ -11,7 +11,7 @@ import {
   ToolExecutor,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Settings, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Settings, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Provider, Router } from "@rika/llm"
 import { OrbManager, SandboxClientFake } from "@rika/orb"
@@ -188,6 +188,7 @@ describe("CLI orb execute", () => {
                   pause: () => Effect.never,
                   resume: () => Effect.never,
                   kill: () => Effect.never,
+                  forceKill: () => Effect.never,
                 }),
               ),
             ),
@@ -267,6 +268,7 @@ describe("CLI orb execute", () => {
                   pause: () => Effect.never,
                   resume: () => Effect.never,
                   kill: () => Effect.never,
+                  forceKill: () => Effect.never,
                 }),
               ),
             ),
@@ -334,6 +336,7 @@ describe("CLI orb execute", () => {
                   pause: () => Effect.never,
                   resume: () => Effect.never,
                   kill: () => Effect.never,
+                  forceKill: () => Effect.never,
                 }),
               ),
             ),
@@ -363,6 +366,8 @@ const makeOrbLayer = (input: {
   const databaseLayer = Database.memoryLayer
   const timeLayer = Time.fixedLayer(now)
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const mcpApprovalLayer = McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
@@ -379,6 +384,7 @@ const makeOrbLayer = (input: {
     configLayer,
     databaseLayer,
     Migration.layer,
+    redactorLayer,
     timeLayer,
     idLayer,
     mcpApprovalLayer,
@@ -389,7 +395,8 @@ const makeOrbLayer = (input: {
   const managerLayer = OrbManager.layerWithSystem(makeSystem()).pipe(
     Layer.provideMerge(migratedStorageLayer),
     Layer.provideMerge(SandboxClientFake.layer(input.sandbox)),
-    Layer.provideMerge(Diagnostics.memoryLayer([])),
+    Layer.provideMerge(diagnosticsLayer),
+    Layer.provideMerge(redactorLayer),
   )
   return OrbExecute.layerWithFetch(input.fetch).pipe(
     Layer.provideMerge(Output.memoryLayer(input.output)),
@@ -461,6 +468,8 @@ const makeRemoteLayer = () => {
   const databaseLayer = Database.memoryLayer
   const timeLayer = Time.fixedLayer(now)
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
@@ -481,14 +490,18 @@ const makeRemoteLayer = () => {
     workspaceStoreLayer,
     projectStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     idLayer,
     orbStoreLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const threadLayer = ThreadService.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const llmLayer = Router.layer.pipe(
     Layer.provideMerge(configLayer),
@@ -498,6 +511,7 @@ const makeRemoteLayer = () => {
         { name: "openai", responses: ["remote hello"] },
       ]),
     ),
+    Layer.provideMerge(diagnosticsLayer),
   )
   const agentBase = Layer.mergeAll(
     migratedStorageLayer,
@@ -505,8 +519,9 @@ const makeRemoteLayer = () => {
     workspaceAccessLayer,
     ContextResolver.fakeLayer({ entries: [], rendered: "", total_chars: 0 }),
     SkillRegistry.emptyLayer,
-    ToolExecutor.emptyLayer,
-    Diagnostics.memoryLayer([]),
+    ToolExecutor.emptyLayer.pipe(Layer.provideMerge(diagnosticsLayer)),
+    redactorLayer,
+    diagnosticsLayer,
     llmLayer,
     IdeBridge.layer,
     unusedCompactionLayer(),
@@ -520,7 +535,11 @@ const makeRemoteLayer = () => {
     Layer.provideMerge(agentBase),
     Layer.provideMerge(presenceLayer),
   )
-  const httpLayer = HttpServer.layer.pipe(Layer.provideMerge(remoteLayer), Layer.provideMerge(presenceLayer))
+  const httpLayer = HttpServer.layer.pipe(
+    Layer.provideMerge(remoteLayer),
+    Layer.provideMerge(presenceLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   return Layer.mergeAll(agentBase, agentLayer, remoteLayer, httpLayer)
 }
 
@@ -555,6 +574,7 @@ const remoteOrbManagerLayer = () =>
       pause: () => Effect.never,
       resume: () => Effect.never,
       kill: () => Effect.never,
+      forceKill: () => Effect.never,
     }),
   )
 

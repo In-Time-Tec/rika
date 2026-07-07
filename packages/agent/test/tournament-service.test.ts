@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message, Remote } from "@rika/schema"
 import { Effect, Layer, Stream } from "effect"
@@ -140,6 +140,8 @@ interface LayerInput {
 }
 
 const makeLayer = (input: LayerInput) => {
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const baseServices = Layer.mergeAll(
     configLayer,
     Database.memoryLayer,
@@ -148,9 +150,12 @@ const makeLayer = (input: LayerInput) => {
     ThreadProjection.layer,
     Time.fixedLayer(now),
     IdGenerator.sequenceLayer(1),
+    redactorLayer,
+    diagnosticsLayer,
   )
+  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(baseServices), Layer.provideMerge(diagnosticsLayer))
   return TournamentService.layer.pipe(
-    Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(baseServices))),
+    Layer.provideMerge(threadLayer),
     Layer.provideMerge(turnControlLayer(input)),
     Layer.provideMerge(judgeLayer(input.judgeInputs)),
     Layer.provideMerge(baseServices),

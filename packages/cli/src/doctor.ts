@@ -75,7 +75,7 @@ export class DoctorError extends Schema.TaggedErrorClass<DoctorError>()("DoctorE
   message: Schema.String,
 }) {}
 
-export type RunError = DoctorError
+export type RunError = DoctorError | Settings.SettingsError
 
 export interface Interface {
   readonly executeCommand: (command: Args.DoctorCommand) => Effect.Effect<number, RunError>
@@ -130,13 +130,14 @@ const reportFromInput = (
   input: Input,
   backend: LocalBackend.Interface,
   dependencies: Dependencies,
-): Effect.Effect<Report, DoctorError> =>
+): Effect.Effect<Report, RunError> =>
   Effect.gen(function* () {
     const workspaceRoot = input.env.RIKA_WORKSPACE_ROOT ?? input.cwd
     const dataDir = input.env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`
     const rivetHost = input.env.RIKA_RIVET_HOST ?? "local"
     const rivetEndpoint = input.env.RIKA_RIVET_ENDPOINT ?? input.env.RIVET_ENDPOINT ?? "http://127.0.0.1:6420"
     const apiKeyConfigured = secretConfigured(input.env.RIKA_API_KEY)
+    const baseUrlConfigured = secretConfigured(input.env.RIKA_BASE_URL)
     const embeddingsApiKeyConfigured = secretConfigured(input.env.RIKA_EMBEDDINGS_API_KEY)
     const settingsSnapshot = dependencies.settings === undefined ? undefined : yield* dependencies.settings.snapshot
     const telemetry =
@@ -151,6 +152,7 @@ const reportFromInput = (
     const diagnosticChecks = yield* checks({
       dataDir,
       apiKeyConfigured,
+      baseUrlConfigured,
       embeddingsApiKeyConfigured,
       permissionSummary,
       rivetHost,
@@ -172,7 +174,7 @@ const reportFromInput = (
         workspace_root: workspaceRoot,
         data_dir: dataDir,
         database_url_configured: input.env.RIKA_DATABASE_URL !== undefined,
-        base_url_configured: input.env.RIKA_BASE_URL !== undefined,
+        base_url_configured: baseUrlConfigured,
         api_key_configured: apiKeyConfigured,
         embeddings_api_key_configured: embeddingsApiKeyConfigured,
         telemetry: telemetry.enabled ? "enabled" : "disabled",
@@ -198,6 +200,7 @@ const reportFromInput = (
 const checks = (input: {
   readonly dataDir: string
   readonly apiKeyConfigured: boolean
+  readonly baseUrlConfigured: boolean
   readonly embeddingsApiKeyConfigured: boolean
   readonly permissionSummary: PermissionPolicy.PermissionSummary
   readonly rivetHost: string
@@ -205,7 +208,7 @@ const checks = (input: {
   readonly telemetry: Telemetry.Options
   readonly env: Record<string, string | undefined>
   readonly dependencies: Dependencies
-}): Effect.Effect<ReadonlyArray<Check>> =>
+}): Effect.Effect<ReadonlyArray<Check>, RunError> =>
   Effect.gen(function* () {
     const orb = yield* orbChecks(input.env, input.dependencies)
     return [
@@ -220,6 +223,15 @@ const checks = (input: {
         message: input.apiKeyConfigured
           ? "Model provider API key is configured. Secret values are not printed."
           : "RIKA_API_KEY is required for live model calls.",
+      },
+      {
+        name: "model-proxy",
+        status: !input.apiKeyConfigured ? "skipped" : input.baseUrlConfigured ? "ok" : "warning",
+        message: !input.apiKeyConfigured
+          ? "Model proxy check skipped because RIKA_API_KEY is unset."
+          : input.baseUrlConfigured
+            ? "RIKA_BASE_URL is configured for live model proxying."
+            : "RIKA_BASE_URL is required when live model calls are enabled.",
       },
       {
         name: "embeddings-provider",
@@ -260,7 +272,7 @@ const checks = (input: {
 const orbChecks = (
   env: Record<string, string | undefined>,
   dependencies: Dependencies,
-): Effect.Effect<ReadonlyArray<Check>> =>
+): Effect.Effect<ReadonlyArray<Check>, RunError> =>
   Effect.gen(function* () {
     const e2bApiKeyConfigured = secretConfigured(env.E2B_API_KEY)
     const template = yield* configuredTemplate(dependencies.settings)
@@ -281,7 +293,7 @@ const orbChecks = (
     ]
   })
 
-const configuredTemplate = (settings: Settings.Interface | undefined): Effect.Effect<string> =>
+const configuredTemplate = (settings: Settings.Interface | undefined): Effect.Effect<string, Settings.SettingsError> =>
   settings === undefined
     ? Effect.succeed(Settings.defaultValues().orb.template)
     : settings.snapshot.pipe(Effect.map((snapshot) => snapshot.values.orb.template))

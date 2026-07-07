@@ -97,6 +97,25 @@ const run = (
         commands.push(command)
         if (command === "/exit")
           return { ...context, state: ViewState.withNotice(context.state, "Goodbye."), exit: true }
+        if (command === "/welcome")
+          return {
+            ...context,
+            state: ViewState.initial({
+              thread_id: context.thread_id,
+              workspace_path: context.workspace_path,
+              mode: context.mode,
+            }),
+            exit: false,
+          }
+        if (command === "/mode rush") {
+          if (ViewState.modeLocked(context.state))
+            return {
+              ...context,
+              state: ViewState.withNotice(context.state, "Mode is locked once a thread is active."),
+              exit: false,
+            }
+          return { ...context, state: ViewState.withMode(context.state, "rush"), mode: "rush" as const, exit: false }
+        }
         return { ...context, state: ViewState.withNotice(context.state, `Ran ${command}`), exit: false }
       }),
     listProjects: () => Effect.succeed(options.projects ?? []),
@@ -283,6 +302,24 @@ describe("Controller", () => {
     const keys = [...Keys.fromString("/help"), Keys.enter, ...quit]
     const { commands } = await run(keys)
     expect(commands).toContain("/help")
+  })
+
+  test("slash commands cannot reset an active turn before switching modes", async () => {
+    const keys = [
+      ...Keys.fromString("first"),
+      Keys.enter,
+      ...Keys.fromString("/welcome"),
+      Keys.enter,
+      ...Keys.fromString("/mode rush"),
+      Keys.enter,
+      ...quit,
+    ]
+    const { rendered, commands, turns } = await run(keys)
+
+    expect(turns).toContain("first")
+    expect(commands).toEqual(expect.arrayContaining(["/welcome", "/mode rush"]))
+    expect(rendered.some((state) => state.notice === "Mode is locked once a thread is active.")).toBe(true)
+    expect(rendered.some((state) => state.mode === "rush")).toBe(false)
   })
 
   test("text paste preserves multiline content until explicit submit", async () => {

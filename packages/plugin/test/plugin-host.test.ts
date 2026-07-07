@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
+import { Diagnostics, SecretRedactor } from "@rika/core"
 import { Common, Ids, Tool } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { PluginHost, PluginUi } from "../src/index"
@@ -26,8 +27,19 @@ const call = (name: string, input: Common.JsonValue): Tool.Call => ({
   input,
 })
 
-const hostLayer = (sources: ReadonlyArray<PluginHost.PluginSource>, ui = memoryUi()) =>
-  PluginHost.layerFromSources(sources).pipe(Layer.provide(PluginUi.memoryLayer(ui)))
+const hostLayer = (
+  sources: ReadonlyArray<PluginHost.PluginSource>,
+  ui = memoryUi(),
+  diagnostics?: Array<Diagnostics.Entry>,
+) => {
+  const layer = PluginHost.layerFromSources(sources).pipe(Layer.provide(PluginUi.memoryLayer(ui)))
+  return diagnostics === undefined ? layer : layer.pipe(Layer.provideMerge(diagnosticsLayer(diagnostics)))
+}
+
+const diagnosticsLayer = (entries: Array<Diagnostics.Entry> = []) => {
+  const redactorLayer = SecretRedactor.layer
+  return Diagnostics.memoryLayer(entries).pipe(Layer.provideMerge(redactorLayer))
+}
 
 describe("PluginHost", () => {
   test("loads plugins and reports load errors without hiding valid plugins", async () => {
@@ -104,6 +116,88 @@ describe("PluginHost", () => {
     expect(ui.notifications).toEqual(["plugin command ran"])
   })
 
+  test("rejects plugin tool input that violates the declared input schema", async () => {
+    let executions = 0
+    const layer = hostLayer([
+      source("typed-tool", (rika) => {
+        rika.registerTool(
+          "plugin_typed",
+          {
+            description: "Typed plugin tool",
+            inputSchema: {
+              type: "object",
+              required: ["text"],
+              properties: { text: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+          () => {
+            executions += 1
+            return { ok: true }
+          },
+        )
+      }),
+    ])
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const definitions = yield* PluginHost.toolDefinitions()
+        const registryLayer = ToolRegistry.layerFromDefinitions(definitions)
+        const invalid = yield* Effect.result(
+          ToolRegistry.execute(call("plugin_typed", { text: 123 })).pipe(Effect.provide(registryLayer)),
+        )
+        const valid = yield* ToolRegistry.execute(call("plugin_typed", { text: "ok" })).pipe(
+          Effect.provide(registryLayer),
+        )
+        return { invalid, valid }
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(result.invalid._tag).toBe("Failure")
+    if (result.invalid._tag === "Failure") {
+      expect(result.invalid.failure.message).toContain("input does not match declared schema")
+    }
+    expect(result.valid).toEqual({ ok: true })
+    expect(executions).toBe(1)
+  })
+
+  test("emits runtime hook logs through host state and Diagnostics", async () => {
+    const diagnostics: Array<Diagnostics.Entry> = []
+    const layer = hostLayer(
+      [
+        source("logger", (rika) => {
+          rika.on("agent.start", (_event, ctx) => {
+            ctx.logger.log("agent started")
+          })
+        }),
+      ],
+      memoryUi(),
+      diagnostics,
+    )
+
+    const logs = await Effect.runPromise(
+      Effect.gen(function* () {
+        const host = yield* PluginHost.Service
+        yield* host.emitAgentStart({ thread_id: "thread_1", turn_id: "turn_1", message: "work" })
+        return yield* host.logs
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(logs).toEqual(["[logger] agent started"])
+    expect(diagnostics).toEqual([
+      {
+        level: "info",
+        message: "plugin.log",
+        data: {
+          op: "plugin.log",
+          plugin_name: "logger",
+          plugin_path: ".rika/plugins/logger.ts",
+          plugin_message: "agent started",
+        },
+      },
+    ])
+  })
+
   test("runs tool.call hooks through the PermissionPolicy path in registration order", async () => {
     const order: Array<string> = []
     const layer = hostLayer([
@@ -174,6 +268,7 @@ describe("PluginHost", () => {
         }),
       ),
       Layer.provideMerge(PluginHost.permissionPolicyLayerFromConfig()),
+      Layer.provideMerge(diagnosticsLayer()),
     )
 
     const result = await Effect.runPromise(
@@ -205,7 +300,9 @@ describe("PluginHost", () => {
         }))
       }),
     ])
-    const baseExecutorLayer = ToolExecutor.fakeLayer({ fake_tool: () => Effect.succeed({ original: true }) })
+    const baseExecutorLayer = ToolExecutor.fakeLayer({ fake_tool: () => Effect.succeed({ original: true }) }).pipe(
+      Layer.provideMerge(diagnosticsLayer()),
+    )
     const executorLayer = PluginHost.toolResultExecutorLayer.pipe(
       Layer.provideMerge(baseExecutorLayer),
       Layer.provideMerge(layer),

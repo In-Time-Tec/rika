@@ -1,5 +1,5 @@
 import { Config, Diagnostics } from "@rika/core"
-import { Cause, Clock, Context, Effect, Exit, JsonSchema, Layer, Option, Schema, Stream } from "effect"
+import { Cause, Clock, Context, Effect, Exit, JsonSchema, Layer, Schema, Stream } from "effect"
 import { AiError, Prompt } from "effect/unstable/ai"
 import * as ExtractJson from "./extract-json"
 import * as Modes from "./modes"
@@ -72,6 +72,7 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const config = yield* Config.Service
     const registry = yield* Provider.Registry
+    const diagnostics = yield* Diagnostics.Service
     const route = makeRoute(config)
     const completeRequest = Effect.fn("LLM.Router.complete")(function* (request: Request) {
       const routed = yield* route(request)
@@ -80,7 +81,7 @@ export const layer = Layer.effect(
       const fields = llmCallSeed(routed, "message")
       return yield* provider.complete(routed).pipe(
         Effect.tap((response) => Effect.sync(() => enrichResponseFields(fields, response))),
-        Effect.onExit((exit) => emitLlmCall(startedAt, fields, exit)),
+        Effect.onExit((exit) => emitLlmCall(diagnostics, startedAt, fields, exit)),
       )
     })
     const completeStructuredNative = Effect.fn("LLM.Router.completeStructured.native")(function* <
@@ -97,7 +98,7 @@ export const layer = Layer.effect(
       }
       return yield* provider.completeStructured(structuredRequest).pipe(
         Effect.tap((response) => Effect.sync(() => enrichResponseFields(fields, response.raw))),
-        Effect.onExit((exit) => emitLlmCall(startedAt, fields, exit)),
+        Effect.onExit((exit) => emitLlmCall(diagnostics, startedAt, fields, exit)),
       )
     })
 
@@ -119,7 +120,7 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const routed = yield* route(request)
             const provider = yield* providerFor(registry, routed)
-            return instrumentStream(routed, provider.stream(routed))
+            return instrumentStream(diagnostics, routed, provider.stream(routed))
           }),
         ),
     })
@@ -311,6 +312,7 @@ const enrichResponseFields = (fields: Diagnostics.Fields, response: Provider.Gen
 }
 
 const instrumentStream = (
+  diagnostics: Diagnostics.Interface,
   routed: RoutedRequest,
   source: Stream.Stream<Provider.StreamEvent, Provider.ProviderError>,
 ): Stream.Stream<Provider.StreamEvent, Provider.ProviderError> =>
@@ -328,22 +330,21 @@ const instrumentStream = (
             }
           }),
         ),
-        Stream.onExit((exit) => emitLlmCall(startedAt, fields, exit)),
+        Stream.onExit((exit) => emitLlmCall(diagnostics, startedAt, fields, exit)),
       )
     }),
   )
 
 const emitLlmCall = <A>(
+  diagnostics: Diagnostics.Interface,
   startedAt: number,
   fields: Diagnostics.Fields,
   exit: Exit.Exit<A, Provider.ProviderError>,
 ): Effect.Effect<void> =>
   Effect.gen(function* () {
-    const service = yield* Effect.serviceOption(Diagnostics.Service)
-    if (Option.isNone(service)) return
     const endedAt = yield* Clock.currentTimeMillis
     const outcome = Exit.isSuccess(exit) ? "success" : "error"
-    yield* service.value.emit({
+    yield* diagnostics.emit({
       level: outcome === "error" ? "error" : "info",
       message: `llm.call ${outcome}`,
       data: {

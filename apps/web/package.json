@@ -5,10 +5,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4590",
+    "dev": "bun --bun vite --host 127.0.0.1 --port 4590",
     "build": "vite build",
     "lint": "bun --cwd ../.. oxlint apps/web/src apps/web/test",
-    "test": "bun test test",
+    "test": "bun test --preload ./test/setup.ts test",
     "typecheck": "bun tsc --noEmit"
   },
   "dependencies": {
@@ -18,9 +18,13 @@
     "@rika/llm": "workspace:*",
     "@rika/schema": "workspace:*",
     "@rika/sdk": "workspace:*",
+    "class-variance-authority": "catalog:",
+    "clsx": "catalog:",
     "effect": "catalog:",
     "foldkit": "catalog:",
     "ghostty-web": "0.4.0",
+    "tailwind-merge": "catalog:",
+    "tailwindcss": "catalog:",
     "ws": "8.21.0"
   },
   "devDependencies": {
@@ -33,6 +37,7 @@
     "@rika/orb": "workspace:*",
     "@rika/persistence": "workspace:*",
     "@rika/server": "workspace:*",
+    "@tailwindcss/vite": "catalog:",
     "@types/bun": "catalog:",
     "@types/ws": "8.18.1",
     "typescript": "catalog:",

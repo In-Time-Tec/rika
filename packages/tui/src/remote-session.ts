@@ -254,10 +254,15 @@ const handleCommand = (
         state: ViewState.withNotice(state, "Relaunch requested. Start Rika again after this session exits."),
         exit: true,
       })
-    if (name === "/welcome")
+    if (name === "/welcome") {
+      if (ViewState.modeLocked(state))
+        return Backend.commandResult(context, {
+          state: ViewState.withNotice(state, "Welcome is only available before a thread is active."),
+        })
       return Backend.commandResult(context, {
         state: ViewState.initial({ thread_id: threadId, workspace_path: workspacePath, mode: context.mode }),
       })
+    }
     if (name === "/credits")
       return Backend.commandResult(context, { state: ViewState.withNotice(state, "Rika is Amp-compatible software.") })
     if (name === "/version") return Backend.commandResult(context, { state: ViewState.withNotice(state, "Rika 0.0.0") })
@@ -473,6 +478,10 @@ const modeCommand = (context: Backend.CommandContext, argument: string | undefin
   if (nextMode === undefined)
     return Backend.commandResult(context, {
       state: ViewState.withNotice(context.state, "Usage: /mode rush|smart|deep1|deep2|deep3"),
+    })
+  if (ViewState.modeLocked(context.state))
+    return Backend.commandResult(context, {
+      state: ViewState.withNotice(context.state, "Mode is locked once a thread is active."),
     })
   return Backend.commandResult(context, {
     state: ViewState.withMode(context.state, nextMode),

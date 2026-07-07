@@ -260,6 +260,12 @@ export const TurnFailed = Schema.Struct({
   data: Schema.Struct({ error: Envelope }),
 }).annotate({ identifier: "Rika.Event.TurnFailed" })
 
+export type TurnTerminal = TurnCompleted | TurnFailed
+export const TurnTerminal = Schema.Union([TurnCompleted, TurnFailed]).pipe(
+  Schema.toTaggedUnion("type"),
+  Schema.annotate({ identifier: "Rika.Event.TurnTerminal" }),
+)
+
 export interface ThreadArchived extends Schema.Schema.Type<typeof ThreadArchived> {}
 export const ThreadArchived = Schema.Struct({
   ...fields,

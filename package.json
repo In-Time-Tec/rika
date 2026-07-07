@@ -13,7 +13,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "install:local": "bun run scripts/install-release.ts",
-    "lint": "oxlint .",
+    "lint": "oxlint . && ast-grep scan",
     "orb:template": "bun run scripts/build-orb-template.ts",
     "orb:template:contract": "bun test scripts/orb-template.test.ts",
     "orb:template:smoke": "bun run scripts/orb-template-smoke.ts",
@@ -34,6 +34,7 @@
       "apps/*"
     ],
     "catalog": {
+      "@ast-grep/cli": "0.44.0",
       "@effect/ai-openai": "4.0.0-beta.90",
       "@effect/ai-anthropic": "4.0.0-beta.90",
       "@effect/opentelemetry": "4.0.0-beta.90",
@@ -55,6 +56,9 @@
       "@types/bun": "1.3.13",
       "@types/node": "24.12.2",
       "@foldkit/ui": "0.120.0",
+      "@tailwindcss/vite": "4.3.2",
+      "class-variance-authority": "0.7.1",
+      "clsx": "2.1.1",
       "drizzle-kit": "1.0.0-rc.2",
       "drizzle-orm": "1.0.0-rc.2",
       "e2b": "2.31.0",
@@ -64,13 +68,19 @@
       "oxlint-tsgolint": "0.21.0",
       "prettier": "3.6.2",
       "rivetkit": "2.3.2",
+      "tailwind-merge": "3.6.0",
+      "tailwindcss": "4.3.2",
       "turbo": "2.8.13",
       "typescript": "5.8.2",
       "vite": "8.1.2",
       "@foldkit/vite-plugin": "0.10.0"
     }
   },
+  "trustedDependencies": [
+    "@ast-grep/cli"
+  ],
   "devDependencies": {
+    "@ast-grep/cli": "catalog:",
     "@tsconfig/bun": "catalog:",
     "@types/bun": "catalog:",
     "@types/node": "catalog:",

@@ -40,6 +40,7 @@ export const ThreadAction = Schema.Literals([
   "share",
   "reference",
   "delete",
+  "rebuild-projection",
 ]).annotate({ identifier: "Rika.Cli.Args.ThreadAction" })
 export type ThreadAction = typeof ThreadAction.Type
 
@@ -317,6 +318,7 @@ export const usage = [
   "  rika threads tournament <thread-id> --message <text|-> -n <2..4> [--modes smart,deep2,deep3] [--rubric <text>]",
   "  rika threads share <thread-id>",
   "  rika threads reference <thread-id> [query]",
+  "  rika threads rebuild-projection",
   "  rika project create <name> [--repo <origin>] [--branch <branch>] [--template <id>]",
   "  rika project list",
   "  rika project show <name>",
@@ -1000,6 +1002,13 @@ const makeThreadsCommand = (
     CliCommand.withShortDescription("Delete thread"),
   )
 
+  const rebuildProjection = CliCommand.make("rebuild-projection", {}, () =>
+    Ref.set(parsedRef, Option.some(toThreadRebuildProjectionCommand())),
+  ).pipe(
+    CliCommand.withDescription("Rebuild local thread projections from the event log"),
+    CliCommand.withShortDescription("Rebuild thread projections"),
+  )
+
   return CliCommand.make("threads", {}, () =>
     Ref.set(rejectedRef, Option.some(new ArgsError({ message: "Expected a threads subcommand", exit_code: 2, usage }))),
   ).pipe(
@@ -1017,6 +1026,7 @@ const makeThreadsCommand = (
       share,
       reference,
       deleteThread,
+      rebuildProjection,
     ]),
   )
 }
@@ -1405,6 +1415,11 @@ const toThreadReferenceCommand = (input: ThreadReferenceInput): ThreadCommand =>
     ...(query.length === 0 ? {} : { query }),
   }
 }
+
+const toThreadRebuildProjectionCommand = (): ThreadCommand => ({
+  type: "threads",
+  action: "rebuild-projection",
+})
 
 const parseModeList = (value: string | undefined): ReadonlyArray<Config.Mode> | undefined | ArgsError => {
   if (value === undefined) return undefined

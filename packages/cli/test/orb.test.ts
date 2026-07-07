@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { JudgeService } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
-import { OrbManager } from "@rika/orb"
-import { ArtifactStore, Database, Migration, OrbStore, ProjectStore } from "@rika/persistence"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
+import { OrbManager, SandboxClientFake } from "@rika/orb"
+import { ArtifactStore, Database, McpApprovalStore, Migration, OrbStore, ProjectStore } from "@rika/persistence"
 import { Client } from "@rika/sdk"
 import { Artifact, Codec, Common, Event, Ids, Message, Orb, Remote } from "@rika/schema"
 import { OrbMirror } from "@rika/server"
@@ -127,7 +127,10 @@ describe("CLI orb commands", () => {
         const finalDiffArtifacts = yield* Effect.forEach(records, (record) =>
           ArtifactStore.list({ thread_id: record.thread_id, kind: "orb-final-diff" }),
         )
-        return { exitCode, records, artifacts, finalDiffArtifacts: finalDiffArtifacts.flat() }
+        const workspaceArtifacts = yield* ArtifactStore.listAll({
+          workspace_id: Ids.WorkspaceId.make("project:project_1"),
+        })
+        return { exitCode, records, artifacts, finalDiffArtifacts: finalDiffArtifacts.flat(), workspaceArtifacts }
       }).pipe(
         Effect.provide(
           makeLayer({
@@ -177,6 +180,11 @@ describe("CLI orb commands", () => {
     expect(result.artifacts).toHaveLength(1)
     expect(result.artifacts[0]?.metadata).toMatchObject({ winner_id: "orb-2", candidate_count: 3 })
     expect(result.finalDiffArtifacts).toHaveLength(2)
+    expect(result.workspaceArtifacts.map((artifact) => artifact.kind).toSorted()).toEqual([
+      "orb-final-diff",
+      "orb-final-diff",
+      "verdict",
+    ])
     expect(
       result.finalDiffArtifacts
         .map((artifact) => Schema.decodeUnknownSync(Remote.OrbChangesResponse)(artifact.content).diff)
@@ -500,7 +508,7 @@ describe("CLI orb commands", () => {
     )
 
     expect(result.exitCode).toBe(0)
-    expect(calls).toEqual(["flush", "changes", "artifact.put", `kill:${orbId}`])
+    expect(calls).toEqual(["flush", "changes", "artifact.put", `forceKill:${orbId}`])
     expect(result.stored?.status).toBe("killed")
     expect(output.stderr).toEqual([])
     expect(result.artifacts).toHaveLength(1)
@@ -511,6 +519,36 @@ describe("CLI orb commands", () => {
       content: finalDiff,
     })
     expect(JSON.stringify(result.artifacts[0]?.content)).not.toContain("orb-token")
+  })
+
+  test("kill with force stores final diff artifacts under the project workspace", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const calls: Array<string> = []
+    const workspaceId = Ids.WorkspaceId.make(`project:${projectId}`)
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* seedOrb("running")
+        const exitCode = yield* CliOrb.executeCommand({
+          type: "orb",
+          action: "kill",
+          thread_id: threadId,
+          force: true,
+        })
+        const artifacts = yield* ArtifactStore.listAll({ workspace_id: workspaceId, kind: "orb-final-diff" })
+        return { exitCode, artifacts }
+      }).pipe(Effect.provide(makeLayer({ output, calls, liveArtifactStore: true }))),
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.artifacts).toHaveLength(1)
+    expect(result.artifacts[0]).toMatchObject({
+      thread_id: threadId,
+      workspace_id: workspaceId,
+      kind: "orb-final-diff",
+      content: finalDiff,
+    })
   })
 
   test("kill default no aborts without mutation", async () => {
@@ -559,100 +597,184 @@ describe("CLI orb commands", () => {
     )
 
     expect(result.exitCode).toBe(0)
-    expect(calls).toEqual(["flush", `kill:${orbId}`])
+    expect(calls).toEqual(["flush", `forceKill:${orbId}`])
     expect(result.stored?.status).toBe("killed")
     expect(result.artifacts).toEqual([])
     expect(output.stderr[0]).toContain("warning: skipped final orb diff")
   })
 
-  test("artifact persistence failure aborts before kill", async () => {
+  test("artifact persistence failure warns and still kills", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const calls: Array<string> = []
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Migration.migrate()
         yield* seedOrb("running")
-        const exit = yield* Effect.result(
-          CliOrb.executeCommand({
-            type: "orb",
-            action: "kill",
-            thread_id: threadId,
-            force: true,
-          }),
-        )
+        const exitCode = yield* CliOrb.executeCommand({
+          type: "orb",
+          action: "kill",
+          thread_id: threadId,
+          force: true,
+        })
         const stored = yield* OrbStore.get(orbId)
         const artifacts = yield* ArtifactStore.list({ thread_id: threadId, kind: "orb-final-diff" })
-        return { exit, stored, artifacts }
+        return { exitCode, stored, artifacts }
       }).pipe(Effect.provide(makeLayer({ output, calls, artifactPutFails: true }))),
     )
 
-    expect(result.exit._tag).toBe("Failure")
-    if (result.exit._tag === "Failure") {
-      expect(result.exit.failure).toBeInstanceOf(ArtifactStore.ArtifactStoreError)
-    }
-    expect(calls).toEqual(["flush", "changes", "artifact.put"])
-    expect(result.stored?.status).toBe("running")
+    expect(result.exitCode).toBe(0)
+    expect(calls).toEqual(["flush", "changes", "artifact.put", `forceKill:${orbId}`])
+    expect(result.stored?.status).toBe("killed")
     expect(result.artifacts).toEqual([])
+    expect(output.stderr[0]).toContain("warning: skipped final orb diff")
   })
 
-  test("orb changes API failure aborts before kill", async () => {
+  test("orb changes API failure warns, skips artifact, and still kills", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const calls: Array<string> = []
+    const sandbox = SandboxClientFake.makeState()
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Migration.migrate()
         yield* seedOrb("running")
-        const exit = yield* Effect.result(
-          CliOrb.executeCommand({
-            type: "orb",
-            action: "kill",
-            thread_id: threadId,
-            force: true,
-          }),
-        )
+        const exitCode = yield* CliOrb.executeCommand({
+          type: "orb",
+          action: "kill",
+          thread_id: threadId,
+          force: true,
+        })
         const stored = yield* OrbStore.get(orbId)
         const artifacts = yield* ArtifactStore.list({ thread_id: threadId, kind: "orb-final-diff" })
-        return { exit, stored, artifacts }
-      }).pipe(Effect.provide(makeLayer({ output, calls, changesFails: true }))),
+        return { exitCode, stored, artifacts }
+      }).pipe(Effect.provide(makeLayer({ output, calls, changesFails: true, sandbox, useLiveManager: true }))),
     )
 
-    expect(result.exit._tag).toBe("Failure")
-    if (result.exit._tag === "Failure") {
-      expect(result.exit.failure).toBeInstanceOf(Client.SdkError)
-    }
+    expect(result.exitCode).toBe(0)
     expect(calls).toEqual(["flush", "changes"])
-    expect(result.stored?.status).toBe("running")
+    expect(sandbox.calls.kill).toEqual(["sandbox_cli_orb"])
+    expect(result.stored?.status).toBe("killed")
     expect(result.artifacts).toEqual([])
+    expect(output.stderr[0]).toContain("warning: skipped final orb diff")
+    expect(output.stderr[0]).toContain("status 502")
   })
 
-  test("generic sandbox kill failure does not mark the orb killed locally", async () => {
+  test("sandbox kill failure still marks the orb killed locally", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const calls: Array<string> = []
+    const sandbox = SandboxClientFake.makeState({ killFailureMessage: "sandbox not found" })
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Migration.migrate()
         yield* seedOrb("running")
+        const exitCode = yield* CliOrb.executeCommand({
+          type: "orb",
+          action: "kill",
+          thread_id: threadId,
+          force: true,
+        })
+        const stored = yield* OrbStore.get(orbId)
+        const artifacts = yield* ArtifactStore.list({ thread_id: threadId, kind: "orb-final-diff" })
+        return { exitCode, stored, artifacts }
+      }).pipe(Effect.provide(makeLayer({ output, calls, sandbox, useLiveManager: true }))),
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(calls).toEqual(["flush", "changes", "artifact.put"])
+    expect(sandbox.calls.kill).toEqual(["sandbox_cli_orb"])
+    expect(result.stored?.status).toBe("killed")
+    expect(result.artifacts).toHaveLength(1)
+  })
+
+  test("kill with force reaps a provisioning orb with a sandbox and frees the thread slot", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const calls: Array<string> = []
+    const sandbox = SandboxClientFake.makeState()
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* seedProvisioningOrb("sandbox_cli_orb")
+        const exitCode = yield* CliOrb.executeCommand({
+          type: "orb",
+          action: "kill",
+          thread_id: threadId,
+          force: true,
+        })
+        const stored = yield* OrbStore.get(orbId)
+        const retry = yield* OrbStore.create({
+          thread_id: threadId,
+          project_id: projectId,
+          sandbox_id: "sandbox_cli_orb_retry",
+        })
+        return { exitCode, stored, retry }
+      }).pipe(Effect.provide(makeLayer({ output, calls, sandbox, useLiveManager: true }))),
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stored?.status).toBe("killed")
+    expect(result.retry.status).toBe("provisioning")
+    expect(sandbox.calls.kill).toEqual(["sandbox_cli_orb"])
+    expect(output.stderr[0]).toContain("warning: skipped final orb diff")
+  })
+
+  test("kill with force reaps a provisioning orb without a sandbox and frees the thread slot", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const calls: Array<string> = []
+    const sandbox = SandboxClientFake.makeState()
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* seedProvisioningOrb(null)
+        const exitCode = yield* CliOrb.executeCommand({
+          type: "orb",
+          action: "kill",
+          thread_id: threadId,
+          force: true,
+        })
+        const stored = yield* OrbStore.get(orbId)
+        const retry = yield* OrbStore.create({
+          thread_id: threadId,
+          project_id: projectId,
+          sandbox_id: "sandbox_cli_orb_retry",
+        })
+        return { exitCode, stored, retry }
+      }).pipe(Effect.provide(makeLayer({ output, calls, sandbox, useLiveManager: true }))),
+    )
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stored?.status).toBe("killed")
+    expect(result.retry.status).toBe("provisioning")
+    expect(sandbox.calls.kill).toEqual([])
+    expect(output.stderr[0]).toContain("warning: skipped final orb diff")
+  })
+
+  test("kill without force still rejects a provisioning orb", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const calls: Array<string> = []
+    const sandbox = SandboxClientFake.makeState()
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* seedProvisioningOrb("sandbox_cli_orb")
         const exit = yield* Effect.result(
           CliOrb.executeCommand({
             type: "orb",
             action: "kill",
             thread_id: threadId,
-            force: true,
+            force: false,
           }),
         )
         const stored = yield* OrbStore.get(orbId)
-        const artifacts = yield* ArtifactStore.list({ thread_id: threadId, kind: "orb-final-diff" })
-        return { exit, stored, artifacts }
-      }).pipe(Effect.provide(makeLayer({ output, calls, killFails: true }))),
+        return { exit, stored }
+      }).pipe(Effect.provide(makeLayer({ output, input: "yes\n", calls, sandbox, useLiveManager: true }))),
     )
 
     expect(result.exit._tag).toBe("Failure")
-    if (result.exit._tag === "Failure") {
-      expect(result.exit.failure).toBeInstanceOf(OrbManager.OrbProvisionError)
-    }
-    expect(calls).toEqual(["flush", "changes", "artifact.put", `kill:${orbId}`])
-    expect(result.stored?.status).toBe("running")
-    expect(result.artifacts).toHaveLength(1)
+    if (result.exit._tag !== "Failure") throw new Error("expected kill failure")
+    expect(result.exit.failure).toBeInstanceOf(OrbManager.OrbProvisionError)
+    expect(result.stored?.status).toBe("provisioning")
+    expect(sandbox.calls.kill).toEqual([])
+    expect(output.stderr[0]).toBe(`Kill orb ${orbId} for thread ${threadId}? [y/N]`)
+    expect(output.stderr[1]).toContain("warning: skipped final orb diff")
   })
 
   test("shell delegates to the orb shell service with the required thread id", async () => {
@@ -682,6 +804,8 @@ const makeLayer = (input: {
   readonly artifactPutFails?: boolean
   readonly changesFails?: boolean
   readonly killFails?: boolean
+  readonly sandbox?: SandboxClientFake.State
+  readonly useLiveManager?: boolean
   readonly shellThreads?: Array<Ids.ThreadId>
   readonly times?: ReadonlyArray<Common.TimestampMillis>
   readonly inputIsTty?: boolean
@@ -694,6 +818,7 @@ const makeLayer = (input: {
   readonly syncFails?: boolean
   readonly judgeWinnerIndex?: number
   readonly killFailsOnCall?: number
+  readonly liveArtifactStore?: boolean
 }) => {
   const calls = input.calls ?? []
   const tournamentState = {
@@ -708,7 +833,10 @@ const makeLayer = (input: {
   const databaseLayer = Database.memoryLayer
   const timeLayer = input.times === undefined ? Time.fixedLayer(now) : timeSequenceLayer(input.times)
   const idLayer = IdGenerator.sequenceLayer(1)
-  const artifactLayer = artifactStoreLayer(calls, input.artifactPutFails === true)
+  const artifactLayer =
+    input.liveArtifactStore === true
+      ? ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
+      : artifactStoreLayer(calls, input.artifactPutFails === true)
   const projectLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(configLayer),
@@ -724,6 +852,7 @@ const makeLayer = (input: {
     artifactLayer,
     projectLayer,
     OrbStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer), Layer.provideMerge(idLayer)),
+    McpApprovalStore.layer.pipe(Layer.provideMerge(databaseLayer), Layer.provideMerge(timeLayer)),
   )
   const clientFactory: CliOrb.ClientFactory = (endpointUrl) =>
     input.tournamentDiffs === undefined
@@ -735,7 +864,11 @@ const makeLayer = (input: {
               Effect.andThen(
                 input.changesFails === true
                   ? Effect.fail(
-                      new Client.SdkError({ message: "orb changes failed", operation: "requestJson", status: 500 }),
+                      new Client.SdkError({
+                        message: "Rika API request failed with status 502",
+                        operation: "requestJson",
+                        status: 502,
+                      }),
                     )
                   : Effect.succeed(finalDiff),
               ),
@@ -753,9 +886,18 @@ const makeLayer = (input: {
 
   const outputLayer = Output.memoryLayer(input.output)
   const inputLayer = Input.memoryLayer(input.input ?? "", input.inputIsTty ?? true)
-  const managerLayer = orbManagerLayer(calls, input.killFails === true, input.killFailsOnCall).pipe(
-    Layer.provideMerge(storageLayer),
-  )
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+  const sandboxLayer = SandboxClientFake.layer(input.sandbox ?? SandboxClientFake.makeState())
+  const managerLayer =
+    input.useLiveManager === true
+      ? OrbManager.layerWithSystem(makeOrbManagerSystem()).pipe(
+          Layer.provideMerge(storageLayer),
+          Layer.provideMerge(sandboxLayer),
+          Layer.provideMerge(diagnosticsLayer),
+          Layer.provideMerge(redactorLayer),
+        )
+      : orbManagerLayer(calls, input.killFails === true, input.killFailsOnCall).pipe(Layer.provideMerge(storageLayer))
   const mirrorLayer = orbMirrorLayer(calls, input.flushFails === true)
   const judgeLayer = fakeJudgeLayer(input.judgeInputs ?? [], input.judgeFails === true, input.judgeWinnerIndex)
   const syncLayer = fakeSyncLayer(calls, input.output, input.syncExitCode ?? 0, input.syncFails === true)
@@ -795,6 +937,9 @@ const makeLayer = (input: {
     tournamentLayer,
     shellLayer,
     commandLayer,
+    redactorLayer,
+    diagnosticsLayer,
+    sandboxLayer,
   )
 }
 
@@ -1027,6 +1172,14 @@ const artifactStoreLayer = (calls: Array<string>, putFails: boolean) => {
             .toSorted((left, right) => right.created_at - left.created_at)
             .slice(0, input.limit ?? 100),
         ),
+      listAll: (input = {}) =>
+        Effect.succeed(
+          [...rows.values()]
+            .filter((artifact) => input.workspace_id === undefined || artifact.workspace_id === input.workspace_id)
+            .filter((artifact) => input.kind === undefined || artifact.kind === input.kind)
+            .toSorted((left, right) => right.created_at - left.created_at)
+            .slice(0, input.limit ?? 100),
+        ),
     }),
   )
 }
@@ -1080,6 +1233,12 @@ const orbManagerLayer = (
                 : orbs.setStatus(id, "killed").pipe(Effect.mapError(toOrbProvisionError("kill", id))),
             ),
           ),
+        forceKill: (id) =>
+          Effect.sync(() => {
+            calls.push(`forceKill:${id}`)
+          }).pipe(
+            Effect.andThen(orbs.setStatus(id, "killed").pipe(Effect.mapError(toOrbProvisionError("forceKill", id)))),
+          ),
       })
     }),
   )
@@ -1115,6 +1274,13 @@ const seedOrb = (status: Extract<Orb.OrbStatus, "running" | "paused">) =>
     return yield* OrbStore.setStatus(created.orb_id, status)
   })
 
+const seedProvisioningOrb = (sandboxId: string | null) =>
+  OrbStore.create({
+    thread_id: threadId,
+    project_id: projectId,
+    ...(sandboxId === null ? {} : { sandbox_id: sandboxId }),
+  })
+
 const seedUsageOrb = () =>
   Effect.gen(function* () {
     const project = yield* ProjectStore.create({
@@ -1147,6 +1313,15 @@ const timeSequenceLayer = (times: ReadonlyArray<Common.TimestampMillis>) => {
     }),
   )
 }
+
+const makeOrbManagerSystem = (): OrbManager.System => ({
+  makeTempPath: Effect.never,
+  createGitBundle: () => Effect.never,
+  currentBranch: () => Effect.never,
+  randomToken: Effect.succeed("server-token"),
+  health: () => Effect.void,
+  sleep: () => Effect.void,
+})
 
 const toOrbProvisionError = (step: string, id: Ids.OrbId) => (error: unknown) =>
   new OrbManager.OrbProvisionError({

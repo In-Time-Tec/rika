@@ -130,15 +130,16 @@ const shellDefinition = (workspaceRoot: string): Definition => ({
 
     const timeoutMs = clamp(decoded.value.timeout_ms ?? 10_000, 1, 60_000)
     const maxOutputBytes = clamp(decoded.value.max_output_bytes ?? 20_000, 1, 100_000)
-    const output = yield* Effect.tryPromise({
-      try: () => runShell(decoded.value.command, workspaceRoot, timeoutMs, maxOutputBytes),
-      catch: (cause) =>
-        new ToolRegistryError({
-          message: cause instanceof Error ? cause.message : String(cause),
-          name: call.name,
-          retryable: false,
-        }),
-    })
+    const output = yield* runShell(decoded.value.command, workspaceRoot, timeoutMs, maxOutputBytes).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ToolRegistryError({
+            message: cause instanceof Error ? cause.message : String(cause),
+            name: call.name,
+            retryable: false,
+          }),
+      ),
+    )
 
     if (output.timed_out) {
       const details = shellOutputToJson(output)
@@ -173,43 +174,132 @@ interface ShellOutput {
   readonly timed_out: boolean
 }
 
-const runShell = async (
+interface ManagedShellProcess {
+  readonly process: {
+    readonly pid: number
+    readonly stdout: ReadableStream<Uint8Array>
+    readonly stderr: ReadableStream<Uint8Array>
+    readonly exited: Promise<number>
+    readonly kill: (signal?: NodeJS.Signals) => void
+  }
+  readonly stdout: Promise<string>
+  readonly stderr: Promise<string>
+  readonly exitCode: Promise<number>
+  completed: boolean
+}
+
+interface CollectedShellOutput {
+  readonly exit_code: number
+  readonly stdout: string
+  readonly stderr: string
+  readonly stdout_truncated: boolean
+  readonly stderr_truncated: boolean
+}
+
+const processTerminationGrace = "1 second"
+
+const runShell = (
   command: string,
   workspaceRoot: string,
   timeoutMs: number,
   maxOutputBytes: number,
-): Promise<ShellOutput> => {
-  let timedOut = false
-  const process = Bun.spawn(["/bin/sh", "-lc", command], {
-    cwd: workspaceRoot,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
-  const timeout = setTimeout(() => {
-    timedOut = true
-    process.kill("SIGKILL")
-  }, timeoutMs)
+): Effect.Effect<ShellOutput, unknown> =>
+  Effect.gen(function* () {
+    let managed: ManagedShellProcess | undefined
+    const completed = yield* Effect.scoped(
+      Effect.gen(function* () {
+        managed = yield* acquireShellProcess(command, workspaceRoot)
+        return yield* collectShellOutput(managed, maxOutputBytes)
+      }),
+    ).pipe(Effect.timeoutOption(`${timeoutMs} millis`))
 
+    if (Option.isSome(completed)) return { ...completed.value, timed_out: false }
+    if (managed === undefined) return emptyShellOutput(true)
+    const output = yield* collectShellOutput(managed, maxOutputBytes)
+    return { ...output, timed_out: true }
+  })
+
+const acquireShellProcess = (command: string, workspaceRoot: string) =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: (): ManagedShellProcess => {
+        const process = Bun.spawn(["/bin/sh", "-lc", command], {
+          cwd: workspaceRoot,
+          stdout: "pipe",
+          stderr: "pipe",
+          detached: true,
+        }) as ManagedShellProcess["process"]
+        return {
+          process,
+          stdout: new Response(process.stdout).text(),
+          stderr: new Response(process.stderr).text(),
+          exitCode: process.exited,
+          completed: false,
+        }
+      },
+      catch: (cause) => cause,
+    }),
+    (managed) => (managed.completed ? Effect.void : terminateProcess(managed.process)),
+  )
+
+const collectShellOutput = (
+  managed: ManagedShellProcess,
+  maxOutputBytes: number,
+): Effect.Effect<CollectedShellOutput, unknown> =>
+  Effect.tryPromise({
+    try: async () => {
+      const [exitCode, stdout, stderr] = await Promise.all([managed.exitCode, managed.stdout, managed.stderr])
+      const cappedStdout = capOutput(stdout, maxOutputBytes)
+      const cappedStderr = capOutput(stderr, maxOutputBytes)
+      managed.completed = true
+      return {
+        exit_code: exitCode,
+        stdout: cappedStdout.text,
+        stderr: cappedStderr.text,
+        stdout_truncated: cappedStdout.truncated,
+        stderr_truncated: cappedStderr.truncated,
+      }
+    },
+    catch: (cause) => cause,
+  })
+
+const terminateProcess = (process: ManagedShellProcess["process"]) =>
+  Effect.gen(function* () {
+    killProcessGroup(process.pid, "SIGTERM")
+    killProcess(process, "SIGTERM")
+    const exited = yield* Effect.race(
+      waitForProcessExit(process).pipe(Effect.as(true)),
+      Effect.sleep(processTerminationGrace).pipe(Effect.as(false)),
+    )
+    if (exited) return
+    killProcessGroup(process.pid, "SIGKILL")
+    killProcess(process, "SIGKILL")
+  })
+
+const waitForProcessExit = (process: { readonly exited: Promise<number> }) =>
+  Effect.promise(() => process.exited).pipe(Effect.asVoid)
+
+const killProcessGroup = (pid: number, signal: NodeJS.Signals) => {
+  if (!Number.isInteger(pid) || pid <= 0) return
   try {
-    const [exitCode, stdout, stderr] = await Promise.all([
-      process.exited,
-      new Response(process.stdout).text(),
-      new Response(process.stderr).text(),
-    ])
-    const cappedStdout = capOutput(stdout, maxOutputBytes)
-    const cappedStderr = capOutput(stderr, maxOutputBytes)
-    return {
-      exit_code: exitCode,
-      stdout: cappedStdout.text,
-      stderr: cappedStderr.text,
-      stdout_truncated: cappedStdout.truncated,
-      stderr_truncated: cappedStderr.truncated,
-      timed_out: timedOut,
-    }
-  } finally {
-    clearTimeout(timeout)
-  }
+    globalThis.process.kill(-pid, signal)
+  } catch {}
 }
+
+const killProcess = (process: ManagedShellProcess["process"], signal: NodeJS.Signals) => {
+  try {
+    process.kill(signal)
+  } catch {}
+}
+
+const emptyShellOutput = (timedOut: boolean): ShellOutput => ({
+  exit_code: -1,
+  stdout: "",
+  stderr: "",
+  stdout_truncated: false,
+  stderr_truncated: false,
+  timed_out: timedOut,
+})
 
 const capOutput = (text: string, maxBytes: number) => {
   const encoded = new TextEncoder().encode(text)

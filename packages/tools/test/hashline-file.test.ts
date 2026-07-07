@@ -3,9 +3,9 @@ import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { ToolExecutor } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, Diagnostics, SecretRedactor } from "@rika/core"
 import { Common, Ids, Tool } from "@rika/schema"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { HashlineFile } from "../src/index"
 
 const tempWorkspace = () => mkdtemp(join(tmpdir(), "rika-hashline-"))
@@ -17,12 +17,20 @@ const configLayer = (workspaceRoot: string) =>
     default_mode: "smart",
   })
 
+const diagnosticsLayer = () => {
+  const redactorLayer = SecretRedactor.layer
+  return Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+}
+
 const run = <A, E>(workspaceRoot: string, effect: Effect.Effect<A, E, HashlineFile.Service>) =>
   Effect.runPromise(effect.pipe(Effect.provide(HashlineFile.layer), Effect.provide(configLayer(workspaceRoot))))
 
 const runTool = <A, E>(workspaceRoot: string, effect: Effect.Effect<A, E, ToolExecutor.Service>) =>
   Effect.runPromise(
-    effect.pipe(Effect.provide(HashlineFile.toolExecutorLayer), Effect.provide(configLayer(workspaceRoot))),
+    effect.pipe(
+      Effect.provide(HashlineFile.toolExecutorLayer.pipe(Layer.provideMerge(diagnosticsLayer()))),
+      Effect.provide(configLayer(workspaceRoot)),
+    ),
   )
 
 const call = (name: string, input: Common.JsonValue): Tool.Call => ({
@@ -45,17 +53,57 @@ describe("HashlineFile", () => {
     expect(output.render).toMatchObject({ kind: "file", renderer: "@pierre/diffs", collapsed: true })
   })
 
-  test("read always returns the entire file", async () => {
+  test("read respects line range and max output bytes", async () => {
     const root = await tempWorkspace()
     await writeFile(join(root, "full.txt"), "one\ntwo\nthree\n")
 
     const output = object(
-      await run(root, HashlineFile.read({ path: "full.txt", start_line: 2, end_line: 2, max_output_bytes: 1 })),
+      await run(root, HashlineFile.read({ path: "full.txt", start_line: 2, end_line: 3, max_output_bytes: 9 })),
     )
 
-    expect(output.content).toMatch(/^1:[A-Za-z0-9_-]{4}\|one\n2:[A-Za-z0-9_-]{4}\|two\n3:[A-Za-z0-9_-]{4}\|three$/)
-    expect(output.range).toEqual({ start_line: 1, end_line: 3 })
+    expect(output.content).toMatch(/^2:[A-Za-z0-9_-]{4}\|tw$/)
+    expect(new TextEncoder().encode(String(output.content)).byteLength).toBeLessThanOrEqual(9)
+    expect(String(output.content)).not.toContain("|one")
+    expect(String(output.content)).not.toContain("|three")
+    expect(output.range).toEqual({ start_line: 2, end_line: 2 })
+    expect(output.truncated).toBe(true)
+    expect(object(object(output.render).file).contents).toBe("tw")
+  })
+
+  test("read hard-caps a single oversized line", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "long.txt"), `${"abcdef".repeat(20)}\n`)
+
+    const output = object(await run(root, HashlineFile.read({ path: "long.txt", max_output_bytes: 12 })))
+
+    expect(new TextEncoder().encode(String(output.content)).byteLength).toBeLessThanOrEqual(12)
+    expect(output.content).toMatch(/^1:[A-Za-z0-9_-]{4}\|abcde$/)
+    expect(output.truncated).toBe(true)
+  })
+
+  test("read rejects start_line beyond EOF when end_line is omitted", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "short.txt"), "one\ntwo\nthree\n")
+    await writeFile(join(root, "empty.txt"), "")
+
+    const error = await Effect.runPromise(
+      HashlineFile.read({ path: "short.txt", start_line: 4 }).pipe(
+        Effect.flip,
+        Effect.provide(HashlineFile.layer),
+        Effect.provide(configLayer(root)),
+      ),
+    )
+    const output = object(await run(root, HashlineFile.read({ path: "short.txt", start_line: 2 })))
+    const empty = object(await run(root, HashlineFile.read({ path: "empty.txt", start_line: 1 })))
+
+    expect(error.code).toBe("E_INVALID_RANGE")
+    expect(error.message).toBe("start_line must be within the file")
+    expect(String(output.content)).toContain("|two")
+    expect(String(output.content)).toContain("|three")
+    expect(output.range).toEqual({ start_line: 2, end_line: 3 })
     expect(output.truncated).toBe(false)
+    expect(empty.content).toBe("")
+    expect(empty.range).toEqual({ start_line: 1, end_line: 1 })
   })
 
   test("edit rejects stale anchors and returns nearby fresh anchors", async () => {

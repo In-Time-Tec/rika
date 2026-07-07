@@ -63,28 +63,36 @@ const makeExecuteDependencies = (
   const databaseLayer = Database.memoryLayer
   const timeLayer = Time.fixedLayer(Common.TimestampMillis.make(1_950_000_000_000))
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+  const toolLayer = ToolExecutor.emptyLayer.pipe(Layer.provideMerge(diagnosticsLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(timeLayer),
     Layer.provideMerge(idLayer),
   )
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerRegistryLayer))
+  const llmLayer = Router.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(providerRegistryLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const baseLayer = Layer.mergeAll(
     configLayer,
     Output.memoryLayer(output),
     databaseLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     idLayer,
     projectStoreLayer,
-    Diagnostics.memoryLayer([]),
+    diagnosticsLayer,
     inputLayer,
     ContextResolver.emptyLayer,
     SkillRegistry.emptyLayer,
-    ToolExecutor.emptyLayer,
+    toolLayer,
     llmLayer,
   )
 
@@ -133,8 +141,12 @@ const makeRedactedShellExecuteLayer = (
       ],
     },
   ])
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerRegistryLayer))
   const diagnosticsLayer = Diagnostics.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(redactorLayer))
+  const llmLayer = Router.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(providerRegistryLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const toolLayer = ToolExecutor.fakeLayer({
     shell_command: () =>
       Effect.succeed({
@@ -145,7 +157,7 @@ const makeRedactedShellExecuteLayer = (
         stderr_truncated: false,
         timed_out: false,
       }),
-  })
+  }).pipe(Layer.provideMerge(diagnosticsLayer))
   const baseLayer = Layer.mergeAll(
     configLayer,
     Output.memoryLayer(output),

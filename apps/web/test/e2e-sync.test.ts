@@ -11,7 +11,7 @@ import {
   ToolExecutor,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Provider, Router } from "@rika/llm"
 import { OrbManager } from "@rika/orb"
@@ -46,6 +46,8 @@ import {
   ChangedProjectSecretField,
   ClickedProject,
   ClickedProjects,
+  GotDeleteSecretDialogMessage,
+  GotKillOrbDialogMessage,
   ReceivedPresence,
   SubmittedNewProject,
   SubmittedProjectSecret,
@@ -56,7 +58,12 @@ import {
   subscriptions,
   update,
 } from "../src/app"
+import { CompletedCloseDialog, CompletedShowDialog } from "../src/components/ui/alert-dialog"
 import type { AppCommand, AppMessage, Model } from "../src/app"
+import { orbTerminalRegistryLayer } from "../src/orb-terminal"
+import { pierreTreeRegistryLayer } from "../src/pierre-tree"
+
+const webResourcesLayer = Layer.mergeAll(orbTerminalRegistryLayer, pierreTreeRegistryLayer)
 
 const threadId = Ids.ThreadId.make("thread_web_e2e_sync")
 const orbThreadId = Ids.ThreadId.make("thread_web_orb_controls")
@@ -226,7 +233,7 @@ describe("web local sync e2e", () => {
 
       const [confirmingKill, firstKillCommands] = update(webModel, ClickedKillOrb())
       const preKill = await runtime.runPromise(OrbStore.get(resumed.orb_id))
-      expect(firstKillCommands).toEqual([])
+      expect(firstKillCommands.map((command) => command.name)).toEqual(["ShowDialog"])
       expect(confirmingKill.confirm_kill_orb_id).toBe(resumed.orb_id)
       expect(preKill?.status).toBe("running")
 
@@ -234,7 +241,7 @@ describe("web local sync e2e", () => {
       webModel = await runCommands(killing, killCommands)
       const killed = requireSelectedOrb(webModel)
       const killedStored = await runtime.runPromise(OrbStore.get(killed.orb_id))
-      expect(killCommands.map((command) => command.name)).toEqual(["KillSelectedOrb"])
+      expect(killCommands.map((command) => command.name)).toEqual(["KillSelectedOrb", "CloseDialog"])
       expect(killed.status).toBe("killed")
       expect(killedStored?.status).toBe("killed")
       expect(webModel.threads.find((thread) => thread.thread_id === orbThreadId)?.orb_status).toBe("killed")
@@ -299,7 +306,7 @@ describe("web local sync e2e", () => {
       await missEvents
 
       let webModel = await openWebModel(handle.url, searchMatchThreadId)
-      const [searching, commands] = update(webModel, ChangedThreadSearchQuery({ value: "neural" }))
+      const [searching, commands] = update(webModel, ChangedThreadSearchQuery({ value: "neural", now }))
       webModel = await runCommands(searching, commands)
 
       expect(commands.map((command) => command.name)).toEqual(["SearchThreads"])
@@ -409,6 +416,8 @@ const makeLayer = (
   })
   const databaseLayer = Database.memoryLayer
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
@@ -429,24 +438,33 @@ const makeLayer = (
     workspaceStoreLayer,
     projectStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     idLayer,
     orbStoreLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const threadLayer = ThreadService.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
-  const llmLayer = Router.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(providerRegistryLayer))
+  const llmLayer = Router.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(providerRegistryLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const agentBase = Layer.mergeAll(
     migratedStorageLayer,
     threadLayer,
     workspaceAccessLayer,
     ContextResolver.fakeLayer({ entries: [], rendered: "", total_chars: 0 }),
     SkillRegistry.emptyLayer,
-    ToolExecutor.fakeLayer({}),
-    Diagnostics.memoryLayer([]),
+    ToolExecutor.fakeLayer({}).pipe(Layer.provideMerge(diagnosticsLayer)),
+    redactorLayer,
+    diagnosticsLayer,
     llmLayer,
     IdeBridge.layer,
     unusedCompactionLayer(),
@@ -460,7 +478,11 @@ const makeLayer = (
     Layer.provideMerge(agentBase),
     Layer.provideMerge(presenceLayer),
   )
-  const httpLayer = HttpServer.layer.pipe(Layer.provideMerge(remoteLayer), Layer.provideMerge(presenceLayer))
+  const httpLayer = HttpServer.layer.pipe(
+    Layer.provideMerge(remoteLayer),
+    Layer.provideMerge(presenceLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   return Layer.mergeAll(agentBase, agentLayer, remoteLayer, httpLayer)
 }
 
@@ -494,6 +516,10 @@ const fakeOrbManagerLayer = () =>
             .pipe(Effect.mapError((error) => toOrbProvisionError("resume", orbId, error))),
         kill: (orbId) =>
           orbs.setStatus(orbId, "killed").pipe(Effect.mapError((error) => toOrbProvisionError("kill", orbId, error))),
+        forceKill: (orbId) =>
+          orbs
+            .setStatus(orbId, "killed")
+            .pipe(Effect.mapError((error) => toOrbProvisionError("forceKill", orbId, error))),
       }),
     ),
   )
@@ -523,7 +549,18 @@ const runCommands = async (initial: Model, initialCommands: ReadonlyArray<AppCom
   while (queue.length > 0) {
     const command = queue.shift()
     if (command === undefined) continue
-    const message = await Effect.runPromise(command.effect)
+    if (command.name === "ShowDialog" || command.name === "CloseDialog") {
+      const childMessage = command.name === "ShowDialog" ? CompletedShowDialog() : CompletedCloseDialog()
+      const parentMessage =
+        command.args?.id === "delete-secret-dialog"
+          ? GotDeleteSecretDialogMessage({ message: childMessage })
+          : GotKillOrbDialogMessage({ message: childMessage })
+      const [next, commands] = update(model, parentMessage)
+      model = next
+      queue.push(...commands)
+      continue
+    }
+    const message = await Effect.runPromise(command.effect.pipe(Effect.provide(webResourcesLayer)))
     const [next, commands] = update(model, message)
     model = next
     queue.push(...commands)

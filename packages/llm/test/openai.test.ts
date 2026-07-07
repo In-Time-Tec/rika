@@ -26,9 +26,12 @@ describe("OpenAI Effect AI layer", () => {
       model: "gpt-test",
       store: false,
       temperature: 0.2,
-      metadata: { thread_id: "T-1" },
       reasoning: { effort: "low" },
     })
+  })
+
+  test("omits OpenAI metadata while response storage is disabled", () => {
+    expect(OpenAi.requestConfigFromRikaRequest(request)).not.toHaveProperty("metadata")
   })
 
   test("forwards a priority service tier when fast mode resolved it", () => {
@@ -36,7 +39,6 @@ describe("OpenAI Effect AI layer", () => {
       model: "gpt-test",
       store: false,
       temperature: 0.2,
-      metadata: { thread_id: "T-1" },
       reasoning: { effort: "low" },
       service_tier: "priority",
     })
@@ -108,6 +110,28 @@ describe("OpenAI Effect AI layer", () => {
         },
       ],
     })
+  })
+})
+
+describe("OpenAI Responses [DONE] SSE compatibility", () => {
+  test("drops a trailing data: [DONE] sentinel while keeping event lines", () => {
+    const out = OpenAi.withoutDoneLines('data: {"a":1}\n\ndata: [DONE]\n\n')
+    expect(out).not.toContain("[DONE]")
+    expect(out).toContain('data: {"a":1}')
+  })
+
+  test("drops data:[DONE] without a space", () => {
+    expect(OpenAi.withoutDoneLines("data:[DONE]\n")).not.toContain("[DONE]")
+  })
+
+  test("leaves a stream without a sentinel unchanged", () => {
+    const input = 'data: {"a":1}\n\ndata: {"b":2}\n\n'
+    expect(OpenAi.withoutDoneLines(input)).toBe(input)
+  })
+
+  test("keeps legitimate data whose JSON payload merely contains [DONE]", () => {
+    const input = 'data: {"text":"[DONE]"}\n'
+    expect(OpenAi.withoutDoneLines(input)).toBe(input)
   })
 })
 

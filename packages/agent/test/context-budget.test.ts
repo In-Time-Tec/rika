@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Tokens } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message, Tool } from "@rika/schema"
@@ -16,6 +16,8 @@ const configLayer = Config.layerFromValues({
   data_dir: "/workspace/rika-context-budget-test/.rika",
   default_mode: "deep1",
 })
+const redactorLayer = SecretRedactor.layer
+const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
 
 const services = Layer.mergeAll(
   configLayer,
@@ -25,9 +27,12 @@ const services = Layer.mergeAll(
   ThreadProjection.layer,
   Time.fixedLayer(now),
   IdGenerator.sequenceLayer(1),
+  redactorLayer,
+  diagnosticsLayer,
 )
 
-const layer = ContextBudget.layer.pipe(Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(services))))
+const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(services), Layer.provideMerge(diagnosticsLayer))
+const layer = ContextBudget.layer.pipe(Layer.provideMerge(threadLayer))
 
 describe("ContextBudget", () => {
   test("uses the last recorded context token sample", async () => {

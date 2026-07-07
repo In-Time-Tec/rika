@@ -108,6 +108,64 @@ describe("orb terminal adapter", () => {
     expectBytes(third.sent[0], [120])
   })
 
+  test("auto-reconnects after an unexpected socket close", async () => {
+    const runtime = fakeRuntime()
+    const statuses: Array<string> = []
+    const handle = mountOrbTerminal(
+      {
+        container: document.createElement("div"),
+        thread_id: threadId,
+        onStatus: (status) => statuses.push(status),
+        onError: () => undefined,
+      },
+      runtime,
+    )
+
+    await handle.activate()
+    const first = runtime.sockets[0]
+    if (first === undefined) throw new Error("missing first socket")
+    first.open()
+    first.close()
+    await waitFor(() => runtime.sockets.length >= 2, "auto reconnect socket")
+    const second = runtime.sockets[1]
+    if (second === undefined) throw new Error("missing second socket")
+    second.open()
+    runtime.terminal.emitData("x")
+
+    expect(first.closeCalls).toBe(1)
+    expect(second.sent).toHaveLength(1)
+    expectBytes(second.sent[0], [120])
+    expect(statuses).toEqual(["connecting", "connected", "disconnected", "connecting", "connected"])
+
+    handle.destroy()
+  })
+
+  test("does not auto-reconnect after a normal PTY exit close", async () => {
+    const runtime = fakeRuntime()
+    const statuses: Array<string> = []
+    const handle = mountOrbTerminal(
+      {
+        container: document.createElement("div"),
+        thread_id: threadId,
+        onStatus: (status) => statuses.push(status),
+        onError: () => undefined,
+      },
+      runtime,
+    )
+
+    await handle.activate()
+    const socket = runtime.sockets[0]
+    if (socket === undefined) throw new Error("missing socket")
+    socket.open()
+    socket.close(1000, "pty process exited")
+    await Bun.sleep(350)
+
+    expect(runtime.sockets).toHaveLength(1)
+    expect(statuses).toEqual(["connecting", "connected", "disconnected"])
+
+    handle.destroy()
+  })
+
   test("builds the browser PTY WebSocket URL without exposing orb credentials", () => {
     expect(
       orbPtyWebSocketUrl({
@@ -222,7 +280,10 @@ class FakeSocket {
   readyState = FakeSocket.CONNECTING
   closeCalls = 0
   readonly sent: Array<string | Uint8Array> = []
-  readonly listeners = new Map<string, Array<(event: { readonly data?: unknown }) => void>>()
+  readonly listeners = new Map<
+    string,
+    Array<(event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void>
+  >()
 
   constructor(readonly url: string) {}
 
@@ -230,10 +291,10 @@ class FakeSocket {
     this.sent.push(data)
   }
 
-  close() {
+  close(code?: number, reason?: string) {
     this.closeCalls += 1
     this.readyState = FakeSocket.CLOSED
-    this.dispatch("close", {})
+    this.dispatch("close", { ...(code === undefined ? {} : { code }), ...(reason === undefined ? {} : { reason }) })
   }
 
   open() {
@@ -245,18 +306,27 @@ class FakeSocket {
     this.dispatch("message", { data })
   }
 
-  addEventListener(event: string, listener: (event: { readonly data?: unknown }) => void) {
+  addEventListener(
+    event: string,
+    listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void,
+  ) {
     this.listeners.set(event, [...(this.listeners.get(event) ?? []), listener])
   }
 
-  removeEventListener(event: string, listener: (event: { readonly data?: unknown }) => void) {
+  removeEventListener(
+    event: string,
+    listener: (event: { readonly data?: unknown; readonly code?: number; readonly reason?: string }) => void,
+  ) {
     this.listeners.set(
       event,
       (this.listeners.get(event) ?? []).filter((candidate) => candidate !== listener),
     )
   }
 
-  private dispatch(event: string, payload: { readonly data?: unknown }) {
+  private dispatch(
+    event: string,
+    payload: { readonly data?: unknown; readonly code?: number; readonly reason?: string },
+  ) {
     for (const listener of this.listeners.get(event) ?? []) listener(payload)
   }
 }
@@ -264,4 +334,13 @@ class FakeSocket {
 const expectBytes = (value: unknown, expected: ReadonlyArray<number>) => {
   if (!(value instanceof Uint8Array)) throw new Error("expected Uint8Array")
   expect(Array.from(value)).toEqual([...expected])
+}
+
+const waitFor = async (predicate: () => boolean, label: string) => {
+  const deadline = Date.now() + 1_000
+  while (Date.now() < deadline) {
+    if (predicate()) return
+    await Bun.sleep(10)
+  }
+  throw new Error(`timed out waiting for ${label}`)
 }

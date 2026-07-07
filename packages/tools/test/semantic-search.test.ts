@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PermissionPolicy, ToolExecutor } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, Diagnostics, SecretRedactor } from "@rika/core"
 import { Common, Ids, Tool } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { SemanticSearch } from "../src/index"
@@ -19,6 +19,11 @@ const configLayer = (workspaceRoot: string, env: Record<string, string | undefin
     },
     env,
   )
+
+const diagnosticsLayer = () => {
+  const redactorLayer = SecretRedactor.layer
+  return Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+}
 
 const fakeHits: ReadonlyArray<SemanticSearch.Hit> = [
   {
@@ -111,7 +116,7 @@ describe("SemanticSearch", () => {
     expect(String(output.content)).toContain("Add session validation")
   })
 
-  test("live layer degrades clearly when vector credentials are missing but still searches local files", async () => {
+  test("live layer honestly reports local lexical fallback and still searches local files", async () => {
     const root = await tempWorkspace()
     await mkdir(join(root, "src", "auth"), { recursive: true })
     await writeFile(
@@ -125,10 +130,36 @@ describe("SemanticSearch", () => {
     )
 
     expect(status).toMatchObject({ type: "semantic_search_status", backend: "local", degraded: true })
-    expect(array(status.missing_configuration)).toEqual(["OPENROUTER_API_KEY", "TURBOPUFFER_API_KEY"])
+    expect(status.missing_configuration).toBeUndefined()
     expect(output).toMatchObject({ type: "semantic_search", backend: "local", degraded: true })
     expect(object(array(output.hits)[0])).toMatchObject({ path: "src/auth/session.ts", language: "typescript" })
-    expect(String(output.degraded_reason)).toContain("Using local lexical fallback")
+    expect(String(output.degraded_reason)).toContain("local lexical/token overlap search")
+  })
+
+  test("configured vector-related credentials do not claim a vector backend when only local search is wired", async () => {
+    const root = await tempWorkspace()
+    await writeFile(join(root, "tool.ts"), "export const semanticStatus = 'local'\n")
+
+    const status = object(
+      await runLive(root, SemanticSearch.status(), {
+        OPENROUTER_API_KEY: "openrouter-test-key",
+        TURBOPUFFER_API_KEY: "turbopuffer-test-key",
+        RIKA_EMBEDDINGS_API_KEY: "embeddings-test-key",
+      }),
+    )
+    const output = object(
+      await runLive(root, SemanticSearch.search({ query: "semantic status", language: "typescript" }), {
+        OPENROUTER_API_KEY: "openrouter-test-key",
+        TURBOPUFFER_API_KEY: "turbopuffer-test-key",
+        RIKA_EMBEDDINGS_API_KEY: "embeddings-test-key",
+      }),
+    )
+
+    expect(status).toMatchObject({ backend: "local", degraded: true })
+    expect(status.missing_configuration).toBeUndefined()
+    expect(String(status.degraded_reason)).toContain("no live vector backend is wired")
+    expect(output).toMatchObject({ backend: "local", degraded: true })
+    expect(object(array(output.hits)[0])).toMatchObject({ path: "tool.ts" })
   })
 
   test("tool execution validates missing query and reports a structured error", async () => {
@@ -138,6 +169,7 @@ describe("SemanticSearch", () => {
     const executorLayer = ToolExecutor.layer.pipe(
       Layer.provideMerge(registryLayer),
       Layer.provideMerge(PermissionPolicy.allowLayer),
+      Layer.provideMerge(diagnosticsLayer()),
     )
 
     const descriptors = await Effect.runPromise(ToolExecutor.describe().pipe(Effect.provide(executorLayer)))

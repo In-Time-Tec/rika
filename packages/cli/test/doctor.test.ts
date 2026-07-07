@@ -23,6 +23,7 @@ describe("CLI doctor command", () => {
           RIKA_WORKSPACE_ROOT: workspaceRoot,
           RIKA_DATA_DIR: "/workspace/rika/.rika-test",
           RIKA_API_KEY: "model-secret",
+          RIKA_BASE_URL: "http://127.0.0.1:8317/v1",
           RIKA_EMBEDDINGS_API_KEY: "embeddings-secret",
           RIKA_GUARDED_TOOLS: "shell_command",
           RIKA_RIVET_HOST: "remote",
@@ -58,7 +59,7 @@ describe("CLI doctor command", () => {
       permission: {
         mode: "configured",
         guarded_tools_configured: true,
-        guarded_files_configured: false,
+        guarded_files_configured: true,
       },
       rivet: {
         host: "remote",
@@ -70,6 +71,7 @@ describe("CLI doctor command", () => {
     expect(parsed.checks.map((check) => check.name)).toEqual([
       "data-dir",
       "model-provider",
+      "model-proxy",
       "embeddings-provider",
       "permissions",
       "rivet",
@@ -79,6 +81,33 @@ describe("CLI doctor command", () => {
       "orb-store",
       "orb-orphans",
     ])
+  })
+
+  test("warns when live model credentials are configured without the proxy base URL", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const layer = doctorLayer({
+      output,
+      input: {
+        cwd: workspaceRoot,
+        version: "test-version",
+        env: {
+          RIKA_API_KEY: "model-secret",
+        },
+      },
+    })
+
+    const exitCode = await Effect.runPromise(Doctor.executeCommand({ type: "doctor" }).pipe(Effect.provide(layer)))
+
+    expect(exitCode).toBe(0)
+    const parsed = Schema.decodeUnknownSync(Doctor.Report)(JSON.parse(output.stdout[0] ?? "{}"))
+    const modelProxy = parsed.checks.find((check) => check.name === "model-proxy")
+
+    expect(parsed.config.api_key_configured).toBe(true)
+    expect(parsed.config.base_url_configured).toBe(false)
+    expect(modelProxy).toMatchObject({
+      status: "warning",
+      message: "RIKA_BASE_URL is required when live model calls are enabled.",
+    })
   })
 
   test("warns when model provider credentials are missing", async () => {
@@ -97,6 +126,7 @@ describe("CLI doctor command", () => {
     expect(exitCode).toBe(0)
     const parsed = Schema.decodeUnknownSync(Doctor.Report)(JSON.parse(output.stdout[0] ?? "{}"))
     const modelProvider = parsed.checks.find((check) => check.name === "model-provider")
+    const modelProxy = parsed.checks.find((check) => check.name === "model-proxy")
     const embeddingsProvider = parsed.checks.find((check) => check.name === "embeddings-provider")
 
     expect(parsed.config.api_key_configured).toBe(false)
@@ -104,6 +134,10 @@ describe("CLI doctor command", () => {
     expect(modelProvider).toMatchObject({
       status: "warning",
       message: "RIKA_API_KEY is required for live model calls.",
+    })
+    expect(modelProxy).toMatchObject({
+      status: "skipped",
+      message: "Model proxy check skipped because RIKA_API_KEY is unset.",
     })
     expect(embeddingsProvider).toMatchObject({
       status: "warning",

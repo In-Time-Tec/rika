@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { Common, Ids } from "@rika/schema"
 import type { Call } from "@rika/schema/tool"
@@ -30,6 +30,8 @@ const configLayer = (subagentTools?: Config.SubagentTools) =>
     default_mode: "smart",
     ...(subagentTools === undefined ? {} : { subagent_tools: subagentTools }),
   })
+const redactorLayer = SecretRedactor.layer
+const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
 
 const makeLayer = (
   routerLayer: Layer.Layer<Router.Service>,
@@ -38,10 +40,12 @@ const makeLayer = (
 ) =>
   SubagentRuntime.layer.pipe(
     Layer.provideMerge(activeConfigLayer),
+    Layer.provideMerge(redactorLayer),
+    Layer.provideMerge(diagnosticsLayer),
     Layer.provideMerge(IdGenerator.sequenceLayer(1)),
     Layer.provideMerge(Time.fixedLayer(now)),
     Layer.provideMerge(routerLayer),
-    Layer.provideMerge(toolLayer),
+    Layer.provideMerge(toolLayer.pipe(Layer.provideMerge(diagnosticsLayer))),
   )
 
 describe("SubagentRuntime", () => {

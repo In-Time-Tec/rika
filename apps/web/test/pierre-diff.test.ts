@@ -1,6 +1,6 @@
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test"
-import { mountPierreDiff } from "../src/pierre-diff"
+import { asFileDiffMetadata, mountPierreDiff } from "../src/pierre-diff"
 
 describe("Pierre diff adapter", () => {
   beforeAll(() => {
@@ -58,6 +58,10 @@ describe("Pierre diff adapter", () => {
     } finally {
       next.destroy()
     }
+  })
+
+  test("decodes explicit language hints", () => {
+    expect(asFileDiffMetadata({ ...fileDiff("component.view", 1, 0), lang: "tsx" })?.lang).toBe("tsx")
   })
 })
 

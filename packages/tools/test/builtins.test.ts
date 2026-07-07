@@ -10,7 +10,7 @@ import {
   ThreadMemory,
   ToolExecutor,
 } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
 import { ArtifactStore, McpApprovalStore } from "@rika/persistence"
 import { Common } from "@rika/schema"
@@ -25,6 +25,11 @@ const configLayer = (workspaceRoot: string, subagentTools?: Config.SubagentTools
     default_mode: "smart",
     ...(subagentTools === undefined ? {} : { subagent_tools: subagentTools }),
   })
+
+const diagnosticsLayer = () => {
+  const redactorLayer = SecretRedactor.layer
+  return Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+}
 
 describe("BuiltInTools", () => {
   test("readonly subagent executor exposes only the read-only tool list", async () => {
@@ -171,6 +176,7 @@ const subagentToolLayer = (workspaceRoot: string, subagentTools?: Config.Subagen
     Layer.provideMerge(McpClient.emptyLayer),
     Layer.provideMerge(IdGenerator.sequenceLayer(10)),
     Layer.provideMerge(Time.fixedLayer(Common.TimestampMillis.make(2_100_000_000_000))),
+    Layer.provideMerge(diagnosticsLayer()),
   )
 
 const fakeRouterLayer = (complete: (request: Router.Request) => Effect.Effect<Provider.GenerateResponse>) =>

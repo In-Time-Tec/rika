@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { GlobalRegistrator } from "@happy-dom/global-registrator"
 import { describe, expect, test } from "bun:test"
-import { Diagnostics, Time } from "@rika/core"
+import { Diagnostics, SecretRedactor, Time } from "@rika/core"
 import { OrbChanges, OrbPty } from "@rika/orb"
 import { Ids } from "@rika/schema"
 import { Effect, Layer, ManagedRuntime, Stream } from "effect"
@@ -210,17 +210,21 @@ class FakeFitAddon {
   dispose() {}
 }
 
-const makeLayer = (pty: Layer.Layer<OrbPty.Service>) =>
-  HttpServer.layerWithOrbChanges(
+const makeLayer = (pty: Layer.Layer<OrbPty.Service, never, Diagnostics.Service>) => {
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+  const ptyLayer = pty.pipe(Layer.provideMerge(diagnosticsLayer))
+  return HttpServer.layerWithOrbChanges(
     OrbChanges.testLayer({
       changes: () => Effect.succeed({ base_commit: "abc123", head_commit: "abc123", diff: "", dirty: false }),
     }),
   ).pipe(
-    Layer.provideMerge(pty),
+    Layer.provideMerge(ptyLayer),
     Layer.provideMerge(remoteLayer),
     Layer.provideMerge(PresenceHub.layer.pipe(Layer.provideMerge(Time.layer))),
-    Layer.provideMerge(Diagnostics.memoryLayer([])),
+    Layer.provideMerge(diagnosticsLayer),
   )
+}
 
 const remoteLayer = Layer.succeed(
   RemoteControl.Service,

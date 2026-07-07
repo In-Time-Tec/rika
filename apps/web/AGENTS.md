@@ -6,7 +6,8 @@ Foldkit local web UI for observing and steering shared Rika threads during devel
 
 - `src/app.ts` owns the Foldkit `Model`, `AppMessage`, commands, subscriptions, and pure `update` function.
 - `src/view.ts` owns browser presentation only. It renders state and dispatches messages; it does not call the SDK directly.
-- `src/ui.ts` contains shadcn-style Foldkit primitives: small copyable helpers with CSS classes and explicit attributes.
+- `components.json` and `foldcn.lock.json` are the canonical foldcn copy-in layer. Copied and ported components live under `src/components/ui/*`.
+- `src/ui.ts` is a thin re-export/adapter over `src/components/ui/*` for app call sites. Do not add hand-rolled primitives there.
 - `src/entry.ts` creates the Foldkit runtime, and `src/main.ts` reads browser/query/env flags.
 - `vite.config.ts` owns the development proxy from `/api/rika/*` to the current local backend record.
 - The FoldKit devtools MCP relay is enabled in development through `foldkit({ devToolsMcpPort: 9988 })`; keep it disabled for test runs.

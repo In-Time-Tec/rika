@@ -1,3 +1,4 @@
+import { Common } from "@rika/schema"
 import { html, type Document, type Html } from "foldkit/html"
 import {
   activeTurnId,
@@ -24,9 +25,13 @@ import {
   ClickedThreads,
   ClickedThread,
   CancelledDeleteProjectSecret,
+  ClickedTranscriptDisclosure,
   ConfirmedKillOrb,
   ConfirmedDeleteProjectSecret,
+  GotDeleteSecretDialogMessage,
+  GotKillOrbDialogMessage,
   GotOrbTabsMessage,
+  GotTranscriptScrollerMessage,
   MountPierreDiff,
   MountPierreTree,
   MountOrbTerminal,
@@ -39,6 +44,7 @@ import {
   contextUsage,
   eventRows,
   OrbTabItems,
+  pierreTreeMountKey,
   type AppMessage,
   type ContextUsage,
   type Model,
@@ -64,9 +70,11 @@ const searchWindowOptions: ReadonlyArray<Ui.SelectOption> = [
   { value: "all", label: "all" },
 ]
 
+const currentTimestamp = () => Common.TimestampMillis.make(Date.now())
+
 export const view = (model: Model): Document => ({
   title: model.selected_thread_id === undefined ? "Rika" : `Rika · ${shortId(model.selected_thread_id)}`,
-  body: H.main([H.Class("shell")], [sidebar(model), workspace(model)]),
+  body: H.main([H.Class("dark shell")], [sidebar(model), workspace(model)]),
 })
 
 const sidebar = (model: Model): Html =>
@@ -102,13 +110,13 @@ const threadSearchControls = (model: Model): Html =>
         H.Value(model.thread_search_query),
         H.Placeholder("Search threads"),
         H.AriaLabel("Thread search"),
-        H.OnInput((value) => ChangedThreadSearchQuery({ value })),
+        H.OnInput((value) => ChangedThreadSearchQuery({ value, now: currentTimestamp() })),
       ]),
       Ui.select({
         id: "thread-search-window",
         value: model.thread_search_window,
         options: searchWindowOptions,
-        onChange: (value) => ChangedThreadSearchWindow({ value }),
+        onChange: (value) => ChangedThreadSearchWindow({ value, now: currentTimestamp() }),
         attributes: [H.AriaLabel("Thread search window")],
         class: "thread-search-window",
       }),
@@ -170,6 +178,7 @@ const workspace = (model: Model): Html =>
             [H.Class("thread-workspace")],
             [
               orbHeader(model),
+              killOrbDialog(model),
               model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
               hasOrbWorkspace(model) ? orbTabs(model) : transcript(model),
               typingIndicator(model),
@@ -184,24 +193,22 @@ const projectsWorkspace = (model: Model): Html =>
     [H.Class("projects-workspace")],
     [
       model.notice === undefined ? Ui.empty : H.div([H.Class("notice")], [model.notice]),
+      deleteSecretDialog(model),
       H.div([H.Class("projects-layout")], [projectsListPanel(model), projectDetailPanel(model)]),
     ],
   )
 
 const projectsListPanel = (model: Model): Html =>
-  Ui.card(
-    [H.Class("projects-list-card")],
-    [
-      H.div([H.Class("projects-section-header")], [H.h3([], ["Projects"])]),
-      model.projects.length === 0
-        ? H.div([H.Class("empty-state")], ["No projects"])
-        : H.div(
-            [H.Class("projects-list")],
-            model.projects.map((project) => projectListButton(model, project)),
-          ),
-      newProjectForm(model),
-    ],
-  )
+  Ui.Card.card({ class: "projects-list-card" }, [
+    H.div([H.Class("projects-section-header")], [H.h3([], ["Projects"])]),
+    model.projects.length === 0
+      ? H.div([H.Class("empty-state")], ["No projects"])
+      : H.div(
+          [H.Class("projects-list")],
+          model.projects.map((project) => projectListButton(model, project)),
+        ),
+    newProjectForm(model),
+  ])
 
 const projectListButton = (model: Model, project: Model["projects"][number]): Html =>
   H.button(
@@ -261,34 +268,31 @@ const newProjectForm = (model: Model): Html =>
 const projectDetailPanel = (model: Model): Html => {
   const project = model.selected_project
   if (project === undefined) {
-    return Ui.card([H.Class("project-detail-card")], [H.div([H.Class("empty-state")], ["Select a project"])])
+    return Ui.Card.card({ class: "project-detail-card" }, [H.div([H.Class("empty-state")], ["Select a project"])])
   }
-  return Ui.card(
-    [H.Class("project-detail-card")],
-    [
-      H.div([H.Class("projects-section-header")], [H.h3([], [project.name]), Ui.badge(["details"], "success")]),
-      H.form(
-        [H.Class("project-form"), H.OnSubmit(SubmittedProjectSettings())],
-        [
-          textInput("project-name", "Name", model.project_form.name, (value) =>
-            ChangedProjectField({ field: "name", value }),
-          ),
-          textInput("project-repo", "Repository", model.project_form.repo_origin, (value) =>
-            ChangedProjectField({ field: "repo_origin", value }),
-          ),
-          textInput("project-branch", "Branch", model.project_form.default_branch, (value) =>
-            ChangedProjectField({ field: "default_branch", value }),
-          ),
-          textInput("project-template", "Template", model.project_form.template_id, (value) =>
-            ChangedProjectField({ field: "template_id", value }),
-          ),
-          envEditor(model),
-          Ui.button([H.Type("submit")], ["Save"]),
-        ],
-      ),
-      secretsPanel(model, project),
-    ],
-  )
+  return Ui.Card.card({ class: "project-detail-card" }, [
+    H.div([H.Class("projects-section-header")], [H.h3([], [project.name]), Ui.badge(["details"], "success")]),
+    H.form(
+      [H.Class("project-form"), H.OnSubmit(SubmittedProjectSettings())],
+      [
+        textInput("project-name", "Name", model.project_form.name, (value) =>
+          ChangedProjectField({ field: "name", value }),
+        ),
+        textInput("project-repo", "Repository", model.project_form.repo_origin, (value) =>
+          ChangedProjectField({ field: "repo_origin", value }),
+        ),
+        textInput("project-branch", "Branch", model.project_form.default_branch, (value) =>
+          ChangedProjectField({ field: "default_branch", value }),
+        ),
+        textInput("project-template", "Template", model.project_form.template_id, (value) =>
+          ChangedProjectField({ field: "template_id", value }),
+        ),
+        envEditor(model),
+        Ui.button([H.Type("submit")], ["Save"]),
+      ],
+    ),
+    secretsPanel(model, project),
+  ])
 }
 
 const envEditor = (model: Model): Html =>
@@ -356,14 +360,36 @@ const secretRow = (model: Model, name: string): Html =>
     [
       H.span([H.Class("secret-name")], [name]),
       H.span([H.Class("secret-mask")], ["****"]),
-      model.pending_secret_delete_name === name
-        ? Ui.button([H.Type("button"), H.OnClick(ConfirmedDeleteProjectSecret())], ["Confirm delete"], "danger")
-        : Ui.button([H.Type("button"), H.OnClick(ClickedDeleteProjectSecret({ name }))], ["Delete"], "ghost"),
-      model.pending_secret_delete_name === name
-        ? Ui.button([H.Type("button"), H.OnClick(CancelledDeleteProjectSecret())], ["Cancel"], "ghost")
-        : Ui.empty,
+      Ui.button([H.Type("button"), H.OnClick(ClickedDeleteProjectSecret({ name }))], ["Delete"], "ghost"),
     ],
   )
+
+const deleteSecretDialog = (model: Model): Html =>
+  H.submodel({
+    slotId: model.delete_secret_dialog.id,
+    model: model.delete_secret_dialog,
+    view: Ui.AlertDialog.view,
+    viewInputs: Ui.AlertDialog.content({}, () => [
+      Ui.AlertDialog.header({}, [
+        Ui.AlertDialog.title({ model: model.delete_secret_dialog }, ["Delete secret?"]),
+        Ui.AlertDialog.description({ model: model.delete_secret_dialog }, [
+          model.pending_secret_delete_name === undefined
+            ? "This secret value will be removed from the selected project."
+            : `Secret ${model.pending_secret_delete_name} will be removed from the selected project.`,
+        ]),
+      ]),
+      Ui.AlertDialog.footer({}, [
+        Ui.AlertDialog.cancel({ attributes: [H.Type("button"), H.OnClick(CancelledDeleteProjectSecret())] }, [
+          "Cancel",
+        ]),
+        Ui.AlertDialog.action(
+          { variant: "destructive", attributes: [H.Type("button"), H.OnClick(ConfirmedDeleteProjectSecret())] },
+          ["Delete"],
+        ),
+      ]),
+    ]),
+    toParentMessage: (message) => GotDeleteSecretDialogMessage({ message }),
+  })
 
 const textInput = (
   id: string,
@@ -401,7 +427,6 @@ const contextMeterToneClass = (usage: ContextUsage) => {
 const orbHeader = (model: Model): Html => {
   const orb = model.selected_orb
   if (orb === undefined) return Ui.empty
-  const confirmingKill = model.confirm_kill_orb_id === orb.orb_id
   return H.section(
     [H.Class("orb-header")],
     [
@@ -427,14 +452,9 @@ const orbHeader = (model: Model): Html => {
             ["Resume"],
             "ghost",
           ),
-          confirmingKill ? Ui.button([H.Type("button"), H.OnClick(CancelledKillOrb())], ["Cancel"], "ghost") : Ui.empty,
           Ui.button(
-            [
-              H.Type("button"),
-              H.Disabled(orb.status === "killed"),
-              H.OnClick(confirmingKill ? ConfirmedKillOrb() : ClickedKillOrb()),
-            ],
-            [confirmingKill ? "Confirm kill" : "Kill"],
+            [H.Type("button"), H.Disabled(orb.status === "killed"), H.OnClick(ClickedKillOrb())],
+            ["Kill"],
             "danger",
           ),
         ],
@@ -443,19 +463,67 @@ const orbHeader = (model: Model): Html => {
   )
 }
 
+const killOrbDialog = (model: Model): Html =>
+  model.selected_orb === undefined
+    ? Ui.empty
+    : H.submodel({
+        slotId: model.kill_orb_dialog.id,
+        model: model.kill_orb_dialog,
+        view: Ui.AlertDialog.view,
+        viewInputs: Ui.AlertDialog.content({}, () => [
+          Ui.AlertDialog.header({}, [
+            Ui.AlertDialog.title({ model: model.kill_orb_dialog }, ["Kill orb?"]),
+            Ui.AlertDialog.description({ model: model.kill_orb_dialog }, [
+              "The selected orb will stop and its running workspace session will end.",
+            ]),
+          ]),
+          Ui.AlertDialog.footer({}, [
+            Ui.AlertDialog.cancel({ attributes: [H.Type("button"), H.OnClick(CancelledKillOrb())] }, ["Cancel"]),
+            Ui.AlertDialog.action(
+              { variant: "destructive", attributes: [H.Type("button"), H.OnClick(ConfirmedKillOrb())] },
+              ["Kill"],
+            ),
+          ]),
+        ]),
+        toParentMessage: (message) => GotKillOrbDialogMessage({ message }),
+      })
+
 const transcript = (model: Model): Html => {
-  const rows = eventRows(model.events, new Set(model.expanded_diff_ids), model.user_id)
-  return Ui.card(
-    [H.Class("transcript-card")],
-    rows.length === 0
-      ? [
-          H.div(
-            [H.Class("empty-state")],
-            ["Open a CLI thread or submit a turn. Events will appear here from the shared subscription."],
-          ),
-        ]
-      : rows.map(rowView),
+  const rows = eventRows(
+    model.events,
+    new Set(model.expanded_diff_ids),
+    model.user_id,
+    new Set(model.collapsed_transcript_row_ids),
   )
+  return Ui.Card.card({ class: "transcript-card" }, [
+    Ui.Conversation.conversation({ class: "transcript-conversation" }, [
+      Ui.Conversation.conversationContent(
+        {
+          model: model.transcript_scroller,
+          toParentMessage: (message) => GotTranscriptScrollerMessage({ message }),
+          class: "transcript-content",
+        },
+        rows.length === 0
+          ? [
+              Ui.MessageScroller.item({}, [
+                Ui.Conversation.conversationEmptyState(
+                  {
+                    title: "No events yet",
+                    description:
+                      "Open a CLI thread or submit a turn. Events will appear here from the shared subscription.",
+                  },
+                  [],
+                ),
+              ]),
+            ]
+          : rows.map((row) => Ui.MessageScroller.item({ attributes: [H.Key(row.id)] }, [rowView(row)])),
+      ),
+      Ui.Conversation.conversationScrollButton({
+        model: model.transcript_scroller,
+        toParentMessage: (message) => GotTranscriptScrollerMessage({ message }),
+      }),
+    ]),
+  ])
 }
 
 const presenceAvatars = (model: Model): Html =>
@@ -494,64 +562,58 @@ const orbTabPanel = (model: Model, tab: OrbTab): Html => {
 }
 
 const orbTerminalPanel = (model: Model): Html =>
-  Ui.card(
-    [H.Class("orb-terminal-card")],
-    [
-      H.div(
-        [H.Class("orb-terminal-toolbar")],
-        [
-          Ui.badge([model.orb_terminal_status], terminalStatusTone(model.orb_terminal_status)),
-          model.orb_terminal_error === undefined
-            ? Ui.empty
-            : H.span([H.Class("orb-terminal-error")], [model.orb_terminal_error]),
-          Ui.button(
-            [
-              H.Type("button"),
-              H.Disabled(model.selected_thread_id === undefined),
-              H.OnClick(RequestedTerminalReconnect()),
-            ],
-            ["Reconnect"],
-            "ghost",
-          ),
-        ],
-      ),
-      model.selected_thread_id === undefined
-        ? H.div([H.Class("empty-state")], ["No thread selected"])
-        : H.div(
-            [
-              H.Key(orbTerminalKey(model.selected_thread_id)),
-              H.Class("orb-terminal-mount"),
-              H.DataAttribute("orb-terminal", ""),
-              H.OnMount(MountOrbTerminal({ thread_id: model.selected_thread_id })),
-            ],
-            [],
-          ),
-    ],
-  )
+  Ui.Card.card({ class: "orb-terminal-card" }, [
+    H.div(
+      [H.Class("orb-terminal-toolbar")],
+      [
+        Ui.badge([model.orb_terminal_status], terminalStatusTone(model.orb_terminal_status)),
+        model.orb_terminal_error === undefined
+          ? Ui.empty
+          : H.span([H.Class("orb-terminal-error")], [model.orb_terminal_error]),
+        Ui.button(
+          [
+            H.Type("button"),
+            H.Disabled(model.selected_thread_id === undefined),
+            H.OnClick(RequestedTerminalReconnect()),
+          ],
+          ["Reconnect"],
+          "ghost",
+        ),
+      ],
+    ),
+    model.selected_thread_id === undefined
+      ? H.div([H.Class("empty-state")], ["No thread selected"])
+      : H.div(
+          [
+            H.Key(orbTerminalKey(model.selected_thread_id)),
+            H.Class("orb-terminal-mount"),
+            H.DataAttribute("orb-terminal", ""),
+            H.OnMount(MountOrbTerminal({ thread_id: model.selected_thread_id })),
+          ],
+          [],
+        ),
+  ])
 
 const orbFilesPanel = (model: Model): Html =>
-  Ui.card(
-    [H.Class("orb-files-card")],
-    [
-      model.orb_files.paths.length === 0
-        ? H.div([H.Class("empty-state")], [orbDirectoryStatus(model, "")])
-        : H.div(
-            [H.Class("orb-files-layout")],
-            [
-              H.div(
-                [
-                  H.Key(orbTreeKey(model)),
-                  H.Class("orb-file-tree"),
-                  H.DataAttribute("pierre-tree", ""),
-                  H.OnMount(MountPierreTree(orbTreeMountArgs(model))),
-                ],
-                [],
-              ),
-              orbFileViewer(model),
-            ],
-          ),
-    ],
-  )
+  Ui.Card.card({ class: "orb-files-card" }, [
+    model.orb_files.paths.length === 0
+      ? H.div([H.Class("empty-state")], [orbDirectoryStatus(model, "")])
+      : H.div(
+          [H.Class("orb-files-layout")],
+          [
+            H.div(
+              [
+                H.Key(orbTreeKey(model)),
+                H.Class("orb-file-tree"),
+                H.DataAttribute("pierre-tree", ""),
+                H.OnMount(MountPierreTree(orbTreeMountArgs(model))),
+              ],
+              [],
+            ),
+            orbFileViewer(model),
+          ],
+        ),
+  ])
 
 const orbFileViewer = (model: Model): Html => {
   const opened = model.orb_files.opened_file
@@ -574,27 +636,24 @@ const orbFileViewer = (model: Model): Html => {
 const orbChangesPanel = (model: Model): Html => {
   const changes = model.orb_changes
   if (changes.state === "idle")
-    return Ui.card([H.Class("orb-changes-card")], [H.div([H.Class("empty-state")], ["Changes not loaded"])])
+    return Ui.Card.card({ class: "orb-changes-card" }, [H.div([H.Class("empty-state")], ["Changes not loaded"])])
   if (changes.state === "loading")
-    return Ui.card([H.Class("orb-changes-card")], [H.div([H.Class("empty-state")], ["Loading changes"])])
+    return Ui.Card.card({ class: "orb-changes-card" }, [H.div([H.Class("empty-state")], ["Loading changes"])])
   if (changes.state === "failed")
-    return Ui.card([H.Class("orb-changes-card")], [H.div([H.Class("empty-state")], [changes.message])])
-  return Ui.card(
-    [H.Class("orb-changes-card")],
-    [
-      H.div(
-        [H.Class("orb-changes-summary")],
-        [
-          Ui.badge([changes.dirty ? "dirty" : "clean"], changes.dirty ? "warning" : "success"),
-          H.span([], [`base ${shortId(changes.base_commit)}`]),
-          H.span([], [`head ${shortId(changes.head_commit)}`]),
-        ],
-      ),
-      changes.diffs.length === 0
-        ? H.div([H.Class("empty-state")], [changes.dirty ? "No renderable file diffs" : "Workspace clean"])
-        : H.div([H.Class("orb-change-list")], changes.diffs.map(orbChangeRowView)),
-    ],
-  )
+    return Ui.Card.card({ class: "orb-changes-card" }, [H.div([H.Class("empty-state")], [changes.message])])
+  return Ui.Card.card({ class: "orb-changes-card" }, [
+    H.div(
+      [H.Class("orb-changes-summary")],
+      [
+        Ui.badge([changes.dirty ? "dirty" : "clean"], changes.dirty ? "warning" : "success"),
+        H.span([], [`base ${shortId(changes.base_commit)}`]),
+        H.span([], [`head ${shortId(changes.head_commit)}`]),
+      ],
+    ),
+    changes.diffs.length === 0
+      ? H.div([H.Class("empty-state")], [changes.dirty ? "No renderable file diffs" : "Workspace clean"])
+      : H.div([H.Class("orb-change-list")], changes.diffs.map(orbChangeRowView)),
+  ])
 }
 
 const orbChangeRowView = (row: Extract<Model["orb_changes"], { readonly state: "loaded" }>["diffs"][number]): Html =>
@@ -647,18 +706,110 @@ const orbChangeDiffView = (
 const rowView = (row: TranscriptRow): Html => (row.kind === "pierre-diff" ? pierreDiffRowView(row) : textRowView(row))
 
 const textRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): Html =>
+  row.kind === "message"
+    ? messageRowView(row)
+    : row.kind === "tool"
+      ? toolRowView(row, false)
+      : row.kind === "error" && row.title.startsWith("Tool:")
+        ? toolRowView(row, true)
+        : row.title === "Reasoning"
+          ? reasoningRowView(row)
+          : eventRowView(row)
+
+const messageRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): Html => {
+  const localUser = row.author?.is_local ?? row.title === "User"
+  const sender = row.author?.label ?? row.title
+  const align = localUser ? "end" : "start"
+  const variant = row.title === "Rika" ? "secondary" : localUser ? "default" : "muted"
+  return Ui.Message.message({ align, attributes: [H.DataAttribute("transcript-row-kind", "message")] }, [
+    Ui.Message.messageAvatar({}, [
+      Ui.Avatar.avatar({ size: "sm" }, [Ui.Avatar.avatarFallback({}, [messageInitial(row)])]),
+    ]),
+    Ui.Message.messageContent({}, [
+      Ui.Message.messageHeader({}, [H.span([], [`#${row.sequence}`]), H.strong([], [sender])]),
+      Ui.Bubble.bubble({ align, variant }, [Ui.Bubble.bubbleContent({}, textContent(row.body))]),
+    ]),
+  ])
+}
+
+const reasoningRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): Html => {
+  const isOpen = row.is_open ?? true
+  return Ui.Reasoning.reasoning({ isOpen, attributes: [H.DataAttribute("transcript-row-kind", "reasoning")] }, [
+    Ui.Reasoning.reasoningTrigger(
+      {
+        isOpen,
+        onToggled: ClickedTranscriptDisclosure({ row_id: row.id }),
+        attributes: [H.DataAttribute("sequence", String(row.sequence))],
+      },
+      [],
+    ),
+    isOpen ? Ui.Reasoning.reasoningContent({}, textContent(row.body)) : Ui.empty,
+  ])
+}
+
+const toolRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>, isError: boolean): Html => {
+  const isOpen = row.is_open ?? true
+  return Ui.Tool.tool({ attributes: [H.DataAttribute("transcript-row-kind", isError ? "tool-error" : "tool")] }, [
+    Ui.Tool.toolHeader({
+      name: toolName(row.title),
+      status: isError ? "output-error" : toolStatus(row.body),
+      isOpen,
+      onToggled: ClickedTranscriptDisclosure({ row_id: row.id }),
+    }),
+    isOpen
+      ? Ui.Tool.toolContent({}, [
+          Ui.Tool.toolOutput({ isError }, [codeBlock("text", row.body, isError ? "error" : "output")]),
+        ])
+      : Ui.empty,
+  ])
+}
+
+const eventRowView = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): Html =>
   H.article(
     [
-      H.Key(row.id),
       H.Class(
         Ui.cn("event-row", row.kind === "message" && "event-row-message", row.kind === "error" && "event-row-error"),
       ),
+      H.DataAttribute("transcript-row-kind", row.kind),
     ],
     [
       H.div([H.Class("event-meta")], [H.span([], [`#${row.sequence}`]), H.strong([], [row.title])]),
       H.p([H.Class("event-body")], [row.body]),
     ],
   )
+
+const textContent = (value: string): ReadonlyArray<Html | string> => {
+  const parts: Array<Html | string> = []
+  const fence = /```([^\n`]*)\n?([\s\S]*?)```/g
+  let index = 0
+  for (const match of value.matchAll(fence)) {
+    const start = match.index ?? 0
+    const text = value.slice(index, start)
+    if (text.length > 0) parts.push(H.span([H.Class("whitespace-pre-wrap")], [text]))
+    const language = match[1]?.trim() || "text"
+    parts.push(codeBlock(language, match[2] ?? "", language))
+    index = start + match[0].length
+  }
+  const tail = value.slice(index)
+  if (tail.length > 0) parts.push(H.span([H.Class("whitespace-pre-wrap")], [tail]))
+  return parts.length === 0 ? [""] : parts
+}
+
+const codeBlock = (language: string, code: string, title: string): Html =>
+  Ui.CodeBlock.codeBlock({ language, class: "my-1 max-w-full" }, [
+    Ui.CodeBlock.codeBlockHeader({}, [Ui.CodeBlock.codeBlockTitle({}, [Ui.CodeBlock.codeBlockFilename({}, [title])])]),
+    Ui.CodeBlock.codeBlockContent({ code }),
+  ])
+
+const toolName = (title: string): string => title.replace(/^Tool input:\s*/, "").replace(/^Tool:\s*/, "")
+
+const toolStatus = (body: string): Ui.Tool.ToolStatus =>
+  body === "Running" || body === "Started" ? "input-available" : "output-available"
+
+const messageInitial = (row: Exclude<TranscriptRow, { readonly kind: "pierre-diff" }>): string => {
+  const sender = row.author?.label ?? row.title
+  return initials(sender)
+}
 
 const pierreDiffRowView = (row: Extract<TranscriptRow, { readonly kind: "pierre-diff" }>): Html =>
   H.article(
@@ -705,59 +856,51 @@ const pierreDiffRowView = (row: Extract<TranscriptRow, { readonly kind: "pierre-
 
 const composer = (model: Model): Html => {
   const active = activeTurnId(model.events)
-  return H.form(
-    [H.Class("composer"), H.OnSubmit(SubmittedDraft())],
-    [
-      Ui.textarea({
-        id: "turn-input",
-        value: model.draft,
-        onInput: (value) => ChangedDraft({ value }),
-        placeholder: model.selected_thread_id === undefined ? "Start a new Rika thread" : "Send a turn to this thread",
-        rows: 3,
-        attributes: [H.AriaLabel("Turn input")],
-      }),
-      H.div(
-        [H.Class("composer-footer")],
-        [
-          H.span(
-            [H.Class("muted")],
-            [model.pending_turn ? "Waiting for the shared event stream" : "Rendered only from durable thread events"],
-          ),
-          H.div(
-            [H.Class("composer-controls")],
-            [
-              Ui.select({
-                id: "turn-mode",
-                value: model.draft_mode ?? "",
-                options: modeOptions,
-                onChange: (value) => ChangedDraftMode({ value }),
-                attributes: [H.AriaLabel("Mode")],
-                class: "mode-select",
-              }),
-              active === undefined
-                ? Ui.empty
-                : Ui.button(
-                    [
-                      H.Type("button"),
-                      H.Disabled(model.pending_interrupt_turn_id === active),
-                      H.OnClick(ClickedInterrupt()),
-                    ],
-                    ["Stop"],
-                    "danger",
-                  ),
-              Ui.button(
-                [
-                  H.Type("submit"),
-                  H.Disabled(model.draft.trim().length === 0 || model.pending_turn || active !== undefined),
-                ],
-                [model.pending_turn || active !== undefined ? "Running" : "Send"],
-              ),
-            ],
-          ),
-        ],
+  return Ui.PromptInput.promptInput({ class: "composer", onSubmitted: SubmittedDraft() }, [
+    Ui.PromptInput.promptInputTextarea({
+      id: "turn-input",
+      value: model.draft,
+      onInput: (value) => ChangedDraft({ value }),
+      placeholder: model.selected_thread_id === undefined ? "Start a new Rika thread" : "Send a turn to this thread",
+      rows: 3,
+      attributes: [H.AriaLabel("Turn input")],
+    }),
+    Ui.PromptInput.promptInputToolbar({ class: "composer-footer" }, [
+      H.span(
+        [H.Class("muted")],
+        [model.pending_turn ? "Waiting for the shared event stream" : "Rendered only from durable thread events"],
       ),
-    ],
-  )
+      Ui.PromptInput.promptInputTools({ class: "composer-controls" }, [
+        Ui.select({
+          id: "turn-mode",
+          value: model.draft_mode ?? "",
+          options: modeOptions,
+          onChange: (value) => ChangedDraftMode({ value }),
+          attributes: [H.AriaLabel("Mode")],
+          class: "mode-select",
+        }),
+        active === undefined
+          ? Ui.empty
+          : Ui.PromptInput.promptInputButton(
+              {
+                type: "button",
+                variant: "destructive",
+                disabled: model.pending_interrupt_turn_id === active,
+                onClick: ClickedInterrupt(),
+              },
+              ["Stop"],
+            ),
+        Ui.PromptInput.promptInputSubmit(
+          {
+            type: "submit",
+            disabled: model.draft.trim().length === 0 || model.pending_turn || active !== undefined,
+            status: model.pending_turn || active !== undefined ? "submitted" : "idle",
+          },
+          [model.pending_turn || active !== undefined ? "Running" : "Send"],
+        ),
+      ]),
+    ]),
+  ])
 }
 
 const activeTitle = (model: Model) => {
@@ -772,7 +915,12 @@ const activeTitle = (model: Model) => {
 const orbTreeMountArgs = (model: Model) => {
   const selected = selectedTreePath(model)
   return {
+    mount_key:
+      model.selected_thread_id === undefined || model.selected_orb === undefined
+        ? "orb-tree:unmounted"
+        : pierreTreeMountKey(model.selected_thread_id, model.selected_orb.orb_id),
     paths: model.orb_files.paths,
+    git_status: model.orb_files.git_status,
     ...(selected === undefined ? {} : { selected_path: selected }),
   }
 }
@@ -783,7 +931,10 @@ const selectedTreePath = (model: Model) => {
   return model.orb_files.path_kinds[selected] === "dir" ? `${selected}/` : selected
 }
 
-const orbTreeKey = (model: Model) => `${model.orb_files.paths.join("\n")}\n${selectedTreePath(model) ?? ""}`
+const orbTreeKey = (model: Model) =>
+  model.selected_thread_id === undefined || model.selected_orb === undefined
+    ? "orb-tree:unmounted"
+    : pierreTreeMountKey(model.selected_thread_id, model.selected_orb.orb_id)
 
 const orbTerminalKey = (thread_id: NonNullable<Model["selected_thread_id"]>) => `orb-terminal:${thread_id}`
 

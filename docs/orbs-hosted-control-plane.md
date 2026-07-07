@@ -161,6 +161,10 @@ Allowed values are `private`, `workspace`, and `unlisted`. `ThreadProjection` de
 
 The no-user allowance is only for local-first mode.
 
+Thread visibility enforcement is implemented for local and Remote Control paths. Storage lives in `packages/persistence/src/schema/event-log.ts`; visibility events live in `packages/schema/src/event.ts`; `ThreadService.setVisibility` appends `thread.visibility.set` events in `packages/agent/src/thread-service.ts`; `WorkspaceAccess` enforces the visibility matrix in `packages/agent/src/workspace-access.ts`; Remote Control exposes the HTTP route in `packages/server/src/http-server.ts`; the SDK exposes `setThreadVisibility` in `packages/sdk/src/client.ts`; and the CLI exposes `rika threads visibility` plus `rika threads share` through `packages/cli/src/args.ts` and `packages/cli/src/threads.ts`.
+
+The remaining open hosted work is the multi-tenant authentication path: hosted tokens must identify the principal before the existing `WorkspaceAccess` checks run. The local no-user allowance stays local-first only.
+
 ## Migration Path
 
 Local-first remains the default.
@@ -193,7 +197,7 @@ Migration sequence:
 2. Add hosted API endpoints that delegate to the same service interfaces used locally.
 3. Move `OrbMirror` into the hosted service and keep local mirror for local-only orbs.
 4. Add ThreadActor live stream action and route hosted subscriptions through actors.
-5. Add thread visibility storage and enforcement.
+5. Wire hosted authentication into the existing thread visibility enforcement path.
 6. Make project secrets hosted-secret references in hosted mode; local Project secrets remain local.
 
 Rollback is setting `RIKA_CONTROL_PLANE_URL` off. Existing local commands keep using local SQLite and local E2B credentials.
@@ -234,10 +238,6 @@ Move continuous orb event mirroring into the Hosted Control Plane. Acceptance: a
 ### ThreadActor live stream action
 
 Add a live `SubscribeThreadEvents` action to `ThreadActor` and route hosted Remote Control subscriptions through it. Acceptance: replay after `after_sequence` and live events share one stream; presence frames remain ephemeral and are not appended to the Event Log.
-
-### Thread visibility enforcement
-
-Add `visibility` to `thread_projections`, visibility events, `ThreadService.setVisibility`, Remote Control route, SDK method, and access matrix tests. Acceptance: creator/member/token-holder/local-no-user behavior matches the table in this document.
 
 ### Hosted token service
 

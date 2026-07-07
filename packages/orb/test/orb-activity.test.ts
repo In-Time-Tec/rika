@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { Config, IdGenerator, Settings, Time } from "@rika/core"
 import { Database, Migration, OrbStore } from "@rika/persistence"
 import { Common, Ids } from "@rika/schema"
-import { Deferred, Effect, Fiber, Layer, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Stream } from "effect"
 import { OrbActivity, SandboxClient, SandboxClientFake } from "../src/index"
 
 const createdAt = Common.TimestampMillis.make(2_030_000_000_000)
@@ -83,6 +83,57 @@ describe("OrbActivity", () => {
     expect(calls).toEqual([{ sandboxId: "sandbox_orb_activity", timeoutMs: 420_000 }])
   })
 
+  test("release evicts refresh state for the orb", async () => {
+    const sandbox = SandboxClientFake.makeState()
+
+    const calls = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* createRunningOrb()
+        yield* OrbActivity.touch(orbId)
+        yield* OrbActivity.release(orbId)
+        yield* OrbActivity.touch(orbId)
+        return sandbox.calls.setTimeout
+      }).pipe(Effect.provide(makeLayer(sandbox))),
+    )
+
+    expect(calls).toEqual([
+      { sandboxId: "sandbox_orb_activity", timeoutMs: 420_000 },
+      { sandboxId: "sandbox_orb_activity", timeoutMs: 420_000 },
+    ])
+  })
+
+  test("touch that read running before terminal release does not refresh the killed orb", async () => {
+    const sandbox = SandboxClientFake.makeState()
+    const touchReadRunning = Effect.runSync(Deferred.make<void>())
+    const allowTouchAfterRelease = Effect.runSync(Deferred.make<void>())
+
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* createRunningOrb()
+        const touchFiber = yield* OrbActivity.touch(orbId).pipe(Effect.exit, Effect.forkChild)
+        yield* Deferred.await(touchReadRunning)
+        yield* OrbStore.setStatus(orbId, "killed")
+        yield* OrbActivity.release(orbId)
+        yield* Deferred.succeed(allowTouchAfterRelease, undefined)
+        const touchResult = yield* Fiber.join(touchFiber)
+        const stored = yield* OrbStore.get(orbId)
+        return { stored, touchResult }
+      }).pipe(
+        Effect.provide(
+          makeLayer(sandbox, SandboxClientFake.layer(sandbox), {
+            wrapOrbStore: staleFirstGetOrbStore(touchReadRunning, allowTouchAfterRelease),
+          }),
+        ),
+      ),
+    )
+
+    expect(result.touchResult._tag).toBe("Success")
+    expect(result.stored).toMatchObject({ status: "killed" })
+    expect(sandbox.calls.setTimeout).toEqual([])
+  })
+
   test("fails when a cached orb is no longer running", async () => {
     const sandbox = SandboxClientFake.makeState()
 
@@ -122,7 +173,11 @@ const createPausedOrb = () =>
 const makeLayer = (
   sandbox: SandboxClientFake.State,
   sandboxLayer = SandboxClientFake.layer(sandbox),
-  options: { readonly env?: Record<string, string | undefined>; readonly workspaceRoot?: string } = {},
+  options: {
+    readonly env?: Record<string, string | undefined>
+    readonly workspaceRoot?: string
+    readonly wrapOrbStore?: (base: OrbStore.Interface) => Effect.Effect<OrbStore.Interface>
+  } = {},
 ) => {
   const root = options.workspaceRoot ?? "/workspace/rika-orb-activity"
   const env = options.env ?? { RIKA_ORB_IDLE_TIMEOUT: "420" }
@@ -147,11 +202,22 @@ const makeLayer = (
     thirdTouchAt,
   ])
   const idLayer = IdGenerator.sequenceLayer(1)
-  const orbStoreLayer = OrbStore.layer.pipe(
+  const baseOrbStoreLayer = OrbStore.layer.pipe(
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(timeLayer),
     Layer.provideMerge(idLayer),
   )
+  const wrapOrbStore = options.wrapOrbStore
+  const orbStoreLayer =
+    wrapOrbStore === undefined
+      ? baseOrbStoreLayer
+      : Layer.effect(
+          OrbStore.Service,
+          Effect.gen(function* () {
+            const base = yield* OrbStore.Service
+            return OrbStore.Service.of(yield* wrapOrbStore(base))
+          }),
+        ).pipe(Layer.provide(baseOrbStoreLayer))
   const activityLayer = OrbActivity.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(settingsLayer),
@@ -171,6 +237,29 @@ const makeLayer = (
     activityLayer,
   )
 }
+
+const staleFirstGetOrbStore =
+  (touchReadRunning: Deferred.Deferred<void>, allowTouchAfterRelease: Deferred.Deferred<void>) =>
+  (base: OrbStore.Interface): Effect.Effect<OrbStore.Interface> =>
+    Effect.gen(function* () {
+      const delayed = yield* Ref.make(false)
+      return {
+        ...base,
+        get: (requestedOrbId) =>
+          Effect.gen(function* () {
+            const shouldDelay = yield* Ref.modify(
+              delayed,
+              (seen) => [!seen && requestedOrbId === orbId, seen || requestedOrbId === orbId] as const,
+            )
+            const record = yield* base.get(requestedOrbId)
+            if (shouldDelay && record?.status === "running") {
+              yield* Deferred.succeed(touchReadRunning, undefined)
+              yield* Deferred.await(allowTouchAfterRelease)
+            }
+            return record
+          }),
+      }
+    })
 
 const delayedSetTimeoutLayer = (
   state: SandboxClientFake.State,

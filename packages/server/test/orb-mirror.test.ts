@@ -191,8 +191,8 @@ describe("OrbMirror", () => {
         Effect.gen(function* () {
           yield* Migration.migrate()
           const orbId = yield* createRunningOrb()
-          yield* ThreadEventLog.append(threadCreated(1))
-          yield* ThreadEventLog.append(messageAdded(2, "before resume"))
+          yield* ThreadEventLog.appendAndProject(threadCreated(1))
+          yield* ThreadEventLog.appendAndProject(messageAdded(2, "before resume"))
           yield* OrbMirror.mirror(orbId)
         }),
       )
@@ -233,8 +233,7 @@ describe("OrbMirror", () => {
         Effect.gen(function* () {
           yield* Migration.migrate()
           const orbId = yield* createRunningOrb()
-          const created = yield* ThreadEventLog.append(threadCreated(1))
-          yield* ThreadProjection.apply(created)
+          yield* ThreadEventLog.appendAndProject(threadCreated(1))
           yield* OrbMirror.flush(orbId)
         }),
       )
@@ -614,6 +613,8 @@ const makeRemoteControlLiveLayer = () => {
   const databaseLayer = Database.memoryLayer
   const timeLayer = Time.fixedLayer(now)
   const idLayer = IdGenerator.sequenceLayer(1)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(
@@ -634,14 +635,18 @@ const makeRemoteControlLiveLayer = () => {
     workspaceStoreLayer,
     projectStoreLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     idLayer,
     orbStoreLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const threadLayer = ThreadService.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const liveLayer = ThreadLive.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const presenceLayer = PresenceHub.layer.pipe(Layer.provideMerge(timeLayer))
@@ -651,7 +656,6 @@ const makeRemoteControlLiveLayer = () => {
       runTurn: () => Effect.never,
       streamTurn: () => Stream.never,
       cancelTurn: () => Effect.never,
-      queueTurn: () => Effect.never,
     }),
   )
   const remoteLayer = RemoteControl.layerWithLive.pipe(
@@ -664,10 +668,11 @@ const makeRemoteControlLiveLayer = () => {
     Layer.provideMerge(IdeBridge.layer),
     Layer.provideMerge(liveLayer),
     Layer.provideMerge(presenceLayer),
+    Layer.provideMerge(diagnosticsLayer),
     Layer.provideMerge(remoteOrbManagerLayer()),
     Layer.provideMerge(remoteOrbMirrorLayer()),
   )
-  return Layer.mergeAll(migratedStorageLayer, liveLayer, presenceLayer, remoteLayer)
+  return Layer.mergeAll(migratedStorageLayer, liveLayer, presenceLayer, redactorLayer, diagnosticsLayer, remoteLayer)
 }
 
 const unusedCompactionLayer = () =>
@@ -701,6 +706,7 @@ const remoteOrbManagerLayer = () =>
       pause: () => Effect.never,
       resume: () => Effect.never,
       kill: () => Effect.never,
+      forceKill: () => Effect.never,
     }),
   )
 
@@ -717,12 +723,14 @@ const remoteOrbMirrorLayer = () =>
 
 const makeRemoteBackendLiveLayer = () => {
   const remoteLayer = makeRemoteControlLiveLayer()
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const httpLayer = HttpServer.layer.pipe(
     Layer.provideMerge(remoteLayer),
     Layer.provideMerge(PresenceHub.layer.pipe(Layer.provideMerge(Time.fixedLayer(now)))),
-    Layer.provideMerge(Diagnostics.memoryLayer([])),
+    Layer.provideMerge(diagnosticsLayer),
   )
-  return Layer.mergeAll(remoteLayer, httpLayer)
+  return Layer.mergeAll(redactorLayer, diagnosticsLayer, remoteLayer, httpLayer)
 }
 
 const createRunningOrb = (targetProjectId: Ids.ProjectId = projectId) =>
@@ -743,8 +751,7 @@ const createRunningOrb = (targetProjectId: Ids.ProjectId = projectId) =>
 const seedActiveTurn = () =>
   Effect.gen(function* () {
     for (const event of [threadCreated(1), turnStarted(2)]) {
-      const appended = yield* ThreadEventLog.append(event)
-      yield* ThreadProjection.apply(appended)
+      yield* ThreadEventLog.appendAndProject(event)
     }
   })
 

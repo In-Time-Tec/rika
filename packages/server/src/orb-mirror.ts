@@ -47,7 +47,6 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
     Effect.gen(function* () {
       const database = yield* Database.Service
       const eventLog = yield* ThreadEventLog.Service
-      const projection = yield* ThreadProjection.Service
       const orbs = yield* OrbStore.Service
       const sandbox = yield* SandboxClient.Service
       const activity = yield* OrbActivity.Service
@@ -62,9 +61,8 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
           Effect.map((events) => events.at(-1)?.sequence ?? 0),
         )
       const appendLocal = Effect.fn("OrbMirror.appendLocal")(function* (event: OrbMirroredEvent) {
-        const result = yield* withDatabase(eventLog.appendIfAbsent(event))
+        const result = yield* withDatabase(eventLog.appendIfAbsentAndProject(event))
         if (result.status === "skipped") return false
-        yield* withDatabase(projection.apply(result.event))
         yield* live.publish(result.event)
         return true
       })
@@ -90,7 +88,6 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
             thread_id: threadId,
             message: TurnInterruption.OrbPauseMessage,
             eventLog,
-            projection,
             live,
           }),
         ).pipe(Effect.asVoid)
@@ -255,4 +252,4 @@ export const syncRunning = Effect.fn("OrbMirror.syncRunning.call")(function* () 
   return yield* service.syncRunning()
 })
 
-type OrbMirroredEvent = Parameters<ThreadEventLog.Interface["appendIfAbsent"]>[0]
+type OrbMirroredEvent = Parameters<ThreadEventLog.Interface["appendIfAbsentAndProject"]>[0]

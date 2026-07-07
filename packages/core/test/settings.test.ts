@@ -218,6 +218,45 @@ describe("Settings", () => {
     }
   })
 
+  test("rejects present invalid decimal integer env values", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-settings-decimal-env-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    await mkdir(join(home, ".config", "rika"), { recursive: true })
+    await mkdir(join(workspace, ".rika"), { recursive: true })
+    await writeFile(
+      join(home, ".config", "rika", "settings.json"),
+      JSON.stringify({
+        "orb.idleTimeoutSeconds": 111,
+        "compaction.reserved": 222,
+      }),
+    )
+
+    try {
+      const error = await Effect.runPromise(
+        Settings.snapshot.pipe(
+          Effect.provide(
+            Settings.layerFromEnv(
+              {
+                HOME: home,
+                RIKA_COMPACTION_RESERVED: "1e3",
+              },
+              workspace,
+            ),
+          ),
+          Effect.flip,
+        ),
+      )
+
+      expect(error).toMatchObject({
+        key: "RIKA_COMPACTION_RESERVED",
+        message: "Invalid RIKA_COMPACTION_RESERVED 1e3",
+      })
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
   test("warns on unknown keys and wrong value types without rejecting the file", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-settings-validation-"))
     const home = join(root, "home")

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 import { mkdir, readdir, readFile, stat } from "node:fs/promises"
 import { basename, dirname, relative, resolve } from "node:path"
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, Diagnostics } from "@rika/core"
 import { Common } from "@rika/schema"
 import type { Call } from "@rika/schema/tool"
 import {
@@ -359,8 +359,11 @@ export const registryLayerFromService: Layer.Layer<ToolRegistry.Service, never, 
 export const registryLayer: Layer.Layer<ToolRegistry.Service, FffSearchError, Config.Service> =
   registryLayerFromService.pipe(Layer.provideMerge(layer))
 
-export const toolExecutorLayer: Layer.Layer<ToolExecutor.Service, FffSearchError, Config.Service> =
-  ToolExecutor.layer.pipe(Layer.provideMerge(registryLayer), Layer.provideMerge(PermissionPolicy.allowLayer))
+export const toolExecutorLayer: Layer.Layer<
+  ToolExecutor.Service,
+  FffSearchError,
+  Config.Service | Diagnostics.Service
+> = ToolExecutor.layer.pipe(Layer.provideMerge(registryLayer), Layer.provideMerge(PermissionPolicy.allowLayer))
 
 const makeService = (workspaceRoot: string, finder: Finder): Interface =>
   Service.of({

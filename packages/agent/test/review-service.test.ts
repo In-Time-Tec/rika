@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { ArtifactStore } from "@rika/persistence"
-import { Common } from "@rika/schema"
+import { ArtifactStore, Database, Migration } from "@rika/persistence"
+import { Common, Ids } from "@rika/schema"
 import { Config, IdGenerator, Time } from "@rika/core"
 import { Effect, Layer, Option } from "effect"
 import { CheckRegistry, ReviewService, SubagentRuntime } from "../src/index"
@@ -47,6 +47,23 @@ const makeLayer = (
     Layer.provideMerge(CheckRegistry.fakeLayer(checks)),
     Layer.provideMerge(SubagentRuntime.fakeLayer(subagentHandler)),
   )
+
+const makeLiveArtifactLayer = () => {
+  const databaseLayer = Database.memoryLayer
+  const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  return ReviewService.layerWithDiffProvider(diffProvider).pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(databaseLayer),
+    Layer.provideMerge(Migration.layer),
+    Layer.provideMerge(artifactLayer),
+    Layer.provideMerge(IdGenerator.sequenceLayer(1)),
+    Layer.provideMerge(Time.fixedLayer(now)),
+    Layer.provideMerge(CheckRegistry.fakeLayer([])),
+    Layer.provideMerge(
+      SubagentRuntime.fakeLayer(() => Effect.die(new Error("review subagents should not run without checks"))),
+    ),
+  )
+}
 
 describe("ReviewService", () => {
   test("runs checks against a diff, validates and dedupes findings, and stores a review artifact", async () => {
@@ -147,5 +164,23 @@ describe("ReviewService", () => {
     expect(called).toBe(false)
     expect(result.run.status).toBe("no_changes")
     expect(result.run.findings).toEqual([])
+  })
+
+  test("stores review artifacts in the configured workspace for scoped listing", async () => {
+    const workspaceId = Ids.WorkspaceId.make(workspaceRoot)
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const review = yield* ReviewService.run({})
+        const listed = yield* ArtifactStore.listAll({
+          workspace_id: workspaceId,
+          kind: "review",
+        })
+        return { review, listed }
+      }).pipe(Effect.provide(makeLiveArtifactLayer())),
+    )
+
+    expect(result.review.artifact.workspace_id).toBe(workspaceId)
+    expect(result.listed).toEqual([result.review.artifact])
   })
 })

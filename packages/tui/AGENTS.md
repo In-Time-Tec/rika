@@ -17,6 +17,7 @@ One pure model, one native adapter, one loop:
 - `src/ticker.ts` — `Ticker.Service`, a fixed-interval `Stream<void>` driving spinner/orb animation.
 - `src/backend.ts` — shared `SessionBackend` contract plus pure thread option formatting, preview shaping, and command result types. Session implementations conform to this interface.
 - `src/controller.ts` — the only place with control flow. A merged `Queue<AppEvent>` (keys, ticks, model events, resizes) drained sequentially. Per-turn streams are fully contained: a turn failure renders a notice and the loop continues — it never drops to the shell. Turn lifecycle: submit-while-idle forks a turn fiber; submit-while-busy enqueues; Esc-Esc interrupts the fiber and discards queued steering messages; Enter-Enter steers; Ctrl+C Ctrl+C quits.
+- `src/controller.ts` keeps model event batching time-windowed because it is UI render cadence after durable event ordering, not agent event coalescing.
 - `src/adapter.ts` — the ONLY module that touches OpenTUI. Owns the `CliRenderer` + a `Surface` renderable tree, exposes `render(state)`, `keys`, `resizes`. A memory layer records states + replays scripted keys for tests.
 - `src/session.ts` / `src/remote-session.ts` — local (`AgentLoop.streamTurn`) and remote (`@rika/sdk`) backends behind `SessionBackend`, both driven by `controller.run`. Default interactive runtime is remote/shared-backend; keep the local seam for ephemeral sessions and tests.
 

@@ -50,9 +50,9 @@ Remote mode should set `RIKA_RIVET_HOST=remote` and the endpoint/token/namespace
 
 ## Workspace access model
 
-Remote requests carry an optional `user_id`. The bearer token gates the remote-control API; `user_id` is attribution and presence identity, not authorization.
+Remote requests do not authorize with a payload-level `user_id`. Hosted adapters resolve bearer or session credentials at the Remote Control boundary and pass a `VerifiedUserIdentity` into the actor contract. Omitting actor identity is a local-first allowance only.
 
-- Remote-control adapters pass identity through shared schema request payloads for event attribution and turn-conflict display.
+- Remote-control adapters pass verified identity through shared schema request payloads for event attribution and turn-conflict display.
 - Presence heartbeats use `user_id` in an in-memory map and never persist it as membership proof.
 - `owner` members may perform future hosted `admin` actions; `owner` and `member` remain the durable membership roles.
 - The first identified user to create an empty workspace is recorded as the `owner`.

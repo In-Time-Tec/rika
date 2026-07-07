@@ -6,11 +6,17 @@ import { SecretRedactor } from "@rika/core"
 import { Event, Ids, Message } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { sql } from "drizzle-orm"
-import { Database, Migration, ThreadEventLog } from "../src/index"
+import { Database, Migration, ThreadEventLog, ThreadProjection } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_event_log_thread")
 const workspaceId = Ids.WorkspaceId.make("workspace_1")
 const layer = Layer.mergeAll(Database.memoryLayer, Migration.layer, ThreadEventLog.layer)
+const projectionLayer = Layer.mergeAll(
+  Database.memoryLayer,
+  Migration.layer,
+  ThreadEventLog.layer,
+  ThreadProjection.layer,
+)
 
 describe("ThreadEventLog", () => {
   test("appends and reads events in sequence order", async () => {
@@ -53,6 +59,50 @@ describe("ThreadEventLog", () => {
     expect(result.error).toBeInstanceOf(ThreadEventLog.ThreadEventLogError)
     expect(result.error.operation).toBe("appendMany")
     expect(result.replay).toEqual([])
+  })
+
+  test("appendAndProject rolls back the append when projection detects a forward gap", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadEventLog.appendAndProject(threadCreated(1))
+        yield* ThreadEventLog.append(messageAdded(2, "legacy unprojected event"))
+        const error = yield* ThreadEventLog.appendAndProject(messageAdded(3, "after gap")).pipe(Effect.flip)
+        const replayAfterFailure = yield* ThreadEventLog.readThread({ thread_id: threadId })
+        const summaryAfterFailure = yield* ThreadProjection.getThread(threadId)
+        yield* ThreadProjection.rebuild()
+        const recovered = yield* ThreadEventLog.appendAndProject(messageAdded(3, "after rebuild"))
+        const replayAfterRecovery = yield* ThreadEventLog.readThread({ thread_id: threadId })
+        const summaryAfterRecovery = yield* ThreadProjection.getThread(threadId)
+        return { error, replayAfterFailure, summaryAfterFailure, recovered, replayAfterRecovery, summaryAfterRecovery }
+      }).pipe(Effect.provide(projectionLayer)),
+    )
+
+    expect(result.error).toBeInstanceOf(ThreadProjection.ThreadProjectionError)
+    expect(result.error.operation).toBe("apply")
+    expect(result.replayAfterFailure.map((event) => event.sequence)).toEqual([1, 2])
+    expect(result.summaryAfterFailure?.last_user_id).toBeUndefined()
+    expect(result.recovered.sequence).toBe(3)
+    expect(result.replayAfterRecovery.map((event) => event.sequence)).toEqual([1, 2, 3])
+    expect(result.summaryAfterRecovery?.latest_message_text).toBe("after rebuild")
+  })
+
+  test("appendIfAbsentAndProject projects an exact existing event", async () => {
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const event = threadCreated(1)
+        yield* ThreadEventLog.append(event)
+        const appendResult = yield* ThreadEventLog.appendIfAbsentAndProject(event)
+        const summary = yield* ThreadProjection.getThread(threadId)
+        const replay = yield* ThreadEventLog.readThread({ thread_id: threadId })
+        return { appendResult, summary, replay }
+      }).pipe(Effect.provide(projectionLayer)),
+    )
+
+    expect(result.appendResult.status).toBe("skipped")
+    expect(result.summary?.thread_id).toBe(threadId)
+    expect(result.replay).toEqual([threadCreated(1)])
   })
 
   test("treats appending the same event as idempotent", async () => {

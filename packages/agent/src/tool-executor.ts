@@ -1,7 +1,7 @@
 import { Config, Diagnostics } from "@rika/core"
 import { Common, ErrorEnvelope } from "@rika/schema"
 import type { Call, Result } from "@rika/schema/tool"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import type { Tool } from "effect/unstable/ai"
 import * as PermissionPolicy from "./permission-policy"
 import * as ToolAccess from "./tool-access"
@@ -38,13 +38,16 @@ export class Service extends Context.Service<Service, Interface>()("@rika/agent/
 
 export type FakeHandler = ToolRegistry.FakeHandler
 
-const makeExecutor = (registry: ToolRegistry.Interface, policy: PermissionPolicy.Interface): Interface => ({
+const makeExecutor = (
+  registry: ToolRegistry.Interface,
+  policy: PermissionPolicy.Interface,
+  diagnostics: Diagnostics.Interface,
+): Interface => ({
   tools: registry.tools,
   describe: registry.describe,
   toolsWithDefinitions: (definitions) => registryWithDefinitions(registry, definitions).tools,
   describeWithDefinitions: (definitions) => registryWithDefinitions(registry, definitions).describe,
   execute: Effect.fn("ToolExecutor.execute")(function* (call: Call) {
-    const diagnostics = Option.getOrElse(yield* Effect.serviceOption(Diagnostics.Service), () => noopDiagnostics)
     return yield* Diagnostics.event(
       "tool.exec",
       (fields) => runExecute(registry, policy, call, fields),
@@ -55,7 +58,6 @@ const makeExecutor = (registry: ToolRegistry.Interface, policy: PermissionPolicy
     call: Call,
     definitions: ReadonlyArray<ToolRegistry.Definition>,
   ) {
-    const diagnostics = Option.getOrElse(yield* Effect.serviceOption(Diagnostics.Service), () => noopDiagnostics)
     const turnRegistry = registryWithDefinitions(registry, definitions)
     return yield* Diagnostics.event(
       "tool.exec",
@@ -112,8 +114,6 @@ const definitionsWithoutCollisions = (
   }
   return selected
 }
-
-const noopDiagnostics: Diagnostics.Interface = { emit: () => Effect.void }
 
 const executeSeed = (call: Call): Diagnostics.Fields => {
   const threadId = call.metadata?.thread_id
@@ -218,7 +218,8 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* ToolRegistry.Service
     const policy = yield* PermissionPolicy.Service
-    return Service.of(makeExecutor(registry, policy))
+    const diagnostics = yield* Diagnostics.Service
+    return Service.of(makeExecutor(registry, policy, diagnostics))
   }),
 )
 
@@ -235,7 +236,8 @@ export const readOnlyLayer = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* ToolRegistry.Service
     const policy = yield* PermissionPolicy.Service
-    return ReadOnlyService.of(makeExecutor(registry, policy))
+    const diagnostics = yield* Diagnostics.Service
+    return ReadOnlyService.of(makeExecutor(registry, policy, diagnostics))
   }),
 )
 
@@ -244,7 +246,8 @@ export const subagentLayer = Layer.effect(
   Effect.gen(function* () {
     const registry = yield* ToolRegistry.Service
     const policy = yield* PermissionPolicy.Service
-    return SubagentService.of(makeExecutor(registry, policy))
+    const diagnostics = yield* Diagnostics.Service
+    return SubagentService.of(makeExecutor(registry, policy, diagnostics))
   }),
 )
 
@@ -271,7 +274,7 @@ export const fakeSubagentLayer = (handlers: Readonly<Record<string, FakeHandler>
     Layer.provideMerge(PermissionPolicy.allowLayer),
   )
 
-export const shellLayer: Layer.Layer<Service, never, Config.Service> = layer.pipe(
+export const shellLayer: Layer.Layer<Service, never, Config.Service | Diagnostics.Service> = layer.pipe(
   Layer.provideMerge(ToolRegistry.shellLayer),
   Layer.provideMerge(PermissionPolicy.allowLayer),
 )

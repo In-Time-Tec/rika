@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { Effect } from "effect"
-import { Config, Diagnostics, IdGenerator, Runtime, TestHarness, Time } from "../src/index"
+import { Effect, Redacted } from "effect"
+import { Config, Diagnostics, IdGenerator, Runtime, SecretRedactor, TestHarness, Time } from "../src/index"
 
 const config = {
   workspace_root: "/workspace",
@@ -25,6 +25,16 @@ describe("core runtime services", () => {
 
     expect(error).toBeInstanceOf(Config.ConfigError)
     expect(error.key).toBe("RIKA_TOKEN")
+  })
+
+  test("returns required secrets as redacted values", async () => {
+    const secret = await TestHarness.runPromise(
+      Config.requireSecret("RIKA_API_KEY"),
+      TestHarness.testLayer({ env: { RIKA_API_KEY: "secret-value" } }),
+    )
+
+    expect(JSON.stringify(secret)).toBe('"<redacted:RIKA_API_KEY>"')
+    expect(Redacted.value(secret)).toBe("secret-value")
   })
 
   test("captures diagnostics in a memory layer", async () => {
@@ -63,6 +73,7 @@ describe("core runtime services", () => {
       await Effect.runPromise(
         Diagnostics.emit({ level: "info", message: "configured-log", data: { thread_id: "thread_test" } }).pipe(
           Effect.provide(Diagnostics.layer),
+          Effect.provide(SecretRedactor.layer),
           Effect.provide(Config.layerFromValues(config, { RIKA_LOG_FILE: path })),
         ),
       )

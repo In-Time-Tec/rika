@@ -19,6 +19,8 @@ export const Entry = Schema.Struct({
 
 export interface Interface {
   readonly emit: (entry: Entry) => Effect.Effect<void>
+  readonly redactEntry: (entry: Entry) => Entry
+  readonly redactFields: (fields: Fields) => Fields
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/core/Diagnostics") {}
@@ -35,32 +37,44 @@ export const resolveLogPath = Effect.fn("Diagnostics.resolveLogPath")(function* 
 
 export const layer = Layer.effect(
   Service,
-  Effect.map(resolveLogPath(), (path) => fileService(path)),
-)
-
-export const fileLayer = (path: string) => Layer.succeed(Service, fileService(path))
-
-export const stderrLayer = Layer.succeed(
-  Service,
-  Service.of({
-    emit: Effect.fn("Diagnostics.emit.stderr")(function* (entry: Entry) {
-      const redacted = yield* redactEntry(entry)
-      yield* Effect.sync(() => {
-        console.error(lineFromEntry(redacted))
-      })
-    }),
+  Effect.gen(function* () {
+    const path = yield* resolveLogPath()
+    const redactor = yield* SecretRedactor.Service
+    return makeService(redactor, makeFileEmit(redactor, path))
   }),
 )
 
-export const memoryLayer = (entries: Array<Entry>) =>
-  Layer.succeed(
+export const fileLayer = (path: string) =>
+  Layer.effect(
     Service,
-    Service.of({
-      emit: Effect.fn("Diagnostics.emit.memory")(function* (entry: Entry) {
-        const redacted = yield* redactEntry(entry)
-        yield* Effect.sync(() => entries.push(redacted))
+    Effect.map(SecretRedactor.Service, (redactor) => makeService(redactor, makeFileEmit(redactor, path))),
+  )
+
+export const stderrLayer = Layer.effect(
+  Service,
+  Effect.map(SecretRedactor.Service, (redactor) =>
+    makeService(
+      redactor,
+      Effect.fn("Diagnostics.emit.stderr")(function* (entry: Entry) {
+        yield* Effect.sync(() => {
+          process.stderr.write(`${lineFromEntry(entry)}\n`)
+        })
       }),
-    }),
+    ),
+  ),
+)
+
+export const memoryLayer = (entries: Array<Entry>) =>
+  Layer.effect(
+    Service,
+    Effect.map(SecretRedactor.Service, (redactor) =>
+      makeService(
+        redactor,
+        Effect.fn("Diagnostics.emit.memory")(function* (entry: Entry) {
+          yield* Effect.sync(() => entries.push(entry))
+        }),
+      ),
+    ),
   )
 
 export const emit = Effect.fn("Diagnostics.emit.call")(function* (entry: Entry) {
@@ -115,9 +129,9 @@ export const event = <A, E, R>(
     )
   })
 
-export const makeFileEmit = (path: string) =>
+export const makeFileEmit = (redactor: SecretRedactor.Interface, path: string) =>
   Effect.fn("Diagnostics.emit.file")(function* (entry: Entry) {
-    const redacted = yield* redactEntry(entry)
+    const redacted = redactEntryWith(redactor, entry)
     yield* Effect.tryPromise({
       try: async () => {
         await mkdir(dirname(path), { recursive: true })
@@ -127,25 +141,36 @@ export const makeFileEmit = (path: string) =>
     }).pipe(Effect.catch(() => Effect.void))
   })
 
-const fileService = (path: string) => Service.of({ emit: makeFileEmit(path) })
+export const makeService = (redactor: SecretRedactor.Interface, emitRedacted: (entry: Entry) => Effect.Effect<void>) =>
+  Service.of({
+    emit: Effect.fn("Diagnostics.emit")(function* (entry: Entry) {
+      yield* emitRedacted(redactEntryWith(redactor, entry))
+    }),
+    redactEntry: (entry) => redactEntryWith(redactor, entry),
+    redactFields: (fields) => redactFieldsWith(redactor, fields),
+  })
 
 export const redactEntry = Effect.fn("Diagnostics.redactEntry")(function* (entry: Entry) {
-  const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
-  if (redactor === undefined) return entry
-  return {
-    level: entry.level,
-    message: redactor.redact(entry.message),
-    ...(entry.data === undefined ? {} : { data: redactor.redactJson(entry.data) }),
-  }
+  const diagnostics = yield* Service
+  return diagnostics.redactEntry(entry)
 })
 
 export const redactFields = Effect.fn("Diagnostics.redactFields")(function* (fields: Fields) {
-  const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
-  if (redactor === undefined) return fields
+  const diagnostics = yield* Service
+  return diagnostics.redactFields(fields)
+})
+
+const redactEntryWith = (redactor: SecretRedactor.Interface, entry: Entry): Entry => ({
+  level: entry.level,
+  message: redactor.redact(entry.message),
+  ...(entry.data === undefined ? {} : { data: redactor.redactJson(entry.data) }),
+})
+
+const redactFieldsWith = (redactor: SecretRedactor.Interface, fields: Fields): Fields => {
   const redacted: Fields = {}
   for (const [key, value] of Object.entries(fields)) redacted[key] = redactor.redactJson(value)
   return redacted
-})
+}
 
 const attributeValue = (value: Common.JsonValue): AttributeValue | undefined => {
   if (typeof value === "string" || typeof value === "boolean") return value

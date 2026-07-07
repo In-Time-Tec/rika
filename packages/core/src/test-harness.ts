@@ -21,12 +21,14 @@ export const testLayer = (input: TestServicesInput = {}) => {
     data_dir: "/tmp/rika-data",
     default_mode: "smart",
   }
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer(input.diagnostics ?? []).pipe(Layer.provideMerge(redactorLayer))
 
   return Layer.mergeAll(
     Config.layerFromValues(config, input.env),
     Settings.layerFromEnv(input.env ?? {}, config.workspace_root),
-    SecretRedactor.layer,
-    Diagnostics.memoryLayer(input.diagnostics ?? []),
+    redactorLayer,
+    diagnosticsLayer,
     Time.fixedLayer(input.now ?? 0),
     IdGenerator.sequenceLayer(input.idStart),
   )

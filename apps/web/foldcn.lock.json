@@ -9,9 +9,15 @@
   "registry": {
     "default_url": "https://foldcn.dev/r/{name}.json",
     "status": "dns-unresolved",
-    "checked_at": "2026-07-03",
+    "checked_at": "2026-07-05",
     "init_command": "npx foldcn@0.0.21 init --cwd apps/web --css src/styles.css",
-    "fallback": "reviewed local copy-in source because foldcn.dev did not resolve and foldcn@0.0.21 has no registry digest lock"
+    "fallback": "copy-in from the local canonical registry source because foldcn.dev did not resolve"
+  },
+  "local_registry": {
+    "ui_path": "/Users/dallen.pyrah/projects/foldcn/apps/www/registry/ui",
+    "styles_path": "/Users/dallen.pyrah/projects/foldcn/apps/www/registry/styles/globals.css",
+    "checked_at": "2026-07-05",
+    "reason": "foldcn.dev DNS unresolved; components were ported from the local canonical registry source"
   },
   "foldkit_ui": {
     "version": "0.120.0",
@@ -24,42 +30,134 @@
     {
       "name": "cn",
       "path": "src/lib/cn.ts",
-      "sha256": "e38e4cac4466ad0891f14931b7a628e774f9f3e82035d00dd8b4ce5f79f07791"
+      "source": "local-adapter",
+      "sha256": "1264c30f9cb2af8310e09ca5669a87ed9858dad2cb0ab25d07ba0f2d6adf1dee"
     },
     {
       "name": "types",
       "path": "src/components/ui/types.ts",
+      "source": "local-adapter",
       "sha256": "5a20a2c0d9ab8d5cea7471c7403f3454d724437abc75791cb96a571edb4488aa"
     },
     {
       "name": "button",
       "path": "src/components/ui/button.ts",
-      "sha256": "6550b04169ea3f2aa53673c4c1bbf188b35a770aba78befb235a6118da5b1d0c"
+      "source": "local-registry:ui/button.ts",
+      "sha256": "66df2e1ec10370ae81d289fb2d2d9ea38bf5eae0fa619f51e13720a40cdbc852"
     },
     {
       "name": "textarea",
       "path": "src/components/ui/textarea.ts",
-      "sha256": "7c6b4e799fdf26988b8b73ae7fa3c563916e1f5abf20f475cc158f5d3080f1fd"
+      "source": "local-registry:ui/textarea.ts",
+      "sha256": "48dbfe1b12e132b361f51285958ce27f4bc80912f011e19f9229ebef094b01a1"
     },
     {
       "name": "tabs-state",
       "path": "src/components/ui/tabs-state.ts",
+      "source": "local-adapter",
       "sha256": "bcf2826d34d455f1e3da827d0356135ec8401cd601068ae52e652de73a941049"
     },
     {
       "name": "tabs",
       "path": "src/components/ui/tabs.ts",
+      "source": "local-registry:ui/tabs.ts",
       "sha256": "70050be991fef16c2797ceb3c3f5a2052d07f1f9700e3129ae25b1f7311acf52"
     },
     {
       "name": "select",
       "path": "src/components/ui/select.ts",
-      "sha256": "ac7a596f9f565a273e2f248f8b21817558a68d07ae405b943288293d42042601"
+      "source": "local-adapter+local-registry:ui/select.ts",
+      "sha256": "03e4634f7448eabe29d7f137ce2337ba5aea083d4a7eebf5138bd6ceab4ccc99"
     },
     {
       "name": "badge",
       "path": "src/components/ui/badge.ts",
-      "sha256": "a806d75ade1ad87471db690a5aeb168a2bf7177b03d3f01b0153082e27089548"
+      "source": "local-registry:ui/badge.ts",
+      "sha256": "09919b2e66cce1a2ff40fa85c22f8e6812e8d0a6622415a70049f3c7601e92b5"
+    },
+    {
+      "name": "card",
+      "path": "src/components/ui/card.ts",
+      "source": "local-registry:ui/card.ts",
+      "sha256": "d2a43249d042e519d4854002b1b6fdef21fd4a45814ed6e19b93eb1fb8a1c536"
+    },
+    {
+      "name": "avatar",
+      "path": "src/components/ui/avatar.ts",
+      "source": "local-registry:ui/avatar.ts",
+      "sha256": "c64a3ec192fee849e244d666cf0df52d06eb87a4595b28c2dfc3f84bf35500bb"
+    },
+    {
+      "name": "message",
+      "path": "src/components/ui/message.ts",
+      "source": "local-registry:ui/message.ts",
+      "sha256": "2accb6aacdd1caee39cdda3db58f75ae61e1d5c39e9bdc4361a5f3ee378723a3"
+    },
+    {
+      "name": "bubble",
+      "path": "src/components/ui/bubble.ts",
+      "source": "local-registry:ui/bubble.ts",
+      "sha256": "a589dfb45736f75c93bb278c8b42662c88613946f4546e9005693b2c036f0607"
+    },
+    {
+      "name": "code-block",
+      "path": "src/components/ui/code-block.ts",
+      "source": "local-registry:ui/code-block.ts",
+      "sha256": "48c52ad8a32a3ce119382be0c48778af10d31008f3785a2acc72a20ef7531bea"
+    },
+    {
+      "name": "spinner",
+      "path": "src/components/ui/spinner.ts",
+      "source": "local-registry:ui/spinner.ts",
+      "sha256": "e2bf7e38a62e8b35b8ff468b25ac3c712eb01e399600f93eec5dc90426bf355c"
+    },
+    {
+      "name": "message-scroller-state",
+      "path": "src/components/ui/message-scroller-state.ts",
+      "source": "local-adapter",
+      "sha256": "8d9d847ccc51cf34e400b3fd3b463a5e8a9131f3cf4361293643715676ac6034"
+    },
+    {
+      "name": "message-scroller",
+      "path": "src/components/ui/message-scroller.ts",
+      "source": "local-registry:ui/message-scroller.ts",
+      "sha256": "beef4e9d4e30b61f4cac2d15269222320ef938327b25193fcab732a8570cf848"
+    },
+    {
+      "name": "conversation",
+      "path": "src/components/ui/conversation.ts",
+      "source": "local-registry:ui/conversation.ts",
+      "sha256": "60054b6cf53d501211baceee8bdc66b582ddbb0443056a9ebe32adfc126a64cf"
+    },
+    {
+      "name": "prompt-input",
+      "path": "src/components/ui/prompt-input.ts",
+      "source": "local-registry:ui/prompt-input.ts",
+      "sha256": "dc693548d94e694847dfa86393c408881fa92989da8bb63655eb24f317f79daf"
+    },
+    {
+      "name": "chain-of-thought",
+      "path": "src/components/ui/chain-of-thought.ts",
+      "source": "local-registry:ui/chain-of-thought.ts",
+      "sha256": "5a34044addcc7d012e2d537ae6fa79575bd2fb3a72826d44ad7d02da29f24649"
+    },
+    {
+      "name": "reasoning",
+      "path": "src/components/ui/reasoning.ts",
+      "source": "local-registry:ui/reasoning.ts",
+      "sha256": "c59a18b0fb2cfcb7b967483f78a84179c6986311d0bcef52b0e07b18e433d1b0"
+    },
+    {
+      "name": "tool",
+      "path": "src/components/ui/tool.ts",
+      "source": "local-registry:ui/tool.ts",
+      "sha256": "ee533494fb1604f60febc582123e43009d0ddb0d3dc1fdb6ae749950dd629662"
+    },
+    {
+      "name": "alert-dialog",
+      "path": "src/components/ui/alert-dialog.ts",
+      "source": "local-adapter+local-registry:ui/alert-dialog.ts",
+      "sha256": "964553144b24608ec243d1526449e03fc0ac997caf66f737671ede3f1894028c"
     }
   ]
 }

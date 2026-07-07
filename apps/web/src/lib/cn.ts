@@ -1,4 +1,6 @@
-export type ClassValue = string | false | null | undefined
+import { type ClassValue, clsx } from "clsx"
+import { twMerge } from "tailwind-merge"
 
-export const cn = (...values: ReadonlyArray<ClassValue>): string =>
-  values.filter((value): value is string => typeof value === "string" && value.length > 0).join(" ")
+export { type ClassValue }
+
+export const cn = (...values: ReadonlyArray<ClassValue>): string => twMerge(clsx(values))

@@ -68,4 +68,37 @@ describe("SecretRedactor", () => {
       nested: ["[REDACTED:API_TOKEN]", 42, true, null],
     })
   })
+
+  test("registers common secret env names without registering public identifiers", () => {
+    const entries = SecretRedactor.entriesFromEnv({
+      AWS_SECRET_ACCESS_KEY: "aws-secret-access-key-value",
+      DATABASE_URL: "postgres://user:pass@localhost/rika",
+      GH_TOKEN: "gh-token-value",
+      OPENAI_API_KEY: "openai-api-key-value",
+      PRIVATE_KEY: "private-key-value",
+      RIKA_DATABASE_URL: "file:/tmp/rika.sqlite?password=secret",
+      SERVICE_CREDENTIALS: "service-credentials-value",
+      SERVICE_PASS: "service-pass-value",
+      SERVICE_PASSWD: "service-passwd-value",
+      STRIPE_SECRET_KEY: "stripe-secret-key-value",
+      TOOL_APIKEY: "tool-apikey-value",
+      CUSTOMER_ID: "customer-id-value",
+      PUBLIC_KEY: "public-key-value",
+      SERVICE_URL: "https://service.example/token",
+    })
+
+    expect(entries.map((entry) => entry.label).toSorted()).toEqual([
+      "AWS_SECRET_ACCESS_KEY",
+      "DATABASE_URL",
+      "GH_TOKEN",
+      "OPENAI_API_KEY",
+      "PRIVATE_KEY",
+      "RIKA_DATABASE_URL",
+      "SERVICE_CREDENTIALS",
+      "SERVICE_PASS",
+      "SERVICE_PASSWD",
+      "STRIPE_SECRET_KEY",
+      "TOOL_APIKEY",
+    ])
+  })
 })

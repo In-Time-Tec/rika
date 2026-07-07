@@ -1,11 +1,14 @@
 import { SecretRedactor } from "@rika/core"
-import { Codec, Common, ErrorEnvelope, Event, Ids, Message, Tool } from "@rika/schema"
+import { Common, ErrorEnvelope, Event, Ids, Message, Tool } from "@rika/schema"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { sql } from "drizzle-orm"
 import * as Database from "./database"
 import { thread_events } from "./schema"
+import { decodePayload, encodePayload } from "./thread-event-codec"
+import { ThreadProjectionError } from "./thread-projection-error"
+import * as ProjectionWriter from "./thread-projection-writer"
 
-const EventPayload = Schema.fromJsonString(Event.Event)
+export { decodePayload, encodePayload } from "./thread-event-codec"
 
 export class ThreadEventLogError extends Schema.TaggedErrorClass<ThreadEventLogError>()("ThreadEventLogError", {
   message: Schema.String,
@@ -33,12 +36,33 @@ export interface Interface {
   readonly append: (
     event: Event.Event,
   ) => Effect.Effect<Event.Event, Database.DatabaseError | ThreadEventLogError, Database.Service>
+  readonly appendAndProject: (
+    event: Event.Event,
+  ) => Effect.Effect<
+    Event.Event,
+    Database.DatabaseError | ThreadEventLogError | ThreadProjectionError,
+    Database.Service
+  >
   readonly appendMany: (
     events: ReadonlyArray<Event.Event>,
   ) => Effect.Effect<ReadonlyArray<Event.Event>, Database.DatabaseError | ThreadEventLogError, Database.Service>
+  readonly appendManyAndProject: (
+    events: ReadonlyArray<Event.Event>,
+  ) => Effect.Effect<
+    ReadonlyArray<Event.Event>,
+    Database.DatabaseError | ThreadEventLogError | ThreadProjectionError,
+    Database.Service
+  >
   readonly appendIfAbsent: (
     event: Event.Event,
   ) => Effect.Effect<AppendIfAbsentResult, Database.DatabaseError | ThreadEventLogError, Database.Service>
+  readonly appendIfAbsentAndProject: (
+    event: Event.Event,
+  ) => Effect.Effect<
+    AppendIfAbsentResult,
+    Database.DatabaseError | ThreadEventLogError | ThreadProjectionError,
+    Database.Service
+  >
   readonly readThread: (
     input: ReadThreadInput,
   ) => Effect.Effect<ReadonlyArray<Event.Event>, Database.DatabaseError | ThreadEventLogError, Database.Service>
@@ -65,7 +89,16 @@ export const layer = Layer.effect(
         return yield* Database.withDatabaseEffect((database) =>
           Effect.try({
             try: () => appendEvent(database, redacted),
-            catch: (cause) => toError(cause, "append", redacted),
+            catch: (cause) => toEventLogError(cause, "append", redacted),
+          }),
+        )
+      }),
+      appendAndProject: Effect.fn("ThreadEventLog.appendAndProject")(function* (event: Event.Event) {
+        const redacted = redactForAppend(event)
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => appendAndProjectEvent(database, redacted),
+            catch: (cause) => toAppendAndProjectError(cause, "appendAndProject", redacted),
           }),
         )
       }),
@@ -74,7 +107,18 @@ export const layer = Layer.effect(
         return yield* Database.withDatabaseEffect((database) =>
           Effect.try({
             try: () => appendEvents(database, redacted),
-            catch: (cause) => toError(cause, "appendMany", redacted[0]),
+            catch: (cause) => toEventLogError(cause, "appendMany", redacted[0]),
+          }),
+        )
+      }),
+      appendManyAndProject: Effect.fn("ThreadEventLog.appendManyAndProject")(function* (
+        events: ReadonlyArray<Event.Event>,
+      ) {
+        const redacted = events.map(redactForAppend)
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => appendManyAndProjectEvents(database, redacted),
+            catch: (cause) => toAppendAndProjectError(cause, "appendManyAndProject", redacted[0]),
           }),
         )
       }),
@@ -83,7 +127,16 @@ export const layer = Layer.effect(
         return yield* Database.withDatabaseEffect((database) =>
           Effect.try({
             try: () => appendEventIfAbsent(database, redacted),
-            catch: (cause) => toError(cause, "appendIfAbsent", redacted),
+            catch: (cause) => toEventLogError(cause, "appendIfAbsent", redacted),
+          }),
+        )
+      }),
+      appendIfAbsentAndProject: Effect.fn("ThreadEventLog.appendIfAbsentAndProject")(function* (event: Event.Event) {
+        const redacted = redactForAppend(event)
+        return yield* Database.withDatabaseEffect((database) =>
+          Effect.try({
+            try: () => appendIfAbsentAndProjectEvent(database, redacted),
+            catch: (cause) => toAppendAndProjectError(cause, "appendIfAbsentAndProject", redacted),
           }),
         )
       }),
@@ -91,7 +144,7 @@ export const layer = Layer.effect(
         return yield* Database.withDatabaseEffect((database) =>
           Effect.try({
             try: () => readThreadRows(database, input).map((row) => decodePayload(row.payload)),
-            catch: (cause) => toError(cause, "readThread"),
+            catch: (cause) => toEventLogError(cause, "readThread"),
           }),
         )
       }),
@@ -99,7 +152,7 @@ export const layer = Layer.effect(
         return yield* Database.withDatabaseEffect((database) =>
           Effect.try({
             try: () => readThreadTailRows(database, input).map((row) => decodePayload(row.payload)),
-            catch: (cause) => toError(cause, "readThreadTail"),
+            catch: (cause) => toEventLogError(cause, "readThreadTail"),
           }),
         )
       }),
@@ -110,7 +163,7 @@ export const layer = Layer.effect(
               database
                 .all<PayloadRow>(sql`select payload from thread_events order by thread_id asc, sequence asc`)
                 .map((row) => decodePayload(row.payload)),
-            catch: (cause) => toError(cause, "readAll"),
+            catch: (cause) => toEventLogError(cause, "readAll"),
           }),
         )
       }),
@@ -123,14 +176,33 @@ export const append = Effect.fn("ThreadEventLog.append.call")(function* (event: 
   return yield* eventLog.append(event)
 })
 
+export const appendAndProject = Effect.fn("ThreadEventLog.appendAndProject.call")(function* (event: Event.Event) {
+  const eventLog = yield* Service
+  return yield* eventLog.appendAndProject(event)
+})
+
 export const appendMany = Effect.fn("ThreadEventLog.appendMany.call")(function* (events: ReadonlyArray<Event.Event>) {
   const eventLog = yield* Service
   return yield* eventLog.appendMany(events)
 })
 
+export const appendManyAndProject = Effect.fn("ThreadEventLog.appendManyAndProject.call")(function* (
+  events: ReadonlyArray<Event.Event>,
+) {
+  const eventLog = yield* Service
+  return yield* eventLog.appendManyAndProject(events)
+})
+
 export const appendIfAbsent = Effect.fn("ThreadEventLog.appendIfAbsent.call")(function* (event: Event.Event) {
   const eventLog = yield* Service
   return yield* eventLog.appendIfAbsent(event)
+})
+
+export const appendIfAbsentAndProject = Effect.fn("ThreadEventLog.appendIfAbsentAndProject.call")(function* (
+  event: Event.Event,
+) {
+  const eventLog = yield* Service
+  return yield* eventLog.appendIfAbsentAndProject(event)
 })
 
 export const readThread = Effect.fn("ThreadEventLog.readThread.call")(function* (input: ReadThreadInput) {
@@ -148,7 +220,7 @@ export const readAll = Effect.fn("ThreadEventLog.readAll.call")(function* () {
   return yield* eventLog.readAll()
 })
 
-type EventLogDatabase = Pick<Database.DrizzleDatabase, "all" | "get" | "insert" | "run" | "transaction">
+type EventLogDatabase = Pick<Database.DrizzleDatabase, "all" | "get" | "insert" | "run">
 
 interface PayloadRow {
   readonly payload: string
@@ -165,40 +237,69 @@ interface ChangesRow {
 const appendEvent = (database: Database.DrizzleDatabase, event: Event.Event) =>
   database.transaction((transaction) => appendEventRow(transaction, event))
 
+const appendAndProjectEvent = (database: Database.DrizzleDatabase, event: Event.Event) =>
+  database.transaction((transaction) => {
+    const appended = appendEventRow(transaction, event, "appendAndProject")
+    ProjectionWriter.applyEventRow(transaction, appended)
+    return appended
+  })
+
 const appendEvents = (database: Database.DrizzleDatabase, events: ReadonlyArray<Event.Event>) =>
   database.transaction((transaction) => events.map((event) => appendEventRow(transaction, event, "appendMany")))
 
+const appendManyAndProjectEvents = (database: Database.DrizzleDatabase, events: ReadonlyArray<Event.Event>) =>
+  database.transaction((transaction) =>
+    events.map((event) => {
+      const appended = appendEventRow(transaction, event, "appendManyAndProject")
+      ProjectionWriter.applyEventRow(transaction, appended)
+      return appended
+    }),
+  )
+
 const appendEventIfAbsent = (database: Database.DrizzleDatabase, event: Event.Event): AppendIfAbsentResult =>
+  database.transaction((transaction) => appendEventIfAbsentRow(transaction, event, "appendIfAbsent"))
+
+const appendIfAbsentAndProjectEvent = (database: Database.DrizzleDatabase, event: Event.Event): AppendIfAbsentResult =>
   database.transaction((transaction) => {
-    const existingBySequence = eventByThreadSequence(transaction, event.thread_id, event.sequence)
-    if (existingBySequence !== undefined) {
-      const existing = requireMatchingExisting(existingBySequence.payload, event, "appendIfAbsent")
-      return { status: "skipped", event: existing }
-    }
-    const existingById = eventById(transaction, event.id)
-    if (existingById !== undefined) requireMatchingExisting(existingById.payload, event, "appendIfAbsent")
-    const latestValue = latestSequence(transaction, event.thread_id)?.sequence ?? 0
-    requireNextSequence(latestValue + 1, event, "appendIfAbsent")
-    insertEventRowIfAbsent(transaction, event)
-    const changes = transaction.get<ChangesRow>(sql`select changes() as changes`)
-    if (changes?.changes === 1) return { status: "inserted", event }
-    const insertedBySequence = eventByThreadSequence(transaction, event.thread_id, event.sequence)
-    if (insertedBySequence !== undefined) {
-      const existing = requireMatchingExisting(insertedBySequence.payload, event, "appendIfAbsent")
-      return { status: "skipped", event: existing }
-    }
-    const insertedById = eventById(transaction, event.id)
-    if (insertedById !== undefined) {
-      const existing = requireMatchingExisting(insertedById.payload, event, "appendIfAbsent")
-      return { status: "skipped", event: existing }
-    }
-    throw new ThreadEventLogError({
-      message: `Event ${event.id} was not inserted`,
-      operation: "appendIfAbsent",
-      thread_id: event.thread_id,
-      event_id: event.id,
-    })
+    const result = appendEventIfAbsentRow(transaction, event, "appendIfAbsentAndProject")
+    ProjectionWriter.applyEventRow(transaction, result.event)
+    return result
   })
+
+const appendEventIfAbsentRow = (
+  database: EventLogDatabase,
+  event: Event.Event,
+  operation: string,
+): AppendIfAbsentResult => {
+  const existingBySequence = eventByThreadSequence(database, event.thread_id, event.sequence)
+  if (existingBySequence !== undefined) {
+    const existing = requireMatchingExisting(existingBySequence.payload, event, operation)
+    return { status: "skipped", event: existing }
+  }
+  const existingById = eventById(database, event.id)
+  if (existingById !== undefined) requireMatchingExisting(existingById.payload, event, operation)
+  const latestValue = latestSequence(database, event.thread_id)?.sequence ?? 0
+  requireNextSequence(latestValue + 1, event, operation)
+  insertEventRowIfAbsent(database, event)
+  const changes = database.get<ChangesRow>(sql`select changes() as changes`)
+  if (changes?.changes === 1) return { status: "inserted", event }
+  const insertedBySequence = eventByThreadSequence(database, event.thread_id, event.sequence)
+  if (insertedBySequence !== undefined) {
+    const existing = requireMatchingExisting(insertedBySequence.payload, event, operation)
+    return { status: "skipped", event: existing }
+  }
+  const insertedById = eventById(database, event.id)
+  if (insertedById !== undefined) {
+    const existing = requireMatchingExisting(insertedById.payload, event, operation)
+    return { status: "skipped", event: existing }
+  }
+  throw new ThreadEventLogError({
+    message: `Event ${event.id} was not inserted`,
+    operation,
+    thread_id: event.thread_id,
+    event_id: event.id,
+  })
+}
 
 const readThreadRows = (database: Database.DrizzleDatabase, input: ReadThreadInput) => {
   const afterSequence = input.after_sequence ?? 0
@@ -308,9 +409,6 @@ const requireMatchingExisting = (payload: string, event: Event.Event, operation 
     event_id: event.id,
   })
 }
-
-export const encodePayload = (event: Event.Event) => Schema.encodeSync(EventPayload)(Codec.decode(Event.Event)(event))
-export const decodePayload = (payload: string) => Schema.decodeUnknownSync(EventPayload)(payload)
 
 const redactEvent = (redactor: SecretRedactor.Interface | undefined, event: Event.Event): Event.Event => {
   if (redactor === undefined) return event
@@ -465,7 +563,13 @@ const redactEnvelope = (
 const redactMetadata = (redactor: SecretRedactor.Interface, metadata: Common.Metadata): Common.Metadata =>
   Object.fromEntries(Object.entries(metadata).map(([key, value]) => [key, redactor.redactJson(value)]))
 
-const toError = (cause: unknown, operation: string, event?: Event.Event) => {
+const toAppendAndProjectError = (cause: unknown, operation: string, event?: Event.Event) => {
+  if (cause instanceof ThreadEventLogError) return cause
+  if (cause instanceof ThreadProjectionError) return cause
+  return toEventLogError(cause, operation, event)
+}
+
+const toEventLogError = (cause: unknown, operation: string, event?: Event.Event) => {
   if (cause instanceof ThreadEventLogError) return cause
   return new ThreadEventLogError({
     message: cause instanceof Error ? cause.message : String(cause),

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import { WebSocketServer } from "ws"
 import { Ids } from "@rika/schema"
 import {
+  backendProxyEnv,
   isApiRequestUrl,
   proxyOrbPtyWebSocketRequest,
   resolveProxyTarget,
@@ -19,6 +20,12 @@ describe("web Vite backend proxy", () => {
     expect(isApiRequestUrl("/src/entry.ts")).toBe(false)
     expect(isApiRequestUrl("/@vite/client")).toBe(false)
     expect(isApiRequestUrl("/api/rika/v1/threads")).toBe(true)
+  })
+
+  test("supplies a source CLI script to the local backend resolver", () => {
+    const env = backendProxyEnv({})
+
+    expect(env.RIKA_BACKEND_SCRIPT).toEndWith("/packages/cli/src/main.ts")
   })
 
   test("routes thread path requests through the matching orb endpoint", async () => {

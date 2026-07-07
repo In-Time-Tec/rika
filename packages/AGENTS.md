@@ -15,7 +15,6 @@
 | `core/`        | Core Effect service examples and future runtime/domain services. See `core/AGENTS.md`.    |
 | `ide/`         | Editor integration seam and mock/reference IDE bridge. See `ide/AGENTS.md`.               |
 | `llm/`         | Provider-neutral LLM contracts and mode routing. See `llm/AGENTS.md`.                     |
-| `motel/`       | Rika-owned fork of the bundled telemetry inspector. See `motel/AGENTS.md`.                |
 | `orb/`         | E2B sandbox orchestration service boundary and test fake. See `orb/AGENTS.md`.            |
 | `persistence/` | Drizzle-backed local SQLite adapter services and migrations. See `persistence/AGENTS.md`. |
 | `plugin/`      | Trusted local TypeScript plugin API and host services. See `plugin/AGENTS.md`.            |

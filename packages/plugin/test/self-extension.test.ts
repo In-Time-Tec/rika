@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { Config, IdGenerator, Time } from "@rika/core"
-import { ArtifactStore } from "@rika/persistence"
-import { Common, Ids } from "@rika/schema"
+import { ArtifactStore, Database, Migration, ThreadProjection } from "@rika/persistence"
+import { Common, Event, Ids } from "@rika/schema"
 import { Effect, Layer, Option } from "effect"
-import { mkdtemp, readFile, stat } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PluginHost, PluginUi, SelfExtension } from "../src/index"
@@ -25,6 +25,8 @@ const exists = async (path: string) => {
 const baseLayer = (
   workspaceRoot: string,
   verifier = SelfExtension.fakeVerifier({ status: "passed", exit_code: 0 }),
+  timeLayer = timeSequenceLayer(),
+  artifactLayer = ArtifactStore.fakeLayer(),
 ) => {
   const configLayer = Config.layerFromValues({
     workspace_root: workspaceRoot,
@@ -33,19 +35,92 @@ const baseLayer = (
   })
   const supportLayer = Layer.mergeAll(
     configLayer,
-    ArtifactStore.fakeLayer(),
+    artifactLayer,
     IdGenerator.sequenceLayer(1),
-    Time.fixedLayer(now),
+    timeLayer,
     PluginUi.silentLayer,
   )
   return Layer.mergeAll(
     supportLayer,
-    SelfExtension.layerFromAdapters({ workspaceRoot, verifier }).pipe(Layer.provideMerge(supportLayer)),
-    PluginHost.layer.pipe(Layer.provideMerge(configLayer), Layer.provideMerge(PluginUi.silentLayer)),
+    SelfExtension.layerFromAdapters({
+      workspaceRoot,
+      verifier,
+      resolveWorkspaceId: () => Effect.succeed(Ids.WorkspaceId.make(workspaceRoot)),
+    }).pipe(Layer.provideMerge(supportLayer)),
+    PluginHost.layer.pipe(
+      Layer.provideMerge(configLayer),
+      Layer.provideMerge(PluginUi.silentLayer),
+      Layer.provideMerge(supportLayer),
+    ),
+  )
+}
+
+const projectedLayer = (workspaceRoot: string) => {
+  const configLayer = Config.layerFromValues({
+    workspace_root: workspaceRoot,
+    data_dir: `${workspaceRoot}/.rika`,
+    default_mode: "smart",
+  })
+  const databaseLayer = Database.memoryLayer
+  const supportLayer = Layer.mergeAll(
+    configLayer,
+    databaseLayer,
+    Migration.layer,
+    ThreadProjection.layer,
+    ArtifactStore.fakeLayer(),
+    IdGenerator.sequenceLayer(1),
+    Time.fixedLayer(now),
+  )
+  return Layer.mergeAll(supportLayer, SelfExtension.layer.pipe(Layer.provideMerge(supportLayer)))
+}
+
+const timeSequenceLayer = (start = now) => {
+  let next = start
+  return Layer.succeed(
+    Time.Service,
+    Time.Service.of({
+      nowMillis: Effect.sync(() => {
+        const current = next
+        next = Common.TimestampMillis.make(next + 1)
+        return current
+      }),
+    }),
   )
 }
 
 describe("SelfExtension", () => {
+  test("does not load or execute plugin files without a SelfExtension trust record", async () => {
+    const root = await tempRoot()
+    const pluginDirectory = join(root, ".rika", "plugins")
+    const marker = join(root, "untrusted-executed")
+    await mkdir(pluginDirectory, { recursive: true })
+    await writeFile(
+      join(pluginDirectory, "untrusted.ts"),
+      `await Bun.write(${JSON.stringify(marker)}, "executed")
+export default function (rika) {
+	rika.registerMode({ name: "rush", description: "Untrusted mode" })
+}
+`,
+    )
+
+    const report = await Effect.runPromise(
+      PluginHost.Service.pipe(
+        Effect.flatMap((host) => host.report),
+        Effect.provide(baseLayer(root)),
+      ),
+    )
+
+    expect(report.loaded).toEqual([])
+    expect(report.errors).toMatchObject([
+      {
+        name: "untrusted",
+        path: join(root, ".rika", "plugins", "untrusted.ts"),
+        message: "Plugin file has no enabled SelfExtension trust record",
+      },
+    ])
+    expect(await exists(marker)).toBe(false)
+  })
+
   test("generates project-local skills and records an artifact with a diff", async () => {
     const root = await tempRoot()
 
@@ -118,10 +193,79 @@ describe("SelfExtension", () => {
       status: "passed",
       command: "bun test --pass-with-no-tests",
     })
+    expect(result.enabled.trust.content_hash).toBe(
+      SelfExtension.contentHash(await readFile(join(root, ".rika", "plugins", "hello-world.ts"), "utf8")),
+    )
     expect(await exists(join(root, ".rika", "plugins", "hello-world.ts"))).toBe(true)
     expect(await exists(join(root, ".rika", "plugins", "hello-world.ts.disabled"))).toBe(false)
     expect(result.loaded.loaded.map((plugin) => plugin.name)).toEqual(["hello-world"])
     expect(result.commands.map((command) => command.name)).toEqual(["hello-world.hello"])
+  })
+
+  test("does not trust byte-identical same-path plugins across workspaces", async () => {
+    const rootA = await tempRoot()
+    const rootB = await tempRoot()
+    const artifactLayer = ArtifactStore.fakeLayer()
+
+    const report = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* SelfExtension.createPlugin({
+          name: "shared-name",
+          description: "Workspace A plugin",
+          thread_id: threadId,
+        }).pipe(Effect.provide(baseLayer(rootA, undefined, timeSequenceLayer(), artifactLayer)))
+        yield* SelfExtension.enablePlugin({
+          name: "shared-name",
+          verification_command: "bun test --pass-with-no-tests",
+          thread_id: threadId,
+        }).pipe(
+          Effect.provide(
+            baseLayer(rootA, undefined, timeSequenceLayer(Common.TimestampMillis.make(1_300)), artifactLayer),
+          ),
+        )
+        const source = yield* Effect.promise(() => readFile(join(rootA, ".rika", "plugins", "shared-name.ts"), "utf8"))
+        yield* Effect.promise(() => mkdir(join(rootB, ".rika", "plugins"), { recursive: true }))
+        yield* Effect.promise(() => writeFile(join(rootB, ".rika", "plugins", "shared-name.ts"), source))
+        return yield* PluginHost.Service.pipe(Effect.flatMap((host) => host.report)).pipe(
+          Effect.provide(
+            baseLayer(rootB, undefined, timeSequenceLayer(Common.TimestampMillis.make(1_400)), artifactLayer),
+          ),
+        )
+      }),
+    )
+
+    expect(report.loaded).toEqual([])
+    expect(report.errors).toMatchObject([
+      {
+        name: "shared-name",
+        path: join(rootB, ".rika", "plugins", "shared-name.ts"),
+        message: "Plugin file has no enabled SelfExtension trust record",
+      },
+    ])
+  })
+
+  test("rejects self-extension records for threads in another workspace", async () => {
+    const root = await tempRoot()
+    const otherThreadId = Ids.ThreadId.make("thread_other_extension_workspace")
+    const otherWorkspaceId = Ids.WorkspaceId.make("workspace_other_extension")
+
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadProjection.apply(threadCreated(otherThreadId, otherWorkspaceId))
+        return yield* SelfExtension.createPlugin({
+          name: "cross-thread",
+          description: "Cross workspace plugin",
+          thread_id: otherThreadId,
+        }).pipe(Effect.flip)
+      }).pipe(Effect.provide(projectedLayer(root))),
+    )
+
+    expect(error).toMatchObject({
+      operation: "resolveWorkspace",
+      message: `Thread ${otherThreadId} belongs to workspace ${otherWorkspaceId}, not ${root}`,
+    })
+    expect(await exists(join(root, ".rika", "plugins", "cross-thread.ts.disabled"))).toBe(false)
   })
 
   test("failed verification records the decision and keeps a plugin bypassed", async () => {
@@ -152,6 +296,90 @@ describe("SelfExtension", () => {
     })
   })
 
+  test("rejects an enabled plugin whose file content changed after trust was recorded", async () => {
+    const root = await tempRoot()
+    const marker = join(root, "tampered-executed")
+
+    const report = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* SelfExtension.createPlugin({ name: "tamper-me", description: "Tamper plugin", thread_id: threadId })
+        yield* SelfExtension.enablePlugin({
+          name: "tamper-me",
+          verification_command: "bun test --pass-with-no-tests",
+          thread_id: threadId,
+        })
+        yield* Effect.promise(() =>
+          writeFile(
+            join(root, ".rika", "plugins", "tamper-me.ts"),
+            `await Bun.write(${JSON.stringify(marker)}, "executed")
+export default function (rika) {
+	rika.registerMode({ name: "rush", description: "Tampered mode" })
+}
+`,
+          ),
+        )
+        return yield* PluginHost.Service.pipe(Effect.flatMap((host) => host.reload))
+      }).pipe(Effect.provide(baseLayer(root))),
+    )
+
+    expect(report.loaded).toEqual([])
+    expect(report.errors).toMatchObject([
+      {
+        name: "tamper-me",
+        path: join(root, ".rika", "plugins", "tamper-me.ts"),
+        message: "Plugin content hash does not match the enabled SelfExtension trust record",
+      },
+    ])
+    expect(await exists(marker)).toBe(false)
+  })
+
+  test("rejects active plugin files when latest trust records have ambiguous timestamps", async () => {
+    const root = await tempRoot()
+    const marker = join(root, "ambiguous-executed")
+    const layer = baseLayer(root, SelfExtension.fakeVerifier({ status: "passed", exit_code: 0 }), Time.fixedLayer(now))
+
+    const report = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* SelfExtension.createPlugin({ name: "ambiguous", description: "Ambiguous plugin", thread_id: threadId })
+        yield* Effect.promise(() =>
+          writeFile(
+            join(root, ".rika", "plugins", "ambiguous.ts.disabled"),
+            `await Bun.write(${JSON.stringify(marker)}, "executed")
+export default function (rika) {
+	rika.registerMode({ name: "rush", description: "Ambiguous mode" })
+}
+`,
+          ),
+        )
+        yield* SelfExtension.enablePlugin({
+          name: "ambiguous",
+          verification_command: "bun test --pass-with-no-tests",
+          thread_id: threadId,
+        })
+        yield* SelfExtension.disablePlugin({
+          name: "ambiguous",
+          reason: "disabled",
+          thread_id: threadId,
+        })
+        yield* Effect.promise(async () => {
+          const disabled = await readFile(join(root, ".rika", "plugins", "ambiguous.ts.disabled"), "utf8")
+          await writeFile(join(root, ".rika", "plugins", "ambiguous.ts"), disabled)
+        })
+        return yield* PluginHost.Service.pipe(Effect.flatMap((host) => host.reload))
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(report.loaded).toEqual([])
+    expect(report.errors).toMatchObject([
+      {
+        name: "ambiguous",
+        path: join(root, ".rika", "plugins", "ambiguous.ts"),
+        message: "Plugin has multiple latest SelfExtension trust records with the same timestamp",
+      },
+    ])
+    expect(await exists(marker)).toBe(false)
+  })
+
   test("rollback disables an enabled plugin without deleting the generated source", async () => {
     const root = await tempRoot()
 
@@ -168,4 +396,14 @@ describe("SelfExtension", () => {
     expect(await exists(join(root, ".rika", "plugins", "toggle-me.ts"))).toBe(false)
     expect(await exists(join(root, ".rika", "plugins", "toggle-me.ts.disabled"))).toBe(true)
   })
+})
+
+const threadCreated = (threadIdValue: Ids.ThreadId, workspaceId: Ids.WorkspaceId): Event.ThreadCreated => ({
+  id: Ids.EventId.make("event_other_extension_workspace_created"),
+  thread_id: threadIdValue,
+  sequence: 1,
+  version: 1,
+  created_at: now,
+  type: "thread.created",
+  data: { workspace_id: workspaceId },
 })

@@ -8,6 +8,11 @@ export interface Calls {
     readonly cmd: ReadonlyArray<string>
     readonly opts: SandboxClient.ExecOptions
   }>
+  readonly execKill: Array<{
+    readonly sandboxId: string
+    readonly cmd: ReadonlyArray<string>
+    readonly opts: SandboxClient.ExecOptions
+  }>
   readonly writeFile: Array<{
     readonly sandboxId: string
     readonly path: string
@@ -34,7 +39,8 @@ export interface Calls {
 
 export interface State {
   readonly calls: Calls
-  readonly execResults: Array<ReadonlyArray<SandboxClient.ExecChunk>>
+  readonly execResults: Array<ExecResult>
+  readonly killFailureMessage?: string
   readonly sandboxes: Map<string, SandboxClient.SandboxSummary>
   readonly templates: Set<string>
   readonly files: Map<string, Uint8Array>
@@ -42,14 +48,23 @@ export interface State {
 }
 
 export interface StateInput {
-  readonly execResults?: ReadonlyArray<ReadonlyArray<SandboxClient.ExecChunk>>
+  readonly execResults?: ReadonlyArray<ExecResult>
+  readonly killFailureMessage?: string
   readonly templates?: ReadonlyArray<string>
 }
+
+export type ExecResult =
+  | ReadonlyArray<SandboxClient.ExecChunk>
+  | {
+      readonly interruptible: true
+      readonly chunks?: ReadonlyArray<SandboxClient.ExecChunk>
+    }
 
 export const makeState = (input: StateInput = {}): State => ({
   calls: {
     create: [],
     exec: [],
+    execKill: [],
     writeFile: [],
     readFile: [],
     hostUrl: [],
@@ -61,6 +76,7 @@ export const makeState = (input: StateInput = {}): State => ({
     templateExists: [],
   },
   execResults: Array.from(input.execResults ?? []),
+  ...(input.killFailureMessage === undefined ? {} : { killFailureMessage: input.killFailureMessage }),
   sandboxes: new Map(),
   templates: new Set(input.templates ?? []),
   files: new Map(),
@@ -91,7 +107,19 @@ const makeService = (state: State): SandboxClient.Interface => ({
       opts: cloneExecOptions(opts),
     })
     const chunks = state.execResults.shift() ?? [{ type: "exit", exitCode: 0 }]
-    return Stream.fromIterable(chunks)
+    if (isExecChunks(chunks)) return Stream.fromIterable(chunks)
+    return Stream.fromIterable(chunks.chunks ?? []).pipe(
+      Stream.concat(Stream.never),
+      Stream.ensuring(
+        Effect.sync(() => {
+          state.calls.execKill.push({
+            sandboxId,
+            cmd: Array.from(cmd),
+            opts: cloneExecOptions(opts),
+          })
+        }),
+      ),
+    )
   },
   writeFile: Effect.fn("SandboxClientFake.writeFile")(function* (sandboxId: string, path: string, bytes: Uint8Array) {
     state.calls.writeFile.push({ sandboxId, path, bytes })
@@ -123,7 +151,15 @@ const makeService = (state: State): SandboxClient.Interface => ({
   }),
   kill: Effect.fn("SandboxClientFake.kill")(function* (sandboxId: string) {
     state.calls.kill.push(sandboxId)
+    if (state.killFailureMessage !== undefined) {
+      return yield* new SandboxClient.SandboxClientError({
+        message: state.killFailureMessage,
+        operation: "kill",
+        sandboxId,
+      })
+    }
     state.sandboxes.delete(sandboxId)
+    return yield* Effect.void
   }),
   setTimeout: Effect.fn("SandboxClientFake.setTimeout")(function* (sandboxId: string, timeoutMs: number) {
     state.calls.setTimeout.push({ sandboxId, timeoutMs })
@@ -145,6 +181,8 @@ const cloneCreateInput = (input: SandboxClient.CreateInput): SandboxClient.Creat
   timeoutMs: input.timeoutMs,
   ...cloneLifecycle(input.lifecycle),
 })
+
+const isExecChunks = (result: ExecResult): result is ReadonlyArray<SandboxClient.ExecChunk> => Array.isArray(result)
 
 const cloneLifecycle = (lifecycle: SandboxClient.CreateInput["lifecycle"]) =>
   lifecycle === undefined

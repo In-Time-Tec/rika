@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router, Tokens } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message, Tool } from "@rika/schema"
@@ -46,6 +46,8 @@ const makeLayer = (
       stream: () => Stream.empty,
     }),
   )
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const services = Layer.mergeAll(
     Config.layerFromValues(config),
     Database.memoryLayer,
@@ -54,10 +56,13 @@ const makeLayer = (
     ThreadProjection.layer,
     Time.fixedLayer(now),
     IdGenerator.sequenceLayer(1),
+    redactorLayer,
+    diagnosticsLayer,
     routerLayer,
   )
+  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(services), Layer.provideMerge(diagnosticsLayer))
 
-  return CompactionService.layer.pipe(Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(services))))
+  return CompactionService.layer.pipe(Layer.provideMerge(threadLayer))
 }
 
 describe("CompactionService", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Embeddings } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadMemoryStore, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
@@ -69,6 +69,8 @@ describe("ThreadMemoryIndexer", () => {
 
 const testLayer = (embeddingsLayer: Layer.Layer<Embeddings.Service>, diagnostics: Array<Diagnostics.Entry> = []) => {
   const databaseLayer = Database.memoryLayer
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer(diagnostics).pipe(Layer.provideMerge(redactorLayer))
   const storageLayer = Layer.mergeAll(
     databaseLayer,
     Migration.layer,
@@ -77,9 +79,14 @@ const testLayer = (embeddingsLayer: Layer.Layer<Embeddings.Service>, diagnostics
     ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer)),
     Time.fixedLayer(now),
     IdGenerator.sequenceLayer(1),
-    Diagnostics.memoryLayer(diagnostics),
+    redactorLayer,
+    diagnosticsLayer,
   )
-  return ThreadMemoryIndexer.layer.pipe(Layer.provideMerge(storageLayer), Layer.provideMerge(embeddingsLayer))
+  return ThreadMemoryIndexer.layer.pipe(
+    Layer.provideMerge(storageLayer),
+    Layer.provideMerge(embeddingsLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
 }
 
 const countingEmbeddingsLayer = (texts: Array<string>) =>

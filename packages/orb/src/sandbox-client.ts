@@ -9,7 +9,7 @@ import {
   type SandboxInfo,
   type SandboxLifecycle as E2bSandboxLifecycle,
 } from "e2b"
-import { Cause, Context, Effect, Layer, Queue, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Exit, Layer, Queue, Redacted, Schema, Stream } from "effect"
 
 export interface SandboxMetadata extends Record<string, string> {
   readonly thread_id: Ids.ThreadId
@@ -193,13 +193,13 @@ export const encodeArgvForShell = (
 
 export const urlFromHost = (host: string) => (/^https?:\/\//.test(host) ? host : `https://${host}`)
 
-const makeLive = (apiKey: string): Interface =>
+const makeLive = (apiKey: Redacted.Redacted): Interface =>
   Service.of({
     create: Effect.fn("SandboxClient.create")(function* (input: CreateInput) {
       yield* validateCreateInput(input)
       const sandbox = yield* tryPromise("create", () =>
         Sandbox.create(input.templateId, {
-          apiKey,
+          apiKey: Redacted.value(apiKey),
           envs: input.envs,
           metadata: input.metadata,
           timeoutMs: input.timeoutMs,
@@ -244,24 +244,28 @@ const makeLive = (apiKey: string): Interface =>
       return urlFromHost(sandbox.getHost(port))
     }),
     pause: Effect.fn("SandboxClient.pause")(function* (sandboxId: string) {
-      yield* tryPromise("pause", () => Sandbox.pause(sandboxId, { apiKey }), sandboxId)
+      yield* tryPromise("pause", () => Sandbox.pause(sandboxId, { apiKey: Redacted.value(apiKey) }), sandboxId)
     }),
     resume: Effect.fn("SandboxClient.resume")(function* (sandboxId: string) {
       yield* connect(apiKey, sandboxId, "resume")
     }),
     kill: Effect.fn("SandboxClient.kill")(function* (sandboxId: string) {
-      yield* tryPromise("kill", () => Sandbox.kill(sandboxId, { apiKey }), sandboxId)
+      yield* tryPromise("kill", () => Sandbox.kill(sandboxId, { apiKey: Redacted.value(apiKey) }), sandboxId)
     }),
     setTimeout: Effect.fn("SandboxClient.setTimeout")(function* (sandboxId: string, ms: number) {
-      yield* tryPromise("setTimeout", () => Sandbox.setTimeout(sandboxId, ms, { apiKey }), sandboxId)
+      yield* tryPromise(
+        "setTimeout",
+        () => Sandbox.setTimeout(sandboxId, ms, { apiKey: Redacted.value(apiKey) }),
+        sandboxId,
+      )
     }),
     list: Effect.fn("SandboxClient.list")(function* (filter?: ListFilter) {
       return yield* tryPromise("list", async () => {
         const paginator = Sandbox.list(
           filter === undefined
-            ? { apiKey }
+            ? { apiKey: Redacted.value(apiKey) }
             : {
-                apiKey,
+                apiKey: Redacted.value(apiKey),
                 query: { metadata: filter.metadata },
               },
         )
@@ -274,7 +278,7 @@ const makeLive = (apiKey: string): Interface =>
       })
     }),
     templateExists: Effect.fn("SandboxClient.templateExists")(function* (templateId: string) {
-      return yield* tryPromise("templateExists", () => Template.exists(templateId, { apiKey }))
+      return yield* tryPromise("templateExists", () => Template.exists(templateId, { apiKey: Redacted.value(apiKey) }))
     }),
   })
 
@@ -301,7 +305,7 @@ const makeLiveFromConfig = (config: Config.Interface): Interface =>
   })
 
 const apiKeyFromConfig = (config: Config.Interface) =>
-  config.requireEnv("E2B_API_KEY").pipe(
+  config.requireSecret("E2B_API_KEY").pipe(
     Effect.mapError(
       (error) =>
         new OrbConfigError({
@@ -316,8 +320,8 @@ const toE2bLifecycle = (lifecycle: SandboxLifecycle): E2bSandboxLifecycle => ({
   ...(lifecycle.autoResume === undefined ? {} : { autoResume: lifecycle.autoResume }),
 })
 
-const connect = (apiKey: string, sandboxId: string, operation: string) =>
-  tryPromise(operation, () => Sandbox.connect(sandboxId, { apiKey }), sandboxId)
+const connect = (apiKey: Redacted.Redacted, sandboxId: string, operation: string) =>
+  tryPromise(operation, () => Sandbox.connect(sandboxId, { apiKey: Redacted.value(apiKey) }), sandboxId)
 
 const runCommand = (
   sandbox: Sandbox,
@@ -330,43 +334,86 @@ const runCommand = (
   { readonly type: "completed"; readonly result: CommandResult } | { readonly type: "started"; readonly pid: number },
   SandboxClientError
 > =>
+  opts.background === true
+    ? runBackgroundCommand(sandbox, sandboxId, command, opts)
+    : runForegroundCommand(sandbox, sandboxId, command, opts, queue, emitted)
+
+const commandBaseOptions = (opts: ExecOptions, signal: AbortSignal) => ({
+  ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
+  ...(opts.envs === undefined ? {} : { envs: opts.envs }),
+  signal,
+})
+
+const runBackgroundCommand = (
+  sandbox: Sandbox,
+  sandboxId: string,
+  command: string,
+  opts: ExecOptions,
+): Effect.Effect<{ readonly type: "started"; readonly pid: number }, SandboxClientError> =>
   tryPromise(
     "exec",
-    async () => {
+    async (signal) => {
+      const result = await sandbox.commands.run(command, { ...commandBaseOptions(opts, signal), background: true })
+      const pid = result.pid
+      await result.disconnect()
+      return { type: "started", pid }
+    },
+    sandboxId,
+  )
+
+const runForegroundCommand = (
+  sandbox: Sandbox,
+  sandboxId: string,
+  command: string,
+  opts: ExecOptions,
+  queue: ExecQueue,
+  emitted: { stdout: boolean; stderr: boolean },
+): Effect.Effect<{ readonly type: "completed"; readonly result: CommandResult }, SandboxClientError> =>
+  Effect.acquireUseRelease(
+    tryPromise(
+      "exec",
+      (signal) =>
+        sandbox.commands.run(command, {
+          ...commandBaseOptions(opts, signal),
+          background: true,
+          onStdout: (data) => {
+            emitted.stdout = true
+            return Effect.runPromise(Queue.offer(queue, { type: "stdout", data }).pipe(Effect.asVoid))
+          },
+          onStderr: (data) => {
+            emitted.stderr = true
+            return Effect.runPromise(Queue.offer(queue, { type: "stderr", data }).pipe(Effect.asVoid))
+          },
+        }),
+      sandboxId,
+    ),
+    (handle) => waitCommand(handle, sandboxId).pipe(Effect.map((result) => ({ type: "completed" as const, result }))),
+    (handle, exit) => (Exit.isSuccess(exit) ? Effect.void : killCommandHandle(handle, sandboxId)),
+  )
+
+const waitCommand = (handle: CommandHandle, sandboxId: string): Effect.Effect<CommandResult, SandboxClientError> =>
+  tryPromise(
+    "exec",
+    async (signal) => {
+      const killOnAbort = () => {
+        void handle.kill().catch(() => undefined)
+      }
+      if (signal.aborted) killOnAbort()
+      signal.addEventListener("abort", killOnAbort, { once: true })
       try {
-        const base = {
-          ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
-          ...(opts.envs === undefined ? {} : { envs: opts.envs }),
-        }
-        const result =
-          opts.background === true
-            ? await sandbox.commands.run(command, { ...base, background: true })
-            : await sandbox.commands.run(command, {
-                ...base,
-                onStdout: (data) => {
-                  emitted.stdout = true
-                  return Effect.runPromise(Queue.offer(queue, { type: "stdout", data }).pipe(Effect.asVoid))
-                },
-                onStderr: (data) => {
-                  emitted.stderr = true
-                  return Effect.runPromise(Queue.offer(queue, { type: "stderr", data }).pipe(Effect.asVoid))
-                },
-              })
-        if (isCommandHandle(result)) {
-          const pid = result.pid
-          await result.disconnect()
-          return { type: "started", pid }
-        }
-        return { type: "completed", result }
+        return await handle.wait()
       } catch (error) {
-        if (error instanceof CommandExitError) {
-          return { type: "completed", result: commandResultFromExitError(error) }
-        }
+        if (error instanceof CommandExitError) return commandResultFromExitError(error)
         throw error
+      } finally {
+        signal.removeEventListener("abort", killOnAbort)
       }
     },
     sandboxId,
   )
+
+const killCommandHandle = (handle: CommandHandle, sandboxId: string): Effect.Effect<void> =>
+  tryPromise("exec_kill", () => handle.kill(), sandboxId).pipe(Effect.ignore)
 
 const offerMissingOutput = (queue: ExecQueue, emitted: { stdout: boolean; stderr: boolean }, result: CommandResult) => {
   const stdout =
@@ -379,9 +426,6 @@ const offerMissingOutput = (queue: ExecQueue, emitted: { stdout: boolean; stderr
 const stdoutChunk = (data: string): ExecChunk => ({ type: "stdout", data })
 
 const stderrChunk = (data: string): ExecChunk => ({ type: "stderr", data })
-
-const isCommandHandle = (value: CommandHandle | CommandResult): value is CommandHandle =>
-  "wait" in value && typeof value.wait === "function"
 
 const commandResultFromExitError = (error: CommandExitError): CommandResult => ({
   exitCode: error.exitCode,
@@ -405,7 +449,7 @@ const shellQuote = (value: string): string => {
 
 const tryPromise = <A>(
   operation: string,
-  run: () => Promise<A>,
+  run: (signal: AbortSignal) => Promise<A>,
   sandboxId?: string,
 ): Effect.Effect<A, SandboxClientError> =>
   Effect.tryPromise({

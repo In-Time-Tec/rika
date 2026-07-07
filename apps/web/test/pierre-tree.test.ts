@@ -58,6 +58,63 @@ describe("Pierre tree adapter", () => {
     }
   })
 
+  test("updates paths in place and preserves collapsed directories", async () => {
+    const container = document.createElement("div")
+    document.body.append(container)
+
+    const handle = mountPierreTree({
+      container,
+      paths: ["src/", "src/index.ts", "src/nested/", "src/nested/file.ts"],
+      onSelectedPath: () => undefined,
+    })
+
+    try {
+      const host = container.firstElementChild
+      expect(host?.tagName).toBe("FILE-TREE-CONTAINER")
+      expect(treeItem(container, "src/nested/")?.getAttribute("aria-expanded")).toBe("true")
+
+      treeItem(container, "src/nested/")?.click()
+      await Bun.sleep(0)
+
+      expect(treeItem(container, "src/nested/")?.getAttribute("aria-expanded")).toBe("false")
+
+      handle.update({
+        paths: ["src/", "src/index.ts", "src/new.ts", "src/nested/", "src/nested/file.ts"],
+        selected_path: "src/new.ts",
+      })
+
+      expect(container.firstElementChild).toBe(host)
+      expect(treeItem(container, "src/nested/")?.getAttribute("aria-expanded")).toBe("false")
+      expect(treeItem(container, "src/new.ts")?.getAttribute("aria-selected")).toBe("true")
+    } finally {
+      handle.destroy()
+    }
+  })
+
+  test("updates git status markers", () => {
+    const container = document.createElement("div")
+    document.body.append(container)
+
+    const handle = mountPierreTree({
+      container,
+      paths: ["src/", "src/index.ts"],
+      onSelectedPath: () => undefined,
+    })
+
+    try {
+      expect(treeItem(container, "src/index.ts")?.getAttribute("data-item-git-status")).toBeNull()
+
+      handle.update({
+        paths: ["src/", "src/index.ts"],
+        git_status: [{ path: "src/index.ts", status: "modified" }],
+      })
+
+      expect(treeItem(container, "src/index.ts")?.getAttribute("data-item-git-status")).toBe("modified")
+    } finally {
+      handle.destroy()
+    }
+  })
+
   test("reports canonical selected paths from user selection", () => {
     const container = document.createElement("div")
     const selected: Array<string> = []

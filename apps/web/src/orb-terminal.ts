@@ -1,5 +1,6 @@
 import { FitAddon, Terminal, init, type ITerminalAddon } from "ghostty-web"
 import type { Ids } from "@rika/schema"
+import { Context, Duration, Effect, HashMap, Layer, Option, Ref, Schedule, Fiber } from "effect"
 
 export type OrbTerminalStatus = "idle" | "connecting" | "connected" | "disconnected" | "failed"
 
@@ -15,6 +16,16 @@ export interface OrbTerminalHandle {
   readonly reconnect: () => Promise<void>
   readonly destroy: () => void
 }
+
+export interface OrbTerminalRegistryInterface {
+  readonly register: (threadId: Ids.ThreadId, handle: OrbTerminalHandle) => Effect.Effect<void>
+  readonly unregister: (threadId: Ids.ThreadId, handle: OrbTerminalHandle) => Effect.Effect<void>
+  readonly reconnect: (threadId: Ids.ThreadId) => Effect.Effect<boolean>
+}
+
+export class OrbTerminalRegistry extends Context.Service<OrbTerminalRegistry, OrbTerminalRegistryInterface>()(
+  "@rika/web/OrbTerminalRegistry",
+) {}
 
 export interface OrbTerminalRuntime {
   readonly location: Pick<Location, "protocol" | "host">
@@ -62,7 +73,11 @@ export interface OrbTerminalWebSocket {
   ) => void
 }
 
-export type OrbTerminalWebSocketListener = (event: { readonly data?: unknown }) => void
+export type OrbTerminalWebSocketListener = (event: {
+  readonly data?: unknown
+  readonly code?: number
+  readonly reason?: string
+}) => void
 
 export interface OrbPtyWebSocketUrlInput {
   readonly thread_id: Ids.ThreadId
@@ -73,11 +88,45 @@ export interface OrbPtyWebSocketUrlInput {
 
 const socketConnecting = 0
 const socketOpen = 1
-const terminalHandles = new Map<Ids.ThreadId, OrbTerminalHandle>()
+const reconnectSchedule = Schedule.exponential("250 millis", 2).pipe(
+  Schedule.modifyDelay((_output, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
+
+type OrbTerminalHandles = HashMap.HashMap<Ids.ThreadId, OrbTerminalHandle>
+
+const makeOrbTerminalRegistry = (handles: Ref.Ref<OrbTerminalHandles>): OrbTerminalRegistryInterface => ({
+  register: (threadId, handle) => Ref.update(handles, (current) => HashMap.set(current, threadId, handle)),
+  unregister: (threadId, handle) =>
+    Ref.update(handles, (current) =>
+      Option.match(HashMap.get(current, threadId), {
+        onNone: () => current,
+        onSome: (currentHandle) => (currentHandle === handle ? HashMap.remove(current, threadId) : current),
+      }),
+    ),
+  reconnect: (threadId) =>
+    Effect.gen(function* () {
+      const current = yield* Ref.get(handles)
+      const handle = Option.getOrUndefined(HashMap.get(current, threadId))
+      if (handle === undefined) return false
+      return yield* Effect.promise(() =>
+        handle.reconnect().then(
+          () => true,
+          () => false,
+        ),
+      )
+    }),
+})
+
+const orbTerminalHandles: Ref.Ref<OrbTerminalHandles> = Ref.makeUnsafe(HashMap.empty())
+
+export const orbTerminalRegistry = makeOrbTerminalRegistry(orbTerminalHandles)
+
+export const orbTerminalRegistryLayer = Layer.succeed(OrbTerminalRegistry, OrbTerminalRegistry.of(orbTerminalRegistry))
 
 export const mountOrbTerminal = (
   input: OrbTerminalMountInput,
   runtime: OrbTerminalRuntime = browserOrbTerminalRuntime(),
+  registry?: OrbTerminalRegistryInterface,
 ): OrbTerminalHandle => {
   let terminal: OrbTerminalTerminal | undefined
   let fitAddon: OrbTerminalFitAddon | undefined
@@ -86,6 +135,7 @@ export const mountOrbTerminal = (
   let resizeSubscription: OrbTerminalDisposable | undefined
   let socketListeners: ReadonlyArray<() => void> = []
   let initializing: Promise<void> | undefined
+  let reconnectFiber: Fiber.Fiber<void> | undefined
   let destroyed = false
 
   const cleanupConnection = () => {
@@ -100,6 +150,33 @@ export const mountOrbTerminal = (
     if (active !== undefined) {
       if (active.readyState === socketOpen || active.readyState === socketConnecting) active.close()
     }
+  }
+
+  const stopAutoReconnect = () => {
+    const fiber = reconnectFiber
+    reconnectFiber = undefined
+    if (fiber !== undefined) Effect.runFork(Fiber.interrupt(fiber))
+  }
+
+  const startAutoReconnect = () => {
+    if (reconnectFiber !== undefined || destroyed) return
+    reconnectFiber = Effect.runFork(
+      Effect.sync(() => {
+        const active = socket
+        if (destroyed) return
+        if (active !== undefined && (active.readyState === socketOpen || active.readyState === socketConnecting)) return
+        connect(true)
+      }).pipe(
+        Effect.repeat(reconnectSchedule),
+        Effect.asVoid,
+        Effect.catchCause(() => Effect.void),
+        Effect.ensuring(
+          Effect.sync(() => {
+            reconnectFiber = undefined
+          }),
+        ),
+      ),
+    )
   }
 
   const ensureTerminal = async () => {
@@ -118,9 +195,10 @@ export const mountOrbTerminal = (
     await initializing
   }
 
-  const connect = () => {
+  const connect = (automatic = false) => {
     const activeTerminal = terminal
     if (destroyed || activeTerminal === undefined) return
+    if (!automatic) stopAutoReconnect()
     cleanupConnection()
     input.onStatus("connecting")
     const nextSocket = runtime.createWebSocket(
@@ -141,6 +219,7 @@ export const mountOrbTerminal = (
     })
     const onOpen = () => {
       if (socket !== nextSocket || destroyed) return
+      stopAutoReconnect()
       input.onStatus("connected")
       activeTerminal.focus?.()
     }
@@ -153,9 +232,12 @@ export const mountOrbTerminal = (
       input.onStatus("failed")
       input.onError("orb terminal websocket failed")
     }
-    const onClose = () => {
+    const onClose = (event: { readonly code?: number; readonly reason?: string }) => {
       if (socket !== nextSocket || destroyed) return
+      socket = undefined
       input.onStatus("disconnected")
+      if (isNormalPtyExit(event)) return
+      startAutoReconnect()
     }
     socketListeners = [
       addSocketListener(nextSocket, "open", onOpen),
@@ -167,6 +249,7 @@ export const mountOrbTerminal = (
 
   const activate = async () => {
     try {
+      stopAutoReconnect()
       await ensureTerminal()
       connect()
     } catch (cause) {
@@ -182,23 +265,22 @@ export const mountOrbTerminal = (
     destroy: () => {
       if (destroyed) return
       destroyed = true
+      stopAutoReconnect()
       cleanupConnection()
-      terminalHandles.delete(input.thread_id)
+      if (registry !== undefined) Effect.runFork(registry.unregister(input.thread_id, handle))
       fitAddon?.dispose()
       terminal?.dispose?.()
       input.container.replaceChildren()
     },
   }
-  terminalHandles.set(input.thread_id, handle)
+  if (registry !== undefined) Effect.runFork(registry.register(input.thread_id, handle))
   return handle
 }
 
-export const reconnectOrbTerminal = (threadId: Ids.ThreadId): boolean => {
-  const handle = terminalHandles.get(threadId)
-  if (handle === undefined) return false
-  void handle.reconnect()
-  return true
-}
+export const reconnectOrbTerminal = (threadId: Ids.ThreadId) =>
+  Effect.gen(function* () {
+    return yield* orbTerminalRegistry.reconnect(threadId)
+  })
 
 export const orbPtyWebSocketUrl = (input: OrbPtyWebSocketUrlInput): string => {
   const protocol = input.location.protocol === "https:" ? "wss:" : "ws:"
@@ -235,7 +317,7 @@ export const orbTerminalWebSocket = (socket: WebSocket): OrbTerminalWebSocket =>
     close: () => socket.close(),
     addEventListener: (event, listener) => {
       const wrapped = (domEvent: Event) => {
-        listener({ data: eventData(domEvent) })
+        listener(socketEventData(domEvent))
       }
       listeners.set(listener, wrapped)
       socket.addEventListener(event, wrapped)
@@ -250,6 +332,18 @@ export const orbTerminalWebSocket = (socket: WebSocket): OrbTerminalWebSocket =>
 }
 
 const eventData = (event: Event): unknown => ("data" in event ? event.data : undefined)
+
+const socketEventData = (event: Event) => ({
+  data: eventData(event),
+  ...("code" in event && typeof event.code === "number" ? { code: event.code } : {}),
+  ...("reason" in event && typeof event.reason === "string" ? { reason: event.reason } : {}),
+})
+
+const isNormalPtyExit = (event: { readonly code?: number; readonly reason?: string }) =>
+  event.code === 1000 &&
+  event.reason !== undefined &&
+  event.reason.startsWith("pty ") &&
+  event.reason.endsWith(" exited")
 
 const addSocketListener = (
   socket: OrbTerminalWebSocket,

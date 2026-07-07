@@ -1,7 +1,8 @@
 import { readdir, readFile, stat } from "node:fs/promises"
 import { homedir } from "node:os"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path"
-import { Config, Settings } from "@rika/core"
+import { Config, Settings, StringArray } from "@rika/core"
+import { IdeBridge } from "@rika/ide"
 import { Embeddings } from "@rika/llm"
 import { ThreadMemoryStore } from "@rika/persistence"
 import { Common, Event, Ide, Ids } from "@rika/schema"
@@ -113,7 +114,7 @@ const makeService = (
     resolve: Effect.fn("ContextResolver.resolve")(function* (input: ResolveInput) {
       const maxContentChars = clamp(input.max_content_chars ?? defaultMaxContentChars, 2_000, 80_000)
       const mentions = parseMentions(input.content)
-      const relevantPaths = uniqueStrings([
+      const relevantPaths = StringArray.uniqueNonEmptyStrings([
         ...mentions.files.map((mention) => mention.value),
         ...mentions.images.map((mention) => mention.value),
         ...observedPaths(input.history ?? []),
@@ -128,7 +129,7 @@ const makeService = (
         input.content,
       )
       const memoryEntries = yield* resolveAutoMemoryEntries(workspaceRoot, threadService, memory, input)
-      const ideEntries = input.ide_context === undefined ? [] : ideContextEntries(input.ide_context)
+      const ideEntries = input.ide_context === undefined ? [] : IdeBridge.contextEntries(input.ide_context)
       const entries = dedupeEntries([...guidanceEntries, ...mentionEntries, ...memoryEntries, ...ideEntries]).slice(
         0,
         maxEntries,
@@ -210,7 +211,7 @@ const threadReferences = (content: string): ReadonlyArray<string> => {
     const value = trimTrailingPunctuation((match[1] ?? "").split(/[/?#]/)[0] ?? "")
     if (isThreadReferenceId(value)) values.push(value)
   }
-  return uniqueStrings(values)
+  return StringArray.uniqueNonEmptyStrings(values)
 }
 
 const isThreadReferenceId = (value: string) => ampThreadId(value) || rikaThreadId(value)
@@ -227,7 +228,7 @@ const fileMentions = (content: string): ReadonlyArray<string> => {
     if (!looksLikePath(value)) continue
     values.push(trimTrailingPunctuation(value))
   }
-  return uniqueStrings(values)
+  return StringArray.uniqueNonEmptyStrings(values)
 }
 
 const looksLikePath = (value: string) =>
@@ -247,7 +248,7 @@ const resolveGuidanceEntries = (
   relevantPaths: ReadonlyArray<string>,
 ): Effect.Effect<ReadonlyArray<Event.ContextEntry>, ContextResolverError> =>
   Effect.gen(function* () {
-    const guidanceDirectories = uniqueStrings([
+    const guidanceDirectories = StringArray.uniqueNonEmptyStrings([
       ...ancestorDirectories(workspaceRoot),
       ...subtreeDirectories(workspaceRoot, relevantPaths),
     ])
@@ -256,7 +257,11 @@ const resolveGuidanceEntries = (
       const path = yield* firstExistingGuidance(fileSystem, directory)
       if (path !== undefined) localGuidance.push(path)
     }
-    const locations = uniqueStrings([...systemGuidancePaths(), ...userGuidancePaths(), ...localGuidance])
+    const locations = StringArray.uniqueNonEmptyStrings([
+      ...systemGuidancePaths(),
+      ...userGuidancePaths(),
+      ...localGuidance,
+    ])
 
     const entries: Array<Event.ContextEntry> = []
     for (const path of locations) {
@@ -317,7 +322,7 @@ const subtreeDirectories = (workspaceRoot: string, relevantPaths: ReadonlyArray<
       current = dirname(current)
     }
   }
-  return uniqueStrings(directories.toSorted((left, right) => left.length - right.length))
+  return StringArray.uniqueNonEmptyStrings(directories.toSorted((left, right) => left.length - right.length))
 }
 
 const systemGuidancePaths = () => [
@@ -451,7 +456,7 @@ const resolveAutoMemoryEntries = (
 ): Effect.Effect<ReadonlyArray<Event.ContextEntry>, ContextResolverError> =>
   Effect.gen(function* () {
     if (memory.settings === undefined || memory.embeddings === undefined || memory.memoryStore === undefined) return []
-    const snapshot = yield* memory.settings.snapshot
+    const snapshot = yield* memory.settings.snapshot.pipe(Effect.mapError((error) => contextError("autoMemory", error)))
     if (!snapshot.values.memory.autoContext) return []
     const vector = yield* memory.embeddings.embed([input.content]).pipe(
       Effect.map((vectors) => vectors[0]),
@@ -498,81 +503,6 @@ const workspaceIdForThread = (
     Effect.map((record) => record.summary.workspace_id),
     Effect.catch(() => Effect.succeed(WorkspaceIdentity.resolveWorkspaceId({ workspace_root: workspaceRoot }))),
   )
-
-const ideContextEntries = (context: Ide.ContextSnapshot): ReadonlyArray<Event.ContextEntry> => {
-  const entries: Array<Event.ContextEntry> = []
-  if (context.active_file !== undefined) entries.push(ideActiveFileEntry(context))
-  const diagnostics = context.diagnostics ?? []
-  if (diagnostics.length > 0) entries.push(ideDiagnosticsEntry(context.workspace_roots, diagnostics))
-  return entries
-}
-
-const ideActiveFileEntry = (context: Ide.ContextSnapshot): Event.ContextEntry => {
-  const activeFile = context.active_file
-  if (activeFile === undefined) {
-    return {
-      kind: "file",
-      source: "ide:active-file",
-      reason: "IDE active file context",
-      trusted: false,
-      metadata: { workspace_roots: context.workspace_roots },
-    }
-  }
-  return {
-    kind: "file",
-    source: "ide:active-file",
-    reason: "IDE active file and selection",
-    trusted: false,
-    path: activeFile.path,
-    content: ideActiveFileContent(activeFile),
-    metadata: ideActiveFileMetadata(context),
-  }
-}
-
-const ideActiveFileContent = (activeFile: Ide.ActiveFile) => {
-  const lines: Array<string> = [`Active file: ${activeFile.path}`]
-  if (activeFile.language_id !== undefined) lines.push(`Language: ${activeFile.language_id}`)
-  if (activeFile.selection !== undefined) {
-    lines.push(`Selection: lines ${activeFile.selection.range.start_line}-${activeFile.selection.range.end_line}`)
-    if (activeFile.selection.selected_text !== undefined) lines.push("", activeFile.selection.selected_text)
-  }
-  return lines.join("\n")
-}
-
-const ideActiveFileMetadata = (context: Ide.ContextSnapshot) => {
-  const activeFile = context.active_file
-  return {
-    workspace_roots: context.workspace_roots,
-    ...(activeFile?.language_id === undefined ? {} : { language_id: activeFile.language_id }),
-    ...(activeFile?.selection === undefined
-      ? {}
-      : {
-          selection: {
-            start_line: activeFile.selection.range.start_line,
-            end_line: activeFile.selection.range.end_line,
-          },
-        }),
-    diagnostics: (context.diagnostics ?? []).length,
-  }
-}
-
-const ideDiagnosticsEntry = (
-  workspaceRoots: ReadonlyArray<string>,
-  diagnostics: ReadonlyArray<Ide.Diagnostic>,
-): Event.ContextEntry => ({
-  kind: "file",
-  source: "ide:diagnostics",
-  reason: "IDE diagnostics for open workspace",
-  trusted: false,
-  content: diagnostics.map(formatIdeDiagnostic).join("\n"),
-  metadata: { workspace_roots: workspaceRoots, diagnostics: diagnostics.length },
-})
-
-const formatIdeDiagnostic = (diagnostic: Ide.Diagnostic) => {
-  const range = diagnostic.range === undefined ? "" : `:${diagnostic.range.start_line}-${diagnostic.range.end_line}`
-  const source = diagnostic.source === undefined ? "" : ` [${diagnostic.source}]`
-  return `${diagnostic.path}${range} ${diagnostic.severity}${source}: ${diagnostic.message}`
-}
 
 const expandMention = (
   fileSystem: FileSystemAdapter,
@@ -626,7 +556,7 @@ const observedPaths = (events: ReadonlyArray<Event.Event>) => {
       paths.push(...pathsFromJson(event.data.result.output))
     }
   }
-  return uniqueStrings(paths).slice(0, 50)
+  return StringArray.uniqueNonEmptyStrings(paths).slice(0, 50)
 }
 
 const pathsFromJson = (value: Common.JsonValue): ReadonlyArray<string> => {
@@ -689,7 +619,7 @@ const parseGlobs = (yaml: string): ReadonlyArray<string> => {
     }
     if (inGlobs && line.trim().length > 0 && !line.startsWith(" ")) inGlobs = false
   }
-  return uniqueStrings(globs.filter(Boolean))
+  return StringArray.uniqueNonEmptyStrings(globs)
 }
 
 const inlineArray = (value: string) => {
@@ -799,8 +729,6 @@ const dedupeEntries = (entries: ReadonlyArray<Event.ContextEntry>) => {
   }
   return result
 }
-
-const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 
 const unquote = (value: string) => value.replace(/^['"]|['"]$/g, "")
 const slashPath = (path: string) => path.split(sep).join("/")

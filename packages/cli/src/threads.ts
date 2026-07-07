@@ -1,7 +1,6 @@
 import { ThreadService, TournamentService } from "@rika/agent"
 import { Embeddings } from "@rika/llm"
-import { OrbStore } from "@rika/persistence"
-import { ThreadMemoryStore } from "@rika/persistence"
+import { Database, OrbStore, ThreadMemoryStore, ThreadProjection } from "@rika/persistence"
 import { Client } from "@rika/sdk"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Args from "./args"
@@ -15,10 +14,12 @@ export class ThreadsError extends Schema.TaggedErrorClass<ThreadsError>()("Threa
 }) {}
 
 export type RunError =
+  | Database.DatabaseError
   | ThreadService.Error
   | TournamentService.RunError
   | OrbStore.OrbStoreError
   | ThreadMemoryStore.ThreadMemoryStoreError
+  | ThreadProjection.ThreadProjectionError
   | Embeddings.EmbeddingsProviderError
   | Embeddings.EmbeddingsValidationError
   | Client.SdkError
@@ -40,7 +41,9 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const output = yield* Output.Service
     const input = yield* Input.Service
+    const database = yield* Database.Service
     const threads = yield* ThreadService.Service
+    const projection = yield* ThreadProjection.Service
     const tournament = yield* Effect.serviceOption(TournamentService.Service)
     const orbs = yield* OrbStore.Service
     const remoteClient = yield* Effect.serviceOption(RemoteClient)
@@ -147,6 +150,11 @@ export const layer = Layer.effect(
           }
           case "delete": {
             yield* threads.deleteThread({ thread_id: yield* requireThreadId(command) })
+            return 0
+          }
+          case "rebuild-projection": {
+            yield* projection.rebuild().pipe(Effect.provideService(Database.Service, database))
+            yield* output.stdout(formatJson({ rebuilt: true }))
             return 0
           }
         }

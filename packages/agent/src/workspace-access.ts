@@ -89,7 +89,7 @@ export const layer = Layer.effect(
       ensureWorkspaceForCreate: Effect.fn("WorkspaceAccess.ensureWorkspaceForCreate")(function* (
         input: WorkspaceAccessInput,
       ) {
-        return yield* ensureWorkspaceForCreateInternal(dependencies, input)
+        return yield* requireDecision(yield* ensureWorkspaceForCreateInternal(dependencies, input))
       }),
       filterReadableThreads: Effect.fn("WorkspaceAccess.filterReadableThreads")(function* (
         summaries: ReadonlyArray<ThreadProjection.ThreadSummary>,
@@ -279,7 +279,7 @@ const ensureWorkspaceForCreateInternal = (dependencies: Dependencies, input: Wor
     if (existing.allowed) return existing
 
     const hasMembers = yield* dependencies.workspaceStore.workspaceHasMembers(input.workspace_id)
-    if (hasMembers) return allow(input)
+    if (hasMembers) return existing
 
     const createdAt = yield* dependencies.time.nowMillis
     yield* dependencies.workspaceStore.putMembership({

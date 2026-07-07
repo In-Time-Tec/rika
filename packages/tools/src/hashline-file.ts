@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises"
 import { dirname, relative, resolve } from "node:path"
 import { PermissionPolicy, ToolExecutor, ToolRegistry } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, Diagnostics } from "@rika/core"
 import { Common } from "@rika/schema"
 import type { Call } from "@rika/schema/tool"
 import { parseDiffFromFile, type FileContents } from "@pierre/diffs"
@@ -87,10 +87,12 @@ export const layer = Layer.effect(
         const path = yield* resolveWorkspacePath(workspaceRoot, input.path)
         const snapshot = yield* readSnapshot(path)
         const anchors = buildAnchors(snapshot.lines)
-        const startLine = 1
-        const endLine = snapshot.lines.length
-        const anchored = { anchors, truncated: false }
-        const selectedLines = snapshot.lines
+        const range = yield* readRange(input, snapshot.lines.length, relativePath(workspaceRoot, path))
+        const selectedAnchors = anchors.slice(range.startIndex, range.endIndex)
+        const anchored = capReadAnchors(selectedAnchors, input.max_output_bytes ?? defaultMaxReadBytes)
+        const selectedLines = anchored.anchors.map((anchor) => anchor.content)
+        const startLine = anchored.anchors[0]?.line ?? range.startLine
+        const endLine = anchored.anchors.at(-1)?.line ?? range.endLine
 
         return yield* jsonValue({
           type: "hashline.read",
@@ -102,7 +104,7 @@ export const layer = Layer.effect(
             end_line: endLine,
           },
           total_lines: snapshot.lines.length,
-          truncated: false,
+          truncated: anchored.truncated,
           file: fileMetadata(snapshot),
           render: {
             kind: "file",
@@ -249,10 +251,8 @@ export const registryLayer: Layer.Layer<ToolRegistry.Service, never, Config.Serv
   }),
 ).pipe(Layer.provideMerge(layer))
 
-export const toolExecutorLayer: Layer.Layer<ToolExecutor.Service, never, Config.Service> = ToolExecutor.layer.pipe(
-  Layer.provideMerge(registryLayer),
-  Layer.provideMerge(PermissionPolicy.allowLayer),
-)
+export const toolExecutorLayer: Layer.Layer<ToolExecutor.Service, never, Config.Service | Diagnostics.Service> =
+  ToolExecutor.layer.pipe(Layer.provideMerge(registryLayer), Layer.provideMerge(PermissionPolicy.allowLayer))
 
 interface Anchor {
   readonly line: number
@@ -368,6 +368,52 @@ const snapshotFromText = (text: string): Snapshot => {
   const withoutFinalNewline = finalNewline ? normalized.slice(0, -1) : normalized
   const lines = withoutFinalNewline.length === 0 ? [] : withoutFinalNewline.split("\n")
   return { text, body, lines, lineEnding, eol, hasBom, finalNewline }
+}
+
+const readRange = (input: ReadInput, totalLines: number, path: string) => {
+  const startLine = input.start_line ?? 1
+  const requestedEndLine = input.end_line ?? totalLines
+  if (startLine < 1) {
+    return new HashlineFileError({
+      message: "start_line must be at least 1",
+      code: "E_INVALID_RANGE",
+      path,
+      retryable: false,
+    })
+  }
+  if (startLine > Math.max(totalLines, 1)) {
+    return new HashlineFileError({
+      message: "start_line must be within the file",
+      code: "E_INVALID_RANGE",
+      path,
+      retryable: false,
+    })
+  }
+  if (input.end_line !== undefined && input.end_line < 1) {
+    return new HashlineFileError({
+      message: "end_line must be at least 1",
+      code: "E_INVALID_RANGE",
+      path,
+      retryable: false,
+    })
+  }
+  if (input.end_line !== undefined && input.end_line < startLine) {
+    return new HashlineFileError({
+      message: "end_line must be at or after start_line",
+      code: "E_INVALID_RANGE",
+      path,
+      retryable: false,
+    })
+  }
+  const startIndex = Math.min(startLine - 1, totalLines)
+  const endIndex = Math.min(Math.max(requestedEndLine, 0), totalLines)
+  const endLine = Math.max(startLine, Math.min(requestedEndLine, totalLines))
+  return Effect.succeed({
+    startLine,
+    endLine,
+    startIndex,
+    endIndex,
+  })
 }
 
 const renderSnapshotText = (snapshot: Snapshot, lines: ReadonlyArray<string>) => {
@@ -634,6 +680,42 @@ const capAnchors = (anchors: ReadonlyArray<Anchor>, maxBytes: number) => {
     bytes += nextBytes
   }
   return { anchors: kept, truncated: false }
+}
+
+const capReadAnchors = (anchors: ReadonlyArray<Anchor>, maxBytes: number) => {
+  const encoder = new TextEncoder()
+  const kept: Array<Anchor> = []
+  let bytes = 0
+  for (const anchor of anchors) {
+    const lineSeparator = kept.length === 0 ? "" : "\n"
+    const nextBytes = encoder.encode(`${lineSeparator}${formatAnchorLine(anchor)}`).byteLength
+    if (bytes + nextBytes <= maxBytes) {
+      kept.push(anchor)
+      bytes += nextBytes
+      continue
+    }
+    const remaining = maxBytes - bytes - encoder.encode(lineSeparator).byteLength
+    if (remaining <= 0) return { anchors: kept, truncated: true }
+    const prefix = `${anchor.anchor}|`
+    const prefixBytes = encoder.encode(prefix).byteLength
+    if (remaining < prefixBytes) return { anchors: kept, truncated: true }
+    kept.push({ ...anchor, content: truncateUtf8(anchor.content, remaining - prefixBytes) })
+    return { anchors: kept, truncated: true }
+  }
+  return { anchors: kept, truncated: false }
+}
+
+const truncateUtf8 = (text: string, maxBytes: number) => {
+  if (maxBytes <= 0) return ""
+  const encoder = new TextEncoder()
+  let low = 0
+  let high = text.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    if (encoder.encode(text.slice(0, middle)).byteLength <= maxBytes) low = middle
+    else high = middle - 1
+  }
+  return text.slice(0, low)
 }
 
 const detectLineEnding = (text: string): Snapshot["lineEnding"] => {

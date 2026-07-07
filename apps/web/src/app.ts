@@ -1,4 +1,4 @@
-import { Common, Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
+import { Common, Event, Ids, Message as RikaMessage, PierreDiff, Remote } from "@rika/schema"
 import { Client } from "@rika/sdk"
 import * as ModelInfo from "@rika/llm/model-info"
 import { parsePatchFiles } from "@pierre/diffs"
@@ -6,7 +6,9 @@ import * as Command from "foldkit/command"
 import { m } from "foldkit/message"
 import * as Mount from "foldkit/mount"
 import * as Subscription from "foldkit/subscription"
-import { Effect, Option, Queue, Schema as S, Stream } from "effect"
+import { Duration, Effect, Option, Queue, Schedule, Schema as S, Stream } from "effect"
+import * as AlertDialog from "./components/ui/alert-dialog"
+import * as MessageScroller from "./components/ui/message-scroller-state"
 import * as Tabs from "./components/ui/tabs-state"
 import {
   asFileDiffMetadata,
@@ -17,8 +19,8 @@ import {
   toWebPierreDiff,
   type WebPierreDiff,
 } from "./pierre-diff"
-import { mountPierreTree } from "./pierre-tree"
-import { mountOrbTerminal, reconnectOrbTerminal } from "./orb-terminal"
+import { mountPierreTree, pierreTreeRegistry, updatePierreTree } from "./pierre-tree"
+import { mountOrbTerminal, orbTerminalRegistry, reconnectOrbTerminal } from "./orb-terminal"
 
 export const Connection = S.Literals(["idle", "loading", "connected", "failed"])
 export type Connection = typeof Connection.Type
@@ -50,11 +52,21 @@ export const OrbOpenedFile = S.Union([
 ])
 export type OrbOpenedFile = typeof OrbOpenedFile.Type
 
+export const PierreTreeGitStatus = S.Literals(["added", "deleted", "ignored", "modified", "renamed", "untracked"])
+export type PierreTreeGitStatus = typeof PierreTreeGitStatus.Type
+
+export const PierreTreeGitStatusEntry = S.Struct({
+  path: S.String,
+  status: PierreTreeGitStatus,
+})
+export type PierreTreeGitStatusEntry = typeof PierreTreeGitStatusEntry.Type
+
 export const OrbFilesModel = S.Struct({
   directories: S.Record(S.String, OrbDirectoryState),
   paths: S.Array(S.String),
   path_kinds: S.Record(S.String, Remote.OrbFileKind),
   selected_path: S.optional(S.String),
+  git_status: S.Array(PierreTreeGitStatusEntry),
   opened_file: OrbOpenedFile,
 })
 export type OrbFilesModel = typeof OrbFilesModel.Type
@@ -65,7 +77,8 @@ export const OrbChangeDiff = S.Struct({
   file_name: S.String,
   additions: S.Int,
   deletions: S.Int,
-  file_diff: S.Unknown,
+  file_diff: PierreDiff.FileDiffMetadata,
+  git_status: PierreTreeGitStatusEntry,
 })
 export type OrbChangeDiff = typeof OrbChangeDiff.Type
 
@@ -74,6 +87,7 @@ export const OrbChangeSkipped = S.Struct({
   payload_id: S.String,
   file_name: S.String,
   reason: S.String,
+  git_status: PierreTreeGitStatusEntry,
 })
 export type OrbChangeSkipped = typeof OrbChangeSkipped.Type
 
@@ -103,6 +117,21 @@ export const ProjectField = S.Literals(["name", "repo_origin", "default_branch",
 export type ProjectField = typeof ProjectField.Type
 export const ProjectSecretField = S.Literals(["name", "value"])
 export type ProjectSecretField = typeof ProjectSecretField.Type
+
+export const QueuedMessage = S.Struct({
+  thread_id: Ids.ThreadId,
+  content: S.String,
+  mode: S.optional(Remote.AgentMode),
+})
+export type QueuedMessage = typeof QueuedMessage.Type
+
+export const PendingStartTurn = S.Struct({
+  thread_id: Ids.ThreadId,
+  request_token: S.Int,
+  content: S.String,
+  mode: S.optional(Remote.AgentMode),
+})
+export type PendingStartTurn = typeof PendingStartTurn.Type
 
 export const ProjectForm = S.Struct({
   name: S.String,
@@ -141,21 +170,33 @@ export const Model = S.Struct({
   events: S.Array(Event.Event),
   last_sequence: S.Int,
   subscription_after_sequence: S.Int,
+  subscription_retry: S.Int,
   draft: S.String,
   draft_mode: S.optional(Remote.AgentMode),
   pending_turn: S.Boolean,
   pending_interrupt_turn_id: S.optional(Ids.TurnId),
+  queued_messages: S.Array(QueuedMessage),
+  pending_start_turns: S.Array(PendingStartTurn),
+  creating_thread: S.Boolean,
+  thread_request_token: S.Int,
+  active_thread_request_token: S.optional(S.Int),
+  turn_request_token: S.Int,
+  active_turn_request_token: S.optional(S.Int),
   selected_thread_id: S.optional(Ids.ThreadId),
   subscribed_thread_id: S.optional(Ids.ThreadId),
   selected_orb: S.optional(Remote.OrbSummary),
   selected_orb_tab: OrbTab,
   orb_tabs: Tabs.Model,
+  transcript_scroller: MessageScroller.Model,
+  kill_orb_dialog: AlertDialog.Model,
   orb_files: OrbFilesModel,
   orb_changes: OrbChangesModel,
   orb_terminal_status: OrbTerminalStatusSchema,
   orb_terminal_error: S.optional(S.String),
   expanded_diff_ids: S.Array(S.String),
+  collapsed_transcript_row_ids: S.Array(S.String),
   confirm_kill_orb_id: S.optional(Ids.OrbId),
+  delete_secret_dialog: AlertDialog.Model,
   backend: S.optional(Remote.BackendHealth),
   notice: S.optional(S.String),
   pending_submit: S.optional(S.String),
@@ -180,6 +221,11 @@ export interface TextTranscriptRow {
   readonly kind: "message" | "event" | "tool" | "error"
   readonly title: string
   readonly body: string
+  readonly is_open?: boolean
+  readonly author?: {
+    readonly label: string
+    readonly is_local: boolean
+  }
 }
 
 export interface PierreDiffTranscriptRow {
@@ -204,17 +250,22 @@ export const LoadedBackendHealth = m("LoadedBackendHealth", { health: Remote.Bac
 export const FailedBackendHealth = m("FailedBackendHealth", { message: S.String })
 export const LoadedThreads = m("LoadedThreads", { threads: S.Array(Remote.ThreadSummary) })
 export const FailedLoadThreads = m("FailedLoadThreads", { message: S.String })
-export const ChangedThreadSearchQuery = m("ChangedThreadSearchQuery", { value: S.String })
-export const ChangedThreadSearchWindow = m("ChangedThreadSearchWindow", { value: S.String })
+export const ChangedThreadSearchQuery = m("ChangedThreadSearchQuery", { value: S.String, now: Common.TimestampMillis })
+export const ChangedThreadSearchWindow = m("ChangedThreadSearchWindow", {
+  value: S.String,
+  now: Common.TimestampMillis,
+})
 export const ClickedThread = m("ClickedThread", { thread_id: Ids.ThreadId })
 export const ClickedNewThread = m("ClickedNewThread")
-export const CreatedThread = m("CreatedThread", { summary: Remote.ThreadSummary })
-export const FailedCreateThread = m("FailedCreateThread", { message: S.String })
-export const OpenedThread = m("OpenedThread", { record: Remote.ThreadRecord })
-export const FailedOpenThread = m("FailedOpenThread", { message: S.String })
+export const CreatedThread = m("CreatedThread", { summary: Remote.ThreadSummary, request_token: S.Int })
+export const FailedCreateThread = m("FailedCreateThread", { message: S.String, request_token: S.Int })
+export const OpenedThread = m("OpenedThread", { record: Remote.ThreadRecord, request_token: S.Int })
+export const FailedOpenThread = m("FailedOpenThread", { message: S.String, request_token: S.Int })
 export const LoadedSelectedOrb = m("LoadedSelectedOrb", { orb: Remote.OrbSummary })
 export const FailedLoadSelectedOrb = m("FailedLoadSelectedOrb", { message: S.String })
 export const GotOrbTabsMessage = m("GotOrbTabsMessage", { message: Tabs.Message })
+export const GotTranscriptScrollerMessage = m("GotTranscriptScrollerMessage", { message: MessageScroller.Message })
+export const GotKillOrbDialogMessage = m("GotKillOrbDialogMessage", { message: AlertDialog.Message })
 export const ClickedPauseOrb = m("ClickedPauseOrb")
 export const ClickedResumeOrb = m("ClickedResumeOrb")
 export const ClickedKillOrb = m("ClickedKillOrb")
@@ -222,6 +273,7 @@ export const CancelledKillOrb = m("CancelledKillOrb")
 export const ConfirmedKillOrb = m("ConfirmedKillOrb")
 export const UpdatedSelectedOrb = m("UpdatedSelectedOrb", { orb: Remote.OrbSummary })
 export const FailedOrbAction = m("FailedOrbAction", { message: S.String })
+export const ClickedTranscriptDisclosure = m("ClickedTranscriptDisclosure", { row_id: S.String })
 export const LoadedOrbDirectory = m("LoadedOrbDirectory", { response: Remote.OrbFilesResponse })
 export const FailedLoadOrbDirectory = m("FailedLoadOrbDirectory", { path: S.String, message: S.String })
 export const SelectedOrbFile = m("SelectedOrbFile", { path: S.String })
@@ -232,11 +284,17 @@ export const FailedLoadOrbChanges = m("FailedLoadOrbChanges", { message: S.Strin
 export const ChangedDraft = m("ChangedDraft", { value: S.String })
 export const ChangedDraftMode = m("ChangedDraftMode", { value: S.String })
 export const SubmittedDraft = m("SubmittedDraft")
-export const AcceptedTurn = m("AcceptedTurn", { response: Remote.StartTurnResponse })
-export const FailedStartTurn = m("FailedStartTurn", { message: S.String })
+export const AcceptedTurn = m("AcceptedTurn", { response: Remote.StartTurnResponse, request_token: S.Int })
+export const FailedStartTurn = m("FailedStartTurn", {
+  thread_id: Ids.ThreadId,
+  message: S.String,
+  request_token: S.Int,
+  status: S.optional(S.Int),
+  active_user_id: S.optional(Ids.UserId),
+})
 export const TypingPresenceReady = m("TypingPresenceReady")
 export const ClickedInterrupt = m("ClickedInterrupt")
-export const InterruptedTurn = m("InterruptedTurn", { event: Event.TurnFailed })
+export const InterruptedTurn = m("InterruptedTurn", { event: Event.TurnTerminal })
 export const FailedInterruptTurn = m("FailedInterruptTurn", { message: S.String })
 export const ReceivedThreadEvent = m("ReceivedThreadEvent", { event: Event.Event })
 export const ReceivedPresence = m("ReceivedPresence", { presence: Remote.PresencePayload })
@@ -271,6 +329,7 @@ export const SubmittedProjectSecret = m("SubmittedProjectSecret")
 export const ClickedDeleteProjectSecret = m("ClickedDeleteProjectSecret", { name: S.String })
 export const CancelledDeleteProjectSecret = m("CancelledDeleteProjectSecret")
 export const ConfirmedDeleteProjectSecret = m("ConfirmedDeleteProjectSecret")
+export const GotDeleteSecretDialogMessage = m("GotDeleteSecretDialogMessage", { message: AlertDialog.Message })
 
 const BackendMessage = S.Union([
   LoadedBackendHealth,
@@ -291,6 +350,7 @@ const OrbControlMessage = S.Union([
   LoadedSelectedOrb,
   FailedLoadSelectedOrb,
   GotOrbTabsMessage,
+  GotKillOrbDialogMessage,
   ClickedPauseOrb,
   ClickedResumeOrb,
   ClickedKillOrb,
@@ -298,6 +358,7 @@ const OrbControlMessage = S.Union([
   ConfirmedKillOrb,
   UpdatedSelectedOrb,
   FailedOrbAction,
+  ClickedTranscriptDisclosure,
 ])
 
 const OrbWorkspaceMessage = S.Union([
@@ -309,6 +370,7 @@ const OrbWorkspaceMessage = S.Union([
   LoadedOrbChanges,
   FailedLoadOrbChanges,
   ChangedDraft,
+  GotTranscriptScrollerMessage,
   ChangedDraftMode,
   SubmittedDraft,
   AcceptedTurn,
@@ -353,6 +415,7 @@ const ProjectMessage = S.Union([
   ClickedDeleteProjectSecret,
   CancelledDeleteProjectSecret,
   ConfirmedDeleteProjectSecret,
+  GotDeleteSecretDialogMessage,
 ])
 
 export const AppMessage = S.Union([BackendMessage, OrbControlMessage, OrbWorkspaceMessage, ProjectMessage]).pipe(
@@ -371,7 +434,7 @@ export type AppCommand = Command.Command<AppMessage>
 
 export const MountPierreDiff = Mount.define(
   "MountPierreDiff",
-  { payload_id: S.String, file_diff: S.Unknown, theme_type: S.Literals(["light", "dark"]) },
+  { payload_id: S.String, file_diff: PierreDiff.FileDiffMetadata, theme_type: S.Literals(["light", "dark"]) },
   RenderedPierreDiff,
   FailedRenderPierreDiff,
 )(
@@ -417,12 +480,17 @@ export const MountPierreDiff = Mount.define(
 
 export const MountPierreTree = Mount.defineStream(
   "MountPierreTree",
-  { paths: S.Array(S.String), selected_path: S.optional(S.String) },
+  {
+    mount_key: S.String,
+    paths: S.Array(S.String),
+    selected_path: S.optional(S.String),
+    git_status: S.Array(PierreTreeGitStatusEntry),
+  },
   RenderedPierreTree,
   SelectedOrbFile,
   FailedRenderPierreTree,
 )(
-  ({ paths, selected_path }) =>
+  ({ mount_key, paths, selected_path, git_status }) =>
     (element) =>
       Stream.callback<PierreTreeMessage>((queue) =>
         Effect.gen(function* () {
@@ -431,17 +499,26 @@ export const MountPierreTree = Mount.defineStream(
             return yield* Effect.never
           }
           yield* Effect.acquireRelease(
-            Effect.try({
-              try: () =>
-                mountPierreTree({
-                  container: element,
-                  paths,
-                  ...(selected_path === undefined ? {} : { selected_path }),
-                  onSelectedPath: (path) => Queue.offerUnsafe(queue, SelectedOrbFile({ path })),
-                }),
-              catch: (cause: unknown) => cause,
+            Effect.gen(function* () {
+              const handle = yield* Effect.try({
+                try: () =>
+                  mountPierreTree({
+                    container: element,
+                    paths,
+                    git_status,
+                    ...(selected_path === undefined ? {} : { selected_path }),
+                    onSelectedPath: (path) => Queue.offerUnsafe(queue, SelectedOrbFile({ path })),
+                  }),
+                catch: (cause: unknown) => cause,
+              })
+              yield* pierreTreeRegistry.register(mount_key, handle)
+              return handle
             }),
-            (handle) => Effect.sync(() => handle.destroy()),
+            (handle) =>
+              Effect.gen(function* () {
+                yield* pierreTreeRegistry.unregister(mount_key, handle)
+                yield* Effect.sync(() => handle.destroy())
+              }),
           )
           Queue.offerUnsafe(
             queue,
@@ -478,12 +555,16 @@ export const MountOrbTerminal = Mount.defineStream(
           }
           yield* Effect.acquireRelease(
             Effect.sync(() => {
-              const handle = mountOrbTerminal({
-                container: element,
-                thread_id,
-                onStatus: (status) => Queue.offerUnsafe(queue, TerminalStatusChanged({ status })),
-                onError: (message) => Queue.offerUnsafe(queue, TerminalFailed({ message })),
-              })
+              const handle = mountOrbTerminal(
+                {
+                  container: element,
+                  thread_id,
+                  onStatus: (status) => Queue.offerUnsafe(queue, TerminalStatusChanged({ status })),
+                  onError: (message) => Queue.offerUnsafe(queue, TerminalFailed({ message })),
+                },
+                undefined,
+                orbTerminalRegistry,
+              )
               void handle.activate()
               return handle
             }),
@@ -534,12 +615,12 @@ export const LoadThreads = Command.define(
 
 export const SearchThreads = Command.define(
   "SearchThreads",
-  { api_base_url: S.String, query: S.String, window: ThreadSearchWindow },
+  { api_base_url: S.String, query: S.String, window: ThreadSearchWindow, now: Common.TimestampMillis },
   LoadedThreads,
   FailedLoadThreads,
-)(({ api_base_url, query, window }) =>
+)(({ api_base_url, query, window, now }) =>
   sdk(api_base_url)
-    .searchThreads(searchThreadsRequest(query, window))
+    .searchThreads(searchThreadsRequest(query, window, now))
     .pipe(
       Effect.map((results) => LoadedThreads({ threads: results.map((result) => result.summary) })),
       Effect.catch((error) => Effect.succeed(FailedLoadThreads({ message: error.message }))),
@@ -647,29 +728,29 @@ export const DeleteProjectSecret = Command.define(
 
 export const CreateThread = Command.define(
   "CreateThread",
-  { api_base_url: S.String },
+  { api_base_url: S.String, request_token: S.Int },
   CreatedThread,
   FailedCreateThread,
-)(({ api_base_url }) =>
+)(({ api_base_url, request_token }) =>
   sdk(api_base_url)
     .createThread()
     .pipe(
-      Effect.map((summary) => CreatedThread({ summary })),
-      Effect.catch((error) => Effect.succeed(FailedCreateThread({ message: error.message }))),
+      Effect.map((summary) => CreatedThread({ summary, request_token })),
+      Effect.catch((error) => Effect.succeed(FailedCreateThread({ message: error.message, request_token }))),
     ),
 )
 
 export const OpenThread = Command.define(
   "OpenThread",
-  { api_base_url: S.String, thread_id: Ids.ThreadId },
+  { api_base_url: S.String, thread_id: Ids.ThreadId, request_token: S.Int },
   OpenedThread,
   FailedOpenThread,
-)(({ api_base_url, thread_id }) =>
+)(({ api_base_url, thread_id, request_token }) =>
   sdk(api_base_url)
     .openThread(thread_id)
     .pipe(
-      Effect.map((record) => OpenedThread({ record })),
-      Effect.catch((error) => Effect.succeed(FailedOpenThread({ message: error.message }))),
+      Effect.map((record) => OpenedThread({ record, request_token })),
+      Effect.catch((error) => Effect.succeed(FailedOpenThread({ message: error.message, request_token }))),
     ),
 )
 
@@ -779,10 +860,11 @@ export const StartTurn = Command.define(
     user_id: S.optional(Ids.UserId),
     content: S.String,
     mode: S.optional(Remote.AgentMode),
+    request_token: S.Int,
   },
   AcceptedTurn,
   FailedStartTurn,
-)(({ api_base_url, thread_id, user_id, content, mode }) =>
+)(({ api_base_url, thread_id, user_id, content, mode, request_token }) =>
   sdk(api_base_url, user_id)
     .startTurn({
       thread_id,
@@ -791,8 +873,18 @@ export const StartTurn = Command.define(
       ...(mode === undefined ? {} : { mode }),
     })
     .pipe(
-      Effect.map((response) => AcceptedTurn({ response })),
-      Effect.catch((error) => Effect.succeed(FailedStartTurn({ message: error.message }))),
+      Effect.map((response) => AcceptedTurn({ response, request_token })),
+      Effect.catch((error) =>
+        Effect.succeed(
+          FailedStartTurn({
+            thread_id,
+            message: error.message,
+            request_token,
+            status: error.status,
+            active_user_id: error.active_user_id,
+          }),
+        ),
+      ),
     ),
 )
 
@@ -835,10 +927,35 @@ export const ReconnectOrbTerminal = Command.define(
   TerminalStatusChanged,
   TerminalFailed,
 )(({ thread_id }) =>
-  Effect.sync(() =>
-    reconnectOrbTerminal(thread_id)
-      ? TerminalStatusChanged({ status: "connecting" })
-      : TerminalFailed({ message: "terminal is not mounted" }),
+  reconnectOrbTerminal(thread_id).pipe(
+    Effect.map((reconnected) =>
+      reconnected
+        ? TerminalStatusChanged({ status: "connecting" })
+        : TerminalFailed({ message: "terminal is not mounted" }),
+    ),
+  ),
+)
+
+export const UpdatePierreTree = Command.define(
+  "UpdatePierreTree",
+  {
+    mount_key: S.String,
+    paths: S.Array(S.String),
+    selected_path: S.optional(S.String),
+    git_status: S.Array(PierreTreeGitStatusEntry),
+  },
+  RenderedPierreTree,
+  FailedRenderPierreTree,
+)(({ mount_key, paths, selected_path, git_status }) =>
+  updatePierreTree(mount_key, {
+    paths,
+    git_status,
+    ...(selected_path === undefined ? {} : { selected_path }),
+  }).pipe(
+    Effect.map(() => (selected_path === undefined ? RenderedPierreTree({}) : RenderedPierreTree({ selected_path }))),
+    Effect.catch((cause: unknown) =>
+      Effect.succeed(FailedRenderPierreTree({ message: cause instanceof Error ? cause.message : String(cause) })),
+    ),
   ),
 )
 
@@ -859,25 +976,52 @@ export const initialModel = (config: RuntimeConfig): Model => ({
   events: [],
   last_sequence: 0,
   subscription_after_sequence: 0,
+  subscription_retry: 0,
   draft: "",
   pending_turn: false,
+  queued_messages: [],
+  pending_start_turns: [],
+  creating_thread: false,
+  thread_request_token: 0,
+  active_thread_request_token: undefined,
+  turn_request_token: 0,
+  active_turn_request_token: undefined,
   presence: [],
   typing_presence_cooling: false,
   expanded_diff_ids: [],
+  collapsed_transcript_row_ids: [],
+  delete_secret_dialog: AlertDialog.init({ id: "delete-secret-dialog" }),
   ...initialOrbWorkspace(),
   ...(config.thread_id === undefined ? {} : { selected_thread_id: config.thread_id }),
 })
 
 export const init = (config: RuntimeConfig): readonly [Model, ReadonlyArray<AppCommand>] => {
-  const model = initialModel(config)
+  const base = initialModel(config)
+  const openRequestToken = config.thread_id === undefined ? undefined : base.thread_request_token + 1
+  const model =
+    openRequestToken === undefined
+      ? base
+      : {
+          ...base,
+          thread_request_token: openRequestToken,
+          active_thread_request_token: openRequestToken,
+        }
+  const openCommands =
+    config.thread_id === undefined || openRequestToken === undefined
+      ? []
+      : [
+          OpenThread({
+            api_base_url: config.api_base_url,
+            thread_id: config.thread_id,
+            request_token: openRequestToken,
+          }),
+        ]
   return [
     { ...model, connection: "loading" },
     [
       LoadBackendHealth({ api_base_url: config.api_base_url }),
       LoadThreads({ api_base_url: config.api_base_url }),
-      ...(config.thread_id === undefined
-        ? []
-        : [OpenThread({ api_base_url: config.api_base_url, thread_id: config.thread_id })]),
+      ...openCommands,
     ],
   ]
 }
@@ -891,14 +1035,21 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "LoadedThreads": {
       const threads = newestFirst(message.threads)
       const next = { ...model, threads }
-      if (model.selected_thread_id !== undefined || threads[0] === undefined) return [next, []]
+      if (
+        model.selected_thread_id !== undefined ||
+        model.creating_thread ||
+        model.active_thread_request_token !== undefined ||
+        threads[0] === undefined
+      ) {
+        return [next, []]
+      }
       return openThreadModel(next, threads[0].thread_id)
     }
     case "FailedLoadThreads":
       return [{ ...model, connection: "failed", notice: message.message }, []]
     case "ChangedThreadSearchQuery": {
       const next = { ...model, thread_search_query: message.value, active_view: "threads" as const, notice: undefined }
-      return [next, [searchThreadsCommand(next)]]
+      return [next, [searchThreadsCommand(next, message.now)]]
     }
     case "ChangedThreadSearchWindow": {
       const next = {
@@ -907,64 +1058,77 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
         active_view: "threads" as const,
         notice: undefined,
       }
-      return [next, [searchThreadsCommand(next)]]
+      return [next, [searchThreadsCommand(next, message.now)]]
     }
     case "ClickedThread":
       return openThreadModel(model, message.thread_id)
-    case "ClickedNewThread":
+    case "ClickedNewThread": {
+      const requestToken = model.thread_request_token + 1
       return [
         {
           ...model,
+          thread_request_token: requestToken,
+          active_thread_request_token: requestToken,
           selected_thread_id: undefined,
           subscribed_thread_id: undefined,
           selected_orb: undefined,
           ...initialOrbWorkspace(),
           confirm_kill_orb_id: undefined,
           expanded_diff_ids: [],
+          collapsed_transcript_row_ids: [],
           pending_interrupt_turn_id: undefined,
+          pending_turn: false,
+          pending_submit: undefined,
+          pending_submit_mode: undefined,
+          active_turn_request_token: undefined,
           events: [],
           last_sequence: 0,
           subscription_after_sequence: 0,
+          subscription_retry: 0,
           presence: [],
           typing_presence_cooling: false,
+          creating_thread: true,
           connection: "loading",
           notice: undefined,
         },
-        [CreateThread({ api_base_url: model.api_base_url })],
+        [CreateThread({ api_base_url: model.api_base_url, request_token: requestToken })],
       ]
+    }
     case "CreatedThread":
-      return createdThreadModel(model, message.summary)
+      return createdThreadModel(model, message.summary, message.request_token)
     case "FailedCreateThread":
-      return [
-        { ...model, connection: "failed", pending_turn: false, pending_submit: undefined, notice: message.message },
-        [],
-      ]
+      return failedCreateThreadModel(model, message)
     case "OpenedThread":
-      return openedThreadModel(model, message.record)
+      return openedThreadModel(model, message.record, message.request_token)
     case "FailedOpenThread":
-      return [{ ...model, connection: "failed", notice: message.message }, []]
+      return failedOpenThreadModel(model, message)
     case "LoadedSelectedOrb":
       return selectedOrbLoadedModel(model, message.orb)
     case "FailedLoadSelectedOrb":
       return [{ ...model, notice: message.message }, []]
     case "GotOrbTabsMessage":
       return orbTabsModel(model, message.message)
+    case "GotKillOrbDialogMessage":
+      return killOrbDialogModel(model, message.message)
     case "ClickedPauseOrb":
       return selectedOrbActionModel(model, "pause")
     case "ClickedResumeOrb":
       return selectedOrbActionModel(model, "resume")
     case "ClickedKillOrb":
-      return model.selected_orb === undefined
-        ? [model, []]
-        : [{ ...model, confirm_kill_orb_id: model.selected_orb.orb_id, notice: undefined }, []]
+      return clickedKillOrbModel(model)
     case "CancelledKillOrb":
-      return [{ ...model, confirm_kill_orb_id: undefined }, []]
+      return cancelKillOrbModel(model)
     case "ConfirmedKillOrb":
       return confirmedKillOrbModel(model)
     case "UpdatedSelectedOrb":
       return selectedOrbLoadedModel(model, message.orb)
     case "FailedOrbAction":
       return [{ ...model, confirm_kill_orb_id: undefined, notice: message.message }, []]
+    case "ClickedTranscriptDisclosure":
+      return [
+        { ...model, collapsed_transcript_row_ids: toggleString(model.collapsed_transcript_row_ids, message.row_id) },
+        [],
+      ]
     case "LoadedOrbDirectory":
       return loadedOrbDirectoryModel(model, message.response)
     case "FailedLoadOrbDirectory":
@@ -979,6 +1143,8 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
       return loadedOrbChangesModel(model, message.response)
     case "FailedLoadOrbChanges":
       return [{ ...model, orb_changes: { state: "failed", message: message.message }, notice: message.message }, []]
+    case "GotTranscriptScrollerMessage":
+      return transcriptScrollerModel(model, message.message)
     case "ChangedDraft":
       return changedDraftModel(model, message.value)
     case "ChangedDraftMode":
@@ -986,15 +1152,15 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "SubmittedDraft":
       return submittedDraftModel(model)
     case "AcceptedTurn":
-      return [model, []]
+      return acceptedTurnModel(model, message)
     case "FailedStartTurn":
-      return [{ ...model, pending_turn: false, notice: message.message }, []]
+      return failedStartTurnModel(model, message)
     case "TypingPresenceReady":
       return [{ ...model, typing_presence_cooling: false }, []]
     case "ClickedInterrupt":
       return interruptTurnModel(model)
     case "InterruptedTurn":
-      return [model, []]
+      return [{ ...model, pending_interrupt_turn_id: undefined }, []]
     case "FailedInterruptTurn":
       return [{ ...model, pending_interrupt_turn_id: undefined, notice: message.message }, []]
     case "ReceivedThreadEvent":
@@ -1002,7 +1168,16 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "ReceivedPresence":
       return receivedPresenceModel(model, message.presence)
     case "ThreadSubscriptionFailed":
-      return [{ ...model, connection: "failed", notice: message.message }, []]
+      return [
+        {
+          ...model,
+          connection: "failed",
+          subscription_after_sequence: model.last_sequence,
+          subscription_retry: model.subscription_retry + 1,
+          notice: message.message,
+        },
+        [],
+      ]
     case "ClickedTogglePierreDiff":
       return [{ ...model, expanded_diff_ids: toggleString(model.expanded_diff_ids, message.payload_id) }, []]
     case "RenderedPierreDiff":
@@ -1046,21 +1221,9 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "FailedLoadProjects":
       return [{ ...model, notice: message.message }, []]
     case "ClickedProject":
-      return [
-        {
-          ...model,
-          active_view: "projects",
-          selected_project_id: message.project_id,
-          selected_project: undefined,
-          project_form: emptyProjectForm(),
-          project_secret_name: "",
-          project_secret_value: "",
-          notice: undefined,
-        },
-        [LoadProject({ api_base_url: model.api_base_url, project_id: message.project_id })],
-      ]
+      return clickedProjectModel(model, message.project_id)
     case "LoadedProject":
-      return [projectLoadedModel(model, message.project), []]
+      return loadedProjectModel(model, message.project)
     case "FailedLoadProject":
       return [{ ...model, notice: message.message }, []]
     case "ChangedNewProjectField":
@@ -1095,17 +1258,7 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "SubmittedProjectSettings":
       return submittedProjectSettingsModel(model)
     case "SavedProject":
-      return [
-        {
-          ...projectLoadedModel(model, message.project),
-          projects: newestProjectFirst([projectSummaryFromDetail(message.project), ...model.projects]),
-          new_project_form: emptyNewProjectForm(),
-          project_secret_value: "",
-          pending_secret_delete_name: undefined,
-          notice: undefined,
-        },
-        [],
-      ]
+      return savedProjectModel(model, message.project)
     case "FailedSaveProject":
       return [{ ...model, notice: message.message }, []]
     case "ChangedProjectSecretField":
@@ -1118,34 +1271,37 @@ export const update = (model: Model, message: AppMessage): readonly [Model, Read
     case "SubmittedProjectSecret":
       return submittedProjectSecretModel(model)
     case "ClickedDeleteProjectSecret":
-      return [
-        {
-          ...model,
-          pending_secret_delete_name: model.pending_secret_delete_name === message.name ? undefined : message.name,
-          notice: undefined,
-        },
-        [],
-      ]
+      return clickedDeleteSecretModel(model, message.name)
     case "CancelledDeleteProjectSecret":
-      return [{ ...model, pending_secret_delete_name: undefined, notice: undefined }, []]
+      return cancelDeleteSecretModel(model)
     case "ConfirmedDeleteProjectSecret": {
       const name = model.pending_secret_delete_name
-      return model.selected_project_id === undefined || name === undefined
-        ? [model, []]
-        : [
-            { ...model, pending_secret_delete_name: undefined, notice: undefined },
-            [
-              DeleteProjectSecret({
-                api_base_url: model.api_base_url,
-                project_id: model.selected_project_id,
-                name,
-              }),
-            ],
-          ]
+      if (model.selected_project_id === undefined || name === undefined) return [model, []]
+      const [delete_secret_dialog, dialogCommands] = AlertDialog.close(model.delete_secret_dialog)
+      return [
+        { ...model, pending_secret_delete_name: undefined, notice: undefined, delete_secret_dialog },
+        [
+          DeleteProjectSecret({
+            api_base_url: model.api_base_url,
+            project_id: model.selected_project_id,
+            name,
+          }),
+          ...Command.mapMessages(dialogCommands, (childMessage) =>
+            GotDeleteSecretDialogMessage({ message: childMessage }),
+          ),
+        ],
+      ]
     }
+    case "GotDeleteSecretDialogMessage":
+      return deleteSecretDialogModel(model, message.message)
   }
   return [model, []]
 }
+
+const threadSubscriptionRetrySchedule = Schedule.exponential("250 millis", 2).pipe(
+  Schedule.both(Schedule.recurs(3)),
+  Schedule.modifyDelay((_error, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
 
 export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => ({
   threadEvents: entry(
@@ -1154,6 +1310,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
       thread_id: S.optional(Ids.ThreadId),
       user_id: S.optional(Ids.UserId),
       after_sequence: S.Int,
+      retry: S.Int,
     },
     {
       modelToDependencies: (model) => ({
@@ -1161,6 +1318,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
         ...(model.subscribed_thread_id === undefined ? {} : { thread_id: model.subscribed_thread_id }),
         ...(model.user_id === undefined ? {} : { user_id: model.user_id }),
         after_sequence: model.subscription_after_sequence,
+        retry: model.subscription_retry,
       }),
       dependenciesToStream: ({ api_base_url, thread_id, user_id, after_sequence }) =>
         thread_id === undefined
@@ -1176,6 +1334,7 @@ export const subscriptions = Subscription.make<Model, AppMessage>()((entry) => (
                     onPresence: (snapshot) => Queue.offerUnsafe(presence, ReceivedPresence({ presence: snapshot })),
                   })
                   .pipe(
+                    Stream.retry(threadSubscriptionRetrySchedule),
                     Stream.map((event) => ReceivedThreadEvent({ event })),
                     Stream.catch((error) => Stream.make(ThreadSubscriptionFailed({ message: error.message }))),
                     Stream.merge(Stream.fromQueue(presence)),
@@ -1190,21 +1349,32 @@ export const eventRows = (
   events: ReadonlyArray<Event.Event>,
   expandedDiffIds: ReadonlySet<string> = new Set(),
   userId?: Ids.UserId,
+  collapsedTranscriptRowIds: ReadonlySet<string> = new Set(),
 ): ReadonlyArray<TranscriptRow> =>
   events.flatMap((event) => {
     switch (event.type) {
-      case "message.added":
+      case "message.added": {
+        const author = messageAuthor(event.data.message, userId)
         return {
           id: event.id,
           sequence: event.sequence,
           kind: "message",
           title: roleLabel(event.data.message.role),
-          body: messageDisplayText(event.data.message, userId),
+          body: RikaMessage.displayText(event.data.message),
+          ...(author === undefined ? {} : { author }),
         }
+      }
       case "model.stream.chunk":
         return { id: event.id, sequence: event.sequence, kind: "message", title: "Rika", body: event.data.text }
       case "model.reasoning.delta":
-        return { id: event.id, sequence: event.sequence, kind: "event", title: "Reasoning", body: event.data.text }
+        return {
+          id: event.id,
+          sequence: event.sequence,
+          kind: "event",
+          title: "Reasoning",
+          body: event.data.text,
+          is_open: !collapsedTranscriptRowIds.has(event.id),
+        }
       case "tool.call.requested":
         return {
           id: event.id,
@@ -1212,6 +1382,7 @@ export const eventRows = (
           kind: "tool",
           title: `Tool: ${event.data.call.name}`,
           body: "Running",
+          is_open: !collapsedTranscriptRowIds.has(event.id),
         }
       case "tool.call.completed":
         return (
@@ -1222,12 +1393,14 @@ export const eventRows = (
             fallbackKind: event.data.result.status === "success" ? "tool" : "error",
             value: event.data.result.output,
             expandedDiffIds,
+            collapsedTranscriptRowIds,
           }) ?? {
             id: event.id,
             sequence: event.sequence,
             kind: event.data.result.status === "success" ? "tool" : "error",
             title: `Tool: ${event.data.result.name}`,
             body: event.data.result.status,
+            is_open: !collapsedTranscriptRowIds.has(event.id),
           }
         )
       case "turn.started":
@@ -1285,6 +1458,7 @@ export const eventRows = (
             fallbackKind: "event",
             value: event.data.artifact.content,
             expandedDiffIds,
+            collapsedTranscriptRowIds,
           }) ?? {
             id: event.id,
             sequence: event.sequence,
@@ -1320,9 +1494,17 @@ export const eventRows = (
           kind: "tool",
           title: `Tool input: ${event.data.name}`,
           body: "Started",
+          is_open: !collapsedTranscriptRowIds.has(event.id),
         }
       case "tool.call.input.delta":
-        return { id: event.id, sequence: event.sequence, kind: "tool", title: "Tool input", body: event.data.text }
+        return {
+          id: event.id,
+          sequence: event.sequence,
+          kind: "tool",
+          title: "Tool input",
+          body: event.data.text,
+          is_open: !collapsedTranscriptRowIds.has(event.id),
+        }
       case "tool.call.input.ended":
         return {
           id: event.id,
@@ -1330,6 +1512,7 @@ export const eventRows = (
           kind: "tool",
           title: `Tool input: ${event.data.name}`,
           body: event.data.input_text,
+          is_open: !collapsedTranscriptRowIds.has(event.id),
         }
     }
     return unreachableEventRow(event)
@@ -1373,26 +1556,34 @@ const sdk = (apiBaseUrl: string, userId?: Ids.UserId) =>
 const orbSdk = (apiBaseUrl: string, threadId: Ids.ThreadId) =>
   sdk(`${apiBaseUrl.replace(/\/$/, "")}/orb/by-thread/${encodeURIComponent(threadId)}`)
 
-const searchThreadsCommand = (model: Model): AppCommand =>
+const searchThreadsCommand = (model: Model, now: Common.TimestampMillis): AppCommand =>
   SearchThreads({
     api_base_url: model.api_base_url,
     query: model.thread_search_query,
     window: model.thread_search_window,
+    now,
   })
 
-const searchThreadsRequest = (query: string, window: ThreadSearchWindow): Remote.SearchThreadsRequest => {
+const searchThreadsRequest = (
+  query: string,
+  window: ThreadSearchWindow,
+  now: Common.TimestampMillis,
+): Remote.SearchThreadsRequest => {
   const trimmed = query.trim()
   return {
     ...(trimmed.length === 0 ? {} : { query: trimmed }),
     include_archived: false,
-    ...searchWindowAfter(window),
+    ...searchWindowAfter(window, now),
   }
 }
 
-const searchWindowAfter = (window: ThreadSearchWindow): Pick<Remote.SearchThreadsRequest, "after"> => {
+const searchWindowAfter = (
+  window: ThreadSearchWindow,
+  now: Common.TimestampMillis,
+): Pick<Remote.SearchThreadsRequest, "after"> => {
   if (window === "all") return {}
   const delta = window === "24h" ? 24 : window === "72h" ? 72 : 7 * 24
-  return { after: Common.TimestampMillis.make(Date.now() - delta * 60 * 60 * 1_000) }
+  return { after: Common.TimestampMillis.make(now - delta * 60 * 60 * 1_000) }
 }
 
 const threadSearchWindowFromValue = (value: string): ThreadSearchWindow =>
@@ -1447,6 +1638,60 @@ const projectLoadedModel = (model: Model, project: Remote.ProjectDetail): Model 
   projects: newestProjectFirst([projectSummaryFromDetail(project), ...model.projects]),
   notice: undefined,
 })
+
+const closeDeleteSecretDialog = (model: Model): readonly [AlertDialog.Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands] = AlertDialog.close(model.delete_secret_dialog)
+  return [
+    delete_secret_dialog,
+    Command.mapMessages(dialogCommands, (childMessage) => GotDeleteSecretDialogMessage({ message: childMessage })),
+  ]
+}
+
+const clickedProjectModel = (model: Model, projectId: Ids.ProjectId): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands] = closeDeleteSecretDialog(model)
+  return [
+    {
+      ...model,
+      active_view: "projects",
+      selected_project_id: projectId,
+      selected_project: undefined,
+      project_form: emptyProjectForm(),
+      project_secret_name: "",
+      project_secret_value: "",
+      pending_secret_delete_name: undefined,
+      delete_secret_dialog,
+      notice: undefined,
+    },
+    [...dialogCommands, LoadProject({ api_base_url: model.api_base_url, project_id: projectId })],
+  ]
+}
+
+const loadedProjectModel = (
+  model: Model,
+  project: Remote.ProjectDetail,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands] = closeDeleteSecretDialog(model)
+  return [{ ...projectLoadedModel(model, project), delete_secret_dialog }, dialogCommands]
+}
+
+const savedProjectModel = (
+  model: Model,
+  project: Remote.ProjectDetail,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands] = closeDeleteSecretDialog(model)
+  return [
+    {
+      ...projectLoadedModel(model, project),
+      projects: newestProjectFirst([projectSummaryFromDetail(project), ...model.projects]),
+      new_project_form: emptyNewProjectForm(),
+      project_secret_value: "",
+      pending_secret_delete_name: undefined,
+      delete_secret_dialog,
+      notice: undefined,
+    },
+    dialogCommands,
+  ]
+}
 
 const submittedNewProjectModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
   const form = model.new_project_form
@@ -1503,6 +1748,40 @@ const submittedProjectSecretModel = (model: Model): readonly [Model, ReadonlyArr
   ]
 }
 
+const clickedDeleteSecretModel = (model: Model, name: string): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands] = AlertDialog.open(model.delete_secret_dialog)
+  return [
+    { ...model, pending_secret_delete_name: name, delete_secret_dialog, notice: undefined },
+    Command.mapMessages(dialogCommands, (childMessage) => GotDeleteSecretDialogMessage({ message: childMessage })),
+  ]
+}
+
+const deleteSecretDialogModel = (
+  model: Model,
+  message: AlertDialog.Message,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands, maybeOutMessage] = AlertDialog.update(
+    model.delete_secret_dialog,
+    message,
+  )
+  return [
+    {
+      ...model,
+      delete_secret_dialog,
+      pending_secret_delete_name: dialogWasClosed(maybeOutMessage) ? undefined : model.pending_secret_delete_name,
+    },
+    Command.mapMessages(dialogCommands, (childMessage) => GotDeleteSecretDialogMessage({ message: childMessage })),
+  ]
+}
+
+const cancelDeleteSecretModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [delete_secret_dialog, dialogCommands] = AlertDialog.close(model.delete_secret_dialog)
+  return [
+    { ...model, pending_secret_delete_name: undefined, delete_secret_dialog, notice: undefined },
+    Command.mapMessages(dialogCommands, (childMessage) => GotDeleteSecretDialogMessage({ message: childMessage })),
+  ]
+}
+
 const newestProjectFirst = (projects: ReadonlyArray<Remote.ProjectSummary>) => {
   const seen = new Set<Ids.ProjectId>()
   const unique = projects.filter((project) => {
@@ -1529,46 +1808,70 @@ const withoutKey = (input: Record<string, string>, key: string) => {
   return next
 }
 
-const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model, ReadonlyArray<AppCommand>] => [
-  {
-    ...model,
-    selected_thread_id: threadId,
-    subscribed_thread_id: undefined,
-    selected_orb: undefined,
-    ...initialOrbWorkspace(),
-    confirm_kill_orb_id: undefined,
-    expanded_diff_ids: [],
-    pending_interrupt_turn_id: undefined,
-    events: [],
-    last_sequence: 0,
-    subscription_after_sequence: 0,
-    presence: [],
-    typing_presence_cooling: false,
-    connection: "loading",
-    notice: undefined,
-  },
-  [OpenThread({ api_base_url: model.api_base_url, thread_id: threadId })],
-]
+const openThreadModel = (model: Model, threadId: Ids.ThreadId): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const requestToken = model.thread_request_token + 1
+  return [
+    {
+      ...model,
+      thread_request_token: requestToken,
+      active_thread_request_token: requestToken,
+      selected_thread_id: threadId,
+      subscribed_thread_id: undefined,
+      selected_orb: undefined,
+      ...initialOrbWorkspace(),
+      confirm_kill_orb_id: undefined,
+      expanded_diff_ids: [],
+      collapsed_transcript_row_ids: [],
+      pending_interrupt_turn_id: undefined,
+      events: [],
+      last_sequence: 0,
+      subscription_after_sequence: 0,
+      subscription_retry: 0,
+      presence: [],
+      typing_presence_cooling: false,
+      pending_turn: false,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      active_turn_request_token: undefined,
+      creating_thread: false,
+      connection: "loading",
+      notice: undefined,
+    },
+    [OpenThread({ api_base_url: model.api_base_url, thread_id: threadId, request_token: requestToken })],
+  ]
+}
 
 const createdThreadModel = (
   model: Model,
   summary: Remote.ThreadSummary,
+  requestToken: number,
 ): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (
+    !model.creating_thread ||
+    model.selected_thread_id !== undefined ||
+    model.active_thread_request_token !== requestToken
+  ) {
+    return [model, []]
+  }
   const next = {
     ...model,
     threads: newestFirst([summary, ...model.threads.filter((thread) => thread.thread_id !== summary.thread_id)]),
+    active_thread_request_token: undefined,
     selected_thread_id: summary.thread_id,
     subscribed_thread_id: summary.thread_id,
     selected_orb: undefined,
     ...initialOrbWorkspace(),
     confirm_kill_orb_id: undefined,
     expanded_diff_ids: [],
+    collapsed_transcript_row_ids: [],
     pending_interrupt_turn_id: undefined,
     events: [],
     last_sequence: 0,
     subscription_after_sequence: 0,
+    subscription_retry: 0,
     presence: [],
     typing_presence_cooling: false,
+    creating_thread: false,
     connection: "connected" as const,
     notice: undefined,
   }
@@ -1577,8 +1880,24 @@ const createdThreadModel = (
   if (content === undefined || content.length === 0) {
     return [{ ...next, pending_submit: undefined, pending_submit_mode: undefined }, []]
   }
+  const turnRequestToken = next.turn_request_token + 1
   return [
-    { ...next, pending_turn: true, pending_submit: undefined, pending_submit_mode: undefined },
+    trackPendingStartTurn(
+      {
+        ...next,
+        turn_request_token: turnRequestToken,
+        active_turn_request_token: turnRequestToken,
+        pending_turn: true,
+        pending_submit: content,
+        pending_submit_mode: mode,
+      },
+      {
+        thread_id: summary.thread_id,
+        request_token: turnRequestToken,
+        content,
+        mode,
+      },
+    ),
     [
       StartTurn({
         api_base_url: model.api_base_url,
@@ -1586,21 +1905,53 @@ const createdThreadModel = (
         user_id: model.user_id,
         content,
         mode,
+        request_token: turnRequestToken,
       }),
     ],
   ]
 }
 
-const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly [Model, ReadonlyArray<AppCommand>] => {
+const failedCreateThreadModel = (
+  model: Model,
+  message: typeof FailedCreateThread.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.active_thread_request_token !== message.request_token) return [model, []]
+  return [
+    {
+      ...model,
+      active_thread_request_token: undefined,
+      connection: "failed",
+      pending_turn: false,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      active_turn_request_token: undefined,
+      creating_thread: false,
+      draft: model.pending_submit ?? model.draft,
+      notice: message.message,
+    },
+    [],
+  ]
+}
+
+const openedThreadModel = (
+  model: Model,
+  record: Remote.ThreadRecord,
+  requestToken: number,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.selected_thread_id !== record.summary.thread_id || model.active_thread_request_token !== requestToken) {
+    return [model, []]
+  }
   const lastSequence = lastEventSequence(record.events)
   const next = {
     ...model,
+    active_thread_request_token: undefined,
     selected_thread_id: record.summary.thread_id,
     subscribed_thread_id: record.summary.thread_id,
     selected_orb: undefined,
     ...initialOrbWorkspace(),
     confirm_kill_orb_id: undefined,
     expanded_diff_ids: [],
+    collapsed_transcript_row_ids: [],
     pending_interrupt_turn_id: undefined,
     threads: newestFirst([
       record.summary,
@@ -1609,17 +1960,27 @@ const openedThreadModel = (model: Model, record: Remote.ThreadRecord): readonly 
     events: record.events,
     last_sequence: lastSequence,
     subscription_after_sequence: lastSequence,
+    subscription_retry: 0,
     presence: [],
     typing_presence_cooling: false,
+    creating_thread: false,
     connection: "connected" as const,
     notice: undefined,
   }
-  return [
-    next,
+  const orbCommands =
     record.summary.orb_status === undefined
       ? []
-      : [LoadSelectedOrb({ api_base_url: model.api_base_url, thread_id: record.summary.thread_id })],
-  ]
+      : [LoadSelectedOrb({ api_base_url: model.api_base_url, thread_id: record.summary.thread_id })]
+  const [drained, drainCommands] = drainQueuedMessagesModel(next)
+  return [drained, [...orbCommands, ...drainCommands]]
+}
+
+const failedOpenThreadModel = (
+  model: Model,
+  message: typeof FailedOpenThread.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.active_thread_request_token !== message.request_token) return [model, []]
+  return [{ ...model, active_thread_request_token: undefined, connection: "failed", notice: message.message }, []]
 }
 
 const changedDraftModel = (model: Model, value: string): readonly [Model, ReadonlyArray<AppCommand>] => {
@@ -1636,25 +1997,54 @@ const changedDraftModel = (model: Model, value: string): readonly [Model, Readon
 const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
   const content = model.draft.trim()
   if (content.length === 0) return [model, []]
-  if (activeTurnId(model.events) !== undefined) return [model, []]
+  if (activeTurnId(model.events) !== undefined && model.selected_thread_id !== undefined) {
+    return queueSubmittedMessageModel(
+      model,
+      { thread_id: model.selected_thread_id, content, mode: model.draft_mode },
+      "Turn already active - message queued",
+    )
+  }
   if (model.selected_thread_id === undefined) {
+    const requestToken = model.thread_request_token + 1
     return [
       {
         ...model,
+        thread_request_token: requestToken,
+        active_thread_request_token: requestToken,
         draft: "",
         pending_turn: true,
         pending_submit: content,
         pending_submit_mode: model.draft_mode,
         typing_presence_cooling: false,
+        creating_thread: true,
         connection: "loading",
         notice: undefined,
       },
-      [CreateThread({ api_base_url: model.api_base_url })],
+      [CreateThread({ api_base_url: model.api_base_url, request_token: requestToken })],
     ]
   }
+  const turnRequestToken = model.turn_request_token + 1
   const presence = presenceCommand(model, "active")
   return [
-    { ...model, draft: "", pending_turn: true, notice: undefined, typing_presence_cooling: false },
+    trackPendingStartTurn(
+      {
+        ...model,
+        turn_request_token: turnRequestToken,
+        active_turn_request_token: turnRequestToken,
+        draft: "",
+        pending_turn: true,
+        pending_submit: content,
+        pending_submit_mode: model.draft_mode,
+        notice: undefined,
+        typing_presence_cooling: false,
+      },
+      {
+        thread_id: model.selected_thread_id,
+        request_token: turnRequestToken,
+        content,
+        mode: model.draft_mode,
+      },
+    ),
     [
       ...(presence === undefined ? [] : [presence]),
       StartTurn({
@@ -1663,10 +2053,108 @@ const submittedDraftModel = (model: Model): readonly [Model, ReadonlyArray<AppCo
         user_id: model.user_id,
         content,
         mode: model.draft_mode,
+        request_token: turnRequestToken,
       }),
     ],
   ]
 }
+
+const acceptedTurnModel = (
+  model: Model,
+  message: typeof AcceptedTurn.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const next = removePendingStartTurn(model, message.response.thread_id, message.request_token)
+  if (model.active_turn_request_token !== message.request_token) return [next, []]
+  if (model.selected_thread_id !== message.response.thread_id) return [next, []]
+  return [
+    {
+      ...next,
+      active_turn_request_token: undefined,
+      pending_submit: undefined,
+      pending_submit_mode: undefined,
+      notice: undefined,
+    },
+    [],
+  ]
+}
+
+const failedStartTurnModel = (
+  model: Model,
+  message: typeof FailedStartTurn.Type,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const pending = pendingStartTurn(model, message.thread_id, message.request_token)
+  if (model.active_turn_request_token !== message.request_token && pending === undefined) return [model, []]
+  const withoutPending = removePendingStartTurn(model, message.thread_id, message.request_token)
+  const isActiveFailure = model.active_turn_request_token === message.request_token
+  const cleared = isActiveFailure
+    ? {
+        ...withoutPending,
+        active_turn_request_token: undefined,
+        pending_turn: false,
+        pending_submit: undefined,
+        pending_submit_mode: undefined,
+      }
+    : withoutPending
+  if (message.status === 409 && pending !== undefined) {
+    return queueSubmittedMessageModel(
+      cleared,
+      queuedFromPendingStartTurn(pending),
+      conflictNotice(message.active_user_id),
+    )
+  }
+  if (!isActiveFailure) {
+    return [{ ...cleared, notice: message.message }, []]
+  }
+  return [
+    {
+      ...cleared,
+      draft: pending?.content ?? model.pending_submit ?? model.draft,
+      notice: message.message,
+    },
+    [],
+  ]
+}
+
+const trackPendingStartTurn = (model: Model, pending: PendingStartTurn): Model => ({
+  ...model,
+  pending_start_turns: [...model.pending_start_turns.filter((entry) => entry.thread_id !== pending.thread_id), pending],
+})
+
+const pendingStartTurn = (model: Model, threadId: Ids.ThreadId, requestToken: number): PendingStartTurn | undefined =>
+  model.pending_start_turns.find((entry) => entry.thread_id === threadId && entry.request_token === requestToken)
+
+const removePendingStartTurn = (model: Model, threadId: Ids.ThreadId, requestToken: number): Model => {
+  const pending_start_turns = model.pending_start_turns.filter(
+    (entry) => entry.thread_id !== threadId || entry.request_token !== requestToken,
+  )
+  return pending_start_turns.length === model.pending_start_turns.length ? model : { ...model, pending_start_turns }
+}
+
+const queuedFromPendingStartTurn = (pending: PendingStartTurn): QueuedMessage => ({
+  thread_id: pending.thread_id,
+  content: pending.content,
+  mode: pending.mode,
+})
+
+const queueSubmittedMessageModel = (
+  model: Model,
+  queued: QueuedMessage,
+  notice: string,
+): readonly [Model, ReadonlyArray<AppCommand>] => [
+  {
+    ...model,
+    draft: "",
+    queued_messages: [...model.queued_messages, queued],
+    typing_presence_cooling: false,
+    notice,
+  },
+  [],
+]
+
+const conflictNotice = (activeUserId: Ids.UserId | undefined) =>
+  activeUserId === undefined
+    ? "Another turn is running - message queued"
+    : `${activeUserId} is running a turn - message queued`
 
 const presenceCommand = (model: Model, state: Remote.PresenceState): AppCommand | undefined =>
   model.selected_thread_id === undefined || model.user_id === undefined
@@ -1723,36 +2211,138 @@ const orbTabsModel = (model: Model, message: Tabs.Message): readonly [Model, Rea
   return [next, tabCommands]
 }
 
+const transcriptScrollerModel = (
+  model: Model,
+  message: MessageScroller.Message,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [transcript_scroller, commands] = MessageScroller.update(model.transcript_scroller, message)
+  return [
+    { ...model, transcript_scroller },
+    Command.mapMessages(commands, (childMessage) => GotTranscriptScrollerMessage({ message: childMessage })),
+  ]
+}
+
+const dialogWasClosed = (maybeOutMessage: Option.Option<AlertDialog.OutMessage>): boolean =>
+  Option.match(maybeOutMessage, {
+    onNone: () => false,
+    onSome: (outMessage) => outMessage._tag === "Closed",
+  })
+
+const clickedKillOrbModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  if (model.selected_orb === undefined) return [model, []]
+  const [kill_orb_dialog, dialogCommands] = AlertDialog.open(model.kill_orb_dialog)
+  return [
+    {
+      ...model,
+      confirm_kill_orb_id: model.selected_orb.orb_id,
+      kill_orb_dialog,
+      notice: undefined,
+    },
+    Command.mapMessages(dialogCommands, (childMessage) => GotKillOrbDialogMessage({ message: childMessage })),
+  ]
+}
+
+const killOrbDialogModel = (
+  model: Model,
+  message: AlertDialog.Message,
+): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [kill_orb_dialog, dialogCommands, maybeOutMessage] = AlertDialog.update(model.kill_orb_dialog, message)
+  return [
+    {
+      ...model,
+      kill_orb_dialog,
+      confirm_kill_orb_id: dialogWasClosed(maybeOutMessage) ? undefined : model.confirm_kill_orb_id,
+    },
+    Command.mapMessages(dialogCommands, (childMessage) => GotKillOrbDialogMessage({ message: childMessage })),
+  ]
+}
+
+const cancelKillOrbModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const [kill_orb_dialog, dialogCommands] = AlertDialog.close(model.kill_orb_dialog)
+  return [
+    { ...model, confirm_kill_orb_id: undefined, kill_orb_dialog, notice: undefined },
+    Command.mapMessages(dialogCommands, (childMessage) => GotKillOrbDialogMessage({ message: childMessage })),
+  ]
+}
+
 const receivedEventModel = (model: Model, event: Event.Event): readonly [Model, ReadonlyArray<AppCommand>] => {
   if (model.subscribed_thread_id === undefined || event.thread_id !== model.subscribed_thread_id) return [model, []]
   if (event.sequence <= model.last_sequence) return [model, []]
   const terminalForPendingInterrupt =
     (event.type === "turn.completed" || event.type === "turn.failed") &&
     event.turn_id === model.pending_interrupt_turn_id
-  return [
+  const next = {
+    ...model,
+    events: [...model.events, event],
+    last_sequence: event.sequence,
+    connection: "connected" as const,
+    pending_turn: event.type === "turn.completed" || event.type === "turn.failed" ? false : model.pending_turn,
+    pending_interrupt_turn_id: terminalForPendingInterrupt ? undefined : model.pending_interrupt_turn_id,
+  }
+  return event.type === "turn.completed" || event.type === "turn.failed" ? drainQueuedMessagesModel(next) : [next, []]
+}
+
+const drainQueuedMessagesModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
+  const threadId = model.selected_thread_id
+  if (threadId === undefined || activeTurnId(model.events) !== undefined) {
+    return [model, []]
+  }
+  const queuedIndex = model.queued_messages.findIndex((message) => message.thread_id === threadId)
+  const queued = model.queued_messages[queuedIndex]
+  if (queued === undefined) return [model, []]
+  const turnRequestToken = model.turn_request_token + 1
+  const next = trackPendingStartTurn(
     {
       ...model,
-      events: [...model.events, event],
-      last_sequence: event.sequence,
-      connection: "connected",
-      pending_turn: event.type === "turn.completed" || event.type === "turn.failed" ? false : model.pending_turn,
-      pending_interrupt_turn_id: terminalForPendingInterrupt ? undefined : model.pending_interrupt_turn_id,
+      turn_request_token: turnRequestToken,
+      active_turn_request_token: turnRequestToken,
+      draft: "",
+      queued_messages: model.queued_messages.filter((_, index) => index !== queuedIndex),
+      pending_turn: true,
+      pending_submit: queued.content,
+      pending_submit_mode: queued.mode,
+      notice: undefined,
     },
-    [],
+    {
+      thread_id: threadId,
+      request_token: turnRequestToken,
+      content: queued.content,
+      mode: queued.mode,
+    },
+  )
+  const presence = presenceCommand(next, "active")
+  return [
+    next,
+    [
+      ...(presence === undefined ? [] : [presence]),
+      StartTurn({
+        api_base_url: model.api_base_url,
+        thread_id: threadId,
+        user_id: model.user_id,
+        content: queued.content,
+        mode: queued.mode,
+        request_token: turnRequestToken,
+      }),
+    ],
   ]
 }
 
 const selectedOrbLoadedModel = (model: Model, orb: Remote.OrbSummary): readonly [Model, ReadonlyArray<AppCommand>] => {
   if (model.selected_thread_id !== orb.thread_id) return [model, []]
+  const keepsPendingKill = model.confirm_kill_orb_id === orb.orb_id && orb.status !== "killed"
+  const [kill_orb_dialog, dialogCommands] = keepsPendingKill
+    ? ([model.kill_orb_dialog, []] as const)
+    : AlertDialog.close(model.kill_orb_dialog)
   return [
     {
       ...model,
       selected_orb: orb,
-      confirm_kill_orb_id: undefined,
+      confirm_kill_orb_id: keepsPendingKill ? model.confirm_kill_orb_id : undefined,
+      kill_orb_dialog,
       threads: updateThreadOrbStatus(model.threads, orb),
       notice: undefined,
     },
-    [],
+    Command.mapMessages(dialogCommands, (childMessage) => GotKillOrbDialogMessage({ message: childMessage })),
   ]
 }
 
@@ -1770,9 +2360,13 @@ const selectedOrbActionModel = (
 
 const confirmedKillOrbModel = (model: Model): readonly [Model, ReadonlyArray<AppCommand>] => {
   if (model.selected_orb === undefined || model.confirm_kill_orb_id !== model.selected_orb.orb_id) return [model, []]
+  const [kill_orb_dialog, dialogCommands] = AlertDialog.close(model.kill_orb_dialog)
   return [
-    { ...model, confirm_kill_orb_id: undefined, notice: undefined },
-    [KillSelectedOrb({ api_base_url: model.api_base_url, orb_id: model.selected_orb.orb_id })],
+    { ...model, confirm_kill_orb_id: undefined, kill_orb_dialog, notice: undefined },
+    [
+      KillSelectedOrb({ api_base_url: model.api_base_url, orb_id: model.selected_orb.orb_id }),
+      ...Command.mapMessages(dialogCommands, (childMessage) => GotKillOrbDialogMessage({ message: childMessage })),
+    ],
   ]
 }
 
@@ -1780,16 +2374,20 @@ const loadOrbDirectoryModel = (model: Model, path: string): readonly [Model, Rea
   if (model.selected_thread_id === undefined || model.selected_orb === undefined) return [model, []]
   const state = model.orb_files.directories[path]
   if (state?.state === "loading" || state?.state === "loaded") return [model, []]
-  return [
-    {
-      ...model,
-      orb_files: {
-        ...model.orb_files,
-        directories: { ...model.orb_files.directories, [path]: { state: "loading" } },
-      },
-      notice: undefined,
+  const next = {
+    ...model,
+    orb_files: {
+      ...model.orb_files,
+      directories: { ...model.orb_files.directories, [path]: { state: "loading" as const } },
     },
-    [LoadOrbDirectory({ api_base_url: model.api_base_url, thread_id: model.selected_thread_id, path })],
+    notice: undefined,
+  }
+  return [
+    next,
+    [
+      ...pierreTreeUpdateCommands(next),
+      LoadOrbDirectory({ api_base_url: model.api_base_url, thread_id: model.selected_thread_id, path }),
+    ],
   ]
 }
 
@@ -1811,19 +2409,17 @@ const loadedOrbDirectoryModel = (
     pathKinds[entry.path] = entry.kind
     return treePath(entry)
   })
-  return [
-    {
-      ...model,
-      orb_files: {
-        ...model.orb_files,
-        directories: { ...model.orb_files.directories, [response.path]: { state: "loaded" } },
-        paths: mergeTreePaths(model.orb_files.paths, treePaths),
-        path_kinds: pathKinds,
-      },
-      notice: undefined,
+  const next = {
+    ...model,
+    orb_files: {
+      ...model.orb_files,
+      directories: { ...model.orb_files.directories, [response.path]: { state: "loaded" as const } },
+      paths: mergeTreePaths(model.orb_files.paths, treePaths),
+      path_kinds: pathKinds,
     },
-    [],
-  ]
+    notice: undefined,
+  }
+  return [next, pierreTreeUpdateCommands(next)]
 }
 
 const failedLoadOrbDirectoryModel = (
@@ -1856,17 +2452,21 @@ const selectedOrbFileModel = (model: Model, path: string): readonly [Model, Read
     return [next, commands]
   }
   if (model.selected_thread_id === undefined || model.selected_orb === undefined) return [model, []]
-  return [
-    {
-      ...model,
-      orb_files: {
-        ...model.orb_files,
-        selected_path: normalized,
-        opened_file: { state: "loading", path: normalized },
-      },
-      notice: undefined,
+  const next = {
+    ...model,
+    orb_files: {
+      ...model.orb_files,
+      selected_path: normalized,
+      opened_file: { state: "loading" as const, path: normalized },
     },
-    [LoadOrbFile({ api_base_url: model.api_base_url, thread_id: model.selected_thread_id, path: normalized })],
+    notice: undefined,
+  }
+  return [
+    next,
+    [
+      ...pierreTreeUpdateCommands(next),
+      LoadOrbFile({ api_base_url: model.api_base_url, thread_id: model.selected_thread_id, path: normalized }),
+    ],
   ]
 }
 
@@ -1912,7 +2512,16 @@ const loadedOrbChangesModel = (
   response: Remote.OrbChangesResponse,
 ): readonly [Model, ReadonlyArray<AppCommand>] => {
   const parsed = parseOrbChanges(response)
-  return [{ ...model, orb_changes: parsed, notice: parsed.state === "failed" ? parsed.message : undefined }, []]
+  const next = {
+    ...model,
+    orb_changes: parsed,
+    orb_files: {
+      ...model.orb_files,
+      git_status: parsed.state === "loaded" ? gitStatusFromOrbChanges(parsed.diffs) : [],
+    },
+    notice: parsed.state === "failed" ? parsed.message : undefined,
+  }
+  return [next, pierreTreeUpdateCommands(next)]
 }
 
 const parseOrbChanges = (response: Remote.OrbChangesResponse): OrbChangesModel => {
@@ -1924,19 +2533,30 @@ const parseOrbChanges = (response: Remote.OrbChangesResponse): OrbChangesModel =
         parsedFileNames.add(fileDiff.name)
         const payloadId = `orb-changes:${patchIndex}:${fileIndex}`
         if (fileDiff.hunks.length === 0) {
-          return { kind: "skipped", payload_id: payloadId, file_name: fileDiff.name, reason: "No renderable hunks" }
+          return {
+            kind: "skipped",
+            payload_id: payloadId,
+            file_name: fileDiff.name,
+            reason: "No renderable hunks",
+            git_status: gitStatusFromFileDiff(fileDiff),
+          }
         }
-        return { kind: "diff", ...toWebPierreDiffFromFileDiff(fileDiff, payloadId) }
+        return {
+          kind: "diff",
+          ...toWebPierreDiffFromFileDiff(fileDiff, payloadId),
+          git_status: gitStatusFromFileDiff(fileDiff),
+        }
       }),
     )
-    const skipped = diffFileNames(response.diff)
-      .filter((fileName) => !parsedFileNames.has(fileName))
+    const skipped = diffFileEntries(response.diff)
+      .filter((entry) => !parsedFileNames.has(entry.file_name))
       .map(
-        (fileName, index): OrbChangeSkipped => ({
+        (entry, index): OrbChangeSkipped => ({
           kind: "skipped",
           payload_id: `orb-changes:skipped:${index}`,
-          file_name: fileName,
+          file_name: entry.file_name,
           reason: "Diff unavailable",
+          git_status: entry.git_status,
         }),
       )
     return {
@@ -1947,12 +2567,13 @@ const parseOrbChanges = (response: Remote.OrbChangesResponse): OrbChangesModel =
       diffs: [...diffs, ...skipped],
     }
   } catch (cause) {
-    const skipped = diffFileNames(response.diff).map(
-      (fileName, index): OrbChangeSkipped => ({
+    const skipped = diffFileEntries(response.diff).map(
+      (entry, index): OrbChangeSkipped => ({
         kind: "skipped",
         payload_id: `orb-changes:skipped:${index}`,
-        file_name: fileName,
+        file_name: entry.file_name,
         reason: cause instanceof Error ? cause.message : String(cause),
+        git_status: entry.git_status,
       }),
     )
     if (skipped.length > 0) {
@@ -1968,11 +2589,37 @@ const parseOrbChanges = (response: Remote.OrbChangesResponse): OrbChangesModel =
   }
 }
 
-const diffFileNames = (diff: string): ReadonlyArray<string> =>
-  diff.split("\n").flatMap((line) => {
+interface DiffFileEntry {
+  readonly file_name: string
+  readonly git_status: PierreTreeGitStatusEntry
+}
+
+const diffFileEntries = (diff: string): ReadonlyArray<DiffFileEntry> => {
+  const entries: Array<DiffFileEntry> = []
+  let current: DiffFileEntry | undefined
+  for (const line of diff.split("\n")) {
     const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line)
-    return match?.[2] === undefined ? [] : [match[2]]
-  })
+    if (match?.[2] !== undefined) {
+      if (current !== undefined) entries.push(current)
+      current = { file_name: match[2], git_status: { path: match[2], status: "modified" } }
+      continue
+    }
+    if (current === undefined) continue
+    if (line.startsWith("new file mode ") || line === "--- /dev/null") {
+      current = { ...current, git_status: { path: current.file_name, status: "added" } }
+      continue
+    }
+    if (line.startsWith("deleted file mode ") || line === "+++ /dev/null") {
+      current = { ...current, git_status: { path: current.file_name, status: "deleted" } }
+      continue
+    }
+    if (line.startsWith("rename from ") || line.startsWith("rename to ")) {
+      current = { ...current, git_status: { path: current.file_name, status: "renamed" } }
+    }
+  }
+  if (current !== undefined) entries.push(current)
+  return entries
+}
 
 const treePath = (entry: Remote.OrbFileEntry) => (entry.kind === "dir" ? `${entry.path}/` : entry.path)
 
@@ -1991,6 +2638,50 @@ const normalizeTreeSelection = (path: string) => {
   return normalized === "." ? "" : normalized
 }
 
+export const pierreTreeMountKey = (threadId: Ids.ThreadId, orbId: Ids.OrbId): string => `orb-tree:${threadId}:${orbId}`
+
+const pierreTreeUpdateCommands = (model: Model): ReadonlyArray<AppCommand> => {
+  const args = pierreTreeCommandArgs(model)
+  return args === undefined ? [] : [UpdatePierreTree(args)]
+}
+
+const pierreTreeCommandArgs = (model: Model) => {
+  if (model.selected_orb_tab !== "files") return undefined
+  if (model.selected_thread_id === undefined || model.selected_orb === undefined) return undefined
+  if (model.orb_files.paths.length === 0) return undefined
+  const selected = selectedTreePath(model.orb_files)
+  return {
+    mount_key: pierreTreeMountKey(model.selected_thread_id, model.selected_orb.orb_id),
+    paths: model.orb_files.paths,
+    git_status: model.orb_files.git_status,
+    ...(selected === undefined ? {} : { selected_path: selected }),
+  }
+}
+
+const selectedTreePath = (orbFiles: OrbFilesModel) => {
+  const selected = orbFiles.selected_path
+  if (selected === undefined) return undefined
+  return orbFiles.path_kinds[selected] === "dir" ? `${selected}/` : selected
+}
+
+const gitStatusFromOrbChanges = (diffs: ReadonlyArray<OrbChangeRow>): ReadonlyArray<PierreTreeGitStatusEntry> => {
+  const entries = new Map<string, PierreTreeGitStatusEntry>()
+  for (const diff of diffs) entries.set(diff.git_status.path, diff.git_status)
+  return [...entries.values()]
+}
+
+const gitStatusFromFileDiff = (fileDiff: PierreDiff.FileDiffMetadata): PierreTreeGitStatusEntry => ({
+  path: fileDiff.name,
+  status: gitStatusFromFileDiffType(fileDiff.type),
+})
+
+const gitStatusFromFileDiffType = (type: PierreDiff.FileDiffChangeType): PierreTreeGitStatus => {
+  if (type === "new") return "added"
+  if (type === "deleted") return "deleted"
+  if (type === "rename-pure" || type === "rename-changed") return "renamed"
+  return "modified"
+}
+
 const updateThreadOrbStatus = (
   threads: ReadonlyArray<Remote.ThreadSummary>,
   orb: Remote.OrbSummary,
@@ -2005,6 +2696,8 @@ const lastEventSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?
 const initialOrbWorkspace = () => ({
   selected_orb_tab: "transcript" as const,
   orb_tabs: Tabs.init({ id: "orb-tabs" }),
+  transcript_scroller: MessageScroller.init({ id: "transcript-scroller" }),
+  kill_orb_dialog: AlertDialog.init({ id: "kill-orb-dialog" }),
   orb_files: initialOrbFiles(),
   orb_changes: { state: "idle" as const },
   orb_terminal_status: "idle" as const,
@@ -2015,6 +2708,7 @@ const initialOrbFiles = (): OrbFilesModel => ({
   directories: {},
   paths: [],
   path_kinds: {},
+  git_status: [],
   opened_file: { state: "idle" },
 })
 
@@ -2027,6 +2721,7 @@ const diffRows = (input: {
     | Event.ToolCallCompleted["data"]["result"]["output"]
     | Event.ArtifactCreated["data"]["artifact"]["content"]
   readonly expandedDiffIds: ReadonlySet<string>
+  readonly collapsedTranscriptRowIds: ReadonlySet<string>
 }): ReadonlyArray<TranscriptRow> | undefined => {
   const payloads = collectPierreDiffPayloads(input.value)
   if (payloads.length === 0) return undefined
@@ -2042,6 +2737,7 @@ const diffRows = (input: {
         kind: input.fallbackKind,
         title: input.title,
         body: fileName === undefined ? "diff unavailable" : `${fileName} · diff unavailable`,
+        is_open: !input.collapsedTranscriptRowIds.has(unavailableId),
       }
     }
     return {
@@ -2081,12 +2777,17 @@ const roleLabel = (role: RikaMessage.Role) => {
   return "System"
 }
 
-const messageDisplayText = (message: RikaMessage.Message, userId: Ids.UserId | undefined): string => {
-  const text = RikaMessage.displayText(message)
+const messageAuthor = (
+  message: RikaMessage.Message,
+  userId: Ids.UserId | undefined,
+): TextTranscriptRow["author"] | undefined => {
   const messageUserId = messageUserIdFromMetadata(message)
-  return message.role === "user" && messageUserId !== undefined && (userId === undefined || messageUserId !== userId)
-    ? `${messageUserId} › ${text}`
-    : text
+  if (message.role !== "user" || messageUserId === undefined) return undefined
+  const isLocal = userId !== undefined && messageUserId === userId
+  return {
+    label: isLocal ? "User" : messageUserId,
+    is_local: isLocal,
+  }
 }
 
 const messageUserIdFromMetadata = (message: RikaMessage.Message): Ids.UserId | undefined => {

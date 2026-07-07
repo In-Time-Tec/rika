@@ -1,7 +1,7 @@
-import { Config, Settings, Time } from "@rika/core"
+import { Config, KeyedSemaphore, Settings, SynchronizedMap, Time } from "@rika/core"
 import { Database, OrbStore } from "@rika/persistence"
 import { Ids } from "@rika/schema"
-import { Context, Effect, Layer, Option, Schema, Semaphore } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as SandboxClient from "./sandbox-client"
 
 const defaultIdleTimeoutSeconds = 300
@@ -22,6 +22,7 @@ export type RunError =
 
 export interface Interface {
   readonly touch: (orbId: Ids.OrbId) => Effect.Effect<void, RunError>
+  readonly release: (orbId: Ids.OrbId) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/orb/OrbActivity") {}
@@ -39,19 +40,8 @@ export const layer: Layer.Layer<
     const sandbox = yield* SandboxClient.Service
     const time = yield* Time.Service
     const timeoutMs = yield* resolveTimeoutMs(config, settings)
-    const lastRefreshByOrb = new Map<Ids.OrbId, number>()
-    const refreshLocks = new Map<Ids.OrbId, Semaphore.Semaphore>()
-    const refreshLocksMutex = yield* Semaphore.make(1)
-    const refreshLockFor = (orbId: Ids.OrbId) =>
-      refreshLocksMutex.withPermit(
-        Effect.gen(function* () {
-          const existing = refreshLocks.get(orbId)
-          if (existing !== undefined) return existing
-          const lock = yield* Semaphore.make(1)
-          refreshLocks.set(orbId, lock)
-          return lock
-        }),
-      )
+    const lastRefreshByOrb = yield* SynchronizedMap.make<Ids.OrbId, number>()
+    const refreshLocks = yield* KeyedSemaphore.make<Ids.OrbId>()
 
     return Service.of({
       touch: Effect.fn("OrbActivity.touch")(function* (orbId: Ids.OrbId) {
@@ -77,20 +67,28 @@ export const layer: Layer.Layer<
             orb_id: orbId,
           })
         }
-        const sandboxId = record.sandbox_id
-        const refreshLock = yield* refreshLockFor(orbId)
-        yield* refreshLock.withPermit(
+        yield* KeyedSemaphore.withPermit(
+          refreshLocks,
+          orbId,
           Effect.gen(function* () {
+            const refreshedRecord = yield* orbs.get(orbId)
+            if (refreshedRecord === undefined || refreshedRecord.status !== "running") return
+            const refreshedSandboxId = refreshedRecord.sandbox_id
+            if (refreshedSandboxId === null) return
             const now = yield* time.nowMillis
-            const previousRefresh = lastRefreshByOrb.get(orbId)
+            const previousRefresh = Option.getOrUndefined(yield* SynchronizedMap.get(lastRefreshByOrb, orbId))
             if (previousRefresh === undefined || now - previousRefresh >= refreshThrottleMillis) {
-              yield* sandbox.setTimeout(sandboxId, timeoutMs)
-              lastRefreshByOrb.set(orbId, now)
+              yield* sandbox.setTimeout(refreshedSandboxId, timeoutMs)
+              yield* SynchronizedMap.set(lastRefreshByOrb, orbId, now)
             }
+            yield* orbs.touch(orbId)
           }),
         )
-        yield* orbs.touch(orbId)
         return yield* Effect.void
+      }),
+      release: Effect.fn("OrbActivity.release")(function* (orbId: Ids.OrbId) {
+        yield* KeyedSemaphore.withPermit(refreshLocks, orbId, SynchronizedMap.remove(lastRefreshByOrb, orbId))
+        yield* KeyedSemaphore.remove(refreshLocks, orbId)
       }),
     })
   }),
@@ -101,6 +99,11 @@ export const touch = Effect.fn("OrbActivity.touch.call")(function* (orbId: Ids.O
   return yield* service.touch(orbId)
 })
 
+export const release = Effect.fn("OrbActivity.release.call")(function* (orbId: Ids.OrbId) {
+  const service = yield* Service
+  return yield* service.release(orbId)
+})
+
 const resolveTimeoutMs = Effect.fn("OrbActivity.resolveTimeoutMs")(function* (
   config: Config.Interface,
   settings: Settings.Interface | undefined,
@@ -108,7 +111,7 @@ const resolveTimeoutMs = Effect.fn("OrbActivity.resolveTimeoutMs")(function* (
   const configured = yield* config.requireEnv("RIKA_ORB_IDLE_TIMEOUT").pipe(Effect.option)
   if (Option.isNone(configured)) {
     if (settings !== undefined) {
-      const snapshot = yield* settings.snapshot
+      const snapshot = yield* settings.snapshot.pipe(Effect.mapError(settingsConfigError))
       return snapshot.values.orb.idleTimeoutSeconds * 1_000
     }
     return defaultIdleTimeoutSeconds * 1_000
@@ -122,3 +125,9 @@ const resolveTimeoutMs = Effect.fn("OrbActivity.resolveTimeoutMs")(function* (
   }
   return seconds * 1_000
 })
+
+const settingsConfigError = (error: Settings.SettingsError) =>
+  new Config.ConfigError({
+    message: error.message,
+    ...(error.key === undefined ? {} : { key: error.key }),
+  })

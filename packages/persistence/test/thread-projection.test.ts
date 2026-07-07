@@ -171,6 +171,21 @@ describe("ThreadProjection", () => {
     expect(summary).toMatchObject({ active_turn_status: "completed" })
   })
 
+  test("rejects a forward sequence gap", async () => {
+    const error = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        const events = projectionEvents()
+        yield* ThreadProjection.apply(events[0])
+        return yield* ThreadProjection.apply(events[2]).pipe(Effect.flip)
+      }).pipe(Effect.provide(layer)),
+    )
+
+    expect(error).toBeInstanceOf(ThreadProjection.ThreadProjectionError)
+    expect(error.operation).toBe("apply")
+    expect(error.message).toContain("Expected projection sequence 2")
+  })
+
   test("keeps the first terminal turn status when a later terminal event arrives", async () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {

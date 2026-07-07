@@ -1,4 +1,4 @@
-import { Config } from "@rika/core"
+import { Config, Diagnostics } from "@rika/core"
 import { Effect, Layer } from "effect"
 import * as Anthropic from "./anthropic"
 import * as OpenAi from "./openai"
@@ -42,5 +42,7 @@ export const providerRegistryLayer = (
     }),
   )
 
-export const layer = (options: Options = {}): Layer.Layer<Router.Service, Config.ConfigError, Config.Service> =>
+export const layer = (
+  options: Options = {},
+): Layer.Layer<Router.Service, Config.ConfigError, Config.Service | Diagnostics.Service> =>
   Router.layer.pipe(Layer.provideMerge(providerRegistryLayer(options)))

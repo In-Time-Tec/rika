@@ -10,7 +10,7 @@ import {
   TournamentService,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { Provider, Router } from "@rika/llm"
 import { OrbManager } from "@rika/orb"
@@ -189,16 +189,20 @@ interface LayerInput {
 
 const makeLayer = (input: LayerInput) => {
   const timeLayer = Time.fixedLayer(now)
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const baseStorageLayer = Layer.mergeAll(
     configLayer,
     Output.memoryLayer(input.output),
     Input.memoryLayer(input.stdin ?? "", false),
     Database.memoryLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     timeLayer,
     IdGenerator.sequenceLayer(1),
+    diagnosticsLayer,
   )
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(baseStorageLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(baseStorageLayer))
@@ -215,20 +219,22 @@ const makeLayer = (input: LayerInput) => {
     orbStoreLayer,
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
-  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const threadLayer = ThreadService.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const llmLayer = Router.layer.pipe(
     Layer.provideMerge(configLayer),
     Layer.provideMerge(fakeProviderRegistryLayer(input.answers, input.failBranchOrdinals ?? new Set())),
   )
-  const diagnosticsLayer = Diagnostics.memoryLayer([])
   const agentBaseLayer = Layer.mergeAll(
     migratedStorageLayer,
     threadLayer,
     workspaceAccessLayer,
     ContextResolver.fakeLayer({ entries: [], rendered: "", total_chars: 0 }),
     SkillRegistry.emptyLayer,
-    ToolExecutor.fakeLayer({}),
+    ToolExecutor.fakeLayer({}).pipe(Layer.provideMerge(diagnosticsLayer)),
     diagnosticsLayer,
     llmLayer,
     IdeBridge.layer,
@@ -420,6 +426,7 @@ const fakeOrbManagerLayer = Layer.succeed(
     pause: (id) => Effect.succeed(orbRecord(sourceThreadId, projectId, "paused", id)),
     resume: (id) => Effect.succeed(orbRecord(sourceThreadId, projectId, "running", id)),
     kill: (id) => Effect.succeed(orbRecord(sourceThreadId, projectId, "killed", id)),
+    forceKill: (id) => Effect.succeed(orbRecord(sourceThreadId, projectId, "killed", id)),
   }),
 )
 

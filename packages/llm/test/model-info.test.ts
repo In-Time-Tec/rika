@@ -19,6 +19,15 @@ describe("LLM model info", () => {
     })
   })
 
+  test("rejects present non-decimal model context window env values", () => {
+    expect(() => ModelInfo.modelInfo("gpt-5.5", { RIKA_MODEL_CONTEXT_WINDOW: "1e3" })).toThrow(
+      "Invalid RIKA_MODEL_CONTEXT_WINDOW 1e3",
+    )
+    expect(() => ModelInfo.modelInfo("gpt-5.5", { RIKA_MODEL_CONTEXT_WINDOW: "+5" })).toThrow(
+      "Invalid RIKA_MODEL_CONTEXT_WINDOW +5",
+    )
+  })
+
   test("computes usable budget after reserved output tokens", () => {
     expect(ModelInfo.usableBudget({ context_window: 200_000, max_output_tokens: 32_000 })).toBe(180_000)
     expect(ModelInfo.usableBudget({ context_window: 200_000, max_output_tokens: 32_000 }, 8_000)).toBe(192_000)

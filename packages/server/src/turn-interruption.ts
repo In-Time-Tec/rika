@@ -15,15 +15,13 @@ export const appendIfLatestTurnOpen = Effect.fn("TurnInterruption.appendIfLatest
   readonly thread_id: Ids.ThreadId
   readonly message: string
   readonly eventLog: ThreadEventLog.Interface
-  readonly projection: ThreadProjection.Interface
   readonly live?: ThreadLive.Interface
 }) {
   const events = yield* input.eventLog.readThread({ thread_id: input.thread_id })
   const started = latestOpenTurn(events)
   if (started === undefined) return undefined
   const event = interruptedTurnFailed(started, (events.at(-1)?.sequence ?? 0) + 1, input.message)
-  const result = yield* input.eventLog.appendIfAbsent(event)
-  yield* input.projection.apply(result.event)
+  const result = yield* input.eventLog.appendIfAbsentAndProject(event)
   if (result.status === "inserted" && input.live !== undefined) yield* input.live.publish(result.event)
   return result.status === "inserted" ? result.event : undefined
 })

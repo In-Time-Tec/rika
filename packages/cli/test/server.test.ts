@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config, Diagnostics } from "@rika/core"
+import { Config, Diagnostics, SecretRedactor } from "@rika/core"
 import { HttpServer } from "@rika/server"
 import { Effect, Fiber, Layer, ManagedRuntime, Ref } from "effect"
 import { Output, Server } from "../src/index"
@@ -29,11 +29,13 @@ describe("CLI server command", () => {
       data_dir: "/workspace/rika-cli-test/.rika",
       default_mode: "smart",
     })
+    const redactorLayer = SecretRedactor.layer
+    const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
     const layer = Server.layer.pipe(
       Layer.provideMerge(Output.memoryLayer(output)),
       Layer.provideMerge(httpLayer),
       Layer.provideMerge(configLayer),
-      Layer.provideMerge(Diagnostics.memoryLayer([])),
+      Layer.provideMerge(diagnosticsLayer),
     )
     const runtime = ManagedRuntime.make(layer)
 

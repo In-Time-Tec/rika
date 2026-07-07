@@ -126,6 +126,7 @@ export const artifacts = sqliteTable(
   {
     id: text().primaryKey(),
     thread_id: text().notNull(),
+    workspace_id: text(),
     turn_id: text(),
     kind: text().notNull(),
     title: text(),
@@ -135,6 +136,7 @@ export const artifacts = sqliteTable(
   },
   (table) => [
     index("artifacts_thread_created_idx").on(table.thread_id, table.created_at),
+    index("artifacts_workspace_kind_created_idx").on(table.workspace_id, table.kind, table.created_at),
     index("artifacts_kind_idx").on(table.kind),
   ],
 )
@@ -194,7 +196,9 @@ export const orbs = sqliteTable(
     last_active_at: integer().notNull(),
   },
   (table) => [
-    uniqueIndex("orbs_thread_idx").on(table.thread_id),
+    uniqueIndex("orbs_thread_idx")
+      .on(table.thread_id)
+      .where(sql`${table.status} in ('provisioning', 'running', 'paused')`),
     index("orbs_project_idx").on(table.project_id),
     index("orbs_status_idx").on(table.status),
   ],

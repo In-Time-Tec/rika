@@ -1,4 +1,5 @@
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Config as EffectConfig, Context, Effect, Layer, Option, Redacted, Schema } from "effect"
+import * as EnvConfig from "./env-config"
 import * as Settings from "./settings"
 
 export const Mode = Schema.Literals(["rush", "smart", "deep1", "deep2", "deep3"]).annotate({
@@ -34,6 +35,7 @@ export class ConfigError extends Schema.TaggedErrorClass<ConfigError>()("ConfigE
 export interface Interface {
   readonly get: Effect.Effect<Values>
   readonly requireEnv: (key: string) => Effect.Effect<string, ConfigError>
+  readonly requireSecret: (key: string) => Effect.Effect<Redacted.Redacted, ConfigError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/core/Config") {}
@@ -44,11 +46,11 @@ export const layerFromValues = (values: Values, env: Record<string, string | und
     Service.of({
       get: Effect.succeed(values),
       requireEnv: Effect.fn("Config.requireEnv")(function* (key: string) {
-        const value = env[key]
-        if (value === undefined || value.length === 0) {
-          return yield* new ConfigError({ message: `Missing required config value ${key}`, key })
-        }
-        return value
+        return yield* requireEnvValue(env, key)
+      }),
+      requireSecret: Effect.fn("Config.requireSecret")(function* (key: string) {
+        const value = yield* requireEnvValue(env, key)
+        return Redacted.make(value, { label: key })
       }),
     }),
   )
@@ -59,38 +61,23 @@ export const valuesFromEnv = (
 ): Effect.Effect<Values, ConfigError> =>
   Effect.gen(function* () {
     const workspaceRoot = env.RIKA_WORKSPACE_ROOT ?? cwd
-    const settings = yield* Settings.loadSnapshotFromEnv(env, workspaceRoot)
-    const defaultMode = env.RIKA_MODE === undefined ? settings.values.mode.default : yield* parseMode(env.RIKA_MODE)
-    const compactionAuto =
-      env.RIKA_COMPACTION_AUTO === undefined
-        ? settings.values.compaction.auto
-        : yield* parseBooleanOption(env.RIKA_COMPACTION_AUTO, "RIKA_COMPACTION_AUTO")
-    const compactionReserved =
-      env.RIKA_COMPACTION_RESERVED === undefined
-        ? settings.values.compaction.reserved
-        : yield* parseNonNegativeIntOption(env.RIKA_COMPACTION_RESERVED, "RIKA_COMPACTION_RESERVED")
-    const compactionPrune =
-      env.RIKA_COMPACTION_PRUNE === undefined
-        ? settings.values.compaction.prune
-        : yield* parseBooleanOption(env.RIKA_COMPACTION_PRUNE, "RIKA_COMPACTION_PRUNE")
-    const compactionPruneProtect =
-      env.RIKA_COMPACTION_PRUNE_PROTECT === undefined
-        ? settings.values.compaction.pruneProtect
-        : yield* parseNonNegativeIntOption(env.RIKA_COMPACTION_PRUNE_PROTECT, "RIKA_COMPACTION_PRUNE_PROTECT")
-    const compactionPruneMinimum =
-      env.RIKA_COMPACTION_PRUNE_MINIMUM === undefined
-        ? settings.values.compaction.pruneMinimum
-        : yield* parseNonNegativeIntOption(env.RIKA_COMPACTION_PRUNE_MINIMUM, "RIKA_COMPACTION_PRUNE_MINIMUM")
-    const subagentTools = yield* parseSubagentTools(env.RIKA_SUBAGENT_TOOLS)
+    const settings = yield* Settings.loadSnapshotFromEnv(env, workspaceRoot).pipe(Effect.mapError(settingsConfigError))
+    const subagentTools = yield* parseSubagentTools(env)
     const base: Values = {
       workspace_root: workspaceRoot,
       data_dir: env.RIKA_DATA_DIR ?? `${workspaceRoot}/.rika`,
-      default_mode: defaultMode,
-      ...(compactionAuto === undefined ? {} : { compaction_auto: compactionAuto }),
-      ...(compactionReserved === undefined ? {} : { compaction_reserved: compactionReserved }),
-      ...(compactionPrune === undefined ? {} : { compaction_prune: compactionPrune }),
-      ...(compactionPruneProtect === undefined ? {} : { compaction_prune_protect: compactionPruneProtect }),
-      ...(compactionPruneMinimum === undefined ? {} : { compaction_prune_minimum: compactionPruneMinimum }),
+      default_mode: settings.values.mode.default,
+      ...(settings.values.compaction.auto === undefined ? {} : { compaction_auto: settings.values.compaction.auto }),
+      ...(settings.values.compaction.reserved === undefined
+        ? {}
+        : { compaction_reserved: settings.values.compaction.reserved }),
+      ...(settings.values.compaction.prune === undefined ? {} : { compaction_prune: settings.values.compaction.prune }),
+      ...(settings.values.compaction.pruneProtect === undefined
+        ? {}
+        : { compaction_prune_protect: settings.values.compaction.pruneProtect }),
+      ...(settings.values.compaction.pruneMinimum === undefined
+        ? {}
+        : { compaction_prune_minimum: settings.values.compaction.pruneMinimum }),
       ...(subagentTools === undefined ? {} : { subagent_tools: subagentTools }),
     }
     const values: Values = env.RIKA_DATABASE_URL === undefined ? base : { ...base, database_url: env.RIKA_DATABASE_URL }
@@ -106,17 +93,17 @@ export const layerFromEnv = (env: Record<string, string | undefined>, cwd: strin
       return Service.of({
         get: Effect.succeed(values),
         requireEnv: Effect.fn("Config.requireEnv")(function* (key: string) {
-          const value = env[key]
-          if (value === undefined || value.length === 0) {
-            return yield* new ConfigError({ message: `Missing required config value ${key}`, key })
-          }
-          return value
+          return yield* requireEnvValue(env, key)
+        }),
+        requireSecret: Effect.fn("Config.requireSecret")(function* (key: string) {
+          const value = yield* requireEnvValue(env, key)
+          return Redacted.make(value, { label: key })
         }),
       })
     }),
   )
 
-export const layer = layerFromEnv(process.env, process.cwd())
+export const layer = Layer.suspend(() => layerFromEnv(process.env, process.cwd()))
 
 export const get = Effect.fn("Config.get")(function* () {
   const config = yield* Service
@@ -128,32 +115,37 @@ export const requireEnv = Effect.fn("Config.requireEnv.call")(function* (key: st
   return yield* config.requireEnv(key)
 })
 
+export const requireSecret = Effect.fn("Config.requireSecret.call")(function* (key: string) {
+  const config = yield* Service
+  return yield* config.requireSecret(key)
+})
+
 export const subagentTools = (values: Values): SubagentTools => values.subagent_tools ?? "readonly"
 
-const parseMode = (value: string) => {
-  const decoded = Schema.decodeUnknownOption(Mode)(value)
-  if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
-  return new ConfigError({ message: `Invalid RIKA_MODE ${value}`, key: "RIKA_MODE" })
-}
+const parseSubagentTools = (env: Record<string, string | undefined>) =>
+  EffectConfig.option(EffectConfig.literals(["readonly", "full"], "RIKA_SUBAGENT_TOOLS"))
+    .parse(EnvConfig.providerFromEnv(env))
+    .pipe(
+      Effect.map((value) => Option.getOrUndefined(value)),
+      Effect.mapError(
+        () =>
+          new ConfigError({
+            message: `Invalid RIKA_SUBAGENT_TOOLS ${env.RIKA_SUBAGENT_TOOLS ?? ""}`,
+            key: "RIKA_SUBAGENT_TOOLS",
+          }),
+      ),
+    )
 
-const parseSubagentTools = (value: string | undefined) => {
-  if (value === undefined) return Effect.succeed(undefined)
-  const decoded = Schema.decodeUnknownOption(SubagentTools)(value)
-  if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
-  return new ConfigError({ message: `Invalid RIKA_SUBAGENT_TOOLS ${value}`, key: "RIKA_SUBAGENT_TOOLS" })
-}
+const settingsConfigError = (error: Settings.SettingsError) =>
+  new ConfigError({
+    message: error.message,
+    ...(error.key === undefined ? {} : { key: error.key }),
+  })
 
-const parseBooleanOption = (value: string | undefined, key: string) => {
-  if (value === undefined) return Effect.succeed(undefined)
-  if (value === "true") return Effect.succeed(true)
-  if (value === "false") return Effect.succeed(false)
-  return new ConfigError({ message: `Invalid ${key} ${value}`, key })
-}
-
-const parseNonNegativeIntOption = (value: string | undefined, key: string) => {
-  if (value === undefined) return Effect.succeed(undefined)
-  if (!/^\d+$/.test(value)) return new ConfigError({ message: `Invalid ${key} ${value}`, key })
-  const parsed = Number(value)
-  if (Number.isSafeInteger(parsed)) return Effect.succeed(parsed)
-  return new ConfigError({ message: `Invalid ${key} ${value}`, key })
+const requireEnvValue = (env: Record<string, string | undefined>, key: string): Effect.Effect<string, ConfigError> => {
+  const value = env[key]
+  if (value === undefined || value.length === 0) {
+    return new ConfigError({ message: `Missing required config value ${key}`, key })
+  }
+  return Effect.succeed(value)
 }

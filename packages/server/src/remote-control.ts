@@ -6,12 +6,12 @@ import {
   WorkspaceAccess,
   WorkspaceIdentity,
 } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SynchronizedMap, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { OrbManager } from "@rika/orb"
 import { ArtifactStore, Database, OrbStore, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Artifact, Common, Event, Ide, Ids, Orb, Remote } from "@rika/schema"
-import { Context, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import { Cause, Context, Effect, FiberMap, HashMap, Layer, Option, Schema, Stream } from "effect"
 import * as OrbMirror from "./orb-mirror"
 import * as PresenceHub from "./presence-hub"
 import * as ThreadLive from "./thread-live"
@@ -110,7 +110,9 @@ export interface Interface {
     input: Authorized<Remote.SetThreadPresenceRequest>,
   ) => Effect.Effect<Remote.PresenceFrame, RunError>
   readonly startTurn: (input: Authorized<Remote.StartTurnRequest>) => Effect.Effect<Remote.StartTurnResponse, RunError>
-  readonly interruptTurn: (input: Authorized<Remote.InterruptTurnRequest>) => Effect.Effect<Event.TurnFailed, RunError>
+  readonly interruptTurn: (
+    input: Authorized<Remote.InterruptTurnRequest>,
+  ) => Effect.Effect<Event.TurnTerminal, RunError>
   readonly listArtifacts: (
     input: Authorized<Remote.ListArtifactsRequest>,
   ) => Effect.Effect<ReadonlyArray<Artifact.Artifact>, RunError>
@@ -141,6 +143,17 @@ const requestUserId = (input: object): Ids.UserId | undefined => {
 
 const userIdField = (userId: Ids.UserId | undefined) => (userId === undefined ? {} : { user_id: userId })
 
+interface ActiveThreadState {
+  readonly user_id?: Ids.UserId
+  readonly turn_id?: Ids.TurnId
+}
+
+type ThreadReservation =
+  | { readonly reserved: true }
+  | { readonly reserved: false; readonly active_user_id?: Ids.UserId }
+
+const activeThreadState = (userId?: Ids.UserId): ActiveThreadState => (userId === undefined ? {} : { user_id: userId })
+
 export const layerWithLive = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -149,6 +162,7 @@ export const layerWithLive = Layer.effect(
     const threads = yield* ThreadService.Service
     const artifacts = yield* ArtifactStore.Service
     const config = yield* Config.Service
+    const diagnostics = yield* Diagnostics.Service
     const idGenerator = yield* IdGenerator.Service
     const database = yield* Database.Service
     const eventLog = yield* ThreadEventLog.Service
@@ -161,30 +175,42 @@ export const layerWithLive = Layer.effect(
     const orbManager = yield* OrbManager.Service
     const orbMirror = yield* OrbMirror.Service
     const presence = yield* PresenceHub.Service
-    const activeThreads = new Map<Ids.ThreadId, Ids.UserId | undefined>()
-    const activeThreadsMutex = yield* Semaphore.make(1)
+    const turnFibers = yield* FiberMap.make<Ids.ThreadId, void, never>()
+    const activeThreads = yield* SynchronizedMap.make<Ids.ThreadId, ActiveThreadState>()
     const reserveThread = (threadId: Ids.ThreadId, userId?: Ids.UserId) =>
-      activeThreadsMutex.withPermit(
-        Effect.sync(() => {
-          if (activeThreads.has(threadId)) {
-            return { reserved: false as const, active_user_id: activeThreads.get(threadId) }
-          }
-          activeThreads.set(threadId, userId)
-          return { reserved: true as const }
-        }),
-      )
-    const releaseThread = (threadId: Ids.ThreadId) =>
-      activeThreadsMutex.withPermit(
-        Effect.sync(() => {
-          activeThreads.delete(threadId)
-        }),
-      )
+      SynchronizedMap.modify<Ids.ThreadId, ActiveThreadState, ThreadReservation>(activeThreads, (entries) => {
+        const active = HashMap.get(entries, threadId)
+        if (Option.isSome(active)) {
+          return [
+            active.value.user_id === undefined
+              ? { reserved: false as const }
+              : { reserved: false as const, active_user_id: active.value.user_id },
+            entries,
+          ] as const
+        }
+        return [{ reserved: true as const }, HashMap.set(entries, threadId, activeThreadState(userId))] as const
+      })
+    const releaseThread = (threadId: Ids.ThreadId) => SynchronizedMap.remove(activeThreads, threadId)
+    const markTurnStarted = (threadId: Ids.ThreadId, turnId: Ids.TurnId) =>
+      SynchronizedMap.modify(activeThreads, (entries) => {
+        const active = HashMap.get(entries, threadId)
+        if (Option.isNone(active)) return [undefined, entries] as const
+        return [undefined, HashMap.set(entries, threadId, { ...active.value, turn_id: turnId })] as const
+      })
+    const activeThread = (threadId: Ids.ThreadId) =>
+      SynchronizedMap.get(activeThreads, threadId).pipe(Effect.map(Option.getOrUndefined))
     const readLoggedEvents = (threadId: Ids.ThreadId, afterSequence: number) =>
       eventLog
         .readThread({ thread_id: threadId, after_sequence: afterSequence })
         .pipe(Effect.provideService(Database.Service, database))
     const latestLoggedSequence = (threadId: Ids.ThreadId) =>
       readLoggedEvents(threadId, 0).pipe(Effect.map((events) => events.at(-1)?.sequence ?? 0))
+    const requestedTurnTerminal = Effect.fn("RemoteControl.requestedTurnTerminal")(function* (
+      input: Remote.InterruptTurnRequest,
+    ) {
+      const events = yield* readLoggedEvents(input.thread_id, 0)
+      return terminalForTurn(events, input.turn_id)
+    })
     const publishLoggedEvents = (threadId: Ids.ThreadId, afterSequence: number) =>
       readLoggedEvents(threadId, afterSequence).pipe(Effect.flatMap((events) => live.publishAll(events)))
     const projectedThread = (threadId: Ids.ThreadId) =>
@@ -218,7 +244,6 @@ export const layerWithLive = Layer.effect(
             thread_id: threadId,
             message: TurnInterruption.BackendRestartMessage,
             eventLog,
-            projection,
             live,
           }),
         { discard: true },
@@ -242,6 +267,38 @@ export const layerWithLive = Layer.effect(
         thread_id: threadId,
         ...(userId === undefined ? {} : { user_id: userId }),
         action: "write",
+      })
+    })
+    const logTurnFiberFailure = (input: AgentLoop.RunTurnInput, cause: Cause.Cause<RunError>): Effect.Effect<void> =>
+      Diagnostics.event("remote_control.turn_fiber", () => Effect.failCause(cause), {
+        thread_id: input.thread_id,
+        workspace_id: input.workspace_id,
+        ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
+        ...(input.mode === undefined ? {} : { mode: input.mode }),
+      }).pipe(
+        Effect.provideService(Diagnostics.Service, diagnostics),
+        Effect.catchCause(() => Effect.void),
+      )
+    const requireInterruptMatchesActiveTurn = Effect.fn("RemoteControl.requireInterruptMatchesActiveTurn")(function* (
+      input: Remote.InterruptTurnRequest,
+    ) {
+      const active = yield* activeThread(input.thread_id)
+      if (active === undefined || active.turn_id === input.turn_id) return active
+      if (active.turn_id === undefined) {
+        const events = yield* readLoggedEvents(input.thread_id, 0)
+        if (latestOpenTurnId(events) === input.turn_id) {
+          yield* markTurnStarted(input.thread_id, input.turn_id)
+          return yield* activeThread(input.thread_id)
+        }
+      }
+      return yield* new RemoteControlError({
+        message:
+          active.turn_id === undefined
+            ? `Thread ${input.thread_id} has an active turn that has not started yet`
+            : `Thread ${input.thread_id} has active turn ${active.turn_id}, not ${input.turn_id}`,
+        operation: "interruptTurn",
+        status: 409,
+        ...(active.user_id === undefined ? {} : { active_user_id: active.user_id }),
       })
     })
 
@@ -594,32 +651,60 @@ export const layerWithLive = Layer.effect(
           })
         }
         const ideContext = input.ide_context ?? Option.getOrUndefined(currentIdeContext)
-        yield* agentLoop
-          .streamTurn({
-            thread_id: input.thread_id,
-            workspace_id: workspaceId,
-            content: input.content,
-            ...(input.content_parts === undefined ? {} : { content_parts: input.content_parts }),
-            ...userIdField(userId),
-            ...(input.mode === undefined ? {} : { mode: input.mode }),
-            ...(input.fast_mode === undefined ? {} : { fast_mode: input.fast_mode }),
-            ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
-            ...(ideContext === undefined ? {} : { ide_context: ideContext }),
-            ...(input.tool_access === undefined ? {} : { tool_access: input.tool_access }),
-          })
-          .pipe(
-            Stream.runForEach((event) => live.publish(event)),
-            Effect.catch(() => Effect.void),
+        const turnInput: AgentLoop.RunTurnInput = {
+          thread_id: input.thread_id,
+          workspace_id: workspaceId,
+          content: input.content,
+          ...(input.content_parts === undefined ? {} : { content_parts: input.content_parts }),
+          ...userIdField(userId),
+          ...(input.mode === undefined ? {} : { mode: input.mode }),
+          ...(input.fast_mode === undefined ? {} : { fast_mode: input.fast_mode }),
+          ...(input.cancelled === undefined ? {} : { cancelled: input.cancelled }),
+          ...(ideContext === undefined ? {} : { ide_context: ideContext }),
+          ...(input.tool_access === undefined ? {} : { tool_access: input.tool_access }),
+        }
+        yield* FiberMap.run(
+          turnFibers,
+          input.thread_id,
+          agentLoop.streamTurn(turnInput).pipe(
+            Stream.runForEach((event) =>
+              Effect.gen(function* () {
+                if (event.type === "turn.started") yield* markTurnStarted(input.thread_id, event.turn_id)
+                yield* live.publish(event)
+              }),
+            ),
+            Effect.catchCause((cause: Cause.Cause<RunError>) =>
+              Cause.hasInterruptsOnly(cause) ? Effect.interrupt : logTurnFiberFailure(turnInput, cause),
+            ),
             Effect.ensuring(releaseThread(input.thread_id)),
-            Effect.forkDetach,
-          )
+          ),
+        )
         return { thread_id: input.thread_id, accepted: true }
       }),
       interruptTurn: Effect.fn("RemoteControl.interruptTurn")(function* (input: Remote.InterruptTurnRequest) {
         yield* requireThreadWrite(input.thread_id, authUserId(input))
-        const failed = yield* agentLoop.cancelTurn({ ...input, ...userIdField(requestUserId(input)) })
-        yield* live.publish(failed)
-        return failed
+        const existingTerminal = yield* requestedTurnTerminal(input)
+        if (existingTerminal !== undefined) return existingTerminal
+        const active = yield* requireInterruptMatchesActiveTurn(input)
+        if (active !== undefined) yield* FiberMap.remove(turnFibers, input.thread_id)
+        const result = yield* agentLoop.cancelTurn({ ...input, ...userIdField(requestUserId(input)) }).pipe(
+          Effect.map((cancelled) => ({
+            event: cancelled.event,
+            existing: cancelled.status === "existing",
+          })),
+          Effect.catchTag("AgentLoopError", (error) =>
+            requestedTurnTerminal(input).pipe(
+              Effect.flatMap((terminal) =>
+                terminal === undefined
+                  ? Effect.fail(error)
+                  : Effect.succeed({ event: terminal, existing: true as const }),
+              ),
+            ),
+          ),
+        )
+        if (result.existing) return result.event
+        yield* live.publish(result.event)
+        return result.event
       }),
       listArtifacts: Effect.fn("RemoteControl.listArtifacts")(function* (input: Remote.ListArtifactsRequest) {
         yield* requireThreadRead(input.thread_id, authUserId(input))
@@ -667,6 +752,7 @@ export const layer: Layer.Layer<
   | ThreadService.Service
   | ArtifactStore.Service
   | Config.Service
+  | Diagnostics.Service
   | IdGenerator.Service
   | Database.Service
   | ThreadEventLog.Service
@@ -981,6 +1067,23 @@ const withOrbStatus = Effect.fn("RemoteControl.withOrbStatus")(function* (
   const orb = yield* orbs.getByThread(summary.thread_id)
   return orb === undefined ? remote : { ...remote, orb_status: orb.status }
 })
+
+const latestOpenTurnId = (events: ReadonlyArray<Event.Event>): Ids.TurnId | undefined => {
+  let open: Ids.TurnId | undefined
+  for (const event of events) {
+    if (event.type === "turn.started") open = event.turn_id
+    if ((event.type === "turn.completed" || event.type === "turn.failed") && event.turn_id === open) {
+      open = undefined
+    }
+  }
+  return open
+}
+
+const terminalForTurn = (events: ReadonlyArray<Event.Event>, turnId: Ids.TurnId): Event.TurnTerminal | undefined =>
+  events.findLast(
+    (event): event is Event.TurnTerminal =>
+      event.turn_id === turnId && (event.type === "turn.completed" || event.type === "turn.failed"),
+  )
 
 const toOrbSummary = Effect.fn("RemoteControl.toOrbSummary")(function* (orbs: OrbStore.Interface, orb: Orb.OrbRecord) {
   const usage = yield* orbs.usage({ orb_id: orb.orb_id })

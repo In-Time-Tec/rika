@@ -1,9 +1,23 @@
 import { describe, expect, test } from "bun:test"
+import { Database, Migration, ThreadProjection } from "@rika/persistence"
+import { Common, Event, Ids } from "@rika/schema"
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Effect, Layer, Schema } from "effect"
 import { Args, Help, Output, Runtime } from "../src/index"
+
+const runtimeNow = Common.TimestampMillis.make(1_965_000_000_000)
+
+const threadCreated = (threadId: Ids.ThreadId, workspaceId: Ids.WorkspaceId): Event.ThreadCreated => ({
+  id: Ids.EventId.make(`event_${threadId}_created`),
+  thread_id: threadId,
+  sequence: 1,
+  version: 1,
+  created_at: runtimeNow,
+  type: "thread.created",
+  data: { workspace_id: workspaceId },
+})
 
 const ConfigListReport = Schema.Struct({
   entries: Schema.Array(
@@ -67,6 +81,96 @@ describe("CLI runtime", () => {
     expect(exitCode).toBe(1)
     expect(output.stdout).toEqual([])
     expect(output.stderr).toEqual([Args.invalidExecuteAliasErrorText])
+  })
+
+  test("formats invalid settings env before live layer startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-invalid-settings-"))
+    const home = join(root, "home")
+    const cwd = join(root, "workspace")
+    await mkdir(home, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-x", "hello"],
+          env: {
+            HOME: home,
+            RIKA_COMPACTION_AUTO: "sometimes",
+            RIKA_DATABASE_URL: "file::memory:",
+            RIKA_TELEMETRY: "0",
+          },
+          cwd,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["Rika failed: Invalid RIKA_COMPACTION_AUTO sometimes"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("formats invalid permission mode env before live layer startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-invalid-permission-"))
+    const home = join(root, "home")
+    const cwd = join(root, "workspace")
+    await mkdir(home, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-x", "hello"],
+          env: {
+            HOME: home,
+            RIKA_DATABASE_URL: "file::memory:",
+            RIKA_PERMISSION_MODE: "bogus",
+            RIKA_TELEMETRY: "0",
+          },
+          cwd,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["Rika failed: Invalid RIKA_PERMISSION_MODE bogus"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  test("formats invalid model context window env before live layer startup", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-invalid-model-context-"))
+    const home = join(root, "home")
+    const cwd = join(root, "workspace")
+    await mkdir(home, { recursive: true })
+    await mkdir(cwd, { recursive: true })
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: ["-x", "hello"],
+          env: {
+            HOME: home,
+            RIKA_DATABASE_URL: "file::memory:",
+            RIKA_MODEL_CONTEXT_WINDOW: "1e3",
+            RIKA_TELEMETRY: "0",
+          },
+          cwd,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual(["Rika failed: Invalid RIKA_MODEL_CONTEXT_WINDOW 1e3"])
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   test("repairs orb usage intervals after migrations in every orb storage graph", async () => {
@@ -559,6 +663,62 @@ describe("CLI runtime", () => {
       })
       expect(output.stdout).toEqual([`edited ${target}`])
       expect(output.stderr).toEqual([expect.stringContaining("unknown.key")])
+    } finally {
+      await rm(root, { force: true, recursive: true })
+    }
+  })
+
+  test("rejects foreign extension thread ids through the process entrypoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-runtime-extension-thread-"))
+    const home = join(root, "home")
+    const workspace = join(root, "workspace")
+    const data = join(root, "data")
+    const threadId = Ids.ThreadId.make("thread_runtime_extension_foreign")
+    const otherWorkspaceId = Ids.WorkspaceId.make("workspace_runtime_extension_foreign")
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+
+    try {
+      await mkdir(workspace, { recursive: true })
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          yield* ThreadProjection.apply(threadCreated(threadId, otherWorkspaceId))
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(Database.layerFromPath(join(data, "rika.sqlite")), Migration.layer, ThreadProjection.layer),
+          ),
+        ),
+      )
+
+      const exitCode = await Effect.runPromise(
+        Runtime.runProcess({
+          argv: [
+            "extensions",
+            "create-plugin",
+            "foreign-plugin",
+            "--description",
+            "Foreign plugin",
+            "--thread",
+            threadId,
+          ],
+          env: { HOME: home, RIKA_WORKSPACE_ROOT: workspace, RIKA_DATA_DIR: data },
+          cwd: workspace,
+        }).pipe(Effect.provide(Output.memoryLayer(output))),
+      )
+
+      expect(exitCode).toBe(1)
+      expect(output.stdout).toEqual([])
+      expect(output.stderr).toEqual([
+        `Rika failed: Thread ${threadId} belongs to workspace ${otherWorkspaceId}, not ${workspace}`,
+      ])
+      const pluginWasWritten = await readFile(
+        join(workspace, ".rika", "plugins", "foreign-plugin.ts.disabled"),
+        "utf8",
+      ).then(
+        () => true,
+        () => false,
+      )
+      expect(pluginWasWritten).toBe(false)
     } finally {
       await rm(root, { force: true, recursive: true })
     }

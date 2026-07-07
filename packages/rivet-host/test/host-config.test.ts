@@ -46,6 +46,12 @@ describe("HostConfig", () => {
     })
   })
 
+  test("parses no-welcome through the shared boolean env set", async () => {
+    const host = await Effect.runPromise(HostConfig.resolveOptions({}, { RIKA_RIVET_NO_WELCOME: "disabled" }))
+
+    expect(host.no_welcome).toBe(false)
+  })
+
   test("requires an explicit endpoint in remote mode", async () => {
     const error = await Effect.runPromise(
       HostConfig.resolveOptions({}, { RIKA_RIVET_HOST: "remote" }).pipe(Effect.flip),

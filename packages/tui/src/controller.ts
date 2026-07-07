@@ -385,15 +385,22 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             state = ViewState.beginConnecting(state)
             yield* render()
           }
+          const commandState = active ? { ...state, active: true } : state
           const result = yield* deps.backend
             .runCommand(
-              { state, thread_id: threadId, workspace_path: workspacePath, workspace_id: workspaceId, mode },
+              {
+                state: commandState,
+                thread_id: threadId,
+                workspace_path: workspacePath,
+                workspace_id: workspaceId,
+                mode,
+              },
               command,
             )
             .pipe(
               Effect.catchCause((cause) =>
                 Effect.succeed<CommandResult>({
-                  state: ViewState.withNotice(state, `Command failed: ${errorMessage(Cause.squash(cause))}`),
+                  state: ViewState.withNotice(commandState, `Command failed: ${errorMessage(Cause.squash(cause))}`),
                   thread_id: threadId,
                   last_sequence: lastSequence,
                   mode,
@@ -401,7 +408,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                 }),
               ),
             )
-          state = result.state
+          state = active ? { ...result.state, active: true } : result.state
           const previousThreadId = threadId
           threadId = result.thread_id
           if (result.last_sequence !== undefined) lastSequence = result.last_sequence
@@ -513,7 +520,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
 
       const openModePicker = () =>
         Effect.gen(function* () {
-          if (ViewState.hasActivity(state)) {
+          if (ViewState.modeLocked(state)) {
             state = ViewState.withNotice(state, "Mode is locked once a thread is active.")
             yield* render()
             return

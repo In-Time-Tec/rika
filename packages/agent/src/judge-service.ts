@@ -24,6 +24,7 @@ export const CompareInput = Schema.Struct({
   rubric: Schema.optional(Schema.String),
   judges: Schema.optional(Schema.Int),
   thread_id: Ids.ThreadId,
+  workspace_id: Schema.optional(Ids.WorkspaceId),
 }).annotate({ identifier: "Rika.Agent.JudgeService.CompareInput" })
 
 export const ScoreValue = Schema.Int.pipe(
@@ -131,6 +132,7 @@ const compareCandidates = (dependencies: Dependencies, input: CompareInput) =>
     yield* dependencies.artifactStore.put({
       id: artifactId,
       thread_id: input.thread_id,
+      ...(input.workspace_id === undefined ? {} : { workspace_id: input.workspace_id }),
       kind: "verdict",
       title: "Judge verdict",
       content: verdictToJson(verdict),

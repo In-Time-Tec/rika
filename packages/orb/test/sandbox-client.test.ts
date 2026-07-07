@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Config } from "@rika/core"
 import { Ids } from "@rika/schema"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Fiber, Layer, Stream } from "effect"
 import { SandboxClient, SandboxClientFake } from "../src/index"
 
 const config = {
@@ -114,6 +114,31 @@ describe("SandboxClient", () => {
         sandboxId: "sandbox_1",
         cmd: ["python", "-m", "http.server", "3000"],
         opts: { background: true },
+      },
+    ])
+  })
+
+  test("fake layer records exec kill when an exec stream is interrupted", async () => {
+    const state = SandboxClientFake.makeState({
+      execResults: [{ interruptible: true }],
+    })
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const fiber = yield* SandboxClient.exec("sandbox_1", ["sleep", "60"], {}).pipe(
+          Stream.runCollect,
+          Effect.forkChild,
+        )
+        yield* Effect.yieldNow
+        yield* Fiber.interrupt(fiber)
+      }).pipe(Effect.provide(SandboxClientFake.layer(state))),
+    )
+
+    expect(state.calls.execKill).toEqual([
+      {
+        sandboxId: "sandbox_1",
+        cmd: ["sleep", "60"],
+        opts: {},
       },
     ])
   })

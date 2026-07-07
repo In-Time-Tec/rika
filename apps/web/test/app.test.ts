@@ -1,4 +1,4 @@
-import { Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
+import { Common, Event, Ids, Message as RikaMessage, Remote } from "@rika/schema"
 import { describe, expect, test } from "bun:test"
 import {
   ChangedDraft,
@@ -18,9 +18,14 @@ import {
   ClickedKillOrb,
   ClickedNewThread,
   ClickedPauseOrb,
+  ClickedTranscriptDisclosure,
   ConfirmedKillOrb,
   ConfirmedDeleteProjectSecret,
+  CreatedThread,
   FailedSaveProject,
+  FailedCreateThread,
+  FailedOpenThread,
+  FailedStartTurn,
   GotOrbTabsMessage,
   LoadedOrbChanges,
   LoadedOrbDirectory,
@@ -29,6 +34,7 @@ import {
   LoadedProjects,
   LoadedThreads,
   OpenedThread,
+  AcceptedTurn,
   ReceivedThreadEvent,
   ReceivedPresence,
   RequestedTerminalReconnect,
@@ -37,6 +43,7 @@ import {
   SubmittedProjectSettings,
   SelectedOrbFile,
   SubmittedDraft,
+  ThreadSubscriptionFailed,
   TypingPresenceReady,
   TerminalFailed,
   TerminalStatusChanged,
@@ -45,16 +52,22 @@ import {
   eventRows,
   init,
   initialModel,
+  InterruptedTurn,
+  subscriptions,
   update,
 } from "../src/app"
+import type { Model } from "../src/app"
 
 const threadId = Ids.ThreadId.make("thread-web")
+const alternateThreadId = Ids.ThreadId.make("thread-web-alternate")
 const workspaceId = Ids.WorkspaceId.make("workspace-web")
 const messageId = Ids.MessageId.make("message-web")
 const orbId = Ids.OrbId.make("orb-web")
 const projectId = Ids.ProjectId.make("project-web")
+const alternateProjectId = Ids.ProjectId.make("project-web-alternate")
 const userId = Ids.UserId.make("user_web")
 const otherUserId = Ids.UserId.make("sarah")
+const searchNow = Common.TimestampMillis.make(2_000_000_000_000)
 
 describe("web app state", () => {
   test("imports only browser-safe LLM modules", async () => {
@@ -125,8 +138,8 @@ describe("web app state", () => {
     expect(listed.orb_files.paths).toEqual(["src/", "README.md"])
     expect(listed.orb_files.path_kinds).toEqual({ src: "dir", "README.md": "file" })
     expect(selected.orb_files.opened_file).toEqual({ state: "loading", path: "README.md" })
-    expect(selectCommands.map((command) => command.name)).toEqual(["LoadOrbFile"])
-    expect(selectCommands[0]?.args).toEqual({ api_base_url: "/api/rika", thread_id: threadId, path: "README.md" })
+    expect(selectCommands.map((command) => command.name)).toEqual(["UpdatePierreTree", "LoadOrbFile"])
+    expect(selectCommands[1]?.args).toEqual({ api_base_url: "/api/rika", thread_id: threadId, path: "README.md" })
     expect(opened.orb_files.opened_file).toEqual({
       state: "text",
       path: "README.md",
@@ -156,6 +169,37 @@ describe("web app state", () => {
     expect(selected.orb_files.opened_file).toEqual({ state: "idle" })
     expect(commands.map((command) => command.name)).toEqual(["LoadOrbDirectory"])
     expect(commands[0]?.args).toEqual({ api_base_url: "/api/rika", thread_id: threadId, path: "src" })
+  })
+
+  test("updates the mounted Pierre tree for file selections and lazy directory loads", () => {
+    const model = activeFilesModel()
+
+    const [selected, selectCommands] = update(model, SelectedOrbFile({ path: "README.md" }))
+    const [loaded, loadCommands] = update(
+      model,
+      LoadedOrbDirectory({
+        response: {
+          path: "src",
+          entries: [{ name: "index.ts", path: "src/index.ts", kind: "file", size: 6 }],
+        },
+      }),
+    )
+
+    expect(selected.orb_files.selected_path).toBe("README.md")
+    expect(selectCommands.map((command) => command.name)).toEqual(["UpdatePierreTree", "LoadOrbFile"])
+    expect(selectCommands[0]?.args).toEqual({
+      mount_key: `orb-tree:${threadId}:${orbId}`,
+      paths: ["src/", "README.md"],
+      selected_path: "README.md",
+      git_status: [],
+    })
+    expect(loaded.orb_files.paths).toEqual(["src/", "README.md", "src/index.ts"])
+    expect(loadCommands.map((command) => command.name)).toEqual(["UpdatePierreTree"])
+    expect(loadCommands[0]?.args).toEqual({
+      mount_key: `orb-tree:${threadId}:${orbId}`,
+      paths: ["src/", "README.md", "src/index.ts"],
+      git_status: [],
+    })
   })
 
   test("loads and parses orb changes through the selected thread endpoint", () => {
@@ -199,6 +243,28 @@ describe("web app state", () => {
       file_name: "README.md",
       additions: 1,
       deletions: 0,
+    })
+  })
+
+  test("derives Pierre tree git status from loaded orb changes", () => {
+    const [loaded, commands] = update(
+      activeFilesModel(),
+      LoadedOrbChanges({
+        response: {
+          base_commit: "abc123",
+          head_commit: "def456",
+          dirty: true,
+          diff: gitPatch("README.md"),
+        },
+      }),
+    )
+
+    expect(loaded.orb_files.git_status).toEqual([{ path: "README.md", status: "modified" }])
+    expect(commands.map((command) => command.name)).toEqual(["UpdatePierreTree"])
+    expect(commands[0]?.args).toEqual({
+      mount_key: `orb-tree:${threadId}:${orbId}`,
+      paths: ["src/", "README.md"],
+      git_status: [{ path: "README.md", status: "modified" }],
     })
   })
 
@@ -247,8 +313,19 @@ describe("web app state", () => {
       secretSaved,
       ClickedDeleteProjectSecret({ name: "OPENAI_API_KEY" }),
     )
+    const [savedWhileDeleteOpen, saveWhileDeleteOpenCommands] = update(
+      confirmingDelete,
+      SavedProject({ project: savedDetail }),
+    )
+    const [switchingWhileDeleteOpen, switchWhileDeleteOpenCommands] = update(
+      confirmingDelete,
+      ClickedProject({ project_id: alternateProjectId }),
+    )
     const [cancelledDelete, cancelCommands] = update(confirmingDelete, CancelledDeleteProjectSecret())
-    const [confirmingDeleteAgain] = update(cancelledDelete, ClickedDeleteProjectSecret({ name: "OPENAI_API_KEY" }))
+    const [confirmingDeleteAgain, deleteClickAgainCommands] = update(
+      cancelledDelete,
+      ClickedDeleteProjectSecret({ name: "OPENAI_API_KEY" }),
+    )
     const [deletingSecret, deleteCommands] = update(confirmingDeleteAgain, ConfirmedDeleteProjectSecret())
 
     expect(projectsView.active_view).toBe("projects")
@@ -283,10 +360,19 @@ describe("web app state", () => {
     expect(secretSaved.selected_project?.secret_names).toEqual(["OPENAI_API_KEY"])
     expect(JSON.stringify(secretSaved)).not.toContain("secret-value")
     expect(confirmingDelete.pending_secret_delete_name).toBe("OPENAI_API_KEY")
-    expect(deleteClickCommands).toEqual([])
+    expect(confirmingDelete.delete_secret_dialog.isOpen).toBe(true)
+    expect(deleteClickCommands.map((command) => command.name)).toEqual(["ShowDialog"])
+    expect(savedWhileDeleteOpen.pending_secret_delete_name).toBeUndefined()
+    expect(savedWhileDeleteOpen.delete_secret_dialog.isOpen).toBe(false)
+    expect(saveWhileDeleteOpenCommands.map((command) => command.name)).toEqual(["CloseDialog"])
+    expect(switchingWhileDeleteOpen.pending_secret_delete_name).toBeUndefined()
+    expect(switchingWhileDeleteOpen.delete_secret_dialog.isOpen).toBe(false)
+    expect(switchWhileDeleteOpenCommands.map((command) => command.name)).toEqual(["CloseDialog", "LoadProject"])
     expect(cancelledDelete.pending_secret_delete_name).toBeUndefined()
-    expect(cancelCommands).toEqual([])
-    expect(deleteCommands.map((command) => command.name)).toEqual(["DeleteProjectSecret"])
+    expect(cancelledDelete.delete_secret_dialog.isOpen).toBe(false)
+    expect(cancelCommands.map((command) => command.name)).toEqual(["CloseDialog"])
+    expect(deleteClickAgainCommands.map((command) => command.name)).toEqual(["ShowDialog"])
+    expect(deleteCommands.map((command) => command.name)).toEqual(["DeleteProjectSecret", "CloseDialog"])
     expect(deleteCommands[0]?.args).toEqual({
       api_base_url: "/api/rika",
       project_id: project.project_id,
@@ -321,6 +407,7 @@ describe("web app state", () => {
         payload_id: "orb-changes:0:0",
         file_name: "image.bin",
         reason: "No renderable hunks",
+        git_status: { path: "image.bin", status: "added" },
       },
     ])
   })
@@ -339,9 +426,14 @@ describe("web app state", () => {
     }
 
     const [newThread] = update(activeFiles, ClickedNewThread())
+    const threadNext = Ids.ThreadId.make("thread-next")
+    const [opening] = update(activeFiles, ClickedThread({ thread_id: threadNext }))
     const [opened] = update(
-      activeFiles,
-      OpenedThread({ record: { summary: summary(Ids.ThreadId.make("thread-next")), events: [] } }),
+      opening,
+      OpenedThread({
+        record: { summary: summary(threadNext), events: [] },
+        request_token: opening.active_thread_request_token ?? 0,
+      }),
     )
 
     expect(newThread.selected_orb_tab).toBe("transcript")
@@ -355,8 +447,12 @@ describe("web app state", () => {
   test("opens a thread from durable events before starting the live subscription", () => {
     const event = messageAdded(4, "assistant", "hello from the CLI")
     const [next, commands] = update(
-      initialModel({ api_base_url: "/api/rika" }),
-      OpenedThread({ record: { summary: summary(threadId), events: [event] } }),
+      {
+        ...initialModel({ api_base_url: "/api/rika" }),
+        selected_thread_id: threadId,
+        active_thread_request_token: 1,
+      },
+      OpenedThread({ record: { summary: summary(threadId), events: [event] }, request_token: 1 }),
     )
 
     expect(commands).toEqual([])
@@ -370,8 +466,12 @@ describe("web app state", () => {
   test("submitting a turn never appends optimistic transcript events", () => {
     const event = messageAdded(4, "assistant", "already rendered")
     const [opened] = update(
-      initialModel({ api_base_url: "/api/rika" }),
-      OpenedThread({ record: { summary: summary(threadId), events: [event] } }),
+      {
+        ...initialModel({ api_base_url: "/api/rika" }),
+        selected_thread_id: threadId,
+        active_thread_request_token: 1,
+      },
+      OpenedThread({ record: { summary: summary(threadId), events: [event] }, request_token: 1 }),
     )
     const [drafted] = update(opened, ChangedDraft({ value: "run tests" }))
     const [next, commands] = update(drafted, SubmittedDraft())
@@ -380,6 +480,181 @@ describe("web app state", () => {
     expect(next.draft).toBe("")
     expect(next.pending_turn).toBe(true)
     expect(commands.map((command) => command.name)).toEqual(["StartTurn"])
+  })
+
+  test("queues the submitted draft when startTurn reports an active user conflict", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      draft: "queue this",
+    }
+
+    const [submitted] = update(model, SubmittedDraft())
+    const [conflicted, commands] = update(
+      submitted,
+      FailedStartTurn({
+        thread_id: threadId,
+        message: "Another user is running this thread",
+        request_token: submitted.active_turn_request_token ?? 0,
+        status: 409,
+        active_user_id: otherUserId,
+      }),
+    )
+
+    expect(commands).toEqual([])
+    expect(conflicted.pending_turn).toBe(false)
+    expect(conflicted.pending_submit).toBeUndefined()
+    expect(conflicted.queued_messages).toEqual([{ thread_id: threadId, content: "queue this", mode: undefined }])
+    expect(conflicted.notice).toBe("sarah is running a turn - message queued")
+  })
+
+  test("queues a stale active-user conflict for the original thread after navigation", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      draft: "queue after navigation",
+    }
+
+    const [submitted] = update(model, SubmittedDraft())
+    const requestToken = submitted.active_turn_request_token ?? 0
+    const [openingOther] = update(submitted, ClickedThread({ thread_id: alternateThreadId }))
+    const [conflicted, commands] = update(
+      openingOther,
+      FailedStartTurn({
+        thread_id: threadId,
+        message: "Another user is running this thread",
+        request_token: requestToken,
+        status: 409,
+        active_user_id: otherUserId,
+      }),
+    )
+
+    expect(commands).toEqual([])
+    expect(conflicted.selected_thread_id).toBe(alternateThreadId)
+    expect(conflicted.pending_turn).toBe(false)
+    expect(conflicted.pending_submit).toBeUndefined()
+    expect(conflicted.queued_messages).toEqual([
+      { thread_id: threadId, content: "queue after navigation", mode: undefined },
+    ])
+    expect(conflicted.notice).toBe("sarah is running a turn - message queued")
+  })
+
+  test("drains queued messages after the active turn completes", () => {
+    const turnId = Ids.TurnId.make("turn-web-active")
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      events: [turnStarted(4, turnId)],
+      last_sequence: 4,
+      subscription_after_sequence: 4,
+      queued_messages: [{ thread_id: threadId, content: "queued follow-up", mode: "smart" as const }],
+    }
+
+    const [next, commands] = update(model, ReceivedThreadEvent({ event: turnCompleted(5, turnId) }))
+
+    expect(next.queued_messages).toEqual([])
+    expect(next.pending_turn).toBe(true)
+    expect(next.pending_submit).toBe("queued follow-up")
+    expect(commands.map((command) => command.name)).toEqual(["SetThreadPresence", "StartTurn"])
+    expect(commands.at(-1)?.args).toEqual({
+      api_base_url: "/api/rika",
+      thread_id: threadId,
+      user_id: userId,
+      content: "queued follow-up",
+      mode: "smart",
+      request_token: 1,
+    })
+  })
+
+  test("queues a stale drained-message conflict for the original thread after navigation", () => {
+    const turnId = Ids.TurnId.make("turn-web-active")
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      events: [turnStarted(4, turnId)],
+      last_sequence: 4,
+      subscription_after_sequence: 4,
+      queued_messages: [{ thread_id: threadId, content: "queued drain", mode: "smart" as const }],
+    }
+
+    const [drained] = update(model, ReceivedThreadEvent({ event: turnCompleted(5, turnId) }))
+    const requestToken = drained.active_turn_request_token ?? 0
+    const [openingOther] = update(drained, ClickedThread({ thread_id: alternateThreadId }))
+    const [conflicted] = update(
+      openingOther,
+      FailedStartTurn({
+        thread_id: threadId,
+        message: "Another user is running this thread",
+        request_token: requestToken,
+        status: 409,
+        active_user_id: otherUserId,
+      }),
+    )
+
+    expect(conflicted.selected_thread_id).toBe(alternateThreadId)
+    expect(conflicted.pending_submit).toBeUndefined()
+    expect(conflicted.queued_messages).toEqual([{ thread_id: threadId, content: "queued drain", mode: "smart" }])
+    expect(conflicted.notice).toBe("sarah is running a turn - message queued")
+  })
+
+  test("keeps queued conflict messages scoped to their original thread", () => {
+    const activeTurnId = Ids.TurnId.make("turn-web-active")
+    const otherTurnId = Ids.TurnId.make("turn-web-other")
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      draft: "draft for A",
+    }
+
+    const [submitted] = update(model, SubmittedDraft())
+    const [conflicted] = update(
+      submitted,
+      FailedStartTurn({
+        thread_id: threadId,
+        message: "Another user is running this thread",
+        request_token: submitted.active_turn_request_token ?? 0,
+        status: 409,
+        active_user_id: otherUserId,
+      }),
+    )
+    const [openingOther] = update(conflicted, ClickedThread({ thread_id: alternateThreadId }))
+    const [openedOther] = update(
+      openingOther,
+      OpenedThread({
+        record: { summary: summary(alternateThreadId), events: [] },
+        request_token: openingOther.active_thread_request_token ?? 0,
+      }),
+    )
+    const [otherCompleted, otherCommands] = update(
+      openedOther,
+      ReceivedThreadEvent({ event: turnCompleted(1, otherTurnId, alternateThreadId) }),
+    )
+    const [openingOriginal] = update(otherCompleted, ClickedThread({ thread_id: threadId }))
+    const [reopenedOriginal, originalCommands] = update(
+      openingOriginal,
+      OpenedThread({
+        record: { summary: summary(threadId), events: [turnStarted(2, activeTurnId), turnCompleted(3, activeTurnId)] },
+        request_token: openingOriginal.active_thread_request_token ?? 0,
+      }),
+    )
+
+    expect(otherCommands).toEqual([])
+    expect(otherCompleted.queued_messages).toEqual([{ thread_id: threadId, content: "draft for A", mode: undefined }])
+    expect(reopenedOriginal.queued_messages).toEqual([])
+    expect(originalCommands.map((command) => command.name)).toEqual(["SetThreadPresence", "StartTurn"])
+    expect(originalCommands.at(-1)?.args).toEqual({
+      api_base_url: "/api/rika",
+      thread_id: threadId,
+      user_id: userId,
+      content: "draft for A",
+      mode: undefined,
+      request_token: 2,
+    })
   })
 
   test("sends user identity on turn submission and returns presence to active", () => {
@@ -407,6 +682,7 @@ describe("web app state", () => {
       user_id: userId,
       content: "run tests",
       mode: undefined,
+      request_token: 1,
     })
   })
 
@@ -443,8 +719,12 @@ describe("web app state", () => {
 
   test("submits the selected mode with the next turn without changing the default backend mode", () => {
     const [opened] = update(
-      initialModel({ api_base_url: "/api/rika" }),
-      OpenedThread({ record: { summary: summary(threadId), events: [] } }),
+      {
+        ...initialModel({ api_base_url: "/api/rika" }),
+        selected_thread_id: threadId,
+        active_thread_request_token: 1,
+      },
+      OpenedThread({ record: { summary: summary(threadId), events: [] }, request_token: 1 }),
     )
     const [drafted] = update(opened, ChangedDraft({ value: "run deep" }))
     const [selectedMode] = update(drafted, ChangedDraftMode({ value: "deep2" }))
@@ -459,6 +739,7 @@ describe("web app state", () => {
       thread_id: threadId,
       content: "run deep",
       mode: "deep2",
+      request_token: 1,
     })
   })
 
@@ -500,6 +781,27 @@ describe("web app state", () => {
 
     expect(firstCommands.map((command) => command.name)).toEqual(["InterruptTurn"])
     expect(secondCommands).toEqual([])
+  })
+
+  test("treats a completed interrupt response as benign", () => {
+    const turnId = Ids.TurnId.make("turn-web-active")
+    const completed = turnCompleted(5, turnId)
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      events: [turnStarted(4, turnId), completed],
+      last_sequence: 5,
+      subscription_after_sequence: 5,
+      pending_interrupt_turn_id: turnId,
+    }
+
+    const [next, commands] = update(model, InterruptedTurn({ event: completed }))
+
+    expect(next.pending_interrupt_turn_id).toBeUndefined()
+    expect(next.notice).toBeUndefined()
+    expect(next.events).toEqual(model.events)
+    expect(commands).toEqual([])
   })
 
   test("applies live events once by sequence", () => {
@@ -545,12 +847,66 @@ describe("web app state", () => {
     ])
   })
 
-  test("prefixes other users' message rows with attribution", () => {
+  test("keeps user message attribution separate from body text", () => {
     expect(eventRows([messageAdded(1, "user", "hi", otherUserId)], new Set(), userId)).toEqual([
-      { id: "event-1", sequence: 1, kind: "message", title: "User", body: "sarah › hi" },
+      {
+        id: "event-1",
+        sequence: 1,
+        kind: "message",
+        title: "User",
+        body: "hi",
+        author: { label: "sarah", is_local: false },
+      },
     ])
     expect(eventRows([messageAdded(2, "user", "mine", userId)], new Set(), userId)).toEqual([
-      { id: "event-2", sequence: 2, kind: "message", title: "User", body: "mine" },
+      {
+        id: "event-2",
+        sequence: 2,
+        kind: "message",
+        title: "User",
+        body: "mine",
+        author: { label: "User", is_local: true },
+      },
+    ])
+  })
+
+  test("toggles transcript disclosure rows by row id", () => {
+    const [collapsed] = update(
+      initialModel({ api_base_url: "/api/rika" }),
+      ClickedTranscriptDisclosure({ row_id: "event-1" }),
+    )
+    const [expanded] = update(collapsed, ClickedTranscriptDisclosure({ row_id: "event-1" }))
+
+    expect(collapsed.collapsed_transcript_row_ids).toEqual(["event-1"])
+    expect(expanded.collapsed_transcript_row_ids).toEqual([])
+    expect(
+      eventRows(
+        [reasoningDelta(1, "checking files")],
+        new Set(),
+        userId,
+        new Set(collapsed.collapsed_transcript_row_ids),
+      ),
+    ).toEqual([
+      {
+        id: "event-1",
+        sequence: 1,
+        kind: "event",
+        title: "Reasoning",
+        body: "checking files",
+        is_open: false,
+      },
+    ])
+    expect(
+      eventRows([toolInputStarted(1, "write")], new Set(), userId, new Set(collapsed.collapsed_transcript_row_ids)),
+    ).toEqual([
+      {
+        id: "event-1",
+        sequence: 1,
+        kind: "tool",
+        title: "Tool input: write",
+        body: "Started",
+        is_open: false,
+      },
     ])
   })
 
@@ -632,6 +988,7 @@ describe("web app state", () => {
         kind: "tool",
         title: "Tool: edit",
         body: "src/broken.ts · diff unavailable",
+        is_open: true,
       },
     ])
   })
@@ -666,9 +1023,9 @@ describe("web app state", () => {
   test("searches threads with the sidebar query and time window", () => {
     const [searched, searchCommands] = update(
       initialModel({ api_base_url: "/api/rika" }),
-      ChangedThreadSearchQuery({ value: "file:src/app.ts auth" }),
+      ChangedThreadSearchQuery({ value: "file:src/app.ts auth", now: searchNow }),
     )
-    const [windowed, windowCommands] = update(searched, ChangedThreadSearchWindow({ value: "24h" }))
+    const [windowed, windowCommands] = update(searched, ChangedThreadSearchWindow({ value: "24h", now: searchNow }))
     const [loaded] = update(windowed, LoadedThreads({ threads: [summary(threadId)] }))
 
     expect(searched.thread_search_query).toBe("file:src/app.ts auth")
@@ -677,6 +1034,7 @@ describe("web app state", () => {
       api_base_url: "/api/rika",
       query: "file:src/app.ts auth",
       window: "all",
+      now: searchNow,
     })
     expect(windowed.thread_search_window).toBe("24h")
     expect(windowCommands.map((command) => command.name)).toEqual(["SearchThreads"])
@@ -684,6 +1042,7 @@ describe("web app state", () => {
       api_base_url: "/api/rika",
       query: "file:src/app.ts auth",
       window: "24h",
+      now: searchNow,
     })
     expect(loaded.threads.map((thread) => thread.thread_id)).toEqual([threadId])
   })
@@ -707,10 +1066,166 @@ describe("web app state", () => {
     expect(model.last_sequence).toBe(0)
   })
 
+  test("ignores a stale opened thread response after a newer thread is selected", () => {
+    const [openingFirst] = update(initialModel({ api_base_url: "/api/rika" }), ClickedThread({ thread_id: threadId }))
+    const [openingSecond] = update(openingFirst, ClickedThread({ thread_id: alternateThreadId }))
+    const [stale] = update(
+      openingSecond,
+      OpenedThread({
+        record: { summary: summary(threadId), events: [messageAdded(3, "assistant", "stale")] },
+        request_token: 1,
+      }),
+    )
+
+    expect(stale.selected_thread_id).toBe(alternateThreadId)
+    expect(stale.subscribed_thread_id).toBeUndefined()
+    expect(stale.events).toEqual([])
+    expect(stale.last_sequence).toBe(0)
+  })
+
+  test("ignores a stale opened thread response from an older request for the same selected thread", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      selected_thread_id: threadId,
+      active_thread_request_token: 3,
+    } as ReturnType<typeof initialModel>
+    const [stale] = update(
+      model,
+      OpenedThread({
+        record: { summary: summary(threadId), events: [messageAdded(3, "assistant", "stale")] },
+        request_token: 1,
+      }),
+    )
+
+    expect(stale.subscribed_thread_id).toBeUndefined()
+    expect(stale.events).toEqual([])
+    expect(stale.last_sequence).toBe(0)
+  })
+
+  test("ignores a stale opened thread response after starting a new thread request", () => {
+    const [openingFirst] = update(initialModel({ api_base_url: "/api/rika" }), ClickedThread({ thread_id: threadId }))
+    const [creating] = update(openingFirst, ClickedNewThread())
+    const [stale] = update(
+      creating,
+      OpenedThread({
+        record: { summary: summary(threadId), events: [messageAdded(3, "assistant", "stale")] },
+        request_token: 1,
+      }),
+    )
+
+    expect(stale.selected_thread_id).toBeUndefined()
+    expect(stale.subscribed_thread_id).toBeUndefined()
+    expect(stale.creating_thread).toBe(true)
+    expect(stale.events).toEqual([])
+  })
+
+  test("does not auto-open loaded threads while a new thread request is active", () => {
+    const createdThreadId = Ids.ThreadId.make("thread-created-current")
+    const [creating] = update(initialModel({ api_base_url: "/api/rika" }), ClickedNewThread())
+    const requestToken = creating.active_thread_request_token ?? 0
+    const [listed, listCommands] = update(creating, LoadedThreads({ threads: [summary(threadId)] }))
+    const [created] = update(listed, CreatedThread({ summary: summary(createdThreadId), request_token: requestToken }))
+
+    expect(listCommands).toEqual([])
+    expect(listed.selected_thread_id).toBeUndefined()
+    expect(listed.creating_thread).toBe(true)
+    expect(listed.active_thread_request_token).toBe(requestToken)
+    expect(created.selected_thread_id).toBe(createdThreadId)
+    expect(created.subscribed_thread_id).toBe(createdThreadId)
+  })
+
+  test("ignores stale open and create failures from older thread requests", () => {
+    const [openingFirst] = update(initialModel({ api_base_url: "/api/rika" }), ClickedThread({ thread_id: threadId }))
+    const [openingSecond] = update(openingFirst, ClickedThread({ thread_id: alternateThreadId }))
+    const [staleOpenFailure] = update(openingSecond, FailedOpenThread({ message: "old open failed", request_token: 1 }))
+    const creating = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      creating_thread: true,
+      active_thread_request_token: 2,
+      connection: "loading" as const,
+    } as ReturnType<typeof initialModel>
+    const [staleCreateFailure] = update(
+      creating,
+      FailedCreateThread({ message: "old create failed", request_token: 1 }),
+    )
+
+    expect(staleOpenFailure.selected_thread_id).toBe(alternateThreadId)
+    expect(staleOpenFailure.connection).toBe("loading")
+    expect(staleOpenFailure.notice).toBeUndefined()
+    expect(staleCreateFailure.creating_thread).toBe(true)
+    expect(staleCreateFailure.connection).toBe("loading")
+    expect(staleCreateFailure.notice).toBeUndefined()
+  })
+
+  test("ignores a stale created thread response after selecting an existing thread", () => {
+    const createdThreadId = Ids.ThreadId.make("thread-created-stale")
+    const [creating] = update(initialModel({ api_base_url: "/api/rika" }), ClickedNewThread())
+    const [openingExisting] = update(creating, ClickedThread({ thread_id: alternateThreadId }))
+    const [stale] = update(openingExisting, CreatedThread({ summary: summary(createdThreadId), request_token: 1 }))
+
+    expect(stale.selected_thread_id).toBe(alternateThreadId)
+    expect(stale.subscribed_thread_id).toBeUndefined()
+    expect(stale.events).toEqual([])
+  })
+
+  test("ignores a stale created thread response from an older create request", () => {
+    const createdThreadId = Ids.ThreadId.make("thread-created-stale")
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      creating_thread: true,
+      active_thread_request_token: 2,
+    } as ReturnType<typeof initialModel>
+    const [stale] = update(model, CreatedThread({ summary: summary(createdThreadId), request_token: 1 }))
+
+    expect(stale.selected_thread_id).toBeUndefined()
+    expect(stale.subscribed_thread_id).toBeUndefined()
+    expect(stale.creating_thread).toBe(true)
+  })
+
+  test("ignores a stale accepted turn while a newer new-thread submission is pending", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika" }),
+      pending_turn: true,
+      pending_submit: "new message",
+      active_turn_request_token: 2,
+      connection: "loading" as const,
+    } as ReturnType<typeof initialModel>
+    const [stale] = update(model, AcceptedTurn({ response: { thread_id: threadId, accepted: true }, request_token: 1 }))
+
+    expect(stale.pending_submit).toBe("new message")
+    expect(stale.pending_turn).toBe(true)
+    expect(stale.connection).toBe("loading")
+  })
+
+  test("changes subscription dependencies after a thread event stream failure", () => {
+    const model = {
+      ...initialModel({ api_base_url: "/api/rika", user_id: userId }),
+      selected_thread_id: threadId,
+      subscribed_thread_id: threadId,
+      last_sequence: 4,
+      subscription_after_sequence: 4,
+    }
+    const before = subscriptions.threadEvents.modelToDependencies(model)
+    const [failed] = update(model, ThreadSubscriptionFailed({ message: "socket closed" }))
+    const after = subscriptions.threadEvents.modelToDependencies(failed)
+
+    expect(after).not.toEqual(before)
+    expect(after.thread_id).toBe(threadId)
+    expect(after.after_sequence).toBe(4)
+    expect(after.retry).toBe(1)
+  })
+
   test("opens an orb-backed thread by loading its selected orb summary", () => {
     const [model, commands] = update(
-      initialModel({ api_base_url: "/api/rika" }),
-      OpenedThread({ record: { summary: summary(threadId, { orb_status: "running" }), events: [] } }),
+      {
+        ...initialModel({ api_base_url: "/api/rika" }),
+        selected_thread_id: threadId,
+        active_thread_request_token: 1,
+      },
+      OpenedThread({
+        record: { summary: summary(threadId, { orb_status: "running" }), events: [] },
+        request_token: 1,
+      }),
     )
 
     expect(model.selected_thread_id).toBe(threadId)
@@ -738,6 +1253,8 @@ describe("web app state", () => {
 
   test("kill requires a confirmation before sending the lifecycle command", () => {
     const running = orbSummary("running")
+    const paused = { ...running, status: "paused" as const }
+    const killed = { ...running, status: "killed" as const }
     const model = {
       ...initialModel({ api_base_url: "/api/rika" }),
       selected_thread_id: threadId,
@@ -746,14 +1263,28 @@ describe("web app state", () => {
     }
 
     const [confirming, firstCommands] = update(model, ClickedKillOrb())
-    const [cancelled] = update(confirming, CancelledKillOrb())
+    const [refreshed, refreshCommands] = update(confirming, UpdatedSelectedOrb({ orb: paused }))
+    const [cancelled, cancelCommands] = update(confirming, CancelledKillOrb())
     const [confirmed, secondCommands] = update(confirming, ConfirmedKillOrb())
+    const [killedRefresh, killedRefreshCommands] = update(confirming, UpdatedSelectedOrb({ orb: killed }))
+    const [confirmedAfterKilled, confirmedAfterKilledCommands] = update(killedRefresh, ConfirmedKillOrb())
 
-    expect(firstCommands).toEqual([])
+    expect(firstCommands.map((command) => command.name)).toEqual(["ShowDialog"])
     expect(confirming.confirm_kill_orb_id).toBe(orbId)
+    expect(confirming.kill_orb_dialog.isOpen).toBe(true)
+    expect(refreshed.confirm_kill_orb_id).toBe(orbId)
+    expect(refreshed.kill_orb_dialog.isOpen).toBe(true)
+    expect(refreshCommands).toEqual([])
     expect(cancelled.confirm_kill_orb_id).toBeUndefined()
-    expect(secondCommands.map((command) => command.name)).toEqual(["KillSelectedOrb"])
+    expect(cancelled.kill_orb_dialog.isOpen).toBe(false)
+    expect(cancelCommands.map((command) => command.name)).toEqual(["CloseDialog"])
+    expect(secondCommands.map((command) => command.name)).toEqual(["KillSelectedOrb", "CloseDialog"])
     expect(confirmed.confirm_kill_orb_id).toBeUndefined()
+    expect(killedRefresh.confirm_kill_orb_id).toBeUndefined()
+    expect(killedRefresh.kill_orb_dialog.isOpen).toBe(false)
+    expect(killedRefreshCommands.map((command) => command.name)).toEqual(["CloseDialog"])
+    expect(confirmedAfterKilled).toBe(killedRefresh)
+    expect(confirmedAfterKilledCommands).toEqual([])
   })
 })
 
@@ -786,6 +1317,21 @@ const orbSummary = (status: Remote.OrbSummary["status"]): Remote.OrbSummary => (
   created_at: 1,
   last_active_at: 121_001,
   running_minutes: 7,
+})
+
+const activeFilesModel = (): Model => ({
+  ...initialModel({ api_base_url: "/api/rika" }),
+  selected_thread_id: threadId,
+  selected_orb: orbSummary("running"),
+  selected_orb_tab: "files",
+  orb_tabs: tabModel(1),
+  threads: [summary(threadId, { orb_status: "running" })],
+  orb_files: {
+    ...initialModel({ api_base_url: "/api/rika" }).orb_files,
+    directories: { "": { state: "loaded" } },
+    paths: ["src/", "README.md"],
+    path_kinds: { src: "dir", "README.md": "file" },
+  },
 })
 
 const projectSummary = (): Remote.ProjectSummary => ({
@@ -865,6 +1411,31 @@ const contextPruned = (sequence: number): Event.ContextPruned => ({
   },
 })
 
+const reasoningDelta = (sequence: number, text: string): Event.ModelReasoningDelta => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-web"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "model.reasoning.delta",
+  data: { text, provider: "openai", model: "gpt-5.5" },
+})
+
+const toolInputStarted = (sequence: number, name: string): Event.ToolCallInputStarted => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: threadId,
+  turn_id: Ids.TurnId.make("turn-web"),
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "tool.call.input.started",
+  data: {
+    id: Ids.ToolCallId.make(`tool-web-${sequence}`),
+    name,
+  },
+})
+
 const turnCompletedWithUsage = (sequence: number, inputTokens: number): Event.TurnCompleted => ({
   id: Ids.EventId.make(`event-${sequence}`),
   thread_id: threadId,
@@ -926,14 +1497,33 @@ const artifactCreated = (
   },
 })
 
-const turnStarted = (sequence: number, turnId: Ids.TurnId): Event.TurnStarted => ({
+const turnStarted = (
+  sequence: number,
+  turnId: Ids.TurnId,
+  eventThreadId: Ids.ThreadId = threadId,
+): Event.TurnStarted => ({
   id: Ids.EventId.make(`event-${sequence}`),
-  thread_id: threadId,
+  thread_id: eventThreadId,
   turn_id: turnId,
   sequence,
   version: 1,
   created_at: sequence,
   type: "turn.started",
+  data: {},
+})
+
+const turnCompleted = (
+  sequence: number,
+  turnId: Ids.TurnId,
+  eventThreadId: Ids.ThreadId = threadId,
+): Event.TurnCompleted => ({
+  id: Ids.EventId.make(`event-${sequence}`),
+  thread_id: eventThreadId,
+  turn_id: turnId,
+  sequence,
+  version: 1,
+  created_at: sequence,
+  type: "turn.completed",
   data: {},
 })
 

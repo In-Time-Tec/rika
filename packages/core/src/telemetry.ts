@@ -16,6 +16,8 @@ import * as NodeSdk from "@effect/opentelemetry/NodeSdk"
 import * as Tracer from "@effect/opentelemetry/Tracer"
 import { Effect, Layer, Option } from "effect"
 import * as Diagnostics from "./diagnostics"
+import * as EnvConfig from "./env-config"
+import * as SecretRedactor from "./secret-redactor"
 import * as Settings from "./settings"
 
 export const serviceName = "rika"
@@ -30,7 +32,8 @@ export interface Options {
 
 export const fromEnv = (env: Record<string, string | undefined>, version: string): Options => {
   const compiled = isCompiledBinary()
-  const override = parseToggle(env.RIKA_TELEMETRY)
+  const provider = EnvConfig.providerFromEnv(env, { booleanKeys: ["RIKA_TELEMETRY"] })
+  const override = EnvConfig.optionalSync(provider, EnvConfig.boolean("RIKA_TELEMETRY"))
   const endpoint = trimTrailingSlash(env.RIKA_TELEMETRY_ENDPOINT ?? defaultEndpoint)
   return {
     enabled: override ?? true,
@@ -87,17 +90,16 @@ export const diagnosticsLayer = (options: Options) =>
     Diagnostics.Service,
     Effect.gen(function* () {
       const path = yield* Diagnostics.resolveLogPath()
-      const fileEmit = Diagnostics.makeFileEmit(path)
+      const redactor = yield* SecretRedactor.Service
+      const fileEmit = Diagnostics.makeFileEmit(redactor, path)
       const otelLogger = logs.getLogger(serviceName, options.version)
-      return Diagnostics.Service.of({
-        emit: (entry) =>
-          Effect.gen(function* () {
-            const redacted = yield* Diagnostics.redactEntry(entry)
-            yield* fileEmit(redacted)
-            const span = yield* Tracer.currentOtelSpan.pipe(Effect.option)
-            yield* Effect.sync(() => emitLogRecord(otelLogger, redacted, span))
-          }),
-      })
+      return Diagnostics.makeService(redactor, (entry) =>
+        Effect.gen(function* () {
+          yield* fileEmit(entry)
+          const span = yield* Tracer.currentOtelSpan.pipe(Effect.option)
+          yield* Effect.sync(() => emitLogRecord(otelLogger, entry, span))
+        }),
+      )
     }),
   )
 
@@ -143,30 +145,6 @@ const resourceAttributes = (options: Options): Attributes => ({
 const isCompiledBinary = () => import.meta.url.includes("/$bunfs/")
 
 const trimTrailingSlash = (value: string) => (value.endsWith("/") ? value.slice(0, -1) : value)
-
-const parseToggle = (value: string | undefined): boolean | undefined => {
-  if (value === undefined) return undefined
-  const normalized = value.trim().toLowerCase()
-  if (
-    normalized === "1" ||
-    normalized === "true" ||
-    normalized === "on" ||
-    normalized === "enabled" ||
-    normalized === "yes"
-  ) {
-    return true
-  }
-  if (
-    normalized === "0" ||
-    normalized === "false" ||
-    normalized === "off" ||
-    normalized === "disabled" ||
-    normalized === "no"
-  ) {
-    return false
-  }
-  return undefined
-}
 
 const isRecord = (value: unknown): value is Diagnostics.Fields =>
   typeof value === "object" && value !== null && !Array.isArray(value)

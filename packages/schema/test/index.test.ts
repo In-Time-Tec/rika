@@ -1,6 +1,19 @@
 import { describe, expect, test } from "bun:test"
-import { Schema } from "effect"
-import { Artifact, Codec, ErrorEnvelope, Event, Ide, Ids, Message, Orb, Remote, Tool, Workspace } from "../src/index"
+import { Option, Schema } from "effect"
+import {
+  Artifact,
+  Codec,
+  ErrorEnvelope,
+  Event,
+  Ide,
+  Ids,
+  Message,
+  Orb,
+  PierreDiff,
+  Remote,
+  Tool,
+  Workspace,
+} from "../src/index"
 
 const now = 1_765_000_000_000
 const threadId = Ids.ThreadId.make("thread_1")
@@ -52,6 +65,13 @@ describe("Rika protocol schemas", () => {
 
     expect(decoded).toEqual(message)
     expect(Message.displayText(decoded)).toBe("Look at [Image 1] please")
+  })
+
+  test("exports a Pierre file diff decoder with language hints", () => {
+    const decoded = PierreDiff.decodeFileDiffMetadata({ ...fileDiff("component.view", 1, 0), lang: "tsx" })
+
+    expect(Option.isSome(decoded)).toBe(true)
+    expect(Option.getOrUndefined(decoded)?.lang).toBe("tsx")
   })
 
   test("round-trips tool calls and results", () => {
@@ -714,4 +734,34 @@ describe("Rika protocol schemas", () => {
 
 const summaryError = (status: number): Remote.ApiError => ({
   error: { message: "Unauthorized", code: "unauthorized", details: { status } },
+})
+
+const fileDiff = (name: string, additions: number, deletions: number) => ({
+  name,
+  type: "change" as const,
+  splitLineCount: additions + deletions,
+  unifiedLineCount: additions + deletions,
+  isPartial: false,
+  deletionLines: Array.from({ length: deletions }, (_, index) => `before ${index}`),
+  additionLines: Array.from({ length: additions }, (_, index) => `after ${index}`),
+  hunks: [
+    {
+      collapsedBefore: 0,
+      additionStart: 1,
+      additionCount: additions,
+      additionLines: additions,
+      additionLineIndex: 0,
+      deletionStart: 1,
+      deletionCount: deletions,
+      deletionLines: deletions,
+      deletionLineIndex: 0,
+      hunkContent: [{ type: "change" as const, deletions, deletionLineIndex: 0, additions, additionLineIndex: 0 }],
+      splitLineStart: 0,
+      splitLineCount: additions + deletions,
+      unifiedLineStart: 0,
+      unifiedLineCount: additions + deletions,
+      noEOFCRDeletions: false,
+      noEOFCRAdditions: false,
+    },
+  ],
 })

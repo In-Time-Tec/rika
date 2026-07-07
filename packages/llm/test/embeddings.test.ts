@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { Effect, Redacted } from "effect"
 import { Embeddings } from "../src/index"
 
 describe("Embeddings", () => {
@@ -39,9 +39,10 @@ describe("Embeddings", () => {
       apiKey: undefined,
       fallbackApiKeyEnv: undefined,
     })
-    expect(Embeddings.optionsFromEnv({ RIKA_API_KEY: "shared" }, { openaiConfigured: true })).toMatchObject({
-      apiKey: "shared",
+    const options = Embeddings.optionsFromEnv({ RIKA_API_KEY: "shared" }, { openaiConfigured: true })
+    expect(options).toMatchObject({
       fallbackApiKeyEnv: "RIKA_API_KEY",
     })
+    expect(options.apiKey === undefined ? undefined : Redacted.value(options.apiKey)).toBe("shared")
   })
 })

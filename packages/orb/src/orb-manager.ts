@@ -1,11 +1,12 @@
 import { readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Config, Diagnostics, SecretRedactor, Settings } from "@rika/core"
+import { Config, Diagnostics, KeyedSemaphore, SecretRedactor, Settings } from "@rika/core"
 import { McpApprovalStore, OrbStore, ProjectStore } from "@rika/persistence"
 import { Ids, Orb } from "@rika/schema"
 import { McpClient } from "@rika/tools"
-import { Context, Effect, Layer, Option, Schema, Semaphore, Stream } from "effect"
+import { Context, Effect, Exit, Layer, Option, Schema, Stream } from "effect"
+import * as OrbActivity from "./orb-activity"
 import * as SandboxClient from "./sandbox-client"
 
 const repoRoot = "/home/user/repo"
@@ -15,6 +16,7 @@ const defaultIdleTimeoutSeconds = 300
 const healthAttempts = 60
 const resumeHealthAttempts = 15
 const healthDelayMillis = 1_000
+const serverLogPath = "/tmp/rika-orb-server.log"
 const setupCommand =
   "if [ -e .agents/setup ] && [ ! -x .agents/setup ]; then echo 'Lifecycle hook file must be executable' >&2; exit 126; fi; if [ -x .agents/setup ]; then .agents/setup; fi"
 const resumeCommand =
@@ -56,11 +58,16 @@ export interface Interface {
   readonly pause: (orbId: Ids.OrbId) => Effect.Effect<Orb.OrbRecord, OrbProvisionError>
   readonly resume: (orbId: Ids.OrbId) => Effect.Effect<Orb.OrbRecord, OrbProvisionError>
   readonly kill: (orbId: Ids.OrbId) => Effect.Effect<Orb.OrbRecord, OrbProvisionError>
+  readonly forceKill: (orbId: Ids.OrbId) => Effect.Effect<Orb.OrbRecord, OrbProvisionError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/orb/OrbManager") {}
 
 type SandboxOrbRecord = Orb.OrbRecord & { readonly sandbox_id: string }
+interface StartedServer {
+  readonly pid: number
+  readonly logPath: string
+}
 
 export const layerWithSystem = (system: System) =>
   Layer.effect(
@@ -74,118 +81,134 @@ export const layerWithSystem = (system: System) =>
       const diagnostics = yield* Diagnostics.Service
       const redactor = Option.getOrUndefined(yield* Effect.serviceOption(SecretRedactor.Service))
       const settings = Option.getOrUndefined(yield* Effect.serviceOption(Settings.Service))
+      const activity = Option.getOrUndefined(yield* Effect.serviceOption(OrbActivity.Service))
       const registerSecrets = (entries: ReadonlyArray<SecretRedactor.Entry>) =>
         redactor === undefined ? Effect.void : redactor.register(entries)
-      const resumeLocks = new Map<Ids.OrbId, Semaphore.Semaphore>()
-      const resumeLocksMutex = yield* Semaphore.make(1)
-      const resumeLockFor = (orbId: Ids.OrbId) =>
-        resumeLocksMutex.withPermit(
-          Effect.gen(function* () {
-            const existing = resumeLocks.get(orbId)
-            if (existing !== undefined) return existing
-            const lock = yield* Semaphore.make(1)
-            resumeLocks.set(orbId, lock)
-            return lock
-          }),
-        )
+      const releaseActivity = (orbId: Ids.OrbId) => (activity === undefined ? Effect.void : activity.release(orbId))
+      const orbLifecycleLocks = yield* KeyedSemaphore.make<Ids.OrbId>()
 
       const provisionForThread: Interface["provisionForThread"] = Effect.fn("OrbManager.provisionForThread")(function* (
         input: ProvisionInput,
       ) {
-        let orbId: Ids.OrbId | undefined
-        let sandboxId: string | undefined
-        const project = yield* step(
-          "project",
-          projects
-            .get(input.project_id)
-            .pipe(
-              Effect.flatMap((record) =>
-                record === undefined
-                  ? Effect.fail(
-                      new SystemError({ message: `Project ${input.project_id} not found`, operation: "project" }),
-                    )
-                  : Effect.succeed(record),
-              ),
-            ),
-        )
-        const templateId = yield* resolveTemplateId(config, project, settings)
-        const timeoutMs = yield* resolveTimeoutMs(config, settings)
-        const created = yield* step(
-          "create_record",
-          orbs.create({ thread_id: input.thread_id, project_id: input.project_id }),
-        )
-        orbId = created.orb_id
+        return yield* Diagnostics.event(
+          "orb.provision",
+          (fields) =>
+            Effect.gen(function* () {
+              let orbId: Ids.OrbId | undefined
+              let sandboxId: string | undefined
+              let terminalSuccess = false
+              const project = yield* step(
+                "project",
+                projects.get(input.project_id).pipe(
+                  Effect.flatMap((record) =>
+                    record === undefined
+                      ? Effect.fail(
+                          new SystemError({
+                            message: `Project ${input.project_id} not found`,
+                            operation: "project",
+                          }),
+                        )
+                      : Effect.succeed(record),
+                  ),
+                ),
+              )
+              const templateId = yield* resolveTemplateId(config, project, settings)
+              fields.template_id = templateId
+              const timeoutMs = yield* resolveTimeoutMs(config, settings)
+              fields.timeout_ms = timeoutMs
+              const created = yield* step(
+                "create_record",
+                orbs.create({ thread_id: input.thread_id, project_id: input.project_id }),
+              )
+              orbId = created.orb_id
+              fields.orb_id = orbId
 
-        return yield* Effect.gen(function* () {
-          const createdSandbox = yield* step(
-            "create_sandbox",
-            sandbox.create({
-              templateId,
-              envs: {},
-              metadata: { app: "rika", thread_id: input.thread_id, project_id: input.project_id },
-              timeoutMs,
-              lifecycle: { onTimeout: "pause", autoResume: false },
+              return yield* Effect.gen(function* () {
+                const createdSandbox = yield* step(
+                  "create_sandbox",
+                  sandbox.create({
+                    templateId,
+                    envs: {},
+                    metadata: { app: "rika", thread_id: input.thread_id, project_id: input.project_id },
+                    timeoutMs,
+                    lifecycle: { onTimeout: "pause", autoResume: false },
+                  }),
+                  { orbId },
+                )
+                sandboxId = createdSandbox.sandboxId
+                fields.sandbox_id = sandboxId
+                yield* step("set_sandbox", orbs.setSandbox(orbId, sandboxId), { orbId, sandboxId })
+
+                const projectSecrets = yield* step("secrets", projects.secretsForProvision(input.project_id), {
+                  orbId,
+                  sandboxId,
+                })
+                const processEnv = { ...project.env, ...projectSecrets }
+                yield* registerSecrets(secretEntries(project.env, projectSecrets))
+                yield* placeRepo({
+                  config,
+                  project,
+                  system,
+                  sandbox,
+                  input,
+                  sandboxId,
+                  processEnv,
+                  orbId,
+                })
+
+                const baseCommit = yield* readBaseCommit(sandbox, sandboxId, orbId)
+                fields.base_commit = baseCommit
+                yield* step("base_commit", orbs.setBaseCommit(orbId, baseCommit), { orbId, sandboxId })
+                yield* propagateMcpServers({
+                  approvals,
+                  diagnostics,
+                  input,
+                  orbId,
+                  registerSecrets,
+                  sandbox,
+                  sandboxId: createdSandbox.sandboxId,
+                  processEnv,
+                }).pipe((effect) => step("mcp", effect, { orbId, sandboxId: createdSandbox.sandboxId }))
+                yield* runSetup(sandbox, diagnostics, sandboxId, processEnv, orbId)
+                const token = yield* step("token", system.randomToken, { orbId, sandboxId })
+                yield* registerSecrets([{ label: "RIKA_ORB_TOKEN", value: token }])
+                const server = yield* startServer(sandbox, sandboxId, processEnv, token, baseCommit, orbId)
+                const endpointUrl = yield* step("host_url", sandbox.hostUrl(sandboxId, serverPort), {
+                  orbId,
+                  sandboxId,
+                })
+                fields.endpoint_url = endpointUrl
+                yield* waitForStartedServerHealth(
+                  system,
+                  sandbox,
+                  endpointUrl,
+                  token,
+                  server,
+                  0,
+                  orbId,
+                  sandboxId,
+                  healthAttempts,
+                )
+                yield* step("endpoint", orbs.setEndpoint(orbId, { endpoint_url: endpointUrl, token }), {
+                  orbId,
+                  sandboxId,
+                })
+                const running = yield* step("running", orbs.setStatus(orbId, "running"), { orbId, sandboxId })
+                terminalSuccess = true
+                fields.status = running.status
+                return running
+              }).pipe(
+                Effect.onExit((exit) =>
+                  Exit.isSuccess(exit) || terminalSuccess
+                    ? Effect.void
+                    : cleanupAfterProvisionFailure(orbs, sandbox, diagnostics, orbId, sandboxId),
+                ),
+              )
             }),
-            { orbId },
-          )
-          sandboxId = createdSandbox.sandboxId
-          yield* step("set_sandbox", orbs.setSandbox(orbId, sandboxId), { orbId, sandboxId })
-
-          const projectSecrets = yield* step("secrets", projects.secretsForProvision(input.project_id), {
-            orbId,
-            sandboxId,
-          })
-          const processEnv = { ...project.env, ...projectSecrets }
-          yield* registerSecrets(secretEntries(project.env, projectSecrets))
-          yield* placeRepo({
-            config,
-            project,
-            system,
-            sandbox,
-            input,
-            sandboxId,
-            processEnv,
-            orbId,
-          })
-
-          const baseCommit = yield* readBaseCommit(sandbox, sandboxId, orbId)
-          yield* step("base_commit", orbs.setBaseCommit(orbId, baseCommit), { orbId, sandboxId })
-          yield* propagateMcpServers({
-            approvals,
-            diagnostics,
-            input,
-            orbId,
-            sandbox,
-            sandboxId: createdSandbox.sandboxId,
-            processEnv,
-          }).pipe((effect) => step("mcp", effect, { orbId, sandboxId: createdSandbox.sandboxId }))
-          yield* runSetup(sandbox, diagnostics, sandboxId, processEnv, orbId)
-          const token = yield* step("token", system.randomToken, { orbId, sandboxId })
-          yield* registerSecrets([{ label: "RIKA_ORB_TOKEN", value: token }])
-          yield* startServer(sandbox, sandboxId, processEnv, token, baseCommit, orbId)
-          const endpointUrl = yield* step("host_url", sandbox.hostUrl(sandboxId, serverPort), { orbId, sandboxId })
-          yield* waitForHealth(system, endpointUrl, token, 0, orbId, sandboxId, healthAttempts)
-          yield* step("endpoint", orbs.setEndpoint(orbId, { endpoint_url: endpointUrl, token }), { orbId, sandboxId })
-          return yield* step("running", orbs.setStatus(orbId, "running"), { orbId, sandboxId })
-        }).pipe(
-          Effect.catch((error) =>
-            cleanupAfterProvisionFailure(orbs, sandbox, orbId, sandboxId).pipe(
-              Effect.flatMap(() => Effect.fail(error)),
-            ),
-          ),
-        )
+          { thread_id: input.thread_id, project_id: input.project_id },
+        ).pipe(Effect.provideService(Diagnostics.Service, diagnostics))
       })
 
-      const requireSandboxId = Effect.fn("OrbManager.requireSandboxId")(function* (orbId: Ids.OrbId, stepName: string) {
-        const record = yield* step(stepName, orbs.get(orbId), { orbId })
-        if (record === undefined) {
-          return yield* new OrbProvisionError({ message: `Orb ${orbId} not found`, step: stepName, orb_id: orbId })
-        }
-        if (record.sandbox_id === null) {
-          return yield* new OrbProvisionError({ message: `Orb ${orbId} has no sandbox`, step: stepName, orb_id: orbId })
-        }
-        return record.sandbox_id
-      })
       const requireOrbRecord = Effect.fn("OrbManager.requireOrbRecord")(function* (orbId: Ids.OrbId, stepName: string) {
         const record = yield* step(stepName, orbs.get(orbId), { orbId })
         if (record === undefined) {
@@ -197,17 +220,67 @@ export const layerWithSystem = (system: System) =>
         }
         return { ...record, sandbox_id: sandboxId }
       })
+      const requireControllableOrbRecord = Effect.fn("OrbManager.requireControllableOrbRecord")(function* (
+        orbId: Ids.OrbId,
+        stepName: string,
+      ) {
+        const record = yield* step(stepName, orbs.get(orbId), { orbId })
+        if (record === undefined) {
+          return yield* new OrbProvisionError({ message: `Orb ${orbId} not found`, step: stepName, orb_id: orbId })
+        }
+        if (record.status === "provisioning") {
+          return yield* new OrbProvisionError({
+            message: `Orb ${orbId} cannot ${stepName} while provisioning`,
+            step: stepName,
+            orb_id: orbId,
+          })
+        }
+        const sandboxId = record.sandbox_id
+        if (sandboxId === null) {
+          return yield* new OrbProvisionError({ message: `Orb ${orbId} has no sandbox`, step: stepName, orb_id: orbId })
+        }
+        return { ...record, sandbox_id: sandboxId }
+      })
 
       return Service.of({
         provisionForThread,
         pause: Effect.fn("OrbManager.pause")(function* (orbId: Ids.OrbId) {
-          const sandboxId = yield* requireSandboxId(orbId, "pause")
-          yield* step("pause", sandbox.pause(sandboxId), { orbId, sandboxId })
-          return yield* step("pause_status", orbs.setStatus(orbId, "paused"), { orbId, sandboxId })
+          return yield* KeyedSemaphore.withPermit(
+            orbLifecycleLocks,
+            orbId,
+            Diagnostics.event(
+              "orb.pause",
+              (fields) =>
+                Effect.gen(function* () {
+                  const record = yield* requireControllableOrbRecord(orbId, "pause")
+                  const sandboxId = record.sandbox_id
+                  fields.sandbox_id = sandboxId
+                  fields.previous_status = record.status
+                  if (record.status === "paused") {
+                    fields.status = "already_paused"
+                    return record
+                  }
+                  if (record.status !== "running") {
+                    return yield* new OrbProvisionError({
+                      message: `Orb ${orbId} cannot pause from ${record.status}`,
+                      step: "pause",
+                      orb_id: orbId,
+                      sandbox_id: sandboxId,
+                    })
+                  }
+                  yield* step("pause", sandbox.pause(sandboxId), { orbId, sandboxId })
+                  const paused = yield* step("pause_status", orbs.setStatus(orbId, "paused"), { orbId, sandboxId })
+                  fields.status = paused.status
+                  return paused
+                }),
+              { orb_id: orbId },
+            ).pipe(Effect.provideService(Diagnostics.Service, diagnostics)),
+          )
         }),
         resume: Effect.fn("OrbManager.resume")(function* (orbId: Ids.OrbId) {
-          const resumeLock = yield* resumeLockFor(orbId)
-          return yield* resumeLock.withPermit(
+          return yield* KeyedSemaphore.withPermit(
+            orbLifecycleLocks,
+            orbId,
             Diagnostics.event(
               "orb.resume",
               (fields) =>
@@ -261,9 +334,78 @@ export const layerWithSystem = (system: System) =>
           )
         }),
         kill: Effect.fn("OrbManager.kill")(function* (orbId: Ids.OrbId) {
-          const sandboxId = yield* requireSandboxId(orbId, "kill")
-          yield* step("kill", sandbox.kill(sandboxId), { orbId, sandboxId })
-          return yield* step("kill_status", orbs.setStatus(orbId, "killed"), { orbId, sandboxId })
+          const killed = yield* KeyedSemaphore.withPermit(
+            orbLifecycleLocks,
+            orbId,
+            Diagnostics.event(
+              "orb.kill",
+              (fields) =>
+                Effect.gen(function* () {
+                  const record = yield* requireControllableOrbRecord(orbId, "kill")
+                  const sandboxId = record.sandbox_id
+                  fields.sandbox_id = sandboxId
+                  fields.previous_status = record.status
+                  const killResult = yield* Effect.result(sandbox.kill(sandboxId))
+                  fields.kill = killResult._tag === "Success" ? "success" : "failure"
+                  if (killResult._tag === "Failure") fields.kill_error = messageFromUnknown(killResult.failure)
+                  const killedRecord = yield* step("kill_status", orbs.setStatus(orbId, "killed"), {
+                    orbId,
+                    sandboxId,
+                  })
+                  fields.status = killedRecord.status
+                  return killedRecord
+                }),
+              { orb_id: orbId },
+            ).pipe(Effect.provideService(Diagnostics.Service, diagnostics)),
+          )
+          yield* KeyedSemaphore.remove(orbLifecycleLocks, orbId)
+          yield* releaseActivity(orbId)
+          return killed
+        }),
+        forceKill: Effect.fn("OrbManager.forceKill")(function* (orbId: Ids.OrbId) {
+          const killed = yield* KeyedSemaphore.withPermit(
+            orbLifecycleLocks,
+            orbId,
+            Diagnostics.event(
+              "orb.kill",
+              (fields) =>
+                Effect.gen(function* () {
+                  fields.force = true
+                  const record = yield* step("kill", orbs.get(orbId), { orbId })
+                  if (record === undefined) {
+                    return yield* new OrbProvisionError({
+                      message: `Orb ${orbId} not found`,
+                      step: "kill",
+                      orb_id: orbId,
+                    })
+                  }
+                  fields.previous_status = record.status
+                  if (record.status === "killed" || record.status === "archived") {
+                    fields.status = record.status
+                    return record
+                  }
+                  const sandboxId = record.sandbox_id
+                  if (sandboxId === null) {
+                    fields.kill = "skipped"
+                  } else {
+                    fields.sandbox_id = sandboxId
+                    const killResult = yield* Effect.result(sandbox.kill(sandboxId))
+                    fields.kill = killResult._tag === "Success" ? "success" : "failure"
+                    if (killResult._tag === "Failure") fields.kill_error = messageFromUnknown(killResult.failure)
+                  }
+                  const killedRecord = yield* step("kill_status", orbs.setStatus(orbId, "killed"), {
+                    orbId,
+                    ...(sandboxId === null ? {} : { sandboxId }),
+                  })
+                  fields.status = killedRecord.status
+                  return killedRecord
+                }),
+              { orb_id: orbId },
+            ).pipe(Effect.provideService(Diagnostics.Service, diagnostics)),
+          )
+          yield* KeyedSemaphore.remove(orbLifecycleLocks, orbId)
+          yield* releaseActivity(orbId)
+          return killed
         }),
       })
     }),
@@ -287,6 +429,11 @@ export const resume = Effect.fn("OrbManager.resume.call")(function* (orbId: Ids.
 export const kill = Effect.fn("OrbManager.kill.call")(function* (orbId: Ids.OrbId) {
   const manager = yield* Service
   return yield* manager.kill(orbId)
+})
+
+export const forceKill = Effect.fn("OrbManager.forceKill.call")(function* (orbId: Ids.OrbId) {
+  const manager = yield* Service
+  return yield* manager.forceKill(orbId)
 })
 
 const step = <A, E, R>(
@@ -315,7 +462,7 @@ const resolveTemplateId = Effect.fn("OrbManager.resolveTemplateId")(function* (
   if (Option.isSome(configured) && configured.value.trim().length > 0) return configured.value.trim()
   if (project.template_id !== null && project.template_id.trim().length > 0) return project.template_id.trim()
   if (settings !== undefined) {
-    const snapshot = yield* settings.snapshot
+    const snapshot = yield* settings.snapshot.pipe(Effect.mapError(settingsProvisionError))
     if (snapshot.values.orb.template.trim().length > 0) return snapshot.values.orb.template.trim()
   }
   return defaultTemplateId
@@ -328,7 +475,7 @@ const resolveTimeoutMs = Effect.fn("OrbManager.resolveTimeoutMs")(function* (
   const configured = yield* config.requireEnv("RIKA_ORB_IDLE_TIMEOUT").pipe(Effect.option)
   if (Option.isNone(configured)) {
     if (settings !== undefined) {
-      const snapshot = yield* settings.snapshot
+      const snapshot = yield* settings.snapshot.pipe(Effect.mapError(settingsProvisionError))
       return snapshot.values.orb.idleTimeoutSeconds * 1_000
     }
     return defaultIdleTimeoutSeconds * 1_000
@@ -342,6 +489,12 @@ const resolveTimeoutMs = Effect.fn("OrbManager.resolveTimeoutMs")(function* (
   }
   return seconds * 1_000
 })
+
+const settingsProvisionError = (error: Settings.SettingsError) =>
+  new OrbProvisionError({
+    message: error.message,
+    step: "settings",
+  })
 
 const placeRepo = Effect.fn("OrbManager.placeRepo")(function* (input: {
   readonly config: Config.Interface
@@ -470,7 +623,7 @@ const startServer: (
   token: string,
   baseCommit: string,
   orbId: Ids.OrbId,
-) => Effect.Effect<void, OrbProvisionError> = Effect.fn("OrbManager.startServer")(function* (
+) => Effect.Effect<StartedServer, OrbProvisionError> = Effect.fn("OrbManager.startServer")(function* (
   sandbox: SandboxClient.Interface,
   sandboxId: string,
   envs: Record<string, string>,
@@ -481,26 +634,13 @@ const startServer: (
   const chunks = yield* collectExec(
     sandbox,
     sandboxId,
-    [
-      "rika",
-      "server",
-      "--host",
-      "0.0.0.0",
-      "--port",
-      String(serverPort),
-      "--token",
-      token,
-      "--workspace",
-      repoRoot,
-      "--orb",
-      "--base-commit",
-      baseCommit,
-    ],
+    ["bash", "-lc", serverLaunchCommand(token, baseCommit)],
     { cwd: repoRoot, envs: serverEnv(envs), background: true },
     "start_server",
     orbId,
   )
-  if (!chunks.some((chunk) => chunk.type === "started")) {
+  const started = chunks.find((chunk) => chunk.type === "started")
+  if (started?.type !== "started") {
     return yield* new OrbProvisionError({
       message: "Orb server did not start",
       step: "start_server",
@@ -508,7 +648,7 @@ const startServer: (
       sandbox_id: sandboxId,
     })
   }
-  return undefined
+  return { pid: started.pid, logPath: serverLogPath }
 })
 
 const runExec: (
@@ -638,11 +778,115 @@ const waitForHealth: (
   )
 })
 
+const waitForStartedServerHealth: (
+  system: System,
+  sandbox: SandboxClient.Interface,
+  url: string,
+  token: string,
+  server: StartedServer,
+  attempt: number,
+  orbId: Ids.OrbId,
+  sandboxId: string,
+  maxAttempts: number,
+) => Effect.Effect<void, OrbProvisionError> = Effect.fn("OrbManager.waitForStartedServerHealth")(function* (
+  system: System,
+  sandbox: SandboxClient.Interface,
+  url: string,
+  token: string,
+  server: StartedServer,
+  attempt: number,
+  orbId: Ids.OrbId,
+  sandboxId: string,
+  maxAttempts: number,
+) {
+  const health = step("health", system.health(url, token), { orbId, sandboxId }).pipe(
+    Effect.as({ status: "healthy" as const }),
+    Effect.catch((error) => Effect.succeed({ status: "unhealthy" as const, error })),
+  )
+  const result = yield* Effect.raceFirst(health, failIfServerExited(sandbox, sandboxId, server, orbId))
+  if (result.status === "healthy") return
+  yield* failWhenServerExited(sandbox, sandboxId, server, orbId)
+  if (attempt >= maxAttempts - 1) {
+    yield* Effect.fail(result.error)
+    return
+  }
+  yield* system.sleep(healthDelayMillis)
+  yield* waitForStartedServerHealth(system, sandbox, url, token, server, attempt + 1, orbId, sandboxId, maxAttempts)
+})
+
+const failIfServerExited = (
+  sandbox: SandboxClient.Interface,
+  sandboxId: string,
+  server: StartedServer,
+  orbId: Ids.OrbId,
+): Effect.Effect<never, OrbProvisionError> =>
+  serverProcessAlive(sandbox, sandboxId, server).pipe(
+    Effect.flatMap((alive) => (alive ? Effect.never : serverExitedError(sandbox, sandboxId, server, orbId))),
+  )
+
+const failWhenServerExited = (
+  sandbox: SandboxClient.Interface,
+  sandboxId: string,
+  server: StartedServer,
+  orbId: Ids.OrbId,
+): Effect.Effect<void, OrbProvisionError> =>
+  serverProcessAlive(sandbox, sandboxId, server).pipe(
+    Effect.flatMap((alive) => (alive ? Effect.void : serverExitedError(sandbox, sandboxId, server, orbId))),
+  )
+
+const serverProcessAlive = (
+  sandbox: SandboxClient.Interface,
+  sandboxId: string,
+  server: StartedServer,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const result = yield* Effect.result(
+      sandbox.exec(sandboxId, ["bash", "-lc", `kill -0 ${server.pid}`], { cwd: repoRoot }).pipe(Stream.runCollect),
+    )
+    if (result._tag === "Failure") return false
+    const chunks = Array.from(result.success)
+    const exit = chunks.find((chunk) => chunk.type === "exit")
+    return exit?.type === "exit" && exit.exitCode === 0
+  })
+
+const serverExitedError = (
+  sandbox: SandboxClient.Interface,
+  sandboxId: string,
+  server: StartedServer,
+  orbId: Ids.OrbId,
+): Effect.Effect<never, OrbProvisionError> =>
+  Effect.gen(function* () {
+    const tail = yield* readServerLogTail(sandbox, sandboxId, server.logPath)
+    return yield* new OrbProvisionError({
+      message: `Orb server exited before health check passed:\n${tail}`,
+      step: "health",
+      orb_id: orbId,
+      sandbox_id: sandboxId,
+    })
+  })
+
+const readServerLogTail = (
+  sandbox: SandboxClient.Interface,
+  sandboxId: string,
+  logPath: string,
+): Effect.Effect<string> =>
+  Effect.gen(function* () {
+    const result = yield* Effect.result(
+      sandbox
+        .exec(sandboxId, ["bash", "-lc", `tail -n 50 ${shellQuote(logPath)} 2>/dev/null || true`], { cwd: repoRoot })
+        .pipe(Stream.runCollect),
+    )
+    if (result._tag === "Failure") return `server log unavailable: ${messageFromUnknown(result.failure)}`
+    const lines = execOutputLines(Array.from(result.success)).slice(-50)
+    return lines.length === 0 ? "server log was empty" : lines.join("\n")
+  })
+
 const propagateMcpServers: (input: {
   readonly approvals: McpApprovalStore.Interface
   readonly diagnostics: Diagnostics.Interface
   readonly input: ProvisionInput
   readonly orbId: Ids.OrbId
+  readonly registerSecrets: (entries: ReadonlyArray<SecretRedactor.Entry>) => Effect.Effect<void>
   readonly sandbox: SandboxClient.Interface
   readonly sandboxId: string
   readonly processEnv: Record<string, string>
@@ -664,12 +908,22 @@ const propagateMcpServers: (input: {
         ) {
           return undefined
         }
-        const resolved = resolveMcpServerConfig(server.config, input.processEnv)
+        const invalidLaunchFields = McpClient.invalidWorkspaceCommandLaunchFields(server)
+        if (invalidLaunchFields.length > 0) {
+          return yield* new McpClient.McpClientError({
+            message: `Workspace MCP server ${server.name} cannot use environment placeholders in command, args, or cwd`,
+            operation: "validateLaunchIdentity",
+            server_name: server.name,
+            details: { fields: [...invalidLaunchFields] },
+          })
+        }
+        const resolved = McpClient.resolveServerConfigPlaceholders(server.config, input.processEnv)
         if (resolved._tag === "missing") {
           yield* emitMcpWarning(input.diagnostics, input.sandboxId, server.name, unresolvedMessage(resolved.variables))
           return undefined
         }
-        return { name: server.name, config: resolved.config }
+        yield* input.registerSecrets(resolved.entries)
+        return { name: server.name, config: server.config }
       }),
     { concurrency: 1 },
   )
@@ -709,10 +963,6 @@ const propagateMcpServers: (input: {
   )
 })
 
-type ResolvedMcpServerConfig =
-  | { readonly _tag: "resolved"; readonly config: McpClient.ServerConfig }
-  | { readonly _tag: "missing"; readonly variables: ReadonlyArray<string> }
-
 const sandboxSettings = (sandbox: SandboxClient.Interface, sandboxId: string) =>
   sandbox.readFile(sandboxId, `${repoRoot}/.rika/settings.json`).pipe(
     Effect.matchEffect({
@@ -734,48 +984,6 @@ const encodeSettings = (
   servers: Readonly<Record<string, McpClient.ServerConfig>>,
 ): Uint8Array =>
   new TextEncoder().encode(`${JSON.stringify({ ...settings, [McpClient.settingsKey]: servers }, null, 2)}\n`)
-
-const resolveMcpServerConfig = (
-  config: McpClient.ServerConfig,
-  env: Record<string, string>,
-): ResolvedMcpServerConfig => {
-  const missing = new Set<string>()
-  const resolve = (value: string) => resolveMcpString(value, env, missing)
-  const resolved =
-    "command" in config
-      ? {
-          command: resolve(config.command),
-          ...(config.args === undefined ? {} : { args: config.args.map(resolve) }),
-          ...(config.env === undefined ? {} : { env: resolveStringRecord(config.env, resolve) }),
-          ...(config.cwd === undefined ? {} : { cwd: resolve(config.cwd) }),
-          ...(config.includeTools === undefined ? {} : { includeTools: [...config.includeTools] }),
-          ...(config.excludeTools === undefined ? {} : { excludeTools: [...config.excludeTools] }),
-        }
-      : {
-          url: resolve(config.url),
-          ...(config.headers === undefined ? {} : { headers: resolveStringRecord(config.headers, resolve) }),
-          ...(config.includeTools === undefined ? {} : { includeTools: [...config.includeTools] }),
-          ...(config.excludeTools === undefined ? {} : { excludeTools: [...config.excludeTools] }),
-        }
-  return missing.size === 0
-    ? { _tag: "resolved", config: resolved }
-    : { _tag: "missing", variables: [...missing].toSorted() }
-}
-
-const resolveMcpString = (value: string, env: Record<string, string>, missing: Set<string>) =>
-  value.replaceAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (match, variable: string) => {
-    const resolved = env[variable]
-    if (resolved === undefined) {
-      missing.add(variable)
-      return match
-    }
-    return resolved
-  })
-
-const resolveStringRecord = (
-  record: Readonly<Record<string, string>>,
-  resolve: (value: string) => string,
-): Record<string, string> => Object.fromEntries(Object.entries(record).map(([key, value]) => [key, resolve(value)]))
 
 const isUnknownRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
@@ -852,8 +1060,18 @@ const ensureResumeHealth = Effect.fn("OrbManager.ensureResumeHealth")(function* 
       sandbox_id: record.sandbox_id,
     })
   } else {
-    yield* startServer(sandbox, record.sandbox_id, process.envs, token, baseCommit, record.orb_id)
-    yield* waitForHealth(system, endpointUrl, token, 0, record.orb_id, record.sandbox_id, resumeHealthAttempts)
+    const server = yield* startServer(sandbox, record.sandbox_id, process.envs, token, baseCommit, record.orb_id)
+    yield* waitForStartedServerHealth(
+      system,
+      sandbox,
+      endpointUrl,
+      token,
+      server,
+      0,
+      record.orb_id,
+      record.sandbox_id,
+      resumeHealthAttempts,
+    )
   }
 })
 
@@ -871,6 +1089,25 @@ const serverEnv = (envs: Record<string, string>): Record<string, string> => ({
   ...envs,
   RIKA_SUBAGENT_TOOLS: "full",
 })
+
+const serverLaunchCommand = (token: string, baseCommit: string) =>
+  `: > ${shellQuote(serverLogPath)} && exec ${[
+    "rika",
+    "server",
+    "--host",
+    "0.0.0.0",
+    "--port",
+    String(serverPort),
+    "--token",
+    token,
+    "--workspace",
+    repoRoot,
+    "--orb",
+    "--base-commit",
+    baseCommit,
+  ]
+    .map(shellQuote)
+    .join(" ")} >> ${shellQuote(serverLogPath)} 2>&1`
 
 type ResumeHookResult =
   | {
@@ -908,13 +1145,27 @@ const runResumeHook: (sandbox: SandboxClient.Interface, sandboxId: string) => Ef
 const cleanupAfterProvisionFailure = (
   orbs: OrbStore.Interface,
   sandbox: SandboxClient.Interface,
+  diagnostics: Diagnostics.Interface,
   orbId: Ids.OrbId | undefined,
   sandboxId: string | undefined,
 ) => {
-  if (orbId === undefined || sandboxId === undefined) return Effect.void
-  return sandbox
-    .kill(sandboxId)
-    .pipe(Effect.ignore, Effect.andThen(orbs.setStatus(orbId, "killed").pipe(Effect.ignore)))
+  if (orbId === undefined) return Effect.void
+  return Diagnostics.event("orb.provision.cleanup", (fields) =>
+    Effect.gen(function* () {
+      fields.orb_id = orbId
+      if (sandboxId === undefined) {
+        fields.kill = "skipped"
+      } else {
+        fields.sandbox_id = sandboxId
+        const killed = yield* Effect.result(sandbox.kill(sandboxId))
+        fields.kill = killed._tag === "Success" ? "success" : "failure"
+        if (killed._tag === "Failure") fields.kill_error = messageFromUnknown(killed.failure)
+      }
+      const terminalized = yield* Effect.result(orbs.setStatus(orbId, "killed"))
+      fields.status_update = terminalized._tag === "Success" ? "success" : "failure"
+      if (terminalized._tag === "Failure") fields.status_error = messageFromUnknown(terminalized.failure)
+    }),
+  ).pipe(Effect.provideService(Diagnostics.Service, diagnostics))
 }
 
 const secretEntries = (

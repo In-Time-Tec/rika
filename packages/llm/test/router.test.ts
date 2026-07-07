@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config } from "@rika/core"
+import { Config, Diagnostics, SecretRedactor } from "@rika/core"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
 import { Provider, Router } from "../src/index"
@@ -15,14 +15,20 @@ const configLayer = Config.layerFromValues(
 
 const messages: ReadonlyArray<Provider.Message> = [{ role: "user", content: "ship it" }]
 
-const routerLayer = Router.layer.pipe(
-  Layer.provideMerge(configLayer),
-  Layer.provideMerge(
-    Provider.fakeRegistryLayer([
-      { name: "openai", responses: ["done"] },
-      { name: "anthropic", responses: ["done"] },
-    ]),
-  ),
+const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(SecretRedactor.layer))
+
+const routerLayerFrom = (registryLayer: Layer.Layer<Provider.Registry>) =>
+  Router.layer.pipe(
+    Layer.provideMerge(configLayer),
+    Layer.provideMerge(registryLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
+
+const routerLayer = routerLayerFrom(
+  Provider.fakeRegistryLayer([
+    { name: "openai", responses: ["done"] },
+    { name: "anthropic", responses: ["done"] },
+  ]),
 )
 
 describe("LLM Router", () => {
@@ -105,9 +111,8 @@ describe("LLM Router", () => {
 
   test("completeStructured decodes valid JSON and returns the raw response", async () => {
     const Decision = Schema.Struct({ answer: Schema.String, score: Schema.Number })
-    const layer = Router.layer.pipe(
-      Layer.provideMerge(configLayer),
-      Layer.provideMerge(Provider.fakeRegistryLayer([{ name: "openai", responses: ['{"answer":"ship","score":1}'] }])),
+    const layer = routerLayerFrom(
+      Provider.fakeRegistryLayer([{ name: "openai", responses: ['{"answer":"ship","score":1}'] }]),
     )
 
     const result = await Effect.runPromise(
@@ -120,11 +125,8 @@ describe("LLM Router", () => {
 
   test("completeStructured retries once after invalid JSON and decodes the correction", async () => {
     const Decision = Schema.Struct({ answer: Schema.String, score: Schema.Number })
-    const layer = Router.layer.pipe(
-      Layer.provideMerge(configLayer),
-      Layer.provideMerge(
-        Provider.fakeRegistryLayer([{ name: "openai", responses: ["not json", '{"answer":"corrected","score":2}'] }]),
-      ),
+    const layer = routerLayerFrom(
+      Provider.fakeRegistryLayer([{ name: "openai", responses: ["not json", '{"answer":"corrected","score":2}'] }]),
     )
 
     const result = await Effect.runPromise(
@@ -157,10 +159,7 @@ describe("LLM Router", () => {
       completeStructured: () => Effect.fail(unsupportedStructuredOutput),
       stream: () => Stream.empty,
     }
-    const layer = Router.layer.pipe(
-      Layer.provideMerge(configLayer),
-      Layer.provideMerge(Provider.registryLayerFromProviders([provider])),
-    )
+    const layer = routerLayerFrom(Provider.registryLayerFromProviders([provider]))
 
     const result = await Effect.runPromise(
       Router.completeStructured({ mode: "rush", messages: [], prompt: "ship it", schema: Decision }).pipe(
@@ -176,11 +175,8 @@ describe("LLM Router", () => {
 
   test("completeStructured decodes fenced JSON", async () => {
     const Decision = Schema.Struct({ answer: Schema.String })
-    const layer = Router.layer.pipe(
-      Layer.provideMerge(configLayer),
-      Layer.provideMerge(
-        Provider.fakeRegistryLayer([{ name: "openai", responses: ['```json\n{"answer":"ok"}\n```'] }]),
-      ),
+    const layer = routerLayerFrom(
+      Provider.fakeRegistryLayer([{ name: "openai", responses: ['```json\n{"answer":"ok"}\n```'] }]),
     )
 
     const result = await Effect.runPromise(
@@ -202,10 +198,7 @@ describe("LLM Router", () => {
         }),
       stream: () => Stream.empty,
     }
-    const layer = Router.layer.pipe(
-      Layer.provideMerge(configLayer),
-      Layer.provideMerge(Provider.registryLayerFromProviders([provider])),
-    )
+    const layer = routerLayerFrom(Provider.registryLayerFromProviders([provider]))
 
     const result = await Effect.runPromise(
       Router.completeStructured({ mode: "rush", messages, schema: Decision }).pipe(Effect.provide(layer)),
@@ -222,6 +215,7 @@ describe("LLM Router", () => {
           Router.layer.pipe(
             Layer.provideMerge(configLayer),
             Layer.provideMerge(Provider.fakeRegistryLayer([{ name: "openai", responses: ["not json"] }])),
+            Layer.provideMerge(diagnosticsLayer),
           ),
         ),
         Effect.flip,

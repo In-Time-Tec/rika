@@ -63,4 +63,4 @@ The web app follows The Elm Architecture:
 - commands for health, thread list, open thread, create thread, and submit turn
 - one subscription keyed by the opened thread and starting sequence
 
-Local shadcn-style primitives live in `apps/web/src/ui.ts`. They are copyable Foldkit view helpers with local CSS classes, not imported React components. Keep them small and accessible, and prefer explicit attributes over a large component framework.
+The foldcn layer is defined by `apps/web/components.json` and `apps/web/foldcn.lock.json`. Copied and ported components live under `apps/web/src/components/ui/*`; `apps/web/src/ui.ts` is only a thin re-export/adapter for app call sites.

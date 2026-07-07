@@ -11,7 +11,7 @@ import {
   ToolExecutor,
   WorkspaceAccess,
 } from "@rika/agent"
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { IdeBridge } from "@rika/ide"
 import { OrbManager } from "@rika/orb"
 import { Provider, Router } from "@rika/llm"
@@ -27,7 +27,7 @@ import {
 } from "@rika/persistence"
 import { Client } from "@rika/sdk"
 import { Artifact, Codec, Common, Event, Ide, Ids, Orb, Remote } from "@rika/schema"
-import { Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, Layer, ManagedRuntime, Schema, Stream } from "effect"
 import { HttpServer, OrbMirror, PresenceHub, RemoteControl } from "../src/index"
 
 const threadId = Ids.ThreadId.make("thread_remote_contract")
@@ -103,6 +103,8 @@ const makeLayer = (
     readonly dataDir?: string
     readonly agentLayer?: Layer.Layer<AgentLoop.Service>
     readonly compactionLayer?: Layer.Layer<CompactionService.Service>
+    readonly providerResponses?: ReadonlyArray<Provider.FakeResponse>
+    readonly toolLayer?: Layer.Layer<ToolExecutor.Service, never, Diagnostics.Service>
   } = {},
 ) => {
   const runtimeConfigLayer = options.dataDir === undefined ? configLayer : configLayerForDataDir(options.dataDir)
@@ -110,6 +112,8 @@ const makeLayer = (
     options.dataDir === undefined ? Database.memoryLayer : Database.layer.pipe(Layer.provideMerge(runtimeConfigLayer))
   const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
   const workspaceStoreLayer = WorkspaceStore.layer.pipe(Layer.provideMerge(databaseLayer))
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const storageLayer = Layer.mergeAll(
     runtimeConfigLayer,
     databaseLayer,
@@ -121,25 +125,31 @@ const makeLayer = (
       Layer.provideMerge(Time.fixedLayer(now)),
       Layer.provideMerge(IdGenerator.sequenceLayer(1)),
     ),
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadProjection.layer,
     Time.fixedLayer(now),
     IdGenerator.sequenceLayer(1),
   )
   const migratedStorageLayer = Layer.effectDiscard(Migration.migrate()).pipe(Layer.provideMerge(storageLayer))
   const projectStoreLayer = ProjectStore.layer.pipe(Layer.provideMerge(migratedStorageLayer))
-  const threadLayer = ThreadService.layer.pipe(Layer.provideMerge(migratedStorageLayer))
+  const threadLayer = ThreadService.layer.pipe(
+    Layer.provideMerge(migratedStorageLayer),
+    Layer.provideMerge(diagnosticsLayer),
+  )
   const workspaceAccessLayer = WorkspaceAccess.layer.pipe(Layer.provideMerge(migratedStorageLayer))
   const providedOrbManagerLayer = orbManagerLayer.pipe(Layer.provideMerge(migratedStorageLayer))
   const llmLayer = Router.layer.pipe(
     Layer.provideMerge(runtimeConfigLayer),
     Layer.provideMerge(
       Provider.fakeRegistryLayer([
-        { name: "anthropic", responses: ["remote hello"] },
-        { name: "openai", responses: ["remote hello"] },
+        { name: "anthropic", responses: options.providerResponses ?? ["remote hello"] },
+        { name: "openai", responses: options.providerResponses ?? ["remote hello"] },
       ]),
     ),
+    Layer.provideMerge(diagnosticsLayer),
   )
+  const toolLayer = (options.toolLayer ?? ToolExecutor.fakeLayer({})).pipe(Layer.provideMerge(diagnosticsLayer))
   const agentBase = Layer.mergeAll(
     migratedStorageLayer,
     projectStoreLayer,
@@ -147,8 +157,9 @@ const makeLayer = (
     workspaceAccessLayer,
     contextLayer,
     SkillRegistry.emptyLayer,
-    ToolExecutor.fakeLayer({}),
-    Diagnostics.memoryLayer([]),
+    toolLayer,
+    redactorLayer,
+    diagnosticsLayer,
     llmLayer,
     IdeBridge.layer,
     providedOrbManagerLayer,
@@ -194,6 +205,7 @@ const fakeOrbManagerLayer = (
       pause: (id) => Effect.succeed(orbRecord(orbThreadId, projectId, "paused", id)),
       resume: (id) => Effect.succeed(orbRecord(orbThreadId, projectId, "running", id)),
       kill: (id) => Effect.succeed(orbRecord(orbThreadId, projectId, "killed", id)),
+      forceKill: (id) => Effect.succeed(orbRecord(orbThreadId, projectId, "killed", id)),
     }),
   )
 
@@ -215,7 +227,6 @@ const blockingAgentLoopLayer = (): Layer.Layer<AgentLoop.Service> =>
       runTurn: () => Effect.never,
       streamTurn: () => Stream.never,
       cancelTurn: () => Effect.never,
-      queueTurn: () => Effect.never,
     }),
   )
 
@@ -239,7 +250,6 @@ const capturingAgentLoopLayer = (inputs: Array<AgentLoop.RunTurnInput>): Layer.L
           } satisfies Event.TurnCompleted
         }),
       cancelTurn: () => Effect.never,
-      queueTurn: () => Effect.never,
     }),
   )
 
@@ -260,6 +270,7 @@ const orbManagerLayerWithStoredResume = (
             onResume(id)
           }).pipe(Effect.andThen(orbManagerStoreStep("resume", id, orbs.setStatus(id, "running")))),
         kill: (id) => orbManagerStoreStep("kill", id, orbs.setStatus(id, "killed")),
+        forceKill: (id) => orbManagerStoreStep("forceKill", id, orbs.setStatus(id, "killed")),
       }),
     ),
   )
@@ -286,6 +297,10 @@ const orbManagerLayerWithStoredLifecycle = (
         kill: (id) =>
           Effect.sync(() => onCall("kill", id)).pipe(
             Effect.andThen(orbManagerStoreStep("kill", id, orbs.setStatus(id, "killed"))),
+          ),
+        forceKill: (id) =>
+          Effect.sync(() => onCall("kill", id)).pipe(
+            Effect.andThen(orbManagerStoreStep("forceKill", id, orbs.setStatus(id, "killed"))),
           ),
       }),
     ),
@@ -366,8 +381,7 @@ const createPausedOrbRecord = (recordThreadId: Ids.ThreadId) =>
 
 const appendProjected = (event: Event.Event) =>
   Effect.gen(function* () {
-    const appended = yield* ThreadEventLog.append(event)
-    yield* ThreadProjection.apply(appended)
+    yield* ThreadEventLog.appendAndProject(event)
   })
 
 const orphanedThreadCreated = (): Event.ThreadCreated => ({
@@ -448,17 +462,25 @@ describe("remote control API and SDK", () => {
     expect(streamed.at(-1)).toMatchObject({ type: "turn.completed" })
 
     const turnId = streamed.find((event) => event.type === "turn.started")?.turn_id
-    expect(turnId).toBeDefined()
-    const interrupted = await Effect.runPromise(
-      client.interruptTurn({ thread_id: threadId, turn_id: turnId ?? Ids.TurnId.make("missing"), reason: "SDK test" }),
-    )
-    expect(interrupted).toMatchObject({ type: "turn.failed", data: { error: { kind: "cancelled" } } })
+    if (turnId === undefined) throw new Error("Missing streamed turn id")
 
-    const opened = await Effect.runPromise(client.openThread(threadId))
-    expect(opened.events.map((event) => event.type)).toContain("turn.failed")
     const preview = await Effect.runPromise(client.previewThread(threadId, { limit: 2 }))
     expect(preview.summary.thread_id).toBe(threadId)
-    expect(preview.events.map((event) => event.type)).toEqual(["turn.completed", "turn.failed"])
+    expect(preview.events.map((event) => event.type)).toEqual(["message.added", "turn.completed"])
+
+    const completedInterrupt = await Effect.runPromise(
+      client.interruptTurn({ thread_id: threadId, turn_id: turnId, reason: "already completed" }),
+    )
+    const previewAfterCompletedInterrupt = await Effect.runPromise(client.previewThread(threadId, { limit: 2 }))
+    expect(completedInterrupt).toMatchObject({
+      type: "turn.completed",
+      turn_id: turnId,
+    })
+    expect(previewAfterCompletedInterrupt.events.map((event) => event.type)).toEqual([
+      "message.added",
+      "turn.completed",
+    ])
+
     const metadataEvents = Effect.runPromise(
       client
         .subscribeThreadEvents({ thread_id: threadId, after_sequence: preview.events.at(-1)?.sequence })
@@ -479,11 +501,12 @@ describe("remote control API and SDK", () => {
       content: { ok: true },
       created_at: now,
     }
+    const storedArtifact = { ...artifact, workspace_id: workspaceId }
     await runtime.runPromise(ArtifactStore.put(artifact))
     const artifacts = await Effect.runPromise(client.listArtifacts({ thread_id: threadId, kind: "research" }))
     const fetched = await Effect.runPromise(client.getArtifact(artifactId))
     expect(artifacts.map((item) => item.id)).toEqual([artifactId])
-    expect(fetched).toEqual(artifact)
+    expect(fetched).toEqual(storedArtifact)
   })
 
   test("startTurn preserves read-only tool access for the agent loop", async () => {
@@ -511,6 +534,238 @@ describe("remote control API and SDK", () => {
 
     expect(captured).toHaveLength(1)
     expect(captured[0]).toMatchObject({ tool_access: "read-only", content: "audit only" })
+  })
+
+  test("interrupting an active turn stops in-flight work and releases the thread", async () => {
+    const interruptThreadId = Ids.ThreadId.make("thread_remote_interrupt_stops_work")
+    const toolStarted = Effect.runSync(Deferred.make<void>())
+    const releaseTool = Effect.runSync(Deferred.make<void>())
+    const sideEffectDone = Effect.runSync(Deferred.make<void>())
+    let sideEffectRan = false
+    const runtime = ManagedRuntime.make(
+      makeLayer(defaultContextLayer, fakeOrbManagerLayer(), fakeOrbMirrorLayer(), {
+        providerResponses: [
+          {
+            type: "tool-call",
+            id: "call_remote_interrupt_delayed",
+            name: "delayed_side_effect",
+            input: {},
+          },
+          "accepted after interrupt",
+        ],
+        toolLayer: ToolExecutor.fakeLayer({
+          delayed_side_effect: () =>
+            Deferred.succeed(toolStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseTool)),
+              Effect.andThen(
+                Effect.sync(() => {
+                  sideEffectRan = true
+                }),
+              ),
+              Effect.andThen(Deferred.succeed(sideEffectDone, undefined)),
+              Effect.as({ ok: true }),
+            ),
+        }),
+      }),
+    )
+    const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))
+
+    try {
+      await Effect.runPromise(client.createThread({ thread_id: interruptThreadId, workspace_id: workspaceId }))
+      const accepted = await Effect.runPromise(
+        client.startTurn({
+          thread_id: interruptThreadId,
+          workspace_id: workspaceId,
+          content: "run a delayed side effect",
+          mode: "smart",
+        }),
+      )
+      const started = await runtime.runPromise(Deferred.await(toolStarted).pipe(Effect.timeoutOption("1 second")))
+      const beforeInterrupt = await runtime.runPromise(ThreadEventLog.readThread({ thread_id: interruptThreadId }))
+      const startedTurn = beforeInterrupt.find((event): event is Event.TurnStarted => event.type === "turn.started")
+      if (startedTurn === undefined) throw new Error("Missing started turn")
+
+      const interrupted = await Effect.runPromise(
+        client.interruptTurn({
+          thread_id: interruptThreadId,
+          turn_id: startedTurn.turn_id,
+          reason: "test interrupt",
+        }),
+      )
+      const acceptedAfterInterrupt = await Effect.runPromise(
+        client.startTurn({
+          thread_id: interruptThreadId,
+          workspace_id: workspaceId,
+          content: "accepted after interrupt",
+          mode: "smart",
+        }),
+      )
+      await runtime.runPromise(
+        Deferred.succeed(releaseTool, undefined).pipe(
+          Effect.andThen(Effect.yieldNow),
+          Effect.andThen(Effect.yieldNow),
+          Effect.andThen(Effect.yieldNow),
+        ),
+      )
+      const sideEffectObserved = await runtime.runPromise(
+        Deferred.await(sideEffectDone).pipe(Effect.timeoutOption("20 millis")),
+      )
+      const events = await runtime.runPromise(ThreadEventLog.readThread({ thread_id: interruptThreadId }))
+      const originalTerminalEvents = events.filter(
+        (event): event is Event.TurnCompleted | Event.TurnFailed =>
+          event.turn_id === startedTurn.turn_id && (event.type === "turn.completed" || event.type === "turn.failed"),
+      )
+
+      expect(accepted).toEqual({ thread_id: interruptThreadId, accepted: true })
+      expect(started._tag).toBe("Some")
+      expect(interrupted).toMatchObject({
+        type: "turn.failed",
+        turn_id: startedTurn.turn_id,
+        data: { error: { kind: "cancelled" } },
+      })
+      expect(acceptedAfterInterrupt).toEqual({ thread_id: interruptThreadId, accepted: true })
+      expect(sideEffectRan).toBe(false)
+      expect(sideEffectObserved._tag).toBe("None")
+      expect(originalTerminalEvents.map((event) => event.type)).toEqual(["turn.failed"])
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
+  test("interrupting a terminal stale turn id does not stop the active turn", async () => {
+    const staleInterruptThreadId = Ids.ThreadId.make("thread_remote_stale_interrupt")
+    const toolStarted = Effect.runSync(Deferred.make<void>())
+    const releaseTool = Effect.runSync(Deferred.make<void>())
+    const sideEffectDone = Effect.runSync(Deferred.make<void>())
+    let sideEffectRan = false
+    const runtime = ManagedRuntime.make(
+      makeLayer(defaultContextLayer, fakeOrbManagerLayer(), fakeOrbMirrorLayer(), {
+        providerResponses: [
+          "first turn complete",
+          {
+            type: "tool-call",
+            id: "call_remote_stale_interrupt_delayed",
+            name: "delayed_side_effect",
+            input: {},
+          },
+          "cleanup after stale interrupt",
+        ],
+        toolLayer: ToolExecutor.fakeLayer({
+          delayed_side_effect: () =>
+            Deferred.succeed(toolStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseTool)),
+              Effect.andThen(
+                Effect.sync(() => {
+                  sideEffectRan = true
+                }),
+              ),
+              Effect.andThen(Deferred.succeed(sideEffectDone, undefined)),
+              Effect.as({ ok: true }),
+            ),
+        }),
+      }),
+    )
+    const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))
+
+    try {
+      await Effect.runPromise(client.createThread({ thread_id: staleInterruptThreadId, workspace_id: workspaceId }))
+      const firstStream = Effect.runPromise(
+        client.subscribeThreadEvents({ thread_id: staleInterruptThreadId }).pipe(
+          Stream.takeUntil((event) => event.type === "turn.completed" || event.type === "turn.failed"),
+          Stream.runCollect,
+        ),
+      )
+      await Effect.runPromise(
+        client.startTurn({
+          thread_id: staleInterruptThreadId,
+          workspace_id: workspaceId,
+          content: "first turn",
+          mode: "smart",
+        }),
+      )
+      const firstEvents = await firstStream
+      const staleTurn = firstEvents.find((event): event is Event.TurnStarted => event.type === "turn.started")
+      if (staleTurn === undefined) throw new Error("Missing first started turn")
+
+      await Effect.runPromise(
+        client.startTurn({
+          thread_id: staleInterruptThreadId,
+          workspace_id: workspaceId,
+          content: "second turn",
+          mode: "smart",
+        }),
+      )
+      const started = await runtime.runPromise(Deferred.await(toolStarted).pipe(Effect.timeoutOption("1 second")))
+      const beforeStaleInterrupt = await runtime.runPromise(
+        ThreadEventLog.readThread({ thread_id: staleInterruptThreadId }),
+      )
+      const activeTurn = beforeStaleInterrupt.findLast(
+        (event): event is Event.TurnStarted => event.type === "turn.started",
+      )
+      if (activeTurn === undefined) throw new Error("Missing active started turn")
+
+      const staleInterrupt = await Effect.runPromise(
+        client.interruptTurn({
+          thread_id: staleInterruptThreadId,
+          turn_id: staleTurn.turn_id,
+          reason: "stale interrupt",
+        }),
+      )
+      const afterStaleInterrupt = await runtime.runPromise(
+        ThreadEventLog.readThread({ thread_id: staleInterruptThreadId }),
+      )
+      const activeTerminalAfterStale = afterStaleInterrupt.filter(
+        (event): event is Event.TurnCompleted | Event.TurnFailed =>
+          event.turn_id === activeTurn.turn_id && (event.type === "turn.completed" || event.type === "turn.failed"),
+      )
+      const cleanup = await Effect.runPromise(
+        client.interruptTurn({
+          thread_id: staleInterruptThreadId,
+          turn_id: activeTurn.turn_id,
+          reason: "cleanup",
+        }),
+      )
+      const afterCleanup = await runtime.runPromise(ThreadEventLog.readThread({ thread_id: staleInterruptThreadId }))
+      const cleanupAgain = await Effect.runPromise(
+        client.interruptTurn({
+          thread_id: staleInterruptThreadId,
+          turn_id: activeTurn.turn_id,
+          reason: "cleanup again",
+        }),
+      )
+      const afterCleanupAgain = await runtime.runPromise(
+        ThreadEventLog.readThread({ thread_id: staleInterruptThreadId }),
+      )
+      await runtime.runPromise(
+        Deferred.succeed(releaseTool, undefined).pipe(
+          Effect.andThen(Effect.yieldNow),
+          Effect.andThen(Effect.yieldNow),
+          Effect.andThen(Effect.yieldNow),
+        ),
+      )
+      const sideEffectObserved = await runtime.runPromise(
+        Deferred.await(sideEffectDone).pipe(Effect.timeoutOption("20 millis")),
+      )
+
+      expect(started._tag).toBe("Some")
+      expect(staleInterrupt).toMatchObject({ type: "turn.completed", turn_id: staleTurn.turn_id })
+      expect(activeTerminalAfterStale).toHaveLength(0)
+      expect(cleanup).toMatchObject({
+        type: "turn.failed",
+        turn_id: activeTurn.turn_id,
+        data: { error: { kind: "cancelled" } },
+      })
+      expect(cleanupAgain).toMatchObject({
+        type: "turn.failed",
+        turn_id: activeTurn.turn_id,
+        data: { error: { kind: "cancelled" } },
+      })
+      expect(afterCleanupAgain).toHaveLength(afterCleanup.length)
+      expect(sideEffectRan).toBe(false)
+      expect(sideEffectObserved._tag).toBe("None")
+    } finally {
+      await runtime.dispose()
+    }
   })
 
   test("uses project identity when remote requests omit workspace id", async () => {
@@ -938,6 +1193,50 @@ describe("remote control API and SDK", () => {
     }
   })
 
+  test("concurrent startTurn calls reserve a thread once", async () => {
+    const concurrentThreadId = Ids.ThreadId.make("thread_remote_concurrent_start")
+    const runtime = ManagedRuntime.make(
+      makeLayer(defaultContextLayer, fakeOrbManagerLayer(), fakeOrbMirrorLayer(), {
+        agentLayer: blockingAgentLoopLayer(),
+      }),
+    )
+    const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))
+
+    try {
+      await Effect.runPromise(client.createThread({ thread_id: concurrentThreadId, workspace_id: workspaceId }))
+      const results = await Promise.allSettled([
+        Effect.runPromise(
+          client.startTurn({
+            thread_id: concurrentThreadId,
+            workspace_id: workspaceId,
+            user_id: ownerId,
+            content: "first concurrent turn",
+          }),
+        ),
+        Effect.runPromise(
+          client.startTurn({
+            thread_id: concurrentThreadId,
+            workspace_id: workspaceId,
+            user_id: memberId,
+            content: "second concurrent turn",
+          }),
+        ),
+      ])
+      const accepted = results.filter(
+        (result): result is PromiseFulfilledResult<Remote.StartTurnResponse> => result.status === "fulfilled",
+      )
+      const rejected = results.filter((result): result is PromiseRejectedResult => result.status === "rejected")
+
+      expect(accepted).toHaveLength(1)
+      expect(accepted[0]?.value).toEqual({ thread_id: concurrentThreadId, accepted: true })
+      expect(rejected).toHaveLength(1)
+      expect(rejected[0]?.reason).toBeInstanceOf(Client.SdkError)
+      expect(rejected[0]?.reason).toMatchObject({ status: 409 })
+    } finally {
+      await runtime.dispose()
+    }
+  })
+
   test("forks completed thread history over the remote API", async () => {
     const runtime = ManagedRuntime.make(makeLayer())
     const client = makeClient((request) => runtime.runPromise(HttpServer.handle(request)))
@@ -1132,6 +1431,9 @@ describe("remote control API and SDK", () => {
     const client = Client.make(Client.fetchTransport({ base_url: handle.url, token: "secret" }))
     try {
       const unauthorized = await fetch(`${handle.url}/v1/threads`)
+      const wrongToken = await fetch(`${handle.url}/v1/threads`, {
+        headers: { authorization: "Bearer wrong" },
+      })
       const unauthorizedHealth = await fetch(`${handle.url}/health`)
       const authorized = await fetch(`${handle.url}/v1/threads`, {
         headers: { authorization: "Bearer secret" },
@@ -1142,8 +1444,10 @@ describe("remote control API and SDK", () => {
       const sdkHealth = await Effect.runPromise(client.backendHealth())
 
       expect(unauthorized.status).toBe(401)
+      expect(wrongToken.status).toBe(401)
       expect(unauthorizedHealth.status).toBe(200)
       expect(await unauthorized.json()).toEqual({ error: { message: "Unauthorized", code: "unauthorized" } })
+      expect(await wrongToken.json()).toEqual({ error: { message: "Unauthorized", code: "unauthorized" } })
       expect(await unauthorizedHealth.json()).toEqual({ status: "ok" })
       expect(authorized.status).toBe(200)
       expect(authorizedHealth.status).toBe(200)
@@ -1219,6 +1523,7 @@ describe("remote control API and SDK", () => {
     const ownerToken = `user:${ownerId}:owner-secret`
     const outsiderToken = `user:${outsiderId}:outsider-secret`
     const forgedThreadId = Ids.ThreadId.make("thread_remote_forged_creator")
+    const forgedWorkspaceId = Ids.WorkspaceId.make("workspace_remote_forged_creator")
     const ownerHandle = await runtime.runPromise(HttpServer.serve({ port: 0, token: ownerToken }))
     const outsiderHandle = await runtime.runPromise(HttpServer.serve({ port: 0, token: outsiderToken }))
 
@@ -1231,10 +1536,15 @@ describe("remote control API and SDK", () => {
       const forged = await fetch(`${outsiderHandle.url}/v1/threads/${threadId}?user_id=${ownerId}`, {
         headers: { authorization: `Bearer ${outsiderToken}` },
       })
-      const forgedCreate = await fetch(`${outsiderHandle.url}/v1/threads`, {
+      const forgedOwnedCreate = await fetch(`${outsiderHandle.url}/v1/threads`, {
         method: "POST",
         headers: { authorization: `Bearer ${outsiderToken}`, "content-type": "application/json" },
         body: JSON.stringify({ thread_id: forgedThreadId, workspace_id: workspaceId, user_id: ownerId }),
+      })
+      const forgedCreate = await fetch(`${outsiderHandle.url}/v1/threads`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${outsiderToken}`, "content-type": "application/json" },
+        body: JSON.stringify({ thread_id: forgedThreadId, workspace_id: forgedWorkspaceId, user_id: ownerId }),
       })
       const forgedCreated = Schema.decodeUnknownSync(Remote.ThreadSummary)(await forgedCreate.json())
       const ownerForgedOpen = await fetch(`${ownerHandle.url}/v1/threads/${forgedThreadId}`, {
@@ -1247,6 +1557,8 @@ describe("remote control API and SDK", () => {
       expect(created.status).toBe(200)
       expect(forged.status).toBe(403)
       expect(await forged.json()).toMatchObject({ error: { code: "workspace_access_denied" } })
+      expect(forgedOwnedCreate.status).toBe(403)
+      expect(await forgedOwnedCreate.json()).toMatchObject({ error: { code: "workspace_access_denied" } })
       expect(forgedCreate.status).toBe(200)
       expect(forgedCreated.user_id).toBe(outsiderId)
       expect(ownerForgedOpen.status).toBe(403)
@@ -1509,17 +1821,14 @@ describe("remote control API and SDK", () => {
           user_id: outsiderId,
           authorization_user_id: outsiderId,
         })
-        const outsiderCreated = yield* remote.createThread({
-          thread_id: outsiderThreadId,
-          workspace_id: workspaceId,
-          user_id: outsiderId,
-          authorization_user_id: outsiderId,
-        })
-        const outsiderArchivedOwnThread = yield* remote.archiveThread({
-          thread_id: outsiderThreadId,
-          user_id: outsiderId,
-          authorization_user_id: outsiderId,
-        })
+        const outsiderCreateError = yield* remote
+          .createThread({
+            thread_id: outsiderThreadId,
+            workspace_id: workspaceId,
+            user_id: outsiderId,
+            authorization_user_id: outsiderId,
+          })
+          .pipe(Effect.flip)
         return {
           created,
           ownerThreads,
@@ -1535,8 +1844,7 @@ describe("remote control API and SDK", () => {
           outsiderPreview,
           outsiderUnlistedThreads,
           outsiderSearch,
-          outsiderCreated,
-          outsiderArchivedOwnThread,
+          outsiderCreateError,
         }
       }),
     )
@@ -1560,13 +1868,12 @@ describe("remote control API and SDK", () => {
     expect(result.outsiderPreview.summary.thread_id).toBe(threadId)
     expect(result.outsiderUnlistedThreads).toEqual([])
     expect(result.outsiderSearch).toEqual([])
-    expect(result.outsiderCreated).toMatchObject({
-      thread_id: outsiderThreadId,
+    expect(result.outsiderCreateError).toBeInstanceOf(WorkspaceAccess.WorkspaceAccessDenied)
+    expect(result.outsiderCreateError).toMatchObject({
+      action: "write",
       workspace_id: workspaceId,
       user_id: outsiderId,
-      visibility: "private",
     })
-    expect(result.outsiderArchivedOwnThread.archived).toBe(true)
   })
 
   test("remote thread visibility applies limits after filtering unreadable threads", async () => {
@@ -1575,6 +1882,7 @@ describe("remote control API and SDK", () => {
       Ids.ThreadId.make(`thread_remote_filter_${index.toString().padStart(4, "0")}`),
     )
     const visibleThreadId = Ids.ThreadId.make("thread_remote_filter_z_visible")
+    const visibleWorkspaceId = Ids.WorkspaceId.make("workspace_remote_filter_visible")
 
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -1591,7 +1899,7 @@ describe("remote control API and SDK", () => {
         )
         yield* remote.createThread({
           thread_id: visibleThreadId,
-          workspace_id: workspaceId,
+          workspace_id: visibleWorkspaceId,
           user_id: outsiderId,
           authorization_user_id: outsiderId,
         })
@@ -1813,6 +2121,7 @@ describe("remote control API and SDK", () => {
       content: { ok: true },
       created_at: now,
     }
+    const storedArtifact = { ...artifact, workspace_id: workspaceId }
 
     const result = await runtime.runPromise(
       Effect.gen(function* () {
@@ -1866,7 +2175,7 @@ describe("remote control API and SDK", () => {
     expect(result.getError).toBeInstanceOf(WorkspaceAccess.WorkspaceAccessDenied)
     expect(result.presenceError).toBeInstanceOf(WorkspaceAccess.WorkspaceAccessDenied)
     expect(result.ownerArtifacts.map((item) => item.id)).toEqual([artifactId])
-    expect(result.ownerArtifact).toEqual(artifact)
+    expect(result.ownerArtifact).toEqual(storedArtifact)
   })
 
   test("remote thread event subscriptions stop when visibility is revoked", async () => {

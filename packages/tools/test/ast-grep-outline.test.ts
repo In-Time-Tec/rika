@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { PermissionPolicy, ToolExecutor } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, Diagnostics, SecretRedactor } from "@rika/core"
 import { Common, Ids, Tool } from "@rika/schema"
 import { Effect, Layer } from "effect"
 import { AstGrepOutline } from "../src/index"
@@ -16,6 +16,11 @@ const configLayer = (workspaceRoot: string) =>
     data_dir: join(workspaceRoot, ".rika"),
     default_mode: "smart",
   })
+
+const diagnosticsLayer = () => {
+  const redactorLayer = SecretRedactor.layer
+  return Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
+}
 
 interface RecordedCall {
   readonly command: string
@@ -155,6 +160,7 @@ describe("AstGrepOutline", () => {
     const executorLayer = ToolExecutor.layer.pipe(
       Layer.provideMerge(registryLayer),
       Layer.provideMerge(PermissionPolicy.allowLayer),
+      Layer.provideMerge(diagnosticsLayer()),
     )
     const result = await Effect.runPromise(
       ToolExecutor.execute(call("ast_grep_outline", { paths: "src" })).pipe(Effect.provide(executorLayer)),

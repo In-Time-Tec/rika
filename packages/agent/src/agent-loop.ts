@@ -37,12 +37,6 @@ export const CancelTurnInput = Schema.Struct({
   reason: Schema.optional(Schema.String),
 }).annotate({ identifier: "Rika.Agent.AgentLoop.CancelTurnInput" })
 
-export interface QueuedTurn extends Schema.Schema.Type<typeof QueuedTurn> {}
-export const QueuedTurn = Schema.Struct({
-  thread_id: Ids.ThreadId,
-  position: Schema.Int,
-}).annotate({ identifier: "Rika.Agent.AgentLoop.QueuedTurn" })
-
 export const RunTurnStatus = Schema.Literals(["completed", "failed", "cancelled"]).annotate({
   identifier: "Rika.Agent.AgentLoop.RunTurnStatus",
 })
@@ -55,6 +49,10 @@ export const RunTurnResult = Schema.Struct({
   status: RunTurnStatus,
   events: Schema.Array(Event.Event),
 }).annotate({ identifier: "Rika.Agent.AgentLoop.RunTurnResult" })
+
+export type CancelTurnResult =
+  | { readonly status: "inserted"; readonly event: Event.TurnFailed }
+  | { readonly status: "existing"; readonly event: Event.TurnFailed }
 
 export class AgentLoopError extends Schema.TaggedErrorClass<AgentLoopError>()("AgentLoopError", {
   message: Schema.String,
@@ -81,8 +79,7 @@ export type RunError =
 export interface Interface {
   readonly runTurn: (input: RunTurnInput) => Effect.Effect<RunTurnResult, RunError>
   readonly streamTurn: (input: RunTurnInput) => Stream.Stream<Event.Event, RunError>
-  readonly cancelTurn: (input: CancelTurnInput) => Effect.Effect<Event.TurnFailed, RunError>
-  readonly queueTurn: (input: RunTurnInput) => Effect.Effect<QueuedTurn, AgentLoopError>
+  readonly cancelTurn: (input: CancelTurnInput) => Effect.Effect<CancelTurnResult, RunError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/agent/AgentLoop") {}
@@ -155,7 +152,6 @@ export const layer = Layer.effect(
     const toolExecutor = yield* ToolExecutor.Service
     const toolkit = yield* Toolkit.Service
     const memoryIndexer = Option.getOrUndefined(yield* Effect.serviceOption(ThreadMemoryIndexer.Service))
-    const queuedTurns = yield* Queue.unbounded<RunTurnInput>()
     const dependencies: Dependencies = {
       config,
       database,
@@ -182,38 +178,19 @@ export const layer = Layer.effect(
       }),
       streamTurn: (input: RunTurnInput) => streamTurnFromDependencies(dependencies, input),
       cancelTurn: Effect.fn("AgentLoop.cancelTurn")(function* (input: CancelTurnInput) {
+        const result = yield* appendFailureEventForTurn(dependencies, {
+          thread_id: input.thread_id,
+          turn_id: input.turn_id,
+          error: cancelledEnvelope(input.reason ?? "Turn cancelled"),
+        })
+        if (result !== undefined) return result
         const events = yield* readThread(dependencies, { thread_id: input.thread_id })
-        if (events.length === 0) {
-          return yield* new AgentLoopError({
-            message: `Cannot cancel missing thread ${input.thread_id}`,
-            operation: "cancelTurn",
-            thread_id: input.thread_id,
-            turn_id: input.turn_id,
-          })
-        }
-
-        const sequence = latestSequence(events) + 1
-        const failed = yield* makeTurnFailed(
-          dependencies,
-          input.thread_id,
-          input.turn_id,
-          sequence,
-          cancelledEnvelope(input.reason ?? "Turn cancelled"),
-        )
-        yield* appendAndProject(dependencies, failed)
-        return failed
-      }),
-      queueTurn: Effect.fn("AgentLoop.queueTurn")(function* (input: RunTurnInput) {
-        const accepted = yield* Queue.offer(queuedTurns, input)
-        if (!accepted) {
-          return yield* new AgentLoopError({
-            message: "Queued turn boundary is closed",
-            operation: "queueTurn",
-            thread_id: input.thread_id,
-          })
-        }
-        const position = yield* Queue.size(queuedTurns)
-        return { thread_id: input.thread_id, position }
+        return yield* new AgentLoopError({
+          message: cancelTurnFailureMessage(input, events),
+          operation: "cancelTurn",
+          thread_id: input.thread_id,
+          turn_id: input.turn_id,
+        })
       }),
     })
   }),
@@ -230,11 +207,6 @@ export const streamTurn = (input: RunTurnInput) =>
 export const cancelTurn = Effect.fn("AgentLoop.cancelTurn.call")(function* (input: CancelTurnInput) {
   const agentLoop = yield* Service
   return yield* agentLoop.cancelTurn(input)
-})
-
-export const queueTurn = Effect.fn("AgentLoop.queueTurn.call")(function* (input: RunTurnInput) {
-  const agentLoop = yield* Service
-  return yield* agentLoop.queueTurn(input)
 })
 
 const streamTurnFromDependencies = (
@@ -525,16 +497,11 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
     yield* append(completed)
     yield* forkMemoryIndex(dependencies, completed)
   }).pipe(
-    Effect.onInterrupt(() => {
-      fields.status = "cancelled"
-      return recordFailureWithEnvelope(dependencies, input, cancelledEnvelope("Turn interrupted"), emit)
-    }),
+    Effect.onInterrupt(() => recordInterruptedFailure(dependencies, input, fields, emit)),
     Effect.catchCause((cause: Cause.Cause<RunError>) => {
       if (Cause.hasInterruptsOnly(cause)) {
         fields.status = "cancelled"
-        return recordFailureWithEnvelope(dependencies, input, cancelledEnvelope("Turn interrupted"), emit).pipe(
-          Effect.andThen(Effect.interrupt),
-        )
+        return Effect.interrupt
       }
       const error = runErrorFromCause(input, cause, "runTurn")
       fields.status = "failed"
@@ -552,6 +519,16 @@ const runTurnBody = (dependencies: Dependencies, input: RunTurnInput, emit: Emit
 const recordFailure = (dependencies: Dependencies, input: RunTurnInput, error: RunError, emit: Emit) =>
   recordFailureWithEnvelope(dependencies, input, envelopeFromRunError(error), emit)
 
+const recordInterruptedFailure = (
+  dependencies: Dependencies,
+  input: RunTurnInput,
+  fields: Diagnostics.Fields,
+  emit: Emit,
+) => {
+  fields.status = "cancelled"
+  return recordFailureWithEnvelope(dependencies, input, cancelledEnvelope("Turn interrupted"), emit)
+}
+
 const recordFailureWithEnvelope = (
   dependencies: Dependencies,
   input: RunTurnInput,
@@ -560,31 +537,94 @@ const recordFailureWithEnvelope = (
 ) =>
   Effect.gen(function* () {
     const appended = yield* appendFailureEvent(dependencies, input, error)
-    if (appended === undefined) return
-    yield* emitEventDiagnostic(dependencies, appended)
-    yield* emit(appended).pipe(Effect.catch(() => Effect.void))
+    if (appended?.status !== "inserted") return
+    yield* emitEventDiagnostic(dependencies, appended.event)
+    yield* emit(appended.event).pipe(Effect.catch(() => Effect.void))
   }).pipe(Effect.catch(() => Effect.void))
 
 const appendFailureEvent = (dependencies: Dependencies, input: RunTurnInput, error: ErrorEnvelope.Envelope) =>
+  appendFailureEventForTurn(dependencies, { thread_id: input.thread_id, error })
+
+const appendFailureEventForTurn = (
+  dependencies: Dependencies,
+  input: {
+    readonly thread_id: Ids.ThreadId
+    readonly turn_id?: Ids.TurnId
+    readonly error: ErrorEnvelope.Envelope
+  },
+) =>
   Effect.uninterruptible(
     Effect.gen(function* () {
       const events = yield* readThread(dependencies, { thread_id: input.thread_id })
-      const turnEvent = events.findLast((event) => event.turn_id !== undefined)
-      if (turnEvent?.turn_id === undefined) return undefined
-      if (events.some((event) => event.type === "turn.failed" && event.turn_id === turnEvent.turn_id)) return undefined
-      if (events.some((event) => event.type === "turn.completed" && event.turn_id === turnEvent.turn_id))
-        return undefined
-
+      const target = failureTarget(events, input.turn_id)
+      if (target._tag === "failed") return { status: "existing" as const, event: target.event }
+      if (target._tag !== "open") return undefined
       const failed = yield* makeTurnFailed(
         dependencies,
         input.thread_id,
-        turnEvent.turn_id,
+        target.turn_id,
         latestSequence(events) + 1,
-        error,
+        input.error,
       )
-      return yield* appendAndProject(dependencies, failed)
-    }),
+      const result = yield* appendTurnFailedIfAbsentAndProject(dependencies, failed)
+      return {
+        status: result.status === "inserted" ? "inserted" : "existing",
+        event: result.event,
+      } satisfies CancelTurnResult
+    }).pipe(Effect.catch((error: RunError) => recoverFailureAppendRace(dependencies, input, error))),
   )
+
+type FailureTarget =
+  | { readonly _tag: "open"; readonly turn_id: Ids.TurnId }
+  | { readonly _tag: "failed"; readonly event: Event.TurnFailed }
+  | { readonly _tag: "closed" }
+  | { readonly _tag: "missing" }
+
+const failureTarget = (events: ReadonlyArray<Event.Event>, requestedTurnId?: Ids.TurnId): FailureTarget => {
+  const turnId = requestedTurnId ?? events.findLast((event) => event.turn_id !== undefined)?.turn_id
+  if (turnId === undefined) return { _tag: "missing" }
+  const started = events.some((event) => event.type === "turn.started" && event.turn_id === turnId)
+  if (!started) return { _tag: "missing" }
+  const terminal = terminalForTurn(events, turnId)
+  if (terminal?.type === "turn.failed") return { _tag: "failed", event: terminal }
+  if (terminal !== undefined) return { _tag: "closed" }
+  return { _tag: "open", turn_id: turnId }
+}
+
+const terminalForTurn = (
+  events: ReadonlyArray<Event.Event>,
+  turnId: Ids.TurnId,
+): Event.TurnCompleted | Event.TurnFailed | undefined =>
+  events.findLast(
+    (event): event is Event.TurnCompleted | Event.TurnFailed =>
+      event.turn_id === turnId && (event.type === "turn.completed" || event.type === "turn.failed"),
+  )
+
+const recoverFailureAppendRace = (
+  dependencies: Dependencies,
+  input: {
+    readonly thread_id: Ids.ThreadId
+    readonly turn_id?: Ids.TurnId
+  },
+  error: RunError,
+): Effect.Effect<CancelTurnResult | undefined, RunError> =>
+  readThread(dependencies, { thread_id: input.thread_id }).pipe(
+    Effect.map((events) => failureTarget(events, input.turn_id)),
+    Effect.flatMap((target) =>
+      target._tag === "failed"
+        ? Effect.succeed({ status: "existing" as const, event: target.event })
+        : Effect.fail(error),
+    ),
+    Effect.catch(() => Effect.fail(error)),
+  )
+
+const cancelTurnFailureMessage = (input: CancelTurnInput, events: ReadonlyArray<Event.Event>): string => {
+  if (events.length === 0) return `Cannot cancel missing thread ${input.thread_id}`
+  const target = failureTarget(events, input.turn_id)
+  if (target._tag === "missing") return `Cannot cancel missing turn ${input.turn_id}`
+  if (target._tag === "closed") return `Cannot cancel completed turn ${input.turn_id}`
+  return `Cannot cancel turn ${input.turn_id}`
+}
 
 const streamModelResponse = (
   dependencies: Dependencies,
@@ -1052,10 +1092,25 @@ const statusFromEvents = (events: ReadonlyArray<Event.Event>, turnId: Ids.TurnId
 const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
   Effect.gen(function* () {
     const appended = yield* dependencies.eventLog
-      .append(event)
+      .appendAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
     return appended
+  })
+
+const appendTurnFailedIfAbsentAndProject = (dependencies: Dependencies, event: Event.TurnFailed) =>
+  Effect.gen(function* () {
+    const result = yield* dependencies.eventLog
+      .appendIfAbsentAndProject(event)
+      .pipe(Effect.provideService(Database.Service, dependencies.database))
+    if (result.event.type !== "turn.failed") {
+      return yield* new AgentLoopError({
+        message: `Terminal event ${result.event.id} was not a turn failure`,
+        operation: "appendFailureEvent",
+        thread_id: event.thread_id,
+        turn_id: event.turn_id,
+      })
+    }
+    return { ...result, event: result.event }
   })
 
 const readThread = (dependencies: Dependencies, input: ThreadEventLog.ReadThreadInput) =>

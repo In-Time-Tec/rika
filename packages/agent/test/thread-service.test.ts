@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Database, Migration, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Artifact, Common, Event, Ids, Message } from "@rika/schema"
 import { Effect, Layer } from "effect"
@@ -23,6 +23,8 @@ const configLayer = Config.layerFromValues({
 const databaseLayer = Database.memoryLayer
 const timeLayer = Time.fixedLayer(now)
 const idLayer = IdGenerator.sequenceLayer(1)
+const redactorLayer = SecretRedactor.layer
+const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
 const projectStoreLayer = ProjectStore.layer.pipe(
   Layer.provideMerge(configLayer),
   Layer.provideMerge(databaseLayer),
@@ -39,9 +41,11 @@ const services = Layer.mergeAll(
   ThreadProjection.layer,
   timeLayer,
   idLayer,
+  redactorLayer,
+  diagnosticsLayer,
 )
 
-const layer = ThreadService.layer.pipe(Layer.provideMerge(services))
+const layer = ThreadService.layer.pipe(Layer.provideMerge(services), Layer.provideMerge(diagnosticsLayer))
 
 describe("ThreadService", () => {
   test("creates, opens, archives, lists, and unarchives local threads", async () => {

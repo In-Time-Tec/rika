@@ -21,6 +21,7 @@ export type RunError =
   | OrbManager.OrbProvisionError
   | OrbStore.OrbStoreError
   | ProjectStore.ProjectStoreError
+  | Settings.SettingsError
 
 export interface Interface {
   readonly execute: (argv: ReadonlyArray<string>) => Effect.Effect<number>

@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises"
 import { join, resolve } from "node:path"
-import { Context, Effect, Layer, Option, Schema, Stream, type Duration } from "effect"
+import { Context, Effect, Layer, Option, Queue, Schema, Stream, type Duration } from "effect"
 
 export const HookName = Schema.Literals(["setup", "resume"]).annotate({
   identifier: "Rika.Agent.LifecycleHooks.HookName",
@@ -43,13 +43,19 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@rika/agent/LifecycleHooks") {}
 
 export interface LayerOptions {
+  readonly setupTimeout?: Duration.Input
   readonly resumeTimeout?: Duration.Input
 }
 
+const defaultSetupTimeout: Duration.Input = "5 minutes"
 const defaultResumeTimeout: Duration.Input = "10 seconds"
+const processTerminationGrace: Duration.Input = "1 second"
 
 export const layerWithOptions = (options: LayerOptions = {}) =>
-  Layer.succeed(Service, makeService(options.resumeTimeout ?? defaultResumeTimeout))
+  Layer.succeed(
+    Service,
+    makeService(options.setupTimeout ?? defaultSetupTimeout, options.resumeTimeout ?? defaultResumeTimeout),
+  )
 
 export const layer = layerWithOptions()
 
@@ -61,13 +67,13 @@ export const runResume = Effect.fn("LifecycleHooks.runResume.call")(function* (w
   return yield* service.runResume(workspaceRoot)
 })
 
-function makeService(resumeTimeout: Duration.Input): Interface {
+function makeService(setupTimeout: Duration.Input, resumeTimeout: Duration.Input): Interface {
   return Service.of({
     runSetup: (workspaceRoot) => {
       const root = resolve(workspaceRoot)
       return Stream.unwrap(
         preflight("setup", root).pipe(
-          Effect.map((hook) => (hook.status === "missing" ? Stream.empty : streamSetup(root, hook.path))),
+          Effect.map((hook) => (hook.status === "missing" ? Stream.empty : streamSetup(root, hook.path, setupTimeout))),
         ),
       )
     },
@@ -87,40 +93,67 @@ function makeService(resumeTimeout: Duration.Input): Interface {
   })
 }
 
-const streamSetup = (workspaceRoot: string, path: string): Stream.Stream<HookOutputLine, HookError> =>
-  Stream.unwrap(
-    spawnSetup(workspaceRoot, path).pipe(
-      Effect.map((process) => {
-        const lastOutput: Array<HookOutputLine> = []
-        const stdout = outputLines(process.stdout, "stdout", "setup", workspaceRoot, path)
-        const stderr = outputLines(process.stderr, "stderr", "setup", workspaceRoot, path)
-        const output = stdout.pipe(
-          Stream.merge(stderr),
-          Stream.tap((line) =>
-            Effect.sync(() => {
-              lastOutput.push(line)
-              if (lastOutput.length > 50) lastOutput.shift()
-            }),
-          ),
-        )
-        const exit = waitForExit(process, "setup", workspaceRoot, path).pipe(
-          Effect.flatMap((exitCode) =>
-            exitCode === 0
-              ? Effect.void
-              : Effect.fail(
-                  new HookError({
-                    hook: "setup",
-                    path,
-                    workspaceRoot,
-                    message: `Lifecycle hook exited with code ${exitCode}`,
-                    exitCode,
-                    lastOutput: [...lastOutput],
-                  }),
-                ),
-          ),
-        )
-        return output.pipe(Stream.concat(Stream.fromEffectDrain(exit)))
-      }),
+const streamSetup = (
+  workspaceRoot: string,
+  path: string,
+  setupTimeout: Duration.Input,
+): Stream.Stream<HookOutputLine, HookError> =>
+  Stream.callback<HookOutputLine, HookError>(
+    (queue) =>
+      setupProcessStream(workspaceRoot, path).pipe(
+        Stream.runForEach((line) => Queue.offer(queue, line).pipe(Effect.asVoid)),
+        Effect.timeoutOrElse({
+          duration: setupTimeout,
+          orElse: () => Effect.fail(timeoutHookError("setup", workspaceRoot, path)),
+        }),
+        Effect.catch((error: HookError) => Queue.fail(queue, error).pipe(Effect.asVoid)),
+        Effect.ensuring(Queue.end(queue).pipe(Effect.ignore)),
+        Effect.forkScoped({ startImmediately: true }),
+      ),
+    { bufferSize: 64, strategy: "suspend" },
+  )
+
+const setupProcessStream = (workspaceRoot: string, path: string): Stream.Stream<HookOutputLine, HookError> =>
+  Stream.scoped(
+    Stream.unwrap(
+      acquireSetupProcess(workspaceRoot, path).pipe(
+        Effect.map((process) => {
+          const lastOutput: Array<HookOutputLine> = []
+          const stdout = outputLines(process.stdout, "stdout", "setup", workspaceRoot, path)
+          const stderr = outputLines(process.stderr, "stderr", "setup", workspaceRoot, path)
+          const output = stdout.pipe(
+            Stream.merge(stderr),
+            Stream.tap((line) =>
+              Effect.sync(() => {
+                lastOutput.push(line)
+                if (lastOutput.length > 50) lastOutput.shift()
+              }),
+            ),
+          )
+          const exit = waitForExit(process, "setup", workspaceRoot, path).pipe(
+            Effect.tap(() =>
+              Effect.sync(() => {
+                process.completed = true
+              }),
+            ),
+            Effect.flatMap((exitCode) =>
+              exitCode === 0
+                ? Effect.void
+                : Effect.fail(
+                    new HookError({
+                      hook: "setup",
+                      path,
+                      workspaceRoot,
+                      message: `Lifecycle hook exited with code ${exitCode}`,
+                      exitCode,
+                      lastOutput: [...lastOutput],
+                    }),
+                  ),
+            ),
+          )
+          return output.pipe(Stream.concat(Stream.fromEffectDrain(exit)))
+        }),
+      ),
     ),
   )
 
@@ -165,22 +198,45 @@ const preflight = Effect.fn("LifecycleHooks.preflight")(function* (hook: HookNam
   })
 })
 
-const spawnSetup = (workspaceRoot: string, path: string) =>
-  Effect.try({
-    try: () =>
-      Bun.spawn([path], {
-        cwd: workspaceRoot,
-        stdout: "pipe",
-        stderr: "pipe",
-      }),
-    catch: (cause) =>
-      new HookError({
-        hook: "setup",
-        path,
-        workspaceRoot,
-        message: cause instanceof Error ? cause.message : String(cause),
-      }),
-  })
+interface SetupProcess {
+  readonly process: {
+    readonly pid: number
+    readonly kill: (signal?: NodeJS.Signals) => void
+  }
+  readonly stdout: ReadableStream<Uint8Array>
+  readonly stderr: ReadableStream<Uint8Array>
+  readonly exited: Promise<number>
+  completed: boolean
+}
+
+const acquireSetupProcess = (workspaceRoot: string, path: string) =>
+  Effect.acquireRelease(
+    Effect.try({
+      try: () => {
+        const process = Bun.spawn([path], {
+          cwd: workspaceRoot,
+          stdout: "pipe",
+          stderr: "pipe",
+          detached: true,
+        })
+        return {
+          process,
+          stdout: process.stdout,
+          stderr: process.stderr,
+          exited: process.exited,
+          completed: false,
+        }
+      },
+      catch: (cause) =>
+        new HookError({
+          hook: "setup",
+          path,
+          workspaceRoot,
+          message: cause instanceof Error ? cause.message : String(cause),
+        }),
+    }),
+    (process) => (process.completed ? Effect.void : terminateProcess(process)),
+  )
 
 const spawnResume = (workspaceRoot: string, path: string) =>
   Effect.try({
@@ -243,3 +299,40 @@ const hookPath = (workspaceRoot: string, hook: HookName) => join(workspaceRoot, 
 
 const isNotFound = (cause: unknown) =>
   typeof cause === "object" && cause !== null && "code" in cause && cause.code === "ENOENT"
+
+const timeoutHookError = (hook: HookName, workspaceRoot: string, path: string) =>
+  new HookError({
+    hook,
+    path,
+    workspaceRoot,
+    message: "Lifecycle hook timed out",
+  })
+
+const terminateProcess = (process: SetupProcess) =>
+  Effect.gen(function* () {
+    killProcessGroup(process.process.pid, "SIGTERM")
+    killProcess(process.process, "SIGTERM")
+    const exited = yield* Effect.race(
+      waitForProcessExit(process).pipe(Effect.as(true)),
+      Effect.sleep(processTerminationGrace).pipe(Effect.as(false)),
+    )
+    if (exited) return
+    killProcessGroup(process.process.pid, "SIGKILL")
+    killProcess(process.process, "SIGKILL")
+  })
+
+const waitForProcessExit = (process: { readonly exited: Promise<number> }) =>
+  Effect.promise(() => process.exited).pipe(Effect.asVoid)
+
+const killProcessGroup = (pid: number, signal: NodeJS.Signals) => {
+  if (!Number.isInteger(pid) || pid <= 0) return
+  try {
+    globalThis.process.kill(-pid, signal)
+  } catch {}
+}
+
+const killProcess = (process: SetupProcess["process"], signal: NodeJS.Signals) => {
+  try {
+    process.kill(signal)
+  } catch {}
+}

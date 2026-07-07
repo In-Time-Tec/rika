@@ -160,6 +160,7 @@ const runReview = (dependencies: Dependencies, diffProvider: DiffProvider, input
     const artifact: Artifact.Artifact = {
       id: artifactId,
       thread_id: threadId,
+      workspace_id: Ids.WorkspaceId.make(config.workspace_root),
       kind: "review",
       title: `Review ${reviewId}`,
       content: reviewRunToJson(reviewRun),

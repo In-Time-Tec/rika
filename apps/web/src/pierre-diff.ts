@@ -1,5 +1,6 @@
-import { Common } from "@rika/schema"
+import { Common, PierreDiff } from "@rika/schema"
 import { FileDiff, type FileDiffMetadata } from "@pierre/diffs"
+import { Option } from "effect"
 
 export interface WebPierreDiff {
   readonly payload_id: string
@@ -83,43 +84,67 @@ export const payloadFileName = (payload: Record<string, Common.JsonValue>): stri
 }
 
 export const asFileDiffMetadata = (value: unknown): FileDiffMetadata | undefined => {
-  if (!isObject(value)) return undefined
-  const name = stringField(value, "name")
-  const type = changeType(value.type)
-  const hunks = arrayField(value, "hunks")
-    ?.map(asHunk)
-    .filter((hunk): hunk is FileDiffHunk => hunk !== undefined)
-  const deletionLines = stringArrayField(value, "deletionLines")
-  const additionLines = stringArrayField(value, "additionLines")
-  const prevName = stringField(value, "prevName")
-  const newObjectId = stringField(value, "newObjectId")
-  const prevObjectId = stringField(value, "prevObjectId")
-  const mode = stringField(value, "mode")
-  const prevMode = stringField(value, "prevMode")
-  const key = stringField(value, "cacheKey")
-  const lang = stringField(value, "lang")
-  if (name === undefined || type === undefined || hunks === undefined) return undefined
-  return {
-    name,
-    type,
-    hunks,
-    splitLineCount: numberField(value, "splitLineCount") ?? 0,
-    unifiedLineCount: numberField(value, "unifiedLineCount") ?? 0,
-    isPartial: booleanField(value, "isPartial") ?? false,
-    deletionLines,
-    additionLines,
-    ...(prevName === undefined ? {} : { prevName }),
-    ...(newObjectId === undefined ? {} : { newObjectId }),
-    ...(prevObjectId === undefined ? {} : { prevObjectId }),
-    ...(mode === undefined ? {} : { mode }),
-    ...(prevMode === undefined ? {} : { prevMode }),
-    ...(key === undefined ? {} : { cacheKey: key }),
-    ...(lang === undefined ? {} : { lang }),
-  }
+  const decoded = Option.getOrUndefined(PierreDiff.decodeFileDiffMetadata(value))
+  return decoded === undefined ? undefined : toPierreFileDiffMetadata(decoded)
 }
 
-type FileDiffHunk = FileDiffMetadata["hunks"][number]
-type FileDiffHunkContent = FileDiffHunk["hunkContent"][number]
+type PierreHunk = FileDiffMetadata["hunks"][number]
+type PierreHunkContent = PierreHunk["hunkContent"][number]
+
+const toPierreFileDiffMetadata = (diff: PierreDiff.FileDiffMetadata): FileDiffMetadata => ({
+  name: diff.name,
+  type: diff.type,
+  hunks: diff.hunks.map(toPierreHunk),
+  splitLineCount: diff.splitLineCount,
+  unifiedLineCount: diff.unifiedLineCount,
+  isPartial: diff.isPartial,
+  deletionLines: [...diff.deletionLines],
+  additionLines: [...diff.additionLines],
+  ...(diff.prevName === undefined ? {} : { prevName: diff.prevName }),
+  ...(diff.lang === undefined ? {} : { lang: diff.lang }),
+  ...(diff.newObjectId === undefined ? {} : { newObjectId: diff.newObjectId }),
+  ...(diff.prevObjectId === undefined ? {} : { prevObjectId: diff.prevObjectId }),
+  ...(diff.mode === undefined ? {} : { mode: diff.mode }),
+  ...(diff.prevMode === undefined ? {} : { prevMode: diff.prevMode }),
+  ...(diff.cacheKey === undefined ? {} : { cacheKey: diff.cacheKey }),
+})
+
+const toPierreHunk = (hunk: PierreDiff.Hunk): PierreHunk => ({
+  collapsedBefore: hunk.collapsedBefore,
+  additionStart: hunk.additionStart,
+  additionCount: hunk.additionCount,
+  additionLines: hunk.additionLines,
+  additionLineIndex: hunk.additionLineIndex,
+  deletionStart: hunk.deletionStart,
+  deletionCount: hunk.deletionCount,
+  deletionLines: hunk.deletionLines,
+  deletionLineIndex: hunk.deletionLineIndex,
+  hunkContent: hunk.hunkContent.map(toPierreHunkContent),
+  ...(hunk.hunkContext === undefined ? {} : { hunkContext: hunk.hunkContext }),
+  ...(hunk.hunkSpecs === undefined ? {} : { hunkSpecs: hunk.hunkSpecs }),
+  splitLineStart: hunk.splitLineStart,
+  splitLineCount: hunk.splitLineCount,
+  unifiedLineStart: hunk.unifiedLineStart,
+  unifiedLineCount: hunk.unifiedLineCount,
+  noEOFCRDeletions: hunk.noEOFCRDeletions,
+  noEOFCRAdditions: hunk.noEOFCRAdditions,
+})
+
+const toPierreHunkContent = (content: PierreDiff.HunkContent): PierreHunkContent =>
+  content.type === "context"
+    ? {
+        type: "context",
+        lines: content.lines,
+        additionLineIndex: content.additionLineIndex,
+        deletionLineIndex: content.deletionLineIndex,
+      }
+    : {
+        type: "change",
+        deletions: content.deletions,
+        deletionLineIndex: content.deletionLineIndex,
+        additions: content.additions,
+        additionLineIndex: content.additionLineIndex,
+      }
 
 const render = (
   instance: FileDiff,
@@ -165,93 +190,10 @@ const diffStats = (fileDiff: FileDiffMetadata): { readonly additions: number; re
   return { additions, deletions }
 }
 
-const asHunk = (value: unknown): FileDiffHunk | undefined => {
-  if (!isObject(value)) return undefined
-  const hunkContent = arrayField(value, "hunkContent")
-    ?.map(asHunkContent)
-    .filter((content): content is FileDiffHunkContent => content !== undefined)
-  const hunkContext = stringField(value, "hunkContext")
-  const hunkSpecs = stringField(value, "hunkSpecs")
-  if (hunkContent === undefined) return undefined
-  return {
-    collapsedBefore: numberField(value, "collapsedBefore") ?? 0,
-    additionStart: numberField(value, "additionStart") ?? 0,
-    additionCount: numberField(value, "additionCount") ?? 0,
-    additionLines: numberField(value, "additionLines") ?? 0,
-    additionLineIndex: numberField(value, "additionLineIndex") ?? 0,
-    deletionStart: numberField(value, "deletionStart") ?? 0,
-    deletionCount: numberField(value, "deletionCount") ?? 0,
-    deletionLines: numberField(value, "deletionLines") ?? 0,
-    deletionLineIndex: numberField(value, "deletionLineIndex") ?? 0,
-    hunkContent,
-    ...(hunkContext === undefined ? {} : { hunkContext }),
-    ...(hunkSpecs === undefined ? {} : { hunkSpecs }),
-    splitLineStart: numberField(value, "splitLineStart") ?? 0,
-    splitLineCount: numberField(value, "splitLineCount") ?? 0,
-    unifiedLineStart: numberField(value, "unifiedLineStart") ?? 0,
-    unifiedLineCount: numberField(value, "unifiedLineCount") ?? 0,
-    noEOFCRDeletions: booleanField(value, "noEOFCRDeletions") ?? false,
-    noEOFCRAdditions: booleanField(value, "noEOFCRAdditions") ?? false,
-  }
-}
-
-const asHunkContent = (value: unknown): FileDiffHunkContent | undefined => {
-  if (!isObject(value)) return undefined
-  if (value.type === "context") {
-    return {
-      type: "context",
-      lines: numberField(value, "lines") ?? 0,
-      additionLineIndex: numberField(value, "additionLineIndex") ?? 0,
-      deletionLineIndex: numberField(value, "deletionLineIndex") ?? 0,
-    }
-  }
-  if (value.type === "change") {
-    return {
-      type: "change",
-      deletions: numberField(value, "deletions") ?? 0,
-      deletionLineIndex: numberField(value, "deletionLineIndex") ?? 0,
-      additions: numberField(value, "additions") ?? 0,
-      additionLineIndex: numberField(value, "additionLineIndex") ?? 0,
-    }
-  }
-  return undefined
-}
-
-const changeType = (value: unknown): FileDiffMetadata["type"] | undefined => {
-  if (
-    value === "change" ||
-    value === "rename-pure" ||
-    value === "rename-changed" ||
-    value === "new" ||
-    value === "deleted"
-  ) {
-    return value
-  }
-  return undefined
-}
-
 const stringField = (value: Record<string, unknown>, key: string): string | undefined => {
   const field = value[key]
   return typeof field === "string" && field.length > 0 ? field : undefined
 }
-
-const numberField = (value: Record<string, unknown>, key: string): number | undefined => {
-  const field = value[key]
-  return typeof field === "number" && Number.isFinite(field) ? field : undefined
-}
-
-const booleanField = (value: Record<string, unknown>, key: string): boolean | undefined => {
-  const field = value[key]
-  return typeof field === "boolean" ? field : undefined
-}
-
-const arrayField = (value: Record<string, unknown>, key: string): ReadonlyArray<unknown> | undefined => {
-  const field = value[key]
-  return Array.isArray(field) ? field : undefined
-}
-
-const stringArrayField = (value: Record<string, unknown>, key: string): Array<string> =>
-  arrayField(value, key)?.filter((item): item is string => typeof item === "string") ?? []
 
 const isObject = (value: unknown): value is Record<string, Common.JsonValue> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

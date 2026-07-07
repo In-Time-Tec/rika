@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path"
 import type { Duplex } from "node:stream"
 import { fileURLToPath } from "node:url"
 import { foldkit } from "@foldkit/vite-plugin"
+import tailwindcss from "@tailwindcss/vite"
 import type * as BackendEndpoint from "@rika/cli/backend-endpoint"
 import { createServerModuleRunner, defineConfig, type Plugin } from "vite"
 import type { ModuleRunner } from "vite/module-runner"
@@ -12,7 +13,11 @@ import WebSocket, { WebSocketServer } from "ws"
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "../..")
 const workspaceRoot = process.env.RIKA_WORKSPACE_ROOT ?? rootDir
 const dataDir = process.env.RIKA_DATA_DIR ?? join(workspaceRoot, ".rika")
+const cliEntryScript = join(rootDir, "packages", "cli", "src", "main.ts")
 const apiPrefix = "/api/rika"
+const bridgeHighWaterBytes = 1024 * 1024
+const bridgeLowWaterBytes = 256 * 1024
+const bridgeCloseBytes = 4 * 1024 * 1024
 type ConfigMode = "rush" | "smart" | "deep1" | "deep2" | "deep3"
 
 interface ProxyForwardTarget {
@@ -66,7 +71,11 @@ interface ProxyModules {
 type LoadProxyModules = () => Promise<ProxyModules>
 
 export default defineConfig({
-  plugins: [foldkit(process.env.NODE_ENV === "test" ? {} : { devToolsMcpPort: 9988 }), localBackendProxy()],
+  plugins: [
+    tailwindcss(),
+    foldkit(process.env.NODE_ENV === "test" ? {} : { devToolsMcpPort: 9988 }),
+    localBackendProxy(),
+  ],
   resolve: {
     alias: [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }],
   },
@@ -137,6 +146,11 @@ const errorBody = (error: unknown, code: string) => ({
 export const isApiRequestUrl = (requestUrl: string | undefined): boolean =>
   requestUrl !== undefined && requestUrl.startsWith(apiPrefix)
 
+export const backendProxyEnv = (env: Record<string, string | undefined>): Record<string, string | undefined> => ({
+  ...env,
+  RIKA_BACKEND_SCRIPT: env.RIKA_BACKEND_SCRIPT ?? cliEntryScript,
+})
+
 export const isOrbPtyWebSocketRequestUrl = (requestUrl: string | undefined): boolean => {
   if (requestUrl === undefined) return false
   const url = new URL(requestUrl, "http://rika.local")
@@ -159,7 +173,7 @@ async function loadProxyModules(): Promise<ProxyModules> {
 async function makeProxyResolver(loadModules: LoadProxyModules = loadProxyModules): Promise<ProxyResolver> {
   const { Core, Persistence, SchemaModule, EffectRuntime, BackendEndpointModule, LocalBackend, Orb } =
     await loadModules()
-  const env = process.env
+  const env = backendProxyEnv(process.env)
   const configLayer = Core.Config.layerFromValues(
     {
       workspace_root: workspaceRoot,
@@ -171,6 +185,7 @@ async function makeProxyResolver(loadModules: LoadProxyModules = loadProxyModule
   )
   const databaseLayer = Persistence.Database.layer.pipe(EffectRuntime.Layer.provideMerge(configLayer))
   const timeLayer = Core.Time.layer
+  const redactorLayer = Core.SecretRedactor.layerFromEnv(env)
   const mcpApprovalLayer = Persistence.McpApprovalStore.layer.pipe(
     EffectRuntime.Layer.provideMerge(databaseLayer),
     EffectRuntime.Layer.provideMerge(timeLayer),
@@ -191,6 +206,7 @@ async function makeProxyResolver(loadModules: LoadProxyModules = loadProxyModule
     configLayer,
     databaseLayer,
     Persistence.Migration.layer,
+    redactorLayer,
     timeLayer,
     mcpApprovalLayer,
     Core.IdGenerator.layer,
@@ -203,10 +219,18 @@ async function makeProxyResolver(loadModules: LoadProxyModules = loadProxyModule
   const managerLayer = Orb.OrbManager.layer.pipe(
     EffectRuntime.Layer.provideMerge(migratedStorageLayer),
     EffectRuntime.Layer.provideMerge(sandboxLayer),
-    EffectRuntime.Layer.provideMerge(Core.Diagnostics.layer.pipe(EffectRuntime.Layer.provideMerge(configLayer))),
+    EffectRuntime.Layer.provideMerge(
+      Core.Diagnostics.layer.pipe(
+        EffectRuntime.Layer.provideMerge(configLayer),
+        EffectRuntime.Layer.provideMerge(redactorLayer),
+      ),
+    ),
+    EffectRuntime.Layer.provideMerge(redactorLayer),
   )
   const layer = BackendEndpointModule.resolverLayerFromEnv(env).pipe(
-    EffectRuntime.Layer.provideMerge(LocalBackend.layerFromInput({ env, cwd: workspaceRoot })),
+    EffectRuntime.Layer.provideMerge(
+      LocalBackend.layerFromInput({ env, cwd: workspaceRoot, adoptHealthyRecord: true }),
+    ),
     EffectRuntime.Layer.provideMerge(BackendEndpointModule.healthLayer),
     EffectRuntime.Layer.provideMerge(migratedStorageLayer),
     EffectRuntime.Layer.provideMerge(BackendEndpointModule.orbManagerResumerLayer),
@@ -338,16 +362,46 @@ const bridgeWebSockets = (client: WebSocket, upstream: WebSocket): void => {
     if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)
       upstream.close(code, reason)
   }
-  client.on("message", (data, isBinary) => {
-    if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary })
-  })
-  upstream.on("message", (data, isBinary) => {
-    if (client.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary })
-  })
+  bridgeWebSocketDirection(client, upstream, closeBoth)
+  bridgeWebSocketDirection(upstream, client, closeBoth)
   client.once("close", (code, reason) => closeBoth(code, reason))
   upstream.once("close", (code, reason) => closeBoth(code, reason))
   client.once("error", () => closeBoth())
   upstream.once("error", () => closeBoth())
+}
+
+const bridgeWebSocketDirection = (
+  source: WebSocket,
+  target: WebSocket,
+  closeBoth: (code?: number, reason?: Buffer) => void,
+): void => {
+  let paused = false
+  const pauseSource = () => {
+    if (paused) return
+    paused = true
+    source.pause()
+  }
+  const resumeSource = () => {
+    if (!paused || target.bufferedAmount > bridgeLowWaterBytes) return
+    paused = false
+    source.resume()
+  }
+  source.on("message", (data, isBinary) => {
+    if (target.readyState !== WebSocket.OPEN) return
+    if (target.bufferedAmount > bridgeHighWaterBytes) pauseSource()
+    target.send(data, { binary: isBinary }, (error) => {
+      if (error != null) {
+        closeBoth(1011, Buffer.from("websocket bridge send failed"))
+        return
+      }
+      resumeSource()
+    })
+    if (target.bufferedAmount > bridgeCloseBytes) {
+      closeBoth(1011, Buffer.from("websocket bridge backpressure limit"))
+      return
+    }
+    if (target.bufferedAmount > bridgeHighWaterBytes) pauseSource()
+  })
 }
 
 export const resolveProxyTarget = async (input: ResolveProxyTargetInput): Promise<ProxyTarget> => {

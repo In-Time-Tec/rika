@@ -8,7 +8,7 @@ import {
   ToolExecutor,
   ToolRegistry,
 } from "@rika/agent"
-import { Config } from "@rika/core"
+import { Config, Diagnostics } from "@rika/core"
 import { McpApprovalStore } from "@rika/persistence"
 import { PluginHost } from "@rika/plugin"
 import { Effect, Layer } from "effect"
@@ -307,6 +307,7 @@ export const toolExecutorLayerFromPermissionConfig = (
   | PluginHost.Service
   | SpecialtyTools.Service
   | SubagentRuntime.Service
+  | Diagnostics.Service
   | ThreadMemory.Service
 > =>
   PluginHost.toolResultExecutorLayer.pipe(
@@ -322,7 +323,11 @@ export const toolExecutorLayer = toolExecutorLayerFromPermissionConfig()
 
 export const readOnlyToolExecutorLayerFromPermissionConfig = (
   permissionConfig: PermissionPolicy.PermissionConfig = PermissionPolicy.defaultConfig,
-): Layer.Layer<ToolExecutor.ReadOnlyService, FffSearch.FffSearchError, Config.Service | ThreadMemory.Service> =>
+): Layer.Layer<
+  ToolExecutor.ReadOnlyService,
+  FffSearch.FffSearchError,
+  Config.Service | Diagnostics.Service | ThreadMemory.Service
+> =>
   ToolExecutor.readOnlyLayer.pipe(
     Layer.provideMerge(readOnlyRegistryLayer),
     Layer.provideMerge(PermissionPolicy.layerFromConfig(permissionConfig)),
@@ -335,7 +340,12 @@ export const subagentToolExecutorLayerFromPermissionConfig = (
 ): Layer.Layer<
   ToolExecutor.SubagentService,
   FffSearch.FffSearchError | McpClient.RunError,
-  Config.Service | McpApprovalStore.Service | PluginHost.Service | SpecialtyTools.Service | ThreadMemory.Service
+  | Config.Service
+  | Diagnostics.Service
+  | McpApprovalStore.Service
+  | PluginHost.Service
+  | SpecialtyTools.Service
+  | ThreadMemory.Service
 > =>
   ToolExecutor.subagentLayer.pipe(
     Layer.provideMerge(configuredSubagentRegistryLayer),

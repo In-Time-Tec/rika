@@ -1,3 +1,4 @@
+import { EnvConfig } from "@rika/core/env-config"
 import { Schema } from "effect"
 
 export interface ModelInfo extends Schema.Schema.Type<typeof ModelInfo> {}
@@ -38,9 +39,10 @@ export const usableBudget = (info: ModelInfo, reserved?: number): number =>
   info.context_window - (reserved ?? Math.min(20_000, info.max_output_tokens))
 
 const contextWindowOverride = (env: Env): number | undefined => {
-  const value = env.RIKA_MODEL_CONTEXT_WINDOW
-  if (value === undefined) return undefined
-  if (!/^[1-9]\d*$/.test(value)) return undefined
-  const parsed = Number(value)
-  return Number.isSafeInteger(parsed) ? parsed : undefined
+  const provider = EnvConfig.providerFromEnv(env)
+  const parsed = EnvConfig.optionalDecimalIntegerSync(provider, "RIKA_MODEL_CONTEXT_WINDOW", {
+    minimum: 1,
+    allowLeadingZero: false,
+  })
+  return parsed !== undefined && parsed > 0 ? parsed : undefined
 }

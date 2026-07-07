@@ -2,11 +2,21 @@ import { type Context, type Effect, Layer, ManagedRuntime } from "effect"
 import { layer as configLayer } from "./config"
 import { layer as diagnosticsLayer } from "./diagnostics"
 import { layer as idGeneratorLayer } from "./id-generator"
+import { layer as secretRedactorLayer } from "./secret-redactor"
 import { layer as timeLayer } from "./time"
 
-const configuredDiagnosticsLayer = diagnosticsLayer.pipe(Layer.provideMerge(configLayer))
+const configuredDiagnosticsLayer = diagnosticsLayer.pipe(
+  Layer.provideMerge(configLayer),
+  Layer.provideMerge(secretRedactorLayer),
+)
 
-export const layer = Layer.mergeAll(configLayer, configuredDiagnosticsLayer, timeLayer, idGeneratorLayer)
+export const layer = Layer.mergeAll(
+  configLayer,
+  secretRedactorLayer,
+  configuredDiagnosticsLayer,
+  timeLayer,
+  idGeneratorLayer,
+)
 
 export function makeRuntime<I, S, E>(service: Context.Service<I, S>, serviceLayer: Layer.Layer<I, E>) {
   let runtime: ManagedRuntime.ManagedRuntime<I, E> | undefined

@@ -334,17 +334,21 @@ export const finishTurn = (state: ViewState, activity: "idle" | "failed" = "idle
 
 export const deepModeForTier = (tier: number): Config.Mode => (tier === 2 ? "deep2" : tier === 3 ? "deep3" : "deep1")
 
-export const withMode = (state: ViewState, mode: Config.Mode): ViewState => ({
-  ...state,
-  mode,
-  reasoning_effort: modeDefaultEffort(mode),
-  fast_mode: isFastEligible(mode) ? state.fast_mode : false,
-  mode_switch_ticks: mode === state.mode ? state.mode_switch_ticks : modeSwitchTicks,
-  mode_switch_kind: "mode",
-  deep_tier: isDeepMode(mode) ? deepModeTier(mode) : state.deep_tier,
-})
+export const withMode = (state: ViewState, mode: Config.Mode): ViewState => {
+  if (modeLocked(state)) return state
+  return {
+    ...state,
+    mode,
+    reasoning_effort: modeDefaultEffort(mode),
+    fast_mode: isFastEligible(mode) ? state.fast_mode : false,
+    mode_switch_ticks: mode === state.mode ? state.mode_switch_ticks : modeSwitchTicks,
+    mode_switch_kind: "mode",
+    deep_tier: isDeepMode(mode) ? deepModeTier(mode) : state.deep_tier,
+  }
+}
 
 export const cycleReasoning = (state: ViewState): ViewState => {
+  if (modeLocked(state)) return state
   const next = nextReasoningMode(state.mode)
   return {
     ...state,
@@ -364,6 +368,8 @@ export const withGitBranch = (state: ViewState, branch: string | undefined): Vie
 })
 
 export const hasActivity = (state: ViewState): boolean => state.entries.length > 0
+
+export const modeLocked = (state: ViewState): boolean => state.active || hasActivity(state)
 
 export const hasActiveOrb = (state: ViewState): boolean => state.active_orb !== undefined
 
@@ -934,10 +940,13 @@ export const paletteMove = (state: ViewState, delta: number, count: number): Vie
 const familyOf = (mode: Config.Mode): ModePickerFamily =>
   mode === "rush" ? "rush" : mode === "smart" ? "smart" : "deep"
 
-export const openModePicker = (state: ViewState): ViewState => ({
-  ...withoutNotice(state),
-  modepicker: { open: true, selected: Math.max(0, modePickerFamilies.indexOf(familyOf(state.mode))) },
-})
+export const openModePicker = (state: ViewState): ViewState => {
+  if (modeLocked(state)) return state
+  return {
+    ...withoutNotice(state),
+    modepicker: { open: true, selected: Math.max(0, modePickerFamilies.indexOf(familyOf(state.mode))) },
+  }
+}
 
 export const closeModePicker = (state: ViewState): ViewState => ({
   ...state,
@@ -945,12 +954,14 @@ export const closeModePicker = (state: ViewState): ViewState => ({
 })
 
 export const modePickerMove = (state: ViewState, delta: number): ViewState => {
+  if (modeLocked(state)) return state
   const count = modePickerFamilies.length
   const selected = (((state.modepicker.selected + delta) % count) + count) % count
   return { ...state, modepicker: { ...state.modepicker, selected } }
 }
 
 export const modePickerApply = (state: ViewState): ViewState => {
+  if (modeLocked(state)) return state
   const family = modePickerFamilies[state.modepicker.selected] ?? "smart"
   if (family === "deep") return withMode(state, deepModeForTier(state.deep_tier))
   return withMode(state, family)

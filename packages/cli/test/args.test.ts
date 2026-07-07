@@ -613,6 +613,7 @@ describe("CLI args", () => {
     const fork = await Effect.runPromise(Args.parse(["threads", "fork", threadId, "--at-turn", "turn_args_threads"]))
     const visibility = await Effect.runPromise(Args.parse(["threads", "visibility", threadId, "workspace"]))
     const reference = await Effect.runPromise(Args.parse(["threads", "reference", threadId, "auth", "race"]))
+    const rebuildProjection = await Effect.runPromise(Args.parse(["threads", "rebuild-projection"]))
 
     expect(list).toEqual({ type: "threads", action: "list", include_archived: true, limit: 5 })
     expect(search).toEqual({ type: "threads", action: "search", query: "auth race", limit: 3 })
@@ -626,6 +627,7 @@ describe("CLI args", () => {
     })
     expect(visibility).toEqual({ type: "threads", action: "visibility", thread_id: threadId, visibility: "workspace" })
     expect(reference).toEqual({ type: "threads", action: "reference", thread_id: threadId, query: "auth race" })
+    expect(rebuildProjection).toEqual({ type: "threads", action: "rebuild-projection" })
   })
 
   test("parses skill management commands", async () => {

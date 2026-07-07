@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Provider, Router } from "@rika/llm"
-import { ArtifactStore, Database, Migration } from "@rika/persistence"
-import { Common, Ids } from "@rika/schema"
+import { ArtifactStore, Database, Migration, ThreadProjection } from "@rika/persistence"
+import { Common, Event, Ids } from "@rika/schema"
 import { Effect, Layer, Schema, Stream } from "effect"
 import { JudgeService } from "../src/index"
 
 const now = Common.TimestampMillis.make(2_100_000_000_000)
 const threadId = Ids.ThreadId.make("thread_judge_service")
+const workspaceId = Ids.WorkspaceId.make("workspace_judge_service")
 const candidates = [
   { id: "a", label: "Alpha", content: "alpha answer" },
   { id: "b", label: "Beta", content: "beta answer" },
@@ -19,6 +20,8 @@ const configLayer = Config.layerFromValues({
   data_dir: "/workspace/.rika",
   default_mode: "smart",
 })
+
+const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(SecretRedactor.layer))
 
 const judgeDraft = (
   winnerId: string,
@@ -86,11 +89,13 @@ const makeLiveishLayer = (responses: ReadonlyArray<string>) => {
     Layer.provideMerge(Time.fixedLayer(now)),
     Layer.provideMerge(databaseLayer),
     Layer.provideMerge(Migration.layer),
+    Layer.provideMerge(ThreadProjection.layer),
     Layer.provideMerge(ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))),
     Layer.provideMerge(
       Router.layer.pipe(
         Layer.provideMerge(configLayer),
         Layer.provideMerge(Provider.fakeRegistryLayer([{ name: "openai", responses }])),
+        Layer.provideMerge(diagnosticsLayer),
       ),
     ),
   )
@@ -288,6 +293,7 @@ describe("JudgeService", () => {
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         yield* Migration.migrate()
+        yield* ThreadProjection.apply(threadCreated(threadId, workspaceId))
         const verdict = yield* JudgeService.compare({
           task: "Pick the safest diff.",
           content_kind: "diff",
@@ -297,7 +303,8 @@ describe("JudgeService", () => {
           thread_id: threadId,
         })
         const artifacts = yield* ArtifactStore.list({ thread_id: threadId, kind: "verdict" })
-        return { verdict, artifacts }
+        const workspaceArtifacts = yield* ArtifactStore.listAll({ workspace_id: workspaceId, kind: "verdict" })
+        return { verdict, artifacts, workspaceArtifacts }
       }).pipe(
         Effect.provide(
           makeLiveishLayer([
@@ -326,6 +333,7 @@ describe("JudgeService", () => {
     })
     expect(result.artifacts).toHaveLength(1)
     expect(result.artifacts[0]?.content).toEqual(result.verdict)
+    expect(result.workspaceArtifacts).toEqual(result.artifacts)
   })
 })
 
@@ -336,3 +344,13 @@ const candidateOrderText = (request: Router.StructuredRequest<Record<string, unk
     .toSorted((left, right) => left.index - right.index)
     .map((entry) => entry.id)
 }
+
+const threadCreated = (eventThreadId: Ids.ThreadId, eventWorkspaceId: Ids.WorkspaceId): Event.ThreadCreated => ({
+  id: Ids.EventId.make(`event_${eventThreadId}_created`),
+  thread_id: eventThreadId,
+  sequence: 1,
+  version: 1,
+  type: "thread.created",
+  created_at: now,
+  data: { workspace_id: eventWorkspaceId },
+})

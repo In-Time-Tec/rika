@@ -1,5 +1,5 @@
 import { Artifact, Codec, Event, Ide, Ids, Remote } from "@rika/schema"
-import { Effect, Schedule, Schema, Stream } from "effect"
+import { Duration, Effect, Schedule, Schema, Stream } from "effect"
 
 export interface RequestInput {
   readonly method: "DELETE" | "GET" | "PATCH" | "POST" | "PUT"
@@ -93,7 +93,7 @@ export interface Interface {
   readonly subscribeThreadEvents: (input: SubscribeThreadEventsInput) => Stream.Stream<Event.Event, SdkError>
   readonly setThreadPresence: (input: Remote.SetThreadPresenceRequest) => Effect.Effect<Remote.PresenceFrame, SdkError>
   readonly startTurn: (input: Remote.StartTurnRequest) => Effect.Effect<Remote.StartTurnResponse, SdkError>
-  readonly interruptTurn: (input: Remote.InterruptTurnRequest) => Effect.Effect<Event.TurnFailed, SdkError>
+  readonly interruptTurn: (input: Remote.InterruptTurnRequest) => Effect.Effect<Event.TurnTerminal, SdkError>
   readonly listArtifacts: (
     input: Remote.ListArtifactsRequest,
   ) => Effect.Effect<ReadonlyArray<Artifact.Artifact>, SdkError>
@@ -122,6 +122,11 @@ const withUserId = <A extends { readonly user_id?: Ids.UserId | undefined }>(tra
   const userId = input.user_id ?? transport.user_id
   return userId === undefined ? input : ({ ...input, user_id: userId } as A)
 }
+
+const presenceHeartbeatRetrySchedule = Schedule.exponential("250 millis", 2).pipe(
+  Schedule.both(Schedule.recurs(3)),
+  Schedule.modifyDelay((_error, delay) => Effect.succeed(Duration.min(delay, Duration.seconds(5)))),
+)
 
 export const make = (transport: Transport): Interface => ({
   backendHealth: () =>
@@ -308,7 +313,12 @@ export const make = (transport: Transport): Interface => ({
               thread_id: request.thread_id,
               user_id: request.user_id,
               state: "active",
-            }).pipe(Effect.repeat(Schedule.spaced("15 seconds")), Effect.asVoid),
+            }).pipe(
+              Effect.retry(presenceHeartbeatRetrySchedule),
+              Effect.ignore,
+              Effect.repeat(Schedule.spaced("15 seconds")),
+              Effect.asVoid,
+            ),
           ),
         )
   },
@@ -328,7 +338,7 @@ export const make = (transport: Transport): Interface => ({
         path: "/v1/turns/interrupt",
         body: Codec.encode(Remote.InterruptTurnRequest)(withUserId(transport, input)),
       })
-      .pipe(Effect.flatMap(decodeEffect(Event.TurnFailed, "interruptTurn"))),
+      .pipe(Effect.flatMap(decodeEffect(Event.TurnTerminal, "interruptTurn"))),
   listArtifacts: (input: Remote.ListArtifactsRequest) =>
     transport
       .requestJson({ method: "GET", path: `/v1/artifacts${query(withUserId(transport, input))}` })
@@ -373,10 +383,11 @@ export const fetchTransport = (input: FetchTransportInput): Transport => {
     ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
     requestJson: (request) =>
       Effect.tryPromise({
-        try: async () => {
-          const response = await fetchImpl(`${baseUrl}${request.path}`, fetchInit(request, input.token))
-          const body = await readJson(response)
-          if (!response.ok) throw apiError(body, "requestJson", response.status)
+        try: async (signal) => {
+          const response = await fetchImpl(`${baseUrl}${request.path}`, fetchInit(request, input.token, signal))
+          const status = response.status
+          const body = await readResponseJson(response, "requestJson", status)
+          if (!response.ok) throw apiError(body, "requestJson", status)
           return body
         },
         catch: (cause) => toSdkError(cause, "requestJson"),
@@ -384,9 +395,11 @@ export const fetchTransport = (input: FetchTransportInput): Transport => {
     streamJson: (request) =>
       Stream.unwrap(
         Effect.tryPromise({
-          try: async () => {
-            const response = await fetchImpl(`${baseUrl}${request.path}`, fetchInit(request, input.token))
-            if (!response.ok) throw apiError(await readJson(response), "streamJson", response.status)
+          try: async (signal) => {
+            const response = await fetchImpl(`${baseUrl}${request.path}`, fetchInit(request, input.token, signal))
+            const status = response.status
+            if (!response.ok)
+              throw apiError(await readResponseJson(response, "streamJson", status), "streamJson", status)
             if (response.body === null) {
               throw new SdkError({
                 message: "Rika API stream response did not include a body",
@@ -463,16 +476,26 @@ const isPresenceFrame = (frame: Remote.StreamFrame): frame is Remote.PresenceFra
 const isApiErrorBody = (value: unknown): value is Remote.ApiError =>
   Schema.decodeUnknownOption(Remote.ApiError)(value)._tag === "Some"
 
-const fetchInit = (request: RequestInput, token: string | undefined): RequestInit => ({
+const fetchInit = (request: RequestInput, token: string | undefined, signal: AbortSignal): RequestInit => ({
   method: request.method,
   headers: {
     ...(request.body === undefined ? {} : { "content-type": "application/json" }),
     ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
   },
+  signal,
   ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) }),
 })
 
 const readJson = async (response: Response) => parseJson(await response.text())
+
+const readResponseJson = async (response: Response, operation: string, status: number) => {
+  try {
+    return await readJson(response)
+  } catch (cause) {
+    if (!response.ok) throw apiError(null, operation, status)
+    throw cause
+  }
+}
 
 const parseJson = (text: string) => {
   if (text.trim().length === 0) return null

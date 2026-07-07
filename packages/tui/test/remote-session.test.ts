@@ -81,6 +81,51 @@ describe("TUI remote session", () => {
     expect(backend.turns).toEqual([])
   })
 
+  test("mode slash command switches only before remote thread activity", async () => {
+    const idleBackend = fakeBackend()
+    const idleRendered: Array<ViewState.ViewState> = []
+    const activeBackend = fakeBackend()
+    const activeRendered: Array<ViewState.ViewState> = []
+
+    const idleExitCode = await Effect.runPromise(
+      RemoteSession.run({ workspace_root: workspaceRoot, mode: "smart" }).pipe(
+        Effect.provide(RemoteSession.layerFromClient(idleBackend.client)),
+        Effect.provide(Adapter.memoryLayer({ rendered: idleRendered, keys: ["/mode rush", "/exit"].flatMap(line) })),
+        Effect.provide(Ticker.memoryLayer),
+      ),
+    )
+    const activeExitCode = await Effect.runPromise(
+      RemoteSession.run({ workspace_root: workspaceRoot, mode: "smart", thread_id: initialThreadId }).pipe(
+        Effect.provide(RemoteSession.layerFromClient(activeBackend.client)),
+        Effect.provide(Adapter.memoryLayer({ rendered: activeRendered, keys: ["/mode rush", "/exit"].flatMap(line) })),
+        Effect.provide(Ticker.memoryLayer),
+      ),
+    )
+
+    expect(idleExitCode).toBe(0)
+    expect(activeExitCode).toBe(0)
+    expect(idleRendered.some((state) => state.mode === "rush")).toBe(true)
+    expect(activeRendered.some((state) => state.notice === "Mode is locked once a thread is active.")).toBe(true)
+    expect(activeRendered.some((state) => state.mode === "rush")).toBe(false)
+  })
+
+  test("remote welcome cannot unlock mode after completed activity", async () => {
+    const backend = fakeBackend()
+    const rendered: Array<ViewState.ViewState> = []
+
+    const exitCode = await Effect.runPromise(
+      RemoteSession.run({ workspace_root: workspaceRoot, mode: "smart", thread_id: initialThreadId }).pipe(
+        Effect.provide(RemoteSession.layerFromClient(backend.client)),
+        Effect.provide(Adapter.memoryLayer({ rendered, keys: ["/welcome", "/mode rush", "/exit"].flatMap(line) })),
+        Effect.provide(Ticker.memoryLayer),
+      ),
+    )
+
+    expect(exitCode).toBe(0)
+    expect(rendered.some((state) => state.notice === "Mode is locked once a thread is active.")).toBe(true)
+    expect(rendered.some((state) => state.mode === "rush")).toBe(false)
+  })
+
   test("reports invalid remote thread visibility commands as usage", async () => {
     const backend = fakeBackend()
     const rendered: Array<ViewState.ViewState> = []

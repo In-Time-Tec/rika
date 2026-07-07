@@ -2,9 +2,13 @@ import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { sql } from "drizzle-orm"
 import { Common, Event, Ids } from "@rika/schema"
-import { Database, Migration, ThreadEventLog } from "../src/index"
+import { cp, mkdtemp, readdir, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { ArtifactStore, Database, Migration, ThreadEventLog } from "../src/index"
 
 const layer = Layer.mergeAll(Database.memoryLayer, Migration.layer, ThreadEventLog.layer)
+const artifactWorkspaceBackfillMigration = "20260706000000_artifacts_workspace_backfill"
 
 describe("Migration", () => {
   test("applies committed migrations at runtime", async () => {
@@ -57,6 +61,50 @@ describe("Migration", () => {
     expect(rows.after).toEqual([{ thread_id: historicalThreadId, path: "packages/server/src/search.ts" }])
   })
 
+  test("backfills legacy NULL artifact workspace ids from thread projections", async () => {
+    const priorMigrations = await migrationsFolderWithout(artifactWorkspaceBackfillMigration)
+    try {
+      const databaseLayer = Database.memoryLayer
+      const artifactLayer = ArtifactStore.layer.pipe(Layer.provideMerge(databaseLayer))
+      const testLayer = Layer.mergeAll(databaseLayer, artifactLayer)
+      const workspaceId = Ids.WorkspaceId.make("migration_workspace_artifact_backfill")
+      const threadId = Ids.ThreadId.make("migration_thread_artifact_backfill")
+      const artifactId = Ids.ArtifactId.make("migration_artifact_workspace_backfill")
+
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          yield* Migration.migrate().pipe(Effect.provide(Migration.layerFromFolder(priorMigrations)))
+          yield* Database.withDatabase((database) => {
+            database.run(sql`
+              insert into thread_projections (thread_id, workspace_id, last_sequence, created_at, updated_at)
+              values (${threadId}, ${workspaceId}, 1, ${historicalCreatedAt}, ${historicalCreatedAt})
+            `)
+            database.run(sql`
+              insert into artifacts (id, thread_id, workspace_id, kind, title, content, created_at)
+              values (${artifactId}, ${threadId}, null, 'other', 'Legacy trust', '{"legacy":true}', ${historicalCreatedAt})
+            `)
+          })
+          const before = yield* ArtifactStore.listAll({ workspace_id: workspaceId, kind: "other" })
+          yield* Migration.migrate().pipe(Effect.provide(Migration.layerFromFolder(Migration.sourceMigrationsFolder)))
+          const after = yield* ArtifactStore.listAll({ workspace_id: workspaceId, kind: "other" })
+          return { before, after }
+        }).pipe(Effect.provide(testLayer)),
+      )
+
+      expect(result.before).toEqual([])
+      expect(result.after).toHaveLength(1)
+      expect(result.after[0]).toMatchObject({
+        id: artifactId,
+        thread_id: threadId,
+        workspace_id: workspaceId,
+        kind: "other",
+        title: "Legacy trust",
+      })
+    } finally {
+      await rm(priorMigrations, { recursive: true, force: true })
+    }
+  })
+
   test("resolves source, configured, and installed migration folders", () => {
     expect(Migration.migrationsFolderFromEnv({ RIKA_MIGRATIONS_DIR: "/tmp/rika-migrations" })).toBe(
       "/tmp/rika-migrations",
@@ -65,6 +113,18 @@ describe("Migration", () => {
     expect(Migration.installedMigrationsFolder("/opt/rika/bin/rika")).toBe("/opt/rika/share/rika/drizzle")
   })
 })
+
+const migrationsFolderWithout = async (...excluded: ReadonlyArray<string>) => {
+  const target = await mkdtemp(join(tmpdir(), "rika-migrations-"))
+  const excludedNames = new Set(excluded)
+  const names = await readdir(Migration.sourceMigrationsFolder)
+  await Promise.all(
+    names
+      .filter((name) => !excludedNames.has(name))
+      .map((name) => cp(join(Migration.sourceMigrationsFolder, name), join(target, name), { recursive: true })),
+  )
+  return target
+}
 
 const historicalThreadId = Ids.ThreadId.make("migration_thread_file_backfill")
 const historicalTurnId = Ids.TurnId.make("migration_turn_file_backfill")

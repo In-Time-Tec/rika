@@ -132,6 +132,7 @@ const activityLayer = (touches: Array<Ids.OrbId>) =>
         Effect.sync(() => {
           touches.push(id)
         }),
+      release: () => Effect.void,
     }),
   )
 

@@ -1,4 +1,4 @@
-import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, StringArray, Time } from "@rika/core"
 import { ModelInfo } from "@rika/llm"
 import { Database, ProjectStore, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
@@ -173,6 +173,7 @@ interface Dependencies {
   readonly projectStore?: ProjectStore.Interface
   readonly idGenerator: IdGenerator.Interface
   readonly time: Time.Interface
+  readonly diagnostics: Diagnostics.Interface
 }
 
 export const layer = Layer.effect(
@@ -185,6 +186,7 @@ export const layer = Layer.effect(
     const projectStore = Option.getOrUndefined(yield* Effect.serviceOption(ProjectStore.Service))
     const idGenerator = yield* IdGenerator.Service
     const time = yield* Time.Service
+    const diagnostics = yield* Diagnostics.Service
     const dependencies: Dependencies = {
       config,
       database,
@@ -193,11 +195,13 @@ export const layer = Layer.effect(
       ...(projectStore === undefined ? {} : { projectStore }),
       idGenerator,
       time,
+      diagnostics,
     }
 
     return Service.of({
       create: Effect.fn("ThreadService.create")(function* (input: CreateInput) {
         return yield* threadEvent(
+          dependencies.diagnostics,
           "thread.create",
           input.thread_id === undefined ? {} : { thread_id: input.thread_id },
           (fields) => createThread(dependencies, input, fields),
@@ -213,22 +217,29 @@ export const layer = Layer.effect(
         return yield* previewThread(dependencies, input)
       }),
       fork: Effect.fn("ThreadService.fork")(function* (input: ForkInput) {
-        return yield* threadEvent("thread.fork", { thread_id: input.thread_id }, (fields) =>
+        return yield* threadEvent(dependencies.diagnostics, "thread.fork", { thread_id: input.thread_id }, (fields) =>
           forkThread(dependencies, input, fields),
         )
       }),
       archive: Effect.fn("ThreadService.archive")(function* (input: ThreadIdInput) {
-        return yield* threadEvent("thread.archive", { thread_id: input.thread_id }, (fields) =>
-          setArchived(dependencies, input.thread_id, true, fields),
+        return yield* threadEvent(
+          dependencies.diagnostics,
+          "thread.archive",
+          { thread_id: input.thread_id },
+          (fields) => setArchived(dependencies, input.thread_id, true, fields),
         )
       }),
       unarchive: Effect.fn("ThreadService.unarchive")(function* (input: ThreadIdInput) {
-        return yield* threadEvent("thread.unarchive", { thread_id: input.thread_id }, (fields) =>
-          setArchived(dependencies, input.thread_id, false, fields),
+        return yield* threadEvent(
+          dependencies.diagnostics,
+          "thread.unarchive",
+          { thread_id: input.thread_id },
+          (fields) => setArchived(dependencies, input.thread_id, false, fields),
         )
       }),
       setVisibility: Effect.fn("ThreadService.setVisibility")(function* (input: SetVisibilityInput) {
         return yield* threadEvent(
+          dependencies.diagnostics,
           "thread.visibility",
           { thread_id: input.thread_id, visibility: input.visibility },
           (fields) => setVisibilityInternal(dependencies, input, fields),
@@ -343,17 +354,12 @@ export const reference = Effect.fn("ThreadService.reference.call")(function* (in
   return yield* service.reference(input)
 })
 
-const noopDiagnostics: Diagnostics.Interface = { emit: () => Effect.void }
-
 const threadEvent = <A, E>(
+  diagnostics: Diagnostics.Interface,
   op: string,
   seed: Diagnostics.Fields,
   run: (fields: Diagnostics.Fields) => Effect.Effect<A, E>,
-) =>
-  Effect.gen(function* () {
-    const diagnostics = Option.getOrElse(yield* Effect.serviceOption(Diagnostics.Service), () => noopDiagnostics)
-    return yield* Diagnostics.event(op, run, seed).pipe(Effect.provideService(Diagnostics.Service, diagnostics))
-  })
+) => Diagnostics.event(op, run, seed).pipe(Effect.provideService(Diagnostics.Service, diagnostics))
 
 const createThread = (dependencies: Dependencies, input: CreateInput, fields: Diagnostics.Fields) =>
   Effect.gen(function* () {
@@ -595,15 +601,9 @@ const forkThread = (dependencies: Dependencies, input: ForkInput, fields: Diagno
         cutoff,
       }),
     )
-    const appended = yield* dependencies.eventLog
-      .appendMany(forkedEvents)
+    yield* dependencies.eventLog
+      .appendManyAndProject(forkedEvents)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* Effect.forEach(
-      appended,
-      (event) =>
-        dependencies.projection.apply(event).pipe(Effect.provideService(Database.Service, dependencies.database)),
-      { discard: true },
-    )
     fields.fork_thread_id = forkThreadId
     fields.cutoff_sequence = cutoff
     fields.event_count = forkedEvents.length
@@ -631,7 +631,7 @@ const referenceEntries = (record: ThreadRecord, terms: ReadonlyArray<string>) =>
     terms.length === 0
       ? messages
       : messages.filter((message) => terms.some((term) => message.toLowerCase().includes(term)))
-  const selected = uniqueStrings([
+  const selected = StringArray.uniqueNonEmptyStrings([
     `Thread ${record.summary.thread_id}`,
     `Workspace: ${record.summary.workspace_id}`,
     `Visibility: ${record.summary.visibility}`,
@@ -660,11 +660,11 @@ const scoreSummary = (
     terms.length === 0
       ? 0
       : terms.reduce((total, term) => total + fields.filter((field) => field.toLowerCase().includes(term)).length, 0)
-  return { summary, score, matched: uniqueStrings(matched).slice(0, 8) }
+  return { summary, score, matched: StringArray.uniqueNonEmptyStrings(matched).slice(0, 8) }
 }
 
 const searchableFields = (summary: ThreadSummary, events: ReadonlyArray<Event.Event>) =>
-  uniqueStrings([
+  StringArray.uniqueNonEmptyStrings([
     summary.thread_id,
     summary.workspace_id,
     summary.user_id ?? "",
@@ -742,9 +742,8 @@ const minTimestamp = (
 const appendAndProject = (dependencies: Dependencies, event: Event.Event) =>
   Effect.gen(function* () {
     const appended = yield* dependencies.eventLog
-      .append(event)
+      .appendAndProject(event)
       .pipe(Effect.provideService(Database.Service, dependencies.database))
-    yield* dependencies.projection.apply(appended).pipe(Effect.provideService(Database.Service, dependencies.database))
     return appended
   })
 
@@ -909,5 +908,4 @@ const capText = (text: string, maxChars: number) =>
 
 const latestSequence = (events: ReadonlyArray<Event.Event>) => events.at(-1)?.sequence ?? 0
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(Math.floor(value), min), max)
-const uniqueStrings = (values: ReadonlyArray<string>) => [...new Set(values.filter((value) => value.length > 0))]
 const oneLine = (value: string) => value.replace(/\s+/g, " ").trim()

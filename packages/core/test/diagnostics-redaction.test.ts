@@ -11,6 +11,25 @@ const config = {
 }
 
 describe("Diagnostics redaction", () => {
+  test("redactEntry uses the registered secret redactor", async () => {
+    const secret = "direct-redact-entry-secret"
+
+    const redacted = await TestHarness.runPromise(
+      Effect.gen(function* () {
+        yield* SecretRedactor.register([{ label: "FAKE_API_KEY", value: secret }])
+        return yield* Diagnostics.redactEntry({
+          level: "info",
+          message: `message ${secret}`,
+          data: { output: `data ${secret}` },
+        })
+      }),
+      TestHarness.testLayer(),
+    )
+
+    expect(JSON.stringify(redacted)).toContain("[REDACTED:FAKE_API_KEY]")
+    expect(JSON.stringify(redacted)).not.toContain(secret)
+  })
+
   test("redacts direct diagnostic entries before they reach memory sinks", async () => {
     const secret = "diagnostic-secret-value"
     const diagnostics: Array<Diagnostics.Entry> = []

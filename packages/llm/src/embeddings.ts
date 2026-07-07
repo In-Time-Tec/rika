@@ -5,7 +5,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import * as OpenAi from "./openai"
 
 export interface Options {
-  readonly apiKey?: string | undefined
+  readonly apiKey?: Redacted.Redacted | undefined
   readonly apiKeyEnv?: string | undefined
   readonly fallbackApiKeyEnv?: string | undefined
   readonly apiUrl?: string | undefined
@@ -62,12 +62,13 @@ export const defaultBatchSize = 128
 
 export const optionsFromEnv = (env: Record<string, string | undefined>, options: EnvOptions = {}): Options => {
   const embeddingsKey = nonEmpty(env.RIKA_EMBEDDINGS_API_KEY)
-  if (embeddingsKey !== undefined) return { apiKey: embeddingsKey, apiKeyEnv: defaultApiKeyEnv }
+  if (embeddingsKey !== undefined)
+    return { apiKey: Redacted.make(embeddingsKey, { label: defaultApiKeyEnv }), apiKeyEnv: defaultApiKeyEnv }
 
   const sharedKey = nonEmpty(env.RIKA_API_KEY)
   if (options.openaiConfigured === true && sharedKey !== undefined) {
     return {
-      apiKey: sharedKey,
+      apiKey: Redacted.make(sharedKey, { label: OpenAi.defaultApiKeyEnv }),
       apiKeyEnv: defaultApiKeyEnv,
       fallbackApiKeyEnv: OpenAi.defaultApiKeyEnv,
     }
@@ -102,7 +103,7 @@ export const layer = (options: Options = {}) => {
   }).pipe(
     Layer.provide(
       OpenAiClient.layer({
-        apiKey: Redacted.make(options.apiKey),
+        apiKey: options.apiKey,
         ...(options.apiUrl === undefined ? {} : { apiUrl: options.apiUrl }),
       }).pipe(Layer.provide(FetchHttpClient.layer)),
     ),

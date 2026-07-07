@@ -520,7 +520,16 @@ const recordColumns = sql`select orb_id, thread_id, project_id, sandbox_id, stat
 const recordByOrbIdQuery = (orbId: Ids.OrbId) => sql`${recordColumns} from orbs where orb_id = ${orbId} limit 1`
 
 const recordByThreadIdQuery = (threadId: Ids.ThreadId) =>
-  sql`${recordColumns} from orbs where thread_id = ${threadId} limit 1`
+  sql`
+    ${recordColumns}
+    from orbs
+    where thread_id = ${threadId}
+    order by
+      case when status in ('provisioning', 'running', 'paused') then 0 else 1 end,
+      last_active_at desc,
+      created_at desc
+    limit 1
+  `
 
 const normalizedMinutes = (value: number) => Number(value.toFixed(6))
 

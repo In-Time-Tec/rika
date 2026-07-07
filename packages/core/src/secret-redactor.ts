@@ -14,12 +14,23 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/core/SecretRedactor") {}
 
-export const secretEnvNamePattern = /(_API_KEY|_TOKEN|_SECRET|_PASSWORD)$/
+export const secretEnvNamePattern =
+  /(^DATABASE_URL$|^AWS_SECRET_ACCESS_KEY$|^STRIPE_SECRET_KEY$|(^|_)SECRET(_|$)|(^|_)TOKEN(_|$)|(^|_)PASSWORD(_|$)|(^|_)PASSWD(_|$)|_PASS$|(^|_)CREDENTIALS?(_|$)|(^|_)PRIVATE_KEY$|_APIKEY$|_KEY$)/i
+
+const nonSecretEnvNamePattern = /((^|_)PUBLIC_KEY$|_URL$|_ID$)/i
+const explicitSecretEnvNames = new Set(["DATABASE_URL", "AWS_SECRET_ACCESS_KEY", "STRIPE_SECRET_KEY"])
+const explicitSecretEnvNamePattern = /(^|_)DATABASE_URL$/i
 
 export const entriesFromEnv = (env: Record<string, string | undefined>): ReadonlyArray<Entry> =>
   Object.entries(env).flatMap(([label, value]) =>
-    value !== undefined && secretEnvNamePattern.test(label) ? [{ label, value }] : [],
+    value !== undefined && isSecretEnvName(label) ? [{ label, value }] : [],
   )
+
+export const isSecretEnvName = (label: string): boolean => {
+  const normalized = label.toUpperCase()
+  if (explicitSecretEnvNames.has(normalized) || explicitSecretEnvNamePattern.test(normalized)) return true
+  return secretEnvNamePattern.test(normalized) && !nonSecretEnvNamePattern.test(normalized)
+}
 
 export const layerFromEntries = (initialEntries: ReadonlyArray<Entry>) =>
   Layer.effect(

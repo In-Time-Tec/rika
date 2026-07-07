@@ -1,7 +1,8 @@
 import { readFile } from "node:fs/promises"
 import { homedir, userInfo } from "node:os"
 import { join } from "node:path"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Config as EffectConfig, ConfigProvider, Context, Effect, Layer, Option, Result, Schema } from "effect"
+import * as EnvConfig from "./env-config"
 
 const defaultOrbTemplate = "rika-orb"
 const defaultOrbIdleTimeoutSeconds = 300
@@ -126,8 +127,13 @@ export interface Snapshot {
   readonly warnings: ReadonlyArray<Warning>
 }
 
+export class SettingsError extends Schema.TaggedErrorClass<SettingsError>()("SettingsError", {
+  message: Schema.String,
+  key: Schema.optional(Schema.String),
+}) {}
+
 export interface Interface {
-  readonly snapshot: Effect.Effect<Snapshot>
+  readonly snapshot: Effect.Effect<Snapshot, SettingsError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/core/Settings") {}
@@ -142,17 +148,20 @@ export const layerFromEnv = (env: Record<string, string | undefined>, workspaceR
     Effect.gen(function* () {
       const loaded = yield* loadFiles(env.HOME ?? homedir(), workspaceRoot)
       return Service.of({
-        snapshot: Effect.succeed(resolve(env, loaded)),
+        snapshot: resolve(env, loaded),
       })
     }),
   )
 
-export const layer = layerFromEnv(process.env, process.cwd())
+export const layer = Layer.suspend(() => layerFromEnv(process.env, process.cwd()))
 
-export const snapshot: Effect.Effect<Snapshot, never, Service> = Effect.flatMap(Service, (service) => service.snapshot)
+export const snapshot: Effect.Effect<Snapshot, SettingsError, Service> = Effect.flatMap(
+  Service,
+  (service) => service.snapshot,
+)
 
 export const loadSnapshotFromEnv = (env: Record<string, string | undefined>, workspaceRoot: string) =>
-  Effect.map(loadFiles(env.HOME ?? homedir(), workspaceRoot), (loaded) => resolve(env, loaded))
+  Effect.flatMap(loadFiles(env.HOME ?? homedir(), workspaceRoot), (loaded) => resolve(env, loaded))
 
 export const defaultValues = (): Values => ({
   orb: {
@@ -273,9 +282,14 @@ const validateRecord = (
   const warnings: Array<Warning> = []
   for (const [key, value] of Object.entries(record)) {
     if (isSettingKey(key)) {
-      const validated = validateSettingValue(key, value)
-      if (validated.valid) values[key] = validated.value
-      else warnings.push({ source, path, key, message: validated.message })
+      Result.match(validateSettingValue(key, value), {
+        onSuccess: (validated) => {
+          values[key] = validated
+        },
+        onFailure: (message) => {
+          warnings.push({ source, path, key, message })
+        },
+      })
     } else if (key === "keymap") {
       const validated = validateKeymap(value, path, source)
       Object.assign(keymap, validated.values)
@@ -287,232 +301,290 @@ const validateRecord = (
   return { values, keymap, warnings }
 }
 
-const resolve = (env: Record<string, string | undefined>, loaded: LoadedSettings): Snapshot => {
-  const template = resolveString("orb.template", env.RIKA_ORB_TEMPLATE, loaded, defaultOrbTemplate)
-  const idleTimeoutSeconds = resolvePositiveInteger(
-    "orb.idleTimeoutSeconds",
-    env.RIKA_ORB_IDLE_TIMEOUT,
-    loaded,
-    defaultOrbIdleTimeoutSeconds,
-  )
-  const projectDefault = resolveOptionalString("project.default", env.RIKA_ORB_PROJECT, loaded)
-  const userName = resolveString("user.name", env.RIKA_USER, loaded, defaultUserName())
-  const modeDefault = resolveMode("mode.default", env.RIKA_MODE, loaded, defaultMode)
-  const compactionAuto = resolveBooleanOption("compaction.auto", env.RIKA_COMPACTION_AUTO, loaded)
-  const compactionReserved = resolveNonNegativeIntegerOption(
-    "compaction.reserved",
-    env.RIKA_COMPACTION_RESERVED,
-    loaded,
-  )
-  const compactionPrune = resolveBooleanOption("compaction.prune", env.RIKA_COMPACTION_PRUNE, loaded)
-  const compactionPruneProtect = resolveNonNegativeIntegerOption(
-    "compaction.pruneProtect",
-    env.RIKA_COMPACTION_PRUNE_PROTECT,
-    loaded,
-  )
-  const compactionPruneMinimum = resolveNonNegativeIntegerOption(
-    "compaction.pruneMinimum",
-    env.RIKA_COMPACTION_PRUNE_MINIMUM,
-    loaded,
-  )
-  const memoryAutoContext = resolveBoolean("memory.autoContext", env.RIKA_MEMORY_AUTO_CONTEXT, loaded, false)
-  const telemetryEnabled = resolveTelemetryBoolean("telemetry.enabled", env.RIKA_TELEMETRY, loaded, true)
-  const telemetryEndpoint = resolveString(
-    "telemetry.endpoint",
-    env.RIKA_TELEMETRY_ENDPOINT,
-    loaded,
-    defaultTelemetryEndpoint,
-  )
-  const keymap = resolveKeymap(loaded)
-
-  return {
-    values: {
-      orb: {
-        template: template.value,
-        idleTimeoutSeconds: idleTimeoutSeconds.value,
-      },
-      project: projectDefault.value === undefined ? {} : { default: projectDefault.value },
-      user: {
-        name: userName.value,
-      },
-      mode: {
-        default: modeDefault.value,
-      },
-      compaction: {
-        ...(compactionAuto.value === undefined ? {} : { auto: compactionAuto.value }),
-        ...(compactionReserved.value === undefined ? {} : { reserved: compactionReserved.value }),
-        ...(compactionPrune.value === undefined ? {} : { prune: compactionPrune.value }),
-        ...(compactionPruneProtect.value === undefined ? {} : { pruneProtect: compactionPruneProtect.value }),
-        ...(compactionPruneMinimum.value === undefined ? {} : { pruneMinimum: compactionPruneMinimum.value }),
-      },
-      memory: {
-        autoContext: memoryAutoContext.value,
-      },
-      keymap: keymap.values,
-      telemetry: {
-        enabled: telemetryEnabled.value,
-        endpoint: telemetryEndpoint.value,
-      },
-    },
-    sources: {
-      "orb.template": template.source,
-      "orb.idleTimeoutSeconds": idleTimeoutSeconds.source,
-      "project.default": projectDefault.source,
-      "user.name": userName.source,
-      "mode.default": modeDefault.source,
-      "compaction.auto": compactionAuto.source,
-      "compaction.reserved": compactionReserved.source,
-      "compaction.prune": compactionPrune.source,
-      "compaction.pruneProtect": compactionPruneProtect.source,
-      "compaction.pruneMinimum": compactionPruneMinimum.source,
-      "memory.autoContext": memoryAutoContext.source,
-      "telemetry.enabled": telemetryEnabled.source,
-      "telemetry.endpoint": telemetryEndpoint.source,
-    },
-    keymapSources: keymap.sources,
-    warnings: loaded.warnings,
-  }
+interface ParsedEnv {
+  readonly orbTemplate: string | undefined
+  readonly orbIdleTimeoutSeconds: number | undefined
+  readonly projectDefault: string | undefined
+  readonly userName: string | undefined
+  readonly modeDefault: Mode | undefined
+  readonly compactionAuto: boolean | undefined
+  readonly compactionReserved: number | undefined
+  readonly compactionPrune: boolean | undefined
+  readonly compactionPruneProtect: number | undefined
+  readonly compactionPruneMinimum: number | undefined
+  readonly memoryAutoContext: boolean | undefined
+  readonly telemetryEnabled: boolean | undefined
+  readonly telemetryEndpoint: string | undefined
 }
+
+const booleanEnvKeys = [
+  "RIKA_COMPACTION_AUTO",
+  "RIKA_COMPACTION_PRUNE",
+  "RIKA_MEMORY_AUTO_CONTEXT",
+  "RIKA_TELEMETRY",
+] as const
+
+const resolve = (
+  env: Record<string, string | undefined>,
+  loaded: LoadedSettings,
+): Effect.Effect<Snapshot, SettingsError> =>
+  Effect.gen(function* () {
+    const parsedEnv = yield* parseEnv(env)
+    const template = resolveString("orb.template", parsedEnv.orbTemplate, loaded, defaultOrbTemplate)
+    const idleTimeoutSeconds = resolvePositiveInteger(
+      "orb.idleTimeoutSeconds",
+      parsedEnv.orbIdleTimeoutSeconds,
+      loaded,
+      defaultOrbIdleTimeoutSeconds,
+    )
+    const projectDefault = resolveOptionalString("project.default", parsedEnv.projectDefault, loaded)
+    const userName = resolveString("user.name", parsedEnv.userName, loaded, defaultUserName())
+    const modeDefault = resolveMode("mode.default", parsedEnv.modeDefault, loaded, defaultMode)
+    const compactionAuto = resolveBooleanOption("compaction.auto", parsedEnv.compactionAuto, loaded)
+    const compactionReserved = resolveNonNegativeIntegerOption(
+      "compaction.reserved",
+      parsedEnv.compactionReserved,
+      loaded,
+    )
+    const compactionPrune = resolveBooleanOption("compaction.prune", parsedEnv.compactionPrune, loaded)
+    const compactionPruneProtect = resolveNonNegativeIntegerOption(
+      "compaction.pruneProtect",
+      parsedEnv.compactionPruneProtect,
+      loaded,
+    )
+    const compactionPruneMinimum = resolveNonNegativeIntegerOption(
+      "compaction.pruneMinimum",
+      parsedEnv.compactionPruneMinimum,
+      loaded,
+    )
+    const memoryAutoContext = resolveBoolean("memory.autoContext", parsedEnv.memoryAutoContext, loaded, false)
+    const telemetryEnabled = resolveBoolean("telemetry.enabled", parsedEnv.telemetryEnabled, loaded, true)
+    const telemetryEndpoint = resolveString(
+      "telemetry.endpoint",
+      parsedEnv.telemetryEndpoint,
+      loaded,
+      defaultTelemetryEndpoint,
+    )
+    const keymap = resolveKeymap(loaded)
+
+    return {
+      values: {
+        orb: {
+          template: template.value,
+          idleTimeoutSeconds: idleTimeoutSeconds.value,
+        },
+        project: projectDefault.value === undefined ? {} : { default: projectDefault.value },
+        user: {
+          name: userName.value,
+        },
+        mode: {
+          default: modeDefault.value,
+        },
+        compaction: {
+          ...(compactionAuto.value === undefined ? {} : { auto: compactionAuto.value }),
+          ...(compactionReserved.value === undefined ? {} : { reserved: compactionReserved.value }),
+          ...(compactionPrune.value === undefined ? {} : { prune: compactionPrune.value }),
+          ...(compactionPruneProtect.value === undefined ? {} : { pruneProtect: compactionPruneProtect.value }),
+          ...(compactionPruneMinimum.value === undefined ? {} : { pruneMinimum: compactionPruneMinimum.value }),
+        },
+        memory: {
+          autoContext: memoryAutoContext.value,
+        },
+        keymap: keymap.values,
+        telemetry: {
+          enabled: telemetryEnabled.value,
+          endpoint: telemetryEndpoint.value,
+        },
+      },
+      sources: {
+        "orb.template": template.source,
+        "orb.idleTimeoutSeconds": idleTimeoutSeconds.source,
+        "project.default": projectDefault.source,
+        "user.name": userName.source,
+        "mode.default": modeDefault.source,
+        "compaction.auto": compactionAuto.source,
+        "compaction.reserved": compactionReserved.source,
+        "compaction.prune": compactionPrune.source,
+        "compaction.pruneProtect": compactionPruneProtect.source,
+        "compaction.pruneMinimum": compactionPruneMinimum.source,
+        "memory.autoContext": memoryAutoContext.source,
+        "telemetry.enabled": telemetryEnabled.source,
+        "telemetry.endpoint": telemetryEndpoint.source,
+      },
+      keymapSources: keymap.sources,
+      warnings: loaded.warnings,
+    }
+  })
+
+const parseEnv = (env: Record<string, string | undefined>): Effect.Effect<ParsedEnv, SettingsError> => {
+  const provider = EnvConfig.providerFromEnv(env, { booleanKeys: booleanEnvKeys })
+  return Effect.all({
+    orbTemplate: optionalString(env, provider, "RIKA_ORB_TEMPLATE"),
+    orbIdleTimeoutSeconds: optionalPositiveInteger(env, provider, "RIKA_ORB_IDLE_TIMEOUT"),
+    projectDefault: optionalString(env, provider, "RIKA_ORB_PROJECT"),
+    userName: optionalString(env, provider, "RIKA_USER"),
+    modeDefault: optionalEnv(env, provider, "RIKA_MODE", EnvConfig.literals(modes, "RIKA_MODE")),
+    compactionAuto: optionalEnv(env, provider, "RIKA_COMPACTION_AUTO", EnvConfig.boolean("RIKA_COMPACTION_AUTO")),
+    compactionReserved: optionalNonNegativeInteger(env, provider, "RIKA_COMPACTION_RESERVED"),
+    compactionPrune: optionalEnv(env, provider, "RIKA_COMPACTION_PRUNE", EnvConfig.boolean("RIKA_COMPACTION_PRUNE")),
+    compactionPruneProtect: optionalNonNegativeInteger(env, provider, "RIKA_COMPACTION_PRUNE_PROTECT"),
+    compactionPruneMinimum: optionalNonNegativeInteger(env, provider, "RIKA_COMPACTION_PRUNE_MINIMUM"),
+    memoryAutoContext: optionalEnv(
+      env,
+      provider,
+      "RIKA_MEMORY_AUTO_CONTEXT",
+      EnvConfig.boolean("RIKA_MEMORY_AUTO_CONTEXT"),
+    ),
+    telemetryEnabled: optionalEnv(env, provider, "RIKA_TELEMETRY", EnvConfig.boolean("RIKA_TELEMETRY")),
+    telemetryEndpoint: optionalString(env, provider, "RIKA_TELEMETRY_ENDPOINT"),
+  })
+}
+
+const optionalEnv = <A>(
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+  config: EffectConfig.Config<A>,
+) => EnvConfig.optional(provider, config).pipe(Effect.mapError(() => invalidEnvSetting(env, key)))
+
+const optionalString = (
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+) => optionalEnv(env, provider, key, EnvConfig.string(key)).pipe(Effect.map(validString))
+
+const optionalPositiveInteger = (
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+) =>
+  EnvConfig.optionalDecimalInteger(provider, key, { minimum: 1 }).pipe(
+    Effect.mapError(() => invalidEnvSetting(env, key)),
+  )
+
+const optionalNonNegativeInteger = (
+  env: Record<string, string | undefined>,
+  provider: ConfigProvider.ConfigProvider,
+  key: string,
+) => EnvConfig.optionalDecimalInteger(provider, key).pipe(Effect.mapError(() => invalidEnvSetting(env, key)))
+
+const invalidEnvSetting = (env: Record<string, string | undefined>, key: string) =>
+  new SettingsError({ message: `Invalid ${key} ${env[key] ?? ""}`, key })
+
+const resolvedOption = <A>(source: SettingSource, value: A | undefined): Option.Option<ResolvedValue<A>> =>
+  value === undefined ? Option.none() : Option.some({ value, source })
+
+const resolvePrecedence = <A>(
+  env: A | undefined,
+  workspace: A | undefined,
+  user: A | undefined,
+  fallback: ResolvedValue<A>,
+): ResolvedValue<A> =>
+  Option.getOrElse(
+    Option.firstSomeOf([
+      resolvedOption("env", env),
+      resolvedOption("workspace", workspace),
+      resolvedOption("user", user),
+    ]),
+    () => fallback,
+  )
 
 const resolveString = (
   key: SettingKey,
   envValue: string | undefined,
   loaded: LoadedSettings,
   fallback: string,
-): ResolvedValue<string> => {
-  const envString = validString(envValue)
-  if (envString !== undefined) return { value: envString, source: "env" }
-  const workspace = validString(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validString(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<string> =>
+  resolvePrecedence(validString(envValue), validString(loaded.workspace[key]), validString(loaded.user[key]), {
+    value: fallback,
+    source: "default",
+  })
 
 const resolveOptionalString = (
   key: SettingKey,
   envValue: string | undefined,
   loaded: LoadedSettings,
-): ResolvedValue<string | undefined> => {
-  const envString = validString(envValue)
-  if (envString !== undefined) return { value: envString, source: "env" }
-  const workspace = validString(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validString(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: undefined, source: "default" }
-}
+): ResolvedValue<string | undefined> =>
+  resolvePrecedence(validString(envValue), validString(loaded.workspace[key]), validString(loaded.user[key]), {
+    value: undefined,
+    source: "default",
+  })
 
 const resolveMode = (
   key: SettingKey,
-  envValue: string | undefined,
+  envValue: Mode | undefined,
   loaded: LoadedSettings,
   fallback: Mode,
-): ResolvedValue<Mode> => {
-  const envMode = validMode(envValue)
-  if (envMode !== undefined) return { value: envMode, source: "env" }
-  const workspace = validMode(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validMode(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<Mode> =>
+  resolvePrecedence(envValue, validMode(loaded.workspace[key]), validMode(loaded.user[key]), {
+    value: fallback,
+    source: "default",
+  })
 
 const resolvePositiveInteger = (
   key: SettingKey,
-  envValue: string | undefined,
+  envValue: number | undefined,
   loaded: LoadedSettings,
   fallback: number,
-): ResolvedValue<number> => {
-  const envNumber = validPositiveIntegerFromEnv(envValue)
-  if (envNumber !== undefined) return { value: envNumber, source: "env" }
-  const workspace = validPositiveIntegerSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validPositiveIntegerSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<number> =>
+  resolvePrecedence(
+    envValue,
+    validPositiveIntegerSetting(loaded.workspace[key]),
+    validPositiveIntegerSetting(loaded.user[key]),
+    {
+      value: fallback,
+      source: "default",
+    },
+  )
 
 const resolveNonNegativeIntegerOption = (
   key: SettingKey,
-  envValue: string | undefined,
+  envValue: number | undefined,
   loaded: LoadedSettings,
-): ResolvedValue<number | undefined> => {
-  const envNumber = validNonNegativeIntegerFromEnv(envValue)
-  if (envNumber !== undefined) return { value: envNumber, source: "env" }
-  const workspace = validNonNegativeIntegerSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validNonNegativeIntegerSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: undefined, source: "default" }
-}
+): ResolvedValue<number | undefined> =>
+  resolvePrecedence(
+    envValue,
+    validNonNegativeIntegerSetting(loaded.workspace[key]),
+    validNonNegativeIntegerSetting(loaded.user[key]),
+    {
+      value: undefined,
+      source: "default",
+    },
+  )
 
 const resolveBooleanOption = (
   key: SettingKey,
-  envValue: string | undefined,
+  envValue: boolean | undefined,
   loaded: LoadedSettings,
-): ResolvedValue<boolean | undefined> => {
-  const envBoolean = validStrictBooleanFromEnv(envValue)
-  if (envBoolean !== undefined) return { value: envBoolean, source: "env" }
-  const workspace = validBooleanSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validBooleanSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: undefined, source: "default" }
-}
+): ResolvedValue<boolean | undefined> =>
+  resolvePrecedence(envValue, validBooleanSetting(loaded.workspace[key]), validBooleanSetting(loaded.user[key]), {
+    value: undefined,
+    source: "default",
+  })
 
 const resolveBoolean = (
   key: SettingKey,
-  envValue: string | undefined,
+  envValue: boolean | undefined,
   loaded: LoadedSettings,
   fallback: boolean,
-): ResolvedValue<boolean> => {
-  const envBoolean = validStrictBooleanFromEnv(envValue)
-  if (envBoolean !== undefined) return { value: envBoolean, source: "env" }
-  const workspace = validBooleanSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validBooleanSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
+): ResolvedValue<boolean> =>
+  resolvePrecedence(envValue, validBooleanSetting(loaded.workspace[key]), validBooleanSetting(loaded.user[key]), {
+    value: fallback,
+    source: "default",
+  })
 
-const resolveTelemetryBoolean = (
-  key: SettingKey,
-  envValue: string | undefined,
-  loaded: LoadedSettings,
-  fallback: boolean,
-): ResolvedValue<boolean> => {
-  const envBoolean = validToggleFromEnv(envValue)
-  if (envBoolean !== undefined) return { value: envBoolean, source: "env" }
-  const workspace = validBooleanSetting(loaded.workspace[key])
-  if (workspace !== undefined) return { value: workspace, source: "workspace" }
-  const user = validBooleanSetting(loaded.user[key])
-  if (user !== undefined) return { value: user, source: "user" }
-  return { value: fallback, source: "default" }
-}
-
-type ValidationResult =
-  | { readonly valid: true; readonly value: unknown }
-  | { readonly valid: false; readonly message: string }
-
-const validateSettingValue = (key: SettingKey, value: unknown): ValidationResult => {
+const validateSettingValue = (key: SettingKey, value: unknown): Result.Result<unknown, string> => {
   if (key === "orb.template" || key === "project.default" || key === "user.name" || key === "telemetry.endpoint") {
     const string = validString(value)
-    return string === undefined
-      ? { valid: false, message: `Setting ${key} must be a non-empty string.` }
-      : { valid: true, value: string }
+    return string === undefined ? Result.fail(`Setting ${key} must be a non-empty string.`) : Result.succeed(string)
   }
   if (key === "orb.idleTimeoutSeconds") {
     const integer = validPositiveIntegerSetting(value)
-    return integer === undefined
-      ? { valid: false, message: `Setting ${key} must be a positive integer.` }
-      : { valid: true, value: integer }
+    return integer === undefined ? Result.fail(`Setting ${key} must be a positive integer.`) : Result.succeed(integer)
   }
   if (key === "mode.default") {
     const mode = validMode(value)
-    return mode === undefined
-      ? { valid: false, message: `Setting ${key} must be one of ${modes.join(", ")}.` }
-      : { valid: true, value: mode }
+    return mode === undefined ? Result.fail(`Setting ${key} must be one of ${modes.join(", ")}.`) : Result.succeed(mode)
   }
   if (
     key === "compaction.auto" ||
@@ -521,14 +593,10 @@ const validateSettingValue = (key: SettingKey, value: unknown): ValidationResult
     key === "telemetry.enabled"
   ) {
     const boolean = validBooleanSetting(value)
-    return boolean === undefined
-      ? { valid: false, message: `Setting ${key} must be a boolean.` }
-      : { valid: true, value: boolean }
+    return boolean === undefined ? Result.fail(`Setting ${key} must be a boolean.`) : Result.succeed(boolean)
   }
   const integer = validNonNegativeIntegerSetting(value)
-  return integer === undefined
-    ? { valid: false, message: `Setting ${key} must be a non-negative integer.` }
-    : { valid: true, value: integer }
+  return integer === undefined ? Result.fail(`Setting ${key} must be a non-negative integer.`) : Result.succeed(integer)
 }
 
 const validateKeymap = (
@@ -617,53 +685,11 @@ const validMode = (value: unknown): Mode | undefined => {
 
 const validBooleanSetting = (value: unknown) => (typeof value === "boolean" ? value : undefined)
 
-const validStrictBooleanFromEnv = (value: string | undefined) => {
-  if (value === "true") return true
-  if (value === "false") return false
-  return undefined
-}
-
-const validToggleFromEnv = (value: string | undefined) => {
-  if (value === undefined) return undefined
-  const normalized = value.trim().toLowerCase()
-  if (
-    normalized === "1" ||
-    normalized === "true" ||
-    normalized === "on" ||
-    normalized === "enabled" ||
-    normalized === "yes"
-  ) {
-    return true
-  }
-  if (
-    normalized === "0" ||
-    normalized === "false" ||
-    normalized === "off" ||
-    normalized === "disabled" ||
-    normalized === "no"
-  ) {
-    return false
-  }
-  return undefined
-}
-
 const validPositiveIntegerSetting = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
 
 const validNonNegativeIntegerSetting = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
-
-const validPositiveIntegerFromEnv = (value: string | undefined) => {
-  if (value === undefined || !/^\d+$/.test(value)) return undefined
-  const parsed = Number(value)
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
-}
-
-const validNonNegativeIntegerFromEnv = (value: string | undefined) => {
-  if (value === undefined || !/^\d+$/.test(value)) return undefined
-  const parsed = Number(value)
-  return Number.isSafeInteger(parsed) ? parsed : undefined
-}
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value)

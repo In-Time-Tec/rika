@@ -1,6 +1,8 @@
+import { readFile, realpath, stat } from "node:fs/promises"
+import { extname, isAbsolute, relative, resolve, sep } from "node:path"
 import { ToolRegistry } from "@rika/agent"
 import { Config, IdGenerator, Time } from "@rika/core"
-import { Router } from "@rika/llm"
+import { Provider, Retry, Router } from "@rika/llm"
 import { ArtifactStore } from "@rika/persistence"
 import { Artifact, Common, Ids } from "@rika/schema"
 import type { Call } from "@rika/schema/tool"
@@ -8,6 +10,7 @@ import { Context, Effect, Layer, Option, Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
 
 const defaultMaxOutputChars = 24_000
+const maxPainterReferenceImageBytes = 8_000_000
 
 export interface OracleInput extends Schema.Schema.Type<typeof OracleInput> {}
 export const OracleInput = Schema.Struct({
@@ -298,14 +301,12 @@ const modelRoutedBackend = (router: Router.Interface, workspaceRoot: string): Ba
     return { ...result.value, model: result.value.model ?? result.raw.model }
   }),
   painter: Effect.fn("SpecialtyTools.backend.painter")(function* (input: PainterInput) {
+    const userMessage = yield* painterUserMessage(input, workspaceRoot)
     const result = yield* router
       .completeStructured({
         mode: "smart",
         schema: PainterDraft,
-        messages: [
-          { role: "system", content: painterSystemPrompt },
-          { role: "user", content: painterUserPrompt(input) },
-        ],
+        messages: [{ role: "system", content: painterSystemPrompt }, userMessage],
         metadata: { specialty_tool: "painter" },
       })
       .pipe(Effect.mapError((error) => fromExternalError(error, "painter")))
@@ -497,7 +498,7 @@ const fromExternalError = (cause: unknown, operation: string) =>
   new SpecialtyToolsError({
     message: cause instanceof Error ? cause.message : String(cause),
     operation,
-    retryable: false,
+    retryable: Retry.isTransient(cause),
   })
 
 const jsonValue = (value: unknown) => {
@@ -552,6 +553,21 @@ const librarianUserPrompt = (input: LibrarianInput) =>
     .filter((line): line is string => line !== undefined)
     .join("\n\n")
 
+const painterUserMessage = (
+  input: PainterInput,
+  workspaceRoot: string,
+): Effect.Effect<Provider.Message, SpecialtyToolsError> =>
+  Effect.gen(function* () {
+    const images = yield* Effect.forEach(
+      input.input_image_paths ?? [],
+      (path) => painterReferenceImage(workspaceRoot, path),
+      { concurrency: 4 },
+    )
+    const text = painterUserPrompt(input)
+    if (images.length === 0) return { role: "user", content: text }
+    return { role: "user", content: [{ type: "text", text }, ...images] }
+  })
+
 const painterUserPrompt = (input: PainterInput) =>
   [
     `Prompt:\n${input.prompt}`,
@@ -562,3 +578,116 @@ const painterUserPrompt = (input: PainterInput) =>
   ]
     .filter((line): line is string => line !== undefined)
     .join("\n\n")
+
+const painterReferenceImage = (
+  workspaceRoot: string,
+  inputPath: string,
+): Effect.Effect<Provider.FileContent, SpecialtyToolsError> =>
+  Effect.gen(function* () {
+    const resolved = yield* resolveWorkspacePath(workspaceRoot, inputPath, "painterReferenceImage")
+    const mediaType = yield* imageMediaType(resolved.filename, inputPath)
+    const fileStat = yield* Effect.tryPromise({
+      try: () => stat(resolved.path),
+      catch: (cause) =>
+        new SpecialtyToolsError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          operation: "painterReferenceImage",
+          retryable: false,
+        }),
+    })
+    if (!fileStat.isFile()) {
+      return yield* new SpecialtyToolsError({
+        message: `Painter reference image is not a file: ${inputPath}`,
+        operation: "painterReferenceImage",
+        retryable: false,
+      })
+    }
+    if (fileStat.size > maxPainterReferenceImageBytes) {
+      return yield* new SpecialtyToolsError({
+        message: `Painter reference image exceeds ${maxPainterReferenceImageBytes} bytes: ${inputPath}`,
+        operation: "painterReferenceImage",
+        retryable: false,
+      })
+    }
+    const bytes = yield* Effect.tryPromise({
+      try: () => readFile(resolved.path),
+      catch: (cause) =>
+        new SpecialtyToolsError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          operation: "painterReferenceImage",
+          retryable: false,
+        }),
+    })
+    return {
+      type: "file",
+      media_type: mediaType,
+      data: bytes.toString("base64"),
+      filename: resolved.filename,
+    }
+  })
+
+const resolveWorkspacePath = (workspaceRoot: string, inputPath: string, operation: string) =>
+  Effect.gen(function* () {
+    const lexicalPath = yield* Effect.try({
+      try: () => {
+        const clean = inputPath.trim().replace(/^@/, "")
+        if (clean.length === 0) throw new Error("input_image_paths entries must be non-empty")
+        const path = isAbsolute(clean) ? resolve(clean) : resolve(workspaceRoot, clean)
+        if (isOutside(workspaceRoot, path)) throw new Error(`Path is outside the workspace: ${inputPath}`)
+        return path
+      },
+      catch: (cause) =>
+        new SpecialtyToolsError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          operation,
+          retryable: false,
+        }),
+    })
+    const real = yield* Effect.tryPromise({
+      try: async () => ({ root: await realpath(workspaceRoot), path: await realpath(lexicalPath) }),
+      catch: (cause) =>
+        new SpecialtyToolsError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          operation,
+          retryable: false,
+        }),
+    })
+    if (isOutside(real.root, real.path)) {
+      return yield* new SpecialtyToolsError({
+        message: `Path is outside the workspace: ${inputPath}`,
+        operation,
+        retryable: false,
+      })
+    }
+    return {
+      path: real.path,
+      filename: slashPath(relative(workspaceRoot, lexicalPath)),
+    }
+  })
+
+const imageMediaType = (path: string, inputPath: string) => {
+  const mediaType = imageMediaTypes[extname(path).toLowerCase()]
+  if (mediaType !== undefined) return Effect.succeed(mediaType)
+  return new SpecialtyToolsError({
+    message: `Unsupported painter reference image type: ${inputPath}`,
+    operation: "painterReferenceImage",
+    retryable: false,
+  })
+}
+
+const imageMediaTypes: Readonly<Record<string, string>> = {
+  ".bmp": "image/bmp",
+  ".gif": "image/gif",
+  ".jpeg": "image/jpeg",
+  ".jpg": "image/jpeg",
+  ".png": "image/png",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+}
+
+const isOutside = (workspaceRoot: string, path: string) => {
+  const rel = relative(workspaceRoot, resolve(path))
+  return rel !== "" && (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel))
+}
+
+const slashPath = (path: string) => path.split(sep).join("/")

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { ThreadService, TournamentService } from "@rika/agent"
-import { Config, IdGenerator, Time } from "@rika/core"
+import { Config, Diagnostics, IdGenerator, SecretRedactor, Time } from "@rika/core"
 import { Embeddings } from "@rika/llm"
 import { Database, Migration, OrbStore, ThreadEventLog, ThreadMemoryStore, ThreadProjection } from "@rika/persistence"
 import { Client } from "@rika/sdk"
@@ -28,22 +28,28 @@ const makeLayer = (
   embeddingsLayer: Layer.Layer<Embeddings.Service> = vectorEmbeddingsLayer([1, 0]),
 ) => {
   const databaseLayer = Database.memoryLayer
+  const redactorLayer = SecretRedactor.layer
+  const diagnosticsLayer = Diagnostics.memoryLayer([]).pipe(Layer.provideMerge(redactorLayer))
   const baseServices = Layer.mergeAll(
     configLayer,
     Output.memoryLayer(output),
     databaseLayer,
     Migration.layer,
-    ThreadEventLog.layer,
+    redactorLayer,
+    ThreadEventLog.layer.pipe(Layer.provideMerge(redactorLayer)),
     ThreadMemoryStore.layer.pipe(Layer.provideMerge(databaseLayer)),
     ThreadProjection.layer,
     Time.fixedLayer(now),
     IdGenerator.sequenceLayer(1),
+    diagnosticsLayer,
   )
   const orbStoreLayer = OrbStore.layer.pipe(Layer.provideMerge(baseServices))
   const services = Layer.mergeAll(baseServices, orbStoreLayer)
 
   return Threads.layer
-    .pipe(Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(services))))
+    .pipe(
+      Layer.provideMerge(ThreadService.layer.pipe(Layer.provideMerge(services), Layer.provideMerge(diagnosticsLayer))),
+    )
     .pipe(
       Layer.provideMerge(Input.memoryLayer(stdin, false)),
       Layer.provideMerge(tournamentLayer),
@@ -205,6 +211,26 @@ describe("CLI thread commands", () => {
     expect(summary).toMatchObject({ thread_id: threadId, visibility: "unlisted" })
   })
 
+  test("rebuilds thread projections from the event log", async () => {
+    const output: Output.MemoryOutput = { stdout: [], stderr: [] }
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* Migration.migrate()
+        yield* ThreadEventLog.append(threadCreated())
+        yield* ThreadEventLog.append(messageAdded())
+        const before = yield* ThreadProjection.getThread(threadId)
+        const exitCode = yield* Threads.executeCommand({ type: "threads", action: "rebuild-projection" })
+        const after = yield* ThreadProjection.getThread(threadId)
+        return { before, exitCode, after }
+      }).pipe(Effect.provide(makeLayer(output))),
+    )
+
+    expect(result.before).toBeUndefined()
+    expect(result.exitCode).toBe(0)
+    expect(JSON.parse(output.stdout[0] ?? "{}")).toEqual({ rebuilt: true })
+    expect(result.after?.latest_message_text).toBe("CLI thread command search body")
+  })
+
   test("prints a forked local thread id as JSON", async () => {
     const output: Output.MemoryOutput = { stdout: [], stderr: [] }
     const result = await Effect.runPromise(
@@ -307,16 +333,14 @@ describe("CLI thread commands", () => {
 const seedThread = () =>
   Effect.gen(function* () {
     yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
-    const appended = yield* ThreadEventLog.append(messageAdded())
-    yield* ThreadProjection.apply(appended)
+    yield* ThreadEventLog.appendAndProject(messageAdded())
   })
 
 const seedThreadWithContextUsage = () =>
   Effect.gen(function* () {
     yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
     for (const event of [modelChunk(), turnCompletedWithUsage()]) {
-      const appended = yield* ThreadEventLog.append(event)
-      yield* ThreadProjection.apply(appended)
+      yield* ThreadEventLog.appendAndProject(event)
     }
   })
 
@@ -331,8 +355,7 @@ const seedForkableThread = () =>
   Effect.gen(function* () {
     yield* ThreadService.create({ thread_id: threadId, workspace_id: workspaceId })
     for (const event of [forkTurnStarted(), forkMessageAdded(), forkTurnCompleted()]) {
-      const appended = yield* ThreadEventLog.append(event)
-      yield* ThreadProjection.apply(appended)
+      yield* ThreadEventLog.appendAndProject(event)
     }
   })
 
@@ -517,6 +540,16 @@ const tournamentResult = (input: TournamentService.RunInput): TournamentService.
 
 const unexpectedClientCall = () =>
   Effect.fail(new Client.SdkError({ message: "Unexpected SDK call", operation: "test" }))
+
+const threadCreated = (): Event.ThreadCreated => ({
+  id: Ids.EventId.make("thread_cli_threads_created"),
+  thread_id: threadId,
+  sequence: 1,
+  version: 1,
+  created_at: now,
+  type: "thread.created",
+  data: { workspace_id: workspaceId },
+})
 
 const modelChunk = (): Event.ModelStreamChunk => ({
   id: Ids.EventId.make("thread_cli_threads_model_chunk"),

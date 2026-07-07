@@ -99,7 +99,7 @@ export const navigationRequests = Effect.fn("IdeBridge.navigationRequests.call")
 
 export const contextEntries = (context: Ide.ContextSnapshot): ReadonlyArray<Event.ContextEntry> => {
   const entries: Array<Event.ContextEntry> = []
-  if (context.active_file !== undefined) entries.push(activeFileEntry(context))
+  if (context.active_file !== undefined) entries.push(activeFileEntry(context, context.active_file))
   const diagnostics = context.diagnostics ?? []
   if (diagnostics.length > 0) entries.push(diagnosticsEntry(context.workspace_roots, diagnostics))
   return entries
@@ -198,27 +198,15 @@ const toStatus = (state: State): Ide.Status => {
   }
 }
 
-const activeFileEntry = (context: Ide.ContextSnapshot): Event.ContextEntry => {
-  const activeFile = context.active_file
-  if (activeFile === undefined) {
-    return {
-      kind: "file",
-      source: "ide:active-file",
-      reason: "IDE active file context",
-      trusted: false,
-      metadata: { workspace_roots: context.workspace_roots },
-    }
-  }
-  return {
-    kind: "file",
-    source: "ide:active-file",
-    reason: "IDE active file and selection",
-    trusted: false,
-    path: activeFile.path,
-    content: activeFileContent(activeFile),
-    metadata: activeFileMetadata(context),
-  }
-}
+const activeFileEntry = (context: Ide.ContextSnapshot, activeFile: Ide.ActiveFile): Event.ContextEntry => ({
+  kind: "file",
+  source: "ide:active-file",
+  reason: "IDE active file and selection",
+  trusted: false,
+  path: activeFile.path,
+  content: activeFileContent(activeFile),
+  metadata: activeFileMetadata(context, activeFile),
+})
 
 const activeFileContent = (activeFile: Ide.ActiveFile) => {
   const lines: Array<string> = [`Active file: ${activeFile.path}`]
@@ -230,12 +218,11 @@ const activeFileContent = (activeFile: Ide.ActiveFile) => {
   return lines.join("\n")
 }
 
-const activeFileMetadata = (context: Ide.ContextSnapshot) => {
-  const activeFile = context.active_file
+const activeFileMetadata = (context: Ide.ContextSnapshot, activeFile: Ide.ActiveFile) => {
   return {
     workspace_roots: context.workspace_roots,
-    ...(activeFile?.language_id === undefined ? {} : { language_id: activeFile.language_id }),
-    ...(activeFile?.selection === undefined
+    ...(activeFile.language_id === undefined ? {} : { language_id: activeFile.language_id }),
+    ...(activeFile.selection === undefined
       ? {}
       : {
           selection: {

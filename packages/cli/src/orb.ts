@@ -1,3 +1,4 @@
+import { WorkspaceIdentity } from "@rika/agent"
 import { IdGenerator, Time } from "@rika/core"
 import { OrbManager, SandboxClient } from "@rika/orb"
 import { ArtifactStore, OrbStore } from "@rika/persistence"
@@ -73,7 +74,9 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
           }
           return yield* Effect.fail(flushResult.failure)
         }
-        const changes = yield* clientFactory(endpoint.endpoint_url, endpoint.token).orbChanges()
+        const changes = yield* clientFactory(endpoint.endpoint_url, endpoint.token)
+          .orbChanges()
+          .pipe(Effect.catch((error) => Effect.fail(new OrbError({ message: failureMessage(error), exit_code: 1 }))))
         return { status: "available", changes } as const
       })
 
@@ -86,6 +89,7 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
         yield* artifacts.put({
           id: artifactId,
           thread_id: orb.thread_id,
+          workspace_id: WorkspaceIdentity.resolveWorkspaceId({ project_id: orb.project_id }),
           kind: "orb-final-diff",
           title: "Orb final diff",
           content: changes,
@@ -95,16 +99,29 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
       })
 
       const bestEffortFinalDiff = Effect.fn("Cli.Orb.bestEffortFinalDiff")(function* (orb: Orb.OrbRecord) {
-        const result = yield* readFinalDiff(orb)
-        if (result.status === "unavailable") {
-          yield* output.stderr(`warning: skipped final orb diff for ${orb.thread_id}: ${result.reason}`)
+        const result = yield* Effect.result(readFinalDiff(orb))
+        if (result._tag === "Failure") {
+          yield* output.stderr(
+            `warning: skipped final orb diff for ${orb.thread_id}: ${failureMessage(result.failure)}`,
+          )
           return undefined
         }
-        yield* storeFinalDiff(orb, result.changes)
+        if (result.success.status === "unavailable") {
+          yield* output.stderr(`warning: skipped final orb diff for ${orb.thread_id}: ${result.success.reason}`)
+          return undefined
+        }
+        const stored = yield* Effect.result(storeFinalDiff(orb, result.success.changes))
+        if (stored._tag === "Failure") {
+          yield* output.stderr(
+            `warning: skipped final orb diff for ${orb.thread_id}: ${failureMessage(stored.failure)}`,
+          )
+        }
         return undefined
       })
 
-      const markKilled = Effect.fn("Cli.Orb.markKilled")(function* (record: Orb.OrbRecord) {
+      const markKilled = Effect.fn("Cli.Orb.markKilled")(function* (record: Orb.OrbRecord, force: boolean) {
+        if (force) return yield* orbManager.forceKill(record.orb_id)
+        if (record.status === "provisioning") return yield* orbManager.kill(record.orb_id)
         if (record.sandbox_id === null) {
           yield* output.stderr(`warning: orb ${record.orb_id} has no sandbox; marking orb killed locally`)
           return yield* orbs.setStatus(record.orb_id, "killed")
@@ -176,7 +193,7 @@ export const layerWithClientFactory = (clientFactory: ClientFactory) =>
                 }
               }
               yield* bestEffortFinalDiff(orb)
-              yield* markKilled(orb)
+              yield* markKilled(orb, command.force === true)
               return 0
             }
             case "shell": {

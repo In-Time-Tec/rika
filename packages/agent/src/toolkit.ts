@@ -1,9 +1,6 @@
 import { Provider } from "@rika/llm"
-import { Common, Ids } from "@rika/schema"
-import type { Call, Result } from "@rika/schema/tool"
-import { Context, Effect, Layer, Option, Schema } from "effect"
-import type { Tool } from "effect/unstable/ai"
-import { Toolkit } from "effect/unstable/ai"
+import { Context, Effect, Layer } from "effect"
+import { AiError, Toolkit, type Tool } from "effect/unstable/ai"
 import * as ToolAccess from "./tool-access"
 import * as ToolExecutor from "./tool-executor"
 import * as ToolRegistry from "./tool-registry"
@@ -32,11 +29,7 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const definitions = input?.definitions ?? []
           const tools = yield* toolExecutor.toolsWithDefinitions(definitions)
-          return prepare(
-            ToolAccess.filterTools(tools, input?.tool_access),
-            (call) => toolExecutor.executeWithDefinitions(call, definitions),
-            ToolAccess.metadata(input?.tool_access),
-          )
+          return prepare(ToolAccess.filterTools(tools, input?.tool_access))
         }),
     })
   }),
@@ -50,31 +43,23 @@ export const layerFromPrepared = (prepared: Prepared) =>
     }),
   )
 
-export const prepare = (
-  tools: ReadonlyArray<Tool.Any>,
-  execute: (call: Call) => Effect.Effect<Result>,
-  metadata: Common.Metadata = {},
-): Prepared => {
+export const prepare = (tools: ReadonlyArray<Tool.Any>): Prepared => {
   const toolkit = Toolkit.make(...tools)
-  const handlers = toolkit.of(
-    Object.fromEntries(
-      tools.map((tool) => [
-        tool.name,
-        (input: unknown) =>
-          execute({
-            id: Ids.ToolCallId.make("toolkit"),
-            name: tool.name,
-            input: inputJson(input),
-            ...(Object.keys(metadata).length === 0 ? {} : { metadata }),
+  return {
+    toolkit: {
+      tools: toolkit.tools,
+      handle: (name) =>
+        Effect.fail(
+          AiError.make({
+            module: "Rika.Toolkit",
+            method: "handle",
+            reason: new AiError.ToolConfigurationError({
+              toolName: String(name),
+              description:
+                "Rika resolves model tool calls manually through ToolExecutor after provider tool.call stream events.",
+            }),
           }),
-      ]),
-    ),
-  )
-  return { toolkit: Effect.provide(toolkit, toolkit.toLayer(handlers)) }
-}
-
-const inputJson = (input: unknown): Common.JsonValue => {
-  const decoded = Schema.decodeUnknownOption(Common.JsonValue)(input)
-  if (Option.isSome(decoded)) return decoded.value
-  return {}
+        ),
+    },
+  }
 }

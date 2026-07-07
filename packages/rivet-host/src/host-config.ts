@@ -1,5 +1,6 @@
+import { EnvConfig } from "@rika/core"
 import type { Client, Registry } from "@rivetkit/effect"
-import { Context, Effect, Layer, Option, Schema } from "effect"
+import { Config as EffectConfig, ConfigProvider, Context, Effect, Layer, Option, Schema } from "effect"
 
 export const HostMode = Schema.Literals(["local", "remote"]).annotate({
   identifier: "Rika.RivetHost.HostConfig.HostMode",
@@ -48,7 +49,7 @@ export const layerFromEnv = (env: Record<string, string | undefined> = process.e
     }),
   )
 
-export const layer = layerFromEnv()
+export const layer = Layer.suspend(() => layerFromEnv())
 
 export const resolve = Effect.fn("HostConfig.resolve.call")(function* () {
   const service = yield* Service
@@ -59,7 +60,8 @@ export const resolveOptions = Effect.fn("HostConfig.resolveOptions")(function* (
   options: ResolveOptions = {},
   env: Record<string, string | undefined> = process.env,
 ) {
-  const mode = yield* parseMode(options.mode ?? env.RIKA_RIVET_HOST ?? "local")
+  const provider = EnvConfig.providerFromEnv(env, { booleanKeys: ["RIKA_RIVET_NO_WELCOME"] })
+  const mode = options.mode ?? (yield* parseModeFromEnv(env, provider))
   const configuredEndpoint = options.endpoint ?? env.RIKA_RIVET_ENDPOINT ?? env.RIVET_ENDPOINT
   if (mode === "remote" && configuredEndpoint === undefined) {
     return yield* new HostConfigError({
@@ -71,12 +73,13 @@ export const resolveOptions = Effect.fn("HostConfig.resolveOptions")(function* (
   const token = optionString(options.token ?? env.RIKA_RIVET_TOKEN ?? env.RIVET_TOKEN)
   const namespace = optionString(options.namespace ?? env.RIKA_RIVET_NAMESPACE ?? env.RIVET_NAMESPACE)
   const runnerVersion = optionString(options.runnerVersion ?? env.RIVET_RUNNER_VERSION)
+  const noWelcome = options.noWelcome ?? (yield* noWelcomeFromEnv(provider))
   return {
     mode,
     endpoint,
     ...(Option.isNone(token) ? {} : { token: token.value }),
     ...(Option.isNone(namespace) ? {} : { namespace: namespace.value }),
-    no_welcome: options.noWelcome ?? env.RIKA_RIVET_NO_WELCOME !== "0",
+    no_welcome: noWelcome,
     ...(Option.isNone(runnerVersion) ? {} : { runner_version: runnerVersion.value }),
   }
 })
@@ -94,11 +97,31 @@ export const toClientOptions = (host: Resolved): Client.Options => ({
   ...(host.namespace === undefined ? {} : { namespace: host.namespace }),
 })
 
-const parseMode = (value: string): Effect.Effect<HostMode, HostConfigError> => {
-  const decoded = Schema.decodeUnknownOption(HostMode)(value)
-  if (Option.isSome(decoded)) return Effect.succeed(decoded.value)
-  return new HostConfigError({ message: `Invalid RIKA_RIVET_HOST ${value}`, key: "RIKA_RIVET_HOST" })
-}
+const parseModeFromEnv = (env: Record<string, string | undefined>, provider: ConfigProvider.ConfigProvider) =>
+  EffectConfig.literals(["local", "remote"], "RIKA_RIVET_HOST")
+    .pipe(EffectConfig.withDefault("local"))
+    .parse(provider)
+    .pipe(
+      Effect.mapError(
+        () =>
+          new HostConfigError({
+            message: `Invalid RIKA_RIVET_HOST ${env.RIKA_RIVET_HOST ?? ""}`,
+            key: "RIKA_RIVET_HOST",
+          }),
+      ),
+    )
+
+const noWelcomeFromEnv = (provider: ConfigProvider.ConfigProvider) =>
+  EnvConfig.optional(provider, EnvConfig.boolean("RIKA_RIVET_NO_WELCOME")).pipe(
+    Effect.map((value) => value ?? true),
+    Effect.mapError(
+      () =>
+        new HostConfigError({
+          message: "Invalid RIKA_RIVET_NO_WELCOME",
+          key: "RIKA_RIVET_NO_WELCOME",
+        }),
+    ),
+  )
 
 const optionString = (value: string | undefined) =>
   value === undefined || value.length === 0 ? Option.none<string>() : Option.some(value)

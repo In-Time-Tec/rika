@@ -1,3 +1,4 @@
+import { Diagnostics } from "@rika/core"
 import { Context, Effect, Layer, Schema } from "effect"
 
 export class OrbPtyError extends Schema.TaggedErrorClass<OrbPtyError>()("OrbPtyError", {
@@ -15,6 +16,14 @@ export const OpenInput = Schema.Struct({
 
 export interface OpenOptions extends OpenInput {
   readonly onData: (bytes: Uint8Array) => Effect.Effect<void>
+  readonly onExit: (exit: PtyExit) => Effect.Effect<void>
+}
+
+export interface PtyExit {
+  readonly source: "process" | "terminal"
+  readonly exit_code: number | null
+  readonly signal: string | null
+  readonly error?: string
 }
 
 export interface Session {
@@ -30,6 +39,7 @@ export interface SystemOpenInput {
   readonly cols: number
   readonly rows: number
   readonly onData: (bytes: Uint8Array) => Effect.Effect<void>
+  readonly onExit: (exit: PtyExit) => Effect.Effect<void>
 }
 
 export interface SystemInterface {
@@ -60,56 +70,102 @@ const serviceLayerFromEnv = (env: Record<string, string | undefined>) =>
             cols: input.cols,
             rows: input.rows,
             onData: input.onData,
+            onExit: input.onExit,
           }),
         ),
       })
     }),
   )
 
-export const systemLayer = Layer.succeed(
+export const systemLayer = Layer.effect(
   System,
-  System.of({
-    open: Effect.fn("OrbPty.System.open")(function* (input: SystemOpenInput) {
-      return yield* Effect.try({
-        try: () => {
-          const subprocess = Bun.spawn([...input.command], {
-            cwd: input.cwd,
-            env: input.env,
-            terminal: {
-              cols: input.cols,
-              rows: input.rows,
-              name: "xterm-256color",
-              data: (_terminal, data) => {
-                void Effect.runPromise(input.onData(data))
+  Effect.gen(function* () {
+    const diagnostics = yield* Diagnostics.Service
+    return System.of({
+      open: Effect.fn("OrbPty.System.open")(function* (input: SystemOpenInput) {
+        return yield* Effect.try({
+          try: () => {
+            const notifyExit = (exit: PtyExit) => {
+              Effect.runFork(
+                Diagnostics.event("orb_pty.exit", () => input.onExit(exit), {
+                  workspace_root: input.cwd,
+                  source: exit.source,
+                  ...(exit.exit_code === null ? {} : { exit_code: exit.exit_code }),
+                  ...(exit.signal === null ? {} : { signal: exit.signal }),
+                  ...(exit.error === undefined ? {} : { error: exit.error }),
+                }).pipe(
+                  Effect.provideService(Diagnostics.Service, diagnostics),
+                  Effect.catchCause(() => Effect.void),
+                ),
+              )
+            }
+            const subprocess = Bun.spawn([...input.command], {
+              cwd: input.cwd,
+              env: input.env,
+              onExit: (_subprocess, exitCode, signalCode, error) => {
+                notifyExit({
+                  source: "process",
+                  exit_code: exitCode,
+                  signal: signalCode === null ? null : String(signalCode),
+                  ...(error === undefined ? {} : { error: error.message }),
+                })
               },
-            },
-          })
-          const terminal = subprocess.terminal
-          if (terminal === null || terminal === undefined) {
-            throw new Error("Bun did not attach a PTY terminal")
-          }
-          return {
-            write: Effect.fn("OrbPty.Session.write")((bytes: Uint8Array) =>
-              Effect.try({
-                try: () => terminal.write(bytes),
-                catch: toError("write", input.cwd),
-              }).pipe(Effect.asVoid),
-            ),
-            resize: Effect.fn("OrbPty.Session.resize")((cols: number, rows: number) =>
-              Effect.try({
-                try: () => terminal.resize(cols, rows),
-                catch: toError("resize", input.cwd),
-              }),
-            ),
-            close: Effect.try({
-              try: () => terminal.close(),
-              catch: toError("close", input.cwd),
-            }),
-          }
-        },
-        catch: toError("open", input.cwd),
-      })
-    }),
+              terminal: {
+                cols: input.cols,
+                rows: input.rows,
+                name: "xterm-256color",
+                data: (_terminal, data) => {
+                  Effect.runFork(input.onData(data).pipe(Effect.catchCause(() => Effect.void)))
+                },
+                exit: (_terminal, exitCode, signal) => {
+                  notifyExit({ source: "terminal", exit_code: exitCode, signal })
+                },
+              },
+            })
+            const terminal = subprocess.terminal
+            if (terminal === null || terminal === undefined) {
+              throw new Error("Bun did not attach a PTY terminal")
+            }
+            return {
+              write: Effect.fn("OrbPty.Session.write")((bytes: Uint8Array) =>
+                Effect.try({
+                  try: () => terminal.write(bytes),
+                  catch: toError("write", input.cwd),
+                }).pipe(
+                  Effect.flatMap((written) =>
+                    bytes.byteLength > 0 && written === 0
+                      ? Effect.fail(
+                          new OrbPtyError({
+                            message: "PTY terminal is closed",
+                            operation: "write",
+                            workspace_root: input.cwd,
+                          }),
+                        )
+                      : Effect.void,
+                  ),
+                ),
+              ),
+              resize: Effect.fn("OrbPty.Session.resize")((cols: number, rows: number) =>
+                Effect.try({
+                  try: () => terminal.resize(cols, rows),
+                  catch: toError("resize", input.cwd),
+                }),
+              ),
+              close: Diagnostics.event(
+                "orb_pty.close",
+                () =>
+                  Effect.try({
+                    try: () => terminal.close(),
+                    catch: toError("close", input.cwd),
+                  }),
+                { workspace_root: input.cwd },
+              ).pipe(Effect.provideService(Diagnostics.Service, diagnostics)),
+            }
+          },
+          catch: toError("open", input.cwd),
+        })
+      }),
+    })
   }),
 )
 

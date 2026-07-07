@@ -1,0 +1,26 @@
+id: no-comments-tsx
+language: Tsx
+severity: error
+message: No code comments — put rationale in AGENTS.md/CONTEXT.md/skills.
+rule:
+  kind: comment
+files:
+  - "packages/*/src/**/*.tsx"
+  - "packages/*/test/**/*.tsx"
+  - "apps/*/src/**/*.tsx"
+  - "apps/*/test/**/*.tsx"
+ignores:
+  - "node_modules/**"
+  - "**/node_modules/**"
+  - "dist/**"
+  - "**/dist/**"
+  - "build/**"
+  - "**/build/**"
+  - ".turbo/**"
+  - "**/.turbo/**"
+  - "coverage/**"
+  - "**/coverage/**"
+  - "vendor/**"
+  - "**/vendor/**"
+  - "vendored/**"
+  - "**/vendored/**"
