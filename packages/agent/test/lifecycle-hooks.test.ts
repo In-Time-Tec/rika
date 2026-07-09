@@ -138,17 +138,22 @@ describe("LifecycleHooks", () => {
   test("runSetup timeout gives a SIGTERM grace window before SIGKILL", async () => {
     const root = await tempRoot()
     const pidPath = join(root, "setup.pid")
-    const termPath = join(root, "term.marker")
+    const originalKill = process.kill.bind(process)
+    const signalCalls: Array<{ readonly pid: number; readonly signal: string | number | undefined }> = []
     let pid: number | undefined
     try {
-      const trapAction = `printf %s term > ${shellQuote(termPath)}`
+      const killSpy: typeof process.kill = (target, signal) => {
+        signalCalls.push({ pid: target, signal })
+        return originalKill(target, signal)
+      }
+      process.kill = killSpy
       await writeHook(
         root,
         "setup",
         [
           "#!/bin/sh",
           `printf %s $$ > ${shellQuote(pidPath)}`,
-          `trap ${shellQuote(trapAction)} TERM`,
+          "trap '' TERM",
           "index=0",
           'while [ "$index" -lt 600 ]; do index=$((index + 1)); sleep 0.05; done',
           "",
@@ -165,13 +170,19 @@ describe("LifecycleHooks", () => {
             )
             pid = Number(yield* Effect.promise(() => waitForText(pidPath)))
             yield* TestClock.adjust("1 second")
-            yield* Effect.promise(() => waitForText(termPath))
+            yield* Effect.yieldNow
+            yield* Effect.yieldNow
+            const termDuringGrace = hasProcessGroupSignal(signalCalls, pid, "SIGTERM")
+            const killDuringGrace = hasProcessGroupSignal(signalCalls, pid, "SIGKILL")
             const aliveDuringGrace = processAlive(pid)
             yield* TestClock.adjust("999 millis")
+            yield* Effect.yieldNow
             const aliveBeforeKill = processAlive(pid)
             yield* TestClock.adjust("1 millis")
+            yield* Effect.yieldNow
             const error = yield* Fiber.join(fiber)
-            return { aliveBeforeKill, aliveDuringGrace, error }
+            const killAfterGrace = hasProcessGroupSignal(signalCalls, pid, "SIGKILL")
+            return { aliveBeforeKill, aliveDuringGrace, error, killAfterGrace, killDuringGrace, termDuringGrace }
           }),
         ).pipe(
           Effect.provide(LifecycleHooks.layerWithOptions({ setupTimeout: "1 second" })),
@@ -185,8 +196,12 @@ describe("LifecycleHooks", () => {
       expect(result.error.message).toContain("timed out")
       expect(result.aliveDuringGrace).toBe(true)
       expect(result.aliveBeforeKill).toBe(true)
+      expect(result.termDuringGrace).toBe(true)
+      expect(result.killDuringGrace).toBe(false)
+      expect(result.killAfterGrace).toBe(true)
       expect(processAlive(pid)).toBe(false)
     } finally {
+      process.kill = originalKill
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
@@ -411,6 +426,12 @@ const processAlive = (pid: number | undefined) => {
     return false
   }
 }
+
+const hasProcessGroupSignal = (
+  calls: ReadonlyArray<{ readonly pid: number; readonly signal: string | number | undefined }>,
+  pid: number | undefined,
+  signal: string,
+) => pid !== undefined && calls.some((call) => call.pid === -pid && call.signal === signal)
 
 const killProcess = (pid: number | undefined) => {
   if (pid === undefined) return
