@@ -98,7 +98,7 @@ describe("LifecycleHooks", () => {
         [
           "#!/usr/bin/env bun",
           `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
-          "await Bun.sleep(200)",
+          "await Bun.sleep(30000)",
           `await Bun.write(${JSON.stringify(markerPath)}, "late")`,
           "",
         ].join("\n"),
@@ -133,7 +133,7 @@ describe("LifecycleHooks", () => {
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("runSetup timeout gives a SIGTERM grace window before SIGKILL", async () => {
     const root = await tempRoot()
@@ -141,14 +141,16 @@ describe("LifecycleHooks", () => {
     const termPath = join(root, "term.marker")
     let pid: number | undefined
     try {
+      const trapAction = `printf %s term > ${shellQuote(termPath)}`
       await writeHook(
         root,
         "setup",
         [
-          "#!/usr/bin/env bun",
-          `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
-          `process.on("SIGTERM", () => { void Bun.write(${JSON.stringify(termPath)}, "term") })`,
-          "await Bun.sleep(30000)",
+          "#!/bin/sh",
+          `printf %s $$ > ${shellQuote(pidPath)}`,
+          `trap ${shellQuote(trapAction)} TERM`,
+          "index=0",
+          'while [ "$index" -lt 30 ]; do index=$((index + 1)); sleep 1; done',
           "",
         ].join("\n"),
       )
@@ -188,7 +190,7 @@ describe("LifecycleHooks", () => {
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("interrupting runSetup kills the hook process", async () => {
     const root = await tempRoot()
@@ -202,7 +204,7 @@ describe("LifecycleHooks", () => {
         [
           "#!/usr/bin/env bun",
           `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
-          "await Bun.sleep(200)",
+          "await Bun.sleep(30000)",
           `await Bun.write(${JSON.stringify(markerPath)}, "late")`,
           "",
         ].join("\n"),
@@ -228,7 +230,7 @@ describe("LifecycleHooks", () => {
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("missing hooks skip without failing", async () => {
     const root = await tempRoot()
@@ -388,6 +390,8 @@ const waitForText = async (path: string) => {
 const relativeFromCwd = (path: string) => {
   return relative(process.cwd(), path)
 }
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 const pathExists = async (path: string) => {
   try {

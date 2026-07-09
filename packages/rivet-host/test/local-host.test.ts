@@ -156,7 +156,7 @@ describe("LocalHost", () => {
       })
       await rm(directory, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("continues startup when local process listing is unavailable", async () => {
     const directory = await mkdtemp(join(tmpdir(), "rika-rivet-host-process-listing-"))

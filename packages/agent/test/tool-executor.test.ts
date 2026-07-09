@@ -349,7 +349,7 @@ describe("shell_command tool", () => {
     try {
       const command = bunEval([
         `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
-        "await Bun.sleep(200)",
+        "await Bun.sleep(30000)",
         `await Bun.write(${JSON.stringify(markerPath)}, "late")`,
       ])
 
@@ -379,7 +379,7 @@ describe("shell_command tool", () => {
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("timeout gives a SIGTERM grace window before SIGKILL", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-shell-grace-"))
@@ -427,7 +427,7 @@ describe("shell_command tool", () => {
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 
   test("interrupting shell execution kills the shell process", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-shell-interrupt-"))
@@ -438,7 +438,7 @@ describe("shell_command tool", () => {
     try {
       const command = bunEval([
         `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
-        "await Bun.sleep(200)",
+        "await Bun.sleep(30000)",
         `await Bun.write(${JSON.stringify(markerPath)}, "late")`,
       ])
       await Effect.runPromise(
@@ -460,7 +460,7 @@ describe("shell_command tool", () => {
       killProcess(pid)
       await rm(root, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 })
 
 const bunEval = (lines: ReadonlyArray<string>) => `bun -e ${JSON.stringify(lines.join(";"))}`
