@@ -9,7 +9,7 @@ export class Service extends Context.Service<Service, Interface>()("@rika/tui/Ti
 export const layer = Layer.succeed(
   Service,
   Service.of({
-    ticks: Stream.fromSchedule(Schedule.fixed("100 millis")).pipe(Stream.map(() => undefined)),
+    ticks: Stream.fromSchedule(Schedule.fixed("33 millis")).pipe(Stream.map(() => undefined)),
   }),
 )
 

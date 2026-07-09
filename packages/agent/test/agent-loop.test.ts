@@ -4,6 +4,7 @@ import { Provider, Router, Tokens } from "@rika/llm"
 import { Database, Migration, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, Event, Ids, Message } from "@rika/schema"
 import { Effect, Exit, Fiber, Layer, Queue, Schema, Scope, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import { AiError, Prompt, Tool } from "effect/unstable/ai"
 import {
   AgentLoop,
@@ -611,6 +612,163 @@ describe("AgentLoop", () => {
       Array.from({ length: result.events.length }, (_, index) => index + 1),
     )
     expect(result.summary).toMatchObject({ latest_message_text: content })
+  })
+
+  test("flushes short model deltas during provider pauses", async () => {
+    const pausedThread = Ids.ThreadId.make("thread_agent_paused_model_flush")
+    const first = "hello"
+    const second = " world"
+    const content = `${first}${second}`
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      providerServiceOf({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.paused.complete")(function* (request: Provider.GenerateRequest) {
+          return fakeResponse(request, content)
+        }),
+        stream: (request: Provider.GenerateRequest) =>
+          Stream.fromIterable<Provider.StreamEvent>([
+            {
+              type: "response.started",
+              provider: request.provider,
+              model: request.model,
+            },
+            {
+              type: "content.delta",
+              text: first,
+            },
+          ]).pipe(
+            Stream.concat(
+              Stream.fromEffect(
+                Effect.sleep("1 second").pipe(
+                  Effect.as<Provider.StreamEvent>({
+                    type: "content.delta",
+                    text: second,
+                  }),
+                ),
+              ),
+            ),
+            Stream.concat(
+              Stream.fromIterable<Provider.StreamEvent>([
+                {
+                  type: "response.completed",
+                  response: fakeResponse(request, content),
+                },
+              ]),
+            ),
+          ),
+      }),
+    )
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+    const observed: Array<Event.Event> = []
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          const fiber = yield* AgentLoop.streamTurn({
+            thread_id: pausedThread,
+            workspace_id: workspaceId,
+            content: "stream then pause",
+            mode: "rush",
+          }).pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                observed.push(event)
+              }),
+            ),
+            Effect.forkScoped({ startImmediately: true }),
+          )
+
+          yield* Effect.yieldNow
+          yield* TestClock.adjust("49 millis")
+          yield* Effect.yieldNow
+          expect(observed.filter((event) => event.type === "model.stream.chunk")).toHaveLength(0)
+
+          yield* TestClock.adjust("1 millis")
+          yield* Effect.yieldNow
+          const flushed = observed.filter((event) => event.type === "model.stream.chunk")
+          expect(flushed).toHaveLength(1)
+          expect(flushed[0]).toMatchObject({
+            type: "model.stream.chunk",
+            data: { text: first },
+          })
+
+          yield* TestClock.adjust("1 second")
+          yield* Fiber.join(fiber)
+        }),
+      ).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+  })
+
+  test("preserves short model deltas when timed flush and completion share a boundary", async () => {
+    const boundaryThread = Ids.ThreadId.make("thread_agent_boundary_model_flush")
+    const content = "boundary"
+    const providerLayer = Layer.succeed(
+      Provider.Service,
+      providerServiceOf({
+        name: "openai",
+        complete: Effect.fn("AgentLoop.test.boundary.complete")(function* (request: Provider.GenerateRequest) {
+          return fakeResponse(request, content)
+        }),
+        stream: (request: Provider.GenerateRequest) =>
+          Stream.fromIterable<Provider.StreamEvent>([
+            {
+              type: "response.started",
+              provider: request.provider,
+              model: request.model,
+            },
+            {
+              type: "content.delta",
+              text: content,
+            },
+          ]).pipe(
+            Stream.concat(
+              Stream.fromEffect(
+                Effect.sleep("50 millis").pipe(
+                  Effect.as<Provider.StreamEvent>({
+                    type: "response.completed",
+                    response: fakeResponse(request, content),
+                  }),
+                ),
+              ),
+            ),
+          ),
+      }),
+    )
+    const layer = makeLayer([], defaultToolLayer, SkillRegistry.emptyLayer, registryFromProviderLayer(providerLayer))
+
+    const observed: Array<Event.Event> = []
+
+    await Effect.runPromise(
+      Effect.scoped(
+        Effect.gen(function* () {
+          yield* Migration.migrate()
+          const fiber = yield* AgentLoop.streamTurn({
+            thread_id: boundaryThread,
+            workspace_id: workspaceId,
+            content: "stream then finish",
+            mode: "rush",
+          }).pipe(
+            Stream.runForEach((event) =>
+              Effect.sync(() => {
+                observed.push(event)
+              }),
+            ),
+            Effect.forkScoped({ startImmediately: true }),
+          )
+
+          yield* Effect.yieldNow
+          yield* TestClock.adjust("50 millis")
+          yield* Effect.yieldNow
+          yield* Fiber.join(fiber)
+        }),
+      ).pipe(Effect.provide(layer), Effect.provide(TestClock.layer())),
+    )
+
+    const chunks = observed.filter((event) => event.type === "model.stream.chunk")
+    expect(observed.some((event) => event.type === "turn.completed")).toBe(true)
+    expect(chunks.map((event) => (event.type === "model.stream.chunk" ? event.data.text : "")).join("")).toBe(content)
   })
 
   test("coalesces bursty tool input deltas before persistence and replay", async () => {

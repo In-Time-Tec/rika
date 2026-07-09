@@ -20,13 +20,13 @@ describe("Ticker", () => {
 
           expect(yield* Ref.get(countRef)).toBe(0)
 
-          yield* TestClock.adjust("99 millis")
+          yield* TestClock.adjust("32 millis")
           expect(yield* Ref.get(countRef)).toBe(0)
 
           yield* TestClock.adjust("1 millis")
           expect(yield* Ref.get(countRef)).toBe(1)
 
-          yield* TestClock.adjust("200 millis")
+          yield* TestClock.adjust("66 millis")
           return yield* Ref.get(countRef)
         }),
       ).pipe(Effect.provide(Layer.mergeAll(Ticker.layer, TestClock.layer()))),

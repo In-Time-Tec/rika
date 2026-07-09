@@ -2,7 +2,7 @@ import { Config, Diagnostics, IdGenerator, Time } from "@rika/core"
 import { Errors, Provider, Router, Tokens } from "@rika/llm"
 import { Database, ThreadEventLog, ThreadProjection } from "@rika/persistence"
 import { Common, ErrorEnvelope, Event, Ids, Message, Tool } from "@rika/schema"
-import { Cause, Context, Effect, Layer, Option, Queue, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Queue, Schema, Semaphore, Stream } from "effect"
 import { AiError, Prompt } from "effect/unstable/ai"
 import * as CompactionService from "./compaction-service"
 import * as ContextResolver from "./context-resolver"
@@ -108,6 +108,7 @@ type Emit = (event: Event.Event) => Effect.Effect<void, RunError>
 const MAX_TOOL_ITERATIONS = 25
 const MAX_EMPTY_ANSWER_RETRIES = 2
 const MODEL_STREAM_FLUSH_TEXT_LENGTH = 64
+const MODEL_STREAM_FLUSH_INTERVAL = "50 millis"
 
 interface ModelInput {
   readonly messages: ReadonlyArray<Provider.Message>
@@ -653,67 +654,80 @@ const streamModelResponse = (
     const toolCalls: Array<Tool.Call> = []
     const toolResults: Array<Tool.Result> = []
     const completedToolIds = new Set<Ids.ToolCallId>()
+    const flushLock = yield* Semaphore.make(1)
     let pendingKind: "content" | "reasoning" | "toolInput" | undefined
     let pendingToolCallId: Ids.ToolCallId | undefined
     let pendingText = ""
 
-    const flushPending = (): Effect.Effect<void, RunError> => {
-      if (pendingKind === undefined || pendingText.length === 0) return Effect.void
-      const kind = pendingKind
-      const text = pendingText
-      const toolCallId = pendingToolCallId
-      pendingKind = undefined
-      pendingToolCallId = undefined
-      pendingText = ""
-      if (kind === "toolInput") {
-        if (toolCallId === undefined) {
-          return Effect.fail(
-            new AgentLoopError({
-              message: "Buffered tool input delta was missing its tool call id",
-              operation: "streamModelResponse",
-              thread_id: input.thread_id,
-              turn_id: turnId,
-            }),
+    const flushPending: Effect.Effect<void, RunError> = Effect.uninterruptible(
+      Effect.suspend(() => {
+        if (pendingKind === undefined || pendingText.length === 0) return Effect.void
+        const kind = pendingKind
+        const text = pendingText
+        const toolCallId = pendingToolCallId
+        pendingKind = undefined
+        pendingToolCallId = undefined
+        pendingText = ""
+        const restorePending = Effect.sync(() => {
+          pendingKind = kind
+          pendingToolCallId = toolCallId
+          pendingText = text
+        })
+        if (kind === "toolInput") {
+          if (toolCallId === undefined) {
+            return Effect.fail(
+              new AgentLoopError({
+                message: "Buffered tool input delta was missing its tool call id",
+                operation: "streamModelResponse",
+                thread_id: input.thread_id,
+                turn_id: turnId,
+              }),
+            )
+          }
+          return makeToolCallInputDelta(dependencies, input.thread_id, turnId, toolCallId, text, nextSequence()).pipe(
+            Effect.flatMap(append),
+            Effect.asVoid,
+            Effect.catch((error: RunError) => restorePending.pipe(Effect.andThen(Effect.fail(error)))),
           )
         }
-        return makeToolCallInputDelta(dependencies, input.thread_id, turnId, toolCallId, text, nextSequence()).pipe(
+        return (
+          kind === "content"
+            ? makeModelStreamChunk(dependencies, input.thread_id, turnId, text, provider, model, nextSequence())
+            : makeModelReasoningChunk(dependencies, input.thread_id, turnId, text, provider, model, nextSequence())
+        ).pipe(
           Effect.flatMap(append),
           Effect.asVoid,
+          Effect.catch((error: RunError) => restorePending.pipe(Effect.andThen(Effect.fail(error)))),
         )
-      }
-      return (
-        kind === "content"
-          ? makeModelStreamChunk(dependencies, input.thread_id, turnId, text, provider, model, nextSequence())
-          : makeModelReasoningChunk(dependencies, input.thread_id, turnId, text, provider, model, nextSequence())
-      ).pipe(Effect.flatMap(append), Effect.asVoid)
-    }
+      }),
+    )
 
     const bufferDelta = (kind: "content" | "reasoning", text: string) =>
       Effect.gen(function* () {
         if (text.length === 0) return
-        if (pendingKind !== undefined && pendingKind !== kind) yield* flushPending()
+        if (pendingKind !== undefined && pendingKind !== kind) yield* flushPending
         pendingKind = kind
         pendingText = `${pendingText}${text}`
-        if (pendingText.length >= MODEL_STREAM_FLUSH_TEXT_LENGTH) yield* flushPending()
+        if (pendingText.length >= MODEL_STREAM_FLUSH_TEXT_LENGTH) yield* flushPending
       })
 
     const bufferToolInputDelta = (toolCallId: Ids.ToolCallId, text: string) =>
       Effect.gen(function* () {
         if (text.length === 0) return
         if (pendingKind !== undefined && (pendingKind !== "toolInput" || pendingToolCallId !== toolCallId)) {
-          yield* flushPending()
+          yield* flushPending
         }
         pendingKind = "toolInput"
         pendingToolCallId = toolCallId
         pendingText = `${pendingText}${text}`
-        if (pendingText.length >= MODEL_STREAM_FLUSH_TEXT_LENGTH) yield* flushPending()
+        if (pendingText.length >= MODEL_STREAM_FLUSH_TEXT_LENGTH) yield* flushPending
       })
 
     const processStreamEvent = (streamEvent: Provider.StreamEvent) =>
       Effect.gen(function* () {
         switch (streamEvent.type) {
           case "response.started":
-            yield* flushPending()
+            yield* flushPending
             provider = streamEvent.provider
             model = streamEvent.model
             return
@@ -724,7 +738,7 @@ const streamModelResponse = (
             yield* bufferDelta("reasoning", streamEvent.text)
             return
           case "tool.input.started":
-            yield* flushPending()
+            yield* flushPending
             yield* makeToolCallInputStarted(
               dependencies,
               input.thread_id,
@@ -738,7 +752,7 @@ const streamModelResponse = (
             yield* bufferToolInputDelta(Ids.ToolCallId.make(streamEvent.id), streamEvent.text)
             return
           case "tool.input.ended":
-            yield* flushPending()
+            yield* flushPending
             yield* makeToolCallInputEnded(
               dependencies,
               input.thread_id,
@@ -750,7 +764,7 @@ const streamModelResponse = (
             ).pipe(Effect.flatMap(append), Effect.asVoid)
             return
           case "tool.call": {
-            yield* flushPending()
+            yield* flushPending
             const call = yield* makeToolCall(dependencies, input, turnId, streamEvent)
             toolCalls.push(call)
             yield* makeToolCallRequested(dependencies, input.thread_id, turnId, call, nextSequence()).pipe(
@@ -771,7 +785,7 @@ const streamModelResponse = (
             return
           }
           case "tool.result": {
-            yield* flushPending()
+            yield* flushPending
             const result = makeToolResult(streamEvent)
             if (completedToolIds.has(result.id)) return
             completedToolIds.add(result.id)
@@ -786,17 +800,30 @@ const streamModelResponse = (
             return
           }
           case "response.completed":
-            yield* flushPending()
+            yield* flushPending
             completed = streamEvent.response
             return
         }
       })
 
-    yield* dependencies.router.stream(request).pipe(
-      Stream.runForEach(processStreamEvent),
-      Effect.onError(() => flushPending().pipe(Effect.ignore)),
+    const flushPendingLocked = Semaphore.withPermit(flushLock, flushPending)
+    const periodicFlush = Effect.forever(
+      Effect.sleep(MODEL_STREAM_FLUSH_INTERVAL).pipe(
+        Effect.andThen(flushPendingLocked),
+        Effect.catch(() => Effect.void),
+      ),
     )
-    yield* flushPending()
+
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* periodicFlush.pipe(Effect.forkScoped({ startImmediately: true }))
+        yield* dependencies.router.stream(request).pipe(
+          Stream.runForEach((event) => Semaphore.withPermit(flushLock, processStreamEvent(event))),
+          Effect.onError(() => flushPendingLocked.pipe(Effect.ignore)),
+        )
+      }),
+    )
+    yield* flushPendingLocked
 
     if (completed === undefined) {
       return yield* new AgentLoopError({

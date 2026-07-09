@@ -140,6 +140,7 @@ export interface ViewState {
   readonly fast_mode: boolean
   readonly activity: Activity
   readonly active: boolean
+  readonly animation_tick: number
   readonly spinner_index: number
   readonly connecting_ticks: number
   readonly mode_switch_ticks: number
@@ -149,6 +150,8 @@ export interface ViewState {
   readonly cards: ReadonlyArray<Card>
   readonly entries: ReadonlyArray<TranscriptEntry>
   readonly streaming_text: string
+  readonly streaming_buffer: string
+  readonly pending_assistant_message?: ThreadMessage
   readonly generated_text_chars: number
   readonly notice?: string
   readonly palette_open: boolean
@@ -175,11 +178,15 @@ export const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "
 export const connectingTicks = 12
 export const modeSwitchTicks = 8
 export const maxStreamingTextChars = 12000
+const spinnerTickRate = 3
+const finalCatchupTargetTicks = 45
+const finalCatchupMinimumChars = 8
 export const isDeepMode = (mode: Config.Mode): boolean => mode === "deep1" || mode === "deep2" || mode === "deep3"
 export const deepModeTier = (mode: Config.Mode): number =>
   mode === "deep1" ? 1 : mode === "deep2" ? 2 : mode === "deep3" ? 3 : 0
 export const isFastEligible = (mode: Config.Mode): boolean => mode === "rush" || isDeepMode(mode)
 
+const pendingUserMessagePrefix = "pending-user:"
 const emptyInput: InputBuffer = { text: "", cursor: 0, attachments: [] }
 const closedPalette: PaletteState = { open: false, query: "", selected: 0 }
 const closedModePicker: ModePickerState = { open: false, selected: 0 }
@@ -224,6 +231,7 @@ const initialSeed = (input: Input): ViewState => ({
   fast_mode: false,
   activity: "idle",
   active: false,
+  animation_tick: 0,
   spinner_index: 0,
   connecting_ticks: 0,
   mode_switch_ticks: 0,
@@ -233,6 +241,7 @@ const initialSeed = (input: Input): ViewState => ({
   cards: [],
   entries: [],
   streaming_text: "",
+  streaming_buffer: "",
   generated_text_chars: 0,
   ...initialContextUsage(input),
   ...interactionDefaults,
@@ -243,51 +252,59 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
     case "thread.created":
       return withoutNotice({ ...state, thread_id: event.thread_id })
     case "turn.started":
-      return tick(
-        withoutNotice({ ...state, activity: "thinking", active: true, streaming_text: "", generated_text_chars: 0 }),
-      )
+      return withoutNotice({
+        ...state,
+        activity: "thinking",
+        active: true,
+        streaming_text: "",
+        streaming_buffer: "",
+        generated_text_chars: 0,
+      })
     case "message.added":
       return applyMessage(state, event)
     case "context.resolved":
-      return tick({ ...state, activity: "thinking", active: true })
+      return { ...state, activity: "thinking", active: true }
     case "context.compacted":
       return pushCard(state, systemCard("Context compacted", event.data.trigger, event.id))
     case "context.pruned":
       return pushCard(state, systemCard("Context pruned", contextPrunedSubtitle(event), event.id))
     case "skill.loaded":
-      return tick(pushCard({ ...state, activity: "thinking", active: true }, skillCard(event)))
+      return pushCard({ ...state, activity: "thinking", active: true }, skillCard(event))
     case "subagent.completed":
-      return tick(pushCard({ ...state, activity: "streaming", active: true }, subagentCard(event)))
+      return pushCard({ ...state, activity: "streaming", active: true }, subagentCard(event))
     case "model.stream.chunk":
-      return tick({
+      return {
         ...state,
         activity: "streaming",
         active: true,
-        streaming_text: appendStreamingText(state.streaming_text, event.data.text),
+        streaming_buffer: `${state.streaming_buffer}${event.data.text}`,
         generated_text_chars: state.generated_text_chars + event.data.text.length,
-      })
+      }
     case "model.reasoning.delta":
-      return tick(withReasoningDelta(state, event.data.text))
+      return withReasoningDelta(state, event.data.text)
     case "tool.call.input.started":
-      return tick(
-        updateCard({ ...state, activity: "streaming", active: true, streaming_text: "" }, toolInputCard(event)),
+      return updateCard(
+        { ...state, activity: "streaming", active: true, streaming_text: "", streaming_buffer: "" },
+        toolInputCard(event),
       )
     case "tool.call.input.delta":
-      return tick({
+      return {
         ...state,
         activity: "streaming",
         active: true,
         streaming_text: "",
+        streaming_buffer: "",
         generated_text_chars: state.generated_text_chars + event.data.text.length,
-      })
+      }
     case "tool.call.input.ended":
-      return tick({ ...state, activity: "streaming", active: true, streaming_text: "" })
+      return { ...state, activity: "streaming", active: true, streaming_text: "", streaming_buffer: "" }
     case "tool.call.requested":
-      return tick(
-        updateCard({ ...state, activity: "running-tools", active: true, streaming_text: "" }, toolCard(state, event)),
+      return updateCard(
+        { ...state, activity: "running-tools", active: true, streaming_text: "", streaming_buffer: "" },
+        toolCard(state, event),
       )
     case "tool.call.completed":
-      return tick(applyToolResult({ ...state, activity: "streaming", active: true }, event))
+      return applyToolResult({ ...state, activity: "streaming", active: true }, event)
     case "artifact.created":
       return pushCard(state, systemCard("Artifact created", event.data.artifact.kind, event.id))
     case "turn.completed":
@@ -300,13 +317,47 @@ export const applyEvent = (state: ViewState, event: Event.Event): ViewState => {
   return state
 }
 
-export const finishTurn = (state: ViewState, activity: "idle" | "failed" = "idle"): ViewState => ({
-  ...state,
-  activity,
-  active: false,
-  streaming_text: "",
-  generated_text_chars: 0,
-})
+export const finishTurn = (state: ViewState, activity: "idle" | "failed" = "idle"): ViewState => {
+  if (activity === "idle" && hasUncommittedStreaming(state)) {
+    return {
+      ...state,
+      activity: "streaming",
+      active: false,
+    }
+  }
+  return clearStreaming({
+    ...state,
+    activity,
+    active: false,
+    generated_text_chars: 0,
+  })
+}
+
+export const appendPendingUserMessage = (
+  state: ViewState,
+  input: { readonly id: string; readonly text: string; readonly user_id?: Ids.UserId },
+): ViewState => {
+  if (input.text.length === 0) return state
+  const message: ThreadMessage = {
+    id: `${pendingUserMessagePrefix}${input.id}`,
+    role: "user",
+    text: input.text,
+    ...(input.user_id === undefined ? {} : { user_id: input.user_id }),
+  }
+  return withoutNotice({
+    ...state,
+    activity: "thinking",
+    active: true,
+    streaming_text: "",
+    streaming_buffer: "",
+    generated_text_chars: 0,
+    messages: [...state.messages, message],
+    entries: [...state.entries, { kind: "message", message }],
+  })
+}
+
+export const removePendingUserMessage = (state: ViewState, id: string): ViewState =>
+  removePendingUserMessageById(state, `${pendingUserMessagePrefix}${id}`)
 
 export const deepModeForTier = (tier: number): Config.Mode => (tier === 2 ? "deep2" : tier === 3 ? "deep3" : "deep1")
 
@@ -777,6 +828,12 @@ export const enqueueMessage = (state: ViewState, message: string): ViewState => 
   queue_selected: -1,
 })
 
+export const prependQueuedMessage = (state: ViewState, message: string): ViewState => ({
+  ...state,
+  queued: [message, ...state.queued],
+  queue_selected: -1,
+})
+
 export const clearQueuedMessages = (state: ViewState): ViewState => ({ ...state, queued: [], queue_selected: -1 })
 
 export const dequeueMessage = (state: ViewState): { readonly next?: string; readonly state: ViewState } => {
@@ -831,6 +888,46 @@ const appendStreamingText = (current: string, next: string): string => {
   const start = text.length - maxStreamingTextChars
   const newlineIndex = text.indexOf("\n", start)
   return newlineIndex >= 0 && newlineIndex < text.length - 1 ? text.slice(newlineIndex + 1) : text.slice(start)
+}
+
+const revealStreamingText = (state: ViewState): ViewState => {
+  if (state.streaming_buffer.length === 0) return commitPendingAssistantMessage(state)
+  const { text, rest } = takeStreamingPrefix(state.streaming_buffer, streamingRevealCount(state))
+  return commitPendingAssistantMessage({
+    ...state,
+    streaming_text: appendStreamingText(state.streaming_text, text),
+    streaming_buffer: rest,
+  })
+}
+
+const streamingRevealCount = (state: ViewState): number => {
+  const length = state.streaming_buffer.length
+  if (state.active && state.pending_assistant_message === undefined) {
+    return length >= 600 ? 4 : length >= 240 ? 2 : 1
+  }
+  const finalLength = state.pending_assistant_message?.text.length ?? state.streaming_text.length + length
+  return Math.max(finalCatchupMinimumChars, Math.ceil(Math.max(length, finalLength) / finalCatchupTargetTicks))
+}
+
+const takeStreamingPrefix = (text: string, count: number): { readonly text: string; readonly rest: string } => {
+  const pieces = Array.from(text)
+  if (count >= pieces.length) return { text, rest: "" }
+  return {
+    text: pieces.slice(0, count).join(""),
+    rest: pieces.slice(count).join(""),
+  }
+}
+
+export const hasUncommittedStreaming = (state: ViewState): boolean =>
+  state.streaming_text.length > 0 || state.streaming_buffer.length > 0 || state.pending_assistant_message !== undefined
+
+const clearStreaming = (state: ViewState): ViewState => {
+  const { pending_assistant_message: _pending, ...rest } = state
+  return {
+    ...rest,
+    streaming_text: "",
+    streaming_buffer: "",
+  }
 }
 
 export const toggleThinking = (state: ViewState): ViewState => ({
@@ -1042,33 +1139,87 @@ export const acceptSelected = (state: ViewState): ViewState => {
   return item === undefined ? closeFilePicker(state) : closeFilePicker(insertText(state, `@${item.insert} `))
 }
 
-export const tickSpinner = (state: ViewState): ViewState => ({
-  ...state,
-  spinner_index: (state.spinner_index + 1) % spinnerFrames.length,
-  connecting_ticks: state.connecting_ticks > 0 ? state.connecting_ticks - 1 : 0,
-  mode_switch_ticks: state.mode_switch_ticks > 0 ? state.mode_switch_ticks - 1 : 0,
-})
-
-const tick = tickSpinner
+export const tickSpinner = (state: ViewState): ViewState => {
+  const animationTick = state.animation_tick + 1
+  const advanceSpinner = animationTick % spinnerTickRate === 0
+  return revealStreamingText({
+    ...state,
+    animation_tick: animationTick,
+    spinner_index: advanceSpinner ? (state.spinner_index + 1) % spinnerFrames.length : state.spinner_index,
+    connecting_ticks:
+      advanceSpinner && state.connecting_ticks > 0 ? state.connecting_ticks - 1 : state.connecting_ticks,
+    mode_switch_ticks:
+      advanceSpinner && state.mode_switch_ticks > 0 ? state.mode_switch_ticks - 1 : state.mode_switch_ticks,
+  })
+}
 
 const applyMessage = (state: ViewState, event: Event.MessageAdded): ViewState => {
   const message = event.data.message
   const text = messageText(message)
   if (text.length === 0) return state
   const userId = messageUserId(message)
+  const target = message.role === "user" ? removeMatchingPendingUserMessage(state, text, userId) : state
   const entry: ThreadMessage = {
     id: message.id,
     role: message.role,
     text,
     ...(userId === undefined ? {} : { user_id: userId }),
   }
+  if (message.role === "assistant" && hasUncommittedStreaming(target)) return holdPendingAssistantMessage(target, entry)
   return {
-    ...state,
-    streaming_text: message.role === "assistant" ? "" : state.streaming_text,
-    messages: [...state.messages, entry],
-    entries: [...state.entries, { kind: "message", message: entry }],
+    ...target,
+    streaming_text: message.role === "assistant" ? "" : target.streaming_text,
+    streaming_buffer: message.role === "assistant" ? "" : target.streaming_buffer,
+    messages: [...target.messages, entry],
+    entries: [...target.entries, { kind: "message", message: entry }],
   }
 }
+
+const holdPendingAssistantMessage = (state: ViewState, message: ThreadMessage): ViewState => {
+  const visible = `${state.streaming_text}${state.streaming_buffer}`
+  const missing = message.text.startsWith(visible) ? message.text.slice(visible.length) : ""
+  return {
+    ...state,
+    activity: "streaming",
+    streaming_buffer: `${state.streaming_buffer}${missing}`,
+    pending_assistant_message: message,
+  }
+}
+
+const commitPendingAssistantMessage = (state: ViewState): ViewState => {
+  if (state.streaming_buffer.length > 0 || state.pending_assistant_message === undefined) return state
+  const { pending_assistant_message: message, ...rest } = state
+  const committed = {
+    ...rest,
+    streaming_text: "",
+    messages: [...rest.messages, message],
+    entries: [...rest.entries, { kind: "message" as const, message }],
+  }
+  return committed.active ? committed : { ...committed, activity: "idle", generated_text_chars: 0 }
+}
+
+const removeMatchingPendingUserMessage = (state: ViewState, text: string, userId: Ids.UserId | undefined) => {
+  const key = pendingUserMessageKey(text)
+  const pending = state.messages.find(
+    (message) =>
+      message.id.startsWith(pendingUserMessagePrefix) &&
+      message.role === "user" &&
+      pendingUserMessageKey(message.text) === key &&
+      message.user_id === userId,
+  )
+  if (pending === undefined) return state
+  return removePendingUserMessageById(state, pending.id)
+}
+
+const removePendingUserMessageById = (state: ViewState, id: string): ViewState => {
+  return {
+    ...state,
+    messages: state.messages.filter((message) => message.id !== id),
+    entries: state.entries.filter((entry) => entry.kind !== "message" || entry.message.id !== id),
+  }
+}
+
+const pendingUserMessageKey = (text: string): string => text.trim()
 
 const messageUserId = (message: Message.Message): Ids.UserId | undefined => {
   const value = message.metadata?.user_id

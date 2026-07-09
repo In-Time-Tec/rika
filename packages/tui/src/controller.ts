@@ -39,6 +39,7 @@ type AppEvent =
   | { readonly _tag: "ThreadPreviewLoaded"; readonly thread_id: Ids.ThreadId; readonly preview: ViewState.ViewState }
   | { readonly _tag: "ThreadPreviewFailed"; readonly thread_id: Ids.ThreadId; readonly message: string }
   | { readonly _tag: "ThreadEventsFailed"; readonly message: string }
+  | { readonly _tag: "SubmitAccepted"; readonly token: number }
   | { readonly _tag: "TurnEnded"; readonly token: number; readonly submitted?: SubmittedTurn; readonly error?: unknown }
   | { readonly _tag: "Resize" }
   | { readonly _tag: "KeysDone" }
@@ -102,6 +103,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
       const queue = yield* Queue.unbounded<AppEvent, Cause.Done>()
       const render = () => deps.renderer.render(state)
       const useThreadEvents = deps.backend.submitTurn !== undefined && deps.backend.subscribeThreadEvents !== undefined
+      const busy = () => active || ViewState.hasUncommittedStreaming(state)
 
       const persistSelectedMode = (next: Config.Mode) =>
         deps.persistMode === undefined ? Effect.void : deps.persistMode(next).pipe(Effect.ignore)
@@ -139,7 +141,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
 
       const maybeShutdown = () =>
         Effect.gen(function* () {
-          if (active) return
+          if (busy()) return
           if (quitRequested || (keysDone && state.queued.length === 0)) {
             yield* Queue.end(queue)
           }
@@ -152,7 +154,11 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           const token = turnToken
           currentTurnId = undefined
           activeThreadId = threadId
-          state = { ...state, active: true, activity: "idle" }
+          state = ViewState.appendPendingUserMessage(state, {
+            id: String(token),
+            text: submitted.content,
+            ...(userId === undefined ? {} : { user_id: userId }),
+          })
           const request = {
             thread_id: threadId,
             workspace_path: workspacePath,
@@ -177,22 +183,23 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               ),
             )
           } else {
-            turnFiber = undefined
-            yield* deps.backend
-              .submitTurn(request)
-              .pipe(
-                Effect.catchCause((cause: Cause.Cause<E>) =>
+            turnFiber = yield* deps.backend.submitTurn(request).pipe(
+              Effect.matchCauseEffect({
+                onFailure: (cause: Cause.Cause<E>) =>
                   Queue.offer(queue, { _tag: "TurnEnded", token, submitted, error: Cause.squash(cause) }).pipe(
                     Effect.asVoid,
                   ),
-                ),
-              )
+                onSuccess: () => Queue.offer(queue, { _tag: "SubmitAccepted", token }).pipe(Effect.asVoid),
+              }),
+              Effect.forkScoped,
+            )
           }
           yield* render()
         })
 
       const drainQueuedTurn = () =>
         Effect.gen(function* () {
+          if (ViewState.hasUncommittedStreaming(state)) return
           const dequeued = ViewState.dequeueMessage(state)
           state = dequeued.state
           if (dequeued.next !== undefined) {
@@ -299,14 +306,14 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             return
           }
           state = ViewState.pushHistory(state, trimmed)
+          if (busy()) {
+            state = ViewState.enqueueMessage(state, trimmed)
+            yield* render()
+            return
+          }
           if (trimmed.startsWith("/")) {
             yield* runSlash(trimmed)
             yield* maybeShutdown()
-            return
-          }
-          if (active) {
-            state = ViewState.enqueueMessage(state, trimmed)
-            yield* render()
             return
           }
           yield* startTurn({ ...submitted, content: trimmed })
@@ -319,9 +326,15 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
             yield* render()
             return
           }
+          const cancelToken = turnToken
           const fiber = turnFiber
           const turnId = currentTurnId
           const cancelThreadId = activeThreadId ?? threadId
+          if (useThreadEvents && fiber === undefined && turnId === undefined) {
+            state = ViewState.withNotice(state, "Turn is starting; interrupt will be available once it starts.")
+            yield* render()
+            return
+          }
           active = false
           turnToken += 1
           turnFiber = undefined
@@ -333,7 +346,13 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               .pipe(Effect.catchCause(() => Effect.void))
           }
           state = ViewState.withNotice(
-            { ...ViewState.clearQueuedMessages(state), active: false, activity: "idle", streaming_text: "" },
+            {
+              ...ViewState.clearQueuedMessages(ViewState.removePendingUserMessage(state, String(cancelToken))),
+              active: false,
+              activity: "idle",
+              streaming_text: "",
+              streaming_buffer: "",
+            },
             "Interrupted the running turn.",
           )
           yield* render()
@@ -638,7 +657,7 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
                 : state.shortcuts_open
                   ? "overlay"
                   : "input",
-            busy: active,
+            busy: busy(),
             inputEmpty: state.input.text.length === 0,
             trailingBackslash: state.input.text.endsWith("\\"),
             queueSelected: state.queue_selected >= 0,
@@ -665,16 +684,20 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           currentTurnId = undefined
           activeThreadId = undefined
           const activeUserId = activeUserIdFromError(error)
+          const targetState =
+            error === undefined || submitted === undefined
+              ? state
+              : ViewState.removePendingUserMessage(state, String(token))
           if (activeUserId !== undefined && submitted !== undefined) {
             state = ViewState.withNotice(
-              ViewState.enqueueMessage(ViewState.finishTurn(state), submitted.content.trim()),
+              ViewState.prependQueuedMessage(ViewState.finishTurn(targetState), submitted.content.trim()),
               `${activeUserId} is running a turn — message queued`,
             )
             yield* render()
             yield* maybeShutdown()
             return
           }
-          state = ViewState.finishTurn(state, error === undefined ? "idle" : "failed")
+          state = ViewState.finishTurn(targetState, error === undefined ? "idle" : "failed")
           if (error !== undefined) state = ViewState.withNotice(state, `Turn failed: ${errorMessage(error)}`)
           yield* drainQueuedTurn()
           yield* render()
@@ -715,6 +738,10 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
           switch (appEvent._tag) {
             case "Tick":
               state = ViewState.tickSpinner(state)
+              if (!active && !ViewState.hasUncommittedStreaming(state)) {
+                yield* drainQueuedTurn()
+                yield* maybeShutdown()
+              }
               yield* render()
               return
             case "Resize":
@@ -767,6 +794,9 @@ export const run = <E>(deps: Dependencies<E>, input: RunInput): Effect.Effect<nu
               state = ViewState.withNotice(state, `Thread sync interrupted: ${appEvent.message} — reconnecting…`)
               yield* render()
               yield* Effect.forkScoped(restartThreadEvents(threadId).pipe(Effect.delay("2 seconds")))
+              return
+            case "SubmitAccepted":
+              if (appEvent.token === turnToken) turnFiber = undefined
               return
             case "TurnEnded":
               yield* handleTurnEnded(appEvent.token, appEvent.submitted, appEvent.error)
