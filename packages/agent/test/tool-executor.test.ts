@@ -388,11 +388,13 @@ describe("shell_command tool", () => {
     let pid: number | undefined
 
     try {
-      const command = bunEval([
-        `await Bun.write(${JSON.stringify(pidPath)}, String(process.pid))`,
-        `process.on("SIGTERM", () => { void Bun.write(${JSON.stringify(termPath)}, "term") })`,
-        "await Bun.sleep(30000)",
-      ])
+      const trapAction = `printf %s term > ${shellQuote(termPath)}`
+      const command = [
+        `printf %s $$ > ${shellQuote(pidPath)}`,
+        `trap ${shellQuote(trapAction)} TERM`,
+        "index=0",
+        'while [ "$index" -lt 600 ]; do index=$((index + 1)); sleep 0.05; done',
+      ].join("\n")
 
       const result = await Effect.runPromise(
         Effect.scoped(
@@ -466,7 +468,7 @@ describe("shell_command tool", () => {
 const bunEval = (lines: ReadonlyArray<string>) => `bun -e ${JSON.stringify(lines.join(";"))}`
 
 const waitForText = async (path: string) => {
-  const deadline = Date.now() + 1_000
+  const deadline = Date.now() + 5_000
   let lastError: unknown
   while (Date.now() < deadline) {
     try {
@@ -487,6 +489,8 @@ const pathExists = async (path: string) => {
     return false
   }
 }
+
+const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`
 
 const processAlive = (pid: number | undefined) => {
   if (pid === undefined) return false

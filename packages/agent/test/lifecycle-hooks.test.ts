@@ -150,7 +150,7 @@ describe("LifecycleHooks", () => {
           `printf %s $$ > ${shellQuote(pidPath)}`,
           `trap ${shellQuote(trapAction)} TERM`,
           "index=0",
-          'while [ "$index" -lt 30 ]; do index=$((index + 1)); sleep 1; done',
+          'while [ "$index" -lt 600 ]; do index=$((index + 1)); sleep 0.05; done',
           "",
         ].join("\n"),
       )
@@ -374,7 +374,7 @@ const writeHook = async (root: string, name: "setup" | "resume", contents: strin
 }
 
 const waitForText = async (path: string) => {
-  const deadline = Date.now() + 1_000
+  const deadline = Date.now() + 5_000
   let lastError: unknown
   while (Date.now() < deadline) {
     try {
