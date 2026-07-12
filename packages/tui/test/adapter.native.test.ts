@@ -2,7 +2,7 @@ import { CliRenderEvents, Renderable } from "@opentui/core"
 import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "bun:test"
 import { Surface } from "../src/adapter"
-import { initial, replaceQueue, update, type Model } from "../src/view-state"
+import { initial, ready, replaceQueue, update, type Model } from "../src/view-state"
 
 const insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
 
@@ -101,7 +101,7 @@ test("renders and scrolls nested changed files within the bordered sidebar", asy
       height: 24,
       entries: [{ role: "assistant", text: "answer" }],
       changedFilesOpen: true,
-      changedFiles,
+      changedFiles: ready(changedFiles),
     })
     await setup.renderOnce()
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -143,10 +143,10 @@ test("keeps click rows stable after a clipped wide-character filename", async ()
       width: 100,
       height: 24,
       changedFilesOpen: true,
-      changedFiles: [
+      changedFiles: ready([
         { path: "a/非常非常非常非常非常非常长的文件名.ts", status: "M", added: 1, removed: 1 },
         { path: "b/after.ts", status: "M", added: 2, removed: 0 },
-      ],
+      ]),
     })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
@@ -182,10 +182,10 @@ test("escapes control characters without shifting changed-file click rows", asyn
       width: 100,
       height: 24,
       changedFilesOpen: true,
-      changedFiles: [
+      changedFiles: ready([
         { path: "a-bad\n\tname.ts", status: "M", added: 1, removed: 1 },
         { path: "z-after.ts", status: "M", added: 2, removed: 0 },
-      ],
+      ]),
     })
     await setup.renderOnce()
     const frame = setup.captureCharFrame()
@@ -209,7 +209,7 @@ test("keeps the mode label and picker grouped with the narrowed composer", async
       height: 24,
       costUsd: 0.004,
       changedFilesOpen: true,
-      changedFiles: [{ path: "src/main.ts", status: "M", added: 2, removed: 1 }],
+      changedFiles: ready([{ path: "src/main.ts", status: "M", added: 2, removed: 1 }]),
       modePicker: { open: true, selected: 2 },
     })
     await setup.renderOnce()

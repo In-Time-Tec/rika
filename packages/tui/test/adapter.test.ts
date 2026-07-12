@@ -170,7 +170,7 @@ import {
   renderTranscript,
   renderTranscriptStyled,
 } from "../src/adapter"
-import { defaultReasoningEffort, initial, type Mode, type Model } from "../src/view-state"
+import { defaultReasoningEffort, initial, ready, type Mode, type Model } from "../src/view-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 
@@ -179,11 +179,11 @@ const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace
 test("renders changed files as an indented path tree", () => {
   const rendered = renderChangedFiles(
     model({
-      changedFiles: [
+      changedFiles: ready([
         { path: "apps/rika/src/main.ts", status: "M", added: 3, removed: 1 },
         { path: "apps/rika/test/main.test.ts", status: "A", added: 8, removed: 0 },
         { path: "README.md", status: "M" },
-      ],
+      ]),
     }),
     29,
   )
@@ -194,12 +194,13 @@ test("renders changed files as an indented path tree", () => {
     "apps/\n  rika/\n    src/\n      main.ts +3 -1\n    test/\n      main.test.ts +8 -0\nREADME.md +0 -0",
   )
   expect(
-    renderChangedFiles(model({ changedFiles: [{ path: "src/main.ts", status: "M", added: 3, removed: 1 }] }), 28)
+    renderChangedFiles(model({ changedFiles: ready([{ path: "src/main.ts", status: "M", added: 3, removed: 1 }]) }), 28)
       .chunks,
   ).toEqual([
     { text: "src/", fg: opentui.RGBA.fromIndex(8) },
     { text: "\n", fg: opentui.RGBA.defaultForeground() },
-    { text: "  main.ts", fg: opentui.RGBA.fromIndex(3) },
+    { text: "  ", fg: opentui.RGBA.defaultForeground() },
+    { text: "main.ts", fg: opentui.RGBA.fromIndex(3) },
     { text: " +3", fg: opentui.RGBA.fromIndex(2) },
     { text: " -1", fg: opentui.RGBA.fromIndex(1) },
   ])
@@ -352,7 +353,7 @@ describe("Surface", () => {
     surface.update(
       model({
         changedFilesOpen: true,
-        changedFiles: [{ path: "apps/rika/src/main.ts", status: "M", added: 2, removed: 1 }],
+        changedFiles: ready([{ path: "apps/rika/src/main.ts", status: "M", added: 2, removed: 1 }]),
       }),
     )
     const text = surface.changedFilesText as unknown as {

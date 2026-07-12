@@ -2,7 +2,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { mkdir, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { Surface } from "../src/adapter"
-import { initial, update, type Model, type TranscriptBlock } from "../src/view-state"
+import { initial, ready, update, type Model, type TranscriptBlock } from "../src/view-state"
 
 export const visualMetadata = {
   schema: 2,
@@ -124,7 +124,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ["shortcuts", { ...base(), shortcutsOpen: true }, 80, 24],
     [
       "file-picker",
-      { ...base(), filePicker: { open: true, query: "src", selected: 0, items: ["src/main.ts"], kind: "file" } },
+      { ...base(), filePicker: { open: true, query: "src", selected: 0, items: ready(["src/main.ts"]), kind: "file" } },
       80,
       24,
     ],

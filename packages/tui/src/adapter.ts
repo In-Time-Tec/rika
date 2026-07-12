@@ -29,8 +29,11 @@ import {
   filteredFiles,
   filteredThreads,
   initial,
+  isLoading,
   isNarrow,
+  isReady,
   pastedTextTokenAt,
+  readyOr,
   selectedThreadMetadata,
   type Mode,
   type Model,
@@ -118,6 +121,7 @@ interface ChangedNode {
 interface ChangedFileRow {
   readonly chunks: ReadonlyArray<TextChunk>
   readonly file?: import("./view-state").ChangedFile
+  readonly nameIndex?: number
 }
 
 const truncateToWidth = (text: string, width: number): string => {
@@ -167,26 +171,42 @@ const fileTreeRows = (
     for (const [name, child] of node.children) {
       const indent = "  ".repeat(depth)
       const displayName = escapeChangedPathSegment(name)
+      const indentChunks = indent.length > 0 ? [fg(colors.text)(indent)] : []
       if (child.file === undefined) {
-        rows.push({ chunks: [fg(colors.muted)(truncateToWidth(`${indent}${displayName}/`, innerWidth))] })
+        rows.push({
+          chunks: [
+            ...indentChunks,
+            fg(colors.muted)(truncateToWidth(`${displayName}/`, Math.max(1, innerWidth - indent.length))),
+          ],
+        })
         walk(child, depth + 1)
       } else {
         if (!showCounts) {
           rows.push({
-            chunks: [fg(changedFileColor(child.file.status))(truncateToWidth(`${indent}${displayName}`, innerWidth))],
+            chunks: [
+              ...indentChunks,
+              fg(changedFileColor(child.file.status))(truncateToWidth(displayName, Math.max(1, innerWidth - indent.length))),
+            ],
             file: child.file,
+            nameIndex: indentChunks.length,
           })
           continue
         }
         const added = ` +${child.file.added ?? 0}`
         const removed = ` -${child.file.removed ?? 0}`
         const label = truncateToWidth(
-          `${indent}${displayName}`,
-          Math.max(1, innerWidth - stringWidth(added) - stringWidth(removed)),
+          displayName,
+          Math.max(1, innerWidth - indent.length - stringWidth(added) - stringWidth(removed)),
         )
         rows.push({
-          chunks: [fg(changedFileColor(child.file.status))(label), fg(colors.green)(added), fg(colors.red)(removed)],
+          chunks: [
+            ...indentChunks,
+            fg(changedFileColor(child.file.status))(label),
+            fg(colors.green)(added),
+            fg(colors.red)(removed),
+          ],
           file: child.file,
+          nameIndex: indentChunks.length,
         })
       }
     }
@@ -197,9 +217,9 @@ const fileTreeRows = (
 
 const sidebarFileRows = (model: Model, innerWidth: number): ReadonlyArray<ChangedFileRow> =>
   model.changedFilesOpen
-    ? fileTreeRows(model.changedFiles as ReadonlyArray<import("./view-state").ChangedFile>, innerWidth, true)
+    ? fileTreeRows(readyOr(model.changedFiles, []), innerWidth, true)
     : fileTreeRows(
-        model.filePicker.items.map((path) => ({ path, status: "" })),
+        readyOr(model.filePicker.items, []).map((path) => ({ path, status: "" })),
         innerWidth,
         false,
       )
@@ -208,16 +228,17 @@ const renderFileRows = (rows: ReadonlyArray<ChangedFileRow>, hoveredRow?: number
   const chunks: Array<TextChunk> = []
   for (const [index, row] of rows.entries()) {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
-    chunks.push(...(index === hoveredRow && row.file !== undefined ? row.chunks.map(underline) : row.chunks))
+    if (index === hoveredRow && row.file !== undefined && row.nameIndex !== undefined) {
+      chunks.push(...row.chunks.map((chunk, chunkIndex) => (chunkIndex === row.nameIndex ? underline(chunk) : chunk)))
+    } else {
+      chunks.push(...row.chunks)
+    }
   }
   return new StyledText(chunks)
 }
 
 export const renderChangedFiles = (model: Model, innerWidth: number, hoveredRow?: number): StyledText =>
-  renderFileRows(
-    fileTreeRows(model.changedFiles as ReadonlyArray<import("./view-state").ChangedFile>, innerWidth, true),
-    hoveredRow,
-  )
+  renderFileRows(fileTreeRows(readyOr(model.changedFiles, []), innerWidth, true), hoveredRow)
 
 export const renderTranscript = (model: Model): string => {
   const welcome = model.entries.length === 0 ? `Rika\nLocal durable coding agent\n\n` : ""
@@ -652,6 +673,7 @@ export interface Handlers {
   readonly expandPaste?: (token: string) => void
   readonly clickToggle?: (unit: string) => void
   readonly composerResize?: (height: number) => void
+  readonly sidebarResize?: (width: number) => void
   readonly openPath?: (target: PathTarget) => void
   readonly resize: (width: number, height: number) => void
 }
@@ -695,7 +717,8 @@ export class Surface {
   private model: Model | undefined
   private transcriptChildren: Array<TextRenderable> = []
   private composerDrag: { readonly startY: number; readonly startHeight: number } | undefined
-  private composerResizePointer = false
+  private sidebarDrag: { readonly startX: number; readonly startWidth: number } | undefined
+  private pointerShape = "default"
   private changedRows: ReadonlyArray<ChangedFileRow> = []
   private changedFilesHoveredRow: number | undefined
   private scrollProgrammatic = false
@@ -749,6 +772,7 @@ export class Surface {
       border: true,
       borderStyle: "rounded",
       borderColor: colors.text,
+      focusedBorderColor: colors.text,
       minHeight: 3,
       paddingLeft: spacing.inputHorizontal,
       paddingRight: spacing.inputHorizontal,
@@ -770,6 +794,7 @@ export class Surface {
       border: true,
       borderStyle: "rounded",
       borderColor: colors.text,
+      focusedBorderColor: colors.text,
       minHeight: spacing.inputHeight,
       paddingLeft: spacing.inputHorizontal,
       paddingRight: spacing.inputHorizontal,
@@ -811,6 +836,7 @@ export class Surface {
       border: true,
       borderStyle: "rounded",
       borderColor: colors.green,
+      focusedBorderColor: colors.green,
       backgroundColor: colors.surface,
       paddingLeft: 1,
       paddingRight: 1,
@@ -829,6 +855,7 @@ export class Surface {
       border: true,
       borderStyle: "rounded",
       borderColor: colors.text,
+      focusedBorderColor: colors.text,
       backgroundColor: colors.surface,
       paddingLeft: 1,
       paddingRight: 1,
@@ -849,6 +876,7 @@ export class Surface {
       border: true,
       borderStyle: "rounded",
       borderColor: colors.text,
+      focusedBorderColor: colors.text,
       paddingLeft: 1,
       paddingRight: 1,
       scrollY: true,
@@ -893,9 +921,13 @@ export class Surface {
     this.inputBox.onMouseOver = this.onComposerMouseMove
     this.inputBox.onMouseMove = this.onComposerMouseMove
     this.inputBox.onMouseOut = this.onComposerMouseOut
-    renderer.root.onMouseDrag = this.onComposerMouseDrag
-    renderer.root.onMouseUp = this.onComposerMouseUp
-    renderer.root.onMouseDragEnd = this.onComposerMouseUp
+    renderer.root.onMouseDrag = this.onRootMouseDrag
+    renderer.root.onMouseUp = this.onRootMouseUp
+    renderer.root.onMouseDragEnd = this.onRootMouseUp
+    this.changedFilesBox.onMouseDown = this.onSidebarMouseDown
+    this.changedFilesBox.onMouseOver = this.onSidebarMouseMove
+    this.changedFilesBox.onMouseMove = this.onSidebarMouseMove
+    this.changedFilesBox.onMouseOut = this.onSidebarMouseOut
     this.inputBox.add(this.input)
     this.paletteBox.add(this.palette)
     this.transcriptRow.add(this.sidebar)
@@ -1042,18 +1074,57 @@ export class Surface {
     this.handlers.paste?.(text)
   }
   private readonly onResize = (width: number, height: number) => this.handlers.resize(width, height)
-  private readonly setComposerResizePointer = (active: boolean) => {
-    if (this.composerResizePointer === active) return
-    this.composerResizePointer = active
+  private readonly setPointerShape = (shape: "ns-resize" | "ew-resize" | "default") => {
+    if (this.pointerShape === shape) return
+    this.pointerShape = shape
     const renderer = this.renderer as unknown as {
       stdout?: NodeJS.WriteStream
       realStdoutWrite?: NodeJS.WriteStream["write"]
     }
     if (renderer.stdout !== undefined && renderer.realStdoutWrite !== undefined) {
-      renderer.realStdoutWrite.call(renderer.stdout, `\u001b]22;${active ? "ns-resize" : "default"}\u001b\\`)
+      renderer.realStdoutWrite.call(renderer.stdout, `\u001b]22;${shape}\u001b\\`)
       return
     }
-    this.renderer.setMousePointer(active ? "move" : "default")
+    this.renderer.setMousePointer(shape === "default" ? "default" : "move")
+  }
+  private readonly setComposerResizePointer = (active: boolean) => {
+    this.setPointerShape(active ? "ns-resize" : "default")
+  }
+  private readonly setSidebarResizePointer = (active: boolean) => {
+    this.setPointerShape(active ? "ew-resize" : "default")
+  }
+  private readonly onSidebarMouseMove = (event: MouseEvent) => {
+    if (this.sidebarDrag === undefined) this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
+  }
+  private readonly onSidebarMouseOut = () => {
+    if (this.sidebarDrag === undefined) this.setSidebarResizePointer(false)
+  }
+  private readonly onSidebarMouseDown = (event: MouseEvent) => {
+    if (event.button !== 0 || this.model === undefined) return
+    if (event.x !== this.changedFilesBox.x) return
+    this.sidebarDrag = { startX: event.x, startWidth: this.model.sidebarWidth }
+    this.setSidebarResizePointer(true)
+    event.preventDefault()
+    event.stopPropagation()
+  }
+  private readonly onRootMouseDrag = (event: MouseEvent) => {
+    if (this.sidebarDrag !== undefined) {
+      this.handlers.sidebarResize?.(this.sidebarDrag.startWidth + (this.sidebarDrag.startX - event.x))
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    this.onComposerMouseDrag(event)
+  }
+  private readonly onRootMouseUp = (event: MouseEvent) => {
+    if (this.sidebarDrag !== undefined) {
+      this.sidebarDrag = undefined
+      this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    this.onComposerMouseUp(event)
   }
   private readonly onComposerMouseMove = (event: MouseEvent) => {
     this.setComposerResizePointer(this.model?.shortcutsOpen !== true && event.y === this.inputBox.y)
@@ -1126,7 +1197,14 @@ export class Surface {
     if (model.shortcutsOpen) this.setComposerResizePointer(false)
     const inputHeight = composerHeight(model)
     const renderedInputHeight = model.shortcutsOpen ? Math.min(model.height - 4, spacing.inputHeight + 12) : inputHeight
-    const sidebarWidth = (model.changedFilesOpen || model.sidebarOpen) && !isNarrow(model) ? 36 : 0
+    const sidebarReady = model.changedFilesOpen
+      ? isReady(model.changedFiles)
+      : model.sidebarOpen
+        ? isReady(model.filePicker.items)
+        : false
+    const sidebarVisible = (model.changedFilesOpen || model.sidebarOpen) && sidebarReady && !isNarrow(model)
+    const sidebarWidth = sidebarVisible ? model.sidebarWidth : 0
+    const sidebarInnerWidth = Math.max(8, model.sidebarWidth - 8)
     const contentWidth = Math.max(20, model.width - sidebarWidth)
     const modeColor = colors[model.mode]
     const isWelcome = model.entries.length === 0 && model.blocks.length === 0
@@ -1259,8 +1337,9 @@ export class Surface {
     const workspaceTitle = isNarrow(model)
       ? ""
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
-    if (model.busy) {
-      const statusName = model.busyStatus ?? "Waiting"
+    const panelLoadingLabel = panelLoading(model)
+    if (model.busy || panelLoadingLabel !== undefined) {
+      const statusName = model.busy ? (model.busyStatus ?? "Waiting") : panelLoadingLabel!
       this.inputBox.bottomTitle = ""
       this.statusLabel.content = new StyledText([
         fg(colors.text)(" "),
@@ -1298,13 +1377,14 @@ export class Surface {
       : composerContent(model, inputHeight - 2)
     this.sidebar.visible = false
     this.sidebar.content = renderSidebar(model)
-    this.changedFilesBox.visible = (model.changedFilesOpen || model.sidebarOpen) && !isNarrow(model)
+    this.changedFilesBox.visible = sidebarVisible
     if (this.changedFilesBox.visible) {
+      this.changedFilesBox.width = Math.max(8, model.sidebarWidth - 2)
       this.changedFilesBox.title = model.changedFilesOpen
-        ? ` Changed files (${model.changedFiles.length}) `
-        : ` Files (${model.filePicker.items.length}) `
+        ? ` Changed files (${readyOr(model.changedFiles, []).length}) `
+        : ` Files (${readyOr(model.filePicker.items, []).length}) `
       this.changedFilesBox.titleAlignment = "left"
-      this.changedRows = sidebarFileRows(model, 28)
+      this.changedRows = sidebarFileRows(model, sidebarInnerWidth)
       this.changedFilesText.content = renderFileRows(this.changedRows, this.changedFilesHoveredRow)
     } else {
       this.changedRows = []
@@ -1318,21 +1398,24 @@ export class Surface {
       this.transcriptScroll.scrollTop = model.scrollOffset
       this.scrollProgrammatic = false
     }
-    if (model.busy && this.loaderTimer === undefined) {
+    const loaderActive = model.busy || panelLoadingLabel !== undefined
+    if (loaderActive && this.loaderTimer === undefined) {
       this.loaderTimer = setInterval(() => {
         this.loaderPhase = (this.loaderPhase + 1) % spinnerFrames.length
         const current = this.model
         if (current !== undefined) {
-          const statusName = current.busyStatus ?? "Waiting"
-          this.statusLabel.content = new StyledText([
-            fg(colors.text)(" "),
-            fg(colors.blue)(loaderFrame(statusName, this.loaderPhase)),
-            dim(fg(colors.text)(` ${statusName} `)),
-          ])
+          const label = current.busy ? (current.busyStatus ?? "Waiting") : panelLoading(current)
+          if (label !== undefined) {
+            this.statusLabel.content = new StyledText([
+              fg(colors.text)(" "),
+              fg(colors.blue)(loaderFrame(label, this.loaderPhase)),
+              dim(fg(colors.text)(` ${label} `)),
+            ])
+          }
         }
         this.renderer.requestRender()
       }, spinnerInterval)
-    } else if (!model.busy && this.loaderTimer !== undefined) {
+    } else if (!loaderActive && this.loaderTimer !== undefined) {
       clearInterval(this.loaderTimer)
       this.loaderTimer = undefined
     }
@@ -1419,7 +1502,8 @@ export class Surface {
     this.junkTimer = undefined
     this.junkBuffer = []
     this.composerDrag = undefined
-    this.setComposerResizePointer(false)
+    this.sidebarDrag = undefined
+    this.setPointerShape("default")
     this.model = undefined
     this.setTranscriptChildren([])
     this.renderer.root.onMouseDrag = undefined
@@ -1649,10 +1733,10 @@ const previewTranscriptLines = (
   width: number,
   maxRows: number,
 ): ReadonlyArray<ReadonlyArray<TextChunk>> | undefined => {
-  const preview = model.threadPreview
   const selected = selectedThreadMetadata(model)
-  if (preview === undefined || selected === undefined || preview.threadId !== selected.id || preview.turns.length === 0)
-    return undefined
+  if (!isReady(model.threadPreview) || selected === undefined) return undefined
+  const preview = model.threadPreview.value
+  if (preview.threadId !== selected.id || preview.turns.length === 0) return undefined
   let previewModel: Model = { ...initial(model.workspace, model.mode), width: Math.max(8, width), height: 200 }
   preview.turns.forEach((turn, index) => {
     previewModel = projectTurn(previewModel, `preview-${index}`, turn.prompt, turn.events as ReadonlyArray<Event>)
@@ -1702,7 +1786,9 @@ const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: nu
     const startRow = previewBottom - transcriptLines.length
     transcriptLines.forEach((line, index) => previewLines.set(startRow + index, line))
   } else {
-    previewLines.set(previewTop + 2, [fg(colors.muted)("Thread Preview")])
+    previewLines.set(previewTop + 2, [
+      isLoading(model.threadPreview) ? dim(fg(colors.text)("Loading preview")) : fg(colors.muted)("Thread Preview"),
+    ])
     centeredHeaderRow = previewTop + 2
     if (preview !== undefined) {
       const details = [
@@ -1781,9 +1867,25 @@ const filePickerContent = (model: Model, entries: ReadonlyArray<string>, innerWi
       chunks.push(fg(colors.text)(clipped))
     }
   })
-  if (chunks.length === 0) chunks.push(dim(fg(colors.text)("no matches")))
+  if (chunks.length === 0)
+    chunks.push(
+      dim(
+        fg(colors.text)(
+          model.filePicker.kind === "file" && isLoading(model.filePicker.items) ? "Loading files" : "no matches",
+        ),
+      ),
+    )
   return new StyledText(chunks)
 }
+
+const panelLoading = (model: Model): string | undefined =>
+  model.threadLoading
+    ? "Loading Thread"
+    : model.changedFilesOpen && isLoading(model.changedFiles)
+      ? "Loading changed files"
+      : (model.sidebarOpen || model.filePicker.open) && isLoading(model.filePicker.items)
+        ? "Loading files"
+        : undefined
 
 const compactWorkspace = (workspace: string): string => {
   const home = workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")

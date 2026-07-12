@@ -131,7 +131,7 @@ export interface FilePickerState {
   readonly open: boolean
   readonly query: string
   readonly selected: number
-  readonly items: ReadonlyArray<string>
+  readonly items: Loadable<ReadonlyArray<string>>
   readonly kind: "file" | "thread"
 }
 export interface ThreadSwitcherState {
@@ -140,13 +140,36 @@ export interface ThreadSwitcherState {
   readonly selected: number
 }
 
+export type Loadable<T> =
+  | { readonly _tag: "Idle" }
+  | { readonly _tag: "Loading" }
+  | { readonly _tag: "Ready"; readonly value: T }
+
+const LoadableIdleSchema = Schema.Struct({ _tag: Schema.Literal("Idle") })
+const LoadableLoadingSchema = Schema.Struct({ _tag: Schema.Literal("Loading") })
+
+export const idle: Loadable<never> = { _tag: "Idle" }
+export const loading: Loadable<never> = { _tag: "Loading" }
+export const ready = <T>(value: T): Loadable<T> => ({ _tag: "Ready", value })
+export const readyOr = <T>(loadable: Loadable<T>, fallback: T): T =>
+  loadable._tag === "Ready" ? loadable.value : fallback
+export const isReady = <T>(loadable: Loadable<T>): loadable is { readonly _tag: "Ready"; readonly value: T } =>
+  loadable._tag === "Ready"
+export const isLoading = <T>(loadable: Loadable<T>): boolean => loadable._tag === "Loading"
+
+const WorkspaceFilesSchema = Schema.Union([
+  LoadableIdleSchema,
+  LoadableLoadingSchema,
+  Schema.Struct({ _tag: Schema.Literal("Ready"), value: Schema.Array(Schema.String) }),
+])
+
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Number })
 const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Number })
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
   selected: Schema.Number,
-  items: Schema.Array(Schema.String),
+  items: WorkspaceFilesSchema,
   kind: Schema.Literals(["file", "thread"]),
 })
 const ThreadSwitcherStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Number })
@@ -166,6 +189,23 @@ export const ChangedFile = Schema.Struct({
   removed: Schema.optional(Schema.Number),
 })
 export type ChangedFile = typeof ChangedFile.Type
+
+const ChangedFilesSchema = Schema.Union([
+  LoadableIdleSchema,
+  LoadableLoadingSchema,
+  Schema.Struct({ _tag: Schema.Literal("Ready"), value: Schema.Array(ChangedFile) }),
+])
+const ThreadPreviewSchema = Schema.Union([
+  LoadableIdleSchema,
+  LoadableLoadingSchema,
+  Schema.Struct({
+    _tag: Schema.Literal("Ready"),
+    value: Schema.Struct({
+      threadId: Schema.String,
+      turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(Schema.Unknown) })),
+    }),
+  }),
+])
 
 export const Model = Schema.Struct({
   workspace: Schema.String,
@@ -213,16 +253,13 @@ export const Model = Schema.Struct({
   fastMode: Schema.Boolean,
   reasoningEffort: ReasoningEffort,
   changedFilesOpen: Schema.Boolean,
-  changedFiles: Schema.Array(ChangedFile),
+  changedFiles: ChangedFilesSchema,
+  sidebarWidth: Schema.Number,
+  threadLoading: Schema.Boolean,
   toolCallDrafts: Schema.Array(
     Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String), text: Schema.String }),
   ),
-  threadPreview: Schema.optional(
-    Schema.Struct({
-      threadId: Schema.String,
-      turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(Schema.Unknown) })),
-    }),
-  ),
+  threadPreview: ThreadPreviewSchema,
 })
 export type Model = typeof Model.Type
 
@@ -267,8 +304,14 @@ export type Message =
   | { readonly _tag: "FastModeToggled" }
   | { readonly _tag: "ReasoningEffortCycled" }
   | { readonly _tag: "SidebarViewToggled" }
+  | { readonly _tag: "SidebarWidthChanged"; readonly width: number }
   | { readonly _tag: "ComposerReplaced"; readonly text: string }
+  | { readonly _tag: "ChangedFilesRequested" }
   | { readonly _tag: "ChangedFilesReplaced"; readonly files: ReadonlyArray<ChangedFile> }
+  | { readonly _tag: "FilesRequested" }
+  | { readonly _tag: "ThreadPreviewRequested" }
+  | { readonly _tag: "ThreadOpenRequested" }
+  | { readonly _tag: "ThreadOpenCompleted" }
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
@@ -294,6 +337,9 @@ export const replaceQueue = (model: Model, queue: ReadonlyArray<QueueItem>): Mod
 export const defaultReasoningEffort = (mode: Mode): ReasoningEffort =>
   mode === "low" ? "low" : mode === "medium" ? "medium" : "high"
 
+const clampSidebarWidth = (width: number, terminalWidth: number): number =>
+  Math.max(24, Math.min(width, Math.max(24, terminalWidth - 40)))
+
 export const initial = (workspace: string, mode: Mode = "medium"): Model => ({
   workspace,
   mode,
@@ -310,7 +356,7 @@ export const initial = (workspace: string, mode: Mode = "medium"): Model => ({
   paletteOpen: false,
   palette: { open: false, query: "", selected: 0 },
   modePicker: { open: false, selected: 0 },
-  filePicker: { open: false, query: "", selected: 0, items: [], kind: "file" },
+  filePicker: { open: false, query: "", selected: 0, items: idle, kind: "file" },
   threadSwitcher: { open: false, query: "", selected: 0 },
   shortcutsOpen: false,
   composerHeight: 5,
@@ -330,7 +376,10 @@ export const initial = (workspace: string, mode: Mode = "medium"): Model => ({
   fastMode: false,
   reasoningEffort: defaultReasoningEffort(mode),
   changedFilesOpen: false,
-  changedFiles: [],
+  changedFiles: idle,
+  sidebarWidth: 36,
+  threadLoading: false,
+  threadPreview: idle,
   toolCallDrafts: [],
 })
 
@@ -506,13 +555,14 @@ const expandPastedTextAttachment = (model: Model, token: string): Model => {
 }
 
 export const filteredFiles = (model: Model): ReadonlyArray<string> => {
+  const items = readyOr(model.filePicker.items, [])
   const query = model.filePicker.query.toLowerCase()
   if (query.length === 0) {
     const segments = new Set<string>()
-    for (const file of model.filePicker.items) segments.add(file.split("/")[0]!)
+    for (const file of items) segments.add(file.split("/")[0]!)
     return [...segments].toSorted().slice(0, 50)
   }
-  return model.filePicker.items.filter((file) => file.toLowerCase().includes(query)).slice(0, 50)
+  return items.filter((file) => file.toLowerCase().includes(query)).slice(0, 50)
 }
 
 export const filteredThreads = (model: Model): ReadonlyArray<ThreadItem> => {
@@ -587,8 +637,12 @@ export const update = (model: Model, message: Message): Model => {
         currentThreadTitle: model.currentThreadId === message.threadId ? message.title : model.currentThreadTitle,
         threads: renameThread(model.threads as ReadonlyArray<ThreadItem>, message.threadId, message.title),
       }
+    case "FilesRequested":
+      return model.filePicker.items._tag === "Ready"
+        ? model
+        : { ...model, filePicker: { ...model.filePicker, items: loading } }
     case "FilesReplaced":
-      return { ...model, filePicker: { ...model.filePicker, items: [...message.files] } }
+      return { ...model, filePicker: { ...model.filePicker, items: ready([...message.files]) } }
     case "BranchDetected":
       return { ...model, branch: message.branch }
     case "SidebarToggled":
@@ -721,9 +775,12 @@ export const update = (model: Model, message: Message): Model => {
         width: message.width,
         height: message.height,
         composerHeight: Math.min(model.composerHeight, Math.max(5, message.height - 4)),
+        sidebarWidth: clampSidebarWidth(model.sidebarWidth, message.width),
       }
     case "ComposerHeightChanged":
       return { ...model, composerHeight: Math.max(5, Math.min(message.height, Math.max(5, model.height - 4))) }
+    case "SidebarWidthChanged":
+      return { ...model, sidebarWidth: clampSidebarWidth(message.width, model.width) }
     case "ScrollMoved":
       return { ...model, scrollOffset: Math.max(0, message.offset), scrollFollow: false }
     case "ScrollFollowed":
@@ -958,15 +1015,23 @@ export const update = (model: Model, message: Message): Model => {
     }
     case "SidebarViewToggled":
       return { ...model, changedFilesOpen: !model.changedFilesOpen, sidebarOpen: false }
+    case "ChangedFilesRequested":
+      return model.changedFiles._tag === "Ready" ? model : { ...model, changedFiles: loading }
     case "ChangedFilesReplaced":
-      return { ...model, changedFiles: [...message.files] }
+      return { ...model, changedFiles: ready([...message.files]) }
+    case "ThreadPreviewRequested":
+      return { ...model, threadPreview: loading }
+    case "ThreadOpenRequested":
+      return { ...model, threadLoading: true }
+    case "ThreadOpenCompleted":
+      return { ...model, threadLoading: false }
     case "ThreadPreviewLoaded":
       return {
         ...model,
-        threadPreview: {
+        threadPreview: ready({
           threadId: message.threadId,
           turns: message.turns.map((turn) => ({ prompt: turn.prompt, events: [...turn.events] })),
-        },
+        }),
       }
     case "ToolCallDeltaReceived": {
       const drafts = model.toolCallDrafts as ReadonlyArray<{ id: string; name?: string; text: string }>
@@ -1011,13 +1076,13 @@ export const update = (model: Model, message: Message): Model => {
           modePicker: { ...model.modePicker, open: false },
           filePicker: { ...model.filePicker, open: false, kind: "file" },
           shortcutsOpen: false,
-          ...(open ? {} : { threadPreview: undefined }),
+          ...(open ? {} : { threadPreview: idle }),
         }
       }
       if (model.threadSwitcher.open) {
         const threads = filteredThreads(model)
         if (key.name === "escape")
-          return { ...model, threadSwitcher: { open: false, query: "", selected: 0 }, threadPreview: undefined }
+          return { ...model, threadSwitcher: { open: false, query: "", selected: 0 }, threadPreview: idle }
         if (key.name === "return") {
           const thread = threads[model.threadSwitcher.selected]
           return thread === undefined
@@ -1025,7 +1090,7 @@ export const update = (model: Model, message: Message): Model => {
             : {
                 ...model,
                 threadSwitcher: { open: false, query: "", selected: 0 },
-                threadPreview: undefined,
+                threadPreview: idle,
                 pendingAction: { _tag: "SelectThread", id: thread.id },
               }
         }

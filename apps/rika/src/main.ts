@@ -766,8 +766,9 @@ if (import.meta.main) {
               let replayTurns = new Map<string, Turn.Turn>()
               const fibers = new Set<Fiber.Fiber<void, never>>()
               let followFiber: Fiber.Fiber<void, never> | undefined
+              let renderSuppressed = false
               const render = (immediate = false) => {
-                if (renderer === undefined) return
+                if (renderer === undefined || renderSuppressed) return
                 if (immediate) {
                   if (renderTimer !== undefined) clearTimeout(renderTimer)
                   renderTimer = undefined
@@ -841,7 +842,7 @@ if (import.meta.main) {
                         (thread) => thread.id === event.thread.id,
                       ),
                     ),
-                    threadPreview: undefined,
+                    threadPreview: ViewState.idle,
                   }
                 } else if (event._tag === "ExecutionReplayed") {
                   if (model.currentThreadId !== event.threadId) return
@@ -1013,7 +1014,20 @@ if (import.meta.main) {
                     yield* Fiber.interrupt(followFiber)
                     fibers.delete(followFiber)
                   }
-                  yield* effect
+                  yield* Effect.sync(() => {
+                    model = ViewState.update(model, { _tag: "ThreadOpenRequested" })
+                    renderer?.surface.update(model)
+                    renderSuppressed = true
+                  })
+                  yield* effect.pipe(
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        renderSuppressed = false
+                        model = ViewState.update(model, { _tag: "ThreadOpenCompleted" })
+                        renderer?.surface.update(model)
+                      }),
+                    ),
+                  )
                   const selectedFollowFiber = yield* Effect.forkDaemon(session.followSelected(dispatch))
                   followFiber = selectedFollowFiber
                   fibers.add(selectedFollowFiber)
@@ -1185,13 +1199,17 @@ if (import.meta.main) {
                     prompt === undefined ? undefined : ViewState.expandPastedText(prompt, model.pastedText)
                   model = ViewState.update(model, { _tag: "KeyPressed", key })
                   if (submitting) model = ViewState.update(model, { _tag: "Submitted" })
+                  if (!wasChangedFilesOpen && model.changedFilesOpen)
+                    model = ViewState.update(model, { _tag: "ChangedFilesRequested" })
+                  const afterPreviewId = model.threadSwitcher.open
+                    ? ViewState.selectedThreadMetadata(model)?.id
+                    : undefined
+                  if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId)
+                    model = ViewState.update(model, { _tag: "ThreadPreviewRequested" })
                   renderer?.surface.update(model)
                   if (key.alt && key.name === "d")
                     renderer?.surface.showToast(`Reasoning effort: ${model.reasoningEffort}`, "#58a6ff")
                   if (!wasChangedFilesOpen && model.changedFilesOpen) run(loadChangedFiles())
-                  const afterPreviewId = model.threadSwitcher.open
-                    ? ViewState.selectedThreadMetadata(model)?.id
-                    : undefined
                   if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
                     if (previewTimer !== undefined) clearTimeout(previewTimer)
                     previewTimer = setTimeout(() => run(session.previewThread(afterPreviewId, dispatch)), 120)
@@ -1218,9 +1236,14 @@ if (import.meta.main) {
                   model = ViewState.update(model, { _tag: "ComposerHeightChanged", height })
                   renderer?.surface.update(model)
                 },
+                sidebarResize: (width) => {
+                  model = ViewState.update(model, { _tag: "SidebarWidthChanged", width })
+                  renderer?.surface.update(model)
+                },
               })
                 .then((created) => {
                   renderer = created
+                  model = ViewState.update(model, { _tag: "FilesRequested" })
                   created.surface.update(model)
                   created.renderer.start()
                   run(watchChangedFiles)
