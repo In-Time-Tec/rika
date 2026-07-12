@@ -20,6 +20,8 @@ The runtime exposes a client-requiring adapter layer for deterministic tests and
 
 The Relay Session identifier is `session:<thread-id>` and the top-level Relay Execution identifier is `execution:<turn-id>`. Starting the same Turn again uses the same idempotency key and returns the existing execution without duplicating visible events.
 
+Every Thread with durable work has one Thread Host: a perpetual Relay entity of kind `rika-thread` keyed by the ThreadId. The runtime adapter registers the kind once per boot, establishes the instance idempotently through entity get-or-create, and exposes only product-vocabulary contract methods (`ensureThreadHost`, `notifyThreadHost`, `registerTurnPromoter`). The Thread Host drives Pending Turn promotion; Turns remain top-level Executions with unchanged identity, and entity identifiers never cross the adapter boundary. The reserved `execution:entity:*`, `address:entity:*`, and `session:entity:*` namespaces belong to Relay; Rika never mints them.
+
 ## Lifecycle
 
 Rika supports creation, continuation, listing, search, rename, label, pin, archive, unarchive, delete, export, fork, and prior-turn navigation.

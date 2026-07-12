@@ -134,6 +134,8 @@ export class BackendError extends Schema.TaggedErrorClass<BackendError>()("Execu
   message: Schema.String,
 }) {}
 
+export type TurnPromoter = (threadId: string) => Effect.Effect<number>
+
 export interface Interface {
   readonly invokeChild: (input: InvokeChildInput) => Effect.Effect<ChildEvent, BackendError>
   readonly createFanOut: (input: FanOutInput) => Effect.Effect<FanOutInspection, BackendError>
@@ -154,6 +156,13 @@ export interface Interface {
   ) => Effect.Effect<WorkflowInspection, BackendError>
   readonly inspectWorkflow: (runId: string) => Effect.Effect<WorkflowInspection | undefined, BackendError>
   readonly cancelWorkflow: (runId: string) => Effect.Effect<WorkflowInspection | undefined, BackendError>
+  readonly ensureThreadHost?: (threadId: string, createdAt: number) => Effect.Effect<void, BackendError>
+  readonly notifyThreadHost?: (
+    threadId: string,
+    turnId: string | undefined,
+    now: number,
+  ) => Effect.Effect<void, BackendError>
+  readonly registerTurnPromoter?: (promoter: TurnPromoter) => Effect.Effect<void>
   readonly start: (input: StartInput) => Effect.Effect<Result, BackendError>
   readonly follow?: (
     turnId: string,

@@ -1,7 +1,7 @@
 import { Agent, type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
 import { Catalog as ToolCatalog, ParallelSearch, ReadWebPage, Runtime as RikaToolRuntime } from "@rika/tools"
-import { Client, Content, type Execution, Ids } from "@relayfx/sdk"
-import { Context, Effect, Layer, Redacted, Stream } from "effect"
+import { Client, Content, type Entity, type Execution, Ids } from "@relayfx/sdk"
+import { Context, Effect, Layer, Option, Redacted, Stream } from "effect"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { BackendError, Event, type PromptPart, Service, Status } from "./execution-contract"
@@ -15,6 +15,7 @@ import {
 } from "./agent-profiles"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as RelayCompat from "./relay-compat"
+import * as ThreadHost from "./thread-host"
 import { definitions, idFor } from "./workflow-definitions"
 
 export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> = {}> {
@@ -242,7 +243,68 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     Service,
     Effect.gen(function* () {
       const client = RelayCompat.extend(yield* Client.Service)
+      const registry = Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
+      const hostInstances = new Map<string, Entity.Instance>()
+      const hostReady = yield* Effect.cached(
+        Effect.gen(function* () {
+          yield* client.registerAgent({
+            id: ThreadHost.hostAgentId,
+            agent: Agent.make("rika-thread-host", {
+              instructions: "Promote pending Rika turns delivered to this thread host.",
+              model: ThreadHost.hostSelection,
+              toolkit: ThreadHost.toolkit,
+            }),
+            permissions: [],
+            max_wait_turns: ThreadHost.hostMaxWaitTurns,
+            metadata: { steering_enabled: false },
+          })
+          yield* client.registerEntityKind({
+            kind: ThreadHost.entityKind,
+            agent_id: ThreadHost.hostAgentId,
+            inbox: { drain: "all" },
+            state_enabled: false,
+            continue_as_new_after_turns: ThreadHost.continueAsNewAfterTurns,
+            metadata: { product: "rika" },
+          })
+        }),
+      )
+      const hostInstance = Effect.fn("ExecutionBackend.hostInstance")(function* (threadId: string, now: number) {
+        yield* hostReady
+        const cached = hostInstances.get(threadId)
+        if (cached !== undefined && cached.status === "active") return cached
+        const instance = yield* client.getOrCreateEntity({
+          kind: ThreadHost.entityKind,
+          key: Ids.EntityKey.make(threadId),
+          metadata: { rika_thread_id: threadId },
+          created_at: now,
+        })
+        hostInstances.set(threadId, instance)
+        return instance
+      })
       return Service.of({
+        ensureThreadHost: Effect.fn("ExecutionBackend.ensureThreadHost")(function* (threadId, createdAt) {
+          yield* hostInstance(threadId, createdAt).pipe(Effect.mapError(error))
+        }),
+        notifyThreadHost: Effect.fn("ExecutionBackend.notifyThreadHost")(function* (threadId, turnId, now) {
+          yield* Effect.gen(function* () {
+            const instance = yield* hostInstance(threadId, now)
+            yield* client.send({
+              from: addressId,
+              to: instance.address_id,
+              content: [
+                Content.text(
+                  JSON.stringify({
+                    kind: "pending-turn",
+                    thread_id: threadId,
+                    ...(turnId === undefined ? {} : { turn_id: turnId }),
+                  }),
+                ),
+              ],
+              idempotency_key: turnId === undefined ? `rika:nudge:${threadId}:${now}` : `rika:turn:${turnId}`,
+            })
+          }).pipe(Effect.mapError(error))
+        }),
+        registerTurnPromoter: (promoter) => registry.register(promoter),
         createFanOut: Effect.fn("ExecutionBackend.createFanOut")(function* (input) {
           const state = yield* client
             .createChildFanOut({
@@ -478,22 +540,34 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
 
 export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(options: LayerOptions<AdditionalTools>) =>
   Layer.unwrap(
-    Effect.promise(() => import("@relayfx/sdk/sqlite")).pipe(
-      Effect.map((sqliteModule) => {
+    Effect.gen(function* () {
+      const sqliteModule = yield* Effect.promise(() => import("@relayfx/sdk/sqlite"))
+      const promoterRegistry = yield* ThreadHost.makeRegistry
+      const promoterRegistryLayer = Layer.succeed(ThreadHost.Registry, promoterRegistry)
+      {
         const { LanguageModelService, RunnerRuntime, SchemaRegistry, SQLite, ToolRuntime } = sqliteModule
         const { ChildFanOutRuntime, WorkflowDefinitionRuntime } = RelayCompat.legacyRuntimes(sqliteModule)
         {
           const toolkit = toolkitFor(options)
-          const handlerLayer =
+          const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
+          const handlerLayer = Layer.merge(
             options.additionalHandlerLayer === undefined
               ? RikaToolRuntime.handlerLayer
-              : Layer.merge(RikaToolRuntime.handlerLayer, options.additionalHandlerLayer)
+              : Layer.merge(RikaToolRuntime.handlerLayer, options.additionalHandlerLayer),
+            ThreadHost.handlerLayer(promoterRegistry),
+          )
           const runnerLayer = RunnerRuntime.layerWithServices({
             databaseLayer: SQLite.layer({ filename: options.filename }),
-            languageModelLayer: LanguageModelService.layer(registrationsFor(options)),
+            languageModelLayer: LanguageModelService.layerFromRegistrationEffects([
+              ...registrationsFor(options).map((registration) => Effect.succeed(registration)),
+              ThreadHost.hostRegistration,
+            ]),
             schemaRegistryLayer: SchemaRegistry.layer(outputSchemaRegistrations),
-            toolRuntimeLayer: ToolRuntime.layerFromToolkit(toolkit, (tool) => ({
-              needsApproval: options.toolNeedsApproval?.(tool.name) ?? ToolCatalog.get(tool.name)?.permission === "ask",
+            toolRuntimeLayer: ToolRuntime.layerFromToolkit(runnerToolkit, (tool) => ({
+              needsApproval:
+                tool.name === ThreadHost.promoteTurnTool.name
+                  ? false
+                  : (options.toolNeedsApproval?.(tool.name) ?? ToolCatalog.get(tool.name)?.permission === "ask"),
             })).pipe(
               Layer.provide(handlerLayer),
               Layer.provideMerge(
@@ -551,7 +625,7 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
               )
           }
           if (!RelayCompat.hasFanOutWorkflowRuntimes(sqliteModule, SQLite)) {
-            return layerFromClient(options).pipe(Layer.provide(runnerClientLayer))
+            return layerFromClient(options).pipe(Layer.provide(runnerClientLayer), Layer.provide(promoterRegistryLayer))
           }
           const fanOutHandlers = Layer.effect(
             ChildFanOutRuntime.HandlerService,
@@ -676,8 +750,8 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
               return Layer.succeed(Client.Service, Client.Service.of(extended))
             }),
           )
-          return layerFromClient(options).pipe(Layer.provide(hostBoundClientLayer))
+          return layerFromClient(options).pipe(Layer.provide(hostBoundClientLayer), Layer.provide(promoterRegistryLayer))
         }
-      }),
-    ),
+      }
+    }),
   )

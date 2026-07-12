@@ -46,7 +46,7 @@ vi.mock("@relayfx/sdk/sqlite", async () => {
   return {
     ChildFanOutRuntime: ChildFanOutRuntimeMock,
     WorkflowDefinitionRuntime: WorkflowDefinitionRuntimeMock,
-    LanguageModelService: { layer: () => NativeLayer.empty },
+    LanguageModelService: { layer: () => NativeLayer.empty, layerFromRegistrationEffects: () => NativeLayer.empty },
     RunnerRuntime: { layerWithServices: () => NativeLayer.empty },
     SchemaRegistry: { layer: () => NativeLayer.empty },
     ToolRuntime: { layerFromToolkit: () => NativeLayer.empty },
@@ -809,6 +809,78 @@ describe("ExecutionBackend Relay client adapter", () => {
     expect(RelayExecutionBackend.remoteToolOptions(undefined)).toEqual({})
     expect(RelayExecutionBackend.remoteToolOptions(key)).toEqual({ apiKey: key })
   })
+
+  it.effect("ensures the thread host entity and notifies it through the durable inbox", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      const kinds: Array<unknown> = []
+      const created: Array<unknown> = []
+      const sent: Array<Record<string, unknown>> = []
+      Object.assign(fixture.implementation, {
+        registerEntityKind: (input: unknown) =>
+          Effect.sync(() => {
+            kinds.push(input)
+            return input
+          }),
+        getOrCreateEntity: (input: { readonly key: string }) =>
+          Effect.sync(() => {
+            created.push(input)
+            return {
+              kind: "rika-thread",
+              key: input.key,
+              address_id: `address:entity:${input.key}`,
+              execution_id: `execution:entity:${input.key}`,
+              generation: 0,
+              status: "active",
+              created_at: 1,
+            }
+          }),
+        send: (input: Record<string, unknown>) =>
+          Effect.sync(() => {
+            sent.push(input)
+            return { envelope_id: "envelope:notify", execution_id: `execution:entity:thread-a` }
+          }),
+      })
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* backend.ensureThreadHost!("thread-a", 100)
+        yield* backend.ensureThreadHost!("thread-a", 101)
+        yield* backend.notifyThreadHost!("thread-a", "turn-9", 102)
+        yield* backend.notifyThreadHost!("thread-a", undefined, 103)
+        yield* backend.registerTurnPromoter!(() => Effect.succeed(1))
+      }).pipe(provideBackend(fixture.implementation))
+      const registrations = yield* Ref.get(fixture.registrations)
+      expect(registrations[0]?.id).toBe("agent:rika-thread-host")
+      const registration = registrations[0]
+      if (registration === undefined || !("agent" in registration)) return yield* Effect.die("Missing host agent")
+      expect(registration.max_wait_turns).toBe(1_000_000)
+      expect(registration.metadata?.steering_enabled).toBe(false)
+      expect(Object.keys(registration.agent.toolkit.tools)).toEqual(["promote_turn"])
+      expect(kinds).toEqual([
+        {
+          kind: "rika-thread",
+          agent_id: "agent:rika-thread-host",
+          inbox: { drain: "all" },
+          state_enabled: false,
+          continue_as_new_after_turns: 32,
+          metadata: { product: "rika" },
+        },
+      ])
+      expect(created).toHaveLength(1)
+      expect(sent).toHaveLength(2)
+      expect(sent[0]).toMatchObject({
+        from: "address:rika",
+        to: "address:entity:thread-a",
+        idempotency_key: "rika:turn:turn-9",
+      })
+      expect(JSON.parse((sent[0]?.content as Array<{ text: string }>)[0]!.text)).toEqual({
+        kind: "pending-turn",
+        thread_id: "thread-a",
+        turn_id: "turn-9",
+      })
+      expect(sent[1]).toMatchObject({ idempotency_key: "rika:nudge:thread-a:103" })
+    }),
+  )
 
   it.effect("constructs the public runtime layer lazily", () =>
     Effect.gen(function* () {

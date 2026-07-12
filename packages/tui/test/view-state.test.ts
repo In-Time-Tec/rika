@@ -556,3 +556,55 @@ describe("Keys", () => {
     expect(Keys.isPrintable(key({ name: "x", sequence: "\u007f" }))).toBe(false)
   })
 })
+
+describe("loadable panel state machine", () => {
+  it("transitions changed files idle to loading to ready and keeps ready on refresh", () => {
+    const base = ViewState.initial("/work")
+    expect(base.changedFiles).toEqual({ _tag: "Idle" })
+    const loading = ViewState.update(base, { _tag: "ChangedFilesRequested" })
+    expect(loading.changedFiles).toEqual({ _tag: "Loading" })
+    const ready = ViewState.update(loading, {
+      _tag: "ChangedFilesReplaced",
+      files: [{ path: "a.ts", status: "M", added: 1, removed: 0 }],
+    })
+    expect(ready.changedFiles._tag).toBe("Ready")
+    const requestedAgain = ViewState.update(ready, { _tag: "ChangedFilesRequested" })
+    expect(requestedAgain.changedFiles._tag).toBe("Ready")
+    const refreshed = ViewState.update(requestedAgain, {
+      _tag: "ChangedFilesReplaced",
+      files: [{ path: "b.ts", status: "A", added: 2, removed: 0 }],
+    })
+    expect(ViewState.readyOr(refreshed.changedFiles, []).map((file) => file.path)).toEqual(["b.ts"])
+  })
+
+  it("transitions workspace files and thread previews through loading states", () => {
+    const base = ViewState.initial("/work")
+    expect(base.filePicker.items).toEqual({ _tag: "Idle" })
+    const loading = ViewState.update(base, { _tag: "FilesRequested" })
+    expect(loading.filePicker.items).toEqual({ _tag: "Loading" })
+    const ready = ViewState.update(loading, { _tag: "FilesReplaced", files: ["src/main.ts"] })
+    expect(ViewState.readyOr(ready.filePicker.items, [])).toEqual(["src/main.ts"])
+    expect(ViewState.update(ready, { _tag: "FilesRequested" }).filePicker.items._tag).toBe("Ready")
+    const previewLoading = ViewState.update(base, { _tag: "ThreadPreviewRequested" })
+    expect(previewLoading.threadPreview).toEqual({ _tag: "Loading" })
+    const previewReady = ViewState.update(previewLoading, {
+      _tag: "ThreadPreviewLoaded",
+      threadId: "thread-1",
+      turns: [{ prompt: "hi", events: [] }],
+    })
+    expect(previewReady.threadPreview._tag).toBe("Ready")
+    const opening = ViewState.update(base, { _tag: "ThreadOpenRequested" })
+    expect(opening.threadLoading).toBe(true)
+    expect(ViewState.update(opening, { _tag: "ThreadOpenCompleted" }).threadLoading).toBe(false)
+  })
+
+  it("clamps the sidebar width on change and terminal resize", () => {
+    const base = { ...ViewState.initial("/work"), width: 120, height: 40 }
+    expect(ViewState.update(base, { _tag: "SidebarWidthChanged", width: 200 }).sidebarWidth).toBe(80)
+    expect(ViewState.update(base, { _tag: "SidebarWidthChanged", width: 10 }).sidebarWidth).toBe(24)
+    const widened = ViewState.update(base, { _tag: "SidebarWidthChanged", width: 60 })
+    expect(widened.sidebarWidth).toBe(60)
+    const shrunk = ViewState.update(widened, { _tag: "Resized", width: 70, height: 40 })
+    expect(shrunk.sidebarWidth).toBe(30)
+  })
+})

@@ -14,6 +14,8 @@ This file is Rika's canonical vocabulary. Implementation details belong in specs
 
 **Pending Turn**: A durable user instruction accepted while another Turn is active and waiting to receive its own top-level Execution.
 
+**Thread Host**: The perpetual Relay entity that durably drives one Thread: it wakes on delivered promotion messages and claims Pending Turns. It is not a Turn, not a session, and never owns product state.
+
 **Execution**: Relay-owned durable work for a Turn, child run, or workflow step.
 
 **Child Run**: A durable Relay execution spawned by another execution with narrowed instructions, tools, mode, budget, or output contract. User-facing copy may say subagent.

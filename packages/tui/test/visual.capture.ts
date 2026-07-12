@@ -144,6 +144,25 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       80,
       24,
     ],
+    [
+      "changed-files-loading",
+      { ...base(), changedFilesOpen: true, changedFiles: { _tag: "Loading" } },
+      80,
+      24,
+    ],
+    [
+      "changed-files-ready",
+      {
+        ...base(),
+        changedFilesOpen: true,
+        changedFiles: ready([
+          { path: "src/main.ts", status: "M", added: 3, removed: 1 },
+          { path: "src/theme.ts", status: "A", added: 8, removed: 0 },
+        ]),
+      },
+      80,
+      24,
+    ],
     ["queued-turn", block({ _tag: "Queued", id: "queued-turn", prompt: "Run verification next" }), 80, 24],
     [
       "child-workflow",
