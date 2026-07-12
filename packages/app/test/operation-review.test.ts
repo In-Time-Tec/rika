@@ -60,7 +60,6 @@ const layer = (
       toolRuntimeLayer: () => Layer.succeed(ToolRuntime.Service, tool),
       defaultWorkspace: "/work",
       makeThreadId: Effect.succeed(Thread.ThreadId.make("thread")),
-      makeSessionId: Effect.succeed(Thread.SessionId.make("session")),
       makeTurnId: Effect.succeed(Turn.TurnId.make("review-turn")),
     }),
   )
@@ -79,7 +78,6 @@ describe("Operation review dispatcher", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.die("unused"),
-          makeSessionId: Effect.die("unused"),
           makeTurnId: Effect.die("unused"),
         }),
       ),

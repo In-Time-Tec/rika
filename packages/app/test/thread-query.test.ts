@@ -13,7 +13,6 @@ const thread = (
   options: { archived?: boolean; labels?: ReadonlyArray<string>; workspace?: string } = {},
 ) => ({
   id: Thread.ThreadId.make(id),
-  sessionId: Thread.SessionId.make(`session-${id}`),
   workspace: options.workspace ?? "/work/acme",
   title,
   labels: [...(options.labels ?? [])],

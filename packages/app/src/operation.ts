@@ -265,7 +265,6 @@ export interface ProductLayerOptions<ThreadError, TurnError, BackendError> {
   readonly defaultWorkspace: string
   readonly shellPermission?: "ask" | "allow"
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
-  readonly makeSessionId: Effect.Effect<Thread.SessionId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly configOperations?: {
     readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, unknown>
@@ -640,7 +639,6 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               if (thread === undefined) {
                 thread = yield* threads.create({
                   id: yield* options.makeThreadId,
-                  sessionId: yield* options.makeSessionId,
                   workspace: options.defaultWorkspace,
                   title: prompt.slice(0, 80) || "New thread",
                   now,
@@ -959,7 +957,6 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               if (thread === undefined) {
                 thread = yield* threads.create({
                   id: yield* options.makeThreadId,
-                  sessionId: yield* options.makeSessionId,
                   workspace: options.defaultWorkspace,
                   title: `$ ${command}`.slice(0, 80),
                   now,
@@ -1209,7 +1206,6 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 input.threadId === undefined
                   ? yield* threads.create({
                       id: yield* options.makeThreadId,
-                      sessionId: yield* options.makeSessionId,
                       workspace: input.workspace ?? options.defaultWorkspace,
                       title: input.prompt.join(" ").slice(0, 80) || "New thread",
                       now,
@@ -1424,10 +1420,8 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             switch (input.action) {
               case "new": {
                 const id = yield* options.makeThreadId
-                const sessionId = yield* options.makeSessionId
                 const thread = yield* repository.create({
                   id,
-                  sessionId,
                   workspace: options.defaultWorkspace,
                   title: "New thread",
                   now,
@@ -1563,7 +1557,6 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   )
                 const fork = yield* repository.create({
                   id: yield* options.makeThreadId,
-                  sessionId: yield* options.makeSessionId,
                   workspace: source.workspace,
                   title: source.title,
                   now,

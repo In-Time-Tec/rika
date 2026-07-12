@@ -34,7 +34,6 @@ const backend = ExecutionBackend.Service.of({
 
 const thread = (id: string, overrides: Partial<Thread.Thread> = {}): Thread.Thread => ({
   id: Thread.ThreadId.make(id),
-  sessionId: Thread.SessionId.make(`${id}-session`),
   workspace: `/work/${id}`,
   title: `${id} title`,
   labels: [],
@@ -79,7 +78,6 @@ describe("Operation thread actions", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("unused")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("unused-session")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("unused-turn")),
         }),
       )
@@ -125,7 +123,6 @@ describe("Operation thread actions", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
-        makeSessionId: Effect.die("unused"),
         makeTurnId: Effect.die("unused"),
       })
       yield* Effect.gen(function* () {
@@ -173,7 +170,6 @@ describe("Operation thread actions", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: next(threadIds).pipe(Effect.map(Thread.ThreadId.make)),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("fork-session")),
         makeTurnId: next(turnIds).pipe(Effect.map(Turn.TurnId.make)),
       })
       yield* Effect.gen(function* () {

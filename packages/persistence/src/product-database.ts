@@ -64,12 +64,31 @@ const turnPromptParts = Effect.gen(function* () {
   yield* sql`ALTER TABLE rika_turns ADD COLUMN prompt_parts_json TEXT`
 })
 
+const dropThreadSessionId = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_threads_next (
+    id TEXT PRIMARY KEY NOT NULL,
+    workspace TEXT NOT NULL REFERENCES rika_workspaces(path),
+    title TEXT NOT NULL,
+    labels_json TEXT NOT NULL DEFAULT '[]',
+    pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_threads_next SELECT id, workspace, title, labels_json, pinned, archived, created_at, updated_at FROM rika_threads`
+  yield* sql`DROP TABLE rika_threads`
+  yield* sql`ALTER TABLE rika_threads_next RENAME TO rika_threads`
+  yield* sql`CREATE INDEX rika_threads_listing ON rika_threads (pinned DESC, updated_at DESC, id ASC)`
+})
+
 const migrations = SqliteMigrator.fromRecord({
   "1_product_baseline": baseline,
   "2_turns": turns,
   "3_queued_turn_status": queuedTurns,
   "4_execution_extension_pins": executionExtensionPins,
   "5_turn_prompt_parts": turnPromptParts,
+  "6_drop_thread_session_id": dropThreadSessionId,
 })
 const migrate = SqliteMigrator.layer({ loader: migrations, table: "rika_migrations" })
 

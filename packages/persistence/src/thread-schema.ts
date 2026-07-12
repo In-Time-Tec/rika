@@ -3,12 +3,8 @@ import { Schema } from "effect"
 export const ThreadId = Schema.String.pipe(Schema.brand("RikaThreadId"))
 export type ThreadId = typeof ThreadId.Type
 
-export const SessionId = Schema.String.pipe(Schema.brand("RikaSessionId"))
-export type SessionId = typeof SessionId.Type
-
 export const Thread = Schema.Struct({
   id: ThreadId,
-  sessionId: SessionId,
   workspace: Schema.String,
   title: Schema.String,
   labels: Schema.Array(Schema.String),

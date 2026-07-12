@@ -22,7 +22,6 @@ test("migrates, persists, and reopens", async () => {
         const repository = yield* ThreadRepository.Service
         yield* repository.create({
           id,
-          sessionId: Thread.SessionId.make("session-a"),
           workspace: "/work/a",
           title: "First",
           now: 1,
@@ -72,6 +71,47 @@ test("migrates, persists, and reopens", async () => {
   })
 })
 
+test("upgrades a seeded v5 database and preserves thread rows", async () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-persistence-v5-" })
+      const filename = `${directory}/rika.db`
+      const { Database: BunDatabase } = yield* Effect.promise(() => import("bun:sqlite"))
+      const seeded = new BunDatabase(filename)
+      seeded.run(
+        "CREATE TABLE rika_migrations (migration_id INTEGER NOT NULL PRIMARY KEY, name TEXT NOT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)",
+      )
+      seeded.run(
+        "INSERT INTO rika_migrations (migration_id, name) VALUES (1, 'product_baseline'), (2, 'turns'), (3, 'queued_turn_status'), (4, 'execution_extension_pins'), (5, 'turn_prompt_parts')",
+      )
+      seeded.run("CREATE TABLE rika_workspaces (path TEXT PRIMARY KEY NOT NULL, created_at INTEGER NOT NULL)")
+      seeded.run(
+        "CREATE TABLE rika_threads (id TEXT PRIMARY KEY NOT NULL, session_id TEXT NOT NULL UNIQUE, workspace TEXT NOT NULL REFERENCES rika_workspaces(path), title TEXT NOT NULL, labels_json TEXT NOT NULL DEFAULT '[]', pinned INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)), archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
+      )
+      seeded.run(
+        "CREATE TABLE rika_turns (id TEXT PRIMARY KEY NOT NULL, thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE, prompt TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('accepted', 'queued', 'running', 'waiting', 'completed', 'failed', 'cancelled')), last_cursor TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, extension_pin_json TEXT, prompt_parts_json TEXT)",
+      )
+      seeded.run("INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/a', 1)")
+      seeded.run(
+        "INSERT INTO rika_threads (id, session_id, workspace, title, labels_json, pinned, archived, created_at, updated_at) VALUES ('thread-a', 'dead-uuid', '/work/a', 'Seeded', '[\"keep\"]', 1, 0, 1, 2)",
+      )
+      seeded.close()
+      const database = Database.layer(filename)
+      const threads = yield* Effect.gen(function* () {
+        const repository = yield* ThreadRepository.Service
+        return yield* repository.list()
+      }).pipe(Effect.provide(ThreadRepository.layer.pipe(Layer.provide(database))))
+      expect(threads).toHaveLength(1)
+      expect(threads[0]?.id).toBe(Thread.ThreadId.make("thread-a"))
+      expect(threads[0]?.title).toBe("Seeded")
+      expect(threads[0]?.labels).toEqual(["keep"])
+      expect(threads[0]?.pinned).toBe(true)
+    }),
+  ).pipe(Effect.provide(BunServices.layer))
+  await Effect.runPromise(program)
+})
+
 test("turn SQL mutations, ordering, and rejection branches", async () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
@@ -87,7 +127,6 @@ test("turn SQL mutations, ordering, and rejection branches", async () => {
         const turns = yield* TurnRepository.Service
         yield* threads.create({
           id,
-          sessionId: Thread.SessionId.make("session-a"),
           workspace: "/work",
           title: "A",
           now: 1,

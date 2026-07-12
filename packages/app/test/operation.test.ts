@@ -72,7 +72,6 @@ describe("Operation", () => {
             backendLayer,
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-sequential")),
-            makeSessionId: Effect.succeed(Thread.SessionId.make("session-sequential")),
             makeTurnId: Ref.updateAndGet(turnIds, (value) => value + 1).pipe(
               Effect.map((value) => Turn.TurnId.make(`turn-${value}`)),
             ),
@@ -243,7 +242,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.die("unused"),
-          makeSessionId: Effect.die("unused"),
           makeTurnId: Effect.die("unused"),
         }),
       )
@@ -278,7 +276,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: nextId.pipe(Effect.map(Thread.ThreadId.make)),
-          makeSessionId: nextId.pipe(Effect.map(Thread.SessionId.make)),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
         }),
       )
@@ -309,7 +306,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("thread-a"),
-        sessionId: Thread.SessionId.make("session-a"),
         workspace: "/work/project",
         title: "Release notes",
         labels: ["urgent"],
@@ -334,7 +330,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("unused")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("unused")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("unused")),
         }),
       )
@@ -362,7 +357,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const source: Thread.Thread = {
         id: Thread.ThreadId.make("source"),
-        sessionId: Thread.SessionId.make("source-session"),
         workspace: "/work",
         title: "Source",
         labels: ["kept"],
@@ -396,7 +390,6 @@ describe("Operation", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("fork")),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("fork-session")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("fork-turn")),
       })
       yield* Effect.gen(function* () {
@@ -428,7 +421,6 @@ describe("Operation", () => {
             backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-a")),
-            makeSessionId: Effect.succeed(Thread.SessionId.make("session-a")),
             makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
             interactive: (interactiveInput) => Ref.update(received, (inputs) => [...inputs, interactiveInput]),
           }),
@@ -459,7 +451,6 @@ describe("Operation", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("thread")),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("session")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("turn")),
         interactive: (_, session) => Ref.update(sessions, (all) => [...all, session]),
       })
@@ -494,7 +485,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("interactive-controls"),
-        sessionId: Thread.SessionId.make("interactive-controls-session"),
         workspace: "/work",
         title: "Controls",
         labels: [],
@@ -563,7 +553,6 @@ describe("Operation", () => {
             backendLayer: Layer.succeed(ExecutionBackend.Service, controlBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
-            makeSessionId: Effect.die("unused"),
             makeTurnId: Effect.succeed(Turn.TurnId.make("submitted-control")),
             interactive: (_, session) => Ref.update(sessions, (current) => [...current, session]),
           }),
@@ -599,7 +588,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("interrupt-thread"),
-        sessionId: Thread.SessionId.make("interrupt-session"),
         workspace: "/work",
         title: "Interrupt",
         labels: [],
@@ -635,7 +623,6 @@ describe("Operation", () => {
             }),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
-            makeSessionId: Effect.die("unused"),
             makeTurnId: Effect.succeed(Turn.TurnId.make("replacement")),
             interactive: (_, session) => Ref.update(sessions, (all) => [...all, session]),
           }),
@@ -665,7 +652,6 @@ describe("Operation", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-interactive")),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("session-interactive")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("turn-interactive")),
         interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
       })
@@ -754,7 +740,6 @@ describe("Operation", () => {
                 backendLayer: Layer.succeed(ExecutionBackend.Service, caseBackend),
                 defaultWorkspace: "/work",
                 makeThreadId: Effect.succeed(Thread.ThreadId.make(`thread-${status}`)),
-                makeSessionId: Effect.succeed(Thread.SessionId.make(`session-${status}`)),
                 makeTurnId: Effect.succeed(Turn.TurnId.make(`turn-${status}`)),
                 interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
               }),
@@ -827,7 +812,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, runBackend),
           defaultWorkspace: "/default-workspace",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-new")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("session-new")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-new")),
         }),
       )
@@ -847,7 +831,6 @@ describe("Operation", () => {
       const turn = yield* turns.get(Turn.TurnId.make("turn-new"))
       expect(thread).toMatchObject({
         id: "thread-new",
-        sessionId: "session-new",
         workspace: "/default-workspace",
         title: "New thread",
       })
@@ -868,7 +851,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("thread-existing"),
-        sessionId: Thread.SessionId.make("session-existing"),
         workspace: "/existing",
         title: "Existing",
         labels: [],
@@ -887,7 +869,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.die("A reused thread must not create an id"),
-          makeSessionId: Effect.die("A reused thread must not create a session"),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-existing")),
         }),
       )
@@ -948,7 +929,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-a")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("session-a")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
         }),
       ),
@@ -959,7 +939,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("thread-a"),
-        sessionId: Thread.SessionId.make("session-a"),
         workspace: "/work",
         title: "Busy",
         labels: [],
@@ -994,7 +973,6 @@ describe("Operation", () => {
         ),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
-        makeSessionId: Effect.die("unused"),
         makeTurnId: Effect.succeed(Turn.TurnId.make("queued")),
       })
       yield* Effect.gen(function* () {
@@ -1046,7 +1024,6 @@ describe("Operation", () => {
           ),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-a")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("session-a")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
         }),
       ),
@@ -1057,7 +1034,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("extension-thread"),
-        sessionId: Thread.SessionId.make("extension-session"),
         workspace: "/work",
         title: "Extensions",
         labels: [],
@@ -1143,7 +1119,6 @@ describe("Operation", () => {
             },
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
-            makeSessionId: Effect.die("unused"),
             makeTurnId: Effect.succeed(Turn.TurnId.make("initial")),
           }),
         ),
@@ -1188,7 +1163,6 @@ describe("Operation", () => {
               backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
               defaultWorkspace: "/work",
               makeThreadId: Effect.succeed(Thread.ThreadId.make("thread")),
-              makeSessionId: Effect.succeed(Thread.SessionId.make("session")),
               makeTurnId: Effect.succeed(Turn.TurnId.make("turn")),
               ...(resumeFails
                 ? {
@@ -1303,7 +1277,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const mentioned: Thread.Thread = {
         id: Thread.ThreadId.make("mentioned"),
-        sessionId: Thread.SessionId.make("mentioned-session"),
         workspace: "/old",
         title: "Mentioned",
         labels: [],
@@ -1348,7 +1321,6 @@ describe("Operation", () => {
             backendLayer: Layer.succeed(ExecutionBackend.Service, mentionBackend),
             defaultWorkspace: "/default",
             makeThreadId: Effect.succeed(Thread.ThreadId.make("created")),
-            makeSessionId: Effect.succeed(Thread.SessionId.make("created-session")),
             makeTurnId: Effect.succeed(Turn.TurnId.make("created-turn")),
           }),
         ),
@@ -1362,7 +1334,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("branch-thread"),
-        sessionId: Thread.SessionId.make("branch-session"),
         workspace: "/work",
         title: "Branch",
         labels: [],
@@ -1379,7 +1350,6 @@ describe("Operation", () => {
           backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
           defaultWorkspace: "/work",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("fork")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("fork-session")),
           makeTurnId: Effect.succeed(Turn.TurnId.make("fork-turn")),
         }),
       )
@@ -1397,7 +1367,6 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const thread: Thread.Thread = {
         id: Thread.ThreadId.make("interactive-mode"),
-        sessionId: Thread.SessionId.make("interactive-mode-session"),
         workspace: "/work",
         title: "Interactive mode",
         labels: [],
@@ -1454,7 +1423,6 @@ describe("Operation", () => {
                 : Layer.succeed(ExecutionBackend.Service, backend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
-            makeSessionId: Effect.die("unused"),
             makeTurnId: Effect.succeed(Turn.TurnId.make("submitted")),
             interactive: (input, session) =>
               Effect.gen(function* () {
@@ -1485,7 +1453,6 @@ describe("Operation", () => {
         },
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("mode-thread")),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("mode-session")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("mode-turn")),
       })
       yield* Effect.gen(function* () {
@@ -1514,7 +1481,6 @@ describe("Operation", () => {
         ),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
-        makeSessionId: Effect.die("unused"),
         makeTurnId: Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {

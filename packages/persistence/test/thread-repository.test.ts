@@ -5,7 +5,6 @@ import * as Thread from "../src/thread-schema"
 import { makeRecordingSql } from "./recording-sql"
 
 const id = (value: string) => Thread.ThreadId.make(value)
-const session = (value: string) => Thread.SessionId.make(value)
 
 const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) => {
   describe(name, () => {
@@ -14,14 +13,12 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         const repository = yield* ThreadRepository.Service
         const first = yield* repository.create({
           id: id("thread-a"),
-          sessionId: session("session-a"),
           workspace: "/work/a",
           title: "First",
           now: 1,
         })
         yield* repository.create({
           id: id("thread-b"),
-          sessionId: session("session-b"),
           workspace: "/work/b",
           title: "Second",
           now: 2,
@@ -53,7 +50,6 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         const repository = yield* ThreadRepository.Service
         const input = {
           id: id("thread-a"),
-          sessionId: session("session-a"),
           workspace: "/work/a",
           title: "First",
           now: 1,
@@ -72,7 +68,6 @@ behavior("memory", ThreadRepository.memoryLayer())
 
 const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   id: "thread-a",
-  session_id: "session-a",
   workspace: "/work/a",
   title: "First",
   labels_json: "[]",
@@ -102,7 +97,6 @@ describe("sql layer", () => {
         const repository = yield* ThreadRepository.Service
         const created = yield* repository.create({
           id: id("thread-a"),
-          sessionId: session("session-a"),
           workspace: "/work/a",
           title: "First",
           now: 1,
@@ -110,10 +104,10 @@ describe("sql layer", () => {
         expect(created.labels).toEqual([])
         expect(sql.statements.map((statement) => statement.sql)).toEqual([
           "INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
-          "INSERT INTO rika_threads (id, session_id, workspace, title, labels_json, pinned, archived, created_at, updated_at) VALUES (?, ?, ?, ?, '[]', 0, 0, ?, ?)",
+          "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?)",
           "SELECT * FROM rika_threads WHERE id = ?",
         ])
-        expect(sql.statements[1]?.parameters).toEqual(["thread-a", "session-a", "/work/a", "First", 1, 1])
+        expect(sql.statements[1]?.parameters).toEqual(["thread-a", "/work/a", "First", 1, 1])
       }),
     ),
   )

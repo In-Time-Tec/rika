@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { SessionId, Thread, ThreadId } from "./thread-schema"
+import { Thread, ThreadId } from "./thread-schema"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
@@ -8,7 +8,6 @@ export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()(
 
 export interface CreateInput {
   readonly id: ThreadId
-  readonly sessionId: SessionId
   readonly workspace: string
   readonly title: string
   readonly now: number
@@ -35,7 +34,6 @@ export class Service extends Context.Service<Service, Interface>()("@rika/persis
 
 const Row = Schema.Struct({
   id: Schema.String,
-  session_id: Schema.String,
   workspace: Schema.String,
   title: Schema.String,
   labels_json: Schema.String,
@@ -73,7 +71,6 @@ const decode = (row: unknown) =>
     const labels = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(labelsJson)
     return {
       id: ThreadId.make(value.id),
-      sessionId: SessionId.make(value.session_id),
       workspace: value.workspace,
       title: value.title,
       labels,
@@ -110,7 +107,6 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
         }
         const thread: Thread = {
           id: input.id,
-          sessionId: input.sessionId,
           workspace: input.workspace,
           title: input.title,
           labels: [],
@@ -184,8 +180,8 @@ export const layer = Layer.effect(
         yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES (${input.workspace}, ${input.now}) ON CONFLICT(path) DO NOTHING`.pipe(
           Effect.mapError(repositoryError),
         )
-        yield* sql`INSERT INTO rika_threads (id, session_id, workspace, title, labels_json, pinned, archived, created_at, updated_at)
-          VALUES (${input.id}, ${input.sessionId}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${input.now}, ${input.now})`.pipe(
+        yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, created_at, updated_at)
+          VALUES (${input.id}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${input.now}, ${input.now})`.pipe(
           Effect.mapError(repositoryError),
         )
         return yield* requireThread(input.id)

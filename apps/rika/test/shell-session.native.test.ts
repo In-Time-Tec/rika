@@ -62,7 +62,6 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         defaultWorkspace: workspace,
         shellPermission: "allow",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-thread")),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("shell-session")),
         makeTurnId: Effect.sync(() => Turn.TurnId.make(`shell-turn-${nextTurn++}`)),
         interactive: (_, session) => Effect.sync(() => sessions.push(session)),
       })

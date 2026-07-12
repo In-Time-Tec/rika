@@ -738,7 +738,6 @@ if (import.meta.main) {
         defaultWorkspace: process.cwd(),
         shellPermission: effectiveConfig.settings.permissions.shell === "allow" ? "allow" : "ask",
         makeThreadId: Effect.sync(() => Thread.ThreadId.make(crypto.randomUUID())),
-        makeSessionId: Effect.sync(() => Thread.SessionId.make(crypto.randomUUID())),
         makeTurnId: Effect.sync(() => Turn.TurnId.make(crypto.randomUUID())),
         configOperations: {
           layer: Layer.merge(configAdapter, applicationConfigLayer).pipe(Layer.provide(BunServices.layer)),

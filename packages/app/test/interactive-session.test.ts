@@ -10,7 +10,6 @@ import { Operation } from "../src/index"
 
 const thread = (id: string, updatedAt: number): Thread.Thread => ({
   id: Thread.ThreadId.make(id),
-  sessionId: Thread.SessionId.make(`session-${id}`),
   workspace: "/work",
   title: id,
   labels: [],
@@ -121,7 +120,6 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
-    makeSessionId: Effect.die("unused"),
     makeTurnId: Effect.succeed(Turn.TurnId.make("pending")),
     interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
   })
@@ -172,7 +170,6 @@ describe("InteractiveSession controls", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, submittedBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.succeed(Thread.ThreadId.make("created")),
-        makeSessionId: Effect.succeed(Thread.SessionId.make("created-session")),
         makeTurnId: Effect.succeed(Turn.TurnId.make("created-turn")),
         interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
       })
@@ -290,7 +287,6 @@ describe("InteractiveSession controls", () => {
         backendLayer: Layer.succeed(ExecutionBackend.Service, checkingBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
-        makeSessionId: Effect.die("unused"),
         makeTurnId: Effect.succeed(Turn.TurnId.make("pending")),
         interactive: (_, value) => Ref.update(sessions, (values) => [...values, value]),
       })
@@ -434,7 +430,6 @@ describe("InteractiveSession controls", () => {
           defaultWorkspace: "/work",
           shellPermission: "ask",
           makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-thread")),
-          makeSessionId: Effect.succeed(Thread.SessionId.make("shell-session")),
           makeTurnId: Effect.sync(() => Turn.TurnId.make(`shell-turn-${turnNumber++}`)),
           interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
         })
