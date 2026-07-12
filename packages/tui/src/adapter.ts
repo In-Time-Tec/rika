@@ -217,6 +217,8 @@ const fileTreeRows = (
   return rows
 }
 
+const sidebarInnerWidth = (model: Model): number => Math.max(8, model.sidebarWidth - 8)
+
 const sidebarFileRows = (model: Model, innerWidth: number): ReadonlyArray<ChangedFileRow> =>
   model.changedFilesOpen
     ? fileTreeRows(readyOr(model.changedFiles, []), innerWidth, true)
@@ -710,6 +712,8 @@ export class Surface {
   readonly toastBox: BoxRenderable
   readonly toast: TextRenderable
   private welcomePhase = 0
+  private welcomeChild: TextRenderable | undefined
+  private welcomeKey = ""
   private welcomeTimer: ReturnType<typeof setInterval> | undefined
   private toastTimer: ReturnType<typeof setTimeout> | undefined
   private reasoningFlash = false
@@ -906,7 +910,10 @@ export class Surface {
       if (hoveredRow === this.changedFilesHoveredRow) return
       this.changedFilesHoveredRow = hoveredRow
       if (this.model !== undefined)
-        this.changedFilesText.content = renderFileRows(sidebarFileRows(this.model, 28), hoveredRow)
+        this.changedFilesText.content = renderFileRows(
+          sidebarFileRows(this.model, sidebarInnerWidth(this.model)),
+          hoveredRow,
+        )
       this.renderer.setMousePointer(hoveredRow === undefined ? "default" : "pointer")
       this.renderer.requestRender()
     }
@@ -915,7 +922,8 @@ export class Surface {
     this.changedFilesText.onMouseOut = () => {
       if (this.changedFilesHoveredRow === undefined) return
       this.changedFilesHoveredRow = undefined
-      if (this.model !== undefined) this.changedFilesText.content = renderFileRows(sidebarFileRows(this.model, 28))
+      if (this.model !== undefined)
+        this.changedFilesText.content = renderFileRows(sidebarFileRows(this.model, sidebarInnerWidth(this.model)))
       this.renderer.setMousePointer("default")
       this.renderer.requestRender()
     }
@@ -1163,12 +1171,23 @@ export class Surface {
     event.stopPropagation()
   }
   private setTranscriptChildren(children: Array<TextRenderable>): void {
+    this.welcomeChild = undefined
     for (const child of this.transcriptChildren) {
       this.transcriptContent.remove(child.id)
       child.destroy()
     }
     this.transcriptChildren = children
     for (const child of children) this.transcriptContent.add(child)
+  }
+  private welcomeWidthFor(model: Model): number {
+    const sidebarReady = model.changedFilesOpen
+      ? isReady(model.changedFiles)
+      : model.sidebarOpen
+        ? isReady(model.filePicker.items)
+        : false
+    const visible = (model.changedFilesOpen || model.sidebarOpen) && sidebarReady && !isNarrow(model)
+    const contentWidth = Math.max(20, model.width - (visible ? model.sidebarWidth : 0))
+    return Math.max(1, contentWidth - spacing.transcript * 2)
   }
   showToast(message: string, color: ColorInput = colors.green): void {
     this.toast.content = new StyledText([fg(color)("✓ "), fg(colors.text)(message)])
@@ -1206,7 +1225,6 @@ export class Surface {
         : false
     const sidebarVisible = (model.changedFilesOpen || model.sidebarOpen) && sidebarReady && !isNarrow(model)
     const sidebarWidth = sidebarVisible ? model.sidebarWidth : 0
-    const sidebarInnerWidth = Math.max(8, model.sidebarWidth - 8)
     const contentWidth = Math.max(20, model.width - sidebarWidth)
     const modeColor = colors[model.mode]
     const isWelcome = model.entries.length === 0 && model.blocks.length === 0
@@ -1219,19 +1237,24 @@ export class Surface {
       !model.palette.open &&
       !model.paletteOpen
     if (isWelcome) {
-      this.setTranscriptChildren([
-        new TextRenderable(this.renderer, {
-          content: welcomeContent(
-            Math.max(1, contentWidth - spacing.transcript * 2),
-            model.height,
-            this.welcomePhase,
-            model.mode,
-          ),
+      const welcomeWidth = this.welcomeWidthFor(model)
+      const welcomeKey = `${welcomeWidth}:${model.height}:${this.welcomePhase}:${model.mode}`
+      const existingWelcome = this.transcriptChildren.length === 1 ? this.welcomeChild : undefined
+      if (existingWelcome === undefined) {
+        const child = new TextRenderable(this.renderer, {
+          content: welcomeContent(welcomeWidth, model.height, this.welcomePhase, model.mode),
           fg: modeColor,
           wrapMode: "word",
           selectable: true,
-        }),
-      ])
+        })
+        this.setTranscriptChildren([child])
+        this.welcomeChild = child
+        this.welcomeKey = welcomeKey
+      } else if (this.welcomeKey !== welcomeKey) {
+        this.welcomeKey = welcomeKey
+        existingWelcome.fg = modeColor
+        existingWelcome.content = welcomeContent(welcomeWidth, model.height, this.welcomePhase, model.mode)
+      }
     } else {
       const renderModel = sidebarWidth === 0 ? model : { ...model, width: Math.max(20, model.width - sidebarWidth) }
       const built = buildTranscript(
@@ -1284,15 +1307,11 @@ export class Surface {
         const current = this.model
         if (current === undefined || current.entries.length > 0 || current.blocks.length > 0) return
         this.welcomePhase = (this.welcomePhase + 1) % welcomeMarkFrames.length
-        const welcome = this.transcriptChildren[0]
+        const welcome = this.welcomeChild
         if (welcome === undefined) return
-        const currentSidebarWidth = (current.changedFilesOpen || current.sidebarOpen) && !isNarrow(current) ? 36 : 0
-        welcome.content = welcomeContent(
-          Math.max(1, current.width - currentSidebarWidth - spacing.transcript * 2),
-          current.height,
-          this.welcomePhase,
-          current.mode,
-        )
+        const width = this.welcomeWidthFor(current)
+        this.welcomeKey = `${width}:${current.height}:${this.welcomePhase}:${current.mode}`
+        welcome.content = welcomeContent(width, current.height, this.welcomePhase, current.mode)
         this.renderer.requestRender()
       }, 80)
     } else if (!animateWelcome && this.welcomeTimer !== undefined) {
@@ -1386,7 +1405,7 @@ export class Surface {
         ? ` Changed files (${readyOr(model.changedFiles, []).length}) `
         : ` Files (${readyOr(model.filePicker.items, []).length}) `
       this.changedFilesBox.titleAlignment = "left"
-      this.changedRows = sidebarFileRows(model, sidebarInnerWidth)
+      this.changedRows = sidebarFileRows(model, sidebarInnerWidth(model))
       this.changedFilesText.content = renderFileRows(this.changedRows, this.changedFilesHoveredRow)
     } else {
       this.changedRows = []

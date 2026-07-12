@@ -39,6 +39,36 @@ test("drags the composer top border through OpenTUI mouse routing", async () => 
   }
 })
 
+test("keeps the welcome mark renderable stable while typing", async () => {
+  const setup = await createTestRenderer({ width: 100, height: 30 })
+  let model: Model = { ...initial("/work", "high"), width: 100, height: 30 }
+  const surface = new Surface(setup.renderer, {
+    key: () => undefined,
+    resize: () => undefined,
+  })
+  try {
+    surface.update(model)
+    await setup.renderOnce()
+    const before = surface.transcriptChildren[0]
+    const beforeContent = before?.content
+    expect(before).toBeDefined()
+    for (const character of "hello world") {
+      model = update(model, {
+        _tag: "KeyPressed",
+        key: { name: character, ctrl: false, alt: false, meta: false, shift: false, sequence: character },
+      })
+      surface.update(model)
+    }
+    await setup.renderOnce()
+    expect(surface.transcriptChildren[0]).toBe(before)
+    expect(surface.transcriptChildren[0]?.content).toBe(beforeContent)
+    expect(setup.captureCharFrame()).toContain("Welcome to Rika")
+  } finally {
+    surface.destroy()
+    setup.renderer.destroy()
+  }
+})
+
 test("drags the sidebar left border to resize it through OpenTUI mouse routing", async () => {
   const setup = await createTestRenderer({ width: 120, height: 30 })
   const pointers: Array<string> = []
@@ -49,7 +79,7 @@ test("drags the sidebar left border to resize it through OpenTUI mouse routing",
     width: 120,
     height: 30,
     changedFilesOpen: true,
-    changedFiles: ready([{ path: "src/main.ts", status: "M", added: 1, removed: 0 }]),
+    changedFiles: ready([{ path: "src/a-really-long-file-name-that-truncates.ts", status: "M", added: 1, removed: 0 }]),
   }
   const surface = new Surface(setup.renderer, {
     key: () => undefined,
@@ -66,12 +96,15 @@ test("drags the sidebar left border to resize it through OpenTUI mouse routing",
     const borderX = surface.changedFilesBox.x
     await setup.mockMouse.moveTo(borderX, 10)
     expect(pointers.at(-1)).toBe("move")
-    await setup.mockMouse.drag(borderX, 10, borderX - 10, 10)
+    const narrowFrame = setup.captureCharFrame()
+    expect(narrowFrame).not.toContain("a-really-long-file-name-that-truncates.ts")
+    await setup.mockMouse.drag(borderX, 10, borderX - 24, 10)
     await setup.renderOnce()
-    expect(model.sidebarWidth).toBe(46)
-    expect(surface.changedFilesBox.width).toBe(44)
+    expect(model.sidebarWidth).toBe(60)
+    expect(surface.changedFilesBox.width).toBe(58)
     const frame = setup.captureCharFrame()
     expect(frame).toContain("Changed files (1)")
+    expect(frame).toContain("a-really-long-file-name-that-truncates.ts")
     surface.changedFilesBox.focus()
     await setup.renderOnce()
     const focusBlue = setup
