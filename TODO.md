@@ -264,3 +264,17 @@ PLEASE MAKE SURE AT THE END YOU PUBLISH CHANGES TO BATON AND RELAY, INSTALL RIKA
 - [x] Integrate interactive Thread continuation and monotonic durable execution terminal projection.
 
 Phase 0: 0; Phase 1: 3; Phase 2: 0; Phase 3: 2; Phase 4: 2; Phase 5: 1; Phase 6: 0; Phase 7: 0; Phase 8: 3; Phase 9: 1; Phase 10: 1; Phase 11: 4.
+
+## Relay 0.1.0 upgrade and resident-model refactor (2026-07-12)
+
+Plan of record: the audit at the relay session scratchpad (WI-1..WI-8); relay 0.1.0 published from relay main, which carries the resident-model surface but not the fan-out/workflow surface from the unreleased fix/sqlite-sdk-package branch.
+
+- [x] WI-1 Pin @relayfx/sdk 0.1.0 behind `packages/runtime/src/relay-compat.ts`; full Client mock extended to the 0.1.0 surface; fan-out/workflow natives gate on the sdk surface probe.
+- [x] WI-2 Resumable streams replace the start race + 2s/250ms watchdog, the 25ms follow poll, and the 10ms child-result poll; fixtures script streams instead of stream exhaustion.
+- [ ] WI-3 `rika-thread` entity kind + `ensureThreadHost` (`pending`; registration shape recorded in the audit §3.2).
+- [ ] WI-4 Pending-turn promotion through the durable inbox with idempotency key = turnId (`pending`; delivery shape in audit §3.3; steering stays relay steering).
+- [ ] WI-5 Shrink `Operation.reconcile` to resync-only (`pending`; blocked by WI-3/WI-4).
+- [x] WI-6 Drop `Thread.sessionId` via migration `6_drop_thread_session_id` with a seeded v5 upgrade test.
+- [ ] WI-7 Presence viewer indicator (`pending`, optional).
+- [ ] WI-8 Documentation ledger for WI-3..WI-5 (`pending`, lands with those items).
+- [ ] Restore fan-out/workflow + suspended-wait-resume + cancel natives when a relay release carries the fix/sqlite-sdk-package surface (gated tests: `workflow.native`, `multi-agent.native`, and four `execution-backend.native` cases; compat seam then deletes).
