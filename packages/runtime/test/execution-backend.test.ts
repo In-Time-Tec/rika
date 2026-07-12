@@ -397,8 +397,7 @@ describe("ExecutionBackend Relay client adapter", () => {
     Effect.gen(function* () {
       const fixture = yield* makeClient({
         startStatus: "waiting",
-        replayEvents: [relayEvent("model.output.delta", 1), relayEvent("permission.ask.requested", 2)],
-        streamEvents: [],
+        streamEvents: [relayEvent("model.output.delta", 1), relayEvent("permission.ask.requested", 2)],
       })
       const seen: Array<string> = []
       const result = yield* Effect.gen(function* () {
@@ -838,6 +837,10 @@ describe("ExecutionBackend Relay client adapter", () => {
           relayEvent("model.output.completed", 1, [Content.text("fallback")]),
           relayEvent("execution.completed", 2, [Content.text("done")]),
         ],
+        streamEvents: [
+          relayEvent("model.output.completed", 1, [Content.text("fallback")]),
+          relayEvent("execution.completed", 2, [Content.text("done")]),
+        ],
       })
       Object.assign(fixture.implementation, {
         getExecution: () => Effect.succeed({ status: "completed" }),
@@ -868,6 +871,10 @@ describe("ExecutionBackend Relay client adapter", () => {
       const model = yield* TestModel.make([])
       const fixture = yield* makeClient({
         replayEvents: [
+          relayEvent("model.output.completed", 1, [Content.text("fallback")]),
+          relayEvent("execution.completed", 2, [Content.text("done")]),
+        ],
+        streamEvents: [
           relayEvent("model.output.completed", 1, [Content.text("fallback")]),
           relayEvent("execution.completed", 2, [Content.text("done")]),
         ],

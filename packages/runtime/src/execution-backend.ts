@@ -1,7 +1,7 @@
 import { Agent, type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
 import { Catalog as ToolCatalog, ParallelSearch, ReadWebPage, Runtime as RikaToolRuntime } from "@rika/tools"
 import { Client, Content, type Execution, Ids } from "@relayfx/sdk"
-import { Context, Effect, Fiber, Layer, Redacted, Schedule, Stream } from "effect"
+import { Context, Effect, Layer, Redacted, Stream } from "effect"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { BackendError, Event, type PromptPart, Service, Status } from "./execution-contract"
@@ -183,6 +183,55 @@ const statusFromEvents = (events: ReadonlyArray<Event>): Status => {
 const isActionableWait = (item: Event) =>
   item.type === "permission.ask.requested" || item.type === "tool.approval.requested"
 
+const followExecution = (
+  client: Client.Interface,
+  turnId: string,
+  afterCursor: string | undefined,
+  onEvent: ((item: Event) => void) | undefined,
+) =>
+  Effect.gen(function* () {
+    const events: Array<Event> = []
+    const seen = new Set<string>()
+    const append = (item: Execution.ExecutionEvent) => {
+      const mapped = event(item)
+      if (seen.has(mapped.cursor)) return mapped
+      seen.add(mapped.cursor)
+      events.push(mapped)
+      onEvent?.(mapped)
+      return mapped
+    }
+    const attach = (cursor: string | undefined) =>
+      client
+        .streamExecution({
+          execution_id: executionId(turnId),
+          ...(cursor === undefined ? {} : { after_cursor: cursor }),
+        })
+        .pipe(
+          Stream.takeUntil(
+            (item) =>
+              item.type === "execution.completed" ||
+              item.type === "execution.failed" ||
+              item.type === "execution.cancelled" ||
+              item.type === "permission.ask.requested" ||
+              item.type === "tool.approval.requested",
+          ),
+          Stream.map(append),
+          Stream.runDrain,
+        )
+    yield* attach(afterCursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => attach(undefined)))
+    const status = statusFromEvents(events)
+    return {
+      turnId,
+      status:
+        status === "running" || status === "queued"
+          ? events.some(isActionableWait)
+            ? Status.make("waiting")
+            : status
+          : status,
+      events,
+    }
+  })
+
 export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any> = {}>(
   options: Pick<
     LayerOptions<AdditionalTools>,
@@ -307,133 +356,21 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               handoff_targets: subagentHandoffTargets,
               child_run_presets: presets(selection),
             })
-            const startFiber = yield* Effect.forkChild(
-              client.startExecutionByAgentDefinition({
-                root_address_id: addressId,
-                session_id: sessionId(input.threadId),
-                agent_id: agentId,
-                input: executionInput(input),
-                idempotency_key: input.turnId,
-                execution_id: executionId(input.turnId),
-                started_at: input.startedAt,
-                completed_at: input.startedAt,
-              }),
-            )
-            const collected: Array<Event> = []
-            const streamFiber = yield* Effect.forkChild(
-              client.streamExecution({ execution_id: executionId(input.turnId) }).pipe(
-                Stream.takeUntil(
-                  (item) =>
-                    item.type === "execution.completed" ||
-                    item.type === "execution.failed" ||
-                    item.type === "execution.cancelled",
-                ),
-                Stream.map((item) => {
-                  const mapped = event(item)
-                  collected.push(mapped)
-                  input.onEvent?.(mapped)
-                  return mapped
-                }),
-                Stream.runDrain,
-              ),
-            )
-            const reconcileFromReplay = Effect.fn("ExecutionBackend.reconcile")(function* (fallbackStatus: Status) {
-              const replay = yield* client.replayExecution({ execution_id: executionId(input.turnId) })
-              const events = replay.events.map(event)
-              const seen = new Set(collected.map((item) => item.cursor))
-              for (const item of events) if (!seen.has(item.cursor)) input.onEvent?.(item)
-              const merged = [...collected, ...events.filter((item) => !seen.has(item.cursor))]
-              const derived = statusFromEvents(events)
-              const status = derived === "running" || derived === "queued" ? fallbackStatus : derived
-              return { turnId: input.turnId, status, events: merged }
+            yield* client.startExecutionByAgentDefinition({
+              root_address_id: addressId,
+              session_id: sessionId(input.threadId),
+              agent_id: agentId,
+              input: executionInput(input),
+              idempotency_key: input.turnId,
+              execution_id: executionId(input.turnId),
+              started_at: input.startedAt,
+              completed_at: input.startedAt,
             })
-            const reconcileTerminal = Effect.fn("ExecutionBackend.reconcileTerminal")(function* () {
-              const execution = yield* client.getExecution(executionId(input.turnId))
-              if (execution === undefined) return undefined
-              const status = Status.make(execution.status)
-              if (status === "completed" || status === "failed" || status === "cancelled")
-                return yield* reconcileFromReplay(status)
-              const replay = yield* client.replayExecution({ execution_id: executionId(input.turnId) })
-              const events = replay.events.map(event)
-              if (events.some(isActionableWait)) return yield* reconcileFromReplay(Status.make("waiting"))
-              return undefined
-            })
-            const watchdog = Effect.sleep("2 seconds").pipe(
-              Effect.andThen(
-                reconcileTerminal().pipe(
-                  Effect.catch(() => Effect.succeed(undefined)),
-                  Effect.repeat({ while: (result) => result === undefined, schedule: Schedule.spaced("250 millis") }),
-                ),
-              ),
-              Effect.map((result) => ({ kind: "reconciled" as const, result })),
-            )
-            const outcome = yield* Effect.race(
-              Effect.race(
-                Fiber.await(startFiber).pipe(Effect.map((exit) => ({ kind: "start" as const, exit }))),
-                Fiber.join(streamFiber).pipe(Effect.as({ kind: "stream" as const })),
-              ),
-              watchdog,
-            )
-            if (outcome.kind === "reconciled") {
-              yield* Fiber.interrupt(startFiber)
-              yield* Fiber.interrupt(streamFiber)
-              return outcome.result ?? (yield* reconcileFromReplay(Status.make("running")))
-            }
-            if (outcome.kind === "stream") {
-              yield* Fiber.interrupt(startFiber)
-              return { turnId: input.turnId, status: statusFromEvents(collected), events: [...collected] }
-            }
-            const started = yield* outcome.exit
-            if (started.status === "waiting") {
-              yield* Fiber.interrupt(streamFiber)
-              return yield* reconcileFromReplay(Status.make("waiting"))
-            }
-            const drained = yield* Fiber.join(streamFiber).pipe(
-              Effect.as(true),
-              Effect.timeout("1500 millis"),
-              Effect.catchTag("TimeoutError", () => Effect.succeed(false)),
-            )
-            if (drained) return { turnId: input.turnId, status: statusFromEvents(collected), events: [...collected] }
-            yield* Fiber.interrupt(streamFiber)
-            const execution = yield* client.getExecution(executionId(input.turnId))
-            return yield* reconcileFromReplay(
-              execution === undefined ? Status.make(started.status) : Status.make(execution.status),
-            )
+            return yield* followExecution(client, input.turnId, undefined, input.onEvent)
           }).pipe(Effect.mapError(error))
         }),
         follow: Effect.fn("ExecutionBackend.follow")(function* (turnId, afterCursor, onEvent) {
-          const events: Array<Event> = []
-          const seen = new Set<string>()
-          let cursor = afterCursor
-          const append = (item: Execution.ExecutionEvent) => {
-            const mapped = event(item)
-            cursor = mapped.cursor
-            if (seen.has(mapped.cursor)) return
-            seen.add(mapped.cursor)
-            events.push(mapped)
-            onEvent?.(mapped)
-          }
-          const reconcile = Effect.fn("ExecutionBackend.follow.reconcile")(function* () {
-            const replayed = yield* client.replayExecution({
-              execution_id: executionId(turnId),
-              ...(cursor === undefined ? {} : { after_cursor: cursor }),
-            })
-            for (const item of replayed.events) append(item)
-            const status = statusFromEvents(events)
-            if (status === "completed" || status === "failed" || status === "cancelled") return status
-            if (events.some(isActionableWait)) return "waiting" as const
-            const execution = yield* client.getExecution(executionId(turnId))
-            if (execution === undefined) return undefined
-            const inspected = Status.make(execution.status)
-            return inspected === "completed" || inspected === "failed" || inspected === "cancelled"
-              ? inspected
-              : undefined
-          })
-          const status = yield* reconcile().pipe(
-            Effect.repeat({ while: (value) => value === undefined, schedule: Schedule.spaced("25 millis") }),
-            Effect.mapError(error),
-          )
-          return { turnId, status: status ?? statusFromEvents(events), events }
+          return yield* followExecution(client, turnId, afterCursor, onEvent).pipe(Effect.mapError(error))
         }),
         replay: Effect.fn("ExecutionBackend.replay")(function* (turnId, afterCursor) {
           return yield* client
@@ -576,40 +513,42 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
           const runnerClientLayer = Client.layerFromRuntime.pipe(Layer.provideMerge(runnerLayer))
           const childResult = (client: Client.Interface, childId: string) => {
             const childExecutionId = Ids.ExecutionId.make(childId)
-            return client.getExecution(childExecutionId).pipe(
-              Effect.repeat({
-                while: (execution) =>
-                  execution === undefined ||
-                  execution.status === "queued" ||
-                  execution.status === "running" ||
-                  execution.status === "waiting",
-                schedule: Schedule.spaced("10 millis"),
-              }),
-              Effect.andThen(client.replayExecution({ execution_id: childExecutionId })),
-              Effect.map(({ events }) => {
-                const terminal = events.findLast(
-                  (executionEvent) =>
-                    executionEvent.type === "execution.completed" ||
-                    executionEvent.type === "execution.failed" ||
-                    executionEvent.type === "execution.cancelled",
-                )
-                const modelOutput = events.findLast(
-                  (executionEvent) => executionEvent.type === "model.output.completed",
-                )
-                return {
-                  status:
-                    terminal?.type === "execution.completed"
-                      ? ("completed" as const)
-                      : terminal?.type === "execution.cancelled"
-                        ? ("cancelled" as const)
-                        : ("failed" as const),
-                  output:
-                    terminal?.content === undefined || terminal.content.length === 0
-                      ? (modelOutput?.content ?? [])
-                      : terminal.content,
-                }
-              }),
-            )
+            return client
+              .streamExecution({ execution_id: childExecutionId })
+              .pipe(
+                Stream.takeUntil(
+                  (item) =>
+                    item.type === "execution.completed" ||
+                    item.type === "execution.failed" ||
+                    item.type === "execution.cancelled",
+                ),
+                Stream.runCollect,
+              )
+              .pipe(
+                Effect.map((events) => {
+                  const terminal = events.findLast(
+                    (executionEvent) =>
+                      executionEvent.type === "execution.completed" ||
+                      executionEvent.type === "execution.failed" ||
+                      executionEvent.type === "execution.cancelled",
+                  )
+                  const modelOutput = events.findLast(
+                    (executionEvent) => executionEvent.type === "model.output.completed",
+                  )
+                  return {
+                    status:
+                      terminal?.type === "execution.completed"
+                        ? ("completed" as const)
+                        : terminal?.type === "execution.cancelled"
+                          ? ("cancelled" as const)
+                          : ("failed" as const),
+                    output:
+                      terminal?.content === undefined || terminal.content.length === 0
+                        ? (modelOutput?.content ?? [])
+                        : terminal.content,
+                  }
+                }),
+              )
           }
           if (!RelayCompat.hasFanOutWorkflowRuntimes(sqliteModule, SQLite)) {
             return layerFromClient(options).pipe(Layer.provide(runnerClientLayer))
