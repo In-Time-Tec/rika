@@ -1,6 +1,15 @@
 import { layer as fileSystemLayer } from "@effect/platform-bun/BunFileSystem"
 import { ProductAgent } from "../src/index"
-import { ChildFanOutRuntime, Client, Ids, SQLite } from "@relayfx/sdk/sqlite"
+import { Client, SQLite } from "@relayfx/sdk/sqlite"
+import * as RelaySqlite from "@relayfx/sdk/sqlite"
+
+const legacyRuntimes = RelaySqlite as typeof RelaySqlite & { readonly ChildFanOutRuntime?: any }
+const legacySqlite = SQLite as typeof SQLite & { readonly childFanOutLayer?: any }
+if (legacyRuntimes.ChildFanOutRuntime === undefined || legacySqlite.childFanOutLayer === undefined) {
+  process.stdout.write(`${JSON.stringify({ type: "ready", pid: process.pid, fanOutSurface: false })}\n`)
+  process.exit(0)
+}
+const ChildFanOutRuntime = legacyRuntimes.ChildFanOutRuntime
 import { Effect, FileSystem, Layer, ManagedRuntime } from "effect"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
 
@@ -12,7 +21,7 @@ const append = (value: unknown) =>
     yield* fileSystem.writeFileString(`${control}/visible.ndjson`, `${JSON.stringify(value)}\n`, { flag: "a" })
   }).pipe(Effect.provide(fileSystemLayer))
 const handlers = ChildFanOutRuntime.testHandlersLayer({
-  execute: (child, fanOut, idempotencyKey) =>
+  execute: (child: any, fanOut: any, idempotencyKey: string) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       yield* append({
@@ -23,22 +32,26 @@ const handlers = ChildFanOutRuntime.testHandlersLayer({
       })
       const release = `${control}/${child.child_execution_id}.json`
       while (!(yield* fileSystem.exists(release))) yield* Effect.sleep("10 millis")
-      const result = JSON.parse(yield* fileSystem.readFileString(release)) as ChildFanOutRuntime.ChildResult
+      const result = JSON.parse(yield* fileSystem.readFileString(release))
       yield* append({ type: "effect", fanOutId: fanOut.fan_out_id, childId: child.child_execution_id, idempotencyKey })
       return result
     }).pipe(Effect.provide(fileSystemLayer)),
-  cancel: (childId, reason) => append({ type: "cancel", childId, reason }),
+  cancel: (childId: any, reason: any) => append({ type: "cancel", childId, reason }),
 })
-const fanOutLayer = SQLite.childFanOutLayer({ filename: database }, handlers)
+const fanOutLayer = legacySqlite.childFanOutLayer({ filename: database }, handlers)
 const clientLayer = Layer.effect(
   Client.Service,
   Effect.gen(function* () {
     const host = yield* ChildFanOutRuntime.Service
     return Client.Service.of({
       createChildFanOut: host.create,
-      inspectChildFanOut: (input: Parameters<Client.Interface["inspectChildFanOut"]>[0]) =>
+      inspectChildFanOut: (input: { readonly fan_out_id: string }) =>
         host.inspect(input.fan_out_id).pipe(Effect.map((fan_out) => ({ fan_out }))),
-      cancelChildFanOut: (input: Parameters<Client.Interface["cancelChildFanOut"]>[0]) =>
+      cancelChildFanOut: (input: {
+        readonly fan_out_id: string
+        readonly cancelled_at: number
+        readonly reason?: string
+      }) =>
         host
           .cancel(input.fan_out_id, input.cancelled_at, input.reason ?? "cancelled")
           .pipe(Effect.map((fan_out) => ({ fan_out: fan_out! }))),
@@ -46,7 +59,7 @@ const clientLayer = Layer.effect(
   }),
 ).pipe(Layer.provideMerge(fanOutLayer))
 const backend = RelayExecutionBackend.layerFromClient({ selection: { provider: "test", model: "deterministic" } }).pipe(
-  Layer.provide(clientLayer),
+  Layer.provide(clientLayer as Layer.Layer<any>),
 )
 const runtime = ManagedRuntime.make(ProductAgent.layer.pipe(Layer.provide(backend)))
 const send = (value: unknown) => process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -78,4 +91,4 @@ process.stdin.on("data", (chunk) => {
     newline = buffer.indexOf("\n")
   }
 })
-send({ type: "ready", pid: process.pid, host: Ids.ChildFanOutId.make("public") })
+send({ type: "ready", pid: process.pid, host: "public", fanOutSurface: true })

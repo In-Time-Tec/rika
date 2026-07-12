@@ -3,6 +3,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "bun:test"
 
+const sqliteSurface = await import("@relayfx/sdk/sqlite").then(
+  (module) => "ChildFanOutRuntime" in module && "WorkflowDefinitionRuntime" in module,
+)
 const script = new URL("./workflow-process.ts", import.meta.url).pathname
 const startHost = (database: string, workspace: string) => {
   const proc = Bun.spawn([process.execPath, script], {
@@ -71,57 +74,61 @@ for (const scenario of [
     count: 3,
   },
 ]) {
-  test(`${scenario.name} pins its definition and survives SIGKILL without duplicate effects`, async () => {
-    const directory = await mkdtemp(join(tmpdir(), "rika-workflow-"))
-    const database = join(directory, "relay.sqlite")
-    let host = startHost(database, directory)
-    try {
-      const firstPid = await host.ready
-      const registrations = await host.request("register")
-      const pin = registrations.find((item: any) => item.name === scenario.name)
-      expect(pin.revision).toBe(1)
-      expect(pin.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
-      void host.request("start", { name: scenario.name, runId: `${scenario.name}-run`, revision: pin.revision })
-      await waitFor(
-        () => rows(directory),
-        (items) => items.some((item) => item.type === "dispatch"),
-      )
-      if (scenario.name === "research-synthesis") {
-        const dispatches = (await rows(directory)).filter((row) => row.type === "dispatch")
-        await Promise.all(dispatches.map((row) => release(directory, row.childId)))
+  test.skipIf(!sqliteSurface)(
+    `${scenario.name} pins its definition and survives SIGKILL without duplicate effects`,
+    async () => {
+      const directory = await mkdtemp(join(tmpdir(), "rika-workflow-"))
+      const database = join(directory, "relay.sqlite")
+      let host = startHost(database, directory)
+      try {
+        const firstPid = await host.ready
+        const registrations = await host.request("register")
+        const pin = registrations.find((item: any) => item.name === scenario.name)
+        expect(pin.revision).toBe(1)
+        expect(pin.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
+        void host.request("start", { name: scenario.name, runId: `${scenario.name}-run`, revision: pin.revision })
         await waitFor(
           () => rows(directory),
-          (items) => items.filter((item) => item.type === "effect").length >= 2,
+          (items) => items.some((item) => item.type === "dispatch"),
         )
-        await host.request("recover")
-        await waitFor(
-          () => rows(directory),
-          (items) => items.filter((item) => item.type === "dispatch").length >= 3,
+        if (scenario.name === "research-synthesis") {
+          const dispatches = (await rows(directory)).filter((row) => row.type === "dispatch")
+          await Promise.all(dispatches.map((row) => release(directory, row.childId)))
+          await waitFor(
+            () => rows(directory),
+            (items) => items.filter((item) => item.type === "effect").length >= 2,
+          )
+          await host.request("recover")
+          await waitFor(
+            () => rows(directory),
+            (items) => items.filter((item) => item.type === "dispatch").length >= 3,
+          )
+        }
+        host.proc.kill("SIGKILL")
+        await host.proc.exited
+        host = startHost(database, directory)
+        expect(await host.ready).not.toBe(firstPid)
+        const duplicatePin = (await host.request("register")).find((item: any) => item.name === scenario.name)
+        expect(duplicatePin).toEqual(pin)
+        const completed = await waitFor(
+          async () => {
+            const dispatched = (await rows(directory)).filter((item) => item.type === "dispatch")
+            await Promise.all(dispatched.map((item) => release(directory, item.childId)))
+            return host.request("inspect", `${scenario.name}-run`)
+          },
+          (state) => state?.status === "completed",
         )
+        expect(completed.revision).toBe(pin.revision)
+        expect(completed.digest).toBe(pin.digest)
+        const visible = await rows(directory)
+        const effects = visible.filter((item) => item.type === "effect")
+        expect(effects).toHaveLength(scenario.count)
+        expect(new Set(effects.map((item) => item.idempotencyKey)).size).toBe(scenario.count)
+        expect(visible.some((item) => item.childId === scenario.first)).toBe(true)
+      } finally {
+        if (host.proc.exitCode === null && host.proc.signalCode === null) host.proc.kill("SIGKILL")
       }
-      host.proc.kill("SIGKILL")
-      await host.proc.exited
-      host = startHost(database, directory)
-      expect(await host.ready).not.toBe(firstPid)
-      const duplicatePin = (await host.request("register")).find((item: any) => item.name === scenario.name)
-      expect(duplicatePin).toEqual(pin)
-      const completed = await waitFor(
-        async () => {
-          const dispatched = (await rows(directory)).filter((item) => item.type === "dispatch")
-          await Promise.all(dispatched.map((item) => release(directory, item.childId)))
-          return host.request("inspect", `${scenario.name}-run`)
-        },
-        (state) => state?.status === "completed",
-      )
-      expect(completed.revision).toBe(pin.revision)
-      expect(completed.digest).toBe(pin.digest)
-      const visible = await rows(directory)
-      const effects = visible.filter((item) => item.type === "effect")
-      expect(effects).toHaveLength(scenario.count)
-      expect(new Set(effects.map((item) => item.idempotencyKey)).size).toBe(scenario.count)
-      expect(visible.some((item) => item.childId === scenario.first)).toBe(true)
-    } finally {
-      if (host.proc.exitCode === null && host.proc.signalCode === null) host.proc.kill("SIGKILL")
-    }
-  }, 120_000)
+    },
+    120_000,
+  )
 }
