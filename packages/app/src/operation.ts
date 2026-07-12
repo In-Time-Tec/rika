@@ -16,6 +16,8 @@ import * as ResolvedContext from "./resolved-context"
 
 const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
 
+const startupDispatch = () => undefined
+
 const isTerminalStatus = (
   status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
 ) => status === "completed" || status === "failed" || status === "cancelled"
@@ -353,6 +355,19 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
     { discard: true },
   )
   const threadIds = [...new Set(active.map((turn) => turn.threadId))]
+  if (backend.ensureThreadHost !== undefined && backend.notifyThreadHost !== undefined) {
+    yield* Effect.forEach(
+      threadIds,
+      (threadId) =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis
+          yield* backend.ensureThreadHost!(threadId, now)
+          yield* backend.notifyThreadHost!(threadId, undefined, now)
+        }),
+      { discard: true },
+    )
+    return
+  }
   yield* Effect.forEach(
     threadIds,
     (threadId) =>
@@ -614,10 +629,15 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         yield* turns.setExtensionPin(turn.id, activated.pin)
         return { prompt: resolved.prompt, promptParts, extensionPin: activated.pin }
       })
-      const reconcileExecutions = reconcile(extensionService, prepareExecution).pipe(
-        Effect.provide(executionDependencies),
-        Effect.scoped,
-      )
+      const promoterForStartup = (threadId: string): Effect.Effect<number> =>
+        Effect.suspend(() => promoterFor(startupDispatch)(threadId))
+      const reconcileExecutions = Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        if (backend.registerTurnPromoter !== undefined) {
+          yield* backend.registerTurnPromoter(promoterForStartup)
+        }
+        yield* reconcile(extensionService, prepareExecution)
+      }).pipe(Effect.provide(executionDependencies), Effect.scoped)
       const submit = Effect.fn("Operation.interactive.submit")(function* (
         prompt: string,
         dispatch: (event: InteractiveEvent) => void,
