@@ -828,7 +828,7 @@ export class Surface {
       zIndex: 20,
       border: true,
       borderStyle: "rounded",
-      borderColor: colors.muted,
+      borderColor: colors.text,
       backgroundColor: colors.surface,
       paddingLeft: 1,
       paddingRight: 1,
@@ -1358,6 +1358,7 @@ export class Surface {
       this.paletteBox.left = Math.max(0, Math.floor((model.width - boxWidth) / 2))
       this.paletteBox.top = Math.max(0, Math.floor((composerTop - boxHeight) / 2))
       this.paletteBox.title = " Command Palette "
+      this.paletteBox.titleColor = colors.amber
       this.paletteBox.titleAlignment = "left"
       this.palette.content = paletteContent(model, results, boxWidth - 4)
     } else if (overlay === "modes") {
@@ -1380,19 +1381,17 @@ export class Surface {
       const entries = isThreadKind
         ? mentionThreads.map((thread) => `@@${thread.title}`)
         : filteredFiles(model).map((file) => `@${file}`)
-      const footers = isThreadKind ? [] : ["@: mention a commit", "@@ mention a thread"]
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))
-      const visibleEntries = entries.slice(0, Math.max(1, maxRows - footers.length))
-      const rows = [...visibleEntries, ...footers]
-      const innerWidth = Math.max(...rows.map((row) => row.length), 19)
+      const visibleEntries = entries.slice(0, Math.max(1, maxRows))
+      const innerWidth = Math.max(...visibleEntries.map((row) => row.length), 19)
       const boxWidth = Math.min(innerWidth + 4, model.width - 4)
-      const boxHeight = rows.length + 2
+      const boxHeight = visibleEntries.length + 2
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = 2
       this.paletteBox.top = Math.max(0, composerTop - boxHeight + 1)
       this.paletteBox.title = ""
-      this.palette.content = filePickerContent(model, visibleEntries, footers, boxWidth - 4)
+      this.palette.content = filePickerContent(model, visibleEntries, boxWidth - 4)
     } else if (overlay === "threads") {
       const overlayWidth = Math.max(40, model.width - 20)
       const overlayHeight = Math.max(6, composerTop)
@@ -1512,8 +1511,8 @@ const shortcutsContent = (model: Model, innerWidth: number): StyledText => {
         chunks.push(fg(colors.text)(" ".repeat(Math.max(1, secondColumn - column))))
         column = secondColumn
       }
-      chunks.push(bold(fg(colors.text)(keys)))
-      chunks.push(fg(colors.muted)(` ${description}`.slice(0, Math.max(0, innerWidth - keys.length))))
+      chunks.push(fg(colors.blue)(keys))
+      chunks.push(fg(colors.text)(` ${description}`.slice(0, Math.max(0, innerWidth - keys.length))))
       column += keys.length + description.length + 1
     })
     chunks.push(fg(colors.text)("\n"))
@@ -1522,11 +1521,11 @@ const shortcutsContent = (model: Model, innerWidth: number): StyledText => {
   chunks.push(bold(fg(colors.amber)("Sidebar")))
   chunks.push(fg(colors.text)("\n"))
   for (const [keys, description] of sidebarShortcutRows) {
-    chunks.push(bold(fg(colors.text)(keys)))
-    chunks.push(fg(colors.muted)(` ${description}`))
+    chunks.push(fg(colors.blue)(keys))
+    chunks.push(fg(colors.text)(` ${description}`))
     chunks.push(fg(colors.text)("\n"))
   }
-  chunks.push(fg(colors.muted)("─".repeat(Math.max(1, innerWidth))))
+  chunks.push(dim(fg(colors.text)("─".repeat(Math.max(1, innerWidth)))))
   chunks.push(fg(colors.text)("\n"))
   chunks.push(...composerChunks(model))
   return new StyledText(chunks)
@@ -1547,16 +1546,16 @@ const paletteContent = (model: Model, results: ReadonlyArray<Command>, innerWidt
     const used = categoryWidth + 2 + label.length
     const padding = Math.max(1, innerWidth - used - keybinding.length - 1)
     if (selected) {
-      chunks.push(bg(colors.selectionBg)(fg("#8a6a3a")(category)))
-      chunks.push(bg(colors.selectionBg)(fg(colors.selectionFg)(`  ${label}`)))
+      chunks.push(bg(colors.selectionBg)(fg(colors.selectionFg)(category)))
+      chunks.push(bold(bg(colors.selectionBg)(fg(colors.selectionFg)(`  ${label}`))))
       chunks.push(bg(colors.selectionBg)(fg(colors.selectionFg)(" ".repeat(padding))))
-      if (keybinding.length > 0) chunks.push(bg(colors.selectionBg)(fg(colors.selectionHint)(keybinding)))
+      if (keybinding.length > 0) chunks.push(bold(bg(colors.selectionBg)(fg(colors.selectionHint)(keybinding))))
       chunks.push(bg(colors.selectionBg)(fg(colors.selectionFg)(" ")))
     } else {
-      chunks.push(fg(colors.muted)(category))
-      chunks.push(fg(colors.text)(`  ${label}`))
+      chunks.push(dim(fg(colors.text)(category)))
+      chunks.push(bold(fg(colors.text)(`  ${label}`)))
       chunks.push(fg(colors.text)(" ".repeat(padding)))
-      if (keybinding.length > 0) chunks.push(fg(colors.blue)(keybinding))
+      if (keybinding.length > 0) chunks.push(bold(fg(colors.blue)(keybinding)))
       chunks.push(fg(colors.text)(" "))
     }
   })
@@ -1764,26 +1763,25 @@ const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: nu
   return new StyledText(chunks)
 }
 
-const filePickerContent = (
-  model: Model,
-  entries: ReadonlyArray<string>,
-  footers: ReadonlyArray<string>,
-  innerWidth: number,
-): StyledText => {
+const filePickerContent = (model: Model, entries: ReadonlyArray<string>, innerWidth: number): StyledText => {
   const chunks: Array<TextChunk> = []
   entries.forEach((entry, index) => {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
+    const marker = /^@{1,2}/.exec(entry)?.[0] ?? ""
+    const rest = entry.slice(marker.length)
+    const clipped = rest.slice(0, Math.max(0, innerWidth - marker.length))
     if (index === model.filePicker.selected) {
-      chunks.push(bg(colors.selectionBg)(fg(colors.selectionFg)(entry.padEnd(innerWidth).slice(0, innerWidth))))
+      chunks.push(bg(colors.muted)(fg(colors.teal)(marker)))
+      chunks.push(bg(colors.muted)(fg(colors.text)(clipped)))
+      chunks.push(
+        bg(colors.muted)(fg(colors.text)(" ".repeat(Math.max(0, innerWidth - marker.length - clipped.length)))),
+      )
     } else {
-      chunks.push(fg(colors.text)(entry.slice(0, innerWidth)))
+      chunks.push(fg(colors.teal)(marker))
+      chunks.push(fg(colors.text)(clipped))
     }
   })
-  for (const footer of footers) {
-    if (chunks.length > 0) chunks.push(fg(colors.text)("\n"))
-    chunks.push(fg(colors.muted)(footer.slice(0, innerWidth)))
-  }
-  if (chunks.length === 0) chunks.push(fg(colors.muted)("no matches"))
+  if (chunks.length === 0) chunks.push(dim(fg(colors.text)("no matches")))
   return new StyledText(chunks)
 }
 

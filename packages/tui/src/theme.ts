@@ -16,9 +16,9 @@ export const colors = {
   medium: "#3dffa6",
   high: "#3dd4ff",
   ultra: "#d8b3ff",
-  selectionBg: "#e8b268",
-  selectionFg: "#1c1c1c",
-  selectionHint: "#3b5bd9",
+  selectionBg: RGBA.fromIndex(3),
+  selectionFg: RGBA.fromIndex(0),
+  selectionHint: RGBA.fromIndex(4),
 } as const
 
 export const spacing = {

@@ -419,11 +419,17 @@ const erase = (value: Model, length: number): Model => ({
 })
 
 const pastedImagePath = (value: string): string | undefined => {
-  const unquoted = value
-    .trim()
-    .replace(/^'(.*)'$/, "$1")
-    .replace(/^"(.*)"$/, "$1")
-  if (!/^(?:file:\/\/|~\/|\.{0,2}\/|\/)?(?:[^\s[\]]|\\ )+\.(?:png|jpe?g|gif|webp)$/i.test(unquoted)) return undefined
+  const trimmed = value.trim()
+  const quoted = (/^'.*'$/s.test(trimmed) || /^".*"$/s.test(trimmed)) && trimmed.length >= 2
+  const unquoted = quoted ? trimmed.slice(1, -1) : trimmed
+  const pathLike =
+    quoted || /^(?:file:\/\/|~\/|\.{0,2}\/|\/)/i.test(unquoted) || unquoted.includes("\\ ") || !/\s/.test(unquoted)
+  if (!pathLike || !/\.(?:png|jpe?g|gif|webp)$/i.test(unquoted)) return undefined
+  if (unquoted.startsWith("file://")) {
+    try {
+      return decodeURIComponent(new URL(unquoted).pathname)
+    } catch {}
+  }
   return unquoted.replace(/\\ /g, " ")
 }
 

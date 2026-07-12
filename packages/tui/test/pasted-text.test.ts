@@ -98,6 +98,13 @@ describe("pasted text attachments", () => {
     expect(ViewState.promptParts("file:///tmp/bad%ZZ.png")).toEqual([{ type: "image", path: "file:///tmp/bad%ZZ.png" }])
   })
 
+  it("inserts a terminal-pasted absolute image path containing spaces as one attachment", () => {
+    const path = "/var/folders/example/T/Screen Shot 2026-07-12 at 10.00.00 PM.png"
+    const model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: `${path}\n` })
+    expect(ViewState.displayInput(model)).toBe("[Image #1]")
+    expect(ViewState.promptParts(model.input, model.pastedText)).toEqual([{ type: "image", path }])
+  })
+
   it("keeps empty and incomplete shell submissions idle", () => {
     const empty = ViewState.initial("/work")
     expect(ViewState.update(empty, { _tag: "Submitted" })).toBe(empty)

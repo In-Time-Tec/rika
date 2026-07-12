@@ -488,7 +488,7 @@ test("keeps every overlay above the composer at 50x12", async () => {
     await capture({ ...base, paletteOpen: true, palette: { ...base.palette, open: true } }, "Command Palette", "run")
     await capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "←→ turn · esc", "GPT-5.6")
     await capture({ ...base, shortcutsOpen: true }, "command palette", "Ctrl+O", 4)
-    await capture({ ...base, filePicker: { ...base.filePicker, open: true, kind: "file" } }, "@src", "mention a thread")
+    await capture({ ...base, filePicker: { ...base.filePicker, open: true, kind: "file" } }, "@src", "@src")
     await capture(
       { ...base, filePicker: { ...base.filePicker, open: true, kind: "thread" } },
       "@@Release notes",
