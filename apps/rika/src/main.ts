@@ -403,10 +403,16 @@ const testModelPartSchema = Schema.Union([
   }),
 ])
 
-const testModelTurnSchema = Schema.Struct({
-  parts: Schema.NonEmptyArray(testModelPartSchema),
-  delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-})
+const testModelTurnSchema = Schema.Union([
+  Schema.Struct({
+    parts: Schema.NonEmptyArray(testModelPartSchema),
+    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+  Schema.Struct({
+    object: Schema.Unknown,
+    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+])
 
 const testModelScriptSchema = Schema.NonEmptyArray(testModelTurnSchema)
 
@@ -419,16 +425,18 @@ export const parseTestModelScript = (json: string) =>
 export const buildTestModelScript = Effect.fn("Main.buildTestModelScript")(function* (json: string) {
   const script = yield* parseTestModelScript(json)
   const { TestModel } = yield* Effect.promise(() => import("@batonfx/test"))
-  return script.map((turn) =>
-    TestModel.turn(
+  return script.map((turn) => {
+    const options = turn.delayMs === undefined ? {} : { delay: turn.delayMs }
+    if ("object" in turn) return TestModel.object(turn.object, options)
+    return TestModel.turn(
       turn.parts.map((part) => {
         if (part.type === "text") return TestModel.text(part.text)
         if (part.type === "reasoning") return TestModel.reasoning(part.text)
         return TestModel.toolCall(part.name, part.params, part.id === undefined ? {} : { id: part.id })
       }),
-      turn.delayMs === undefined ? {} : { delay: turn.delayMs },
-    ),
-  )
+      options,
+    )
+  })
 })
 
 const sanitizeChatCompletion = (value: unknown): unknown => {

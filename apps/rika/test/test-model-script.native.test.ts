@@ -77,7 +77,7 @@ test("keeps registrations distinct by the exact Baton registry tuple", () => {
   expect(distinctModelRoutes([route, second, route])).toEqual([route, second])
 })
 
-test("parses and builds multi-part delayed TestModel turns", async () => {
+test("parses and builds multi-part, object, and delayed TestModel turns", async () => {
   const json = JSON.stringify([
     {
       parts: [
@@ -87,9 +87,10 @@ test("parses and builds multi-part delayed TestModel turns", async () => {
       delayMs: 25,
     },
     { parts: [{ type: "text", text: "done" }] },
+    { object: { summary: "reviewed", findings: [] }, delayMs: 10 },
   ])
   const parsed = await Effect.runPromise(parseTestModelScript(json))
-  expect(parsed).toHaveLength(2)
+  expect(parsed).toHaveLength(3)
   const built = await Effect.runPromise(buildTestModelScript(json))
   expect(built).toEqual([
     {
@@ -101,6 +102,7 @@ test("parses and builds multi-part delayed TestModel turns", async () => {
       delay: 25,
     },
     { _tag: "Turn", parts: [{ _tag: "Text", text: "done" }] },
+    { _tag: "Object", value: { summary: "reviewed", findings: [] }, delay: 10 },
   ])
 })
 
