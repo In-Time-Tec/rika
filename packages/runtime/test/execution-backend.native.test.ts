@@ -150,27 +150,17 @@ test.skipIf(!("reasoning" in TestModel))(
   30_000,
 )
 
-test("returns canonical failures for unknown and malformed tool calls at the durable model boundary", async () => {
+test("corrects unknown and malformed tool calls at the durable model boundary", async () => {
   const cases = [
-    [
-      "turn-unknown",
-      "not_a_rika_tool",
-      {},
-      /^effect\/ai\/AiError\/AiError: LanguageModel\.streamText: Invalid output: [\s\S]*not_a_rika_tool/,
-    ],
-    [
-      "turn-malformed",
-      "read_file",
-      { path: 42 },
-      /^effect\/ai\/AiError\/AiError: LanguageModel\.streamText: Invalid output: [\s\S]*path/,
-    ],
+    ["turn-unknown", "not_a_rika_tool", {}],
+    ["turn-malformed", "read_file", { path: 42 }],
   ] as const
   const verifyCases = async (remaining: ReadonlyArray<(typeof cases)[number]>): Promise<void> => {
     if (remaining.length === 0) return
-    const [turnId, name, params, expectedFailure] = remaining[0]!
+    const [turnId, name, params] = remaining[0]!
     const rest = remaining.slice(1)
     const outcome = await Effect.runPromise(
-      withBackend([TestModel.toolCall(name, params, { id: turnId })], (fixture) =>
+      withBackend([TestModel.toolCall(name, params, { id: turnId }), TestModel.text("corrected")], (fixture) =>
         Effect.gen(function* () {
           const backend = yield* ExecutionBackend.Service
           const result = yield* backend.start({ threadId: turnId, turnId, prompt: "call tool", startedAt: 1 })
@@ -178,13 +168,14 @@ test("returns canonical failures for unknown and malformed tool calls at the dur
         }),
       ),
     )
-    const failures = outcome.result.events.filter((event) => event.type === "execution.failed")
-    expect(outcome.result.status).toBe("failed")
-    expect(failures).toHaveLength(1)
-    expect(failures[0]?.text).toMatch(expectedFailure)
-    expect(failures[0]?.data?.message).toBe(failures[0]?.text)
-    expect(failures[0]?.content).toBeUndefined()
-    expect(outcome.requests).toHaveLength(1)
+    expect(outcome.result.status).toBe("completed")
+    expect(
+      outcome.result.events
+        .filter((event) => event.type === "model.output.delta")
+        .map((event) => event.text)
+        .join(""),
+    ).toBe("corrected")
+    expect(outcome.requests).toHaveLength(2)
     await verifyCases(rest)
   }
   await verifyCases(cases)
@@ -197,7 +188,9 @@ test("preserves a canonical terminal failure after more than one thousand execut
         ...Array.from({ length: 260 }, (_, index) =>
           TestModel.toolCall("read_file", { path: "fixture.txt" }, { id: `read-${index}` }),
         ),
-        TestModel.toolCall("not_a_rika_tool", {}, { id: "late-invalid-tool" }),
+        ...Array.from({ length: 3 }, (_, index) =>
+          TestModel.toolCall("not_a_rika_tool", {}, { id: `late-invalid-tool-${index}` }),
+        ),
       ],
       (_, directory) =>
         Effect.gen(function* () {
@@ -499,7 +492,7 @@ test("persists automatic compaction across backend restart and reuses compacted 
           workspace: directory,
           registration: fixture.registration,
           selection: fixture.selection,
-          compaction: { contextWindow: 100, reserveTokens: 0, keepRecentTokens: 10 },
+          compaction: { contextWindow: 100, reserveTokens: 1, keepRecentTokens: 10 },
         }
         const input = {
           threadId: "thread-compaction",
