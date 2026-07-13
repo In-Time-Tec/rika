@@ -92,7 +92,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 - [x] Define the Rika execution backend contract.
 - [x] Compose Relay embedded SQLite through `@relayfx/sdk` exports only.
 - [x] Register deterministic model layers through Baton/Effect AI package APIs.
-- [x] Replace provider-name routing and legacy model/mode configuration with protocol-discriminated Gateways, exact model variants, and complete main/Oracle mode routes. Published Baton 0.4.2 cannot safely provide pre-output availability-only candidate fallback, and Relay 0.2.11 cannot carry role-specific child compaction; ADR 0013 records both limits.
+- [x] Replace provider-name routing and legacy model/mode configuration with protocol-discriminated Gateways, exact model variants, complete main/Oracle mode routes, content-addressed registrations, immutable Relay revision pins, and role-specific typed compaction. Published Baton 0.4.2 cannot safely provide pre-output availability-only candidate fallback; ADR 0013 records that limit.
 - [x] Materialize persisted fan-out overrides into deterministic child-specific Relay definitions and prove concurrent main and Oracle provider execution natively.
 - [x] Implement thread-to-execution mapping.
 - [x] Map each Rika Thread to one stable Relay Session id.

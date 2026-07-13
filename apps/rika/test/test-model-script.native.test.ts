@@ -1,6 +1,13 @@
 import { expect, test } from "bun:test"
 import { Effect } from "effect"
-import { buildTestModelScript, parseTestModelScript, productionCompaction } from "../src/main"
+import { ConfigContract } from "@rika/config"
+import {
+  buildTestModelScript,
+  distinctModelRoutes,
+  modelRoutePlan,
+  parseTestModelScript,
+  productionCompaction,
+} from "../src/main"
 
 test("uses production compaction defaults and route overrides", () => {
   expect(productionCompaction()).toEqual({
@@ -15,6 +22,40 @@ test("uses production compaction defaults and route overrides", () => {
     reserveTokens: 32_000,
     keepRecentTokens: 16_000,
   })
+})
+
+test("content-addresses non-secret model execution semantics deterministically", () => {
+  const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
+  const key = modelRoutePlan(route).registrationKey
+  expect(key).toMatch(/^sha256:[a-f0-9]{64}$/)
+  expect(modelRoutePlan(route).registrationKey).toBe(key)
+  expect(
+    modelRoutePlan({ ...route, gateway: { ...route.gateway, baseUrl: `${route.gateway.baseUrl}/` } }).registrationKey,
+  ).toBe(key)
+  const changes = [
+    { ...route, gateway: { ...route.gateway, protocol: "openai" as const } },
+    { ...route, gateway: { ...route.gateway, baseUrl: "https://models.example.test/v1" } },
+    { ...route, model: "claude-opus-4-8" },
+    { ...route, effort: "high" as const },
+    { ...route, fast: true },
+    { ...route, options: { ...route.options, max_tokens: 64_000 } },
+    { ...route, options: { ...route.options, service_tier: "priority" } },
+    { ...route, gateway: { ...route.gateway, auth: { type: "none" as const } } },
+    {
+      ...route,
+      gateway: { ...route.gateway, auth: { type: "bearer-env" as const, variable: "OTHER_API_KEY" } },
+    },
+  ]
+  for (const changed of changes) expect(modelRoutePlan(changed).registrationKey).not.toBe(key)
+  expect(JSON.stringify(modelRoutePlan(route))).not.toContain("API_KEY_VALUE")
+  expect(modelRoutePlan(route).selection.registrationKey).toBe(key)
+})
+
+test("keeps registrations distinct by the exact Baton registry tuple", () => {
+  const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
+  const second = { ...route, gatewayName: `${route.gatewayName}-secondary` }
+  expect(modelRoutePlan(second).registrationKey).toBe(modelRoutePlan(route).registrationKey)
+  expect(distinctModelRoutes([route, second, route])).toEqual([route, second])
 })
 
 test("parses and builds multi-part delayed TestModel turns", async () => {

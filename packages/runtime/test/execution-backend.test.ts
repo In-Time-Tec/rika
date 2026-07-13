@@ -146,16 +146,18 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
   const lookups = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["getExecution"]>[0]>>([])
   const replays = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["replayExecution"]>[0]>>([])
   const cancellations = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["cancelExecution"]>[0]>>([])
+  const nextRevision = yield* Ref.make(40)
   const implementation: Client.Interface = {
     registerAgent: (input) =>
       Ref.update(registrations, (values) => [...values, input]).pipe(
-        Effect.andThen(
+        Effect.andThen(Ref.getAndUpdate(nextRevision, (revision) => revision + 1)),
+        Effect.flatMap((revision) =>
           options?.fail === "register"
             ? Effect.fail(clientFailure("register failed"))
             : Effect.succeed({
                 record: {
                   id: input.id,
-                  current_revision: 1,
+                  current_revision: revision,
                   definition: { name: "rika", model: selection, tool_names: [], permissions: [] },
                   created_at: 0,
                   updated_at: 0,
@@ -340,6 +342,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(yield* Ref.get(fixture.lookups)).toEqual([])
       expect(registrations[0]?.id).toBe("agent:rika")
       expect(registrations[0]?.address).toBe("address:rika")
+      expect((starts[0] as { agent_revision?: number }).agent_revision).toBe(40)
       const registration = registrations[0]
       if (registration === undefined || !("agent" in registration)) return yield* Effect.die("Missing Baton agent")
       expect(Object.keys(registration.agent.toolkit.tools)).toEqual([
@@ -611,18 +614,17 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect((yield* Ref.get(fixture.registrations))[0]).toMatchObject({
         permission_rules: permissionPolicy,
         token_budget: 8_000,
-        metadata: {
-          steering_enabled: true,
-          compaction_enabled: true,
-          compaction_context_window: 10_000,
-          compaction_reserve_tokens: 500,
-          compaction_keep_recent_tokens: 2_000,
+        metadata: { steering_enabled: true },
+        compaction_policy: {
+          context_window: 10_000,
+          reserve_tokens: 500,
+          keep_recent_tokens: 2_000,
         },
       })
     }),
   )
 
-  it.effect("registers compaction defaults without optional token overrides", () =>
+  it.effect("omits incomplete compaction policies", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
       yield* Effect.gen(function* () {
@@ -630,9 +632,8 @@ describe("ExecutionBackend Relay client adapter", () => {
         yield* backend.start({ threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
       }).pipe(provideConfiguredBackend(fixture.implementation, { selection, compaction: {} }))
 
-      expect((yield* Ref.get(fixture.registrations))[0]).toMatchObject({
-        metadata: { steering_enabled: true, compaction_enabled: true },
-      })
+      expect((yield* Ref.get(fixture.registrations))[0]).toMatchObject({ metadata: { steering_enabled: true } })
+      expect((yield* Ref.get(fixture.registrations))[0]).not.toHaveProperty("compaction_policy")
     }),
   )
 
@@ -1036,7 +1037,7 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("routes root and ordinary children to main and Oracle presets and fan-out members to Oracle", () =>
+  it.effect("pins main and Oracle selections and alias-owned compaction policies", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
       const fanOutInputs: Array<any> = []
@@ -1054,6 +1055,8 @@ describe("ExecutionBackend Relay client adapter", () => {
         },
       })
       const oracleSelection = { provider: "oracle-gateway", model: "oracle-model", registrationKey: "sol:high:normal" }
+      const mainCompaction = { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 }
+      const oracleCompaction = { contextWindow: 1_000_000, reserveTokens: 128_000, keepRecentTokens: 64_000 }
       yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         yield* backend.start({ threadId: "thread", turnId: "turn", prompt: "prompt", startedAt: 1 })
@@ -1068,13 +1071,34 @@ describe("ExecutionBackend Relay client adapter", () => {
           join: "all",
           createdAt: 2,
         })
-      }).pipe(provideConfiguredBackend(fixture.implementation, { selection, oracleSelection }))
+      }).pipe(
+        provideConfiguredBackend(fixture.implementation, {
+          selection,
+          oracleSelection,
+          compaction: mainCompaction,
+          oracleCompaction,
+        }),
+      )
       const registered = (yield* Ref.get(fixture.registrations)).at(-1) as any
       expect(registered.agent.model).toEqual(selection)
+      expect(registered.compaction_policy).toEqual({
+        context_window: 372_000,
+        reserve_tokens: 128_000,
+        keep_recent_tokens: 32_000,
+      })
       expect(registered.child_run_presets.Oracle.model).toEqual(oracleSelection)
+      expect(registered.child_run_presets.Oracle.compaction_policy).toEqual({
+        context_window: 1_000_000,
+        reserve_tokens: 128_000,
+        keep_recent_tokens: 64_000,
+      })
       expect(registered.child_run_presets.Task.model).toEqual(selection)
       expect(fanOutInputs[0].children[0].override.model).toEqual(oracleSelection)
+      expect(fanOutInputs[0].children[0].override.compaction_policy).toEqual(
+        registered.child_run_presets.Oracle.compaction_policy,
+      )
       expect(fanOutInputs[0].children[1].override.model).toEqual(selection)
+      expect(fanOutInputs[0].children[1].override.compaction_policy).toEqual(registered.compaction_policy)
     }),
   )
 
@@ -1225,7 +1249,7 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("registers fan-out children without model-facing subagent tools", () =>
+  it.effect("forwards every fan-out registration revision without model-facing subagent tools", () =>
     Effect.gen(function* () {
       const model = yield* TestModel.make([])
       const fixture = yield* makeClient({
@@ -1253,7 +1277,12 @@ describe("ExecutionBackend Relay client adapter", () => {
         }),
       ).pipe(Effect.provide(BunServices.layer), Effect.scoped)
       const registrations = yield* Ref.get(fixture.registrations)
+      const starts = yield* Ref.get(fixture.starts)
       expect(registrations.length).toBeGreaterThan(0)
+      expect(starts).toHaveLength(registrations.length)
+      expect(starts.map((start) => (start as { agent_revision?: number }).agent_revision)).toEqual(
+        registrations.map((_, index) => 40 + index),
+      )
       for (const registration of registrations) {
         const typed = registration as { metadata?: Record<string, unknown>; handoff_targets?: unknown }
         expect(typed.metadata?.multi_agent_enabled).not.toBe(true)
