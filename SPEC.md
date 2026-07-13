@@ -29,18 +29,20 @@ Read `CONTEXT.md`, `AGENTS.md`, and the owning feature branch before implementat
 
 ## Decisions
 
-| Decision                               | ADR                                                            |
-| -------------------------------------- | -------------------------------------------------------------- |
-| Local-only product                     | `docs/spec/decisions/0001-local-only.md`                       |
-| Published Baton and Relay dependencies | `docs/spec/decisions/0002-published-framework-dependencies.md` |
-| Relay owns durable execution           | `docs/spec/decisions/0003-relay-execution-authority.md`        |
-| Baton owns the agent loop              | `docs/spec/decisions/0004-baton-agent-loop.md`                 |
-| Effect SQL SQLite product persistence  | `docs/spec/decisions/0005-effect-sql-sqlite.md`                |
-| OpenTUI visual boundary                | `docs/spec/decisions/0006-opentui-boundary.md`                 |
-| WebSockets over SSE                    | `docs/spec/decisions/0007-websocket-transport.md`              |
-| No v1 compatibility                    | `docs/spec/decisions/0008-greenfield-v2.md`                    |
-| No semantic search or ast-grep outline | `docs/spec/decisions/0009-reduced-tool-surface.md`             |
-| Effect CLI command contracts           | `docs/spec/decisions/0010-effect-cli.md`                       |
+| Decision                               | ADR                                                                 |
+| -------------------------------------- | ------------------------------------------------------------------- |
+| Local-only product                     | `docs/spec/decisions/0001-local-only.md`                            |
+| Published Baton and Relay dependencies | `docs/spec/decisions/0002-published-framework-dependencies.md`      |
+| Relay owns durable execution           | `docs/spec/decisions/0003-relay-execution-authority.md`             |
+| Baton owns the agent loop              | `docs/spec/decisions/0004-baton-agent-loop.md`                      |
+| Effect SQL SQLite product persistence  | `docs/spec/decisions/0005-effect-sql-sqlite.md`                     |
+| OpenTUI visual boundary                | `docs/spec/decisions/0006-opentui-boundary.md`                      |
+| WebSockets over SSE                    | `docs/spec/decisions/0007-websocket-transport.md`                   |
+| No v1 compatibility                    | `docs/spec/decisions/0008-greenfield-v2.md`                         |
+| No semantic search or ast-grep outline | `docs/spec/decisions/0009-reduced-tool-surface.md`                  |
+| Effect CLI command contracts           | `docs/spec/decisions/0010-effect-cli.md`                            |
+| One owner and runtime per Relay SQLite | `docs/spec/decisions/0012-single-owner-relay-sqlite.md`             |
+| Config-owned gateways and role routes  | `docs/spec/decisions/0013-config-owned-gateways-and-role-routes.md` |
 
 ## Stop Gates
 

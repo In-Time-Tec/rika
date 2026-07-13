@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Operation } from "@rika/app"
+import { ConfigContract } from "@rika/config"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
@@ -11,8 +12,171 @@ import { MediaView, ParallelSearch, ReadWebPage, Runtime as ToolRuntime } from "
 import { ViewState } from "@rika/tui"
 import { Surface } from "@rika/tui/adapter"
 import { expect, test } from "bun:test"
-import { Effect, FileSystem, Layer } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
+import { fileURLToPath } from "node:url"
+import {
+  credentialForRoute,
+  interruptTrackedFibers,
+  relayDatabaseLease,
+  requiresRelay,
+  settleTuiInitialization,
+} from "../src/main"
+
+test("holds one exclusive process lease for a Relay database", async () => {
+  const program = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-relay-lease-" })
+    const filename = `${workspace}/relay.db`
+    const concurrent = yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* relayDatabaseLease(filename)
+        return yield* Effect.exit(Effect.scoped(relayDatabaseLease(filename)))
+      }),
+    )
+    expect(String(concurrent)).toContain("is already in use by Rika process")
+    yield* Effect.scoped(relayDatabaseLease(filename))
+  })
+  await Effect.runPromise(Effect.scoped(program).pipe(Effect.provide(BunServices.layer)))
+})
+
+test("classifies product-only commands without Relay and execution commands with Relay", () => {
+  expect(requiresRelay({ _tag: "Config", action: "list" })).toBe(false)
+  expect(requiresRelay({ _tag: "Doctor" })).toBe(false)
+  expect(requiresRelay({ _tag: "Thread", action: "list" })).toBe(false)
+  expect(requiresRelay({ _tag: "Thread", action: "continue", last: true })).toBe(true)
+  expect(
+    requiresRelay({
+      _tag: "Run",
+      prompt: [],
+      ephemeral: false,
+      streamJson: false,
+      streamJsonInput: false,
+      streamJsonThinking: false,
+    }),
+  ).toBe(true)
+})
+
+test("runs a product-only command under a held Relay lease without creating relay.db and rejects execution", async () => {
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-relay-lazy-" })
+        const relayDatabase = `${workspace}/relay.db`
+        yield* relayDatabaseLease(relayDatabase)
+        const run = (args: ReadonlyArray<string>) =>
+          Effect.promise(async () => {
+            const child = Bun.spawn(["bun", fileURLToPath(new URL("../src/main.ts", import.meta.url)), ...args], {
+              cwd: fileURLToPath(new URL("../../..", import.meta.url)),
+              env: {
+                ...Bun.env,
+                HOME: workspace,
+                RIKA_DATABASE: `${workspace}/rika.db`,
+                RIKA_RELAY_DATABASE: relayDatabase,
+              },
+              stdout: "pipe",
+              stderr: "pipe",
+            })
+            const stdout = new Response(child.stdout).text()
+            const stderr = new Response(child.stderr).text()
+            return {
+              code: await child.exited,
+              stdout: await stdout,
+              stderr: await stderr,
+            }
+          })
+        const configList = yield* run(["config", "list"])
+        if (configList.code !== 0) throw new Error(configList.stderr)
+        expect(yield* fileSystem.exists(relayDatabase)).toBe(false)
+        const execution = yield* run(["run", "blocked"])
+        expect(execution.code).not.toBe(0)
+        expect(execution.stderr).toContain("already in use by Rika process")
+        expect(yield* fileSystem.exists(relayDatabase)).toBe(false)
+      }).pipe(Effect.provide(BunServices.layer)),
+    ),
+  )
+}, 30_000)
+
+test("selects only the credential named by each high and ultra main and Oracle gateway", () => {
+  const openai = Redacted.make("openai-sentinel")
+  const anthropic = Redacted.make("anthropic-sentinel")
+  const credentials = { OPENAI_API_KEY: openai, ANTHROPIC_API_KEY: anthropic }
+  const highMain = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "main")
+  const highOracle = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
+  const ultraMain = ConfigContract.resolveModelRoute(ConfigContract.defaults, "ultra", "main")
+  const ultraOracle = ConfigContract.resolveModelRoute(ConfigContract.defaults, "ultra", "oracle")
+  expect(credentialForRoute(highMain, credentials)).toBe(openai)
+  expect(credentialForRoute(highOracle, credentials)).toBe(anthropic)
+  expect(credentialForRoute(ultraMain, credentials)).toBe(anthropic)
+  expect(credentialForRoute(ultraOracle, credentials)).toBe(openai)
+})
+
+test("awaits tracked fiber cleanup before releasing its enclosing lease", async () => {
+  const events: Array<string> = []
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() => Effect.sync(() => events.push("lease-released")).pipe(Effect.asVoid))
+        const started = yield* Deferred.make<void>()
+        const fiber = yield* Effect.forkChild(
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.ensuring(Effect.sync(() => events.push("fiber-cleaned")).pipe(Effect.asVoid)),
+          ),
+        )
+        yield* Deferred.await(started)
+        yield* interruptTrackedFibers([fiber])
+        events.push("shutdown-resumed")
+      }),
+    ),
+  )
+  expect(events).toEqual(["fiber-cleaned", "shutdown-resumed", "lease-released"])
+})
+
+test("awaits delayed TUI initialization and tears down its renderer before lease finalization", async () => {
+  const events: Array<string> = []
+  let resolveCreation: ((value: { readonly renderer: string }) => void) | undefined
+  const creation = new Promise<{ readonly renderer: string }>((resolve) => {
+    resolveCreation = resolve
+  })
+  let closed = false
+  await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() => Effect.sync(() => events.push("lease-finalized")).pipe(Effect.asVoid))
+        const initialization = settleTuiInitialization(
+          creation,
+          () => closed,
+          async () => {
+            events.push("renderer-stopped", "renderer-idle", "renderer-destroyed")
+          },
+        ).then((created) => {
+          if (created !== undefined && !closed) events.push("post-close-work-started")
+        })
+        closed = true
+        events.push("close-started")
+        const close = Effect.promise(() => initialization).pipe(
+          Effect.andThen(Effect.sync(() => events.push("shutdown-resumed"))),
+          Effect.asVoid,
+        )
+        const closeFiber = yield* Effect.forkChild(close)
+        yield* Effect.yieldNow
+        expect(events).toEqual(["close-started"])
+        resolveCreation?.({ renderer: "delayed" })
+        yield* Fiber.join(closeFiber)
+      }),
+    ),
+  )
+  expect(events).toEqual([
+    "close-started",
+    "renderer-stopped",
+    "renderer-idle",
+    "renderer-destroyed",
+    "shutdown-resumed",
+    "lease-finalized",
+  ])
+})
 
 test("drives bypassed recorded and incognito shell commands through Operation and native OpenTUI", async () => {
   const program = Effect.scoped(

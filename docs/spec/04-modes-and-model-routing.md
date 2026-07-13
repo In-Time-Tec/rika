@@ -1,34 +1,27 @@
-# Modes and Model Routing
+# Modes and model routing
 
-## Built-In Modes
+## Contract
 
-| Mode     | Intent                                | Initial primary route |
-| -------- | ------------------------------------- | --------------------- |
-| `low`    | Precisely scoped changes              | GPT-5.6 Terra         |
-| `medium` | Default multi-file work               | GPT-5.6 Luna          |
-| `high`   | Difficult and subtle work             | GPT-5.6 Sol           |
-| `ultra`  | Architecture and open-ended discovery | Claude Fable 5        |
+Rika settings contain named `gateways`, `models`, and `modes`. A Gateway has an explicit `openai` Responses or `anthropic` Messages protocol, a `baseUrl`, and an explicit authentication mode. VibeProxy uses one Gateway of each protocol. Runtime behavior never depends on the Gateway name or endpoint. Authentication is either `none` or `bearer-env` with a required environment-variable name. The configuration boundary resolves each distinct named variable once into a redacted credential map, and each model registration receives only its Gateway's credential. Defaults name `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`; both VibeProxy Gateways may name `RIKA_MODEL_API_KEY`.
 
-Each mode owns reasoning, autonomy, budget, tool defaults, and Oracle route. Provider model identifiers are configuration resolved through Baton model registration.
+Each model alias owns ordered upstream candidate IDs, exact operational compaction, and request variants keyed by effort. Every effort variant has `normal` options and may have `fast` options. GPT aliases expose normal and fast variants; fast options explicitly include `service_tier: priority`. Claude aliases expose normal variants only, so a fast Claude route is rejected. Supported efforts are `low`, `medium`, `high`, `xhigh`, and `max`.
 
-System routes separately cover thread titling, media analysis, image generation, and compaction so product modes do not accidentally change those contracts.
+Each mode has a budget and complete `main` and `oracle` routes. A route selects an alias, effort, and optional fast variant.
 
-Rika reads typed JSON settings from `~/.config/rika/settings.json` and then `.rika/settings.json`; workspace values override global values. `models` maps stable aliases to a provider and provider model id, while `modes` select aliases. Provider connections may persist a non-secret `baseUrl`, including the Vibe OpenAI-compatible gateway. API keys are never accepted from JSON and remain redacted environment values from `RIKA_MODEL_API_KEY`, with existing provider-specific environment variables retained for compatibility.
+| Mode   | Main                    | Oracle                |
+| ------ | ----------------------- | --------------------- |
+| low    | `gpt-5.6-luna`, low     | `gpt-5.6-sol`, high   |
+| medium | `gpt-5.6-terra`, medium | `gpt-5.6-sol`, high   |
+| high   | `gpt-5.6-sol`, xhigh    | `claude-fable-5`, max |
+| ultra  | `claude-fable-5`, max   | `gpt-5.6-sol`, max    |
 
-## Invariants
+Fable declares candidates `claude-fable-5` then `claude-opus-4-8`; Opus is also separately configurable. Baton 0.4.2 does not expose a candidate fallback policy constrained to availability failures before output, so Rika does not fake automatic fallback. Startup and doctor route resolution must report missing Gateways, aliases, and variants explicitly.
 
-- Modes are stable product concepts.
-- Provider routing may change without renaming a mode.
-- Mode changes apply only when no Turn is active.
-- A Turn records the selected mode and resolved routing metadata needed for diagnosis.
-- Missing model registration fails typed.
-- Legacy mode identifiers are rejected.
-- Missing aliases, malformed configuration, and unsupported providers fail typed before runtime initialization.
-- CLI and TUI executions consume the same resolved route from the application composition root.
-- The TUI mode picker exposes each built-in mode's current route label, marks the active route, and changes it only after explicit confirmation between Turns.
+## Runtime invariants
 
-Model registrations opt into mode-derived variants. Production routes resolve reasoning effort and fast mode to exact registration keys. Fixed deterministic fixtures retain their single registered selection regardless of the product mode so packaged and TUI tests exercise the same routing boundary without adding fixture-only aliases or weakening exact registry lookup.
-
-## Extensions
-
-Plugins may register custom modes with unique ids, approved model routes, instructions, tools, and budgets. Built-in modes remain a fixed dial; custom modes use a separate picker.
+- Registration keys contain alias and variant, preventing collisions between aliases that share an upstream model ID.
+- Every main and Oracle route is resolved and registered before execution.
+- Root execution uses main. Oracle presets and Oracle fan-out members use Oracle. Librarian, Painter, Review, ReadThread, and Task remain on main.
+- Deterministic TestModel configuration remains a fixed selection for every role.
+- Automatic titling reuses the initiating Turn route.
+- Old `providers`, model `provider`/`model`, and mode `model`/`oracleModel`/`reasoning` shapes are rejected.

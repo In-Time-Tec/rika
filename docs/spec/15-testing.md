@@ -19,6 +19,8 @@ Every behavior-bearing service has a test or memory layer. Tests use determinist
 - Native OpenTUI end-to-end tests that drive real keyboard input and terminal resize behavior through the packaged application.
 - Real model and MCP opt-in tests.
 - Kill-point tests after external side effects, Relay acceptance, projection commits, active child execution, and migration steps.
+- Runtime-cardinality tests proving one Relay SQLite client, migration sequence, runner, fan-out host, Workflow host, Thread Host registry, and notification graph per process.
+- Ownership tests covering two-process startup, stopped owners, `SIGKILL` release, stale diagnostics, legacy binaries, and acquisition before the first SQLite open.
 
 ## Coverage
 
@@ -40,6 +42,7 @@ Rika uses `@batonfx/test` and product-owned test layers to script Effect AI mode
 - Maximum-step, token, time, and cost termination.
 - Child Run spawn, progress, completion, partial failure, cancellation, and join.
 - Process kill and restart against the same Relay SQLite state.
+- Process kill after Turn persistence, Relay acceptance, model output, canonical terminal commit, product projection, and Thread Host notification.
 - Versioned dynamic workflow branches, joins, approvals, timers, retries, and compensation.
 
 Golden transcripts assert structured requests, tool names, arguments, results, parent-child correlation, checkpoints, and exactly-once visible side effects. Long scenarios run hundreds of deterministic events without real sleeps by using Effect test time and scripted model cursors.

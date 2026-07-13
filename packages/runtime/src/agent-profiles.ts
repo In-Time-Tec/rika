@@ -110,8 +110,8 @@ export const resolvePainter = Effect.fn("AgentProfiles.resolvePainter")(function
   return resolve("Painter", model)
 })
 
-export const presets = (model: ModelRegistry.ModelSelection) =>
-  Object.fromEntries(names.map((name) => [name, resolve(name, model).preset]))
+export const presets = (model: ModelRegistry.ModelSelection, oracleModel: ModelRegistry.ModelSelection = model) =>
+  Object.fromEntries(names.map((name) => [name, resolve(name, name === "Oracle" ? oracleModel : model).preset]))
 
 export const parentPermissions = [...new Set(names.flatMap((name) => definitions[name].permissions))].map((name) => ({
   name,

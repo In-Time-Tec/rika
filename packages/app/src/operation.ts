@@ -705,7 +705,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           if (outcome._tag === "Failure") {
             yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
             dispatch({ _tag: "ExecutionFailed", threadId: thread.id, turnId: turn.id, message: String(outcome.cause) })
-            yield* promoteThread(thread, undefined, dispatch)
+            yield* settleThread(thread, dispatch)
             return
           }
           const result = outcome.value
@@ -713,7 +713,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             dispatch({ _tag: "ExecutionEventReceived", threadId: thread.id, turnId: turn.id, event })
           yield* turns.setStatus(turn.id, result.status, result.events.at(-1)?.cursor, yield* Clock.currentTimeMillis)
           if (result.status === "completed") {
-            yield* promoteThread(thread, undefined, dispatch)
+            yield* settleThread(thread, dispatch)
             if (isNewThread) yield* titleThread(thread, prompt, dispatch)
             return
           }
@@ -725,7 +725,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               turnId: turn.id,
               message: `Execution ${result.status}`,
             })
-          yield* promoteThread(thread, undefined, dispatch)
+          yield* settleThread(thread, dispatch)
         })
         yield* program.pipe(
           Effect.provide(selectedExecutionDependencies),
@@ -852,6 +852,15 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         yield* backend.notifyThreadHost(thread.id, turnId === undefined ? undefined : String(turnId), now)
         yield* queueChanged(thread.id, dispatch)
       })
+      const settleThread = Effect.fn("Operation.interactive.settleThread")(function* (
+        thread: Thread.Thread,
+        dispatch: (event: InteractiveEvent) => void,
+      ) {
+        yield* promoteThread(thread, undefined, dispatch).pipe(
+          Effect.catch(() => queueChanged(thread.id, dispatch)),
+          Effect.catch(() => Effect.void),
+        )
+      })
       const active = Effect.fn("Operation.interactive.active")(function* () {
         const thread = yield* Ref.get(interactiveThread)
         if (thread === undefined) return yield* Effect.fail(new Error("No thread selected"))
@@ -889,7 +898,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               result.events.at(-1)?.cursor ?? turn.lastCursor,
               yield* Clock.currentTimeMillis,
             )
-            if (isTerminalStatus(result.status)) yield* promoteThread(thread, undefined, dispatch)
+            if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
             else if (result.status !== "waiting" && result.status !== "running" && result.status !== "queued")
               dispatch({
                 _tag: "ExecutionFailed",
@@ -905,7 +914,6 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         seedPrompt: string,
         dispatch: (event: InteractiveEvent) => void,
       ) {
-        const lowBackendLayer = backendLayersByMode.get("low") ?? defaultBackendLayer
         const program = Effect.gen(function* () {
           const backend = yield* ExecutionBackend.Service
           const threads = yield* ThreadRepository.Service
@@ -933,11 +941,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           dispatch({ _tag: "ThreadTitled", threadId: String(thread.id), title })
           dispatch({ _tag: "ThreadsListed", threads: yield* threads.list() })
         })
-        yield* program.pipe(
-          Effect.provide(Layer.merge(dependencies, lowBackendLayer)),
-          Effect.scoped,
-          Effect.catch(() => Effect.void),
-        )
+        yield* program.pipe(Effect.catch(() => Effect.void))
       })
       const loadThread = Effect.fn("Operation.interactive.loadThread")(function* (
         thread: Thread.Thread,
@@ -1132,7 +1136,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 yield* Clock.currentTimeMillis,
               )
               dispatch({ _tag: "ExecutionControlled", threadId: turn.threadId, turnId: turn.id, action: "cancelled" })
-              if (isTerminalStatus(result.status)) yield* promoteThread(thread, undefined, dispatch)
+              if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
             }),
           ),
         resolvePermission: (waitId, kind, decision, dispatch) =>

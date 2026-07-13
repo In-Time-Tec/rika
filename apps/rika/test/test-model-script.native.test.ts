@@ -1,6 +1,21 @@
 import { expect, test } from "bun:test"
 import { Effect } from "effect"
-import { buildTestModelScript, parseTestModelScript } from "../src/main"
+import { buildTestModelScript, parseTestModelScript, productionCompaction } from "../src/main"
+
+test("uses production compaction defaults and route overrides", () => {
+  expect(productionCompaction()).toEqual({
+    contextWindow: 372_000,
+    reserveTokens: 128_000,
+    keepRecentTokens: 32_000,
+  })
+  expect(
+    productionCompaction({ compaction: { contextWindow: 192_000, reserveTokens: 32_000, keepRecentTokens: 16_000 } }),
+  ).toEqual({
+    contextWindow: 192_000,
+    reserveTokens: 32_000,
+    keepRecentTokens: 16_000,
+  })
+})
 
 test("parses and builds multi-part delayed TestModel turns", async () => {
   const json = JSON.stringify([

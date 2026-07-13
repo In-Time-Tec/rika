@@ -223,12 +223,14 @@ test("preserves a canonical terminal failure after more than one thousand execut
 }, 120_000)
 
 test("settles a Rika fan-out child after more than one thousand execution events", async () => {
-  const childOutput = `${"x".repeat(1_100)}CHILD_OK`
+  const childText = `${"x".repeat(1_100)}CHILD_OK`
+  const childOutput = `${childText}{"type":"structured","value":{"summary":"CHILD_OK","files":[]},"schema_ref":"rika.agent.task.v1"}`
   const result = await Effect.runPromise(
     withBackend(
       [
         TestModel.text("parent ready"),
         TestModel.turn([...Array.from({ length: 1_100 }, () => TestModel.text("x")), TestModel.text("CHILD_OK")]),
+        TestModel.object({ summary: "CHILD_OK", files: [] }),
       ],
       (_, directory) =>
         Effect.gen(function* () {
@@ -283,6 +285,86 @@ test("settles a Rika fan-out child after more than one thousand execution events
       output: childOutput,
     },
   ])
+}, 60_000)
+
+test("executes concurrent fan-out members with their persisted main and Oracle model routes", async () => {
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-runtime-routes-" })
+        const main = yield* TestModel.make(
+          [
+            TestModel.text("parent-main"),
+            TestModel.text("child-main"),
+            TestModel.object({ summary: "child-main", files: [] }),
+          ],
+          {
+            provider: "main-provider",
+            model: "main-model",
+          },
+        )
+        const oracle = yield* TestModel.make(
+          [TestModel.text("child-oracle"), TestModel.object({ answer: "child-oracle", evidence: [] })],
+          {
+            provider: "oracle-provider",
+            model: "oracle-model",
+          },
+        )
+        return yield* Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          yield* backend.start({
+            threadId: "thread-routes",
+            turnId: "turn-routes-parent",
+            prompt: "prepare fan-out",
+            startedAt: 1,
+          })
+          yield* backend.createFanOut({
+            parentTurnId: "turn-routes-parent",
+            fanOutId: "fan-out:routes",
+            children: [
+              { childId: "oracle-route", profile: "Oracle", prompt: "ask Oracle" },
+              { childId: "main-route", profile: "Task", prompt: "ask main" },
+            ],
+            maxConcurrency: 2,
+            join: "all",
+            createdAt: 2,
+          })
+          const fanOut = yield* backend.inspectFanOut("fan-out:routes").pipe(
+            Effect.repeat({
+              while: (inspection) => inspection?.state === "joining",
+              schedule: Schedule.both(Schedule.spaced("20 millis"), Schedule.recurs(500)),
+            }),
+          )
+          return {
+            fanOut,
+            mainRequests: yield* main.requests,
+            oracleRequests: yield* oracle.requests,
+          }
+        }).pipe(
+          Effect.provide(
+            RelayExecutionBackend.layer({
+              filename: `${directory}/relay.db`,
+              workspace: directory,
+              registration: main.registration,
+              additionalRegistrations: [oracle.registration],
+              selection: main.selection,
+              oracleSelection: oracle.selection,
+            }),
+          ),
+        )
+      }),
+    ).pipe(Effect.provide(BunServices.layer)),
+  )
+  expect(result.fanOut?.state).toBe("satisfied")
+  expect(result.fanOut?.members.map((member) => member.output)).toEqual([
+    'child-oracle{"type":"structured","value":{"answer":"child-oracle","evidence":[]},"schema_ref":"rika.agent.oracle.v1"}',
+    'child-main{"type":"structured","value":{"summary":"child-main","files":[]},"schema_ref":"rika.agent.task.v1"}',
+  ])
+  expect(result.mainRequests).toHaveLength(3)
+  expect(result.oracleRequests).toHaveLength(2)
+  expect(JSON.stringify(result.mainRequests[1]?.prompt)).toContain("ask main")
+  expect(JSON.stringify(result.oracleRequests[0]?.prompt)).toContain("ask Oracle")
 }, 60_000)
 
 test("retries a transient TestModel failure inside the durable execution", async () => {

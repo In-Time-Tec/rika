@@ -15,6 +15,8 @@
 
 Rika submits one immutable Relay fan-out definition with a caller-stable fan-out id, ordered child ids, a positive concurrency bound, and an explicit join policy. General Task prompts select the narrow built-in profile before submission; review checks always use the Review profile and default to best-effort aggregation. Relay owns admission, restart recovery, join transitions, and cancellation propagation. Rika only projects ordered member state, output, and typed failure details beneath the parent Turn.
 
+The fan-out runtime materializes each persisted child override as a deterministic child-specific immutable Relay agent definition before starting that child. The definition applies Relay 0.2.11's supported instruction, model selection and request variant, tool, permission, output-schema, and metadata fields. Fan-out members never replace or mutate the shared root definition, so concurrent main and Oracle children retain their own routes. Relay 0.2.11 does not carry a child compaction override; fan-out definitions therefore retain the root compaction metadata.
+
 Repeating a submission after restart uses the same fan-out and child ids. A different definition under an existing id is an error; Rika never retries by allocating replacement ids. Child cancellation addresses the Relay child execution directly, while parent cancellation uses Relay's parent execution cancellation and propagation.
 
 ## Product Agents

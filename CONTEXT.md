@@ -26,6 +26,8 @@ This file is Rika's canonical vocabulary. Implementation details belong in specs
 
 **Model Route**: Product configuration resolved through Baton to an Effect AI language-model layer.
 
+**Gateway**: A named, protocol-discriminated connection to a model service. Gateway authentication is explicitly absent or supplied by the application environment.
+
 **Tool**: A typed capability an agent may invoke to observe or change the Workspace or another external system.
 
 **Permission Decision**: The canonical Baton/Relay policy result for a proposed tool call: allow, deny, or ask. An accepted ask may be remembered as always according to the published framework contract.

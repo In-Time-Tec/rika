@@ -8,6 +8,8 @@ Business behavior lives behind Effect services. Flags and arguments are Schema-v
 
 Help, version, completions, and parse errors require only platform services. They must not initialize SQL, Relay, models, MCP, plugins, or OpenTUI.
 
+Parsed product-only operations build a lightweight product layer without acquiring or migrating Relay state. Config, doctor, extension, tool catalog, MCP, skill, and metadata-only Thread operations remain available while another process holds the Relay lease. Interactive, run, review, workflow, and Thread continue operations acquire Relay ownership before runtime construction and fail while it is held.
+
 ## Required Surfaces
 
 - Default interactive TUI.

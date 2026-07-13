@@ -9,7 +9,6 @@
         "@batonfx/mcp": "catalog:",
         "@batonfx/providers": "catalog:",
         "@batonfx/skills": "catalog:",
-        "@effect/ai-openrouter": "catalog:",
         "@effect/platform-bun": "catalog:",
         "@effect/sql-sqlite-bun": "catalog:",
         "@relayfx/sdk": "catalog:",
@@ -39,7 +38,6 @@
       },
       "dependencies": {
         "@batonfx/providers": "catalog:",
-        "@effect/ai-openai-compat": "4.0.0-beta.93",
         "@effect/platform-bun": "catalog:",
         "@ff-labs/fff-node": "^0.9.6",
         "@opentui/core": "catalog:",
@@ -193,7 +191,6 @@
     "@batonfx/providers": "0.4.2",
     "@batonfx/skills": "0.4.2",
     "@batonfx/test": "0.4.2",
-    "@effect/ai-openrouter": "4.0.0-beta.93",
     "@effect/platform-bun": "4.0.0-beta.93",
     "@effect/sql-mysql2": "4.0.0-beta.93",
     "@effect/sql-sqlite-bun": "4.0.0-beta.93",

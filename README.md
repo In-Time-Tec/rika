@@ -77,26 +77,47 @@ If `~/.local/bin` is not already on your shell path, add it once:
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-## Vibe proxy configuration
+## VibeProxy Gateway configuration
 
 Rika follows Amp's settings layout. Global settings live at `~/.config/rika/settings.json`; a repository may override
-them with `.rika/settings.json`. To route the default medium mode through an OpenAI-compatible Vibe proxy, use:
+them with `.rika/settings.json`. Gateway names are arbitrary. To route medium mode through VibeProxy, use:
 
 ```json
 {
-  "providers": {
-    "vibe": { "baseUrl": "http://127.0.0.1:8317/v1" }
+  "gateways": {
+    "openai": {
+      "protocol": "openai",
+      "baseUrl": "http://127.0.0.1:8317/v1",
+      "auth": { "type": "bearer-env", "variable": "RIKA_MODEL_API_KEY" }
+    }
   },
   "models": {
-    "vibe-subscription": { "provider": "vibe", "model": "your-vibe-model-id" }
+    "subscription": {
+      "gateway": "openai",
+      "candidates": ["your-vibe-model-id"],
+      "compaction": { "contextWindow": 372000, "reserveTokens": 128000, "keepRecentTokens": 32000 },
+      "variants": {
+        "medium": {
+          "normal": { "options": { "reasoning": { "effort": "medium" }, "max_output_tokens": 128000 } },
+          "fast": {
+            "options": { "reasoning": { "effort": "medium" }, "max_output_tokens": 128000, "service_tier": "priority" }
+          }
+        },
+        "high": { "normal": { "options": { "reasoning": { "effort": "high" }, "max_output_tokens": 128000 } } }
+      }
+    }
   },
   "modes": {
-    "medium": { "model": "vibe-subscription" }
+    "medium": {
+      "budget": 64,
+      "main": { "alias": "subscription", "effort": "medium" },
+      "oracle": { "alias": "subscription", "effort": "high" }
+    }
   }
 }
 ```
 
-Keep the gateway credential out of JSON and provide it as a redacted environment value:
+Keep gateway credentials out of JSON. Each `bearer-env` Gateway names the environment variable resolved once at startup. The defaults use `OPENAI_API_KEY` and `ANTHROPIC_API_KEY`; VibeProxy configurations may name `RIKA_MODEL_API_KEY` on both protocol Gateways:
 
 ```bash
 export RIKA_MODEL_API_KEY="your-vibe-proxy-key"
@@ -107,3 +128,4 @@ rika
 
 The installed `rika` command and the OpenTUI session use the same resolved settings, durable Relay database, and Baton
 model registration. Workspace settings override global settings without copying credentials into the repository.
+Automatic titles reuse the initiating turn's configured mode route and do not require credentials for another provider.

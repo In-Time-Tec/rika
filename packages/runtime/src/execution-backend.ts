@@ -26,6 +26,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly registration: ModelRegistry.Registration
   readonly additionalRegistrations?: ReadonlyArray<ModelRegistry.Registration>
   readonly selection: ModelRegistry.ModelSelection
+  readonly oracleSelection?: ModelRegistry.ModelSelection
   readonly defaultReasoningEffort?: string
   readonly modelVariantPolicy?: ModelVariantPolicy
   readonly modelResilience?: ModelResilience.Interface
@@ -100,6 +101,8 @@ const variantSelection = (
 
 const agentId = Ids.AgentId.make("agent:rika")
 const addressId = Ids.AddressId.make("address:rika")
+const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
+  Ids.AgentId.make(`agent:rika:fan-out:${String(fanOutId)}:${String(childExecutionId)}`)
 const executionId = (turnId: string) =>
   Ids.ExecutionId.make(turnId.startsWith("child:") ? turnId : `execution:${turnId}`)
 const sessionId = (threadId: string) => Ids.SessionId.make(`session:${threadId}`)
@@ -237,7 +240,41 @@ const followExecution = (
           ...(cursor === undefined ? {} : { after_cursor: cursor }),
         })
         .pipe(Stream.takeUntilEffect(shouldStop), Stream.map(append), Stream.runDrain)
-    yield* attach(afterCursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => attach(undefined)))
+    yield* attach(afterCursor).pipe(
+      Effect.catchTag("EventLogCursorNotFound", () => attach(undefined)),
+      Effect.catchTag("ClientError", (streamError) =>
+        Effect.gen(function* () {
+          const existing = yield* client.getExecution(executionId(turnId))
+          if (
+            existing === undefined ||
+            (existing.status !== "completed" && existing.status !== "failed" && existing.status !== "cancelled")
+          ) {
+            return yield* Effect.fail(streamError)
+          }
+          const replay = yield* client.replayExecution({ execution_id: executionId(turnId) })
+          for (const item of replay.events) {
+            const mapped = append(item)
+            if (
+              mapped.type === "execution.completed" ||
+              mapped.type === "execution.failed" ||
+              mapped.type === "execution.cancelled"
+            ) {
+              break
+            }
+          }
+          if (
+            events.every(
+              (item) =>
+                item.type !== "execution.completed" &&
+                item.type !== "execution.failed" &&
+                item.type !== "execution.cancelled",
+            )
+          ) {
+            return yield* Effect.fail(streamError)
+          }
+        }).pipe(Effect.catch(() => Effect.fail(streamError))),
+      ),
+    )
     const status = statusFromEvents(events)
     return {
       turnId,
@@ -255,6 +292,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
   options: Pick<
     LayerOptions<AdditionalTools>,
     | "selection"
+    | "oracleSelection"
     | "additionalToolkit"
     | "compaction"
     | "tokenBudget"
@@ -385,7 +423,10 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               parent_execution_id: executionId(input.parentTurnId),
               children: input.children.map((child) => {
                 const profile = child.profile ?? "Task"
-                const preset = resolve(profile, options.selection).preset
+                const preset = resolve(
+                  profile,
+                  profile === "Oracle" ? (options.oracleSelection ?? options.selection) : options.selection,
+                ).preset
                 return {
                   child_execution_id: Ids.ChildExecutionId.make(`child:${child.childId}`),
                   address_id: addressId,
@@ -492,7 +533,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               ...(options.tokenBudget === undefined ? {} : { token_budget: options.tokenBudget }),
               metadata,
               handoff_targets: subagentHandoffTargets,
-              child_run_presets: presets(selection),
+              child_run_presets: presets(selection, options.oracleSelection),
             })
             const id = executionId(input.turnId)
             yield* client
@@ -728,22 +769,55 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                   execute: (child: any, fanOutState: any, idempotencyKey: string) =>
                     Effect.gen(function* () {
                       const startedAt = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
-                      const metadata = agentMetadata(options.compaction)
+                      const override = child.override ?? {}
+                      const childToolkit = Toolkit.make(
+                        ...Object.values(toolkit.tools).filter(
+                          (tool) => override.tool_names === undefined || override.tool_names.includes(tool.name),
+                        ),
+                      )
+                      const metadata = {
+                        ...agentMetadata(options.compaction),
+                        ...override.metadata,
+                        ...child.metadata,
+                      }
+                      const childSelection =
+                        override.model === undefined
+                          ? options.selection
+                          : {
+                              provider: override.model.provider,
+                              model: override.model.model,
+                              ...(override.model.registration_key === undefined &&
+                              override.model.registrationKey === undefined
+                                ? {}
+                                : {
+                                    registrationKey: override.model.registration_key ?? override.model.registrationKey,
+                                  }),
+                            }
+                      const childAgentId = fanOutAgentId(fanOutState.fan_out_id, child.child_execution_id)
                       yield* client.registerAgent({
-                        id: agentId,
-                        address: addressId,
-                        agent: Agent.make("rika", { model: options.selection, toolkit }),
-                        permissions: parentPermissions,
+                        id: childAgentId,
+                        address: child.address_id,
+                        agent: Agent.make(`rika-fan-out-${String(child.child_execution_id)}`, {
+                          ...(override.instructions === undefined ? {} : { instructions: override.instructions }),
+                          model: childSelection,
+                          toolkit: childToolkit,
+                        }),
+                        permissions:
+                          override.permissions === undefined
+                            ? parentPermissions
+                            : override.permissions.map((name: string) => ({ name, value: true })),
                         ...(options.permissionPolicy === undefined
                           ? {}
                           : { permission_rules: options.permissionPolicy }),
                         ...(options.tokenBudget === undefined ? {} : { token_budget: options.tokenBudget }),
-                        ...(metadata === undefined ? {} : { metadata }),
-                        child_run_presets: presets(options.selection),
+                        ...(override.output_schema_ref === undefined
+                          ? {}
+                          : { output_schema_ref: override.output_schema_ref }),
+                        metadata,
                       })
                       yield* client.startExecutionByAgentDefinition({
                         root_address_id: child.address_id,
-                        agent_id: agentId,
+                        agent_id: childAgentId,
                         execution_id: Ids.ExecutionId.make(String(child.child_execution_id)),
                         ...(child.input === undefined ? {} : { input: child.input }),
                         idempotency_key: idempotencyKey,

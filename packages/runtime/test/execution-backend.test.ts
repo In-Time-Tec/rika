@@ -135,6 +135,7 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
   readonly startStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
   readonly existingStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
   readonly streamEvents?: ReadonlyArray<Execution.ExecutionEvent>
+  readonly streamFailure?: string
   readonly replayEvents?: ReadonlyArray<Execution.ExecutionEvent>
   readonly openWaitIds?: ReadonlyArray<string>
   readonly cancelStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
@@ -242,7 +243,13 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
     listRunners: unused,
     routeExecution: unused,
     send: unused,
-    streamExecution: () => Stream.fromIterable(options?.streamEvents ?? []),
+    streamExecution: () =>
+      options?.streamFailure === undefined
+        ? Stream.fromIterable(options?.streamEvents ?? [])
+        : Stream.concat(
+            Stream.fromIterable(options.streamEvents ?? []),
+            Stream.fail(clientFailure(options.streamFailure)),
+          ),
     followExecution: () => Stream.empty,
     wake: unused,
     listPendingApprovals: unused,
@@ -736,6 +743,36 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("recovers a canonical terminal execution when streaming fails after completion", () =>
+    Effect.gen(function* () {
+      const output = relayEvent("model.output.completed", 1, [Content.text("answer")])
+      const completed = relayEvent("execution.completed", 2, [], { model_output: "answer" })
+      const fixture = yield* makeClient({
+        existingStatus: "completed",
+        streamEvents: [output],
+        streamFailure: "effect/sql/SqlError: Failed to execute statement",
+        replayEvents: [output, completed],
+      })
+      const seen: Array<string> = []
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* backend.start({
+          threadId: "thread-a",
+          turnId: "turn-a",
+          prompt: "prompt",
+          startedAt: 1,
+          onEvent: (item) => seen.push(item.type),
+        })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.status).toBe("completed")
+      expect(result.events.map((item) => item.type)).toEqual(["model.output.completed", "execution.completed"])
+      expect(seen).toEqual(["model.output.completed", "execution.completed"])
+      expect(yield* Ref.get(fixture.lookups)).toEqual(["execution:turn-a"])
+      expect(yield* Ref.get(fixture.replays)).toEqual([{ execution_id: "execution:turn-a" }])
+    }),
+  )
+
   it.effect("preserves the start failure when reconciliation lookup fails", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({ fail: "lookup" })
@@ -996,6 +1033,48 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(inputs).toHaveLength(4)
       expect(result.replay.events[0]).not.toHaveProperty("text")
       expect(result.inspection).not.toHaveProperty("lastCursor")
+    }),
+  )
+
+  it.effect("routes root and ordinary children to main and Oracle presets and fan-out members to Oracle", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      const fanOutInputs: Array<any> = []
+      Object.assign(fixture.implementation, {
+        createChildFanOut: (input: any) => {
+          fanOutInputs.push(input)
+          return Effect.succeed({
+            fan_out_id: input.fan_out_id,
+            parent_execution_id: input.parent_execution_id,
+            state: "running",
+            max_concurrency: input.max_concurrency,
+            join: input.join,
+            members: [],
+          })
+        },
+      })
+      const oracleSelection = { provider: "oracle-gateway", model: "oracle-model", registrationKey: "sol:high:normal" }
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* backend.start({ threadId: "thread", turnId: "turn", prompt: "prompt", startedAt: 1 })
+        yield* backend.createFanOut({
+          fanOutId: "fan",
+          parentTurnId: "turn",
+          children: [
+            { childId: "oracle", profile: "Oracle", prompt: "inspect" },
+            { childId: "task", profile: "Task", prompt: "work" },
+          ],
+          maxConcurrency: 2,
+          join: "all",
+          createdAt: 2,
+        })
+      }).pipe(provideConfiguredBackend(fixture.implementation, { selection, oracleSelection }))
+      const registered = (yield* Ref.get(fixture.registrations)).at(-1) as any
+      expect(registered.agent.model).toEqual(selection)
+      expect(registered.child_run_presets.Oracle.model).toEqual(oracleSelection)
+      expect(registered.child_run_presets.Task.model).toEqual(selection)
+      expect(fanOutInputs[0].children[0].override.model).toEqual(oracleSelection)
+      expect(fanOutInputs[0].children[1].override.model).toEqual(selection)
     }),
   )
 

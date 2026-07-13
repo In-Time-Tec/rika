@@ -50,7 +50,14 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       yield* json({
         settings: config.settings,
         environment: { parallelApiKey: config.environment.parallelApiKey === undefined ? "missing" : "present" },
-        model: { route, apiKey: config.environment.modelApiKey === undefined ? "missing" : "present" },
+        model: {
+          route,
+          apiKey:
+            route.gateway.auth.type === "none" ||
+            config.environment.gatewayCredentials[route.gateway.auth.variable] !== undefined
+              ? "present"
+              : "missing",
+        },
         diagnostics: config.diagnostics,
       })
       return
@@ -76,7 +83,14 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       workspace: (yield* adapter.exists(options.workspaceConfigPath)) ? "present" : "missing",
     },
     credentials: { parallel: config.environment.parallelApiKey === undefined ? "missing" : "present" },
-    model: { route, apiKey: config.environment.modelApiKey === undefined ? "missing" : "present" },
+    model: {
+      route,
+      apiKey:
+        route.gateway.auth.type === "none" ||
+        config.environment.gatewayCredentials[route.gateway.auth.variable] !== undefined
+          ? "present"
+          : "missing",
+    },
   })
 })
 

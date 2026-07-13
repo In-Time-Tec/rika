@@ -14,19 +14,19 @@ Status values:
 
 ## Modes and Models
 
-| Feature                         | Amp July 2026         | Rika v1               | Rika v2                            | Status   | Spec   | Evidence                                              |
-| ------------------------------- | --------------------- | --------------------- | ---------------------------------- | -------- | ------ | ----------------------------------------------------- |
-| `low` mode                      | Yes                   | Yes                   | GPT-5.6 Terra route                | planned  | 04     | Pending                                               |
-| `medium` mode                   | Yes                   | Yes                   | GPT-5.6 Luna route                 | planned  | 04     | Pending                                               |
-| `high` mode                     | Yes                   | Yes                   | GPT-5.6 Sol route                  | planned  | 04     | Pending                                               |
-| `ultra` mode                    | Yes                   | Yes                   | Claude Fable 5 route               | planned  | 04     | Pending                                               |
-| Stable mode dial                | `Ctrl+S`              | Implemented           | Included                           | verified | 04, 11 | Pure reducer, native renderer, and packaged PTY tests |
-| Mode-specific tools/policy      | Yes                   | Partial               | Included                           | planned  | 04, 06 | Pending                                               |
-| Mode-specific Oracle            | Yes                   | Implemented           | Included                           | planned  | 04, 07 | Pending                                               |
-| Raw model picker                | Plugin/custom surface | No default            | Not a default surface              | excluded | 04     | Decision 0008                                         |
-| Legacy `rush/smart/deep*` modes | Deprecated            | Compatibility existed | Omitted                            | excluded | 04     | Decision 0008                                         |
-| Separate reasoning-effort dial  | Transitional          | Partial               | Mode-owned only                    | excluded | 04     | Decision 0008                                         |
-| Fast speed toggle               | Model-dependent       | Implemented           | Included when provider supports it | planned  | 04, 11 | Pending                                               |
+| Feature                         | Amp July 2026         | Rika v1               | Rika v2                            | Status      | Spec   | Evidence                                              |
+| ------------------------------- | --------------------- | --------------------- | ---------------------------------- | ----------- | ------ | ----------------------------------------------------- |
+| `low` mode                      | Yes                   | Yes                   | Luna low; Oracle Sol high          | implemented | 04     | Config contract and runtime routing tests             |
+| `medium` mode                   | Yes                   | Yes                   | Terra medium; Oracle Sol high      | implemented | 04     | Config contract and runtime routing tests             |
+| `high` mode                     | Yes                   | Yes                   | Sol xhigh; Oracle Fable max        | implemented | 04     | Config contract and runtime routing tests             |
+| `ultra` mode                    | Yes                   | Yes                   | Fable max; Oracle Sol max          | implemented | 04     | Config contract and runtime routing tests             |
+| Stable mode dial                | `Ctrl+S`              | Implemented           | Included                           | verified    | 04, 11 | Pure reducer, native renderer, and packaged PTY tests |
+| Mode-specific tools/policy      | Yes                   | Partial               | Included                           | planned     | 04, 06 | Pending                                               |
+| Mode-specific Oracle            | Yes                   | Implemented           | Included                           | implemented | 04, 07 | Root, preset, and fan-out selection tests             |
+| Raw model picker                | Plugin/custom surface | No default            | Not a default surface              | excluded    | 04     | Decision 0008                                         |
+| Legacy `rush/smart/deep*` modes | Deprecated            | Compatibility existed | Omitted                            | excluded    | 04     | Decision 0008                                         |
+| Separate reasoning-effort dial  | Transitional          | Partial               | Mode-owned only                    | excluded    | 04     | Decision 0008                                         |
+| Fast speed toggle               | Model-dependent       | Implemented           | Included when provider supports it | planned     | 04, 11 | Pending                                               |
 
 ## Prompt and Input
 

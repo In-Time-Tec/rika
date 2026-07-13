@@ -7,6 +7,7 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()
       expect(config.environment.parallelApiKey).toBeUndefined()
+      expect(config.environment.gatewayCredentials).toEqual({})
       expect(JSON.stringify(config)).not.toContain("PARALLEL_API_KEY")
     }).pipe(
       Effect.provide(
@@ -35,13 +36,18 @@ describe("ConfigService", () => {
 
   it.effect("keeps copied environment secrets usable after the config layer scope closes", () => {
     const layer = ConfigService.liveEnvironmentLayer().pipe(
-      Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENROUTER_API_KEY: "model-secret" } }))),
+      Layer.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({ env: { OPENAI_API_KEY: "openai-secret", ANTHROPIC_API_KEY: "anthropic-secret" } }),
+        ),
+      ),
     )
     return Effect.gen(function* () {
       const effective = yield* Effect.scoped(
         Layer.build(layer).pipe(Effect.map((context) => Context.get(context, ConfigService.Service))),
       ).pipe(Effect.flatMap((service: ConfigService.Interface) => service.effective))
-      expect(Redacted.value(effective.environment.modelApiKey!)).toBe("model-secret")
+      expect(Redacted.value(effective.environment.gatewayCredentials.OPENAI_API_KEY!)).toBe("openai-secret")
+      expect(Redacted.value(effective.environment.gatewayCredentials.ANTHROPIC_API_KEY!)).toBe("anthropic-secret")
     })
   })
 
@@ -76,15 +82,18 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()
       expect(Redacted.value(config.environment.parallelApiKey!)).toBe("secret")
-      expect(Redacted.value(config.environment.modelApiKey!)).toBe("model-secret")
+      expect(Redacted.value(config.environment.gatewayCredentials.RIKA_MODEL_API_KEY!)).toBe("model-secret")
       expect(JSON.stringify(config.diagnostics)).not.toContain("secret")
-      expect(config.diagnostics.map((diagnostic) => diagnostic.path)).toEqual(["parallelApiKey", "modelApiKey"])
+      expect(config.diagnostics.map((diagnostic) => diagnostic.path)).toEqual([
+        "parallelApiKey",
+        "gatewayCredentials.RIKA_MODEL_API_KEY",
+      ])
     }).pipe(
       Effect.provide(
         ConfigService.testLayer({
           environment: {
             parallelApiKey: Redacted.make("secret"),
-            modelApiKey: Redacted.make("model-secret"),
+            gatewayCredentials: { RIKA_MODEL_API_KEY: Redacted.make("model-secret") },
           },
         }),
       ),
@@ -94,7 +103,7 @@ describe("ConfigService", () => {
   it.effect("merges aliases, modes, keymap, MCP, and notification settings", () =>
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()
-      expect(config.settings.models.local).toEqual({ provider: "test", model: "fake" })
+      expect(config.settings.models.local?.candidates).toEqual(["fake"])
       expect(config.settings.modes.medium.budget).toBe(99)
       expect(config.settings.keymap.submit).toBe("ctrl+enter")
       expect(config.settings.notifications.enabled).toBe(false)
@@ -103,8 +112,8 @@ describe("ConfigService", () => {
       Effect.provide(
         ConfigService.memoryLayer({
           workspace: {
-            models: { local: { provider: "test", model: "fake" } },
-            modes: { medium: { budget: 99 } },
+            models: { local: { ...ConfigContract.defaults.models.luna!, candidates: ["fake"] } },
+            modes: { medium: { ...ConfigContract.defaults.modes.medium, budget: 99 } },
             keymap: { submit: "ctrl+enter" },
             notifications: { enabled: false },
             mcp: { docs: { transport: "remote", url: "https://example.test/mcp", headers: {}, enabled: true } },
@@ -117,23 +126,41 @@ describe("ConfigService", () => {
   it.effect("resolves workspace model and provider connection over global configuration", () =>
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()
-      expect(ConfigContract.resolveModelRoute(config.settings, "medium")).toEqual({
+      expect(ConfigContract.resolveModelRoute(config.settings, "medium")).toMatchObject({
         alias: "gateway",
-        provider: "vibe",
+        gatewayName: "vibe",
         model: "workspace-model",
-        baseUrl: "https://workspace.vibe.test/v1",
+        gateway: {
+          protocol: "openai",
+          auth: { type: "none" },
+          baseUrl: "https://workspace.vibe.test/v1",
+        },
       })
     }).pipe(
       Effect.provide(
         ConfigService.memoryLayer({
           global: {
-            providers: { vibe: { baseUrl: "https://global.vibe.test/v1" } },
-            models: { gateway: { provider: "vibe", model: "global-model" } },
-            modes: { medium: { model: "gateway" } },
+            gateways: {
+              vibe: { protocol: "openai", auth: { type: "none" }, baseUrl: "https://global.vibe.test/v1" },
+            },
+            models: {
+              gateway: { ...ConfigContract.defaults.models.luna!, gateway: "vibe", candidates: ["global-model"] },
+            },
+            modes: {
+              medium: { ...ConfigContract.defaults.modes.medium, main: { alias: "gateway", effort: "medium" } },
+            },
           },
           workspace: {
-            providers: { vibe: { baseUrl: "https://workspace.vibe.test/v1" } },
-            models: { gateway: { provider: "vibe", model: "workspace-model" } },
+            gateways: {
+              vibe: {
+                protocol: "openai",
+                auth: { type: "none" },
+                baseUrl: "https://workspace.vibe.test/v1",
+              },
+            },
+            models: {
+              gateway: { ...ConfigContract.defaults.models.luna!, gateway: "vibe", candidates: ["workspace-model"] },
+            },
           },
         }),
       ),
@@ -141,11 +168,19 @@ describe("ConfigService", () => {
   )
 
   it("rejects malformed and secret-bearing JSON configuration with typed failures", () => {
-    expect(() => ConfigContract.decodeSettingsInput("bad.json", { providers: { vibe: { baseUrl: 42 } } })).toThrow(
+    expect(() => ConfigContract.decodeSettingsInput("bad.json", { gateways: { vibe: { baseUrl: 42 } } })).toThrow(
       ConfigContract.ConfigFileError,
     )
     expect(() =>
-      ConfigContract.decodeSettingsInput("secret.json", { providers: { vibe: { apiKey: "must-not-persist" } } }),
+      ConfigContract.decodeSettingsInput("secret.json", {
+        gateways: {
+          vibe: {
+            protocol: "anthropic",
+            baseUrl: "https://vibe.test",
+            auth: { type: "bearer-env", apiKey: "must-not-persist" },
+          },
+        },
+      }),
     ).toThrow(ConfigContract.ConfigFileError)
   })
 })

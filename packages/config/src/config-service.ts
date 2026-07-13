@@ -19,7 +19,7 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
   const mode = (id: ModeId) => ({ ...defaults.modes[id], ...global.modes?.[id], ...workspace.modes?.[id] })
   const modes = { low: mode("low"), medium: mode("medium"), high: mode("high"), ultra: mode("ultra") }
   return {
-    providers: { ...defaults.providers, ...global.providers, ...workspace.providers },
+    gateways: { ...defaults.gateways, ...global.gateways, ...workspace.gateways },
     models: { ...defaults.models, ...global.models, ...workspace.models },
     modes,
     keymap: { ...defaults.keymap, ...global.keymap, ...workspace.keymap },
@@ -44,8 +44,12 @@ const diagnostics = (
   record(workspace, "workspace")
   if (environment.parallelApiKey !== undefined)
     entries.push({ path: "parallelApiKey", source: "environment", message: "environment value applied (redacted)" })
-  if (environment.modelApiKey !== undefined)
-    entries.push({ path: "modelApiKey", source: "environment", message: "environment value applied (redacted)" })
+  for (const variable of Object.keys(environment.gatewayCredentials).toSorted())
+    entries.push({
+      path: `gatewayCredentials.${variable}`,
+      source: "environment",
+      message: "environment value applied (redacted)",
+    })
   return entries
 }
 
@@ -58,7 +62,7 @@ export const memoryLayer = (
 ) => {
   const global = options.global ?? {}
   const workspace = options.workspace ?? {}
-  const environment = options.environment ?? {}
+  const environment = options.environment ?? { gatewayCredentials: {} }
   return Layer.succeed(
     Service,
     Service.of({
@@ -73,35 +77,39 @@ export const memoryLayer = (
 
 export const testLayer = memoryLayer
 
-const environmentConfig = Config.all({
-  parallelApiKey: Config.option(Config.redacted("PARALLEL_API_KEY")),
-  modelApiKey: Config.option(
-    Config.redacted("RIKA_MODEL_API_KEY").pipe(Config.orElse(() => Config.redacted("OPENROUTER_API_KEY"))),
-  ),
-})
-
 export const liveEnvironmentLayer = (
   options: { readonly global?: SettingsInput; readonly workspace?: SettingsInput } = {},
 ) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
-      const values = yield* environmentConfig
-      const environment: Environment =
-        values.parallelApiKey._tag === "Some"
-          ? { parallelApiKey: Redacted.make(Redacted.value(values.parallelApiKey.value)) }
-          : {}
-      const completeEnvironment: Environment = {
-        ...environment,
-        ...(values.modelApiKey._tag === "Some"
-          ? { modelApiKey: Redacted.make(Redacted.value(values.modelApiKey.value)) }
-          : {}),
-      }
       const global = options.global ?? {}
       const workspace = options.workspace ?? {}
+      const settings = mergeSettings(global, workspace)
+      const variables = Object.values(settings.gateways)
+        .flatMap((gateway) => (gateway.auth.type === "bearer-env" ? [gateway.auth.variable] : []))
+        .filter((variable, index, all) => all.indexOf(variable) === index)
+      const values = yield* Config.all({
+        parallelApiKey: Config.option(Config.redacted("PARALLEL_API_KEY")),
+        gatewayCredentials: Config.all(
+          Object.fromEntries(variables.map((variable) => [variable, Config.option(Config.redacted(variable))])),
+        ),
+      })
+      const environment: Environment =
+        values.parallelApiKey._tag === "Some"
+          ? { gatewayCredentials: {}, parallelApiKey: Redacted.make(Redacted.value(values.parallelApiKey.value)) }
+          : { gatewayCredentials: {} }
+      const completeEnvironment: Environment = {
+        ...environment,
+        gatewayCredentials: Object.fromEntries(
+          Object.entries(values.gatewayCredentials).flatMap(([variable, value]) =>
+            value._tag === "Some" ? [[variable, Redacted.make(Redacted.value(value.value))]] : [],
+          ),
+        ),
+      }
       return Service.of({
         effective: Effect.succeed({
-          settings: mergeSettings(global, workspace),
+          settings,
           environment: completeEnvironment,
           diagnostics: diagnostics(global, workspace, completeEnvironment),
         }),

@@ -787,6 +787,148 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("titles a new thread through its selected mode backend", () =>
+    Effect.gen(function* () {
+      const repository = yield* ThreadRepository.makeMemory()
+      const turns = yield* TurnRepository.makeMemory()
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const starts = yield* Ref.make<ReadonlyArray<string>>([])
+      const backendFor = (mode: string) =>
+        ExecutionBackend.Service.of({
+          ...backend,
+          start: (input) =>
+            Ref.update(starts, (values) => [...values, `${mode}:${input.turnId}`]).pipe(
+              Effect.andThen(
+                mode === "high"
+                  ? Effect.succeed({
+                      turnId: input.turnId,
+                      status: "completed" as const,
+                      events: [
+                        {
+                          cursor: `cursor:${input.turnId}:output`,
+                          sequence: 1,
+                          type: "model.output.completed" as const,
+                          createdAt: 1,
+                          text: input.turnId.startsWith("title:") ? "Selected Route Title" : "answer",
+                        },
+                        {
+                          cursor: `cursor:${input.turnId}:completed`,
+                          sequence: 2,
+                          type: "execution.completed" as const,
+                          createdAt: 2,
+                        },
+                      ],
+                    })
+                  : Effect.fail(new ExecutionBackend.BackendError({ message: `${mode} backend must not start` })),
+              ),
+            ),
+        })
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, backendFor("default")),
+        backendLayerForMode: (mode) => Layer.succeed(ExecutionBackend.Service, backendFor(mode)),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-selected-title")),
+        makeTurnId: Effect.succeed(Turn.TurnId.make("turn-selected-title")),
+        interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
+      })
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
+      }).pipe(Effect.provide(layer))
+      const session = (yield* Ref.get(sessions))[0]
+      if (session === undefined) return yield* Effect.die("Missing interactive session")
+      yield* session.submit("Build groceries", () => {}, "high")
+
+      expect(yield* Ref.get(starts)).toEqual([
+        "high:turn-selected-title",
+        expect.stringMatching(/^high:title:thread-selected-title:/),
+      ])
+      expect(yield* repository.get(Thread.ThreadId.make("thread-selected-title"))).toMatchObject({
+        title: "Selected Route Title",
+      })
+    }),
+  )
+
+  it.effect("keeps the seed title when best-effort titling fails", () =>
+    Effect.gen(function* () {
+      const repository = yield* ThreadRepository.makeMemory()
+      const turns = yield* TurnRepository.makeMemory()
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const titleFailingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        start: (input) =>
+          input.turnId.startsWith("title:")
+            ? Effect.fail(new ExecutionBackend.BackendError({ message: "title unavailable" }))
+            : backend.start(input),
+      })
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, titleFailingBackend),
+        backendLayerForMode: () => Layer.succeed(ExecutionBackend.Service, titleFailingBackend),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-title-failure")),
+        makeTurnId: Effect.succeed(Turn.TurnId.make("turn-title-failure")),
+        interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
+      })
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
+      }).pipe(Effect.provide(layer))
+      const session = (yield* Ref.get(sessions))[0]
+      if (session === undefined) return yield* Effect.die("Missing interactive session")
+      yield* session.submit("Stable seed title", (event) =>
+        Effect.runSync(Ref.update(events, (values) => [...values, event])),
+      )
+
+      expect(yield* turns.get(Turn.TurnId.make("turn-title-failure"))).toMatchObject({ status: "completed" })
+      expect(yield* repository.get(Thread.ThreadId.make("thread-title-failure"))).toMatchObject({
+        title: "Stable seed title",
+      })
+      expect((yield* Ref.get(events)).some((event) => event._tag === "ThreadTitled")).toBe(false)
+      expect((yield* Ref.get(events)).some((event) => event._tag === "ExecutionFailed")).toBe(false)
+    }),
+  )
+
+  it.effect("does not reclassify a completed turn when thread promotion fails", () =>
+    Effect.gen(function* () {
+      const repository = yield* ThreadRepository.makeMemory()
+      const turns = yield* TurnRepository.makeMemory()
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const promotionFailingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        ensureThreadHost: () => Effect.fail(new ExecutionBackend.BackendError({ message: "promotion failed" })),
+        notifyThreadHost: () => Effect.void,
+        registerTurnPromoter: () => Effect.void,
+      })
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, promotionFailingBackend),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-promotion-failure")),
+        makeTurnId: Effect.succeed(Turn.TurnId.make("turn-promotion-failure")),
+        interactive: (_, session) => Ref.update(sessions, (values) => [...values, session]),
+      })
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
+      }).pipe(Effect.provide(layer))
+      const session = (yield* Ref.get(sessions))[0]
+      if (session === undefined) return yield* Effect.die("Missing interactive session")
+      yield* session.submit("Completed response", (event) =>
+        Effect.runSync(Ref.update(events, (values) => [...values, event])),
+      )
+
+      expect(yield* turns.get(Turn.TurnId.make("turn-promotion-failure"))).toMatchObject({ status: "completed" })
+      expect((yield* Ref.get(events)).some((event) => event._tag === "ExecutionFailed")).toBe(false)
+    }),
+  )
+
   it.effect("projects interactive backend failures and terminal failure statuses", () =>
     Effect.gen(function* () {
       const runCase = (status: "backend" | "failed" | "failed-event" | "cancelled") =>

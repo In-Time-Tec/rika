@@ -25,6 +25,7 @@ The baseline is Amp CLI's rendered output; Rika never copies Amp branding, produ
 - Interactive execution publishes each durable Execution Event as it arrives. `model.output.completed` finalizes assistant content but does not clear working state; only `execution.completed`, `execution.failed`, or `execution.cancelled` makes the TUI terminal, and that state is monotonic against late model events.
 - Startup lists Threads from the product repository and remains on the empty welcome view. It selects and replays durable execution history only when a Thread is intentionally opened, including an explicit `--thread` startup selection.
 - When a Turn reaches a terminal state, the oldest Pending Turn is atomically promoted and executed until the durable queue is empty or an execution waits.
+- Shutdown stops input and rendering, awaits pending renderer initialization, snapshots all tracked work, interrupts and awaits every tracked fiber, and only then completes the interactive operation so Relay, database, and lease scopes finalize in order. A renderer that completes initialization after shutdown begins is stopped and destroyed without starting watchers or session work. Repeated close requests are idempotent.
 
 ## Required Interaction
 

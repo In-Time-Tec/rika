@@ -1,4 +1,4 @@
-# Context, Skills, and Compaction
+# Context, skills, and compaction
 
 ## Resolved Context
 
@@ -18,6 +18,10 @@ Skill listings are compact startup context. Skill bodies and resources load lazi
 
 ## Compaction
 
-Compaction is automatic near the configured context threshold, preserves a recent suffix, bounds tool output first, emits a validated structured summary, and records checkpoints needed for replay. Baton owns the compaction decision and summary. Relay execution events are the sole durable checkpoint authority; restart reconstructs the latest valid checkpoint from replay and its digest prevents duplicate persistence. Rika projects token utilization, available capacity, threshold state, and the Relay checkpoint cursor for CLI and TUI presentation but does not persist a second durable authority. Manual compaction may exist only as a diagnostic operation.
+Every model alias owns explicit `contextWindow`, `reserveTokens`, and `keepRecentTokens` values. GPT operational limits are 372,000, 128,000, and 32,000 tokens. Claude, Fable, and Opus limits are 1,000,000, 128,000, and 64,000 tokens. Reserve plus recent tokens must remain below the context window.
+
+Root execution compaction follows the selected main route. Baton owns compaction decisions and summaries; Relay execution events remain the durable checkpoint authority. Prompt compaction never deletes the durable transcript or Workspace files.
+
+Relay 0.2.11 child presets cannot carry Baton compaction options. Oracle children therefore inherit root/main compaction even when their Oracle model has different operational limits. Rika does not claim role-specific Oracle compaction until the published Relay contract can represent it.
 
 Semantic thread memory may be specified separately from code search. The excluded semantic-search feature is a model-visible code-search tool and code embedding index, not an automatic ban on future thread-memory implementations.

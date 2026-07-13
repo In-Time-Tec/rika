@@ -16,7 +16,9 @@ it.effect("prints effective redacted config and keymap", () =>
   Effect.gen(function* () {
     const layer = Layer.mergeAll(
       TestConsole.layer,
-      ConfigService.memoryLayer({ environment: { parallelApiKey: Redacted.make("never-print-this") } }),
+      ConfigService.memoryLayer({
+        environment: { gatewayCredentials: {}, parallelApiKey: Redacted.make("never-print-this") },
+      }),
       ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(false) }),
     )
     const lines = yield* Effect.gen(function* () {
@@ -26,7 +28,7 @@ it.effect("prints effective redacted config and keymap", () =>
     }).pipe(Effect.provide(layer))
     expect(lines[0]).toContain('"parallelApiKey": "present"')
     expect(lines.join("\n")).not.toContain("never-print-this")
-    expect(lines[0]).toContain('"provider": "openrouter"')
+    expect(lines[0]).toContain('"gatewayName": "openai"')
     expect(lines[0]).toContain('"apiKey": "missing"')
     expect(lines[1]).toContain('"submit": "enter"')
   }),
@@ -61,7 +63,13 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
     const layer = Layer.mergeAll(
       TestConsole.layer,
       ConfigService.memoryLayer({
-        environment: { parallelApiKey: Redacted.make("secret"), modelApiKey: Redacted.make("model-secret") },
+        environment: {
+          parallelApiKey: Redacted.make("secret"),
+          gatewayCredentials: {
+            OPENAI_API_KEY: Redacted.make("model-secret"),
+            ANTHROPIC_API_KEY: Redacted.make("oracle-secret"),
+          },
+        },
         workspace: {
           mcp: { local: { transport: "command", command: "mcp", args: [], environment: {}, enabled: false } },
         },
