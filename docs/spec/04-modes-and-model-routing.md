@@ -15,12 +15,13 @@ Each mode has a budget and complete `main` and `oracle` routes. A route selects 
 | high   | `gpt-5.6-sol`, xhigh    | `claude-fable-5`, max |
 | ultra  | `claude-fable-5`, max   | `gpt-5.6-sol`, max    |
 
-Fable declares candidates `claude-fable-5` then `claude-opus-4-8`; Opus is also separately configurable. Baton 0.4.2 does not expose a candidate fallback policy constrained to availability failures before output, so Rika does not fake automatic fallback. Startup and doctor route resolution must report missing Gateways, aliases, and variants explicitly.
+Fable declares candidates `claude-fable-5` then `claude-opus-4-8`; Opus is also separately configurable. Baton 0.4.3 does not expose a candidate fallback policy constrained to availability failures before output, so Rika does not fake automatic fallback. Startup and doctor route resolution must report missing Gateways, aliases, and variants explicitly.
 
 ## Runtime invariants
 
-- Registration keys contain alias and variant, preventing collisions between aliases that share an upstream model ID.
+- Registration keys are non-secret SHA-256 identities over protocol, normalized base URL, authentication mode and credential name, provider model ID, effort, fast selection, and canonical provider options. Registration deduplication uses Baton's exact `(Gateway name, provider model ID, registration key)` tuple.
 - Every main and Oracle route is resolved and registered before execution.
+- Every Relay execution start pins the exact immutable revision returned by its immediately preceding agent registration.
 - Root execution uses main. Oracle presets and Oracle fan-out members use Oracle. Librarian, Painter, Review, ReadThread, and Task remain on main.
 - Deterministic TestModel configuration remains a fixed selection for every role.
 - Automatic titling reuses the initiating Turn route.

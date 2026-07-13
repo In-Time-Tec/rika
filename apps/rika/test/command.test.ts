@@ -5,7 +5,7 @@ import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
 import { parseJsonLines, readStreamInput, run } from "../src/command"
 
-const workspace = "/Users/dallen.pyrah/projects/Rika"
+const workspace = process.cwd()
 
 const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>) => effect.pipe(Effect.provide(layer))
 

@@ -19,6 +19,12 @@ import { definitions, idFor } from "./workflow-definitions"
 
 export type ModelVariantPolicy = "registration-key" | "fixed-selection"
 
+export interface CompactionPolicy {
+  readonly context_window: number
+  readonly reserve_tokens: number
+  readonly keep_recent_tokens: number
+}
+
 export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> = {}> {
   readonly filename: string
   readonly workspace: string
@@ -31,6 +37,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly modelVariantPolicy?: ModelVariantPolicy
   readonly modelResilience?: ModelResilience.Interface
   readonly compaction?: Compaction.DefaultOptions
+  readonly oracleCompaction?: Compaction.DefaultOptions
   readonly tokenBudget?: number
   readonly permissionPolicy?: Permissions.Ruleset
   readonly additionalToolkit?: Toolkit.Toolkit<AdditionalTools>
@@ -64,17 +71,16 @@ const registrationsFor = <AdditionalTools extends Record<string, Tool.Any>>(
   ),
 ]
 
-const agentMetadata = (compaction: Compaction.DefaultOptions | undefined) =>
-  compaction === undefined
-    ? { steering_enabled: true }
+const compactionPolicy = (compaction: Compaction.DefaultOptions | undefined): CompactionPolicy | undefined =>
+  compaction === undefined ||
+  compaction.contextWindow === undefined ||
+  compaction.reserveTokens === undefined ||
+  compaction.keepRecentTokens === undefined
+    ? undefined
     : {
-        steering_enabled: true,
-        compaction_enabled: true,
-        ...(compaction.contextWindow === undefined ? {} : { compaction_context_window: compaction.contextWindow }),
-        ...(compaction.reserveTokens === undefined ? {} : { compaction_reserve_tokens: compaction.reserveTokens }),
-        ...(compaction.keepRecentTokens === undefined
-          ? {}
-          : { compaction_keep_recent_tokens: compaction.keepRecentTokens }),
+        context_window: compaction.contextWindow,
+        reserve_tokens: compaction.reserveTokens,
+        keep_recent_tokens: compaction.keepRecentTokens,
       }
 
 const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
@@ -106,6 +112,8 @@ const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
 const executionId = (turnId: string) =>
   Ids.ExecutionId.make(turnId.startsWith("child:") ? turnId : `execution:${turnId}`)
 const sessionId = (threadId: string) => Ids.SessionId.make(`session:${threadId}`)
+const childSessionId = (childExecutionId: Ids.ChildExecutionId) =>
+  Ids.SessionId.make(`session:child:${String(childExecutionId)}`)
 const error = (cause: unknown) => new BackendError({ message: String(cause) })
 const executionInput = (input: { readonly prompt: string; readonly promptParts?: ReadonlyArray<PromptPart> }) =>
   input.promptParts?.map((part) =>
@@ -295,6 +303,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     | "oracleSelection"
     | "additionalToolkit"
     | "compaction"
+    | "oracleCompaction"
     | "tokenBudget"
     | "permissionPolicy"
     | "defaultReasoningEffort"
@@ -427,11 +436,14 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   profile,
                   profile === "Oracle" ? (options.oracleSelection ?? options.selection) : options.selection,
                 ).preset
+                const policy = compactionPolicy(
+                  profile === "Oracle" ? (options.oracleCompaction ?? options.compaction) : options.compaction,
+                )
                 return {
                   child_execution_id: Ids.ChildExecutionId.make(`child:${child.childId}`),
                   address_id: addressId,
                   input: [Content.text(child.prompt)],
-                  override: preset,
+                  override: { ...preset, ...(policy === undefined ? {} : { compaction_policy: policy }) },
                   metadata: { product_profile: profile, steering_enabled: true },
                 }
               }),
@@ -517,14 +529,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         }),
         start: Effect.fn("ExecutionBackend.start")(function* (input) {
           return yield* Effect.gen(function* () {
-            const metadata = { ...agentMetadata(options.compaction), multi_agent_enabled: true }
+            const metadata = { steering_enabled: true, multi_agent_enabled: true }
+            const rootCompaction = compactionPolicy(options.compaction)
             const selection = variantSelection(
               options.selection,
               input.reasoningEffort ?? options.defaultReasoningEffort,
               input.fastMode === true,
               options.modelVariantPolicy ?? "registration-key",
             )
-            yield* client.registerAgent({
+            const registered = yield* client.registerAgent({
               id: agentId,
               address: addressId,
               agent: Agent.make("rika", { model: selection, toolkit: toolkitFor(options) }),
@@ -532,8 +545,16 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               ...(options.permissionPolicy === undefined ? {} : { permission_rules: options.permissionPolicy }),
               ...(options.tokenBudget === undefined ? {} : { token_budget: options.tokenBudget }),
               metadata,
+              ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
               handoff_targets: subagentHandoffTargets,
-              child_run_presets: presets(selection, options.oracleSelection),
+              child_run_presets: Object.fromEntries(
+                Object.entries(presets(selection, options.oracleSelection)).map(([name, preset]) => {
+                  const policy = compactionPolicy(
+                    name === "Oracle" ? (options.oracleCompaction ?? options.compaction) : options.compaction,
+                  )
+                  return [name, { ...preset, ...(policy === undefined ? {} : { compaction_policy: policy }) }]
+                }),
+              ),
             })
             const id = executionId(input.turnId)
             yield* client
@@ -541,6 +562,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 root_address_id: addressId,
                 session_id: sessionId(input.threadId),
                 agent_id: agentId,
+                agent_revision: registered.record.current_revision,
                 input: executionInput(input),
                 idempotency_key: input.turnId,
                 execution_id: id,
@@ -776,7 +798,7 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                         ),
                       )
                       const metadata = {
-                        ...agentMetadata(options.compaction),
+                        steering_enabled: true,
                         ...override.metadata,
                         ...child.metadata,
                       }
@@ -794,7 +816,7 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                                   }),
                             }
                       const childAgentId = fanOutAgentId(fanOutState.fan_out_id, child.child_execution_id)
-                      yield* client.registerAgent({
+                      const registered = yield* client.registerAgent({
                         id: childAgentId,
                         address: child.address_id,
                         agent: Agent.make(`rika-fan-out-${String(child.child_execution_id)}`, {
@@ -814,10 +836,15 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                           ? {}
                           : { output_schema_ref: override.output_schema_ref }),
                         metadata,
+                        ...(override.compaction_policy === undefined
+                          ? {}
+                          : { compaction_policy: override.compaction_policy }),
                       })
                       yield* client.startExecutionByAgentDefinition({
                         root_address_id: child.address_id,
+                        session_id: childSessionId(child.child_execution_id),
                         agent_id: childAgentId,
+                        agent_revision: registered.record.current_revision,
                         execution_id: Ids.ExecutionId.make(String(child.child_execution_id)),
                         ...(child.input === undefined ? {} : { input: child.input }),
                         idempotency_key: idempotencyKey,

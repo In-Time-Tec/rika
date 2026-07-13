@@ -32,6 +32,7 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Config, Console, Context, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schedule, Schema } from "effect"
 import { Command } from "effect/unstable/cli"
+import { createHash } from "node:crypto"
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, relative as relativePathFrom, resolve } from "node:path"
 import { command, version } from "./command"
@@ -402,10 +403,16 @@ const testModelPartSchema = Schema.Union([
   }),
 ])
 
-const testModelTurnSchema = Schema.Struct({
-  parts: Schema.NonEmptyArray(testModelPartSchema),
-  delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-})
+const testModelTurnSchema = Schema.Union([
+  Schema.Struct({
+    parts: Schema.NonEmptyArray(testModelPartSchema),
+    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+  Schema.Struct({
+    object: Schema.Unknown,
+    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  }),
+])
 
 const testModelScriptSchema = Schema.NonEmptyArray(testModelTurnSchema)
 
@@ -418,16 +425,18 @@ export const parseTestModelScript = (json: string) =>
 export const buildTestModelScript = Effect.fn("Main.buildTestModelScript")(function* (json: string) {
   const script = yield* parseTestModelScript(json)
   const { TestModel } = yield* Effect.promise(() => import("@batonfx/test"))
-  return script.map((turn) =>
-    TestModel.turn(
+  return script.map((turn) => {
+    const options = turn.delayMs === undefined ? {} : { delay: turn.delayMs }
+    if ("object" in turn) return TestModel.object(turn.object, options)
+    return TestModel.turn(
       turn.parts.map((part) => {
         if (part.type === "text") return TestModel.text(part.text)
         if (part.type === "reasoning") return TestModel.reasoning(part.text)
         return TestModel.toolCall(part.name, part.params, part.id === undefined ? {} : { id: part.id })
       }),
-      turn.delayMs === undefined ? {} : { delay: turn.delayMs },
-    ),
-  )
+      options,
+    )
+  })
 })
 
 const sanitizeChatCompletion = (value: unknown): unknown => {
@@ -469,8 +478,46 @@ const sanitizedFetchLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(FetchHttpClient.layer))
 
-export const modelRouteKey = (route: Pick<ConfigContract.ResolvedModelRoute, "alias" | "effort" | "fast">) =>
-  `${route.alias}:${route.effort}:${route.fast ? "fast" : "normal"}`
+const canonical = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`
+  return `{${Object.entries(value as Record<string, unknown>)
+    .toSorted(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+    .join(",")}}`
+}
+
+const normalizedBaseUrl = (value: string) => {
+  const url = new URL(value)
+  url.hash = ""
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/"
+  return url.toString().replace(/\/(?=\?|$)/, "")
+}
+
+export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
+  const auth =
+    route.gateway.auth.type === "none"
+      ? { type: "none" }
+      : { type: "bearer-env", variable: route.gateway.auth.variable }
+  const registrationKey = `sha256:${createHash("sha256")
+    .update(
+      canonical({
+        protocol: route.gateway.protocol,
+        baseUrl: normalizedBaseUrl(route.gateway.baseUrl),
+        auth,
+        model: route.model,
+        effort: route.effort,
+        fast: route.fast,
+        options: route.options,
+      }),
+    )
+    .digest("hex")}`
+  return {
+    registrationKey,
+    selection: { provider: route.gatewayName, model: route.model, registrationKey },
+    compaction: productionCompaction(route),
+  }
+}
 
 export const credentialForRoute = (
   route: ConfigContract.ResolvedModelRoute,
@@ -484,7 +531,7 @@ const registrationForRoute = (
   route.gateway.protocol === "openai"
     ? openAi({
         model: route.model,
-        registrationKey: modelRouteKey(route),
+        registrationKey: modelRoutePlan(route).registrationKey,
         config: route.options as NonNullable<Parameters<typeof openAi>[0]["config"]>,
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.gatewayName })),
@@ -497,7 +544,7 @@ const registrationForRoute = (
       )
     : anthropic({
         model: route.model,
-        registrationKey: modelRouteKey(route),
+        registrationKey: modelRoutePlan(route).registrationKey,
         config: route.options as NonNullable<Parameters<typeof anthropic>[0]["config"]>,
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.gatewayName })),
@@ -509,21 +556,33 @@ const registrationForRoute = (
         ),
       )
 
+export const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) =>
+  routes.filter((route, index, all) => {
+    const plan = modelRoutePlan(route)
+    return (
+      all.findIndex((candidate) => {
+        const candidatePlan = modelRoutePlan(candidate)
+        return (
+          candidatePlan.selection.provider === plan.selection.provider &&
+          candidatePlan.selection.model === plan.selection.model &&
+          candidatePlan.registrationKey === plan.registrationKey
+        )
+      }) === index
+    )
+  })
+
 export const registrationsForRoutes = (
   routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
 ) => {
-  const distinct = routes.filter(
-    (route, index, all) => all.findIndex((candidate) => modelRouteKey(candidate) === modelRouteKey(route)) === index,
-  )
-  return Effect.forEach(distinct, (route) => {
+  return Effect.forEach(distinctModelRoutes(routes), (route) => {
     if (route.gateway.auth.type === "none") return registrationForRoute(route, Config.succeed(Redacted.make("unused")))
     const credential = credentialForRoute(route, gatewayCredentials)
     if (credential === undefined)
       return Effect.fail(
         new Error(`Missing environment variable ${route.gateway.auth.variable} for gateway ${route.gatewayName}`),
       )
-    return registrationForRoute(route, Config.succeed(Redacted.value(credential)).pipe(Config.map(Redacted.make)))
+    return registrationForRoute(route, Config.succeed(credential))
   })
 }
 
@@ -551,9 +610,8 @@ export const configuredBackendLayer = (
       yield* Effect.promise(() => mkdir(dirname(filename), { recursive: true }))
       const route = modelRoute ?? ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
       const resolvedOracleRoute = oracleRoute ?? route
-      const provider = route.gatewayName
-      const model = route.model
-      const compaction = productionCompaction(modelRoute)
+      const routePlan = modelRoutePlan(route)
+      const oracleRoutePlan = modelRoutePlan(resolvedOracleRoute)
       const testResponse = yield* Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE"))
       const testScript = yield* Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT"))
       if (testResponse._tag === "Some" && testScript._tag === "Some") {
@@ -584,7 +642,7 @@ export const configuredBackendLayer = (
           return yield* Effect.fail(new Error("No configured model routes could be registered"))
         registration = registrations[0]!
         additionalRegistrations = registrations.slice(1)
-        selection = { provider, model, registrationKey: modelRouteKey(route) }
+        selection = routePlan.selection
         modelVariantPolicy = "fixed-selection"
       }
       return relayBackendLayer(
@@ -595,15 +653,10 @@ export const configuredBackendLayer = (
           ...(additionalRegistrations.length === 0 ? {} : { additionalRegistrations }),
           selection,
           oracleSelection:
-            testScript._tag === "Some" || testResponse._tag === "Some"
-              ? selection
-              : {
-                  provider: resolvedOracleRoute.gatewayName,
-                  model: resolvedOracleRoute.model,
-                  registrationKey: modelRouteKey(resolvedOracleRoute),
-                },
+            testScript._tag === "Some" || testResponse._tag === "Some" ? selection : oracleRoutePlan.selection,
           modelVariantPolicy,
-          compaction,
+          compaction: routePlan.compaction,
+          oracleCompaction: oracleRoutePlan.compaction,
           ...(parallelApiKey === undefined ? {} : { parallelApiKey }),
         },
         repositoryLayer,

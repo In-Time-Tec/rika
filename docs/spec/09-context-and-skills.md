@@ -20,8 +20,6 @@ Skill listings are compact startup context. Skill bodies and resources load lazi
 
 Every model alias owns explicit `contextWindow`, `reserveTokens`, and `keepRecentTokens` values. GPT operational limits are 372,000, 128,000, and 32,000 tokens. Claude, Fable, and Opus limits are 1,000,000, 128,000, and 64,000 tokens. Reserve plus recent tokens must remain below the context window.
 
-Root execution compaction follows the selected main route. Baton owns compaction decisions and summaries; Relay execution events remain the durable checkpoint authority. Prompt compaction never deletes the durable transcript or Workspace files.
-
-Relay 0.2.11 child presets cannot carry Baton compaction options. Oracle children therefore inherit root/main compaction even when their Oracle model has different operational limits. Rika does not claim role-specific Oracle compaction until the published Relay contract can represent it.
+Root execution compaction follows the selected main route. Oracle presets, fan-out overrides, and accepted snapshots carry the selected Oracle route policy; ordinary children carry main. Baton owns compaction decisions and summaries; Relay execution events remain the durable checkpoint authority. Prompt compaction never deletes the durable transcript or Workspace files.
 
 Semantic thread memory may be specified separately from code search. The excluded semantic-search feature is a model-visible code-search tool and code embedding index, not an automatic ban on future thread-memory implementations.

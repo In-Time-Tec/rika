@@ -104,7 +104,11 @@ for (const [name, parameters, malformedField] of cases) {
           const fileSystem = yield* FileSystem.FileSystem
           const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-malformed-" })
           const malformedInput = name === "git_status" ? { refresh: 42 } : { malformed: 42 }
-          const fixture = yield* TestModel.make([TestModel.toolCall(name, malformedInput, { id: `bad-${name}` })])
+          const fixture = yield* TestModel.make(
+            Array.from({ length: 3 }, (_, index) =>
+              TestModel.toolCall(name, malformedInput, { id: `bad-${name}-${index + 1}` }),
+            ),
+          )
           return yield* Effect.gen(function* () {
             const backend = yield* ExecutionBackend.Service
             const execution = yield* backend.start({
@@ -141,6 +145,6 @@ for (const [name, parameters, malformedField] of cases) {
     expect(failed?.text).toContain(malformedField)
     expect(failed?.data?.message).toBe(failed?.text)
     expect(failed?.content).toBeUndefined()
-    expect(result.requests).toHaveLength(1)
+    expect(result.requests).toHaveLength(3)
   }, 30_000)
 }

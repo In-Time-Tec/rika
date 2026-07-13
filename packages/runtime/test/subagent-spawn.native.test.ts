@@ -32,6 +32,11 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
         toolRuntimeLayer: runtimeLayer,
         toolNeedsApproval: () => false,
         permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
+        compaction: {
+          contextWindow: 1_000_000,
+          reserveTokens: 100,
+          keepRecentTokens: 100,
+        },
       })
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
@@ -52,9 +57,9 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
         const childExecutionId = inspection?.children[0]?.executionId
         const child = database
           .query<
-            { readonly id: string; readonly status: string; readonly metadata_json: string },
+            { readonly id: string; readonly session_id: string | null; readonly status: string },
             [string]
-          >("select id, status, metadata_json from relay_executions where id = ?")
+          >("select id, session_id, status from relay_executions where id = ?")
           .get(childExecutionId ?? "")
         const childFailure =
           child === null
@@ -88,6 +93,7 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
   expect(settled.status).toBe("completed")
   expect(inspection?.children).toHaveLength(1)
   expect(child?.status).toBe("completed")
+  expect(child?.session_id).toBe(`session:child:${child?.id}`)
   expect(childFailure).toBeNull()
   expect(childEventCount).toBeGreaterThan(1_000)
   expect(inspection?.children[0]?.status).toBe("completed")
