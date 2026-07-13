@@ -514,16 +514,19 @@ export const configuredBackendLayer = (
       let registration: ModelRegistry.Registration
       let selection: ModelRegistry.ModelSelection
       let additionalRegistrations: Array<ModelRegistry.Registration> = []
+      let modelVariantPolicy: RelayExecutionBackend.ModelVariantPolicy = "registration-key"
       if (testScript._tag === "Some") {
         const { TestModel } = yield* Effect.promise(() => import("@batonfx/test"))
         const fixture = yield* TestModel.make(yield* buildTestModelScript(testScript.value))
         registration = fixture.registration
         selection = fixture.selection
+        modelVariantPolicy = "fixed-selection"
       } else if (testResponse._tag === "Some") {
         const { TestModel } = yield* Effect.promise(() => import("@batonfx/test"))
         const fixture = yield* TestModel.make(Array.from({ length: 4 }, () => TestModel.text(testResponse.value)))
         registration = fixture.registration
         selection = fixture.selection
+        modelVariantPolicy = "fixed-selection"
       } else {
         const apiKeyConfig =
           modelApiKey === undefined
@@ -586,6 +589,7 @@ export const configuredBackendLayer = (
           registration,
           ...(additionalRegistrations.length === 0 ? {} : { additionalRegistrations }),
           selection,
+          modelVariantPolicy,
           ...(defaultReasoningEffort === undefined ? {} : { defaultReasoningEffort }),
           ...(parallelApiKey === undefined ? {} : { parallelApiKey }),
         },

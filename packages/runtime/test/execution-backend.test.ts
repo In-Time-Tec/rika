@@ -119,6 +119,7 @@ const relayEvent = (
   type: Execution.ExecutionEvent["type"],
   sequence: number,
   content?: Execution.ExecutionEvent["content"],
+  data?: Execution.ExecutionEvent["data"],
 ): Execution.ExecutionEvent => ({
   id: Ids.EventId.make(`event:${sequence}`),
   execution_id: Ids.ExecutionId.make("execution:turn-a"),
@@ -126,32 +127,40 @@ const relayEvent = (
   sequence,
   cursor: `cursor-${sequence}`,
   ...(content === undefined ? {} : { content }),
+  ...(data === undefined ? {} : { data }),
   created_at: sequence * 10,
 })
 
 const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (options?: {
   readonly startStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
+  readonly existingStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
   readonly streamEvents?: ReadonlyArray<Execution.ExecutionEvent>
   readonly replayEvents?: ReadonlyArray<Execution.ExecutionEvent>
+  readonly openWaitIds?: ReadonlyArray<string>
   readonly cancelStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
-  readonly fail?: "start" | "replay" | "cancel"
+  readonly fail?: "register" | "start" | "lookup" | "replay" | "cancel"
 }) {
   const registrations = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["registerAgent"]>[0]>>([])
   const starts = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["startExecutionByAgentDefinition"]>[0]>>([])
+  const lookups = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["getExecution"]>[0]>>([])
   const replays = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["replayExecution"]>[0]>>([])
   const cancellations = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["cancelExecution"]>[0]>>([])
   const implementation: Client.Interface = {
     registerAgent: (input) =>
       Ref.update(registrations, (values) => [...values, input]).pipe(
-        Effect.as({
-          record: {
-            id: input.id,
-            current_revision: 1,
-            definition: { name: "rika", model: selection, tool_names: [], permissions: [] },
-            created_at: 0,
-            updated_at: 0,
-          },
-        }),
+        Effect.andThen(
+          options?.fail === "register"
+            ? Effect.fail(clientFailure("register failed"))
+            : Effect.succeed({
+                record: {
+                  id: input.id,
+                  current_revision: 1,
+                  definition: { name: "rika", model: selection, tool_names: [], permissions: [] },
+                  created_at: 0,
+                  updated_at: 0,
+                },
+              }),
+        ),
       ),
     registerAgentDefinition: unused,
     getAgentDefinition: unused,
@@ -185,8 +194,39 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
         ),
       ),
     steer: unused,
-    getExecution: unused,
-    inspectExecution: unused,
+    getExecution: (input) =>
+      Ref.update(lookups, (values) => [...values, input]).pipe(
+        Effect.andThen(
+          options?.fail === "lookup"
+            ? Effect.fail(clientFailure("lookup failed"))
+            : Effect.succeed(
+                options?.existingStatus === undefined
+                  ? undefined
+                  : {
+                      id: Ids.ExecutionId.make("execution:turn-a"),
+                      root_address_id: Ids.AddressId.make("address:rika"),
+                      status: options.existingStatus,
+                      created_at: 1,
+                      updated_at: 1,
+                    },
+              ),
+        ),
+      ),
+    inspectExecution: () =>
+      Effect.succeed({
+        execution_id: Ids.ExecutionId.make("execution:turn-a"),
+        status: options?.openWaitIds === undefined || options.openWaitIds.length === 0 ? "running" : "waiting",
+        waiting_on: (options?.openWaitIds ?? []).map((waitId) => ({
+          wait_id: Ids.WaitId.make(waitId),
+          execution_id: Ids.ExecutionId.make("execution:turn-a"),
+          mode: "reply" as const,
+          state: "open" as const,
+          metadata: {},
+          created_at: 1,
+        })),
+        pending_tool_calls: [],
+        child_runs: [],
+      }),
     listExecutions: unused,
     listSessions: unused,
     getSession: unused,
@@ -253,7 +293,7 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
     watchExecutions: () => Stream.empty,
     watchPresence: () => Stream.empty,
   }
-  return { implementation, registrations, starts, replays, cancellations }
+  return { implementation, registrations, starts, lookups, replays, cancellations }
 })
 
 const provideBackend = (implementation: Client.Interface, includeThreadTools = false) =>
@@ -290,6 +330,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       }).pipe(provideBackend(fixture.implementation, true))
       const registrations = yield* Ref.get(fixture.registrations)
       const starts = yield* Ref.get(fixture.starts)
+      expect(yield* Ref.get(fixture.lookups)).toEqual([])
       expect(registrations[0]?.id).toBe("agent:rika")
       expect(registrations[0]?.address).toBe("address:rika")
       const registration = registrations[0]
@@ -383,6 +424,45 @@ describe("ExecutionBackend Relay client adapter", () => {
       }),
   )
 
+  it.effect("projects opaque Relay failure detail without discarding event data", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        streamEvents: [
+          relayEvent("execution.failed", 1, [], {
+            message: "opaque provider failure",
+            diagnostic: { retained: true },
+          }),
+        ],
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* backend.start({ threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.events[0]).toMatchObject({
+        type: "execution.failed",
+        text: "opaque provider failure",
+        data: { message: "opaque provider failure", diagnostic: { retained: true } },
+      })
+    }),
+  )
+
+  it.effect("prefers terminal failure content over Relay failure metadata", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        streamEvents: [
+          relayEvent("execution.failed", 1, [Content.text("content failure")], { message: "metadata failure" }),
+        ],
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* backend.start({ threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.events[0]?.text).toBe("content failure")
+    }),
+  )
+
   it.effect.each(["queued", "running"] as const)(
     "derives terminal completion after Relay starts with status %s",
     (status) =>
@@ -396,27 +476,37 @@ describe("ExecutionBackend Relay client adapter", () => {
       }),
   )
 
-  it.effect("returns waiting with replayed events when Relay suspends on an actionable wait", () =>
-    Effect.gen(function* () {
-      const fixture = yield* makeClient({
-        startStatus: "waiting",
-        streamEvents: [relayEvent("model.output.delta", 1), relayEvent("permission.ask.requested", 2)],
-      })
-      const seen: Array<string> = []
-      const result = yield* Effect.gen(function* () {
-        const backend = yield* ExecutionBackend.Service
-        return yield* backend.start({
-          threadId: "thread-a",
-          turnId: "turn-a",
-          prompt: "prompt",
-          startedAt: 1,
-          onEvent: (item) => seen.push(item.type),
-        })
-      }).pipe(provideBackend(fixture.implementation))
-      expect(result.status).toBe("waiting")
-      expect(result.events.map((value) => value.type)).toEqual(["model.output.delta", "permission.ask.requested"])
-      expect(seen).toEqual(["model.output.delta", "permission.ask.requested"])
-    }),
+  it.effect.each(["queued", "running"] as const)(
+    "returns waiting when a %s execution reaches either actionable request",
+    (startStatus) =>
+      Effect.gen(function* () {
+        yield* Effect.forEach(["permission.ask.requested", "tool.approval.requested"] as const, (actionableType) =>
+          Effect.gen(function* () {
+            const fixture = yield* makeClient({
+              startStatus,
+              streamEvents: [
+                relayEvent("model.output.delta", 1),
+                relayEvent(actionableType, 2, undefined, { wait_id: "wait:actionable" }),
+              ],
+              openWaitIds: ["wait:actionable"],
+            })
+            const seen: Array<string> = []
+            const result = yield* Effect.gen(function* () {
+              const backend = yield* ExecutionBackend.Service
+              return yield* backend.start({
+                threadId: "thread-a",
+                turnId: "turn-a",
+                prompt: "prompt",
+                startedAt: 1,
+                onEvent: (item) => seen.push(item.type),
+              })
+            }).pipe(provideBackend(fixture.implementation))
+            expect(result.status).toBe("waiting")
+            expect(result.events.map((value) => value.type)).toEqual(["model.output.delta", actionableType])
+            expect(seen).toEqual(["model.output.delta", actionableType])
+          }),
+        )
+      }),
   )
 
   it.effect.each(["completed", "failed", "cancelled"] as const)(
@@ -466,6 +556,33 @@ describe("ExecutionBackend Relay client adapter", () => {
         | undefined
       expect(registered?.agent?.model?.registrationKey).toBe("effort:xhigh:fast")
       expect(RelayExecutionBackend.modelVariantKey("high", false)).toBe("effort:high")
+    }),
+  )
+
+  it.effect("retains a fixed model selection when variants are unsupported", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* backend.start({
+          threadId: "thread-fixed",
+          turnId: "turn-fixed",
+          prompt: "prompt",
+          startedAt: 1,
+          reasoningEffort: "xhigh",
+          fastMode: true,
+        })
+      }).pipe(
+        provideConfiguredBackend(fixture.implementation, {
+          selection,
+          modelVariantPolicy: "fixed-selection",
+        }),
+      )
+      const registered = (yield* Ref.get(fixture.registrations)).at(-1) as
+        | { agent?: { model?: { registrationKey?: string } } }
+        | undefined
+      expect(registered?.agent?.model).toEqual(selection)
+      expect(registered?.agent?.model?.registrationKey).toBeUndefined()
     }),
   )
 
@@ -577,6 +694,81 @@ describe("ExecutionBackend Relay client adapter", () => {
       }).pipe(provideBackend(fixture.implementation))
       expect(failure._tag).toBe("ExecutionBackendError")
       expect(failure.message).toContain(`${operation} failed`)
+    }),
+  )
+
+  it.effect("recovers a canonical terminal execution when start fails after persistence", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        fail: "start",
+        existingStatus: "failed",
+        streamEvents: [
+          relayEvent("permission.ask.requested", 1, undefined, { wait_id: "wait:resolved" }),
+          relayEvent("permission.ask.resolved", 2, undefined, { wait_id: "wait:resolved", approved: true }),
+          relayEvent("execution.failed", 3, [], { message: "canonical failure" }),
+          relayEvent("model.output.delta", 4, [Content.text("ignored")]),
+        ],
+        openWaitIds: ["wait:unrelated"],
+      })
+      const seen: Array<string> = []
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* backend.start({
+          threadId: "thread-a",
+          turnId: "turn-a",
+          prompt: "prompt",
+          startedAt: 1,
+          onEvent: (item) => seen.push(item.type),
+        })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(yield* Ref.get(fixture.starts)).toHaveLength(1)
+      expect(yield* Ref.get(fixture.lookups)).toEqual(["execution:turn-a"])
+      expect(yield* Ref.get(fixture.replays)).toEqual([])
+      expect(result.status).toBe("failed")
+      expect(result.events.map((item) => item.type)).toEqual([
+        "permission.ask.requested",
+        "permission.ask.resolved",
+        "execution.failed",
+      ])
+      expect(result.events[2]).toMatchObject({ text: "canonical failure", data: { message: "canonical failure" } })
+      expect(seen).toEqual(["permission.ask.requested", "permission.ask.resolved", "execution.failed"])
+    }),
+  )
+
+  it.effect("preserves the start failure when reconciliation lookup fails", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ fail: "lookup" })
+      const implementation: Client.Interface = {
+        ...fixture.implementation,
+        startExecutionByAgentDefinition: () => Effect.fail(clientFailure("start failed")),
+      }
+      const failure = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* Effect.flip(
+          backend.start({ threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 }),
+        )
+      }).pipe(provideBackend(implementation))
+
+      expect(failure.message).toContain("start failed")
+      expect(failure.message).not.toContain("lookup failed")
+      expect(yield* Ref.get(fixture.lookups)).toEqual(["execution:turn-a"])
+    }),
+  )
+
+  it.effect("does not reconcile registration failures", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ fail: "register" })
+      const failure = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* Effect.flip(
+          backend.start({ threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 }),
+        )
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(failure.message).toContain("register failed")
+      expect(yield* Ref.get(fixture.starts)).toEqual([])
+      expect(yield* Ref.get(fixture.lookups)).toEqual([])
     }),
   )
 

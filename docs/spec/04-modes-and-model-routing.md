@@ -27,6 +27,8 @@ Rika reads typed JSON settings from `~/.config/rika/settings.json` and then `.ri
 - CLI and TUI executions consume the same resolved route from the application composition root.
 - The TUI mode picker exposes each built-in mode's current route label, marks the active route, and changes it only after explicit confirmation between Turns.
 
+Model registrations opt into mode-derived variants. Production routes resolve reasoning effort and fast mode to exact registration keys. Fixed deterministic fixtures retain their single registered selection regardless of the product mode so packaged and TUI tests exercise the same routing boundary without adding fixture-only aliases or weakening exact registry lookup.
+
 ## Extensions
 
 Plugins may register custom modes with unique ids, approved model routes, instructions, tools, and budgets. Built-in modes remain a fixed dial; custom modes use a separate picker.

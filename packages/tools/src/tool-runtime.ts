@@ -2,7 +2,7 @@ import { FileFinder } from "@ff-labs/fff-node"
 import { Context, Effect, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { Service as ParallelSearchService } from "./parallel-search"
+import * as ParallelSearch from "./parallel-search"
 import { Service as ReadWebPageService } from "./read-web-page"
 import * as ApplyPatch from "./apply-patch"
 import * as ProcessRegistry from "./process-registry"
@@ -50,7 +50,7 @@ export const GitStatus = Schema.Struct({ _tag: Schema.tag("GitStatus") })
 export const WebSearch = Schema.Struct({
   _tag: Schema.tag("WebSearch"),
   objective: Schema.String,
-  searchQueries: Schema.NonEmptyArray(Schema.String),
+  searchQueries: ParallelSearch.SearchQueries,
 })
 export const ReadWebPage = Schema.Struct({
   _tag: Schema.tag("ReadWebPage"),
@@ -171,7 +171,7 @@ export const webSearchTool = tool(
   "Search the current web with Parallel. Provide a self-contained objective and 2-3 concise keyword queries.",
   {
     objective: Schema.String,
-    searchQueries: Schema.NonEmptyArray(Schema.String),
+    searchQueries: ParallelSearch.SearchQueries,
   },
 )
 export const readWebPageTool = tool(
@@ -261,7 +261,7 @@ export const layer = (workspace: string) =>
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-      const parallelSearch = yield* ParallelSearchService
+      const parallelSearch = yield* ParallelSearch.Service
       const readWebPage = yield* ReadWebPageService
       const processes = yield* ProcessRegistry.Service
       const mediaView = yield* MediaView.Service

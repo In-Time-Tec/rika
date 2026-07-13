@@ -151,28 +151,139 @@ test.skipIf(!("reasoning" in TestModel))(
   30_000,
 )
 
-test("rejects unknown and malformed tool calls at the durable model boundary", async () => {
+test("returns canonical failures for unknown and malformed tool calls at the durable model boundary", async () => {
   const cases = [
-    ["turn-unknown", "not_a_rika_tool", {}],
-    ["turn-malformed", "read_file", { path: 42 }],
+    [
+      "turn-unknown",
+      "not_a_rika_tool",
+      {},
+      /^effect\/ai\/AiError\/AiError: LanguageModel\.streamText: Invalid output: [\s\S]*not_a_rika_tool/,
+    ],
+    [
+      "turn-malformed",
+      "read_file",
+      { path: 42 },
+      /^effect\/ai\/AiError\/AiError: LanguageModel\.streamText: Invalid output: [\s\S]*path/,
+    ],
   ] as const
   const verifyCases = async (remaining: ReadonlyArray<(typeof cases)[number]>): Promise<void> => {
     if (remaining.length === 0) return
-    const [turnId, name, params] = remaining[0]!
+    const [turnId, name, params, expectedFailure] = remaining[0]!
     const rest = remaining.slice(1)
-    const result = await Effect.runPromise(
-      withBackend([TestModel.toolCall(name, params, { id: turnId })], () =>
+    const outcome = await Effect.runPromise(
+      withBackend([TestModel.toolCall(name, params, { id: turnId })], (fixture) =>
         Effect.gen(function* () {
           const backend = yield* ExecutionBackend.Service
-          return yield* backend.start({ threadId: turnId, turnId, prompt: "call tool", startedAt: 1 })
-        }).pipe(Effect.exit),
+          const result = yield* backend.start({ threadId: turnId, turnId, prompt: "call tool", startedAt: 1 })
+          return { result, requests: yield* fixture.requests }
+        }),
       ),
     )
-    expect(result._tag).toBe("Failure")
+    const failures = outcome.result.events.filter((event) => event.type === "execution.failed")
+    expect(outcome.result.status).toBe("failed")
+    expect(failures).toHaveLength(1)
+    expect(failures[0]?.text).toMatch(expectedFailure)
+    expect(failures[0]?.data?.message).toBe(failures[0]?.text)
+    expect(failures[0]?.content).toBeUndefined()
+    expect(outcome.requests).toHaveLength(1)
     await verifyCases(rest)
   }
   await verifyCases(cases)
 }, 30_000)
+
+test("preserves a canonical terminal failure after more than one thousand execution events", async () => {
+  const result = await Effect.runPromise(
+    withBackend(
+      [
+        ...Array.from({ length: 260 }, (_, index) =>
+          TestModel.toolCall("read_file", { path: "fixture.txt" }, { id: `read-${index}` }),
+        ),
+        TestModel.toolCall("not_a_rika_tool", {}, { id: "late-invalid-tool" }),
+      ],
+      (_, directory) =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "fixture")
+          const backend = yield* ExecutionBackend.Service
+          return yield* backend.start({
+            threadId: "thread-late-failure",
+            turnId: "turn-late-failure",
+            prompt: "stream before failing",
+            startedAt: 1,
+          })
+        }),
+    ),
+  )
+  const failures = result.events.filter((event) => event.type === "execution.failed")
+  expect(result.events.length).toBeGreaterThan(1_000)
+  expect(result.status).toBe("failed")
+  expect(failures).toHaveLength(1)
+  expect(failures[0]?.data?.message).toBe(failures[0]?.text)
+  expect(failures[0]?.text).toContain("not_a_rika_tool")
+}, 120_000)
+
+test("settles a Rika fan-out child after more than one thousand execution events", async () => {
+  const childOutput = `${"x".repeat(1_100)}CHILD_OK`
+  const result = await Effect.runPromise(
+    withBackend(
+      [
+        TestModel.text("parent ready"),
+        TestModel.turn([...Array.from({ length: 1_100 }, () => TestModel.text("x")), TestModel.text("CHILD_OK")]),
+      ],
+      (_, directory) =>
+        Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          yield* backend.start({
+            threadId: "thread-long-child",
+            turnId: "turn-long-child-parent",
+            prompt: "prepare fan-out",
+            startedAt: 1,
+          })
+          yield* backend.createFanOut({
+            parentTurnId: "turn-long-child-parent",
+            fanOutId: "fan-out:long-child",
+            children: [{ childId: "long-child", prompt: "produce the child result" }],
+            maxConcurrency: 1,
+            join: "all",
+            createdAt: 2,
+          })
+          const fanOut = yield* backend.inspectFanOut("fan-out:long-child").pipe(
+            Effect.repeat({
+              while: (inspection) => inspection?.state === "joining",
+              schedule: Schedule.both(Schedule.spaced("20 millis"), Schedule.recurs(500)),
+            }),
+          )
+          const database = new Database(`${directory}/relay.db`, { readonly: true })
+          const childExecutions = database
+            .query<
+              { readonly id: string; readonly status: string },
+              []
+            >("select id, status from relay_executions where id = 'child:long-child'")
+            .all()
+          const childEventCount =
+            database
+              .query<
+                { readonly count: number },
+                []
+              >("select count(*) as count from relay_execution_events where execution_id = 'child:long-child'")
+              .get()?.count ?? 0
+          database.close()
+          return { fanOut, childExecutions, childEventCount }
+        }),
+    ),
+  )
+  expect(result.fanOut?.state).toBe("satisfied")
+  expect(result.childExecutions).toEqual([{ id: "child:long-child", status: "completed" }])
+  expect(result.childEventCount).toBeGreaterThan(1_000)
+  expect(result.fanOut?.members).toEqual([
+    {
+      childId: "long-child",
+      ordinal: 0,
+      state: "completed",
+      output: childOutput,
+    },
+  ])
+}, 60_000)
 
 test("retries a transient TestModel failure inside the durable execution", async () => {
   const retryable = AiError.make({
@@ -255,15 +366,31 @@ test("exhausts the configured token budget before another model turn", async () 
           const fileSystem = yield* FileSystem.FileSystem
           yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "fixture")
           const backend = yield* ExecutionBackend.Service
-          const exit = yield* backend
-            .start({ threadId: "thread-budget", turnId: "turn-budget", prompt: "read", startedAt: 1 })
-            .pipe(Effect.exit)
-          return { exit, requests: yield* fixture.requests }
+          const execution = yield* backend.start({
+            threadId: "thread-budget",
+            turnId: "turn-budget",
+            prompt: "read",
+            startedAt: 1,
+          })
+          return { execution, requests: yield* fixture.requests }
         }),
       { tokenBudget: 1 },
     ),
   )
-  expect(result.exit._tag).toBe("Failure")
+  const budgetExceeded = result.execution.events.find((event) => event.type === "budget.exceeded")
+  const failed = result.execution.events.find((event) => event.type === "execution.failed")
+  expect(result.execution.status).toBe("failed")
+  expect(budgetExceeded).toMatchObject({
+    type: "budget.exceeded",
+    data: { tokens_used: 4, token_budget: 1 },
+  })
+  expect(failed).toMatchObject({
+    type: "execution.failed",
+    text: "AgentLoopBudgetExceeded: used 4 of 1 tokens",
+    data: { message: "AgentLoopBudgetExceeded: used 4 of 1 tokens" },
+  })
+  expect(failed?.content).toBeUndefined()
+  expect(budgetExceeded!.sequence).toBeLessThan(failed!.sequence)
   expect(result.requests).toHaveLength(1)
 }, 30_000)
 

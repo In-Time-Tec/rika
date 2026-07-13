@@ -7,20 +7,20 @@ import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 
 const cases = [
-  ["find_files", { query: "fixture" }],
-  ["grep", { pattern: "needle", regex: false }],
-  ["read_file", { path: "fixture.txt", limit: 1 }],
-  ["create_file", { path: "created.txt", content: "value" }],
-  ["edit_file", { path: "fixture.txt", oldText: "old", newText: "new" }],
-  ["apply_patch", { patchText: "*** Begin Patch\n*** End Patch" }],
-  ["shell", { command: "printf", args: ["safe"] }],
-  ["shell_command_status", { processId: "process-1", waitMillis: 0 }],
-  ["git_status", {}],
-  ["web_search", { objective: "deterministic research", searchQueries: ["fixture"] }],
-  ["read_web_page", { url: "https://example.test/page", fullContent: true }],
-  ["view_media", { path: "fixture.png" }],
-  ["find_thread", { query: "workspace:fixture", limit: 1 }],
-  ["read_thread", { threadId: "thread-fixture", maxTurns: 1, maxChars: 100 }],
+  ["find_files", { query: "fixture" }, "query"],
+  ["grep", { pattern: "needle", regex: false }, "pattern"],
+  ["read_file", { path: "fixture.txt", limit: 1 }, "path"],
+  ["create_file", { path: "created.txt", content: "value" }, "path"],
+  ["edit_file", { path: "fixture.txt", oldText: "old", newText: "new" }, "path"],
+  ["apply_patch", { patchText: "*** Begin Patch\n*** End Patch" }, "patchText"],
+  ["shell", { command: "printf", args: ["safe"] }, "command"],
+  ["shell_command_status", { processId: "process-1", waitMillis: 0 }, "processId"],
+  ["git_status", {}, "refresh"],
+  ["web_search", { objective: "deterministic research", searchQueries: ["fixture"] }, "objective"],
+  ["read_web_page", { url: "https://example.test/page", fullContent: true }, "url"],
+  ["view_media", { path: "fixture.png" }, "path"],
+  ["find_thread", { query: "workspace:fixture", limit: 1 }, "query"],
+  ["read_thread", { threadId: "thread-fixture", maxTurns: 1, maxChars: 100 }, "threadId"],
 ] as const
 
 const caseNames = new Set<string>(cases.map(([name]) => name))
@@ -39,7 +39,7 @@ test("standard catalog transcript matrix is complete", () => {
   expect(cases.map(([name]) => name).toSorted()).toEqual(standardNames.toSorted())
 })
 
-for (const [name, parameters] of cases) {
+for (const [name, parameters, malformedField] of cases) {
   test(`persists deterministic ${name} call and result`, async () => {
     const program = Effect.scoped(
       Effect.gen(function* () {
@@ -97,7 +97,7 @@ for (const [name, parameters] of cases) {
     if (name === "read_file") expect(transcript).toContain("[REDACTED]")
   }, 30_000)
 
-  test(`rejects malformed ${name} input at the durable boundary`, async () => {
+  test(`returns canonical failure for malformed ${name} input at the durable boundary`, async () => {
     const result = await Effect.runPromise(
       Effect.scoped(
         Effect.gen(function* () {
@@ -107,7 +107,13 @@ for (const [name, parameters] of cases) {
           const fixture = yield* TestModel.make([TestModel.toolCall(name, malformedInput, { id: `bad-${name}` })])
           return yield* Effect.gen(function* () {
             const backend = yield* ExecutionBackend.Service
-            return yield* backend.start({ threadId: `bad-${name}`, turnId: `bad-${name}`, prompt: "bad", startedAt: 1 })
+            const execution = yield* backend.start({
+              threadId: `bad-${name}`,
+              turnId: `bad-${name}`,
+              prompt: "bad",
+              startedAt: 1,
+            })
+            return { execution, requests: yield* fixture.requests }
           }).pipe(
             Effect.provide(
               RelayExecutionBackend.layer({
@@ -122,12 +128,19 @@ for (const [name, parameters] of cases) {
                 permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
               }),
             ),
-            Effect.exit,
           )
         }),
       ).pipe(Effect.provide(BunServices.layer)),
     )
-    expect(result._tag).toBe("Failure")
-    expect(JSON.stringify(result)).toMatch(/Schema|Parse|invalid|malformed|Execution workflow failed/i)
+    const failures = result.execution.events.filter((event) => event.type === "execution.failed")
+    const failed = failures[0]
+    expect(result.execution.status).toBe("failed")
+    expect(failures).toHaveLength(1)
+    expect(failed?.text).toMatch(/^effect\/ai\/AiError\/AiError: LanguageModel\.streamText: Invalid output:/)
+    expect(failed?.text).toContain(name)
+    expect(failed?.text).toContain(malformedField)
+    expect(failed?.data?.message).toBe(failed?.text)
+    expect(failed?.content).toBeUndefined()
+    expect(result.requests).toHaveLength(1)
   }, 30_000)
 }

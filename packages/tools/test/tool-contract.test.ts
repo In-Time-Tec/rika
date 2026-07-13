@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Stream } from "effect"
-import { Catalog, ProcessRegistry, Runtime } from "../src"
+import { Effect, Layer, Ref, Schema, Stream } from "effect"
+import { Tool } from "effect/unstable/ai"
+import { Catalog, ParallelSearch, ProcessRegistry, Runtime } from "../src"
 
 describe("tool contracts", () => {
   it("defines permission and output policies for every initial tool", () => {
@@ -37,6 +38,26 @@ describe("tool contracts", () => {
         }),
       ),
     ),
+  )
+
+  it.effect("describes web search queries as a homogeneous non-empty array", () =>
+    Effect.gen(function* () {
+      const schema = Tool.getJsonSchema(Runtime.webSearchTool)
+      const searchQueries = (schema.properties as Record<string, unknown>).searchQueries
+      expect(searchQueries).toEqual({
+        type: "array",
+        items: { type: "string" },
+        allOf: [{ minItems: 1 }],
+      })
+      expect(searchQueries).not.toHaveProperty("prefixItems")
+      expect(yield* Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)(["current docs"])).toEqual([
+        "current docs",
+      ])
+      yield* Effect.flip(Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)([]))
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)({ 0: "current docs", __rest__: ["api"] }),
+      )
+    }),
   )
 
   it.effect("routes every model-facing toolkit handler through the runtime contract", () =>

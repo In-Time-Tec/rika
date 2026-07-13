@@ -718,7 +718,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             return
           }
           if (result.status === "waiting" || result.status === "running" || result.status === "queued") return
-          if (result.status === "failed")
+          if (result.status === "failed" && !result.events.some((event) => event.type === "execution.failed"))
             dispatch({
               _tag: "ExecutionFailed",
               threadId: thread.id,

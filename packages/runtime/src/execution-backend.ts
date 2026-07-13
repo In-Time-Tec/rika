@@ -17,6 +17,8 @@ import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
 import { definitions, idFor } from "./workflow-definitions"
 
+export type ModelVariantPolicy = "registration-key" | "fixed-selection"
+
 export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> = {}> {
   readonly filename: string
   readonly workspace: string
@@ -25,6 +27,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly additionalRegistrations?: ReadonlyArray<ModelRegistry.Registration>
   readonly selection: ModelRegistry.ModelSelection
   readonly defaultReasoningEffort?: string
+  readonly modelVariantPolicy?: ModelVariantPolicy
   readonly modelResilience?: ModelResilience.Interface
   readonly compaction?: Compaction.DefaultOptions
   readonly tokenBudget?: number
@@ -89,8 +92,9 @@ const variantSelection = (
   selection: ModelRegistry.ModelSelection,
   effort: string | undefined,
   fast: boolean,
+  policy: ModelVariantPolicy,
 ): ModelRegistry.ModelSelection =>
-  effort === undefined && !fast
+  policy === "fixed-selection" || (effort === undefined && !fast)
     ? selection
     : { ...selection, registrationKey: modelVariantKey(effort ?? "medium", fast) }
 
@@ -153,16 +157,21 @@ const event = (value: {
   readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>
   readonly data?: Readonly<Record<string, unknown>>
 }): Event => {
-  const text = value.content
+  const contentText = value.content
     ?.filter((part) => part.type === "text")
     .map((part) => part.text ?? "")
     .join("")
+  const failureText =
+    value.type === "execution.failed" && typeof value.data?.message === "string" && value.data.message.length > 0
+      ? value.data.message
+      : undefined
+  const text = contentText !== undefined && contentText.length > 0 ? contentText : failureText
   return {
     cursor: value.cursor,
     sequence: value.sequence,
     type: value.type,
     createdAt: value.created_at,
-    ...(text === undefined || text.length === 0 ? {} : { text }),
+    ...(text === undefined ? {} : { text }),
     ...(value.content === undefined ? {} : { content: [...value.content] }),
     ...(value.data === undefined ? {} : { data: value.data }),
   }
@@ -193,6 +202,7 @@ const followExecution = (
   Effect.gen(function* () {
     const events: Array<Event> = []
     const seen = new Set<string>()
+    let stoppedAtActionableWait = false
     const append = (item: Execution.ExecutionEvent) => {
       const mapped = event(item)
       if (seen.has(mapped.cursor)) return mapped
@@ -201,31 +211,39 @@ const followExecution = (
       onEvent?.(mapped)
       return mapped
     }
+    const shouldStop = (item: Execution.ExecutionEvent) => {
+      if (
+        item.type === "execution.completed" ||
+        item.type === "execution.failed" ||
+        item.type === "execution.cancelled"
+      ) {
+        return Effect.succeed(true)
+      }
+      if (!stopAtActionableWait || !isActionableWait(event(item))) return Effect.succeed(false)
+      const waitId = item.data?.wait_id
+      if (typeof waitId !== "string") return Effect.succeed(false)
+      return client.inspectExecution(executionId(turnId)).pipe(
+        Effect.map((inspection) => {
+          const actionable = inspection.waiting_on.some((wait) => wait.wait_id === waitId)
+          if (actionable) stoppedAtActionableWait = true
+          return actionable
+        }),
+      )
+    }
     const attach = (cursor: string | undefined) =>
       client
         .streamExecution({
           execution_id: executionId(turnId),
           ...(cursor === undefined ? {} : { after_cursor: cursor }),
         })
-        .pipe(
-          Stream.takeUntil(
-            (item) =>
-              item.type === "execution.completed" ||
-              item.type === "execution.failed" ||
-              item.type === "execution.cancelled" ||
-              (stopAtActionableWait &&
-                (item.type === "permission.ask.requested" || item.type === "tool.approval.requested")),
-          ),
-          Stream.map(append),
-          Stream.runDrain,
-        )
+        .pipe(Stream.takeUntilEffect(shouldStop), Stream.map(append), Stream.runDrain)
     yield* attach(afterCursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => attach(undefined)))
     const status = statusFromEvents(events)
     return {
       turnId,
       status:
         status === "running" || status === "queued"
-          ? events.some(isActionableWait)
+          ? stoppedAtActionableWait
             ? Status.make("waiting")
             : status
           : status,
@@ -236,7 +254,13 @@ const followExecution = (
 export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any> = {}>(
   options: Pick<
     LayerOptions<AdditionalTools>,
-    "selection" | "additionalToolkit" | "compaction" | "tokenBudget" | "permissionPolicy" | "defaultReasoningEffort"
+    | "selection"
+    | "additionalToolkit"
+    | "compaction"
+    | "tokenBudget"
+    | "permissionPolicy"
+    | "defaultReasoningEffort"
+    | "modelVariantPolicy"
   >,
 ) =>
   Layer.effect(
@@ -457,6 +481,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               options.selection,
               input.reasoningEffort ?? options.defaultReasoningEffort,
               input.fastMode === true,
+              options.modelVariantPolicy ?? "registration-key",
             )
             yield* client.registerAgent({
               id: agentId,
@@ -469,17 +494,30 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               handoff_targets: subagentHandoffTargets,
               child_run_presets: presets(selection),
             })
-            const started = yield* client.startExecutionByAgentDefinition({
-              root_address_id: addressId,
-              session_id: sessionId(input.threadId),
-              agent_id: agentId,
-              input: executionInput(input),
-              idempotency_key: input.turnId,
-              execution_id: executionId(input.turnId),
-              started_at: input.startedAt,
-              completed_at: input.startedAt,
-            })
-            return yield* followExecution(client, input.turnId, undefined, input.onEvent, started.status === "waiting")
+            const id = executionId(input.turnId)
+            yield* client
+              .startExecutionByAgentDefinition({
+                root_address_id: addressId,
+                session_id: sessionId(input.threadId),
+                agent_id: agentId,
+                input: executionInput(input),
+                idempotency_key: input.turnId,
+                execution_id: id,
+                started_at: input.startedAt,
+                completed_at: input.startedAt,
+              })
+              .pipe(
+                Effect.asVoid,
+                Effect.catchTag("ClientError", (startError) =>
+                  client.getExecution(id).pipe(
+                    Effect.matchEffect({
+                      onFailure: () => Effect.fail(startError),
+                      onSuccess: (existing) => (existing === undefined ? Effect.fail(startError) : Effect.void),
+                    }),
+                  ),
+                ),
+              )
+            return yield* followExecution(client, input.turnId, undefined, input.onEvent)
           }).pipe(Effect.mapError(error))
         }),
         follow: Effect.fn("ExecutionBackend.follow")(function* (turnId, afterCursor, onEvent) {
@@ -642,7 +680,7 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
               ),
             ),
           })
-          const runnerClientLayer = Client.layerFromRuntime.pipe(Layer.provideMerge(runnerLayer))
+          const handlerClientLayer = Layer.fresh(Client.layerFromRuntime).pipe(Layer.provideMerge(runnerLayer))
           const childResult = (client: Client.Interface, childId: string) => {
             const childExecutionId = Ids.ExecutionId.make(childId)
             return client
@@ -729,7 +767,7 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                 }),
               ),
             ),
-          ).pipe(Layer.provide(runnerClientLayer))
+          ).pipe(Layer.provide(handlerClientLayer))
           const fanOutLayer = SQLite.childFanOutLayer({ filename: options.filename }, fanOutHandlers)
           const workflowHandlers = Layer.effect(
             WorkflowDefinitionRuntime.HandlerService,
@@ -764,7 +802,7 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                 inspectChildFanOut: childFanOut.inspect,
               })
             }),
-          ).pipe(Layer.provide(runnerClientLayer), Layer.provide(fanOutLayer))
+          ).pipe(Layer.provide(handlerClientLayer), Layer.provide(fanOutLayer))
           const workflowLayer = SQLite.workflowLayer({ filename: options.filename }, workflowHandlers)
           const runtimeLayer = workflowLayer.pipe(Layer.provideMerge(fanOutLayer), Layer.provideMerge(runnerLayer))
           return layerFromClient(options).pipe(

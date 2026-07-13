@@ -165,6 +165,26 @@ describe("ExecutionEvents", () => {
     ])
   })
 
+  it("clears Waiting and projects one opaque terminal failure", () => {
+    const failed: ExecutionEvents.Event = {
+      cursor: "failure-1",
+      sequence: 1,
+      type: "execution.failed",
+      text: "opaque provider failure",
+    }
+    let model = ExecutionEvents.projectTurn(ViewState.initial("/work"), "turn-failed", "prompt", [])
+    expect(model.busyStatus).toBe("Waiting")
+    model = ExecutionEvents.project(model, [
+      { ...failed, turnId: "turn-failed" },
+      { ...failed, turnId: "turn-failed" },
+    ])
+
+    expect(model.busy).toBe(false)
+    expect(model.busyStatus).toBeUndefined()
+    expect(model.activeTurnId).toBeUndefined()
+    expect(model.blocks).toEqual([expect.objectContaining({ _tag: "Error", detail: "opaque provider failure" })])
+  })
+
   it("projects every execution event family and fallback", () => {
     const events: ReadonlyArray<ExecutionEvents.Event> = [
       { cursor: "1", sequence: 1, type: "model.output.delta", text: "a" },

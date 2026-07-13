@@ -31,6 +31,8 @@ Text reads return stable line anchors suitable for strict edits. Edits using sta
 
 The initial local runtime implements bounded FFF-backed file discovery and content grep, line-numbered reads, create, exact-anchor edit, shell execution, Git status, and Parallel Search API web search. Shell and Git subprocess pipes are always drained, but retained pending output is bounded before polling or result construction; excess output sets a sticky truncation signal and completed process entries are released after terminal polling. One watched FFF index is retained for each tool-runtime lifecycle, honors repository ignore rules, and supplies the TUI `@` file picker. All built-in tool classes default to `allow`, matching Amp's bypass-permissions operation. Explicit user configuration may still select `ask` or `deny`. The runtime receives its Workspace path and redacted Parallel credential at composition and rejects errors through tagged boundaries. Packages never read the credential from the environment.
 
+`web_search.searchQueries` is presented to models as a homogeneous string array with at least one item. Object-shaped and empty values remain invalid and are never normalized into queries.
+
 The initial tools are one Effect AI Toolkit shared by the Baton agent definition and Relay ToolRuntime registration. Relay snapshots the same model-facing schemas it executes, and maps Rika `ask` metadata to durable tool approvals.
 
 ## Permission Decisions

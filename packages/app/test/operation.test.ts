@@ -789,7 +789,7 @@ describe("Operation", () => {
 
   it.effect("projects interactive backend failures and terminal failure statuses", () =>
     Effect.gen(function* () {
-      const runCase = (status: "backend" | "failed" | "cancelled") =>
+      const runCase = (status: "backend" | "failed" | "failed-event" | "cancelled") =>
         Effect.gen(function* () {
           const repository = yield* ThreadRepository.makeMemory()
           const turns = yield* TurnRepository.makeMemory()
@@ -814,7 +814,22 @@ describe("Operation", () => {
                         ),
                       )
                   : backend.start(input)
-                : Effect.succeed({ turnId: input.turnId, status, events: [] }),
+                : Effect.succeed({
+                    turnId: input.turnId,
+                    status: status === "failed-event" ? ("failed" as const) : status,
+                    events:
+                      status === "failed-event"
+                        ? [
+                            {
+                              cursor: "failure-cursor",
+                              sequence: 1,
+                              type: "execution.failed",
+                              createdAt: 1,
+                              text: "opaque provider failure",
+                            },
+                          ]
+                        : [],
+                  }),
           })
           yield* Effect.gen(function* () {
             const operation = yield* Operation.Service
@@ -843,6 +858,7 @@ describe("Operation", () => {
         })
       const failedBackend = yield* runCase("backend")
       const failed = yield* runCase("failed")
+      const failedEvent = yield* runCase("failed-event")
       const cancelled = yield* runCase("cancelled")
       const failedBackendEvent = nonActivation(failedBackend.events).find((event) => event._tag === "ExecutionFailed")
       expect(failedBackendEvent).toMatchObject({ _tag: "ExecutionFailed" })
@@ -857,6 +873,19 @@ describe("Operation", () => {
         turnId: "turn-failed",
         message: "Execution failed",
       })
+      expect(nonActivation(failedEvent.events)).toContainEqual({
+        _tag: "ExecutionEventReceived",
+        threadId: "thread-failed-event",
+        turnId: "turn-failed-event",
+        event: {
+          cursor: "failure-cursor",
+          sequence: 1,
+          type: "execution.failed",
+          createdAt: 1,
+          text: "opaque provider failure",
+        },
+      })
+      expect(nonActivation(failedEvent.events).some((event) => event._tag === "ExecutionFailed")).toBe(false)
       expect(nonActivation(cancelled.events)).toContainEqual({
         _tag: "QueueChanged",
         threadId: "thread-cancelled",
