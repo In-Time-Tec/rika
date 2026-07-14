@@ -1,0 +1,2 @@
+  PID  PPID  %CPU    RSS      TIME ELAPSED COMMAND
+95181 95178  33.5  79568   0:04.09   00:11 bun -e import * as BunRuntime from "@effect/platform-bun/BunRuntime"; import * as BunServices from "@effect/platform-bun/BunServices"; import { Effect } from "effect"; import * as Logging from "./apps/rika/src/logging.ts"; const program = Effect.never.pipe(Effect.provide(Logging.layer({ dataRoot: process.env.DATA_ROOT, role: "client", version: "probe" })), Effect.provide(BunServices.layer)); BunRuntime.runMain(program)

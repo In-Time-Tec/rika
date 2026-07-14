@@ -1,0 +1,30 @@
+[
+  {
+    "summaryModel": "ambient",
+    "status": "succeeded",
+    "eventTypes": [
+      "TurnStarted",
+      "ModelPart",
+      "ModelPart",
+      "ModelPart",
+      "ModelPart",
+      "TurnCompleted",
+      "Completed"
+    ],
+    "requestCount": 3,
+    "operations": [
+      "generateText",
+      "generateText",
+      "streamText"
+    ]
+  },
+  {
+    "summaryModel": "dedicated",
+    "status": "failed",
+    "errorTag": "@batonfx/core/AgentError",
+    "requestCount": 1,
+    "operations": [
+      "generateText"
+    ]
+  }
+]

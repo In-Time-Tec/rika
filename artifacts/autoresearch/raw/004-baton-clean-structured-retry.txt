@@ -1,0 +1,8 @@
+{
+  "status": "failed",
+  "errorTag": "@batonfx/core/AgentError",
+  "ambientOperations": [],
+  "summaryOperations": [
+    "generateObject"
+  ]
+}

@@ -1,0 +1,83 @@
+[13:28:35.939] INFO (#44): execution.starting {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.model.name": "scripted",
+  "rika.model.provider": "test",
+}
+[13:28:36.506] INFO (#44): execution.accepted {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.duration.ms": 567,
+}
+[13:28:36.506] INFO (#44): execution.follow.started {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:execution:accepted",
+  "rika.event.sequence": 0,
+  "rika.event.type": "execution.accepted",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:execution:1:started",
+  "rika.event.sequence": 1,
+  "rika.event.type": "execution.started",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:model:2:input-prepared",
+  "rika.event.sequence": 2,
+  "rika.event.type": "model.input.prepared",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:tool:compact-read:requested",
+  "rika.event.sequence": 3,
+  "rika.event.type": "tool.call.requested",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:tool:compact-read:result",
+  "rika.event.sequence": 4,
+  "rika.event.type": "tool.result.received",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:model:5:usage",
+  "rika.event.sequence": 5,
+  "rika.event.type": "model.usage.reported",
+}
+[13:28:36.508] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.event.cursor": "execution:turn-summary-retry:execution:7:failed",
+  "rika.event.sequence": 7,
+  "rika.event.type": "execution.failed",
+}
+[13:28:36.508] INFO (#44): execution.follow.completed {
+  "rika.execution.id": "execution:turn-summary-retry",
+  "rika.thread.id": "thread-summary-retry",
+  "rika.turn.id": "turn-summary-retry",
+  "rika.duration.ms": 2,
+  "rika.event.count": 8,
+  "rika.execution.status": "failed",
+}
+{"status":"failed","requestCount":2,"operations":["streamText","generateText"],"eventTypes":["execution.accepted","execution.started","model.input.prepared","tool.call.requested","tool.result.received","model.usage.reported","steering.received","execution.failed"]}

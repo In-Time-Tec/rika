@@ -1,0 +1,59 @@
+[13:46:34.087] INFO (#44): execution.starting {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.model.name": "scripted",
+  "rika.model.provider": "test",
+}
+[13:46:34.457] INFO (#44): execution.accepted {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.duration.ms": 370,
+}
+[13:46:34.457] INFO (#44): execution.follow.started {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+}
+[13:46:34.458] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.event.cursor": "execution:turn-compaction-noop:execution:accepted",
+  "rika.event.sequence": 0,
+  "rika.event.type": "execution.accepted",
+}
+[13:46:34.458] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.event.cursor": "execution:turn-compaction-noop:execution:1:started",
+  "rika.event.sequence": 1,
+  "rika.event.type": "execution.started",
+}
+[13:46:34.458] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.event.cursor": "execution:turn-compaction-noop:model:2:input-prepared",
+  "rika.event.sequence": 2,
+  "rika.event.type": "model.input.prepared",
+}
+[13:46:34.458] INFO (#44): execution.event {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.event.cursor": "execution:turn-compaction-noop:execution:3:failed",
+  "rika.event.sequence": 3,
+  "rika.event.type": "execution.failed",
+}
+[13:46:34.458] INFO (#44): execution.follow.completed {
+  "rika.execution.id": "execution:turn-compaction-noop",
+  "rika.thread.id": "thread-compaction-noop",
+  "rika.turn.id": "turn-compaction-noop",
+  "rika.duration.ms": 1,
+  "rika.event.count": 4,
+  "rika.execution.status": "failed",
+}
+{"status":"failed","requestCount":2,"eventTypes":["execution.accepted","execution.started","model.input.prepared","execution.failed"]}

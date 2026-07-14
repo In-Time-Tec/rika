@@ -1,0 +1,315 @@
+[13:10:09.487] INFO (#42): execution.starting {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.model.name": "scripted",
+  "rika.model.provider": "test",
+}
+[13:10:11.303] INFO (#42): execution.accepted {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.duration.ms": 1816,
+}
+[13:10:11.303] INFO (#42): execution.follow.started {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:execution:accepted",
+  "rika.event.sequence": 0,
+  "rika.event.type": "execution.accepted",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:execution:1:started",
+  "rika.event.sequence": 1,
+  "rika.event.type": "execution.started",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:2:input-prepared",
+  "rika.event.sequence": 2,
+  "rika.event.type": "model.input.prepared",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-0:requested",
+  "rika.event.sequence": 3,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-0:result",
+  "rika.event.sequence": 4,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:5:usage",
+  "rika.event.sequence": 5,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-1:requested",
+  "rika.event.sequence": 7,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-1:result",
+  "rika.event.sequence": 8,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:9:usage",
+  "rika.event.sequence": 9,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-2:requested",
+  "rika.event.sequence": 11,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-2:result",
+  "rika.event.sequence": 12,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:13:usage",
+  "rika.event.sequence": 13,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-3:requested",
+  "rika.event.sequence": 15,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-3:result",
+  "rika.event.sequence": 16,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:17:usage",
+  "rika.event.sequence": 17,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-4:requested",
+  "rika.event.sequence": 19,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-4:result",
+  "rika.event.sequence": 20,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:21:usage",
+  "rika.event.sequence": 21,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-5:requested",
+  "rika.event.sequence": 23,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-5:result",
+  "rika.event.sequence": 24,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:25:usage",
+  "rika.event.sequence": 25,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-6:requested",
+  "rika.event.sequence": 27,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-6:result",
+  "rika.event.sequence": 28,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:29:usage",
+  "rika.event.sequence": 29,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-7:requested",
+  "rika.event.sequence": 31,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-7:result",
+  "rika.event.sequence": 32,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:33:usage",
+  "rika.event.sequence": 33,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-8:requested",
+  "rika.event.sequence": 35,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-8:result",
+  "rika.event.sequence": 36,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:37:usage",
+  "rika.event.sequence": 37,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-9:requested",
+  "rika.event.sequence": 39,
+  "rika.event.type": "tool.call.requested",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:tool:read-9:result",
+  "rika.event.sequence": 40,
+  "rika.event.type": "tool.result.received",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:41:usage",
+  "rika.event.sequence": 41,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:44:usage",
+  "rika.event.sequence": 44,
+  "rika.event.type": "model.usage.reported",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:model:46:output-completed",
+  "rika.event.sequence": 46,
+  "rika.event.type": "model.output.completed",
+}
+[13:10:11.306] INFO (#42): execution.event {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.event.cursor": "execution:turn-turn-cap:execution:47:completed",
+  "rika.event.sequence": 47,
+  "rika.event.type": "execution.completed",
+}
+[13:10:11.306] INFO (#42): execution.follow.completed {
+  "rika.execution.id": "execution:turn-turn-cap",
+  "rika.thread.id": "thread-turn-cap",
+  "rika.turn.id": "turn-turn-cap",
+  "rika.duration.ms": 3,
+  "rika.event.count": 48,
+  "rika.execution.status": "completed",
+}
+{"status":"completed","requestCount":11,"eventTypes":["execution.accepted","execution.started","model.input.prepared","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","tool.call.requested","tool.result.received","model.usage.reported","steering.received","model.output.delta","model.usage.reported","steering.received","model.output.completed","execution.completed"],"steeringEvents":[{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:6","sequence":6,"type":"steering.received","createdAt":5,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:6","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:10","sequence":10,"type":"steering.received","createdAt":9,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:10","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:14","sequence":14,"type":"steering.received","createdAt":13,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:14","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:18","sequence":18,"type":"steering.received","createdAt":17,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:18","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:22","sequence":22,"type":"steering.received","createdAt":21,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:22","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:26","sequence":26,"type":"steering.received","createdAt":25,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:26","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:30","sequence":30,"type":"steering.received","createdAt":29,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:30","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:34","sequence":34,"type":"steering.received","createdAt":33,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:34","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:38","sequence":38,"type":"steering.received","createdAt":37,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:38","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:steering:drain:execution:turn-turn-cap:steering:steering:sequence:42","sequence":42,"type":"steering.received","createdAt":41,"content":[],"data":{"kind":"steering","drain_id":"drain:execution:turn-turn-cap:steering:steering:sequence:42","message_sequences":[],"message_count":0}},{"cursor":"execution:turn-turn-cap:steering:follow_up:drain:execution:turn-turn-cap:steering:follow_up:sequence:45","sequence":45,"type":"steering.received","createdAt":44,"content":[],"data":{"kind":"follow_up","drain_id":"drain:execution:turn-turn-cap:steering:follow_up:sequence:45","message_sequences":[],"message_count":0}}]}
