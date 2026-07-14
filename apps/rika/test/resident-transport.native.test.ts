@@ -163,6 +163,36 @@ describe("resident WebSocket process transport", () => {
     }
   }, 15_000)
 
+  test("reports an interactive operation failure before the client callback starts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-resident-"))
+    try {
+      const client = start(root)
+      await attached(client)
+
+      client.send("rejected-interactive")
+      expect(await client.next()).toEqual({ type: "interactive-rejected", error: "Interactive setup rejected" })
+      await client.close()
+    } finally {
+      await chmod(root, 0o700).catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  test("delivers a long burst of interactive execution events without overflowing", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-resident-"))
+    try {
+      const client = start(root)
+      await attached(client)
+
+      client.send("burst-interactive")
+      expect(await client.next()).toEqual({ type: "burst-completed", text: "2000" })
+      await client.close()
+    } finally {
+      await chmod(root, 0o700).catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
   test("cancels a resident interactive action before starting the next action", async () => {
     const root = await mkdtemp(join(tmpdir(), "rika-resident-"))
     try {
@@ -317,6 +347,25 @@ describe("resident WebSocket process transport", () => {
       expect(await nextType(client, "mutation-failed")).toMatchObject({ tag: "ExecutionFailed" })
       expect(await nextType(client, "post-mutation-read")).toMatchObject({ tag: "ThreadsListed" })
       expect(await nextType(client, "mutation-attempts")).toMatchObject({ text: "1" })
+    } finally {
+      await chmod(root, 0o700).catch(() => undefined)
+      await rm(root, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  test("logical close completes a blocking interactive callback and stops its physical connection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "rika-resident-"))
+    try {
+      const client = start(root, 250)
+      const event = await attached(client)
+      client.send("blocking-interactive")
+      expect((await client.next()).type).toBe("interactive-callback")
+      client.send("close")
+      const completed = [await client.next(), await client.next()]
+      expect(completed.map((item) => item.type).sort()).toEqual(["blocking-completed", "closed"])
+      client.client.stdin.end()
+      await client.client.exited
+      await waitUntil(() => !alive(event.hostPid!))
     } finally {
       await chmod(root, 0o700).catch(() => undefined)
       await rm(root, { recursive: true, force: true })

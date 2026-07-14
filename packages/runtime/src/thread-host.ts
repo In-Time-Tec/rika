@@ -1,6 +1,6 @@
 import { ModelRegistry } from "@batonfx/core"
 import { Ids } from "@relayfx/sdk"
-import { Context, Effect, Layer, Option, Ref, Schema, Stream } from "effect"
+import { Context, Crypto, Effect, Layer, Option, Ref, Schema, Stream } from "effect"
 import { LanguageModel, type Prompt, Response, Tool, Toolkit } from "effect/unstable/ai"
 
 export const hostAgentId = Ids.AgentId.make("agent:rika-thread-host")
@@ -99,6 +99,7 @@ const finish = (reason: "stop" | "tool-calls"): Response.FinishPartEncoded => ({
 })
 
 const respond = (
+  namespace: string,
   counter: Ref.Ref<number>,
   options: LanguageModel.ProviderOptions,
 ): Effect.Effect<Array<Response.PartEncoded>> =>
@@ -109,7 +110,7 @@ const respond = (
       return [
         {
           type: "tool-call",
-          id: `wait-${request}`,
+          id: `${namespace}-wait-${request}`,
           name: waitToolName,
           params: {},
           providerExecuted: false,
@@ -121,7 +122,7 @@ const respond = (
       ...threadIds.map(
         (threadId, index): Response.PartEncoded => ({
           type: "tool-call",
-          id: `promote-${request}-${index}`,
+          id: `${namespace}-promote-${request}-${index}`,
           name: "promote_turn",
           params: { threadId },
           providerExecuted: false,
@@ -143,11 +144,15 @@ const toStreamParts = (parts: Array<Response.PartEncoded>): Array<Response.Strea
   })
 
 export const hostRegistration: Effect.Effect<ModelRegistry.Registration> = Effect.gen(function* () {
+  const crypto = yield* Crypto.Crypto
+  const namespace = yield* crypto.randomUUIDv4
   const counter = yield* Ref.make(0)
   const service = yield* LanguageModel.make({
-    generateText: (options) => respond(counter, options),
+    generateText: (options) => respond(namespace, counter, options),
     streamText: (options) =>
-      Stream.unwrap(respond(counter, options).pipe(Effect.map((parts) => Stream.fromIterable(toStreamParts(parts))))),
+      Stream.unwrap(
+        respond(namespace, counter, options).pipe(Effect.map((parts) => Stream.fromIterable(toStreamParts(parts)))),
+      ),
   })
   return yield* ModelRegistry.registrationFromLayer({
     provider: hostSelection.provider,

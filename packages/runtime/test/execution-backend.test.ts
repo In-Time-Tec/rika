@@ -5,7 +5,7 @@ import { ModelResilience } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { Client, Content, Execution, Ids } from "@relayfx/sdk"
 import { ThreadTools } from "@rika/tools"
-import { Effect, Layer, Redacted, Ref, Schedule, Stream } from "effect"
+import { Effect, Layer, Logger, Redacted, Ref, Schedule, Stream } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
@@ -435,6 +435,47 @@ describe("ExecutionBackend Relay client adapter", () => {
         { cursor: "cursor-2", sequence: 2, type: "model.output.delta", createdAt: 20, content: [] },
         { cursor: "cursor-3", sequence: 3, type: "execution.completed", createdAt: 30 },
       ])
+    }),
+  )
+
+  it.effect("emits safe correlated execution breadcrumbs without payloads", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        streamEvents: [
+          relayEvent("tool.call.requested", 1, [Content.text("SECRET_CONTENT")], { input: "SECRET_DATA" }),
+          relayEvent("tool.result.received", 2, [Content.text("SECRET_RESULT")]),
+          relayEvent("execution.completed", 3),
+        ],
+      })
+      const lines: Array<string> = []
+      const logger = Logger.make((options) => lines.push(Logger.formatJson.log(options)))
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* backend.start({
+          threadId: "thread-observed",
+          turnId: "turn-observed",
+          prompt: "SECRET_PROMPT",
+          startedAt: 1,
+        })
+      }).pipe(provideBackend(fixture.implementation), Effect.provide(Logger.layer([logger])))
+      const records = lines.map(
+        (line) => JSON.parse(line) as { readonly message: string; readonly annotations: Record<string, unknown> },
+      )
+      expect(records.map((record) => record.message)).toEqual([
+        "execution.starting",
+        "execution.accepted",
+        "execution.follow.started",
+        "execution.event",
+        "execution.event",
+        "execution.event",
+        "execution.follow.completed",
+      ])
+      expect(records.find((record) => record.message === "execution.event")?.annotations).toMatchObject({
+        "rika.execution.id": "execution:turn-observed",
+        "rika.turn.id": "turn-observed",
+        "rika.event.type": "tool.call.requested",
+      })
+      expect(lines.join("\n")).not.toContain("SECRET_")
     }),
   )
 
@@ -1301,6 +1342,47 @@ describe("ExecutionBackend Relay client adapter", () => {
         turn_id: "turn-9",
       })
       expect(sent[1]).toMatchObject({ idempotency_key: "rika:nudge:thread-a:103" })
+    }),
+  )
+
+  it.effect("recreates an active thread host whose execution is terminal before get-or-create", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      const calls: Array<string> = []
+      const failed = {
+        kind: "rika-thread",
+        key: "thread-stale",
+        address_id: "address:entity:thread-stale",
+        execution_id: "execution:entity:thread-stale:0",
+        generation: 0,
+        status: "active" as const,
+        created_at: 1,
+      }
+      const recreated = { ...failed, execution_id: "execution:entity:thread-stale:1", generation: 1 }
+      Object.assign(fixture.implementation, {
+        registerEntityKind: (input: unknown) => Effect.succeed(input),
+        getEntity: () => Effect.sync(() => (calls.push("get"), failed)),
+        inspectExecution: () =>
+          Effect.sync(() => {
+            calls.push("inspect")
+            return {
+              execution_id: failed.execution_id,
+              status: "failed",
+              waiting_on: [],
+              pending_tool_calls: [],
+              child_runs: [],
+            }
+          }),
+        destroyEntity: () => Effect.sync(() => (calls.push("destroy"), { ...failed, status: "destroyed" })),
+        getOrCreateEntity: () => Effect.sync(() => (calls.push("create"), recreated)),
+      })
+
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* backend.ensureThreadHost!("thread-stale", 100)
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(calls).toEqual(["get", "inspect", "destroy", "create"])
     }),
   )
 

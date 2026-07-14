@@ -196,7 +196,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 - [x] Custom agent profile registration.
 - [x] Custom mode registration.
 - [x] Plugin diagnostics and reload.
-- [x] Add Effect-native per-process JSON file logging, resident-free path/status/export commands, private retention, and a crash-debugging skill.
+- [x] Add Effect-native per-process JSON file logging, correlated transport/interactive-action/thread-host/Turn/execution/tool breadcrumbs, resident-free path/status/export commands, private retention, and a `debugging-rika` skill.
 - [x] Pin plugin source hash, config fingerprint, generation, and tool-schema digest per execution.
 - [x] Pin MCP command fingerprint and effective cwd for approvals.
 
@@ -207,7 +207,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 - [x] Verify keymap coverage.
 - [x] Restore visible file mention completion, Ctrl+S route selection, and shortcuts help with packaged interaction evidence.
 - [x] Verify thread lifecycle coverage.
-- [x] Verify queueing, steering, and interruption. Queue promotion, active-execution steering injection, and native interruption flows pass.
+- [x] Verify queueing, steering, and interruption. Queue promotion, active-execution steering injection, native interruption, non-duplicated live event projection, and a 2,000-event resident transport burst pass.
 - [x] Verify shell and incognito-shell prompts. Operation, real shell runtime, native OpenTUI permission/rendering, product SQLite persistence, denial, and busy queue behavior pass.
 - [x] Verify execute and JSONL modes. Packaged plain-text and streaming JSON output flows pass against the extracted artifact; local stream-input tests prove ordered string/prompt-object JSONL and malformed-input rejection. Plain stdin prompting and image JSONL remain pending.
 - [x] Verify review command and JSON output. Packaged text and JSON review flows pass against the extracted artifact.

@@ -19,7 +19,7 @@ const run = (product: string, relay: string, args: ReadonlyArray<string>) => {
 
 test("packaged deterministic execution persists thread and turn cursors", async () => {
   const directory = (await Bun.$`mktemp -d`.text()).trim()
-  const product = `${directory}/rika/product.db`
+  const product = `${directory}/rika/rika.db`
   const relay = `${directory}/rika/relay.db`
   expect(run(product, relay, ["run", "hello"])).toContain("deterministic response")
   const threads = JSON.parse(run(product, relay, ["threads", "list"]))

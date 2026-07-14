@@ -281,16 +281,16 @@ Catalog completeness is enforced by `bun run catalog:evidence`: all 18 entries i
 
 ## Diagnostics and Operations
 
-| Feature                      | Amp July 2026                | Rika v1         | Rika v2                        | Status            | Spec   | Evidence                                                                    |
-| ---------------------------- | ---------------------------- | --------------- | ------------------------------ | ----------------- | ------ | --------------------------------------------------------------------------- |
-| Local logs                   | Yes                          | Yes             | Included                       | implemented       | 16     | Effect JSON files for every resident-backed client and resident process     |
-| Configurable log level       | Yes                          | Yes             | Level included; path fixed     | implemented       | 16     | Effective `logging.level`; fixed private diagnostics directory              |
-| Doctor command               | Diagnostic report and status | Yes             | Included                       | verified          | 13, 16 | Extracted packaged artifact returns stable secret-safe status               |
-| Local diagnostic export      | Support upload in Amp        | Partial         | Included                       | implemented       | 16     | Resident-free path, status, and private log-directory export commands       |
-| OpenTelemetry opt-in         | Internal/unknown             | No              | Omitted                        | excluded          | 16     | Native local logging selected; no custom telemetry backend                  |
-| Secret redaction             | Expected                     | Yes             | Included                       | verified          | 16     | Packaged config, keymap, and doctor E2E reject configured secret disclosure |
-| Execution replay diagnostics | Hosted/internal              | Actor replay    | Included through Relay cursors | framework-blocked | 05, 16 | Relay proof                                                                 |
-| Feature parity evidence      | No product feature           | Existing corpus | Required engineering artifact  | implementing      | 15     | This file and `docs/reference/V1_BASELINE.md`                               |
+| Feature                      | Amp July 2026                | Rika v1         | Rika v2                        | Status            | Spec   | Evidence                                                                                |
+| ---------------------------- | ---------------------------- | --------------- | ------------------------------ | ----------------- | ------ | --------------------------------------------------------------------------------------- |
+| Local logs                   | Yes                          | Yes             | Included                       | implemented       | 16     | Correlated Effect JSON process, transport, Turn, execution, event, and tool breadcrumbs |
+| Configurable log level       | Yes                          | Yes             | Level included; path fixed     | implemented       | 16     | Effective `logging.level`; fixed private diagnostics directory                          |
+| Doctor command               | Diagnostic report and status | Yes             | Included                       | verified          | 13, 16 | Extracted packaged artifact returns stable secret-safe status                           |
+| Local diagnostic export      | Support upload in Amp        | Partial         | Included                       | implemented       | 16     | Resident-free path, status, and private log-directory export commands                   |
+| OpenTelemetry opt-in         | Internal/unknown             | No              | Omitted                        | excluded          | 16     | Native local logging selected; no custom telemetry backend                              |
+| Secret redaction             | Expected                     | Yes             | Included                       | verified          | 16     | Packaged config, keymap, and doctor E2E reject configured secret disclosure             |
+| Execution replay diagnostics | Hosted/internal              | Actor replay    | Included through Relay cursors | framework-blocked | 05, 16 | Relay proof                                                                             |
+| Feature parity evidence      | No product feature           | Existing corpus | Required engineering artifact  | implementing      | 15     | This file and `docs/reference/V1_BASELINE.md`                                           |
 
 ## Verification Harness
 

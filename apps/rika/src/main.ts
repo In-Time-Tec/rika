@@ -709,6 +709,12 @@ export const configuredBackendLayer = (
       if (testResponse._tag === "Some" && testScript._tag === "Some") {
         return yield* Effect.fail(new Error("RIKA_TEST_MODEL_RESPONSE and RIKA_TEST_MODEL_SCRIPT cannot both be set"))
       }
+      yield* Effect.logInfo("model.backend.configured").pipe(
+        Effect.annotateLogs(
+          "rika.model.backend.kind",
+          testScript._tag === "Some" ? "test-script" : testResponse._tag === "Some" ? "test-response" : "provider",
+        ),
+      )
       let registration: ModelRegistry.Registration
       let selection: ModelRegistry.ModelSelection
       let additionalRegistrations: Array<ModelRegistry.Registration> = []
@@ -1234,6 +1240,7 @@ if (import.meta.main) {
         }
         const teardown = (showGoodbye: boolean) =>
           Effect.gen(function* () {
+            yield* Effect.logInfo("tui.teardown.started")
             closed = true
             process.off("SIGINT", interrupt)
             process.off("SIGTERM", close)
@@ -1246,6 +1253,7 @@ if (import.meta.main) {
               yield* Effect.promise(() => initialization!).pipe(Effect.catch(() => Effect.void))
             yield* interruptTrackedFibers([...fibers])
             if (showGoodbye) goodbye()
+            yield* Effect.logInfo("tui.teardown.completed")
           })
         const close = (exitCode?: number) => {
           if (closing) return
@@ -1552,10 +1560,14 @@ if (import.meta.main) {
           .then((created) => {
             if (created === undefined) return
             renderer = created
-            if (closed) return
+            if (closed) {
+              created.releaseTerminal()
+              return
+            }
             model = ViewState.update(model, { _tag: "FilesRequested" })
             created.surface.update(model)
             created.renderer.start()
+            run(Effect.logInfo("tui.renderer.started"))
             if (closed) return
             run(watchChangedFiles)
             run(
@@ -1636,7 +1648,12 @@ if (import.meta.main) {
           .catch((cause) => {
             if (closed) return
             resume(
-              Effect.fail(new Operation.OperationUnavailable({ operation: "Interactive", message: String(cause) })),
+              Effect.logError("tui.renderer.failed").pipe(
+                Effect.annotateLogs("rika.failure.kind", cause instanceof Error ? cause.name : typeof cause),
+                Effect.andThen(
+                  Effect.fail(new Operation.OperationUnavailable({ operation: "Interactive", message: String(cause) })),
+                ),
+              ),
             )
           })
         return teardown(false)
@@ -1657,6 +1674,8 @@ if (import.meta.main) {
           workspace: workspaceSettings,
         })
         const effectiveConfig = yield* ConfigService.effective().pipe(Effect.provide(applicationConfigLayer))
+        const testModelConfigured =
+          process.env.RIKA_TEST_MODEL_RESPONSE !== undefined || process.env.RIKA_TEST_MODEL_SCRIPT !== undefined
         const resolveWorkspaceExecutionRoute = (
           mode: "low" | "medium" | "high" | "ultra",
           tuning: { readonly reasoningEffort?: string; readonly fastMode?: boolean } | undefined,
@@ -1679,12 +1698,14 @@ if (import.meta.main) {
                 ConfigContract.resolveAgentRoute(resolvedWorkspaceConfig.settings, agent),
               ),
             )
-            const registrations = yield* registrationsForRoutes(
-              routes,
-              resolvedWorkspaceConfig.environment.gatewayCredentials,
-            )
-            const backend = yield* ExecutionBackend.Service
-            if (backend.registerModels !== undefined) yield* backend.registerModels(registrations)
+            if (!testModelConfigured) {
+              const registrations = yield* registrationsForRoutes(
+                routes,
+                resolvedWorkspaceConfig.environment.gatewayCredentials,
+              )
+              const backend = yield* ExecutionBackend.Service
+              if (backend.registerModels !== undefined) yield* backend.registerModels(registrations)
+            }
             return executionRoutePin(resolvedWorkspaceConfig.settings, mode, tuning)
           }).pipe(Effect.provide(BunServices.layer))
         const parallelApiKey = effectiveConfig.environment.parallelApiKey
@@ -1838,6 +1859,9 @@ if (import.meta.main) {
       ),
     ).pipe(
       Effect.map((context) => Context.get(context, Operation.Service)),
+      Effect.tapCause((cause) =>
+        Effect.logError("resident.owner.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+      ),
       Effect.mapError(
         (cause) =>
           new ResidentService.ResidentServiceError({
@@ -1922,6 +1946,12 @@ if (import.meta.main) {
                                     RIKA_INTERNAL_RESIDENT_HOST: "1",
                                     RIKA_INTERNAL_RESIDENT_PROFILE: "default",
                                     RIKA_INTERNAL_RESIDENT_DATA_ROOT: dataRoot,
+                                    ...(process.env.RIKA_TEST_MODEL_RESPONSE === undefined
+                                      ? {}
+                                      : { RIKA_TEST_MODEL_RESPONSE: process.env.RIKA_TEST_MODEL_RESPONSE }),
+                                    ...(process.env.RIKA_TEST_MODEL_SCRIPT === undefined
+                                      ? {}
+                                      : { RIKA_TEST_MODEL_SCRIPT: process.env.RIKA_TEST_MODEL_SCRIPT }),
                                   },
                                 }),
                               )

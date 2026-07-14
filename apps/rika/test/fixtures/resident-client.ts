@@ -97,38 +97,46 @@ const program = Effect.gen(function* () {
               Effect.andThen(Effect.sync(() => console.log(JSON.stringify({ type: "stall-survived" })))),
             )
           : command === "reconnect-interactive"
-            ? connection.run(
-                { _tag: "Interactive", prompt: [], ephemeral: false, workspace: process.cwd() },
-                {
-                  interactive: (_, session) =>
-                    Effect.gen(function* () {
-                      let callbacks = 0
-                      callbacks += 1
-                      yield* Effect.sync(() => console.log(JSON.stringify({ type: "interactive-callback", callbacks })))
-                      yield* session.initialize((event) =>
-                        console.log(JSON.stringify({ type: "initial-read", tag: event._tag })),
-                      )
-                      yield* Effect.sync(() => process.kill(hostPid, "SIGKILL"))
-                      yield* Effect.sleep("250 millis")
-                      yield* session.initialize((event) =>
-                        console.log(JSON.stringify({ type: "replacement-read", tag: event._tag })),
-                      )
-                      yield* session.submit("ambiguous", (event) => {
-                        if (event._tag === "ExecutionFailed")
-                          console.log(JSON.stringify({ type: "mutation-failed", tag: event._tag }))
-                      })
-                      yield* session.initialize((event) =>
-                        console.log(JSON.stringify({ type: "post-mutation-read", tag: event._tag })),
-                      )
-                      yield* Effect.promise(async () => {
-                        const attempts = (await Bun.file(join(dataRoot, "mutation-attempts.log")).text())
-                          .trim()
-                          .split("\n")
-                        console.log(JSON.stringify({ type: "mutation-attempts", text: String(attempts.length) }))
-                      })
-                    }),
-                },
-              )
+            ? connection
+                .run(
+                  { _tag: "Interactive", prompt: [], ephemeral: false, workspace: process.cwd() },
+                  {
+                    interactive: (_, session) =>
+                      Effect.gen(function* () {
+                        let callbacks = 0
+                        callbacks += 1
+                        yield* Effect.sync(() =>
+                          console.log(JSON.stringify({ type: "interactive-callback", callbacks })),
+                        )
+                        yield* session.initialize((event) =>
+                          console.log(JSON.stringify({ type: "initial-read", tag: event._tag })),
+                        )
+                        yield* Effect.sync(() => process.kill(hostPid, "SIGKILL"))
+                        yield* Effect.sleep("250 millis")
+                        yield* session.initialize((event) =>
+                          console.log(JSON.stringify({ type: "replacement-read", tag: event._tag })),
+                        )
+                        yield* session.submit("ambiguous", (event) => {
+                          if (event._tag === "ExecutionFailed")
+                            console.log(JSON.stringify({ type: "mutation-failed", tag: event._tag }))
+                        })
+                        yield* session.initialize((event) =>
+                          console.log(JSON.stringify({ type: "post-mutation-read", tag: event._tag })),
+                        )
+                        yield* Effect.promise(async () => {
+                          const attempts = (await Bun.file(join(dataRoot, "mutation-attempts.log")).text())
+                            .trim()
+                            .split("\n")
+                          console.log(JSON.stringify({ type: "mutation-attempts", text: String(attempts.length) }))
+                        })
+                      }),
+                  },
+                )
+                .pipe(
+                  Effect.catch((error) =>
+                    Effect.sync(() => console.log(JSON.stringify({ type: "reconnect-failed", error: error.message }))),
+                  ),
+                )
             : command === "interactive"
               ? connection
                   .run(
@@ -147,90 +155,142 @@ const program = Effect.gen(function* () {
                   .pipe(
                     Effect.andThen(Effect.sync(() => console.log(JSON.stringify({ type: "interactive-completed" })))),
                   )
-              : command === "blocking-interactive"
+              : command === "rejected-interactive"
                 ? connection
                     .run(
-                      { _tag: "Interactive", prompt: [], ephemeral: false, workspace: process.cwd() },
                       {
-                        interactive: () =>
-                          Effect.sync(() => console.log(JSON.stringify({ type: "interactive-callback" }))).pipe(
-                            Effect.andThen(Effect.never),
-                          ),
+                        _tag: "Interactive",
+                        prompt: ["reject-before-start"],
+                        ephemeral: false,
+                        workspace: process.cwd(),
                       },
+                      { interactive: () => Effect.void },
                     )
                     .pipe(
                       Effect.catch((error) =>
                         Effect.sync(() =>
-                          console.log(JSON.stringify({ type: "blocking-failed", error: error.message })),
+                          console.log(JSON.stringify({ type: "interactive-rejected", error: error.message })),
                         ),
                       ),
                     )
-                : command === "cancel-action"
-                  ? connection
-                      .run(
-                        { _tag: "Interactive", prompt: [], ephemeral: false, workspace: process.cwd() },
-                        {
-                          interactive: (_, session) =>
-                            Effect.gen(function* () {
-                              const first = yield* Effect.forkChild(session.followSelected(() => undefined))
-                              yield* Effect.sleep("50 millis")
-                              yield* Fiber.interrupt(first)
-                              yield* session.followSelected((event) =>
-                                console.log(JSON.stringify({ type: "second-action-event", tag: event._tag })),
-                              )
-                            }),
-                        },
+                : command === "burst-interactive"
+                  ? Effect.gen(function* () {
+                      let count = 0
+                      const exit = yield* Effect.exit(
+                        connection.run(
+                          {
+                            _tag: "Interactive",
+                            prompt: ["burst-events"],
+                            ephemeral: false,
+                            workspace: process.cwd(),
+                          },
+                          {
+                            interactive: (_, session) =>
+                              session.initialize(() => {
+                                count += 1
+                              }),
+                          },
+                        ),
                       )
-                      .pipe(
-                        Effect.andThen(Effect.sync(() => console.log(JSON.stringify({ type: "actions-completed" })))),
+                      yield* Effect.sync(() =>
+                        console.log(
+                          JSON.stringify(
+                            exit._tag === "Success"
+                              ? { type: "burst-completed", text: String(count) }
+                              : { type: "burst-failed", error: String(exit.cause) },
+                          ),
+                        ),
                       )
-                  : command === "output"
+                    })
+                  : command === "blocking-interactive"
                     ? connection
                         .run(
-                          { _tag: "Doctor" },
+                          { _tag: "Interactive", prompt: [], ephemeral: false, workspace: process.cwd() },
                           {
-                            stdout: (text) => Effect.sync(() => console.log(JSON.stringify({ type: "output", text }))),
+                            interactive: () =>
+                              Effect.sync(() => console.log(JSON.stringify({ type: "interactive-callback" }))).pipe(
+                                Effect.andThen(Effect.never),
+                              ),
                           },
                         )
                         .pipe(
-                          Effect.andThen(Effect.sync(() => console.log(JSON.stringify({ type: "output-completed" })))),
+                          Effect.ensuring(
+                            Effect.sync(() => console.log(JSON.stringify({ type: "blocking-completed" }))),
+                          ),
+                          Effect.forkChild,
+                          Effect.asVoid,
                         )
-                    : command === "delayed"
+                    : command === "cancel-action"
                       ? connection
-                          .run({
-                            _tag: "Run",
-                            prompt: ["delayed"],
-                            ephemeral: false,
-                            streamJson: false,
-                            streamJsonInput: false,
-                            streamJsonThinking: false,
-                          })
+                          .run(
+                            { _tag: "Interactive", prompt: [], ephemeral: false, workspace: process.cwd() },
+                            {
+                              interactive: (_, session) =>
+                                Effect.gen(function* () {
+                                  const first = yield* Effect.forkChild(session.followSelected(() => undefined))
+                                  yield* Effect.sleep("50 millis")
+                                  yield* Fiber.interrupt(first)
+                                  yield* session.followSelected((event) =>
+                                    console.log(JSON.stringify({ type: "second-action-event", tag: event._tag })),
+                                  )
+                                }),
+                            },
+                          )
                           .pipe(
                             Effect.andThen(
-                              Effect.sync(() => console.log(JSON.stringify({ type: "delayed-completed" }))),
-                            ),
-                            Effect.catch((error) =>
-                              Effect.sync(() =>
-                                console.log(JSON.stringify({ type: "delayed-failed", error: error.message })),
-                              ),
+                              Effect.sync(() => console.log(JSON.stringify({ type: "actions-completed" }))),
                             ),
                           )
-                      : command === "rejected"
-                        ? connection.run({ _tag: "Doctor" }).pipe(
-                            Effect.andThen(
-                              Effect.sync(() => console.log(JSON.stringify({ type: "rejected-work-completed" }))),
-                            ),
-                            Effect.catch((error) =>
-                              Effect.sync(() =>
-                                console.log(JSON.stringify({ type: "rejected-work", error: error.message })),
-                              ),
-                            ),
-                          )
-                        : command === "close"
-                          ? connection.close.pipe(
-                              Effect.andThen(Effect.sync(() => console.log(JSON.stringify({ type: "closed" })))),
+                      : command === "output"
+                        ? connection
+                            .run(
+                              { _tag: "Doctor" },
+                              {
+                                stdout: (text) =>
+                                  Effect.sync(() => console.log(JSON.stringify({ type: "output", text }))),
+                              },
                             )
-                          : Effect.void,
+                            .pipe(
+                              Effect.andThen(
+                                Effect.sync(() => console.log(JSON.stringify({ type: "output-completed" }))),
+                              ),
+                            )
+                        : command === "delayed"
+                          ? connection
+                              .run({
+                                _tag: "Run",
+                                prompt: ["delayed"],
+                                ephemeral: false,
+                                streamJson: false,
+                                streamJsonInput: false,
+                                streamJsonThinking: false,
+                              })
+                              .pipe(
+                                Effect.andThen(
+                                  Effect.sync(() => console.log(JSON.stringify({ type: "delayed-completed" }))),
+                                ),
+                                Effect.catch((error) =>
+                                  Effect.sync(() =>
+                                    console.log(JSON.stringify({ type: "delayed-failed", error: error.message })),
+                                  ),
+                                ),
+                              )
+                          : command === "rejected"
+                            ? connection.run({ _tag: "Doctor" }).pipe(
+                                Effect.andThen(
+                                  Effect.sync(() => console.log(JSON.stringify({ type: "rejected-work-completed" }))),
+                                ),
+                                Effect.catch((error) =>
+                                  Effect.sync(() =>
+                                    console.log(JSON.stringify({ type: "rejected-work", error: error.message })),
+                                  ),
+                                ),
+                              )
+                            : command === "close"
+                              ? connection.close.pipe(
+                                  Effect.andThen(Effect.sync(() => console.log(JSON.stringify({ type: "closed" })))),
+                                )
+                              : Effect.void,
     ),
   )
 })

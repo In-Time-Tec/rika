@@ -30,7 +30,7 @@ export const sandbox = async (): Promise<Sandbox> => {
     env: {
       ...process.env,
       HOME: home,
-      RIKA_DATABASE: join(state, "product.db"),
+      RIKA_DATABASE: join(state, "rika.db"),
       RIKA_RELAY_DATABASE: join(state, "relay.db"),
       RIKA_TEST_MODEL_RESPONSE: "deterministic response",
     },

@@ -8,7 +8,7 @@ import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
 import * as ExtensionOperations from "./extension-operations"
 import { Catalog as ToolCatalog, Runtime as ToolRuntime } from "@rika/tools"
-import { Clock, Console, Context, Deferred, Effect, Fiber, Layer, Ref, Runtime, Schema, Semaphore } from "effect"
+import { Cause, Clock, Console, Context, Deferred, Effect, Fiber, Layer, Ref, Runtime, Schema, Semaphore } from "effect"
 import * as FileMentions from "./file-mentions"
 import * as ContextMentions from "./context-mentions"
 import * as ConfigOperations from "./config-operations"
@@ -18,6 +18,14 @@ const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
 const ClientWorkspace = { clientWorkspace: Schema.optionalKey(Schema.String) }
 
 const startupDispatch = () => undefined
+
+const failureKind = (cause: Cause.Cause<unknown>) => {
+  const failure = Cause.squash(cause)
+  if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
+    return failure._tag
+  if (failure instanceof Error) return failure.name
+  return typeof failure
+}
 
 const isTerminalStatus = (
   status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
@@ -803,14 +811,23 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               }),
             )
             const { thread, isNewThread, turn } = admitted
+            yield* Effect.logInfo("turn.accepted").pipe(
+              Effect.annotateLogs({
+                "rika.thread.id": String(thread.id),
+                "rika.turn.id": String(turn.id),
+                "rika.turn.status": turn.status,
+              }),
+            )
             if (turn.status === "queued") {
               yield* promoteThread(thread, turn.id, dispatch)
               return
             }
             dispatch({ _tag: "TurnStarted", threadId: thread.id, turn })
             const startedAt = yield* Clock.currentTimeMillis
+            const deliveredCursors = new Set<string>()
             const outcome = yield* Effect.exit(
               Effect.gen(function* () {
+                yield* Effect.logInfo("turn.started")
                 const prepared = yield* prepareExecution(turn, thread.workspace)
                 yield* turns.setStatus(turn.id, "running", turn.lastCursor, startedAt)
                 const result = yield* backend.start({
@@ -824,15 +841,31 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                     ? {}
                     : { reasoningEffort: modelTuning.reasoningEffort }),
                   ...(modelTuning?.fastMode === undefined ? {} : { fastMode: modelTuning.fastMode }),
-                  onEvent: (event) =>
-                    dispatch({ _tag: "ExecutionEventReceived", threadId: thread.id, turnId: turn.id, event }),
+                  onEvent: (event) => {
+                    deliveredCursors.add(event.cursor)
+                    dispatch({ _tag: "ExecutionEventReceived", threadId: thread.id, turnId: turn.id, event })
+                  },
                   ...(prepared.extensionPin === undefined ? {} : { extensionPin: prepared.extensionPin }),
                 })
                 return result
-              }),
+              }).pipe(
+                Effect.annotateLogs({
+                  "rika.thread.id": String(thread.id),
+                  "rika.turn.id": String(turn.id),
+                }),
+              ),
             )
             if (outcome._tag === "Failure") {
-              yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+              const failedAt = yield* Clock.currentTimeMillis
+              yield* Effect.logError("turn.failed").pipe(
+                Effect.annotateLogs({
+                  "rika.duration.ms": failedAt - startedAt,
+                  "rika.failure.kind": failureKind(outcome.cause),
+                  "rika.thread.id": String(thread.id),
+                  "rika.turn.id": String(turn.id),
+                }),
+              )
+              yield* turns.setStatus(turn.id, "failed", turn.lastCursor, failedAt)
               dispatch({
                 _tag: "ExecutionFailed",
                 threadId: thread.id,
@@ -844,8 +877,18 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             }
             const result = outcome.value
             for (const event of result.events)
-              dispatch({ _tag: "ExecutionEventReceived", threadId: thread.id, turnId: turn.id, event })
-            yield* turns.setStatus(turn.id, result.status, result.events.at(-1)?.cursor, yield* Clock.currentTimeMillis)
+              if (!deliveredCursors.has(event.cursor))
+                dispatch({ _tag: "ExecutionEventReceived", threadId: thread.id, turnId: turn.id, event })
+            const completedAt = yield* Clock.currentTimeMillis
+            yield* Effect.logInfo("turn.finished").pipe(
+              Effect.annotateLogs({
+                "rika.duration.ms": completedAt - startedAt,
+                "rika.thread.id": String(thread.id),
+                "rika.turn.id": String(turn.id),
+                "rika.turn.status": result.status,
+              }),
+            )
+            yield* turns.setStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
             if (result.status === "completed") {
               yield* settleThread(thread, dispatch)
               if (isNewThread) yield* titleThread(thread, prompt, turn.executionRoute!, dispatch)
@@ -864,6 +907,11 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           yield* program.pipe(
             Effect.provide(executionDependencies),
             Effect.scoped,
+            Effect.tapCause((cause) =>
+              Effect.logError("interactive.submit.failed").pipe(
+                Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+              ),
+            ),
             Effect.catch((error) => Effect.sync(() => dispatch({ _tag: "ExecutionFailed", message: String(error) }))),
           )
         })
@@ -1027,11 +1075,14 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               const turn = yield* turns.get(turnId)
               if (turn === undefined) return yield* Effect.fail(new Error(`Turn ${turnId} does not exist`))
               const thread = yield* threadForTurn(turn)
+              const deliveredCursors = new Set<string>()
               const result = yield* follow(turn.id, turn.lastCursor, (event) => {
+                deliveredCursors.add(event.cursor)
                 dispatch({ _tag: "ExecutionEventReceived", threadId: turn.threadId, turnId: turn.id, event })
               })
               for (const event of result.events)
-                dispatch({ _tag: "ExecutionEventReceived", threadId: turn.threadId, turnId: turn.id, event })
+                if (!deliveredCursors.has(event.cursor))
+                  dispatch({ _tag: "ExecutionEventReceived", threadId: turn.threadId, turnId: turn.id, event })
               yield* turns.setStatus(
                 turn.id,
                 result.status,
@@ -1471,10 +1522,23 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 executionRoute: yield* resolveExecutionRoute(input.mode ?? "medium", undefined, thread.workspace),
                 now,
               })
+              yield* Effect.logInfo("turn.accepted").pipe(
+                Effect.annotateLogs({
+                  "rika.thread.id": String(thread.id),
+                  "rika.turn.id": String(submitted.id),
+                  "rika.turn.status": submitted.status,
+                }),
+              )
               if (submitted.status === "queued") return
               const runTurn = Effect.fn("Operation.runTurn")(function* (turn: Turn.Turn) {
+                const startedAt = yield* Clock.currentTimeMillis
+                yield* Effect.logInfo("turn.started").pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": String(thread.id),
+                    "rika.turn.id": String(turn.id),
+                  }),
+                )
                 const result = yield* Effect.gen(function* () {
-                  const startedAt = yield* Clock.currentTimeMillis
                   const prepared = yield* prepareExecution(turn, thread.workspace)
                   yield* turns.setStatus(turn.id, "running", turn.lastCursor, startedAt)
                   return yield* backend.start({
@@ -1488,17 +1552,30 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 }).pipe(
                   Effect.catch((error) =>
                     Effect.gen(function* () {
-                      yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+                      const failedAt = yield* Clock.currentTimeMillis
+                      yield* Effect.logError("turn.failed").pipe(
+                        Effect.annotateLogs({
+                          "rika.duration.ms": failedAt - startedAt,
+                          "rika.failure.kind": error instanceof Error ? error.name : typeof error,
+                          "rika.thread.id": String(thread.id),
+                          "rika.turn.id": String(turn.id),
+                        }),
+                      )
+                      yield* turns.setStatus(turn.id, "failed", turn.lastCursor, failedAt)
                       return yield* Effect.fail(error)
                     }),
                   ),
                 )
-                yield* turns.setStatus(
-                  turn.id,
-                  result.status,
-                  result.events.at(-1)?.cursor,
-                  yield* Clock.currentTimeMillis,
+                const completedAt = yield* Clock.currentTimeMillis
+                yield* Effect.logInfo("turn.finished").pipe(
+                  Effect.annotateLogs({
+                    "rika.duration.ms": completedAt - startedAt,
+                    "rika.thread.id": String(thread.id),
+                    "rika.turn.id": String(turn.id),
+                    "rika.turn.status": result.status,
+                  }),
                 )
+                yield* turns.setStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
                 return result
               })
               const result = yield* runTurn(submitted)

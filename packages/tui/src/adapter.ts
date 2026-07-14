@@ -2232,15 +2232,26 @@ export const create = async (handlers: Handlers) => {
     } finally {
       try {
         renderer.destroy()
-      } catch {
-      }
+      } catch {}
     }
   }
   const suspendTerminal = () => {
-    if (!released) renderer.suspend()
+    if (released) return
+    try {
+      renderer.suspend()
+    } catch (cause) {
+      releaseTerminal()
+      throw cause
+    }
   }
   const resumeTerminal = () => {
-    if (!released) renderer.resume()
+    if (released) return
+    try {
+      renderer.resume()
+    } catch (cause) {
+      releaseTerminal()
+      throw cause
+    }
   }
   try {
     handlers.resize(renderer.terminalWidth, renderer.terminalHeight)

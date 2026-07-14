@@ -622,6 +622,33 @@ test("releases terminal modes once before other cleanup and prevents editor resu
   expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
 })
 
+test("releases terminal modes when renderer suspension fails", async () => {
+  opentui.renderer.destroy.mockReset()
+  opentui.renderer.suspend.mockImplementationOnce(() => {
+    throw new Error("suspend failed")
+  })
+  const created = await create(handlers())
+
+  expect(() => created.suspendTerminal()).toThrow("suspend failed")
+  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  expect(() => created.releaseTerminal()).not.toThrow()
+  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+})
+
+test("releases terminal modes when renderer resume fails", async () => {
+  opentui.renderer.destroy.mockReset()
+  opentui.renderer.resume.mockImplementationOnce(() => {
+    throw new Error("resume failed")
+  })
+  const created = await create(handlers())
+
+  created.suspendTerminal()
+  expect(() => created.resumeTerminal()).toThrow("resume failed")
+  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  expect(() => created.releaseTerminal()).not.toThrow()
+  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+})
+
 test("destroys the renderer when surface cleanup fails", async () => {
   opentui.renderer.destroy.mockClear()
   const created = await create(handlers())

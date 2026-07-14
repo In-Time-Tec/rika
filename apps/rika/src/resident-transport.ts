@@ -3,6 +3,7 @@ import * as BunSocket from "@effect/platform-bun/BunSocket"
 import { Operation, ResidentService } from "@rika/app"
 import {
   Cause,
+  Clock,
   Console,
   Crypto,
   Deferred,
@@ -32,7 +33,19 @@ const json = (value: unknown) => JSON.stringify(value)
 const parse = (value: string) => JSON.parse(value) as unknown
 const capabilities = ["ping", "startup-state"] as const
 const maxFrameBytes = 1_048_576
-const outboundCapacity = 256
+const outboundCapacity = 4_096
+const failureKind = (cause: Cause.Cause<unknown>) => {
+  const failure = Cause.squash(cause)
+  if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
+    return failure._tag
+  if (failure instanceof Error) return failure.name
+  return typeof failure
+}
+const isDisconnectedOperation = (error: unknown) =>
+  error instanceof Operation.OperationUnavailable && error.operation === "ResidentConnection"
+const isReconnectableTransport = (error: unknown) =>
+  error instanceof ResidentService.ResidentServiceError &&
+  (error.reason === "resident-absent" || error.reason === "resident-draining" || error.reason === "transport-failed")
 const formatOutput = (values: ReadonlyArray<unknown>) =>
   `${values.map((value) => (typeof value === "string" ? value : Formatter.format(value))).join(" ")}\n`
 
@@ -185,6 +198,12 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 yield* Deferred.await(operationReady)
                 yield* writer(json({ _tag: "startup-ready" } satisfies ResidentService.ServerMessage))
               }
+              yield* Effect.logInfo("resident.connection.accepted").pipe(
+                Effect.annotateLogs({
+                  "rika.resident.client.kind": message.clientKind,
+                  "rika.resident.connection.id": connectionId,
+                }),
+              )
               return
             }
             if (!("_tag" in message)) return
@@ -209,8 +228,20 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             if (message._tag === "interactive-action") {
               const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
               if (active === undefined) return
+              const startedAt = yield* Clock.currentTimeMillis
+              yield* Effect.logInfo("resident.interactive_action.accepted").pipe(
+                Effect.annotateLogs({
+                  "rika.resident.request.id": message.requestId,
+                  "rika.resident.session.id": message.sessionId,
+                  "rika.resident.action.id": message.actionId,
+                  "rika.resident.action.method": message.method,
+                }),
+              )
               let outputOverflowed = false
+              let dispatchedEvents = 0
+              let overflowAt: number | undefined
               const dispatch = (event: Operation.InteractiveEvent) => {
+                dispatchedEvents += 1
                 if (
                   !Queue.offerUnsafe(
                     outbound,
@@ -222,8 +253,10 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                       event,
                     } satisfies ResidentService.ServerMessage),
                   )
-                )
+                ) {
                   outputOverflowed = true
+                  overflowAt ??= dispatchedEvents
+                }
               }
               const args = message.arguments
               const action = (() => {
@@ -287,33 +320,76 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                                 message: "Resident client is too slow to receive interactive events",
                               }),
                             )
-                          : writer(
-                              json({
-                                _tag: "action-completed",
-                                requestId: message.requestId,
-                                sessionId: message.sessionId,
-                                actionId: message.actionId,
-                              } satisfies ResidentService.ServerMessage),
+                          : Clock.currentTimeMillis.pipe(
+                              Effect.flatMap((completedAt) =>
+                                Effect.logInfo("resident.interactive_action.completed").pipe(
+                                  Effect.annotateLogs({
+                                    "rika.resident.request.id": message.requestId,
+                                    "rika.resident.session.id": message.sessionId,
+                                    "rika.resident.action.id": message.actionId,
+                                    "rika.resident.action.method": message.method,
+                                    "rika.resident.action.event_count": dispatchedEvents,
+                                    "rika.duration.ms": completedAt - startedAt,
+                                  }),
+                                ),
+                              ),
+                              Effect.andThen(
+                                writer(
+                                  json({
+                                    _tag: "action-completed",
+                                    requestId: message.requestId,
+                                    sessionId: message.sessionId,
+                                    actionId: message.actionId,
+                                  } satisfies ResidentService.ServerMessage),
+                                ),
+                              ),
                             ),
                       ),
                       Effect.asVoid,
                     ),
                   ),
                   Effect.catch((failure) =>
-                    writer(
-                      json({
-                        _tag: "action-failed",
-                        requestId: message.requestId,
-                        sessionId: message.sessionId,
-                        actionId: message.actionId,
-                        error:
-                          failure instanceof Operation.OperationUnavailable
-                            ? failure
-                            : new Operation.OperationUnavailable({
-                                operation: message.method,
-                                message: String(failure),
-                              }),
-                      } satisfies ResidentService.ServerMessage),
+                    Clock.currentTimeMillis.pipe(
+                      Effect.flatMap((failedAt) =>
+                        Effect.logError("resident.interactive_action.failed").pipe(
+                          Effect.annotateLogs({
+                            "rika.resident.request.id": message.requestId,
+                            "rika.resident.session.id": message.sessionId,
+                            "rika.resident.action.id": message.actionId,
+                            "rika.resident.action.method": message.method,
+                            "rika.resident.action.event_count": dispatchedEvents,
+                            "rika.resident.action.queue_capacity": outboundCapacity,
+                            ...(overflowAt === undefined ? {} : { "rika.resident.action.overflow_at": overflowAt }),
+                            "rika.failure.kind":
+                              failure !== null &&
+                              typeof failure === "object" &&
+                              "_tag" in failure &&
+                              typeof failure._tag === "string"
+                                ? failure._tag
+                                : failure instanceof Error
+                                  ? failure.name
+                                  : typeof failure,
+                            "rika.duration.ms": failedAt - startedAt,
+                          }),
+                        ),
+                      ),
+                      Effect.andThen(
+                        writer(
+                          json({
+                            _tag: "action-failed",
+                            requestId: message.requestId,
+                            sessionId: message.sessionId,
+                            actionId: message.actionId,
+                            error:
+                              failure instanceof Operation.OperationUnavailable
+                                ? failure
+                                : new Operation.OperationUnavailable({
+                                    operation: message.method,
+                                    message: String(failure),
+                                  }),
+                          } satisfies ResidentService.ServerMessage),
+                        ),
+                      ),
                     ),
                   ),
                   Effect.ensuring(Ref.update(actions, (current) => (current.delete(message.actionId), current))),
@@ -344,6 +420,12 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               yield* Deferred.succeed(started, undefined)
             }
             if (message._tag === "operation") {
+              yield* Effect.logInfo("resident.operation.accepted").pipe(
+                Effect.annotateLogs({
+                  "rika.operation": message.input._tag,
+                  "rika.resident.request.id": message.requestId,
+                }),
+              )
               requestByInput.set(message.input, message.requestId)
               const send = (frame: string) => writer(frame).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(routes, (current) =>
@@ -355,6 +437,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const fiber = yield* lifecycle.runWork(
                 hostWork,
                 Effect.gen(function* () {
+                  const startedAt = yield* Clock.currentTimeMillis
                   const operation = yield* Deferred.await(operationReady)
                   const output = yield* Queue.bounded<
                     | { readonly _tag: "output"; readonly channel: "stdout" | "stderr"; readonly text: string }
@@ -408,24 +491,50 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                                 operation: message.input._tag,
                                 message: String(failure),
                               })
-                        return send(
-                          json({
-                            _tag: "operation-failed",
-                            requestId: message.requestId,
-                            error,
-                          } satisfies ResidentService.ServerMessage),
+                        return Clock.currentTimeMillis.pipe(
+                          Effect.flatMap((failedAt) =>
+                            Effect.logError("resident.operation.failed").pipe(
+                              Effect.annotateLogs({
+                                "rika.duration.ms": failedAt - startedAt,
+                                "rika.failure.kind": failureKind(cause),
+                              }),
+                            ),
+                          ),
+                          Effect.andThen(
+                            send(
+                              json({
+                                _tag: "operation-failed",
+                                requestId: message.requestId,
+                                error,
+                              } satisfies ResidentService.ServerMessage),
+                            ),
+                          ),
                         )
                       },
                       onSuccess: () =>
-                        send(
-                          json({
-                            _tag: "operation-completed",
-                            requestId: message.requestId,
-                          } satisfies ResidentService.ServerMessage),
+                        Clock.currentTimeMillis.pipe(
+                          Effect.flatMap((completedAt) =>
+                            Effect.logInfo("resident.operation.completed").pipe(
+                              Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+                            ),
+                          ),
+                          Effect.andThen(
+                            send(
+                              json({
+                                _tag: "operation-completed",
+                                requestId: message.requestId,
+                              } satisfies ResidentService.ServerMessage),
+                            ),
+                          ),
                         ),
                     },
                   )
                 }).pipe(
+                  Effect.annotateLogs({
+                    "rika.operation": message.input._tag,
+                    "rika.resident.connection.id": connectionId,
+                    "rika.resident.request.id": message.requestId,
+                  }),
                   Effect.ensuring(
                     Ref.update(requests, (current) => (current.delete(message.requestId), current)).pipe(
                       Effect.andThen(Ref.update(routes, (current) => (current.delete(message.requestId), current))),
@@ -461,6 +570,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             const generation = yield* lifecycle.detach
             if (generation === undefined) return
             yield* scheduleGrace(generation)
+            yield* Effect.logInfo("resident.connection.closed").pipe(
+              Effect.annotateLogs("rika.resident.connection.id", connectionId),
+            )
           }),
         ),
       )
@@ -640,7 +752,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                                     Effect.andThen(
                                       Effect.fail(
                                         new Operation.OperationUnavailable({
-                                          operation: method,
+                                          operation: "ResidentConnection",
                                           message: "Resident connection closed before the action outcome was known",
                                         }),
                                       ),
@@ -666,45 +778,28 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                                   ),
                                 )
                               })
-                              const safeInvoke = (
-                                method: string,
-                                args: ReadonlyArray<unknown>,
-                                dispatch: (event: Operation.InteractiveEvent) => void,
-                              ) =>
-                                invoke(method, args, dispatch).pipe(
-                                  Effect.mapError((error) =>
-                                    error instanceof Operation.OperationUnavailable
-                                      ? error
-                                      : new Operation.OperationUnavailable({
-                                          operation: method,
-                                          message: String(error),
-                                        }),
-                                  ),
-                                )
                               const session: Operation.InteractiveSession = {
-                                initialize: (dispatch) => safeInvoke("initialize", [], dispatch),
+                                initialize: (dispatch) => invoke("initialize", [], dispatch),
                                 submit: (prompt, dispatch, mode, parts, tuning) =>
-                                  safeInvoke("submit", [prompt, mode, parts, tuning], dispatch),
+                                  invoke("submit", [prompt, mode, parts, tuning], dispatch),
                                 shell: (command, incognito, dispatch) =>
-                                  safeInvoke("shell", [command, incognito], dispatch),
+                                  invoke("shell", [command, incognito], dispatch),
                                 editQueued: (turnId, prompt, dispatch) =>
-                                  safeInvoke("editQueued", [turnId, prompt], dispatch),
-                                dequeue: (turnId, dispatch) => safeInvoke("dequeue", [turnId], dispatch),
+                                  invoke("editQueued", [turnId, prompt], dispatch),
+                                dequeue: (turnId, dispatch) => invoke("dequeue", [turnId], dispatch),
                                 steerQueued: (turnId, text, dispatch) =>
-                                  safeInvoke("steerQueued", [turnId, text], dispatch),
-                                steer: (text, dispatch) => safeInvoke("steer", [text], dispatch),
-                                interruptAndSend: (prompt, dispatch) =>
-                                  safeInvoke("interruptAndSend", [prompt], dispatch),
-                                cancel: (dispatch) => safeInvoke("cancel", [], dispatch),
+                                  invoke("steerQueued", [turnId, text], dispatch),
+                                steer: (text, dispatch) => invoke("steer", [text], dispatch),
+                                interruptAndSend: (prompt, dispatch) => invoke("interruptAndSend", [prompt], dispatch),
+                                cancel: (dispatch) => invoke("cancel", [], dispatch),
                                 resolvePermission: (waitId, kind, decision, dispatch) =>
-                                  safeInvoke("resolvePermission", [waitId, kind, decision], dispatch),
-                                selectThread: (threadId, dispatch) => safeInvoke("selectThread", [threadId], dispatch),
-                                previewThread: (threadId, dispatch) =>
-                                  safeInvoke("previewThread", [threadId], dispatch),
-                                reopenThread: (dispatch) => safeInvoke("reopenThread", [], dispatch),
-                                followSelected: (dispatch) => safeInvoke("followSelected", [], dispatch),
+                                  invoke("resolvePermission", [waitId, kind, decision], dispatch),
+                                selectThread: (threadId, dispatch) => invoke("selectThread", [threadId], dispatch),
+                                previewThread: (threadId, dispatch) => invoke("previewThread", [threadId], dispatch),
+                                reopenThread: (dispatch) => invoke("reopenThread", [], dispatch),
+                                followSelected: (dispatch) => invoke("followSelected", [], dispatch),
                                 replay: (turnId, afterCursor, dispatch) =>
-                                  safeInvoke("replay", [turnId, afterCursor], dispatch),
+                                  invoke("replay", [turnId, afterCursor], dispatch),
                               }
                               if (request.interactiveStarted !== undefined)
                                 yield* Deferred.succeed(request.interactiveStarted, {
@@ -775,6 +870,13 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
       orElse: () => Effect.fail(transportError("Resident startup timed out", "transport-failed")),
     }),
   )
+  yield* Effect.logInfo("resident.connection.ready").pipe(
+    Effect.annotateLogs({
+      "rika.resident.client.kind": options.clientKind,
+      "rika.resident.connection.id": response.connectionId,
+      "rika.resident.connection.role": options.role,
+    }),
+  )
   const ping = Effect.acquireUseRelease(
     Effect.gen(function* () {
       const id = yield* crypto.randomUUIDv4
@@ -836,19 +938,28 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
         ({ requestId, done, interactiveStarted }) =>
           interactiveStarted === undefined || runOptions?.interactive === undefined
             ? whileConnected(Deferred.await(done))
-            : whileConnected(Deferred.await(interactiveStarted)).pipe(
-                Effect.flatMap(({ sessionId, session }) =>
-                  whileConnected(runOptions.interactive!(input as ResidentService.InteractiveInput, session)).pipe(
-                    Effect.ensuring(
-                      sendBestEffort(
-                        json({
-                          _tag: "interactive-end",
-                          requestId,
-                          sessionId,
-                        } satisfies ResidentService.ClientMessage),
+            : Effect.raceFirst(
+                whileConnected(Deferred.await(interactiveStarted)).pipe(
+                  Effect.map((started) => ({ _tag: "Started" as const, started })),
+                ),
+                whileConnected(Deferred.await(done)).pipe(Effect.as({ _tag: "Completed" as const })),
+              ).pipe(
+                Effect.flatMap((state) =>
+                  state._tag === "Completed"
+                    ? Effect.void
+                    : whileConnected(
+                        runOptions.interactive!(input as ResidentService.InteractiveInput, state.started.session),
+                      ).pipe(
+                        Effect.ensuring(
+                          sendBestEffort(
+                            json({
+                              _tag: "interactive-end",
+                              requestId,
+                              sessionId: state.started.sessionId,
+                            } satisfies ResidentService.ClientMessage),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
                 ),
                 Effect.andThen(whileConnected(Deferred.await(done))),
               ),
@@ -874,8 +985,12 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const endpoint = yield* resolve(input.profile, input.dataRoot)
           const token = yield* readOrCreateToken(endpoint.tokenPath)
           const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
-          const parentScope = yield* Effect.scope
+          const connectionScope = yield* Scope.make()
+          yield* Effect.addFinalizer((exit) => Scope.close(connectionScope, exit))
           const attach = (role: ResidentService.Connection["role"]) => connect({ ...endpoint, ...input, token, role })
+          yield* Effect.logInfo("resident.connection.acquiring").pipe(
+            Effect.annotateLogs("rika.resident.client.kind", input.clientKind),
+          )
           const acquire = Effect.fn("ResidentTransport.acquireConnection")(function* () {
             const first = yield* Effect.result(attach("attached"))
             if (first._tag === "Success") return first.success
@@ -907,12 +1022,20 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
             )
           })
           const acquireReady = acquire().pipe(
-            Scope.provide(parentScope),
+            Scope.provide(connectionScope),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+            Effect.tapError((error) =>
+              Effect.logWarning("resident.connection.failed").pipe(
+                Effect.annotateLogs({
+                  "rika.failure.kind": error._tag,
+                  "rika.failure.reason": error.reason,
+                  "rika.resident.client.kind": input.clientKind,
+                }),
+              ),
+            ),
           ) as Effect.Effect<ResidentService.Connection, ResidentService.ResidentServiceError>
           const initial = yield* acquireReady
           const logicalClosed = yield* Deferred.make<void>()
-          const physical = yield* Ref.make(initial)
           const supervise = Effect.fn("ResidentTransport.superviseInteractive")(function* (
             operationInput: ResidentService.InteractiveInput,
             interactive: NonNullable<NonNullable<Parameters<ResidentService.Connection["run"]>[1]>["interactive"]>,
@@ -947,6 +1070,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 if (changed !== undefined) yield* Deferred.succeed(changed, undefined)
               })
             const retryRead = (
+              dispatch: (event: Operation.InteractiveEvent) => void,
               invoke: (session: Operation.InteractiveSession) => Effect.Effect<void>,
             ): Effect.Effect<void> =>
               Effect.suspend(() =>
@@ -956,7 +1080,11 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                       Effect.catchCause((cause) =>
                         Cause.hasInterruptsOnly(cause)
                           ? Effect.failCause(cause)
-                          : invalidate(session).pipe(Effect.andThen(retryRead(invoke))),
+                          : isDisconnectedOperation(Cause.squash(cause))
+                            ? invalidate(session).pipe(Effect.andThen(retryRead(dispatch, invoke)))
+                            : Effect.sync(() =>
+                                dispatch({ _tag: "ExecutionFailed", message: String(Cause.squash(cause)) }),
+                              ),
                       ),
                     ),
                   ),
@@ -972,17 +1100,21 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                     Effect.catchCause((cause) =>
                       Cause.hasInterruptsOnly(cause)
                         ? Effect.failCause(cause)
-                        : invalidate(session).pipe(
-                            Effect.andThen(
-                              Effect.sync(() =>
-                                dispatch({
-                                  _tag: "ExecutionFailed",
-                                  message:
-                                    "Resident transport disconnected; the action outcome is unknown and was not retried",
-                                }),
+                        : isDisconnectedOperation(Cause.squash(cause))
+                          ? invalidate(session).pipe(
+                              Effect.andThen(
+                                Effect.sync(() =>
+                                  dispatch({
+                                    _tag: "ExecutionFailed",
+                                    message:
+                                      "Resident transport disconnected; the action outcome is unknown and was not retried",
+                                  }),
+                                ),
                               ),
+                            )
+                          : Effect.sync(() =>
+                              dispatch({ _tag: "ExecutionFailed", message: String(Cause.squash(cause)) }),
                             ),
-                          ),
                     ),
                   ),
                 ),
@@ -990,7 +1122,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
             const stable: Operation.InteractiveSession = {
               initialize: (dispatch) =>
                 Ref.set(initialized, dispatch).pipe(
-                  Effect.andThen(retryRead((session) => session.initialize(dispatch))),
+                  Effect.andThen(retryRead(dispatch, (session) => session.initialize(dispatch))),
                 ),
               submit: (prompt, dispatch, mode, parts, tuning) =>
                 mutation(dispatch, (session) => session.submit(prompt, dispatch, mode, parts, tuning)),
@@ -1009,13 +1141,14 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 mutation(dispatch, (session) => session.resolvePermission(waitId, kind, decision, dispatch)),
               selectThread: (threadId, dispatch) =>
                 Ref.set(selected, { threadId, dispatch }).pipe(
-                  Effect.andThen(retryRead((session) => session.selectThread(threadId, dispatch))),
+                  Effect.andThen(retryRead(dispatch, (session) => session.selectThread(threadId, dispatch))),
                 ),
-              previewThread: (threadId, dispatch) => retryRead((session) => session.previewThread(threadId, dispatch)),
-              reopenThread: (dispatch) => retryRead((session) => session.reopenThread(dispatch)),
-              followSelected: (dispatch) => retryRead((session) => session.followSelected(dispatch)),
+              previewThread: (threadId, dispatch) =>
+                retryRead(dispatch, (session) => session.previewThread(threadId, dispatch)),
+              reopenThread: (dispatch) => retryRead(dispatch, (session) => session.reopenThread(dispatch)),
+              followSelected: (dispatch) => retryRead(dispatch, (session) => session.followSelected(dispatch)),
               replay: (turnId, afterCursor, dispatch) =>
-                retryRead((session) => session.replay(turnId, afterCursor, dispatch)),
+                retryRead(dispatch, (session) => session.replay(turnId, afterCursor, dispatch)),
             }
             const publish = (session: Operation.InteractiveSession, first: boolean) =>
               Effect.gen(function* () {
@@ -1035,31 +1168,48 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                   interactive: (_, session) => publish(session, first).pipe(Effect.andThen(connection.closed)),
                 })
                 .pipe(Effect.ensuring(connection.close))
-            const reconnect = (attempt: number): Effect.Effect<void> =>
+            const reconnect = (
+              attempt: number,
+            ): Effect.Effect<void, ResidentService.ResidentServiceError | Operation.OperationUnavailable> =>
               Effect.sleep(Math.min(1_000, 25 * 2 ** Math.min(attempt, 6))).pipe(
                 Effect.andThen(acquireReady),
-                Effect.flatMap((next) => Ref.set(physical, next).pipe(Effect.andThen(loop(next, false)))),
+                Effect.flatMap((next) => loop(next, false)),
                 Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause) ? Effect.interrupt : reconnect(attempt + 1),
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.interrupt
+                    : isReconnectableTransport(Cause.squash(cause))
+                      ? reconnect(attempt + 1)
+                      : Effect.failCause(cause),
                 ),
               )
-            const loop = (connection: ResidentService.Connection, first: boolean): Effect.Effect<void> =>
+            const loop = (
+              connection: ResidentService.Connection,
+              first: boolean,
+            ): Effect.Effect<void, ResidentService.ResidentServiceError | Operation.OperationUnavailable> =>
               runPhysical(connection, first).pipe(
                 Effect.catchCause((cause) =>
                   Cause.hasInterruptsOnly(cause)
                     ? Effect.interrupt
-                    : Effect.gen(function* () {
-                        const current = (yield* Ref.get(sessions)).session
-                        if (current !== undefined) yield* invalidate(current)
-                        return yield* reconnect(0)
-                      }),
+                    : isDisconnectedOperation(Cause.squash(cause)) || isReconnectableTransport(Cause.squash(cause))
+                      ? Effect.gen(function* () {
+                          const current = (yield* Ref.get(sessions)).session
+                          if (current !== undefined) yield* invalidate(current)
+                          return yield* reconnect(0)
+                        })
+                      : Effect.failCause(cause),
                 ),
               )
             const supervisor = yield* Effect.forkChild(
               Effect.raceFirst(loop(initial, true), Deferred.await(logicalClosed)),
             )
-            yield* Deferred.await(firstSession)
-            yield* interactive(operationInput, stable).pipe(Effect.ensuring(Fiber.interrupt(supervisor)))
+            yield* Effect.raceFirst(
+              Deferred.await(firstSession),
+              Effect.raceFirst(Deferred.await(logicalClosed), Fiber.join(supervisor)),
+            )
+            yield* Effect.raceFirst(
+              interactive(operationInput, stable),
+              Effect.raceFirst(Deferred.await(logicalClosed), Fiber.join(supervisor)),
+            ).pipe(Effect.ensuring(Fiber.interrupt(supervisor)))
           })
           return {
             ...initial,
@@ -1069,8 +1219,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 : initial.run(operationInput, options),
             closed: Deferred.await(logicalClosed),
             close: Deferred.succeed(logicalClosed, undefined).pipe(
-              Effect.andThen(Ref.get(physical)),
-              Effect.flatMap((connection) => connection.close),
+              Effect.andThen(Scope.close(connectionScope, Exit.void)),
             ),
           } satisfies ResidentService.Connection
         }).pipe(

@@ -37,40 +37,51 @@ const program = serve({
       return Operation.Service.of({
         run: (input) =>
           input._tag === "Interactive"
-            ? interactive(input, {
-                initialize: (dispatch) => Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads: [] })),
-                submit: (prompt) =>
-                  prompt === "ambiguous"
-                    ? Effect.promise(() =>
-                        appendFile(join(dataRoot, "mutation-attempts.log"), `${process.pid}\n`),
-                      ).pipe(Effect.andThen(Effect.sync(() => process.kill(process.pid, "SIGKILL"))), Effect.asVoid)
-                    : Effect.void,
-                shell: () => Effect.void,
-                editQueued: () => Effect.void,
-                dequeue: () => Effect.void,
-                steerQueued: () => Effect.void,
-                steer: () => Effect.void,
-                interruptAndSend: () => Effect.void,
-                cancel: () => Effect.void,
-                resolvePermission: () => Effect.void,
-                selectThread: () => Effect.void,
-                previewThread: () => Effect.void,
-                reopenThread: () => Effect.void,
-                followSelected: (dispatch) =>
-                  followOwnership.withPermits(1)(
+            ? input.prompt[0] === "reject-before-start"
+              ? Effect.fail(
+                  new Operation.OperationUnavailable({
+                    operation: "Interactive",
+                    message: "Interactive setup rejected",
+                  }),
+                )
+              : interactive(input, {
+                  initialize: (dispatch) =>
                     Effect.sync(() => {
-                      followCount += 1
-                      return followCount
-                    }).pipe(
-                      Effect.flatMap((count) =>
-                        count === 1
-                          ? Effect.never
-                          : Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads: [] })),
+                      const count = input.prompt[0] === "burst-events" ? 2_000 : 1
+                      for (let index = 0; index < count; index += 1) dispatch({ _tag: "ThreadsListed", threads: [] })
+                    }),
+                  submit: (prompt) =>
+                    prompt === "ambiguous"
+                      ? Effect.promise(() =>
+                          appendFile(join(dataRoot, "mutation-attempts.log"), `${process.pid}\n`),
+                        ).pipe(Effect.andThen(Effect.sync(() => process.kill(process.pid, "SIGKILL"))), Effect.asVoid)
+                      : Effect.void,
+                  shell: () => Effect.void,
+                  editQueued: () => Effect.void,
+                  dequeue: () => Effect.void,
+                  steerQueued: () => Effect.void,
+                  steer: () => Effect.void,
+                  interruptAndSend: () => Effect.void,
+                  cancel: () => Effect.void,
+                  resolvePermission: () => Effect.void,
+                  selectThread: () => Effect.void,
+                  previewThread: () => Effect.void,
+                  reopenThread: () => Effect.void,
+                  followSelected: (dispatch) =>
+                    followOwnership.withPermits(1)(
+                      Effect.sync(() => {
+                        followCount += 1
+                        return followCount
+                      }).pipe(
+                        Effect.flatMap((count) =>
+                          count === 1
+                            ? Effect.never
+                            : Effect.sync(() => dispatch({ _tag: "ThreadsListed", threads: [] })),
+                        ),
                       ),
                     ),
-                  ),
-                replay: () => Effect.void,
-              })
+                  replay: () => Effect.void,
+                })
             : Effect.suspend(() => {
                 if (!delayedWork || input._tag !== "Run") return Console.log(JSON.stringify({ hostPid: process.pid }))
                 return Effect.sync(() => {

@@ -13,7 +13,20 @@ import type {
   ChildFanOutRuntime as ChildFanOutRuntimeModule,
   WorkflowDefinitionRuntime as WorkflowDefinitionRuntimeModule,
 } from "@relayfx/sdk/sqlite"
-import { Context, Duration, Effect, Layer, LayerMap, Option, Redacted, Schedule, Semaphore, Stream } from "effect"
+import {
+  Cause,
+  Clock,
+  Context,
+  Duration,
+  Effect,
+  Layer,
+  LayerMap,
+  Option,
+  Redacted,
+  Schedule,
+  Semaphore,
+  Stream,
+} from "effect"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
@@ -38,6 +51,40 @@ import * as ThreadHost from "./thread-host"
 import { definitions, idFor } from "./workflow-definitions"
 
 export type ModelVariantPolicy = "registration-key" | "fixed-selection"
+
+const failureKind = (cause: Cause.Cause<unknown>) => {
+  const failure = Cause.squash(cause)
+  if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
+    return failure._tag
+  if (failure instanceof Error) return failure.name
+  return typeof failure
+}
+
+const observableEventTypes = new Set([
+  "execution.accepted",
+  "execution.started",
+  "model.input.prepared",
+  "model.output.completed",
+  "model.usage.reported",
+  "tool.call.requested",
+  "tool.result.received",
+  "tool.approval.requested",
+  "tool.approval.resolved",
+  "permission.ask.requested",
+  "permission.ask.resolved",
+  "wait.created",
+  "wait.woken",
+  "wait.timed_out",
+  "wait.cancelled",
+  "child_run.spawned",
+  "child_fan_out.created",
+  "child_fan_out.member.terminal",
+  "child_fan_out.terminal",
+  "budget.exceeded",
+  "execution.completed",
+  "execution.failed",
+  "execution.cancelled",
+])
 
 export interface CompactionPolicy {
   readonly context_window: number
@@ -88,7 +135,36 @@ export const routedToolRuntimeLayer = (
             const workspace = yield* resolveWorkspace(String(call.executionId))
             const context = yield* runtimes.contextEffect(workspace)
             const runtime = Context.get(context, RikaToolRuntime.Service)
-            return yield* runtime.run(request)
+            const startedAt = yield* Clock.currentTimeMillis
+            yield* Effect.logInfo("tool.started")
+            return yield* runtime.run(request).pipe(
+              Effect.tap(() =>
+                Clock.currentTimeMillis.pipe(
+                  Effect.flatMap((completedAt) =>
+                    Effect.logInfo("tool.completed").pipe(
+                      Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+                    ),
+                  ),
+                ),
+              ),
+              Effect.tapCause((cause) =>
+                Clock.currentTimeMillis.pipe(
+                  Effect.flatMap((failedAt) =>
+                    Effect.logError("tool.failed").pipe(
+                      Effect.annotateLogs({
+                        "rika.duration.ms": failedAt - startedAt,
+                        "rika.failure.kind": failureKind(cause),
+                      }),
+                    ),
+                  ),
+                ),
+              ),
+              Effect.annotateLogs({
+                "rika.execution.id": String(call.executionId),
+                "rika.tool.call.id": String(call.call.id),
+                "rika.tool.name": String(call.call.name),
+              }),
+            )
           }),
         ).pipe(
           Effect.mapError((cause) =>
@@ -309,6 +385,8 @@ const followExecution = (
   stopAtActionableWait = true,
 ) =>
   Effect.gen(function* () {
+    const startedAt = yield* Clock.currentTimeMillis
+    yield* Effect.logInfo("execution.follow.started")
     const events: Array<Event> = []
     const seen = new Set<string>()
     let stoppedAtActionableWait = false
@@ -382,6 +460,26 @@ const followExecution = (
       ),
     )
     const status = statusFromEvents(events)
+    yield* Effect.forEach(
+      events.filter((item) => observableEventTypes.has(item.type)),
+      (item) =>
+        Effect.logInfo("execution.event").pipe(
+          Effect.annotateLogs({
+            "rika.event.cursor": item.cursor,
+            "rika.event.sequence": item.sequence,
+            "rika.event.type": item.type,
+          }),
+        ),
+      { discard: true },
+    )
+    const completedAt = yield* Clock.currentTimeMillis
+    yield* Effect.logInfo("execution.follow.completed").pipe(
+      Effect.annotateLogs({
+        "rika.duration.ms": completedAt - startedAt,
+        "rika.event.count": events.length,
+        "rika.execution.status": status,
+      }),
+    )
     return {
       turnId,
       status:
@@ -392,7 +490,15 @@ const followExecution = (
           : status,
       events,
     }
-  })
+  }).pipe(
+    Effect.tapCause((cause) =>
+      Effect.logError("execution.follow.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+    ),
+    Effect.annotateLogs({
+      "rika.execution.id": String(executionId(turnId)),
+      "rika.turn.id": turnId,
+    }),
+  )
 
 export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any> = {}>(
   options: Pick<
@@ -447,12 +553,51 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
       )
       const hostGate = yield* Semaphore.make(1)
       const entityFor = Effect.fn("ExecutionBackend.entityFor")(function* (threadId: string, now: number) {
-        return yield* client.getOrCreateEntity({
+        let recovering = false
+        const existing = yield* client.getEntity({
+          kind: ThreadHost.entityKind,
+          key: Ids.EntityKey.make(threadId),
+        })
+        if (existing?.status === "active") {
+          const inspection = yield* client.inspectExecution(existing.execution_id)
+          if (
+            inspection.status === "completed" ||
+            inspection.status === "failed" ||
+            inspection.status === "cancelled"
+          ) {
+            recovering = true
+            yield* Effect.logWarning("thread_host.recovery.started").pipe(
+              Effect.annotateLogs({
+                "rika.thread.id": threadId,
+                "rika.execution.id": existing.execution_id,
+                "rika.execution.status": inspection.status,
+                "rika.thread_host.generation": existing.generation,
+              }),
+            )
+            yield* client.destroyEntity({
+              kind: ThreadHost.entityKind,
+              key: Ids.EntityKey.make(threadId),
+              reason: "thread host execution ended; recreating a fresh generation",
+              destroyed_at: now,
+            })
+            hostInstances.delete(threadId)
+          }
+        }
+        const instance = yield* client.getOrCreateEntity({
           kind: ThreadHost.entityKind,
           key: Ids.EntityKey.make(threadId),
           metadata: { rika_thread_id: threadId },
           created_at: now,
         })
+        if (recovering)
+          yield* Effect.logInfo("thread_host.recovery.completed").pipe(
+            Effect.annotateLogs({
+              "rika.thread.id": threadId,
+              "rika.execution.id": instance.execution_id,
+              "rika.thread_host.generation": instance.generation,
+            }),
+          )
+        return instance
       })
       const hostInstance = Effect.fn("ExecutionBackend.hostInstance")(function* (threadId: string, now: number) {
         yield* hostReady
@@ -501,7 +646,19 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
       return Service.of({
         ...(options.registerModels === undefined ? {} : { registerModels: options.registerModels }),
         ensureThreadHost: Effect.fn("ExecutionBackend.ensureThreadHost")(function* (threadId, createdAt) {
-          yield* hostInstance(threadId, createdAt).pipe(Effect.mapError(error))
+          yield* hostGate
+            .withPermits(1)(hostInstance(threadId, createdAt))
+            .pipe(
+              Effect.tapCause((cause) =>
+                Effect.logError("thread_host.ensure.failed").pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": threadId,
+                    "rika.failure.kind": failureKind(cause),
+                  }),
+                ),
+              ),
+              Effect.mapError(error),
+            )
         }),
         notifyThreadHost: Effect.fn("ExecutionBackend.notifyThreadHost")(function* (threadId, turnId, now) {
           yield* hostGate
@@ -525,7 +682,18 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 })
               }),
             )
-            .pipe(Effect.mapError(error))
+            .pipe(
+              Effect.tapCause((cause) =>
+                Effect.logError("thread_host.notification.failed").pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": threadId,
+                    ...(turnId === undefined ? {} : { "rika.turn.id": turnId }),
+                    "rika.failure.kind": failureKind(cause),
+                  }),
+                ),
+              ),
+              Effect.mapError(error),
+            )
         }),
         registerTurnPromoter: (promoter) => registry.register(promoter),
         createFanOut: Effect.fn("ExecutionBackend.createFanOut")(function* (input) {
@@ -668,6 +836,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         }),
         start: Effect.fn("ExecutionBackend.start")(function* (input) {
           return yield* Effect.gen(function* () {
+            const startedAt = yield* Clock.currentTimeMillis
             const metadata = { steering_enabled: true, multi_agent_enabled: true }
             const rootCompaction =
               input.executionRoute === undefined
@@ -701,6 +870,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                     ReadThread: pinnedSelection(agentRoutes.readThread),
                     Task: pinnedSelection(agentRoutes.task),
                   }
+            yield* Effect.logInfo("execution.starting").pipe(
+              Effect.annotateLogs({
+                "rika.model.name": selection.model,
+                "rika.model.provider": selection.provider,
+              }),
+            )
             const registered = yield* client.registerAgent({
               id: agentId,
               address: addressId,
@@ -759,8 +934,27 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   ),
                 ),
               )
+            yield* Clock.currentTimeMillis.pipe(
+              Effect.flatMap((acceptedAt) =>
+                Effect.logInfo("execution.accepted").pipe(
+                  Effect.annotateLogs("rika.duration.ms", acceptedAt - startedAt),
+                ),
+              ),
+            )
             return yield* followExecution(client, input.turnId, undefined, input.onEvent)
-          }).pipe(Effect.mapError(error))
+          }).pipe(
+            Effect.tapCause((cause) =>
+              Effect.logError("execution.start.failed").pipe(
+                Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+              ),
+            ),
+            Effect.annotateLogs({
+              "rika.execution.id": String(executionId(input.turnId)),
+              "rika.thread.id": String(input.threadId),
+              "rika.turn.id": String(input.turnId),
+            }),
+            Effect.mapError(error),
+          )
         }),
         follow: Effect.fn("ExecutionBackend.follow")(function* (turnId, afterCursor, onEvent) {
           return yield* followExecution(client, turnId, afterCursor, onEvent).pipe(Effect.mapError(error))
