@@ -108,6 +108,57 @@ for (const historySize of [1, 10, 100, 1_000] as const) {
     ))
 }
 
+for (const panel of ["changed", "workspace"] as const) {
+  test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
+        const paths = Array.from(
+          { length: 10_000 },
+          (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
+        )
+        const initialModel = initial("/work", "high")
+        const base: Model = {
+          ...initialModel,
+          width: 120,
+          height: 40,
+          entries: [{ role: "assistant", text: "settled response" }],
+          ...(panel === "changed"
+            ? {
+                changedFilesOpen: true,
+                changedFiles: ready(paths.map((path) => ({ path, status: "M", added: 1, removed: 0 }))),
+              }
+            : {
+                workspaceFilesOpen: true,
+                filePicker: { ...initialModel.filePicker, items: ready(paths) },
+              }),
+        }
+        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        try {
+          surface.update(base)
+          yield* openTui(() => setup.renderer.idle())
+          const durations = yield* Effect.forEach(
+            Array.from({ length: 20 }, (_, index) => index),
+            (index) =>
+              Effect.sync(() =>
+                surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length }),
+              ).pipe(
+                Effect.timed,
+                Effect.map(([duration]) => Duration.toMillis(duration)),
+              ),
+            { concurrency: 1 },
+          )
+          const p95 = durations.toSorted((left, right) => left - right)[Math.floor(durations.length * 0.95)]!
+
+          expect(p95).toBeLessThan(16)
+        } finally {
+          surface.destroy()
+          setup.renderer.destroy()
+        }
+      }),
+    ))
+}
+
 test("renders autonomous welcome animation frames while otherwise event-driven", () =>
   Effect.runPromise(
     Effect.gen(function* () {

@@ -138,6 +138,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 - [x] Port the initial command palette.
 - [x] Port thread sidebar.
 - [x] Render changed files as a complete nested tree in a full-height right sidebar with panel-bounded scrolling, colored line counts, and editor-opening file clicks.
+- [x] Virtualize and identity-cache changed-files and Workspace sidebar rows. Native 10,000-file cases keep p95 composer updates below sixteen milliseconds; the installed Pilotty flow opens the 10,000-file tree in 178 ms and displays typed input in 4 ms.
 - [x] Keep the mode selector grouped with the narrowed composer, refresh changed files while open, and switch mutually exclusively between changed files (`Opt+S`) and the Workspace file tree (`Opt+T`).
 - [x] Bound subprocess output while draining, release terminal process entries, and stop loader animation from rebuilding the complete transcript.
 - [x] Keep generic and child waits non-actionable, preserve permission request kinds, and reconcile exhausted Relay 0.0.50 follows through parent terminal state.

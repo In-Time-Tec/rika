@@ -336,6 +336,13 @@ describe("ViewState", () => {
     expect(model).toMatchObject({ workspaceFilesOpen: false, changedFilesOpen: false })
   })
 
+  test("keeps an unchanged changed-files snapshot stable", () => {
+    const files = [{ path: "src/a.ts", status: "M", added: 1, removed: 2 }]
+    const model = ViewState.update(ViewState.initial("/work"), { _tag: "ChangedFilesReplaced", files })
+
+    expect(ViewState.update(model, { _tag: "ChangedFilesReplaced", files: [...files] })).toBe(model)
+  })
+
   test("selects permission decisions and executes the pending choice from keys", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "BlockAdded",

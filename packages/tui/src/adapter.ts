@@ -819,6 +819,19 @@ const cutoutBackground = (renderer: CliRenderer): RGBA => {
   return background instanceof RGBA && background.a > 0 ? RGBA.defaultBackground(background) : RGBA.defaultBackground()
 }
 
+class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
+  onWindowChanged: (() => void) | undefined
+
+  override get scrollTop(): number {
+    return super.scrollTop
+  }
+
+  override set scrollTop(value: number) {
+    super.scrollTop = value
+    this.onWindowChanged?.()
+  }
+}
+
 export class Surface {
   readonly main: BoxRenderable
   readonly contentColumn: BoxRenderable
@@ -836,7 +849,7 @@ export class Surface {
   readonly paletteBox: BoxRenderable
   readonly palette: TextRenderable
   readonly sidebar: TextRenderable
-  readonly changedFilesBox: ScrollBoxRenderable
+  readonly changedFilesBox: SidebarScrollBoxRenderable
   readonly changedFilesText: TextRenderable
   readonly statusLabel: TextRenderable
   readonly toastBox: BoxRenderable
@@ -859,6 +872,14 @@ export class Surface {
   private pointerShape = "default"
   private changedRows: ReadonlyArray<ChangedFileRow> = []
   private changedFilesHoveredRow: number | undefined
+  private readonly changedFilesBefore: BoxRenderable
+  private readonly changedFilesAfter: BoxRenderable
+  private sidebarRowsSource: unknown
+  private sidebarRowsView: "changed" | "workspace" | undefined
+  private sidebarRowsWidth = 0
+  private sidebarWindowStart = -1
+  private sidebarWindowEnd = -1
+  private sidebarWindowHoveredRow: number | undefined
   private scrollProgrammatic = false
   private scrollFramePending = false
   private loaderPhase = 0
@@ -1016,7 +1037,7 @@ export class Surface {
       event.stopPropagation()
       this.handlers.threadSidebarSelect?.(index)
     }
-    this.changedFilesBox = new ScrollBoxRenderable(renderer, {
+    this.changedFilesBox = new SidebarScrollBoxRenderable(renderer, {
       visible: false,
       width: 34,
       flexShrink: 0,
@@ -1029,32 +1050,35 @@ export class Surface {
       scrollY: true,
       viewportCulling: true,
       verticalScrollbarOptions: { marginRight: 1 },
+      onMouseScroll: () => queueMicrotask(() => this.refreshSidebarWindow()),
     })
+    this.changedFilesBox.onWindowChanged = () => this.refreshSidebarWindow()
+    this.changedFilesBefore = new BoxRenderable(renderer, { height: 0, flexShrink: 0 })
     this.changedFilesText = new TextRenderable(renderer, {
       content: "",
       fg: colors.text,
       selectable: false,
       wrapMode: "none",
     })
+    this.changedFilesAfter = new BoxRenderable(renderer, { height: 0, flexShrink: 0 })
+    this.changedFilesBox.add(this.changedFilesBefore)
     this.changedFilesBox.add(this.changedFilesText)
+    this.changedFilesBox.add(this.changedFilesAfter)
+    this.changedFilesBox.verticalScrollBar.on?.("change", () => this.refreshSidebarWindow())
     this.changedFilesText.onMouseDown = (event) => {
       if (event.button !== 0) return
-      const row = Math.floor(event.y - this.changedFilesText.screenY)
+      const row = this.sidebarWindowStart + Math.floor(event.y - this.changedFilesText.screenY)
       const file = this.changedRows[row]?.file
       if (file === undefined) return
       event.stopPropagation()
       this.handlers.openPath?.({ path: file.path })
     }
     const updateChangedFilesHover = (event: MouseEvent) => {
-      const row = Math.floor(event.y - this.changedFilesText.screenY)
+      const row = this.sidebarWindowStart + Math.floor(event.y - this.changedFilesText.screenY)
       const hoveredRow = this.changedRows[row]?.file === undefined ? undefined : row
       if (hoveredRow === this.changedFilesHoveredRow) return
       this.changedFilesHoveredRow = hoveredRow
-      if (this.model !== undefined)
-        this.changedFilesText.content = renderFileRows(
-          sidebarFileRows(this.model, sidebarInnerWidth(this.model)),
-          hoveredRow,
-        )
+      this.refreshSidebarWindow(true)
       this.renderer.setMousePointer(hoveredRow === undefined ? "default" : "pointer")
       this.renderer.requestRender()
     }
@@ -1063,8 +1087,7 @@ export class Surface {
     this.changedFilesText.onMouseOut = () => {
       if (this.changedFilesHoveredRow === undefined) return
       this.changedFilesHoveredRow = undefined
-      if (this.model !== undefined)
-        this.changedFilesText.content = renderFileRows(sidebarFileRows(this.model, sidebarInnerWidth(this.model)))
+      this.refreshSidebarWindow(true)
       this.renderer.setMousePointer("default")
       this.renderer.requestRender()
     }
@@ -1408,6 +1431,46 @@ export class Surface {
       previous.width !== input.width
     )
   }
+  private refreshSidebarRows(model: Model): void {
+    const view = model.changedFilesOpen ? "changed" : "workspace"
+    const source = view === "changed" ? model.changedFiles : model.filePicker.items
+    const width = sidebarInnerWidth(model)
+    if (this.sidebarRowsView !== view || this.sidebarRowsSource !== source || this.sidebarRowsWidth !== width) {
+      this.sidebarRowsView = view
+      this.sidebarRowsSource = source
+      this.sidebarRowsWidth = width
+      this.changedRows = sidebarFileRows(model, width)
+      this.sidebarWindowStart = -1
+      this.sidebarWindowEnd = -1
+    }
+    this.refreshSidebarWindow()
+  }
+  private refreshSidebarWindow(force = false): void {
+    if (!this.changedFilesBox.visible) return
+    const viewportRows = Math.max(1, this.changedFilesBox.viewport.height || (this.model?.height ?? 1) - 2)
+    const scrollTop = Math.min(
+      Math.max(0, Math.floor(this.changedFilesBox.scrollTop)),
+      Math.max(0, this.changedRows.length - viewportRows),
+    )
+    const start = Math.max(0, scrollTop - 4)
+    const end = Math.min(this.changedRows.length, scrollTop + viewportRows + 4)
+    if (
+      !force &&
+      start === this.sidebarWindowStart &&
+      end === this.sidebarWindowEnd &&
+      this.changedFilesHoveredRow === this.sidebarWindowHoveredRow
+    )
+      return
+    this.sidebarWindowStart = start
+    this.sidebarWindowEnd = end
+    this.sidebarWindowHoveredRow = this.changedFilesHoveredRow
+    this.changedFilesBefore.height = start
+    this.changedFilesAfter.height = Math.max(0, this.changedRows.length - end)
+    this.changedFilesText.content = renderFileRows(
+      this.changedRows.slice(start, end),
+      this.changedFilesHoveredRow === undefined ? undefined : this.changedFilesHoveredRow - start,
+    )
+  }
   private welcomeWidthFor(model: Model): number {
     const sidebarReady = model.changedFilesOpen
       ? isReady(model.changedFiles)
@@ -1657,10 +1720,8 @@ export class Surface {
         ? ` Changed files (${readyOr(model.changedFiles, []).length}) `
         : ` Files (${readyOr(model.filePicker.items, []).length}) `
       this.changedFilesBox.titleAlignment = "left"
-      this.changedRows = sidebarFileRows(model, sidebarInnerWidth(model))
-      this.changedFilesText.content = renderFileRows(this.changedRows, this.changedFilesHoveredRow)
+      this.refreshSidebarRows(model)
     } else {
-      this.changedRows = []
       this.changedFilesHoveredRow = undefined
     }
     this.transcriptScroll.stickyScroll = model.scrollFollow

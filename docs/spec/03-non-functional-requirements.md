@@ -25,6 +25,7 @@
 - Renderer updates are coalesced to at most one normal frame per sixteen milliseconds. Terminal results, permission requests, and resync frames bypass that delay.
 - Resident interactive delivery uses bounded queues. A slow consumer receives a typed resync requirement rather than unbounded buffered history.
 - The transcript benchmark covers 1, 10, 100, and 1,000 Turns. Input dispatch and a one-entry live patch stay under sixteen milliseconds at p95 on the supported packaged development target, and mounted renderable count stays constant after the window is full.
+- The file-sidebar benchmark covers 10,000 changed or Workspace files. Opening builds one cached hierarchy, only viewport rows plus overscan enter OpenTUI content, and later composer updates stay under sixteen milliseconds at p95.
 
 ## Maintainability
 

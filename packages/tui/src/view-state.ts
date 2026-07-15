@@ -628,6 +628,19 @@ const renameThread = (
   return next
 }
 
+const sameChangedFiles = (left: ReadonlyArray<ChangedFile>, right: ReadonlyArray<ChangedFile>): boolean =>
+  left.length === right.length &&
+  left.every((file, index) => {
+    const candidate = right[index]
+    return (
+      candidate !== undefined &&
+      file.path === candidate.path &&
+      file.status === candidate.status &&
+      file.added === candidate.added &&
+      file.removed === candidate.removed
+    )
+  })
+
 export const canSubmit = (model: Model): boolean =>
   !model.threadSwitcher.open &&
   !model.threadSidebar.focused &&
@@ -1098,8 +1111,10 @@ export const update: {
       return { ...model, changedFilesOpen: !model.changedFilesOpen, workspaceFilesOpen: false }
     case "ChangedFilesRequested":
       return model.changedFiles._tag === "Ready" ? model : { ...model, changedFiles: loading }
-    case "ChangedFilesReplaced":
+    case "ChangedFilesReplaced": {
+      if (model.changedFiles._tag === "Ready" && sameChangedFiles(model.changedFiles.value, message.files)) return model
       return { ...model, changedFiles: ready([...message.files]) }
+    }
     case "ThreadPreviewRequested":
       return {
         ...model,
