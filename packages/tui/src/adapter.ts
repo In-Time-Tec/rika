@@ -842,6 +842,7 @@ interface TranscriptRenderInput {
 }
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
+const typingCursorStyle = { style: "default" } as const
 
 const cutoutBackground = (renderer: CliRenderer): RGBA => {
   const background: unknown = Reflect.get(renderer, "backgroundColor")
@@ -931,6 +932,7 @@ export class Surface {
   private scrollbarSyncing = false
   private scrollGeneration = 0
   private destroyed = false
+  private focusedEditor: ProjectedEditorRenderable | undefined
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -1017,7 +1019,7 @@ export class Surface {
       wrapMode: "word",
       showCursor: true,
       cursorColor: colors.text,
-      cursorStyle: { style: "block", blinking: true },
+      cursorStyle: typingCursorStyle,
     })
     this.modeLabel = new TextRenderable(renderer, {
       content: "",
@@ -1093,7 +1095,7 @@ export class Surface {
       wrapMode: "none",
       showCursor: true,
       cursorColor: colors.text,
-      cursorStyle: { style: "block", blinking: true },
+      cursorStyle: typingCursorStyle,
     })
     this.sidebar = new TextRenderable(renderer, {
       content: "",
@@ -1965,7 +1967,6 @@ export class Surface {
             : undefined
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible
-    this.overlayEditor.visible = false
     this.paletteBox.bottomTitle = ""
     let cursorEditor: ProjectedEditorRenderable | undefined =
       model.shortcutsOpen || model.threadSidebar.focused ? undefined : this.composerEditor
@@ -2030,6 +2031,7 @@ export class Surface {
       cursorEditor = this.overlayEditor
     }
     this.focusEditor(cursorEditor)
+    if (cursorEditor !== this.overlayEditor) this.overlayEditor.visible = false
     this.renderer.requestRender()
   }
 
@@ -2042,18 +2044,10 @@ export class Surface {
   }
 
   private focusEditor(editor: ProjectedEditorRenderable | undefined): void {
-    if (editor === this.composerEditor) {
-      this.overlayEditor.blur()
-      this.composerEditor.focus()
-      return
-    }
-    if (editor === this.overlayEditor) {
-      this.composerEditor.blur()
-      this.overlayEditor.focus()
-      return
-    }
-    this.composerEditor.blur()
-    this.overlayEditor.blur()
+    if (editor === this.focusedEditor) return
+    this.focusedEditor?.blur()
+    this.focusedEditor = editor
+    this.focusedEditor?.focus()
   }
 
   destroy(): void {
@@ -2074,8 +2068,7 @@ export class Surface {
     this.cancelTimer(this.junkTimer)
     this.junkTimer = undefined
     this.junkBuffer = []
-    this.composerEditor.blur()
-    this.overlayEditor.blur()
+    this.focusEditor(undefined)
     this.composerDrag = undefined
     this.sidebarDrag = undefined
     this.setPointerShape("default")

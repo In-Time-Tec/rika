@@ -68,7 +68,7 @@ test("renders input and resize updates while the renderer remains event-driven",
     }),
   ))
 
-test("uses OpenTUI's native blinking cursor for each editable surface", () =>
+test("uses OpenTUI's native cursor without overriding the terminal cursor style", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
@@ -78,7 +78,7 @@ test("uses OpenTUI's native blinking cursor for each editable surface", () =>
         surface.update(base)
         yield* openTui(() => setup.renderer.idle())
         const composerCursor = setup.renderer.getCursorState()
-        expect(composerCursor).toMatchObject({ visible: true, style: "block", blinking: true })
+        expect(composerCursor).toMatchObject({ visible: true, style: "default" })
 
         surface.update({
           ...base,
@@ -87,7 +87,7 @@ test("uses OpenTUI's native blinking cursor for each editable surface", () =>
         })
         yield* openTui(() => setup.renderer.idle())
         const paletteCursor = setup.renderer.getCursorState()
-        expect(paletteCursor).toMatchObject({ visible: true, style: "block", blinking: true })
+        expect(paletteCursor).toMatchObject({ visible: true, style: "default" })
         expect(paletteCursor.y).not.toBe(composerCursor.y)
 
         surface.update({
@@ -95,14 +95,14 @@ test("uses OpenTUI's native blinking cursor for each editable surface", () =>
           threadSwitcher: { ...base.threadSwitcher, open: true, query: "cursor" },
         })
         yield* openTui(() => setup.renderer.idle())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "block", blinking: true })
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "default" })
 
         surface.update({
           ...base,
           filePicker: { ...base.filePicker, open: true, query: "src", items: ready(["src/main.ts"]) },
         })
         yield* openTui(() => setup.renderer.idle())
-        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "block", blinking: true })
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "default" })
 
         surface.update({ ...base, modePicker: { open: true, selected: 0 } })
         yield* openTui(() => setup.renderer.idle())
@@ -114,6 +114,38 @@ test("uses OpenTUI's native blinking cursor for each editable surface", () =>
         })
         yield* openTui(() => setup.renderer.idle())
         expect(setup.renderer.getCursorState().visible).toBe(false)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("keeps the native cursor visible when the focused editor does not change", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const base = { ...initial("/work", "high"), width: 100, height: 30, input: "draft", cursor: 5 }
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        expect(setup.renderer.getCursorState().visible).toBe(true)
+
+        surface.update({ ...base, input: "drafts", cursor: 6 })
+        expect(setup.renderer.getCursorState().visible).toBe(true)
+
+        const palette = {
+          ...base,
+          paletteOpen: true,
+          palette: { open: true, query: "mode", selected: 0 },
+        }
+        surface.update(palette)
+        yield* openTui(() => setup.renderer.idle())
+        expect(setup.renderer.getCursorState().visible).toBe(true)
+
+        surface.update({ ...palette, palette: { ...palette.palette, query: "modes" } })
+        expect(setup.renderer.getCursorState().visible).toBe(true)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
