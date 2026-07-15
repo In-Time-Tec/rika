@@ -177,11 +177,21 @@ import {
   renderTranscript,
   renderTranscriptStyled,
 } from "../src/adapter"
-import { defaultReasoningEffort, initial, ready, type Mode, type Model } from "../src/view-state"
+import { defaultReasoningEffort, initial, ready, type Mode, type Model, type ThreadItem } from "../src/view-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
+
+const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
+  workspace: "/workspace",
+  pinned: false,
+  archived: false,
+  status: "idle",
+  unread: false,
+  lastActivityAt: 0,
+  ...input,
+})
 
 const createScoped = (callbacks: Parameters<typeof create>[0]) =>
   Effect.acquireRelease(
@@ -255,10 +265,8 @@ describe("Surface", () => {
     expect(blocks.map(renderBlock).join("\n")).toContain("2×3 · 4 bytes")
     const state = model({
       blocks: [...blocks],
-      threads: [
-        { id: "a", title: "One", active: true, unread: true },
-        { id: "b", title: "Two", active: false, unread: false },
-      ],
+      currentThreadId: "a",
+      threads: [thread({ id: "a", title: "One", unread: true }), thread({ id: "b", title: "Two" })],
     })
     expect(renderTranscript(state)).toContain("Reasoning")
     const styledTranscript = renderTranscriptStyled(state)
@@ -267,8 +275,11 @@ describe("Surface", () => {
     expect(styledTranscript).toContain("Allow once")
     expect(styledTranscript).toContain("Always")
     expect(styledTranscript).toContain("Deny")
-    expect(renderSidebar(state)).toContain("› ● One")
-    expect(renderSidebar(state)).toContain("    Two")
+    const sidebar = renderSidebar(state)
+      .chunks.map((chunk) => chunk.text)
+      .join("")
+    expect(sidebar).toContain(" * One")
+    expect(sidebar).toContain("   Two")
   })
 
   test("keeps tool cards generic without removed activity assumptions", () => {
@@ -614,7 +625,12 @@ describe("Surface", () => {
       expect(surface.paletteBox.bottomTitle).toBe(" ←→ turn · esc")
       surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
       expect(paletteText()).toContain("quit")
-      surface.update(model({ threads: [{ id: "a", title: "A", active: true, unread: false }], sidebarOpen: false }))
+      surface.update(
+        model({
+          threads: [thread({ id: "a", title: "A" })],
+          threadSidebar: { open: false, focused: false, selected: 0, scrollTop: 0 },
+        }),
+      )
       expect(surface.sidebar.visible).toBe(false)
       surface.update(model({ entries: [{ role: "assistant", text: "ok" }] }))
       expect(surface.transcriptContent).toBeInstanceOf(Object)

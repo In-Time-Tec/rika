@@ -6,7 +6,7 @@ Rika deterministically resolves parent and subtree guidance, global guidance, fi
 
 ## Guidance
 
-Supported files include `AGENTS.md` with `AGENT.md` and `CLAUDE.md` fallbacks. Referenced files and globs are resolved with explicit precedence, bounded depth and cardinality inside the Workspace, and recorded for diagnosis. Typed `@file:`, `@guidance:`, `@thread:`, and `@image:` mentions add files, reference globs, local thread transcripts, and image files to execution context without granting policy authority to their contents.
+Supported files include `AGENTS.md` with `AGENT.md` and `CLAUDE.md` fallbacks. Referenced files and globs are resolved with explicit precedence, bounded depth and cardinality inside the Workspace, and recorded for diagnosis. Typed `@file:`, `@guidance:`, and `@image:` mentions add files, reference globs, and image files to execution context without granting policy authority to their contents. A Thread reference is `@<thread-id>`. An untyped mention is a Thread reference only when it resolves to an existing product Thread; otherwise it follows file mention handling. The superseded `@thread:<thread-id>` form is not supported.
 
 The TUI may materialize an untyped `@` file completion as Workspace-relative prompt text. This completion changes only composer text: submission and execution continue through the same durable prompt-parts and Resolved Context resolution boundaries.
 

@@ -49,6 +49,7 @@ const program = Effect.gen(function* () {
                         const count = input.prompt[0] === "burst-events" ? 2_000 : 1
                         for (let index = 0; index < count; index += 1) dispatch({ _tag: "ThreadsListed", threads: [] })
                       }),
+                    watchThreads: () => Effect.never,
                     submit: (prompt) =>
                       prompt === "ambiguous"
                         ? append("mutation-attempts.log", `${process.pid}\n`).pipe(

@@ -1,7 +1,6 @@
 export interface Mentions {
   readonly files: ReadonlyArray<string>
   readonly references: ReadonlyArray<string>
-  readonly threads: ReadonlyArray<string>
   readonly images: ReadonlyArray<string>
 }
 
@@ -15,6 +14,5 @@ const unique = (input: ReadonlyArray<string>) => [...new Set(input)].toSorted()
 export const parse = (text: string): Mentions => ({
   files: unique(values(text, "file")),
   references: unique(values(text, "(?:ref|guidance)")),
-  threads: unique(values(text, "thread")),
   images: unique(values(text, "image")),
 })

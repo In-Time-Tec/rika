@@ -137,8 +137,11 @@ const start = (root: string, grace = 350, finalizerDelay = 0, delayedWork = fals
     )
   }
   const nextEffect = Effect.suspend(readLine).pipe(
-    Effect.flatMap(decodeEvent),
-    Effect.mapError((cause) => new FixtureFailure({ operation: "decode client event", cause })),
+    Effect.flatMap((line) =>
+      decodeEvent(line).pipe(
+        Effect.mapError((cause) => new FixtureFailure({ operation: `decode client event: ${line}`, cause })),
+      ),
+    ),
   )
   const next = () => Effect.runPromise(nextEffect)
   const send = (command: string) => client.stdin.write(new TextEncoder().encode(`${command}\n`))

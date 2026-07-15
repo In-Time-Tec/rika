@@ -1,0 +1,31 @@
+--- Terminal 100x30 | Cursor: (29, 3) ---
+ * background streaming turn       │
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                     ┃ background streaming turn
+                                    ╭──────────────────────────────────────────────────────────────╮
+                                    │ queued follow-up turn Enter to steer · Backspace to dequeue  │
+                                    ╰───────────────────────────────────────────── $···· ─ medium ─╯
+                                    ╭──────────────────────────────────────────────────────────────╮
+                                    │                                                              │
+                                    │                                                              │
+                                    │                                                              │
+  ⠴[ ]Waiting                         ╰──────────────────── /private/tmp/rika-thread-live/workspace ─╯

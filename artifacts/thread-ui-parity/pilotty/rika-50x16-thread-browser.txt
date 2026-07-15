@@ -1,0 +1,17 @@
+--- Terminal 50x16 | Cursor: (10, 48) ---
+
+
+  ╭─ Switch Thread ────────────────────────────╮
+  │                                            │
+  │ >                                          │
+  │                                            │
+  │   TUI performance and bug audit  16m ago   │
+  │   Push all local changes to main 16m ago   │
+  │   Rika performance and reli… ~1 16m ago    │
+  │                                            │
+  ╰── Opt+W/Ctrl+T all workspaces · Esc close ─╯[ ]
+╭─────────────────────────────────────── medium ─╮
+│                                                │
+│                                                │
+│                                                │
+╰────────────────────────────────────────────────╯

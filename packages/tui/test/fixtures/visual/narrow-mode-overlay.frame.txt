@@ -1,12 +1,12 @@
-
-
-        Welcome to Rika
 ╭──────────────────────────────╮
 │ •••••••••••••••••••········· │
 │ low     medium   high        │
 │ ultra                        │
-│                        high  │
-│ Agent:  GPT-5.6 Luna medium  │
-│ Oracle: GPT-5.6 Sol high     │
 │                              │
+│ Agent:  GPT-5.6 Luna medium  │
 ╰─────────────── ←→ turn · esc─╯
+╭─────────────────────── high ─╮
+│                              │
+│                              │
+│                              │
+╰──────────────────────────────╯

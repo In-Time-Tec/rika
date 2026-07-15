@@ -973,7 +973,6 @@ describe("Operation", () => {
         { _tag: "QueueChanged", threadId: "thread-interactive", turns: [] },
       ])
       expect(dispatched[5]).toMatchObject({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" })
-      expect(dispatched[6]?._tag).toBe("ThreadsListed")
       expect(yield* turns.get(Turn.TurnId.make("turn-interactive"))).toMatchObject({
         prompt: "exact prompt",
         status: "completed",
@@ -1735,7 +1734,7 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("expands existing and missing thread mentions for a run in an explicit workspace", () =>
+  it.effect("expands an existing bare thread mention for a run in an explicit workspace", () =>
     Effect.gen(function* () {
       const mentioned: Thread.Thread = {
         id: Thread.ThreadId.make("mentioned"),
@@ -1759,7 +1758,7 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run({
           _tag: "Run",
-          prompt: ["compare", "@thread:mentioned", "@thread:missing"],
+          prompt: ["compare", "@mentioned"],
           workspace: "/explicit",
           ephemeral: false,
           streamJson: false,
@@ -1788,7 +1787,7 @@ describe("Operation", () => {
         ),
       )
       expect((yield* Ref.get(prompts))[0]).toContain("# Mentioned")
-      expect((yield* Ref.get(prompts))[0]).toContain("Thread not found")
+      expect((yield* Ref.get(prompts))[0]).not.toContain("Thread not found")
     }),
   )
 

@@ -168,13 +168,12 @@ describe("ResolvedContext", () => {
     }).pipe(provideLayer(Path.layer)),
   )
 
-  it("parses typed file, guidance, thread, and image mentions without collisions", () => {
+  it("parses typed file, guidance, and image mentions without treating removed thread syntax as supported", () => {
     expect(
       ContextMentions.parse('@thread:T-2 @image:"assets/diagram one.png" @guidance:docs/*.md @file:src/a.ts'),
     ).toEqual({
       files: ["src/a.ts"],
       references: ["docs/*.md"],
-      threads: ["T-2"],
       images: ["assets/diagram one.png"],
     })
   })

@@ -13,6 +13,18 @@ const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   eventType: input.eventType ?? "press",
 })
 
+const thread = (
+  input: Partial<ViewState.ThreadItem> & Pick<ViewState.ThreadItem, "id" | "title">,
+): ViewState.ThreadItem => ({
+  workspace: "/work",
+  pinned: false,
+  archived: false,
+  status: "idle",
+  unread: false,
+  lastActivityAt: 0,
+  ...input,
+})
+
 describe("ViewState", () => {
   test("exposes only thread switch, mode change, fast mode, and quit in the command palette", () => {
     expect(Palette.commands).toEqual([
@@ -315,13 +327,13 @@ describe("ViewState", () => {
   test("switches mutually exclusively between the file tree and changed files", () => {
     let model = ViewState.initial("/work")
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", alt: true }) })
-    expect(model).toMatchObject({ sidebarOpen: true, changedFilesOpen: false })
+    expect(model).toMatchObject({ workspaceFilesOpen: true, changedFilesOpen: false })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "s", alt: true }) })
-    expect(model).toMatchObject({ sidebarOpen: false, changedFilesOpen: true })
+    expect(model).toMatchObject({ workspaceFilesOpen: false, changedFilesOpen: true })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", alt: true }) })
-    expect(model).toMatchObject({ sidebarOpen: true, changedFilesOpen: false })
+    expect(model).toMatchObject({ workspaceFilesOpen: true, changedFilesOpen: false })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", alt: true }) })
-    expect(model).toMatchObject({ sidebarOpen: false, changedFilesOpen: false })
+    expect(model).toMatchObject({ workspaceFilesOpen: false, changedFilesOpen: false })
   })
 
   test("selects permission decisions and executes the pending choice from keys", () => {
@@ -400,13 +412,10 @@ describe("ViewState", () => {
   test("navigates threads, selects permissions, and deduplicates replay", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "ThreadsReplaced",
-      threads: [
-        { id: "a", title: "First", active: true, unread: false },
-        { id: "b", title: "Second", active: false, unread: true },
-      ],
+      threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second", unread: true })],
     })
-    model = ViewState.update(model, { _tag: "ThreadSelectionMoved", offset: 1 })
-    model = ViewState.update(model, { _tag: "ThreadSelectionConfirmed" })
+    model = ViewState.update(model, { _tag: "ThreadSidebarSelectionMoved", offset: 1 })
+    model = ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed" })
     expect(model.pendingAction).toEqual({ _tag: "SelectThread", id: "b" })
     model = {
       ...model,
@@ -430,18 +439,21 @@ describe("ViewState", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "ThreadsReplaced",
       threads: [
-        { id: "a", title: "First", workspace: "/one", active: true, unread: false, archived: false },
-        { id: "b", title: "Second task", workspace: "/two", active: false, unread: true, archived: true },
+        thread({ id: "a", title: "First", workspace: "/one" }),
+        thread({ id: "b", title: "Second task", workspace: "/two", unread: true, archived: true }),
       ],
     })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
     expect(model.threadSwitcher.open).toBe(true)
+    model = ViewState.update(model, { _tag: "ThreadPreviewScrolled", offset: 5 })
+    expect(model.threadSwitcher.previewScroll).toBe(5)
     for (const character of "second")
       model = ViewState.update(model, {
         _tag: "KeyPressed",
         key: key({ name: character, sequence: character }),
       })
-    expect(ViewState.filteredThreads(model).map((thread) => thread.id)).toEqual(["b"])
+    expect(model.threadSwitcher.previewScroll).toBe(0)
+    expect(ViewState.filteredThreads(model).map((item) => item.id)).toEqual(["b"])
     expect(ViewState.selectedThreadMetadata(model)).toMatchObject({ id: "b", workspace: "/two", archived: true })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
     expect(model.pendingAction).toEqual({ _tag: "SelectThread", id: "b" })
@@ -454,22 +466,43 @@ describe("ViewState", () => {
   test("switches file completion to thread completion with @@ and inserts a typed thread mention", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "ThreadsReplaced",
-      threads: [{ id: "thread-2", title: "Release notes", workspace: "/two", active: false, unread: false }],
+      threads: [thread({ id: "thread-2", title: "Release notes", workspace: "/two" })],
     })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "@", sequence: "@" }) })
-    expect(model.filePicker.kind).toBe("thread")
+    expect(model.threadSwitcher).toMatchObject({ open: true, kind: "mention" })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "r", sequence: "r" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-    expect(model.input).toBe('@thread:"thread-2" ')
+    expect(model.input).toBe("@thread-2 ")
+  })
+
+  test("opens, focuses, navigates, and closes the fixed thread sidebar with ctrl+backslash", () => {
+    let model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "ThreadsReplaced",
+      threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second" })],
+    })
+    model = ViewState.update(model, { _tag: "ThreadActivated", threadId: "b", title: "Second" })
+    const toggle = { _tag: "KeyPressed", key: key({ name: "\\", ctrl: true, sequence: "\u001c" }) } as const
+    model = ViewState.update(model, toggle)
+    expect(model.threadSidebar).toMatchObject({ open: true, focused: false, selected: 1 })
+    model = ViewState.update(model, toggle)
+    expect(model.threadSidebar.focused).toBe(true)
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+    expect(model.pendingAction).toEqual({ _tag: "SelectThread", id: "a" })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
+    expect(model.threadSidebar).toMatchObject({ open: true, focused: false })
+    model = ViewState.update(model, toggle)
+    model = ViewState.update(model, toggle)
+    expect(model.threadSidebar.open).toBe(false)
   })
 
   test("covers reducer boundaries and every busy shortcut", () => {
     let model = ViewState.initial("/work")
-    expect(ViewState.update(model, { _tag: "ThreadSelectionConfirmed" })).toBe(model)
-    model = ViewState.update(model, { _tag: "SidebarToggled" })
+    expect(ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed" })).toBe(model)
+    model = ViewState.update(model, { _tag: "WorkspaceFilesToggled" })
     model = ViewState.update(model, { _tag: "ThreadsReplaced", threads: [] })
-    model = ViewState.update(model, { _tag: "ThreadSelectionMoved", offset: 9 })
+    model = ViewState.update(model, { _tag: "ThreadSidebarSelectionMoved", offset: 9 })
     model = ViewState.update(model, { _tag: "ScrollMoved", offset: -3 })
     model = ViewState.update(model, { _tag: "BlockAdded", block: { _tag: "Queued", id: "x", prompt: "x" } })
     model = ViewState.update(model, { _tag: "QueuedEdited", index: 3, prompt: "no" })
@@ -555,7 +588,7 @@ describe("ViewState", () => {
     expect(ViewState.canSubmit({ ...base, filePicker: { ...base.filePicker, open: true } })).toBe(false)
     expect(ViewState.canSubmit({ ...base, modePicker: { open: true, selected: 0 } })).toBe(false)
     expect(ViewState.canSubmit({ ...base, palette: { open: true, query: "", selected: 0 } })).toBe(false)
-    expect(ViewState.canSubmit({ ...base, threadSwitcher: { open: true, query: "", selected: 0 } })).toBe(false)
+    expect(ViewState.canSubmit({ ...base, threadSwitcher: { ...base.threadSwitcher, open: true } })).toBe(false)
     expect(ViewState.canSubmit({ ...base, shortcutsOpen: true })).toBe(false)
     expect(ViewState.canSubmit({ ...base, input: "multi\\", cursor: 6 })).toBe(false)
     const withPermission = ViewState.update(base, {

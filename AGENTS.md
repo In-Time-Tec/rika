@@ -4,6 +4,10 @@
 
 Rika is a local-only personal coding-agent CLI and OpenTUI application. Its committed dependency contract consumes released Baton and Relay packages and uses Effect v4 throughout.
 
+## Keep the project greenfield
+
+Rika has no users and no compatibility obligation. Do not preserve old code, formats, names, commands, or behavior unless the current specification still requires them. Remove superseded paths instead of adding aliases, fallback decoders, migrations, deprecation layers, or dual behavior. If a change replaces a contract, update every caller, test, fixture, and document in the same change.
+
 ## Effect is non-negotiable
 
 - **All code in this repository MUST be Effect-native and Effect-idiomatic. This is the primary engineering constraint, not a preference.** It applies to production code, tests, scripts, CLIs, adapters, and examples—not only services. A change that works but is not idiomatic Effect is not complete.

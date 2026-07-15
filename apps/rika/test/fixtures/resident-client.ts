@@ -6,8 +6,8 @@ import {
   Config,
   Deferred,
   Effect,
-  Fiber,
   FileSystem,
+  Fiber,
   Layer,
   Logger,
   Path,
@@ -99,13 +99,11 @@ const program = Effect.gen(function* () {
         ),
     },
   )
-  const selfStat = yield* fs.readFileString("/proc/self/stat")
-  const clientPid = Number(selfStat.slice(0, selfStat.indexOf(" ")))
   yield* emit({
     type: "attached",
     role: connection.role,
     id: connection.connectionId,
-    clientPid,
+    clientPid: process.pid,
     hostPid: yield* Ref.get(hostPid),
   })
   const commands = stdio.stdin.pipe(

@@ -1,0 +1,31 @@
+--- Terminal 100x30 | Cursor: (25, 98) ---
+ * background streaming turn       │
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                                     ┃ background streaming turn
+                                     STREAM-DONE
+                                    ╭───────────────────────────────────────────────────── medium [─]╮
+                                    │                                                              │
+                                    │                                                              │
+                                    │                                                              │
+                                    ╰──────────────────── /private/tmp/rika-thread-live/workspace ─╯

@@ -10,7 +10,7 @@ const program = Effect.gen(function* () {
   const candidate = yield* approve
     ? fileSystem.makeTempDirectoryScoped({ prefix: "rika-visual-candidate-" })
     : fileSystem.makeTempDirectory({ prefix: "rika-visual-candidate-" })
-  yield* Effect.promise(() => captureVisuals(candidate))
+  yield* captureVisuals(candidate)
   if (approve) {
     const approved = path.join(import.meta.dir, "../packages/tui/test/fixtures/visual")
     yield* fileSystem.remove(approved, { recursive: true, force: true })

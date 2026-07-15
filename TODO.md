@@ -300,3 +300,11 @@ Plan of record: the audit at the relay session scratchpad (WI-1..WI-8); Relay 0.
 - [x] WI-8 Documentation for WI-3..WI-5: spec 05 (Thread Host), spec 08 (promotion mechanics), ADR 0011 (thread host entity), CONTEXT.md vocabulary.
 - [x] Restore fan-out/workflow + suspended-wait-resume + cancel natives on Relay 0.2.0; delete the compatibility seam and capability gates.
 - [x] Pin published Baton 0.4.3 and Relay 0.2.13, simplify `web_search` to a homogeneous non-empty array schema, reconcile deterministic starts after Relay persists a terminal execution, preserve opaque Relay failure detail beyond 1,000 execution events, validate actionable waits against current Relay state, reject inert child fan-outs, keep deterministic test-model selection fixed across TUI reasoning modes, route every child compaction policy through an isolated durable Session, and clear terminal TUI working state without duplicate generic failures. The generic known-tool malformed-argument recovery seam remains blocked upstream in Effect AI 4.0.0-beta.93.
+
+## Amp thread UI parity (2026-07-15)
+
+- [x] Replace the switcher and `@@` popup with the shared responsive Amp-style Thread browser and preview.
+- [x] Add the 36-column `Ctrl+\` Thread sidebar with keyboard, mouse, live status, and unread state.
+- [x] Persist restart-repairable Thread Summary activity and edit totals.
+- [x] Use `@<thread-id>` and remove the superseded `@thread:<thread-id>` form.
+- [x] Record matched Pilotty and agent-tty evidence for the packaged Rika and installed Amp binaries in `artifacts/thread-ui-parity/`.

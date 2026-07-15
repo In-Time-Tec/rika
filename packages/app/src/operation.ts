@@ -1,5 +1,7 @@
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
+import * as ThreadSummary from "@rika/persistence/thread-summary"
+import * as ThreadSummaryRepository from "@rika/persistence/thread-summary-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
@@ -8,11 +10,26 @@ import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
 import * as ExtensionOperations from "./extension-operations"
 import { Catalog as ToolCatalog, Runtime as ToolRuntime } from "@rika/tools"
-import { Cause, Clock, Console, Context, Deferred, Effect, Fiber, Layer, Ref, Runtime, Schema, Semaphore } from "effect"
+import {
+  Cause,
+  Clock,
+  Console,
+  Context,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  PubSub,
+  Ref,
+  Runtime,
+  Schema,
+  Semaphore,
+} from "effect"
 import * as FileMentions from "./file-mentions"
 import * as ContextMentions from "./context-mentions"
 import * as ConfigOperations from "./config-operations"
 import * as ResolvedContext from "./resolved-context"
+import * as ThreadActivity from "./thread-activity"
 
 const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
 const ClientWorkspace = { clientWorkspace: Schema.optionalKey(Schema.String) }
@@ -304,9 +321,10 @@ export const unavailableLayer = Layer.succeed(
   }),
 )
 
-export interface ProductLayerOptions<ThreadError, TurnError, BackendError> {
+export interface ProductLayerOptions<ThreadError, TurnError, BackendError, ThreadSummaryError = never> {
   readonly repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadError>
   readonly turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnError>
+  readonly threadSummaryRepositoryLayer?: Layer.Layer<ThreadSummaryRepository.Service, ThreadSummaryError>
   readonly backendLayer: Layer.Layer<ExecutionBackend.Service, BackendError>
   readonly resolveExecutionRoute?: (
     mode: "low" | "medium" | "high" | "ultra",
@@ -564,7 +582,7 @@ export type InteractiveEvent =
       readonly turnId: Turn.TurnId
       readonly event: ExecutionBackend.Event
     }
-  | { readonly _tag: "ThreadsListed"; readonly threads: ReadonlyArray<Thread.Thread> }
+  | { readonly _tag: "ThreadsListed"; readonly threads: ReadonlyArray<ThreadSummary.ThreadSummary> }
   | { readonly _tag: "AssistantCompleted"; readonly text: string }
   | {
       readonly _tag: "ExecutionFailed"
@@ -599,6 +617,7 @@ export type InteractiveEvent =
 
 export interface InteractiveSession {
   readonly initialize: (dispatch: (event: InteractiveEvent) => void) => Effect.Effect<void, never>
+  readonly watchThreads: (dispatch: (event: InteractiveEvent) => void) => Effect.Effect<void, never>
   readonly submit: (
     prompt: string,
     dispatch: (event: InteractiveEvent) => void,
@@ -667,8 +686,8 @@ const markdownExport = (thread: Thread.Thread, turns: ReadonlyArray<Turn.Turn>) 
     ...turns.flatMap((turn, index) => [`## Turn ${index + 1}`, "", `Status: ${turn.status}`, "", turn.prompt, ""]),
   ].join("\n")
 
-export const productLayer = <ThreadError, TurnError, BackendError>(
-  options: ProductLayerOptions<ThreadError, TurnError, BackendError>,
+export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummaryError = never>(
+  options: ProductLayerOptions<ThreadError, TurnError, BackendError, ThreadSummaryError>,
 ) =>
   Layer.effect(
     Service,
@@ -677,15 +696,19 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
       const submissionAdmission = yield* Semaphore.make(1)
       const queueDrain = yield* Semaphore.make(1)
       const reviewSettlementAdmission = yield* Semaphore.make(1)
+      const threadSummaryChanges = yield* PubSub.sliding<void>(1)
       const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionBackend.FanOutInspection, OperationError>>()
       const resolvedContextLayer =
         options.resolvedContextLayer ??
         ResolvedContext.testLayer({
           resolve: () => Effect.succeed({ sources: [], diagnostics: [], digest: "" }),
         })
+      const repositories = Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)
+      const threadSummaryRepositoryLayer =
+        options.threadSummaryRepositoryLayer ?? ThreadSummaryRepository.memoryLayer.pipe(Layer.provide(repositories))
       const dependencies = Layer.mergeAll(
-        options.repositoryLayer,
-        options.turnRepositoryLayer,
+        repositories,
+        threadSummaryRepositoryLayer,
         resolvedContextLayer,
         ...(options.executionExtensions === undefined ? [] : [options.executionExtensions.layer]),
       )
@@ -704,23 +727,82 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         dependencyContext,
         Context.make(ExecutionBackend.Service, acquiredBackend),
       )
+      const notifyThreadSummaries = PubSub.publish(threadSummaryChanges, undefined).pipe(Effect.asVoid)
+      const dispatchThreadSummaries = Effect.fn("Operation.dispatchThreadSummaries")(function* (
+        dispatch: (event: InteractiveEvent) => void,
+      ) {
+        const summaries = yield* ThreadSummaryRepository.Service
+        dispatch({ _tag: "ThreadsListed", threads: yield* summaries.list() })
+      })
+      const ensureTurnSummary = Effect.fn("Operation.ensureTurnSummary")(function* (turn: Turn.Turn) {
+        const summaries = yield* ThreadSummaryRepository.Service
+        yield* summaries.ensureTurn(turn.id, turn.threadId, turn.updatedAt)
+        yield* notifyThreadSummaries
+      })
+      const projectExecutionResult = Effect.fn("Operation.projectExecutionResult")(function* (
+        threadId: Thread.ThreadId,
+        result: ExecutionBackend.Result,
+      ) {
+        const summaries = yield* ThreadSummaryRepository.Service
+        yield* summaries.replaceTurn(ThreadActivity.projectionInput(threadId, result, yield* Clock.currentTimeMillis))
+        yield* notifyThreadSummaries
+      })
+      const setTurnStatus = Effect.fn("Operation.setTurnStatus")(function* (
+        id: Turn.TurnId,
+        status: Turn.Status,
+        lastCursor: string | undefined,
+        now: number,
+      ) {
+        const turns = yield* TurnRepository.Service
+        const turn = yield* turns.setStatus(id, status, lastCursor, now)
+        yield* notifyThreadSummaries
+        return turn
+      })
+      const repairThreadSummaries = Effect.fn("Operation.repairThreadSummaries")(function* () {
+        const summaries = yield* ThreadSummaryRepository.Service
+        const backend = yield* ExecutionBackend.Service
+        const candidates = yield* summaries.listRepairCandidates(100)
+        yield* Effect.forEach(
+          candidates,
+          (candidate) =>
+            Effect.gen(function* () {
+              if (candidate.status === "queued") {
+                yield* summaries.ensureTurn(candidate.turnId, candidate.threadId, yield* Clock.currentTimeMillis)
+                return
+              }
+              const inspection = yield* backend.inspect(candidate.turnId)
+              if (inspection === undefined) {
+                yield* summaries.ensureTurn(candidate.turnId, candidate.threadId, yield* Clock.currentTimeMillis)
+                return
+              }
+              yield* projectExecutionResult(candidate.threadId, yield* backend.replay(candidate.turnId))
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.logError("thread-summary.repair.failed").pipe(
+                  Effect.annotateLogs("rika.turn.id", candidate.turnId),
+                  Effect.annotateLogs("rika.failure.kind", String(error)),
+                ),
+              ),
+            ),
+          { concurrency: 4, discard: true },
+        )
+      })
       const settleReviewOwner = Effect.fn("Operation.settleReviewOwner")(function* (
         turn: Pick<Turn.Turn, "id" | "lastCursor">,
         fanOutId: string,
         initial?: ExecutionBackend.FanOutInspection,
       ) {
-        const turns = yield* TurnRepository.Service
         const backend = yield* ExecutionBackend.Service
         let inspection = initial
         while (inspection?.state === "joining" || inspection === undefined) {
           inspection = yield* backend.inspectFanOut(fanOutId)
           if (inspection === undefined) {
-            yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+            yield* setTurnStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
             return yield* operationError(`Review ${fanOutId} disappeared`)
           }
           if (inspection.state === "joining") yield* Effect.sleep("50 millis")
         }
-        yield* turns.setStatus(
+        yield* setTurnStatus(
           turn.id,
           inspection.state === "satisfied" ? "completed" : inspection.state,
           turn.lastCursor,
@@ -754,20 +836,35 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
       const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
       const executionPrompt = Effect.fn("Operation.executionPrompt")(function* (workspace: string, prompt: string) {
         const context = yield* ResolvedContext.Service
+        const threads = yield* ThreadRepository.Service
         const structured = ContextMentions.parse(prompt)
-        const legacy = [...new Set(FileMentions.parse(prompt))].filter(
-          (value) => !/^(?:file|ref|guidance|thread|image):/.test(value),
+        const bareMentions = [...new Set(FileMentions.parse(prompt))].filter(
+          (value) => !/^(?:file|ref|guidance|image):/.test(value),
         )
-        const files = [...new Set([...legacy, ...structured.files, ...structured.images])].toSorted()
+        const mentionKinds = yield* Effect.forEach(
+          bareMentions,
+          (value) =>
+            threads
+              .get(Thread.ThreadId.make(value))
+              .pipe(Effect.map((thread) => ({ value, isThread: thread !== undefined }))),
+          { concurrency: 1 },
+        )
+        const files = [
+          ...new Set([
+            ...mentionKinds.filter(({ isThread }) => !isThread).map(({ value }) => value),
+            ...structured.files,
+            ...structured.images,
+          ]),
+        ].toSorted()
+        const threadIds = [...new Set(mentionKinds.filter(({ isThread }) => isThread).map(({ value }) => value))]
         const resolved = yield* context.resolve({
           workspace,
           targetPaths: files,
           references: [...files, ...structured.references],
         })
-        const threads = yield* ThreadRepository.Service
         const turns = yield* TurnRepository.Service
         const threadBlocks = yield* Effect.forEach(
-          structured.threads,
+          threadIds,
           (id) =>
             Effect.gen(function* () {
               const thread = yield* threads.get(Thread.ThreadId.make(id))
@@ -858,6 +955,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   executionRoute: yield* resolveExecutionRoute(mode, modelTuning, thread.workspace),
                   now,
                 })
+                yield* ensureTurnSummary(turn)
                 return { thread, isNewThread, turn }
               }),
             )
@@ -880,7 +978,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               Effect.gen(function* () {
                 yield* Effect.logInfo("turn.started")
                 const prepared = yield* prepareExecution(turn, thread.workspace)
-                yield* turns.setStatus(turn.id, "running", turn.lastCursor, startedAt)
+                yield* setTurnStatus(turn.id, "running", turn.lastCursor, startedAt)
                 const result = yield* backend.start({
                   threadId: thread.id,
                   turnId: turn.id,
@@ -916,7 +1014,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   "rika.turn.id": String(turn.id),
                 }),
               )
-              yield* turns.setStatus(turn.id, "failed", turn.lastCursor, failedAt)
+              yield* setTurnStatus(turn.id, "failed", turn.lastCursor, failedAt)
               dispatch({
                 _tag: "ExecutionFailed",
                 threadId: thread.id,
@@ -939,7 +1037,8 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 "rika.turn.status": result.status,
               }),
             )
-            yield* turns.setStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
+            yield* setTurnStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
+            yield* projectExecutionResult(thread.id, result)
             if (result.status === "completed") {
               yield* settleThread(thread, dispatch)
               if (isNewThread) yield* titleThread(thread, prompt, turn.executionRoute!, dispatch)
@@ -973,6 +1072,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             E,
             | ThreadRepository.Service
             | TurnRepository.Service
+            | ThreadSummaryRepository.Service
             | ExecutionBackend.Service
             | ResolvedContext.Service
             | ExecutionExtensions.Service
@@ -1006,7 +1106,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             claimed += 1
             const promotedTurn = promoted
             if (promotedTurn.executionRoute === undefined) {
-              yield* turns.setStatus(promotedTurn.id, "failed", promotedTurn.lastCursor, yield* Clock.currentTimeMillis)
+              yield* setTurnStatus(promotedTurn.id, "failed", promotedTurn.lastCursor, yield* Clock.currentTimeMillis)
               promoted = yield* turns.claimNextQueued(thread.id, yield* Clock.currentTimeMillis)
               continue
             }
@@ -1017,7 +1117,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             const outcome = yield* Effect.exit(
               Effect.gen(function* () {
                 const prepared = yield* prepareExecution(promotedTurn, thread.workspace)
-                yield* turns.setStatus(promotedTurn.id, "running", promotedTurn.lastCursor, promotedAt)
+                yield* setTurnStatus(promotedTurn.id, "running", promotedTurn.lastCursor, promotedAt)
                 const result = yield* backend.start({
                   threadId: thread.id,
                   turnId: promotedTurn.id,
@@ -1033,7 +1133,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               }),
             )
             if (outcome._tag === "Failure") {
-              yield* turns.setStatus(promotedTurn.id, "failed", promotedTurn.lastCursor, yield* Clock.currentTimeMillis)
+              yield* setTurnStatus(promotedTurn.id, "failed", promotedTurn.lastCursor, yield* Clock.currentTimeMillis)
               dispatch({
                 _tag: "ExecutionFailed",
                 threadId: thread.id,
@@ -1044,12 +1144,13 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               const result = outcome.value
               for (const event of result.events)
                 dispatch({ _tag: "ExecutionEventReceived", threadId: thread.id, turnId: promotedTurn.id, event })
-              yield* turns.setStatus(
+              yield* setTurnStatus(
                 promotedTurn.id,
                 result.status,
                 result.events.at(-1)?.cursor,
                 yield* Clock.currentTimeMillis,
               )
+              yield* projectExecutionResult(thread.id, result)
               if (!isTerminalStatus(result.status)) break
             }
             promoted = yield* turns.claimNextQueued(thread.id, yield* Clock.currentTimeMillis)
@@ -1134,12 +1235,13 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               for (const event of result.events)
                 if (!deliveredCursors.has(event.cursor))
                   dispatch({ _tag: "ExecutionEventReceived", threadId: turn.threadId, turnId: turn.id, event })
-              yield* turns.setStatus(
+              yield* setTurnStatus(
                 turn.id,
                 result.status,
                 result.events.at(-1)?.cursor ?? turn.lastCursor,
                 yield* Clock.currentTimeMillis,
               )
+              yield* projectExecutionResult(turn.threadId, result)
               if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
               else if (result.status !== "waiting" && result.status !== "running" && result.status !== "queued")
                 dispatch({
@@ -1183,7 +1285,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             if (title.length === 0) return
             yield* threads.rename(thread.id, title, yield* Clock.currentTimeMillis)
             dispatch({ _tag: "ThreadTitled", threadId: String(thread.id), title })
-            dispatch({ _tag: "ThreadsListed", threads: yield* threads.list() })
+            yield* notifyThreadSummaries
           })
           yield* program.pipe(Effect.orElseSucceed(() => undefined))
         })
@@ -1197,6 +1299,9 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           const history = yield* turns.list(thread.id)
           if ((yield* Ref.get(selectionRequest)) !== request) return
           yield* Ref.set(interactiveThread, thread)
+          const summaries = yield* ThreadSummaryRepository.Service
+          yield* summaries.markRead(thread.id, yield* Clock.currentTimeMillis)
+          yield* notifyThreadSummaries
           dispatch({ _tag: "ThreadSelected", thread, turns: history })
           dispatch({ _tag: "QueueChanged", threadId: thread.id, turns: yield* turns.listQueued(thread.id) })
           for (const turn of history) {
@@ -1215,14 +1320,20 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           }
         })
         const session: InteractiveSession = {
-          initialize: (dispatch) =>
+          initialize: (dispatch) => safe(dispatch, dispatchThreadSummaries(dispatch)),
+          watchThreads: (dispatch) =>
             safe(
               dispatch,
-              Effect.gen(function* () {
-                const threads = yield* ThreadRepository.Service
-                const listed = yield* threads.list()
-                dispatch({ _tag: "ThreadsListed", threads: listed })
-              }),
+              Effect.scoped(
+                Effect.gen(function* () {
+                  const subscription = yield* PubSub.subscribe(threadSummaryChanges)
+                  yield* dispatchThreadSummaries(dispatch)
+                  while (true) {
+                    yield* PubSub.take(subscription)
+                    yield* dispatchThreadSummaries(dispatch)
+                  }
+                }),
+              ),
             ),
           submit,
           shell: (command, incognito, dispatch) => {
@@ -1274,8 +1385,9 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   executionRoute: yield* resolveExecutionRoute("medium", undefined, thread.workspace),
                   now,
                 })
+                yield* ensureTurnSummary(turn)
                 if (turn.status !== "queued")
-                  yield* turns.setStatus(turn.id, "completed", undefined, yield* Clock.currentTimeMillis)
+                  yield* setTurnStatus(turn.id, "completed", undefined, yield* Clock.currentTimeMillis)
                 yield* queueChangedCurrent(dispatch)
               }
               dispatch({ _tag: "ShellCompleted", command, text, incognito })
@@ -1363,9 +1475,10 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   executionRoute,
                   now: yield* Clock.currentTimeMillis,
                 })
+                yield* ensureTurnSummary(pending)
                 if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
                 yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
-                yield* turns.setStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+                yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
                 yield* drainQueued(thread, dispatch)
               }),
             ),
@@ -1373,7 +1486,6 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             safe(
               dispatch,
               Effect.gen(function* () {
-                const turns = yield* TurnRepository.Service
                 const backend = yield* ExecutionBackend.Service
                 const turn = yield* active().pipe(Effect.orElseSucceed(() => undefined))
                 if (turn === undefined) {
@@ -1382,12 +1494,13 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 }
                 const thread = yield* threadForTurn(turn)
                 const result = yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
-                yield* turns.setStatus(
+                yield* setTurnStatus(
                   turn.id,
                   result.status,
                   result.events.at(-1)?.cursor ?? turn.lastCursor,
                   yield* Clock.currentTimeMillis,
                 )
+                yield* projectExecutionResult(turn.threadId, result)
                 dispatch({ _tag: "ExecutionControlled", threadId: turn.threadId, turnId: turn.id, action: "cancelled" })
                 if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
               }),
@@ -1531,7 +1644,20 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
       })
       yield* makeInteractiveSession(options.defaultWorkspace)
       const reconcileOnce = yield* Effect.cached(
-        Effect.forkIn(reconcileExecutions, ownerScope).pipe(Effect.flatMap(Fiber.join), Effect.uninterruptible),
+        Effect.gen(function* () {
+          yield* Effect.forkIn(reconcileExecutions, ownerScope).pipe(Effect.flatMap(Fiber.join))
+          yield* Effect.forkIn(
+            repairThreadSummaries().pipe(
+              Effect.provide(executionDependencies),
+              Effect.catch((error) =>
+                Effect.logError("thread-summary.repair.failed").pipe(
+                  Effect.annotateLogs("rika.failure.kind", String(error)),
+                ),
+              ),
+            ),
+            ownerScope,
+          )
+        }).pipe(Effect.uninterruptible),
       )
       return Service.of({
         run: Effect.fn("Operation.product.run")(function* (input) {
@@ -1579,6 +1705,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 executionRoute: yield* resolveExecutionRoute(input.mode ?? "medium", undefined, thread.workspace),
                 now,
               })
+              yield* ensureTurnSummary(submitted)
               yield* Effect.logInfo("turn.accepted").pipe(
                 Effect.annotateLogs({
                   "rika.thread.id": String(thread.id),
@@ -1597,7 +1724,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 )
                 const result = yield* Effect.gen(function* () {
                   const prepared = yield* prepareExecution(turn, thread.workspace)
-                  yield* turns.setStatus(turn.id, "running", turn.lastCursor, startedAt)
+                  yield* setTurnStatus(turn.id, "running", turn.lastCursor, startedAt)
                   return yield* backend.start({
                     threadId: turn.threadId,
                     turnId: turn.id,
@@ -1618,7 +1745,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                           "rika.turn.id": String(turn.id),
                         }),
                       )
-                      yield* turns.setStatus(turn.id, "failed", turn.lastCursor, failedAt)
+                      yield* setTurnStatus(turn.id, "failed", turn.lastCursor, failedAt)
                       return yield* error
                     }),
                   ),
@@ -1632,7 +1759,8 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                     "rika.turn.status": result.status,
                   }),
                 )
-                yield* turns.setStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
+                yield* setTurnStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
+                yield* projectExecutionResult(thread.id, result)
                 return result
               })
               const result = yield* runTurn(submitted)
@@ -1698,7 +1826,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 ["quality", "Find missing tests, maintainability risks, and contract violations."],
               ] as const
               const settlement = yield* Effect.gen(function* () {
-                yield* turns.createForSubmission({
+                const parentTurn = yield* turns.createForSubmission({
                   id: parentTurnId,
                   threadId: thread.id,
                   prompt: "Review workspace changes",
@@ -1706,7 +1834,8 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   reviewFanOutId: fanOutId,
                   now,
                 })
-                yield* turns.setStatus(parentTurnId, "running", undefined, now)
+                yield* ensureTurnSummary(parentTurn)
+                yield* setTurnStatus(parentTurnId, "running", undefined, now)
                 const inspection = yield* agents.runReviewLanes({
                   parentTurnId,
                   fanOutId,
@@ -1723,7 +1852,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 return yield* startReviewSettlement({ id: parentTurnId }, fanOutId, inspection)
               }).pipe(
                 Effect.catch((error) =>
-                  turns.setStatus(parentTurnId, "failed", undefined, now).pipe(Effect.andThen(Effect.fail(error))),
+                  setTurnStatus(parentTurnId, "failed", undefined, now).pipe(Effect.andThen(Effect.fail(error))),
                 ),
                 Effect.uninterruptible,
               )
@@ -1851,6 +1980,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   title: "New thread",
                   now,
                 })
+                yield* notifyThreadSummaries
                 yield* writeThread(thread)
                 return
               }
@@ -1917,29 +2047,35 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 yield* repository
                   .rename(Thread.ThreadId.make(input.threadId), input.title, now)
                   .pipe(Effect.flatMap(writeThread))
+                yield* notifyThreadSummaries
                 return
               case "label":
                 yield* repository
                   .label(Thread.ThreadId.make(input.threadId), input.labels, now)
                   .pipe(Effect.flatMap(writeThread))
+                yield* notifyThreadSummaries
                 return
               case "pin":
                 yield* repository
                   .setPinned(Thread.ThreadId.make(input.threadId), true, now)
                   .pipe(Effect.flatMap(writeThread))
+                yield* notifyThreadSummaries
                 return
               case "archive":
                 yield* repository
                   .setArchived(Thread.ThreadId.make(input.threadId), true, now)
                   .pipe(Effect.flatMap(writeThread))
+                yield* notifyThreadSummaries
                 return
               case "unarchive":
                 yield* repository
                   .setArchived(Thread.ThreadId.make(input.threadId), false, now)
                   .pipe(Effect.flatMap(writeThread))
+                yield* notifyThreadSummaries
                 return
               case "delete":
                 yield* repository.remove(Thread.ThreadId.make(input.threadId))
+                yield* notifyThreadSummaries
                 return
               case "export": {
                 const thread = yield* requireThread(repository, input.threadId)
@@ -1993,8 +2129,15 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                     ...(sourceTurn.executionRoute === undefined ? {} : { executionRoute: sourceTurn.executionRoute }),
                     now: sourceTurn.createdAt,
                   })
-                  yield* turns.setStatus(copied.id, sourceTurn.status, sourceTurn.lastCursor, sourceTurn.updatedAt)
+                  yield* setTurnStatus(copied.id, sourceTurn.status, sourceTurn.lastCursor, sourceTurn.updatedAt)
+                  const execution = yield* acquiredBackend.inspect(sourceTurn.id)
+                  if (execution === undefined) yield* ensureTurnSummary(copied)
+                  else {
+                    const replayed = yield* acquiredBackend.replay(sourceTurn.id)
+                    yield* projectExecutionResult(fork.id, { ...replayed, turnId: copied.id })
+                  }
                 }
+                yield* notifyThreadSummaries
                 yield* writeThread(yield* requireThread(repository, fork.id))
                 return
               }

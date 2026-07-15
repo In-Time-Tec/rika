@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "command": "screenshot",
+  "timestamp": "2026-07-15T17:31:07.401Z",
+  "result": {
+    "sessionId": "01KXKD5SM7XCHCBNTK18ZCRB9F",
+    "capturedAtSeq": 3838,
+    "profileName": "reference-dark",
+    "cols": 200,
+    "rows": 66,
+    "artifactPath": "/private/tmp/rika-agent-tty/sessions/01KXKD5SM7XCHCBNTK18ZCRB9F/artifacts/screenshot-3838-reference-dark.png",
+    "pngSizeBytes": 316092,
+    "cursorVisible": false,
+    "rendererBackend": "ghostty-web",
+    "pixelWidth": 1800,
+    "pixelHeight": 1056,
+    "sha256": "22f91d0e263935a75471584074fd42e5c51391c5fe4da952e3d68a2323296c99",
+    "renderProfileHash": "8ffed6af301ec7c0e6b69599c3be0d1d12096f9fcdfc59d0bbb4cc474d64c53d"
+  }
+}

@@ -3,7 +3,7 @@ import { createTestRenderer } from "@opentui/core/testing"
 import { expect, test } from "bun:test"
 import { Data, Effect } from "effect"
 import { Surface } from "../src/adapter"
-import { initial, ready, replaceQueue, update, type Model } from "../src/view-state"
+import { initial, ready, replaceQueue, update, type Model, type ThreadItem } from "../src/view-state"
 
 class OpenTuiError extends Data.TaggedError("OpenTuiError")<{ readonly cause: unknown }> {}
 
@@ -11,6 +11,16 @@ const openTui = <A>(operation: () => Promise<A>) =>
   Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
 
 const insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
+
+const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
+  workspace: "/work",
+  pinned: false,
+  archived: false,
+  status: "idle",
+  unread: false,
+  lastActivityAt: 0,
+  ...input,
+})
 
 test("renders input and resize updates while the renderer remains event-driven", () =>
   Effect.runPromise(
@@ -682,7 +692,7 @@ test("keeps every overlay above the composer at 50x12", () =>
       model = update(model, { _tag: "FilesReplaced", files: ["src/main.ts"] })
       model = update(model, {
         _tag: "ThreadsReplaced",
-        threads: [{ id: "thread-2", title: "Release notes", workspace: "/two", active: false, unread: false }],
+        threads: [thread({ id: "thread-2", title: "Release notes", workspace: "/two" })],
       })
       const base = model
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
@@ -705,10 +715,10 @@ test("keeps every overlay above the composer at 50x12", () =>
         )
         yield* capture({ ...base, modePicker: { ...base.modePicker, open: true } }, "←→ turn · esc", "GPT-5.6")
         yield* capture({ ...base, shortcutsOpen: true }, "command palette", "Ctrl+O", 4)
-        yield* capture({ ...base, filePicker: { ...base.filePicker, open: true, kind: "file" } }, "@src", "@src")
+        yield* capture({ ...base, filePicker: { ...base.filePicker, open: true } }, "@src", "@src")
         yield* capture(
-          { ...base, filePicker: { ...base.filePicker, open: true, kind: "thread" } },
-          "@@Release notes",
+          { ...base, threadSwitcher: { ...base.threadSwitcher, open: true, kind: "mention" } },
+          "Mention Thread",
           "Release notes",
         )
         yield* capture(

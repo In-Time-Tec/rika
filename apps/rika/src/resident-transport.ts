@@ -269,6 +269,8 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 switch (message.method) {
                   case "initialize":
                     return active.session.initialize(dispatch)
+                  case "watchThreads":
+                    return active.session.watchThreads(dispatch)
                   case "submit":
                     return active.session.submit(
                       args[0] as string,
@@ -794,6 +796,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                               ) => invokeRaw(method, args, dispatch).pipe(Effect.orDie)
                               const session: Operation.InteractiveSession = {
                                 initialize: (dispatch) => invoke("initialize", [], dispatch),
+                                watchThreads: (dispatch) => invoke("watchThreads", [], dispatch),
                                 submit: (prompt, dispatch, mode, parts, tuning) =>
                                   invoke("submit", [prompt, mode, parts, tuning], dispatch),
                                 shell: (command, incognito, dispatch) =>
@@ -1135,6 +1138,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 Ref.set(initialized, dispatch).pipe(
                   Effect.andThen(retryRead(dispatch, (session) => session.initialize(dispatch))),
                 ),
+              watchThreads: (dispatch) => retryRead(dispatch, (session) => session.watchThreads(dispatch)),
               submit: (prompt, dispatch, mode, parts, tuning) =>
                 mutation(dispatch, (session) => session.submit(prompt, dispatch, mode, parts, tuning)),
               shell: (command, incognito, dispatch) =>

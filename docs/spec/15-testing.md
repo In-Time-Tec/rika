@@ -66,3 +66,7 @@ Live tests cover one short turn, one coding tool call, one multi-turn tool loop,
 A feature is `verified` only when its ledger row links to passing automated evidence and, where applicable, a packaged real-flow record. Code presence alone is not parity.
 
 The visual baseline manifest records the v1 commit, dirty-worktree snapshot, OpenTUI and native package versions, Bun version, terminal profile, font, dimensions, dynamic masks, thresholds, and golden artifact locations. Performance evidence records startup, input latency, scroll-during-stream behavior, and long-thread memory budgets.
+
+Thread parity evidence compares the installed Amp and packaged Rika binaries at identical 200×66, 120×40, 119×30, 100×30, 80×24, 60×20, and 50×16 terminal sizes. Pilotty records semantic snapshots for switching, mentioning, sidebar navigation, mouse input, resize, execution status, unread state, replay, and exit. Agent-tty records matching Ghostty PNGs. Dynamic masks may cover only cursor blink, spinner phase, generated Thread identifiers, relative time, and provider-controlled transcript text; they never cover borders, spacing, colors, selection, scrollbars, or key hints.
+
+The retained Thread parity captures live in `artifacts/thread-ui-parity/`.

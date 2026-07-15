@@ -114,8 +114,53 @@ export const renderBlock: {
   },
 )
 
-export const renderSidebar = (model: Model): string =>
-  `Threads\n\n${(model.threads as ReadonlyArray<ThreadItem>).map((thread, index) => `${index === model.selectedThread ? "›" : " "} ${thread.unread ? "●" : " "} ${thread.title}`).join("\n")}`
+const threadSidebarWidth = 36
+
+export const renderSidebar: {
+  (spinnerFrame?: string): (model: Model) => StyledText
+  (model: Model): StyledText
+  (model: Model, spinnerFrame?: string): StyledText
+} = Function.dual(
+  (args) => args.length > 1 || typeof args[0] !== "string",
+  (model: Model, spinnerFrame = idleSpinnerFrame): StyledText => {
+    const chunks: Array<TextChunk> = []
+    const threads = model.threads as ReadonlyArray<ThreadItem>
+    threads
+      .slice(model.threadSidebar.scrollTop, model.threadSidebar.scrollTop + model.height)
+      .forEach((thread, row) => {
+        const index = row + model.threadSidebar.scrollTop
+        if (row > 0) chunks.push(fg(colors.text)("\n"))
+        const selected = model.threadSidebar.focused && index === model.threadSidebar.selected
+        const marker =
+          thread.id === model.currentThreadId
+            ? "*"
+            : thread.status !== "idle"
+              ? spinnerFrame
+              : thread.unread
+                ? "○"
+                : " "
+        const title = truncateToWidth(thread.title, threadSidebarWidth - 4)
+        const padding = " ".repeat(Math.max(0, threadSidebarWidth - 4 - stringWidth(title)))
+        const renderedRow = ` ${marker} ${title}${padding}`
+        if (selected) chunks.push(bg(colors.amber)(fg(colors.surface)(renderedRow)))
+        else {
+          chunks.push(fg(colors.text)(" "))
+          chunks.push(
+            thread.id === model.currentThreadId
+              ? fg(colors.green)(marker)
+              : thread.status !== "idle"
+                ? fg(colors.blue)(marker)
+                : thread.unread
+                  ? dim(fg(colors.blue)(marker))
+                  : fg(colors.text)(marker),
+          )
+          chunks.push(fg(colors.text)(` ${title}${padding}`))
+        }
+        chunks.push(dim(fg(colors.text)("│")))
+      })
+    return new StyledText(chunks)
+  },
+)
 
 const changedFileColor = (status: string): ColorInput => {
   if (status.includes("?")) return colors.muted
@@ -702,6 +747,8 @@ export interface Handlers {
   readonly clickToggle?: (unit: string) => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
+  readonly threadSidebarSelect?: (index: number) => void
+  readonly threadPreviewScroll?: (offset: number) => void
   readonly openPath?: (target: PathTarget) => void
   readonly resize: (width: number, height: number) => void
 }
@@ -894,11 +941,20 @@ export class Surface {
     this.palette = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word" })
     this.sidebar = new TextRenderable(renderer, {
       content: "",
-      width: 26,
+      width: threadSidebarWidth,
+      flexShrink: 0,
       visible: false,
-      fg: colors.muted,
-      padding: 1,
+      fg: colors.text,
+      wrapMode: "none",
+      selectable: false,
     })
+    this.sidebar.onMouseDown = (event) => {
+      if (event.button !== 0) return
+      const index = (this.model?.threadSidebar.scrollTop ?? 0) + Math.floor(event.y - this.sidebar.screenY)
+      if (index < 0 || index >= (this.model?.threads.length ?? 0)) return
+      event.stopPropagation()
+      this.handlers.threadSidebarSelect?.(index)
+    }
     this.changedFilesBox = new ScrollBoxRenderable(renderer, {
       visible: false,
       width: 34,
@@ -964,12 +1020,12 @@ export class Surface {
     this.changedFilesBox.onMouseOut = this.onSidebarMouseOut
     this.inputBox.add(this.input)
     this.paletteBox.add(this.palette)
-    this.transcriptRow.add(this.sidebar)
     this.transcriptRow.add(this.transcriptScroll)
     this.transcriptRow.add(this.transcriptScrollbar)
     this.contentColumn.add(this.transcriptRow)
     this.contentColumn.add(this.queueBox)
     this.contentColumn.add(this.inputBox)
+    this.main.add(this.sidebar)
     this.main.add(this.contentColumn)
     this.main.add(this.changedFilesBox)
     renderer.root.add(this.main)
@@ -978,6 +1034,11 @@ export class Surface {
     renderer.root.add(this.workspaceLabel)
     renderer.root.add(this.paletteBox)
     renderer.root.add(this.toastBox)
+    this.paletteBox.onMouseScroll = (event) => {
+      if (this.model?.threadSwitcher.open !== true || event.scroll === undefined) return
+      event.stopPropagation()
+      this.handlers.threadPreviewScroll?.(event.scroll.direction === "up" ? 3 : -3)
+    }
     renderer.keyInput.on("keypress", this.onKey)
     renderer.keyInput.on("paste", this.onPaste)
     renderer.on(CliRenderEvents.RESIZE, this.onResize)
@@ -1224,11 +1285,14 @@ export class Surface {
   private welcomeWidthFor(model: Model): number {
     const sidebarReady = model.changedFilesOpen
       ? isReady(model.changedFiles)
-      : model.sidebarOpen
+      : model.workspaceFilesOpen
         ? isReady(model.filePicker.items)
         : false
-    const visible = (model.changedFilesOpen || model.sidebarOpen) && sidebarReady && !isNarrow(model)
-    const contentWidth = Math.max(20, model.width - (visible ? model.sidebarWidth : 0))
+    const visible = (model.changedFilesOpen || model.workspaceFilesOpen) && sidebarReady && !isNarrow(model)
+    const contentWidth = Math.max(
+      1,
+      model.width - (visible ? model.sidebarWidth : 0) - (model.threadSidebar.open ? threadSidebarWidth : 0),
+    )
     return Math.max(1, contentWidth - spacing.transcript * 2)
   }
   showToast(message: string, color: ColorInput = colors.green): void {
@@ -1262,12 +1326,12 @@ export class Surface {
     const renderedInputHeight = model.shortcutsOpen ? Math.min(model.height - 4, spacing.inputHeight + 12) : inputHeight
     const sidebarReady = model.changedFilesOpen
       ? isReady(model.changedFiles)
-      : model.sidebarOpen
+      : model.workspaceFilesOpen
         ? isReady(model.filePicker.items)
         : false
-    const sidebarVisible = (model.changedFilesOpen || model.sidebarOpen) && sidebarReady && !isNarrow(model)
+    const sidebarVisible = (model.changedFilesOpen || model.workspaceFilesOpen) && sidebarReady && !isNarrow(model)
     const sidebarWidth = sidebarVisible ? model.sidebarWidth : 0
-    const contentWidth = Math.max(20, model.width - sidebarWidth)
+    const contentWidth = Math.max(1, model.width - sidebarWidth - (model.threadSidebar.open ? threadSidebarWidth : 0))
     const modeColor = colors[model.mode]
     const isWelcome = model.entries.length === 0 && model.blocks.length === 0
     this.transcriptScroll.content.justifyContent = isWelcome ? "flex-start" : "flex-end"
@@ -1298,7 +1362,7 @@ export class Surface {
         existingWelcome.content = welcomeContent(welcomeWidth, model.height, this.welcomePhase, model.mode)
       }
     } else {
-      const renderModel = sidebarWidth === 0 ? model : { ...model, width: Math.max(20, model.width - sidebarWidth) }
+      const renderModel = sidebarWidth === 0 && !model.threadSidebar.open ? model : { ...model, width: contentWidth }
       const built = buildTranscript(
         renderModel,
         model.busy ? spinnerFrames[this.loaderPhase % spinnerFrames.length]! : idleSpinnerFrame,
@@ -1438,8 +1502,8 @@ export class Surface {
     this.input.content = model.shortcutsOpen
       ? shortcutsContent(model, Math.max(1, contentWidth - 4))
       : composerContent(model, inputHeight - 2)
-    this.sidebar.visible = false
-    this.sidebar.content = renderSidebar(model)
+    this.sidebar.visible = model.threadSidebar.open
+    this.sidebar.content = renderSidebar(model, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
     this.changedFilesBox.visible = sidebarVisible
     if (this.changedFilesBox.visible) {
       this.changedFilesBox.width = Math.max(8, model.sidebarWidth - 2)
@@ -1461,7 +1525,11 @@ export class Surface {
       this.transcriptScroll.scrollTop = model.scrollOffset
       this.scrollProgrammatic = false
     }
-    const loaderActive = model.busy || panelLoadingLabel !== undefined
+    const loaderActive =
+      model.busy ||
+      panelLoadingLabel !== undefined ||
+      (model.threadSidebar.open &&
+        (model.threads as ReadonlyArray<ThreadItem>).some((thread) => thread.status !== "idle"))
     if (loaderActive && this.loaderTimer === undefined) {
       this.loaderTimer = this.repeated(spinnerInterval, () => {
         this.loaderPhase = (this.loaderPhase + 1) % spinnerFrames.length
@@ -1475,6 +1543,8 @@ export class Surface {
               dim(fg(colors.text)(` ${label} `)),
             ])
           }
+          if (current.threadSidebar.open)
+            this.sidebar.content = renderSidebar(current, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
         }
         this.renderer.requestRender()
       })
@@ -1482,7 +1552,7 @@ export class Surface {
       this.cancelTimer(this.loaderTimer)
       this.loaderTimer = undefined
     }
-    const composerTop = model.height - this.inputBox.height
+    const composerTop = model.height - renderedInputHeight
     const overlay = model.threadSwitcher.open
       ? ("threads" as const)
       : model.filePicker.open
@@ -1498,7 +1568,7 @@ export class Surface {
     if (overlay === "palette") {
       const results = filter(model.palette.query)
       const boxWidth = Math.max(20, Math.min(80, model.width - 4))
-      const boxHeight = Math.min(Math.max(1, composerTop - 2), results.length + 5)
+      const boxHeight = Math.min(Math.max(1, composerTop), results.length + 5)
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = Math.max(0, Math.floor((model.width - boxWidth) / 2))
@@ -1506,7 +1576,7 @@ export class Surface {
       this.paletteBox.title = " Command Palette "
       this.paletteBox.titleColor = colors.amber
       this.paletteBox.titleAlignment = "left"
-      this.palette.content = paletteContent(model, results, boxWidth - 4)
+      this.palette.content = paletteContent(model, results, boxWidth - 4, boxHeight - 2)
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
       const boxHeight = Math.min(9, Math.max(3, composerTop))
@@ -1519,14 +1589,7 @@ export class Surface {
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = modePickerContent(model, boxWidth - 4)
     } else if (overlay === "files") {
-      const mentionQuery = model.filePicker.query.toLowerCase()
-      const mentionThreads = (model.threads as ReadonlyArray<ThreadItem>).filter((thread) =>
-        `${thread.title} ${thread.workspace ?? ""} ${thread.id}`.toLowerCase().includes(mentionQuery),
-      )
-      const isThreadKind = model.filePicker.kind === "thread"
-      const entries = isThreadKind
-        ? mentionThreads.map((thread) => `@@${thread.title}`)
-        : filteredFiles(model).map((file) => `@${file}`)
+      const entries = filteredFiles(model).map((file) => `@${file}`)
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))
       const visibleEntries = entries.slice(0, Math.max(1, maxRows))
       const innerWidth = Math.max(...visibleEntries.map((row) => row.length), 19)
@@ -1535,18 +1598,20 @@ export class Surface {
       this.paletteBox.width = boxWidth
       this.paletteBox.height = boxHeight
       this.paletteBox.left = 2
-      this.paletteBox.top = Math.max(0, composerTop - boxHeight + 1)
+      this.paletteBox.top = Math.max(0, composerTop - boxHeight)
       this.paletteBox.title = ""
       this.palette.content = filePickerContent(model, visibleEntries, boxWidth - 4)
     } else if (overlay === "threads") {
-      const overlayWidth = Math.max(40, model.width - 20)
-      const overlayHeight = Math.max(6, composerTop)
+      const overlayWidth = Math.max(10, Math.min(140, model.width - 4))
+      const overlayHeight = Math.max(6, composerTop - 2)
       this.paletteBox.width = overlayWidth
       this.paletteBox.height = overlayHeight
       this.paletteBox.left = Math.max(0, Math.floor((model.width - overlayWidth) / 2))
-      this.paletteBox.top = 1
-      this.paletteBox.title = " Switch Thread "
+      this.paletteBox.top = Math.max(0, composerTop - overlayHeight)
+      this.paletteBox.title = model.threadSwitcher.kind === "mention" ? " Mention Thread " : " Switch Thread "
       this.paletteBox.titleAlignment = "left"
+      this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces · Esc close "
+      this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = threadSwitcherContent(model, overlayWidth - 4, overlayHeight - 2)
     }
     this.renderer.requestRender()
@@ -1678,11 +1743,17 @@ const shortcutsContent = (model: Model, innerWidth: number): StyledText => {
   return new StyledText(chunks)
 }
 
-const paletteContent = (model: Model, results: ReadonlyArray<Command>, innerWidth: number): StyledText => {
-  const chunks: Array<TextChunk> = [fg(colors.text)("\n")]
+const paletteContent = (
+  model: Model,
+  results: ReadonlyArray<Command>,
+  innerWidth: number,
+  innerHeight: number,
+): StyledText => {
+  const compact = innerHeight < results.length + 3
+  const chunks: Array<TextChunk> = compact ? [] : [fg(colors.text)("\n")]
   chunks.push(fg(colors.text)(`> ${model.palette.query}`))
   chunks.push(bg(colors.text)(fg(colors.surface)(" ")))
-  chunks.push(fg(colors.text)("\n\n"))
+  chunks.push(fg(colors.text)(compact ? "\n" : "\n\n"))
   const categoryWidth = 16
   results.forEach((command, index) => {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
@@ -1758,7 +1829,7 @@ const modePickerContent = (model: Model, innerWidth: number): StyledText => {
 }
 
 const threadAge = (updatedAt: number | undefined, now: number): string => {
-  if (updatedAt === undefined) return ""
+  if (updatedAt === undefined || updatedAt <= 0) return ""
   const minutes = Math.floor(Math.max(0, now - updatedAt) / 60_000)
   if (minutes < 1) return "now"
   if (minutes < 60) return `${minutes}m ago`
@@ -1795,7 +1866,13 @@ const previewTranscriptLines = (
   model: Model,
   width: number,
   maxRows: number,
-): ReadonlyArray<ReadonlyArray<TextChunk>> | undefined => {
+):
+  | {
+      readonly lines: ReadonlyArray<ReadonlyArray<TextChunk>>
+      readonly total: number
+      readonly start: number
+    }
+  | undefined => {
   const selected = selectedThreadMetadata(model)
   if (!isReady(model.threadPreview) || selected === undefined) return undefined
   const preview = model.threadPreview.value
@@ -1805,108 +1882,173 @@ const previewTranscriptLines = (
     previewModel = projectTurn(previewModel, `preview-${index}`, turn.prompt, turn.events as ReadonlyArray<Event>)
   })
   const lines = splitStyledLines(renderTranscriptStyled(previewModel)).map((line) => clipStyledLine(line, width))
-  return lines.slice(-Math.max(1, maxRows))
+  const rows = Math.max(1, maxRows)
+  const offset = Math.min(model.threadSwitcher.previewScroll, Math.max(0, lines.length - rows))
+  const end = lines.length - offset
+  const start = Math.max(0, end - rows)
+  return { lines: lines.slice(start, end), total: lines.length, start }
 }
 
-const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: number): StyledText => {
-  const previewWidth = innerWidth < 70 ? 0 : Math.max(20, Math.floor(innerWidth * 0.45))
-  const listWidth = Math.max(10, innerWidth - previewWidth - (previewWidth > 0 ? 2 : 0))
+const threadStats = (thread: ThreadItem): ReadonlyArray<readonly [string, ColorInput]> => {
+  if (thread.editTotals === undefined) return []
+  return [
+    ...(thread.editTotals.added > 0 ? ([[`+${thread.editTotals.added}`, colors.green]] as const) : []),
+    ...(thread.editTotals.modified > 0 ? ([[`~${thread.editTotals.modified}`, colors.amber]] as const) : []),
+    ...(thread.editTotals.removed > 0 ? ([[`-${thread.editTotals.removed}`, colors.red]] as const) : []),
+  ]
+}
+
+const threadListRows = (
+  model: Model,
+  width: number,
+  height: number,
+  now: number,
+): ReadonlyMap<number, ReadonlyArray<TextChunk>> => {
   const threads = filteredThreads(model)
-  const now = Effect.runSync(Clock.currentTimeMillis)
   const listRows = new Map<number, ReadonlyArray<TextChunk>>()
-  threads.slice(0, Math.max(1, innerHeight - 4)).forEach((thread, index) => {
+  threads.slice(0, Math.max(1, height - 4)).forEach((thread, index) => {
     const selected = index === model.threadSwitcher.selected
-    const age = threadAge(thread.updatedAt, now)
-    const marker = thread.active ? "(current) " : ""
-    const stats = thread.diff ?? ""
-    const right = `${stats.length > 0 ? `${stats}  ` : ""}${age}`
-    const titleWidth = Math.max(1, listWidth - right.length - marker.length - 4)
+    const age = threadAge(thread.lastActivityAt, now)
+    const stats = threadStats(thread)
+    const statsWidth = stats.reduce((total, [text]) => total + text.length + 1, 0)
+    const rightWidth = statsWidth + (stats.length > 0 && age.length > 0 ? 1 : 0) + age.length
+    const titleWidth = Math.max(1, width - rightWidth - 4)
     const title = thread.title.length > titleWidth ? `${thread.title.slice(0, titleWidth - 1)}…` : thread.title
-    const leftText = ` ${marker}${title}`
-    const padding = Math.max(1, listWidth - leftText.length - right.length - 1)
-    if (selected)
+    const leftText = `  ${title}`
+    const padding = Math.max(1, width - leftText.length - rightWidth - 1)
+    if (selected) {
+      const right = `${stats.map(([text]) => text).join(" ")}${stats.length > 0 && age.length > 0 ? " " : ""}${age}`
       listRows.set(index + 3, [
         bg(colors.selectionBg)(fg(colors.selectionFg)(leftText)),
         bg(colors.selectionBg)(fg(colors.selectionFg)(" ".repeat(padding))),
         bg(colors.selectionBg)(fg(colors.selectionFg)(`${right} `)),
       ])
-    else
-      listRows.set(index + 3, [
-        fg(colors.text)(leftText),
-        fg(colors.text)(" ".repeat(padding)),
-        fg(colors.muted)(`${right} `),
-      ])
+      return
+    }
+    const chunks: Array<TextChunk> = [fg(colors.text)(leftText), fg(colors.text)(" ".repeat(padding))]
+    stats.forEach(([text, color], statsIndex) => {
+      if (statsIndex > 0) chunks.push(fg(colors.text)(" "))
+      chunks.push(fg(color)(text))
+    })
+    if (stats.length > 0 && age.length > 0) chunks.push(fg(colors.text)(" "))
+    chunks.push(fg(colors.muted)(`${age} `))
+    listRows.set(index + 3, chunks)
   })
-  const previewTop = 1
-  const previewBottom = innerHeight - 2
+  return listRows
+}
+
+const previewBoxRows = (model: Model, width: number, height: number): ReadonlyMap<number, ReadonlyArray<TextChunk>> => {
+  const rows = new Map<number, ReadonlyArray<TextChunk>>()
+  if (width < 8 || height < 4) return rows
+  const inner = width - 2
   const preview = selectedThreadMetadata(model)
-  const previewLines = new Map<number, ReadonlyArray<TextChunk>>()
-  const previewInner = Math.max(1, previewWidth - 4)
-  const previewRows = Math.max(1, previewBottom - previewTop - 1)
-  const transcriptLines = previewWidth > 0 ? previewTranscriptLines(model, previewInner, previewRows) : undefined
-  let centeredHeaderRow = -1
-  if (transcriptLines !== undefined) {
-    const startRow = previewBottom - transcriptLines.length
-    transcriptLines.forEach((line, index) => previewLines.set(startRow + index, line))
+  const contentWidth = Math.max(1, inner - 3)
+  const contentRows = Math.max(1, height - 4)
+  const transcript = previewTranscriptLines(model, contentWidth, contentRows)
+  rows.set(0, [fg(colors.muted)(`╭${"─".repeat(inner)}╮`)])
+  const header = "Thread Preview"
+  const headerLeft = Math.max(0, Math.floor((inner - header.length) / 2))
+  rows.set(1, [
+    fg(colors.muted)("│"),
+    fg(colors.text)(" ".repeat(headerLeft)),
+    fg(colors.muted)(header),
+    fg(colors.text)(" ".repeat(Math.max(0, inner - headerLeft - header.length))),
+    fg(colors.muted)("│"),
+  ])
+  if (transcript !== undefined) {
+    const startRow = height - 1 - transcript.lines.length
+    const scrollable = transcript.total > contentRows
+    const thumb = scrollable
+      ? Math.round((transcript.start / Math.max(1, transcript.total - contentRows)) * Math.max(0, contentRows - 1))
+      : -1
+    transcript.lines.forEach((line, index) => {
+      const textWidth = line.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
+      const contentRow = startRow + index
+      rows.set(contentRow, [
+        fg(colors.muted)("│ "),
+        ...line,
+        fg(colors.text)(" ".repeat(Math.max(0, contentWidth - textWidth))),
+        scrollable ? fg(colors.muted)(contentRow - 2 === thumb ? "█" : "│") : fg(colors.text)(" "),
+        fg(colors.muted)("│"),
+      ])
+    })
   } else {
-    previewLines.set(previewTop + 2, [
-      isLoading(model.threadPreview) ? dim(fg(colors.text)("Loading preview")) : fg(colors.muted)("Thread Preview"),
+    const status = isLoading(model.threadPreview) ? "Loading preview" : "No preview"
+    const statusLeft = Math.max(0, Math.floor((inner - status.length) / 2))
+    rows.set(2, [
+      fg(colors.muted)("│"),
+      fg(colors.text)(" ".repeat(statusLeft)),
+      dim(fg(colors.text)(status)),
+      fg(colors.text)(" ".repeat(Math.max(0, inner - statusLeft - status.length))),
+      fg(colors.muted)("│"),
     ])
-    centeredHeaderRow = previewTop + 2
     if (preview !== undefined) {
       const details = [
         preview.title,
-        preview.workspace ?? "",
-        [preview.archived === true ? "archived" : "", preview.unread === true ? "unread" : "", preview.diff ?? ""]
+        preview.workspace,
+        [preview.archived ? "archived" : "", preview.unread ? "unread" : "", preview.status]
           .filter((value) => value.length > 0)
           .join(" · "),
       ].filter((value) => value.length > 0)
       details.forEach((line, index) => {
-        previewLines.set(previewBottom - details.length + index, [fg(colors.text)(line)])
+        const visible = truncateToWidth(line, contentWidth)
+        rows.set(height - 1 - details.length + index, [
+          fg(colors.muted)("│ "),
+          fg(colors.text)(visible),
+          fg(colors.text)(" ".repeat(Math.max(0, contentWidth - stringWidth(visible) + 1))),
+          fg(colors.muted)("│"),
+        ])
       })
     }
   }
+  for (let row = 2; row < height - 1; row += 1)
+    if (!rows.has(row))
+      rows.set(row, [fg(colors.muted)("│"), fg(colors.text)(" ".repeat(inner)), fg(colors.muted)("│")])
+  rows.set(height - 1, [fg(colors.muted)(`╰${"─".repeat(inner)}╯`)])
+  return rows
+}
+
+const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: number): StyledText => {
+  const horizontal = model.width >= 120
+  const showPreview = horizontal || innerHeight >= 9
+  const layoutWidth = Math.max(8, innerWidth - 1)
+  const listWidth = horizontal ? Math.max(8, Math.floor((layoutWidth - 2) / 2)) : layoutWidth
+  const listHeight = horizontal
+    ? innerHeight
+    : showPreview
+      ? Math.max(5, Math.min(innerHeight - 4, Math.floor(innerHeight * 0.42)))
+      : innerHeight
+  const previewWidth = horizontal ? Math.max(8, layoutWidth - listWidth - 2) : layoutWidth
+  const previewHeight = horizontal ? Math.max(4, innerHeight - 3) : Math.max(4, innerHeight - listHeight - 2)
+  const previewTop = horizontal ? 1 : listHeight
+  const now = Effect.runSync(Clock.currentTimeMillis)
+  const listRows = threadListRows(model, listWidth, listHeight, now)
+  const previewRows = previewBoxRows(model, previewWidth, previewHeight)
   const chunks: Array<TextChunk> = []
   for (let row = 0; row < innerHeight; row += 1) {
     if (row > 0) chunks.push(fg(colors.text)("\n"))
-    if (row === 1) {
-      chunks.push(fg(colors.text)(`> ${model.threadSwitcher.query}`))
+    if (!horizontal && showPreview && row >= previewTop) {
+      const previewRow = previewRows.get(row - previewTop)
+      if (previewRow !== undefined) chunks.push(...previewRow)
+      continue
+    }
+    if (row === 1 && row < listHeight) {
+      chunks.push(fg(colors.text)(`> ${model.threadSwitcher.query}`.slice(0, listWidth - 1)))
       chunks.push(bg(colors.text)(fg(colors.surface)(" ")))
-      const used = 3 + model.threadSwitcher.query.length
-      if (previewWidth > 0) chunks.push(fg(colors.text)(" ".repeat(Math.max(1, listWidth - used + 2))))
+      const used = Math.min(listWidth, 3 + model.threadSwitcher.query.length)
+      chunks.push(fg(colors.text)(" ".repeat(Math.max(0, listWidth - used))))
     } else {
       const listRow = listRows.get(row)
-      if (listRow === undefined) {
-        if (previewWidth > 0) chunks.push(fg(colors.text)(" ".repeat(listWidth + 2)))
-      } else {
+      if (listRow === undefined) chunks.push(fg(colors.text)(" ".repeat(listWidth)))
+      else {
         chunks.push(...listRow)
         const used = listRow.reduce((total, chunk) => total + chunk.text.length, 0)
-        if (previewWidth > 0) chunks.push(fg(colors.text)(" ".repeat(Math.max(0, listWidth + 2 - used))))
+        chunks.push(fg(colors.text)(" ".repeat(Math.max(0, listWidth - used))))
       }
     }
-    if (previewWidth === 0) continue
-    const inner = previewWidth - 2
-    if (row === previewTop) chunks.push(fg(colors.muted)(`╭${"─".repeat(inner)}╮`))
-    else if (row === previewBottom) chunks.push(fg(colors.muted)(`╰${"─".repeat(inner)}╯`))
-    else if (row > previewTop && row < previewBottom) {
-      const lineChunks = previewLines.get(row)
-      const text = lineChunks?.map((chunk) => chunk.text).join("") ?? ""
-      const centered = row === centeredHeaderRow
-      const available = inner - 2
-      const visible = text.length > available ? text.slice(0, available) : text
-      const leftPad = centered ? Math.max(0, Math.floor((available - visible.length) / 2)) : 0
-      chunks.push(fg(colors.muted)("│ "))
-      if (lineChunks === undefined) chunks.push(fg(colors.text)(" ".repeat(available)))
-      else {
-        chunks.push(fg(colors.text)(" ".repeat(leftPad)))
-        chunks.push(
-          ...(visible === text ? lineChunks : [fg(colors.text)(visible)]).map((chunk) =>
-            chunk === lineChunks?.[0] && centered ? fg(colors.muted)(chunk.text) : chunk,
-          ),
-        )
-        chunks.push(fg(colors.text)(" ".repeat(Math.max(0, available - leftPad - visible.length))))
-      }
-      chunks.push(fg(colors.muted)(" │"))
+    if (horizontal) {
+      chunks.push(fg(colors.text)("  "))
+      chunks.push(...(previewRows.get(row - previewTop) ?? [fg(colors.text)(" ".repeat(previewWidth))]))
     }
   }
   return new StyledText(chunks)
@@ -1931,13 +2073,7 @@ const filePickerContent = (model: Model, entries: ReadonlyArray<string>, innerWi
     }
   })
   if (chunks.length === 0)
-    chunks.push(
-      dim(
-        fg(colors.text)(
-          model.filePicker.kind === "file" && isLoading(model.filePicker.items) ? "Loading files" : "no matches",
-        ),
-      ),
-    )
+    chunks.push(dim(fg(colors.text)(isLoading(model.filePicker.items) ? "Loading files" : "no matches")))
   return new StyledText(chunks)
 }
 
@@ -1946,7 +2082,7 @@ const panelLoading = (model: Model): string | undefined =>
     ? "Loading Thread"
     : model.changedFilesOpen && isLoading(model.changedFiles)
       ? "Loading changed files"
-      : (model.sidebarOpen || model.filePicker.open) && isLoading(model.filePicker.items)
+      : (model.workspaceFilesOpen || model.filePicker.open) && isLoading(model.filePicker.items)
         ? "Loading files"
         : undefined
 

@@ -1,7 +1,7 @@
 import { createTestRenderer } from "@opentui/core/testing"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { Surface } from "../src/adapter"
-import { initial, ready, update, type Model, type TranscriptBlock } from "../src/view-state"
+import { initial, ready, update, type Model, type ThreadItem, type TranscriptBlock } from "../src/view-state"
 
 export const visualMetadata = {
   schema: 2,
@@ -17,6 +17,53 @@ export const visualMetadata = {
 
 const block = (value: TranscriptBlock): Model => ({ ...initial("/workspace", "high"), blocks: [value] })
 const base = (): Model => initial("/workspace", "high")
+const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
+  workspace: "/workspace",
+  pinned: false,
+  archived: false,
+  status: "idle",
+  unread: false,
+  lastActivityAt: 0,
+  ...input,
+})
+const threadBrowser = (): Model => ({
+  ...base(),
+  currentThreadId: "thread-1",
+  threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+  threads: [
+    thread({
+      id: "thread-1",
+      title: "Rika performance and reliability",
+      unread: true,
+      editTotals: { added: 428, modified: 56, removed: 59 },
+    }),
+    thread({
+      id: "thread-2",
+      title: "Push all local changes to main",
+      status: "running",
+      editTotals: { added: 558, modified: 68, removed: 68 },
+    }),
+    thread({ id: "thread-3", title: "TUI performance and bug audit", unread: true }),
+  ],
+  threadPreview: ready({
+    threadId: "thread-1",
+    turns: [
+      {
+        prompt: "Finish the thread UI parity work.",
+        events: [
+          {
+            cursor: "preview-output",
+            sequence: 1,
+            type: "model.output.completed",
+            createdAt: 1,
+            text: "Merged all work into main and verified the affected paths.",
+          },
+          { cursor: "preview-complete", sequence: 2, type: "execution.completed", createdAt: 2 },
+        ],
+      },
+    ],
+  }),
+})
 
 export const scenarios = (): ReadonlyArray<readonly [string, Model, number, number]> => {
   const reasoning = block({ _tag: "Reasoning", text: "Inspecting stable inputs", expanded: false })
@@ -123,23 +170,20 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     ["shortcuts", { ...base(), shortcutsOpen: true }, 80, 24],
     [
       "file-picker",
-      { ...base(), filePicker: { open: true, query: "src", selected: 0, items: ready(["src/main.ts"]), kind: "file" } },
+      { ...base(), filePicker: { open: true, query: "src", selected: 0, items: ready(["src/main.ts"]) } },
       80,
       24,
     ],
-    [
-      "thread-switcher",
-      {
-        ...base(),
-        threadSwitcher: { open: true, query: "", selected: 0 },
-        threads: [{ id: "thread-1", title: "Visual baseline", active: true, unread: true, workspace: "/workspace" }],
-      },
-      80,
-      24,
-    ],
+    ["thread-switcher", threadBrowser(), 200, 66],
+    ["thread-switcher-stacked", threadBrowser(), 119, 30],
     [
       "sidebar",
-      { ...base(), threads: [{ id: "thread-1", title: "Visual baseline", active: true, unread: true }] },
+      {
+        ...base(),
+        currentThreadId: "thread-1",
+        threadSidebar: { open: true, focused: false, selected: 0, scrollTop: 0 },
+        threads: [thread({ id: "thread-1", title: "Visual baseline", unread: true })],
+      },
       80,
       24,
     ],

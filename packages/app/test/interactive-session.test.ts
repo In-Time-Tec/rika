@@ -5,7 +5,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Runtime as ToolRuntime } from "@rika/tools"
-import { Effect, Fiber, Layer, Ref } from "effect"
+import { Effect, Fiber, Layer, Queue, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { Operation } from "../src/index"
 import { provideLayer } from "./layer"
@@ -138,6 +138,35 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
 })
 
 describe("InteractiveSession controls", () => {
+  it.effect("publishes live thread summaries and clears unread state when a thread is selected", () =>
+    Effect.gen(function* () {
+      const { session, older } = yield* makeHarness()
+      const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+      const watcher = yield* Effect.forkChild(session.watchThreads((event) => Queue.offerUnsafe(events, event)))
+      const initial = yield* Queue.take(events)
+      expect(initial).toMatchObject({
+        _tag: "ThreadsListed",
+        threads: expect.arrayContaining([
+          expect.objectContaining({ id: "older", status: "running", unread: true }),
+          expect.objectContaining({ id: "latest", status: "running", unread: true }),
+        ]),
+      })
+      yield* TestClock.adjust("10 millis")
+      yield* session.selectThread(older.id, () => undefined)
+      let selected = yield* Queue.take(events)
+      while (
+        selected._tag !== "ThreadsListed" ||
+        selected.threads.find((item) => item.id === older.id)?.unread !== false
+      )
+        selected = yield* Queue.take(events)
+      expect(selected).toMatchObject({
+        _tag: "ThreadsListed",
+        threads: expect.arrayContaining([expect.objectContaining({ id: "older", unread: false })]),
+      })
+      yield* Fiber.interrupt(watcher)
+    }),
+  )
+
   it.effect("keeps simultaneous interactive sessions independent and uses each request workspace", () =>
     Effect.gen(function* () {
       const repositories = yield* ThreadRepository.makeMemory()

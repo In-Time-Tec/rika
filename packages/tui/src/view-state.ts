@@ -72,12 +72,13 @@ export type TranscriptBlock =
 export interface ThreadItem {
   readonly id: string
   readonly title: string
-  readonly active: boolean
+  readonly workspace: string
+  readonly pinned: boolean
+  readonly archived: boolean
+  readonly status: "idle" | "queued" | "running" | "waiting"
   readonly unread: boolean
-  readonly workspace?: string
-  readonly archived?: boolean
-  readonly updatedAt?: number
-  readonly diff?: string
+  readonly lastActivityAt: number
+  readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }
 }
 
 export type PermissionDecision = "allow" | "always" | "deny"
@@ -132,12 +133,19 @@ export interface FilePickerState {
   readonly query: string
   readonly selected: number
   readonly items: Loadable<ReadonlyArray<string>>
-  readonly kind: "file" | "thread"
 }
 export interface ThreadSwitcherState {
   readonly open: boolean
   readonly query: string
   readonly selected: number
+  readonly kind: "switch" | "mention"
+  readonly previewScroll: number
+}
+export interface ThreadSidebarState {
+  readonly open: boolean
+  readonly focused: boolean
+  readonly selected: number
+  readonly scrollTop: number
 }
 
 export type Loadable<T> =
@@ -175,9 +183,20 @@ const FilePickerStateSchema = Schema.Struct({
   query: Schema.String,
   selected: Schema.Finite,
   items: WorkspaceFilesSchema,
-  kind: Schema.Literals(["file", "thread"]),
 })
-const ThreadSwitcherStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
+const ThreadSwitcherStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  query: Schema.String,
+  selected: Schema.Finite,
+  kind: Schema.Literals(["switch", "mention"]),
+  previewScroll: Schema.Finite,
+})
+const ThreadSidebarStateSchema = Schema.Struct({
+  open: Schema.Boolean,
+  focused: Schema.Boolean,
+  selected: Schema.Finite,
+  scrollTop: Schema.Finite,
+})
 const PastedTextAttachmentSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), token: Schema.String, value: Schema.String, label: Schema.String }),
   Schema.Struct({ type: Schema.Literal("image"), token: Schema.String, path: Schema.String, label: Schema.String }),
@@ -242,8 +261,8 @@ export const Model = Schema.Struct({
   scrollOffset: Schema.Finite,
   scrollFollow: Schema.Boolean,
   threads: Schema.Array(Schema.Unknown),
-  sidebarOpen: Schema.Boolean,
-  selectedThread: Schema.Finite,
+  workspaceFilesOpen: Schema.Boolean,
+  threadSidebar: ThreadSidebarStateSchema,
   permissionSelection: Schema.Finite,
   queueSelection: Schema.optional(Schema.String),
   queue: Schema.Array(Schema.Unknown),
@@ -297,9 +316,10 @@ export type Message =
   | { readonly _tag: "FilesReplaced"; readonly files: ReadonlyArray<string> }
   | { readonly _tag: "BranchDetected"; readonly branch: string }
   | { readonly _tag: "UsageReported"; readonly costUsd?: number }
-  | { readonly _tag: "SidebarToggled" }
-  | { readonly _tag: "ThreadSelectionMoved"; readonly offset: number }
-  | { readonly _tag: "ThreadSelectionConfirmed" }
+  | { readonly _tag: "WorkspaceFilesToggled" }
+  | { readonly _tag: "ThreadSidebarSelectionMoved"; readonly offset: number }
+  | { readonly _tag: "ThreadSidebarSelectionConfirmed"; readonly index?: number }
+  | { readonly _tag: "ThreadPreviewScrolled"; readonly offset: number }
   | { readonly _tag: "PermissionSelectionMoved"; readonly offset: number }
   | { readonly _tag: "PermissionDecisionSelected"; readonly id: string; readonly decision?: PermissionDecision }
   | { readonly _tag: "EventReplayed"; readonly event: UiEvent }
@@ -368,8 +388,8 @@ export const initial: {
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
-    filePicker: { open: false, query: "", selected: 0, items: idle, kind: "file" },
-    threadSwitcher: { open: false, query: "", selected: 0 },
+    filePicker: { open: false, query: "", selected: 0, items: idle },
+    threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     shortcutsOpen: false,
     composerHeight: 5,
     width: 80,
@@ -377,8 +397,8 @@ export const initial: {
     scrollOffset: 0,
     scrollFollow: true,
     threads: [],
-    sidebarOpen: false,
-    selectedThread: 0,
+    workspaceFilesOpen: false,
+    threadSidebar: { open: false, focused: false, selected: 0, scrollTop: 0 },
     permissionSelection: 0,
     queueSelection: undefined,
     queue: [],
@@ -598,12 +618,6 @@ export const filteredThreads = (model: Model): ReadonlyArray<ThreadItem> => {
 export const selectedThreadMetadata = (model: Model): ThreadItem | undefined =>
   filteredThreads(model)[model.threadSwitcher.selected]
 
-const markThreadActive = (threads: ReadonlyArray<ThreadItem>, threadId: string): ReadonlyArray<ThreadItem> => {
-  const next: Array<ThreadItem> = []
-  for (const thread of threads) next.push({ ...thread, active: thread.id === threadId })
-  return next
-}
-
 const renameThread = (
   threads: ReadonlyArray<ThreadItem>,
   threadId: string,
@@ -616,6 +630,7 @@ const renameThread = (
 
 export const canSubmit = (model: Model): boolean =>
   !model.threadSwitcher.open &&
+  !model.threadSidebar.focused &&
   !model.paletteOpen &&
   !model.palette.open &&
   !model.modePicker.open &&
@@ -641,13 +656,18 @@ export const update: {
     case "PastedTextExpanded":
       return expandPastedTextAttachment(model, message.token)
     case "ThreadsReplaced": {
-      const threads: Array<ThreadItem> = []
-      for (const thread of message.threads)
-        threads.push(thread.id === model.currentThreadId ? { ...thread, active: true } : thread)
+      const selectedId = (model.threads as ReadonlyArray<ThreadItem>)[model.threadSidebar.selected]?.id
+      const selected = Math.max(
+        0,
+        selectedId === undefined ? 0 : message.threads.findIndex((thread) => thread.id === selectedId),
+      )
       return {
         ...model,
-        threads,
-        selectedThread: Math.min(model.selectedThread, Math.max(0, message.threads.length - 1)),
+        threads: [...message.threads],
+        threadSidebar: {
+          ...model.threadSidebar,
+          selected: Math.min(selected, Math.max(0, message.threads.length - 1)),
+        },
       }
     }
     case "ThreadActivated":
@@ -655,7 +675,6 @@ export const update: {
         ...model,
         currentThreadId: message.threadId,
         currentThreadTitle: message.title,
-        threads: markThreadActive(model.threads as ReadonlyArray<ThreadItem>, message.threadId),
       }
     case "ThreadTitleChanged":
       return {
@@ -671,17 +690,37 @@ export const update: {
       return { ...model, filePicker: { ...model.filePicker, items: ready([...message.files]) } }
     case "BranchDetected":
       return { ...model, branch: message.branch }
-    case "SidebarToggled":
-      return { ...model, sidebarOpen: !model.sidebarOpen, changedFilesOpen: false }
-    case "ThreadSelectionMoved":
+    case "WorkspaceFilesToggled":
+      return { ...model, workspaceFilesOpen: !model.workspaceFilesOpen, changedFilesOpen: false }
+    case "ThreadSidebarSelectionMoved": {
+      const selected = Math.max(0, Math.min(model.threads.length - 1, model.threadSidebar.selected + message.offset))
+      const scrollTop =
+        selected < model.threadSidebar.scrollTop
+          ? selected
+          : selected >= model.threadSidebar.scrollTop + model.height
+            ? selected - model.height + 1
+            : model.threadSidebar.scrollTop
+      return { ...model, threadSidebar: { ...model.threadSidebar, selected, scrollTop } }
+    }
+    case "ThreadSidebarSelectionConfirmed": {
+      const index = message.index ?? model.threadSidebar.selected
+      const thread = (model.threads as ReadonlyArray<ThreadItem>)[index]
+      return thread === undefined
+        ? model
+        : {
+            ...model,
+            threadSidebar: { ...model.threadSidebar, selected: index },
+            pendingAction: { _tag: "SelectThread", id: thread.id },
+          }
+    }
+    case "ThreadPreviewScrolled":
       return {
         ...model,
-        selectedThread: Math.max(0, Math.min(model.threads.length - 1, model.selectedThread + message.offset)),
+        threadSwitcher: {
+          ...model.threadSwitcher,
+          previewScroll: Math.max(0, model.threadSwitcher.previewScroll + message.offset),
+        },
       }
-    case "ThreadSelectionConfirmed": {
-      const thread = (model.threads as ReadonlyArray<ThreadItem>)[model.selectedThread]
-      return thread !== undefined ? { ...model, pendingAction: { _tag: "SelectThread", id: thread.id } } : model
-    }
     case "PermissionSelectionMoved":
       return { ...model, permissionSelection: (model.permissionSelection + message.offset + 3) % 3 }
     case "PermissionDecisionSelected": {
@@ -1040,13 +1079,17 @@ export const update: {
       return { ...model, reasoningEffort: efforts[(efforts.indexOf(model.reasoningEffort) + 1) % efforts.length]! }
     }
     case "SidebarViewToggled":
-      return { ...model, changedFilesOpen: !model.changedFilesOpen, sidebarOpen: false }
+      return { ...model, changedFilesOpen: !model.changedFilesOpen, workspaceFilesOpen: false }
     case "ChangedFilesRequested":
       return model.changedFiles._tag === "Ready" ? model : { ...model, changedFiles: loading }
     case "ChangedFilesReplaced":
       return { ...model, changedFiles: ready([...message.files]) }
     case "ThreadPreviewRequested":
-      return { ...model, threadPreview: loading }
+      return {
+        ...model,
+        threadPreview: loading,
+        threadSwitcher: { ...model.threadSwitcher, previewScroll: 0 },
+      }
     case "ThreadOpenRequested":
       return { ...model, threadLoading: true }
     case "ThreadOpenCompleted":
@@ -1078,6 +1121,32 @@ export const update: {
     case "KeyPressed": {
       const key = message.key
       if (key.eventType === "release") return model
+      if (key.ctrl && (key.name === "\\" || key.sequence === "\u001c")) {
+        const currentIndex = Math.max(
+          0,
+          (model.threads as ReadonlyArray<ThreadItem>).findIndex((thread) => thread.id === model.currentThreadId),
+        )
+        return model.threadSidebar.open
+          ? model.threadSidebar.focused
+            ? { ...model, threadSidebar: { ...model.threadSidebar, open: false, focused: false } }
+            : { ...model, threadSidebar: { ...model.threadSidebar, focused: true } }
+          : {
+              ...model,
+              threadSidebar: {
+                open: true,
+                focused: false,
+                selected: currentIndex,
+                scrollTop: Math.max(0, currentIndex - model.height + 1),
+              },
+            }
+      }
+      if (model.threadSidebar.open && model.threadSidebar.focused) {
+        if (key.name === "escape") return { ...model, threadSidebar: { ...model.threadSidebar, focused: false } }
+        if (key.name === "up") return update(model, { _tag: "ThreadSidebarSelectionMoved", offset: -1 })
+        if (key.name === "down") return update(model, { _tag: "ThreadSidebarSelectionMoved", offset: 1 })
+        if (key.name === "return") return update(model, { _tag: "ThreadSidebarSelectionConfirmed" })
+        return model
+      }
       if (!key.ctrl && !key.alt && !key.meta && key.name === "pageup")
         return {
           ...model,
@@ -1094,13 +1163,19 @@ export const update: {
         return { ...model, scrollOffset: 0, scrollFollow: true }
       if ((key.ctrl && key.name === "t") || (key.alt && key.name === "w")) {
         const open = !model.threadSwitcher.open
+        const selected = Math.max(
+          0,
+          filteredThreads({ ...model, threadSwitcher: { ...model.threadSwitcher, query: "" } }).findIndex(
+            (thread) => thread.id === model.currentThreadId,
+          ),
+        )
         return {
           ...model,
-          threadSwitcher: { open, query: "", selected: 0 },
+          threadSwitcher: { open, query: "", selected, kind: "switch", previewScroll: 0 },
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
           modePicker: { ...model.modePicker, open: false },
-          filePicker: { ...model.filePicker, open: false, kind: "file" },
+          filePicker: { ...model.filePicker, open: false },
           shortcutsOpen: false,
           ...(open ? {} : { threadPreview: idle }),
         }
@@ -1108,32 +1183,98 @@ export const update: {
       if (model.threadSwitcher.open) {
         const threads = filteredThreads(model)
         if (key.name === "escape")
-          return { ...model, threadSwitcher: { open: false, query: "", selected: 0 }, threadPreview: idle }
+          return {
+            ...model,
+            threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+            threadPreview: idle,
+          }
         if (key.name === "return") {
           const thread = threads[model.threadSwitcher.selected]
           return thread === undefined
             ? model
-            : {
-                ...model,
-                threadSwitcher: { open: false, query: "", selected: 0 },
-                threadPreview: idle,
-                pendingAction: { _tag: "SelectThread", id: thread.id },
-              }
+            : model.threadSwitcher.kind === "mention"
+              ? insert(
+                  erase(
+                    {
+                      ...model,
+                      threadSwitcher: {
+                        open: false,
+                        query: "",
+                        selected: 0,
+                        kind: "switch",
+                        previewScroll: 0,
+                      },
+                      threadPreview: idle,
+                    },
+                    Math.min(2 + model.threadSwitcher.query.length, model.cursor),
+                  ),
+                  `@${thread.id} `,
+                )
+              : {
+                  ...model,
+                  threadSwitcher: {
+                    open: false,
+                    query: "",
+                    selected: 0,
+                    kind: "switch",
+                    previewScroll: 0,
+                  },
+                  threadPreview: idle,
+                  pendingAction: { _tag: "SelectThread", id: thread.id },
+                }
         }
-        if (key.name === "backspace")
-          return {
+        if (key.name === "backspace") {
+          if (model.threadSwitcher.kind === "mention" && model.threadSwitcher.query.length === 0)
+            return erase(
+              {
+                ...model,
+                threadSwitcher: {
+                  open: false,
+                  query: "",
+                  selected: 0,
+                  kind: "switch",
+                  previewScroll: 0,
+                },
+                filePicker: { ...model.filePicker, open: true, query: "", selected: 0 },
+              },
+              1,
+            )
+          const next = {
             ...model,
-            threadSwitcher: { open: true, query: model.threadSwitcher.query.slice(0, -1), selected: 0 },
+            threadSwitcher: {
+              ...model.threadSwitcher,
+              query: model.threadSwitcher.query.slice(0, -1),
+              selected: 0,
+              previewScroll: 0,
+            },
           }
+          return model.threadSwitcher.kind === "mention" ? erase(next, 1) : next
+        }
         const selected =
           key.name === "up"
             ? (model.threadSwitcher.selected + Math.max(1, threads.length) - 1) % Math.max(1, threads.length)
             : key.name === "down"
               ? (model.threadSwitcher.selected + 1) % Math.max(1, threads.length)
               : model.threadSwitcher.selected
-        return isPrintable(key)
-          ? { ...model, threadSwitcher: { open: true, query: model.threadSwitcher.query + key.sequence, selected: 0 } }
-          : { ...model, threadSwitcher: { ...model.threadSwitcher, selected } }
+        if (!isPrintable(key))
+          return {
+            ...model,
+            threadSwitcher: {
+              ...model.threadSwitcher,
+              selected,
+              previewScroll: selected === model.threadSwitcher.selected ? model.threadSwitcher.previewScroll : 0,
+            },
+          }
+        const next = {
+          ...model,
+          threadSwitcher: {
+            ...model.threadSwitcher,
+            query: model.threadSwitcher.query + key.sequence,
+            selected: 0,
+            previewScroll: 0,
+          },
+        }
+        return model.threadSwitcher.kind === "mention" ? insert(next, key.sequence) : next
       }
       if (key.ctrl && key.name === "o") {
         const open = !model.palette.open
@@ -1153,7 +1294,7 @@ export const update: {
             paletteOpen: false,
             palette: { open: false, query: "", selected: 0 },
             modePicker: { ...model.modePicker, open: false },
-            filePicker: { ...model.filePicker, open: true, query: "", selected: 0, kind: "file" },
+            filePicker: { ...model.filePicker, open: true, query: "", selected: 0 },
             shortcutsOpen: false,
           },
           "@",
@@ -1185,7 +1326,7 @@ export const update: {
       if (key.ctrl && key.name === "return" && model.busy && model.input.length > 0)
         return { ...model, pendingAction: { _tag: "InterruptAndSend", prompt: model.input }, input: "", cursor: 0 }
       if (key.alt && key.name === "t") {
-        return update(model, { _tag: "SidebarToggled" })
+        return update(model, { _tag: "WorkspaceFilesToggled" })
       }
       if (key.alt && key.name === "d") return update(model, { _tag: "ReasoningEffortCycled" })
       if (key.alt && key.name === "s") return update(model, { _tag: "SidebarViewToggled" })
@@ -1198,7 +1339,7 @@ export const update: {
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
           modePicker: { ...model.modePicker, open: false },
-          filePicker: { ...model.filePicker, open: false, query: "", selected: 0, kind: "file" },
+          filePicker: { ...model.filePicker, open: false, query: "", selected: 0 },
           shortcutsOpen: false,
         }
       if (model.shortcutsOpen) return model
@@ -1243,7 +1384,7 @@ export const update: {
               ...model,
               paletteOpen: false,
               palette: { open: false, query: "", selected: 0 },
-              threadSwitcher: { open: true, query: "", selected: 0 },
+              threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
             }
           if (action._tag === "ToggleFastMode")
             return {
@@ -1266,46 +1407,25 @@ export const update: {
           : { ...model, palette: { ...model.palette, selected } }
       }
       if (model.filePicker.open) {
-        const mentionLength = Math.min(
-          (model.filePicker.kind === "thread" ? 2 : 1) + model.filePicker.query.length,
-          model.cursor,
-        )
-        if (
-          isPrintable(key) &&
-          key.sequence === "@" &&
-          model.filePicker.kind === "file" &&
-          model.filePicker.query === ""
-        )
-          return insert({ ...model, filePicker: { ...model.filePicker, kind: "thread", selected: 0 } }, "@")
-        const threadItems = (model.threads as ReadonlyArray<ThreadItem>).filter((thread) =>
-          `${thread.title} ${thread.workspace ?? ""} ${thread.id}`
-            .toLowerCase()
-            .includes(model.filePicker.query.toLowerCase()),
-        )
+        const mentionLength = Math.min(1 + model.filePicker.query.length, model.cursor)
+        if (isPrintable(key) && key.sequence === "@" && model.filePicker.query === "")
+          return insert(
+            {
+              ...model,
+              filePicker: { ...model.filePicker, open: false },
+              threadSwitcher: { open: true, query: "", selected: 0, kind: "mention", previewScroll: 0 },
+            },
+            "@",
+          )
         const files = filteredFiles(model)
-        const candidates = model.filePicker.kind === "thread" ? threadItems : files
         const selected =
           key.name === "up"
-            ? (model.filePicker.selected + Math.max(1, candidates.length) - 1) % Math.max(1, candidates.length)
+            ? (model.filePicker.selected + Math.max(1, files.length) - 1) % Math.max(1, files.length)
             : key.name === "down"
-              ? (model.filePicker.selected + 1) % Math.max(1, candidates.length)
+              ? (model.filePicker.selected + 1) % Math.max(1, files.length)
               : model.filePicker.selected
         if (key.name === "return") {
           const file = files[selected]
-          const thread = threadItems[selected]
-          if (model.filePicker.kind === "thread")
-            return thread === undefined
-              ? { ...model, filePicker: { ...model.filePicker, open: false } }
-              : insert(
-                  erase(
-                    {
-                      ...model,
-                      filePicker: { ...model.filePicker, open: false, query: "", selected: 0, kind: "file" },
-                    },
-                    mentionLength,
-                  ),
-                  `@thread:"${thread.id}" `,
-                )
           return file === undefined
             ? { ...model, filePicker: { ...model.filePicker, open: false } }
             : insert(
@@ -1325,8 +1445,6 @@ export const update: {
               },
               1,
             )
-          if (model.filePicker.kind === "thread")
-            return erase({ ...model, filePicker: { ...model.filePicker, kind: "file", selected: 0 } }, 1)
           return erase({ ...model, filePicker: { ...model.filePicker, open: false, selected: 0 } }, 1)
         }
         return isPrintable(key)

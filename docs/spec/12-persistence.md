@@ -16,7 +16,11 @@ The service authentication token is generated with OS cryptographic randomness, 
 
 The initial product schema stores canonical Workspace paths and Thread metadata. A Thread row contains its stable Relay Session identifier before any Turn begins. Thread and Session identifiers are allocated by the product service and passed into repositories so tests remain deterministic.
 
-Thread metadata operations are create, get, list, search, rename, replace labels, pin, archive, unarchive, and delete. Listing is ordered by pinned state, most recent update, then identifier. Search matches title, workspace path, and labels. Repository list limits are clamped to one through one hundred.
+Thread metadata operations are create, get, list, search, rename, replace labels, pin, archive, unarchive, and delete. Metadata listing is ordered by pinned state, most recent metadata update, then identifier. Search matches title, workspace path, and labels. Repository list limits are clamped to one through one hundred.
+
+The product schema also stores one replaceable activity aggregate per Turn and one read timestamp per Thread. The activity row records its projected Relay cursor, whether terminal replay is complete, edit totals, and last event time. Counts are nonnegative and both rows cascade with their owning product record. Thread Summary queries combine these rows with Turn status without copying execution truth into Thread metadata. New Turns receive an incomplete zero aggregate. Relay results replace the aggregate rather than incrementing it, so repeated replay is idempotent.
+
+Resident startup repairs missing, incomplete, and cursor-stale aggregates from Relay in batches of 25 with concurrency four. Repair does not delay the initial Thread list. A summary omits unknown edit totals until repair succeeds, publishes a replacement after each committed batch, and retries typed failures on the next startup. The migration is additive and does not mutate Relay state or Thread identifiers.
 
 ## Rules
 

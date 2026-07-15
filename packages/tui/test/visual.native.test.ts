@@ -40,6 +40,7 @@ test("native character frames and deterministic screenshots match the frozen bas
           "permission",
           "sidebar",
           "thread-switcher",
+          "thread-switcher-stacked",
           "narrow-mode-overlay",
           "narrow-palette-overlay",
           "narrow-permission",

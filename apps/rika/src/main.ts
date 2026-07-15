@@ -22,6 +22,7 @@ import { McpOAuth, SkillRegistry } from "@rika/extensions"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
+import * as ThreadSummaryRepository from "@rika/persistence/thread-summary-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
@@ -1418,6 +1419,10 @@ if (import.meta.main) {
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
   )
+  const threadSummaryRepositoryLayer = ThreadSummaryRepository.layer.pipe(
+    Layer.provide(productDatabase),
+    Layer.provide(BunServices.layer),
+  )
   const resolvedContextLayer = ResolvedContext.layer.pipe(
     Layer.provide(ContextFileSystem.liveLayer),
     Layer.provide(BunServices.layer),
@@ -1492,10 +1497,12 @@ if (import.meta.main) {
                 id: thread.id,
                 title: thread.title,
                 workspace: thread.workspace,
+                pinned: thread.pinned,
                 archived: thread.archived,
-                updatedAt: thread.updatedAt,
-                active: false,
-                unread: false,
+                status: thread.status,
+                unread: thread.unread,
+                lastActivityAt: thread.lastActivityAt,
+                ...(thread.editTotals === undefined ? {} : { editTotals: thread.editTotals }),
               })),
             })
           } else if (event._tag === "ThreadSelected") {
@@ -1516,12 +1523,15 @@ if (import.meta.main) {
               busyStatus: activeTurn === undefined ? undefined : "Working",
               currentThreadId: String(event.thread.id),
               currentThreadTitle: event.thread.title,
-              selectedThread: Math.max(
-                0,
-                (model.threads as ReadonlyArray<ViewState.ThreadItem>).findIndex(
-                  (thread) => thread.id === event.thread.id,
+              threadSidebar: {
+                ...model.threadSidebar,
+                selected: Math.max(
+                  0,
+                  (model.threads as ReadonlyArray<ViewState.ThreadItem>).findIndex(
+                    (thread) => thread.id === event.thread.id,
+                  ),
                 ),
-              ),
+              },
               threadPreview: ViewState.idle,
             }
           } else if (event._tag === "ExecutionReplayed") {
@@ -1973,6 +1983,19 @@ if (import.meta.main) {
               model = ViewState.update(model, { _tag: "SidebarWidthChanged", width })
               renderer?.surface.update(model)
             },
+            threadSidebarSelect: (index) => {
+              model = ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed", index })
+              renderer?.surface.update(model)
+              const action = model.pendingAction as Session.Action | undefined
+              if (action !== undefined) {
+                Session.execute(adapter, action)
+                model = ViewState.update(model, { _tag: "PaletteActionConsumed" })
+              }
+            },
+            threadPreviewScroll: (offset) => {
+              model = ViewState.update(model, { _tag: "ThreadPreviewScrolled", offset })
+              renderer?.surface.update(model)
+            },
           }),
           () => closed,
           (created) => {
@@ -1991,6 +2014,7 @@ if (import.meta.main) {
             created.surface.update(model)
             run(Effect.logInfo("tui.renderer.started"))
             if (closed) return
+            run(session.watchThreads(dispatch))
             run(watchChangedFiles)
             run(
               Effect.gen(function* () {
@@ -2235,6 +2259,7 @@ if (import.meta.main) {
         const product = Operation.productLayer({
           repositoryLayer: repositories,
           turnRepositoryLayer: repositories,
+          threadSummaryRepositoryLayer,
           resolvedContextLayer,
           backendLayer: lazyBackendLayer(backendLayer).pipe(
             Layer.catchCause((cause) =>

@@ -1,0 +1,31 @@
+--- Terminal 119x30 | Cursor: (4, 6) ---
+
+
+  ╭─ Switch Thread ─────────────────────────────────────────────────────────────────────────────────────────────────╮
+  │                                                                                                                 │
+  │ > [ ]                                                                                                             │
+  │                                                                                                                 │
+  │   Effect plugin subagent design                                                                      Just now   │
+  │   Toggle details visibility                                                                            1h ago   │
+  │   GitHub Actions check and relay release                                               +147 ~45 -65   17h ago   │
+  │   AMP CLI programmatic control                                                           +649 ~0 -0   19h ago   │
+  │   BatonFX design issues audit                                                            +102 ~0 -0   19h ago   │
+  │   Rika performance and reliability                                                     +428 ~56 -59   19h ago   │
+  │   Push all local changes to main                                                                      21h ago   │
+  │   Relay diagnostic errors and publishing                                                +43 ~25 -30   21h ago   │
+  │                                                                                                                 │
+  │ ╭─────────────────────────────────────────────────────────────────────────────────────────────────────────────╮ │
+  │ │                                                                                                             │ │
+  │ │                                                Thread Preview                                               │ │
+  │ │                                                                                                             │ │
+  │ │        // ...                                                                                             █ │ │
+  │ │      })                                                                                                   █ │ │
+  │ │                                                                                                           █ │ │
+  │ │  “Review” can imply ordinary code review. “Audit” better covers plans, architecture, APIs, error models,  █ │ │
+  │ │  resource lifetimes, concurrency, tests, and completed implementations.                                   █ │ │
+  │ │                                                                                                             │ │
+╭ │ ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────╯ │ ╮
+│ │                                                                                                                 │ │
+│ ╰────────────────────────────────────────────────────────────────── Opt+W/Ctrl+T filter by workspace · Esc close ─╯ │
+│                                                                                                                     │
+╰───────────────────────────────────────────────────────────────────────── /private/tmp/rika-thread-parity/workspace ─╯
