@@ -412,39 +412,49 @@ export interface UnitLineRange {
 
 export const maxMountedTranscriptEntries = 200
 
-export const boundedTranscriptModel = (model: Model): Model => {
-  const limit = maxMountedTranscriptEntries
-  if (model.items.length === 0)
-    return {
-      ...model,
-      entries: model.entries.slice(-limit),
-      blocks: model.blocks.slice(-limit),
-    }
-  const source = (model.items as ReadonlyArray<TranscriptItem>).slice(-limit)
-  const entries: Array<Model["entries"][number]> = []
-  const blocks: Array<Model["blocks"][number]> = []
-  const entryIndices = new Map<number, number>()
-  const blockIndices = new Map<number, number>()
-  const items = source.map((item): TranscriptItem => {
-    if (item._tag === "Entry") {
-      let index = entryIndices.get(item.index)
-      if (index === undefined) {
-        index = entries.length
-        entryIndices.set(item.index, index)
-        entries.push(model.entries[item.index]!)
+export const boundedTranscriptModel: {
+  (model: Model): Model
+  (model: Model, end: number): Model
+  (end: number): (model: Model) => Model
+} = Function.dual(
+  (args) => typeof args[0] === "object",
+  (model: Model, end = model.items.length): Model => {
+    const limit = maxMountedTranscriptEntries
+    if (model.items.length === 0)
+      return {
+        ...model,
+        entries: model.entries.slice(-limit),
+        blocks: model.blocks.slice(-limit),
       }
-      return { ...item, index }
+    const windowEnd = Math.min(model.items.length, Math.max(0, Math.floor(end)))
+    const source = (model.items as ReadonlyArray<TranscriptItem>).slice(Math.max(0, windowEnd - limit), windowEnd)
+    const entries: Array<Model["entries"][number]> = []
+    const blocks: Array<Model["blocks"][number]> = []
+    const entryIndices = new Map<number, number>()
+    const blockIndices = new Map<number, number>()
+    const items: Array<TranscriptItem> = []
+    for (const item of source) {
+      if (item._tag === "Entry") {
+        let index = entryIndices.get(item.index)
+        if (index === undefined) {
+          index = entries.length
+          entryIndices.set(item.index, index)
+          entries.push(model.entries[item.index]!)
+        }
+        items.push({ ...item, index })
+        continue
+      }
+      let index = blockIndices.get(item.index)
+      if (index === undefined) {
+        index = blocks.length
+        blockIndices.set(item.index, index)
+        blocks.push(model.blocks[item.index]!)
+      }
+      items.push({ ...item, index })
     }
-    let index = blockIndices.get(item.index)
-    if (index === undefined) {
-      index = blocks.length
-      blockIndices.set(item.index, index)
-      blocks.push(model.blocks[item.index]!)
-    }
-    return { ...item, index }
-  })
-  return { ...model, entries, blocks, items }
-}
+    return { ...model, entries, blocks, items }
+  },
+)
 
 const toolUnitsFor = (model: Model, indices: ReadonlyArray<number>): ReadonlyArray<ToolUnit> =>
   indices.map((index) => {
@@ -776,6 +786,7 @@ export const renderTranscriptStyled = (model: Model): StyledText => buildTranscr
 export interface Handlers {
   readonly key: (key: Key) => void
   readonly scroll?: (offset: number) => void
+  readonly scrollGeometry?: (offset: number) => void
   readonly scrollFollow?: () => void
   readonly paste?: (text: string) => void
   readonly pasteImage?: (image?: { readonly bytes: Uint8Array; readonly mediaType?: string }) => void
@@ -802,6 +813,18 @@ interface TranscriptRenderableDescriptor {
   readonly onMouseDown?: TextRenderable["onMouseDown"]
 }
 
+interface TranscriptAnchor {
+  readonly key: string
+  readonly screenY: number
+}
+
+interface PendingTranscriptAnchor {
+  readonly anchor: TranscriptAnchor | undefined
+  readonly threadId: string | undefined
+  readonly scrollHeight: number
+  readonly scrollBy: number
+}
+
 interface TranscriptRenderInput {
   readonly entries: Model["entries"]
   readonly blocks: Model["blocks"]
@@ -810,6 +833,7 @@ interface TranscriptRenderInput {
   readonly detailSelection: Model["detailSelection"]
   readonly permissionSelection: number
   readonly width: number
+  readonly windowEnd: number
 }
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
@@ -885,6 +909,14 @@ export class Surface {
   private loaderPhase = 0
   private loaderTimer: Fiber.Fiber<void> | undefined
   private transcriptViewportRows = 0
+  private transcriptWindowEnd = 0
+  private transcriptWindowThread: string | undefined
+  private transcriptAnchorFrame: (() => void) | undefined
+  private transcriptAnchorScrollBy = 0
+  private pendingTranscriptAnchor: PendingTranscriptAnchor | undefined
+  private scrollbarSyncing = false
+  private scrollGeneration = 0
+  private destroyed = false
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -901,7 +933,7 @@ export class Surface {
       viewportCulling: true,
       verticalScrollbarOptions: { visible: false },
       contentOptions: { flexDirection: "column", justifyContent: "flex-end" },
-      onMouseScroll: () => queueMicrotask(() => this.reportTranscriptScroll()),
+      onMouseScroll: () => this.queueTranscriptScroll(() => this.handleTranscriptScroll()),
     })
     this.transcriptScroll.verticalScrollBar.visible = false
     this.transcriptContent = new BoxRenderable(renderer, {
@@ -923,8 +955,9 @@ export class Surface {
       visible: false,
       trackOptions: { foregroundColor: colors.text, backgroundColor: colors.muted },
       onChange: (position) => {
+        if (this.scrollbarSyncing || this.destroyed) return
         this.transcriptScroll.scrollTop = position
-        queueMicrotask(() => this.reportTranscriptScroll())
+        this.queueTranscriptScroll(() => this.reportTranscriptScroll())
       },
     })
     this.queueBox = new BoxRenderable(renderer, {
@@ -1134,34 +1167,89 @@ export class Surface {
     if (this.suppressMouseJunk(mapped)) return
     if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pageup") {
       this.transcriptScroll.stickyScroll = false
-      this.transcriptScroll.scrollBy(-Math.max(1, this.transcriptScroll.viewport.height - 1))
+      const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
+      if (this.queuePendingTranscriptScroll(-amount)) return
+      if (this.transcriptScroll.scrollTop <= 1 && this.shiftTranscriptWindow(-100, true, -amount)) return
+      this.transcriptScroll.scrollBy(-amount)
       this.reportTranscriptScroll()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pagedown") {
       this.transcriptScroll.stickyScroll = false
-      this.transcriptScroll.scrollBy(Math.max(1, this.transcriptScroll.viewport.height - 1))
+      const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
+      if (this.queuePendingTranscriptScroll(amount)) return
+      if (this.atMountedTranscriptBottom() && this.shiftTranscriptWindow(100, true, amount)) return
+      this.transcriptScroll.scrollBy(amount)
       this.reportTranscriptScroll()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "end") {
       this.handlers.scrollFollow?.()
     } else if (mapped.ctrl && mapped.name === "v" && this.handlers.pasteImage !== undefined) this.handlers.pasteImage()
     else this.handlers.key(mapped)
   }
-  private readonly atTranscriptBottom = (): boolean =>
+  private readonly atMountedTranscriptBottom = (): boolean =>
     this.transcriptScroll.scrollTop >=
     Math.max(0, this.transcriptScroll.scrollHeight - this.transcriptScroll.viewport.height) - 1
+  private readonly atTranscriptBottom = (): boolean =>
+    this.atMountedTranscriptBottom() && this.transcriptWindowEnd >= (this.model?.items.length ?? 0)
+  private readonly transcriptWindowStart = (): number =>
+    Math.max(0, this.transcriptWindowEnd - maxMountedTranscriptEntries)
+  private captureTranscriptAnchor(): TranscriptAnchor | undefined {
+    const viewportTop = this.transcriptScroll.screenY
+    const first = [...this.transcriptRecords.values()]
+      .filter(({ renderable }) => renderable.height > 0 && renderable.screenY + renderable.height > viewportTop)
+      .toSorted((left, right) => left.renderable.screenY - right.renderable.screenY)[0]
+    return first === undefined ? undefined : { key: first.key, screenY: first.renderable.screenY }
+  }
+  private handleTranscriptScroll(): void {
+    if (
+      this.transcriptScroll.scrollTop <= 1 &&
+      this.transcriptWindowStart() > 0 &&
+      this.shiftTranscriptWindow(-100, true)
+    )
+      return
+    this.reportTranscriptScroll()
+  }
+  private shiftTranscriptWindow(delta: number, preserveAnchor: boolean, scrollBy = 0): boolean {
+    const model = this.model
+    if (model === undefined || model.items.length <= maxMountedTranscriptEntries) return false
+    const minimumEnd = Math.min(maxMountedTranscriptEntries, model.items.length)
+    const end = Math.min(model.items.length, Math.max(minimumEnd, this.transcriptWindowEnd + delta))
+    if (end === this.transcriptWindowEnd) return false
+    this.transcriptWindowEnd = end
+    this.transcriptRenderInput = undefined
+    this.transcriptAnchorScrollBy = scrollBy
+    this.update(model, preserveAnchor)
+    return true
+  }
+  private queuePendingTranscriptScroll(scrollBy: number): boolean {
+    const pending = this.pendingTranscriptAnchor
+    if (pending === undefined || pending.threadId !== this.model?.currentThreadId) return false
+    this.pendingTranscriptAnchor = { ...pending, scrollBy: pending.scrollBy + scrollBy }
+    this.renderer.requestRender()
+    return true
+  }
   private readonly reportTranscriptScroll = () => {
-    if (this.scrollProgrammatic) return
+    if (this.scrollProgrammatic || this.destroyed) return
     this.syncTranscriptScrollbar()
     if (this.atTranscriptBottom()) this.handlers.scrollFollow?.()
     else this.handlers.scroll?.(this.transcriptScroll.scrollTop)
   }
   private syncTranscriptScrollbar(): void {
+    if (this.destroyed) return
     const viewportHeight = this.transcriptViewportRows
     const scrollHeight = this.transcriptScroll.scrollHeight
     const overflowing = viewportHeight > 0 && scrollHeight > viewportHeight
     this.transcriptScrollbar.scrollSize = scrollHeight
     this.transcriptScrollbar.viewportSize = Math.max(1, viewportHeight)
+    this.scrollbarSyncing = true
     this.transcriptScrollbar.scrollPosition = this.transcriptScroll.scrollTop
+    this.scrollbarSyncing = false
     if (this.transcriptScrollbar.visible !== overflowing) this.transcriptScrollbar.visible = overflowing
+  }
+  private queueTranscriptScroll(action: () => void): void {
+    const generation = this.scrollGeneration
+    queueMicrotask(() => {
+      if (this.destroyed || generation !== this.scrollGeneration) return
+      action()
+    })
   }
   private anchorTranscriptAfterLayout(): void {
     queueMicrotask(() => {
@@ -1316,6 +1404,8 @@ export class Surface {
   private readonly onRootMouseUp = (event: MouseEvent) => {
     if (this.sidebarDrag !== undefined) {
       this.sidebarDrag = undefined
+      this.sidebarRowsWidth = 0
+      if (this.model !== undefined) this.refreshSidebarRows(this.model)
       this.setSidebarResizePointer(event.x === this.changedFilesBox.x)
       event.preventDefault()
       event.stopPropagation()
@@ -1428,14 +1518,19 @@ export class Surface {
       previous.toolCallDrafts !== input.toolCallDrafts ||
       previous.detailSelection !== input.detailSelection ||
       previous.permissionSelection !== input.permissionSelection ||
-      previous.width !== input.width
+      previous.width !== input.width ||
+      previous.windowEnd !== input.windowEnd
     )
   }
   private refreshSidebarRows(model: Model): void {
     const view = model.changedFilesOpen ? "changed" : "workspace"
     const source = view === "changed" ? model.changedFiles : model.filePicker.items
     const width = sidebarInnerWidth(model)
-    if (this.sidebarRowsView !== view || this.sidebarRowsSource !== source || this.sidebarRowsWidth !== width) {
+    if (
+      this.sidebarRowsView !== view ||
+      this.sidebarRowsSource !== source ||
+      (this.sidebarDrag === undefined && this.sidebarRowsWidth !== width)
+    ) {
       this.sidebarRowsView = view
       this.sidebarRowsSource = source
       this.sidebarRowsWidth = width
@@ -1506,7 +1601,23 @@ export class Surface {
 
   update(model: Model, preserveTranscriptAnchor = false): void {
     const previousScrollHeight = this.transcriptScroll.scrollHeight
-    const previousScrollTop = this.transcriptScroll.scrollTop
+    const transcriptAnchor = preserveTranscriptAnchor ? this.captureTranscriptAnchor() : undefined
+    const previousModel = this.model
+    const previousItems = previousModel?.items.length ?? 0
+    if (this.transcriptWindowThread !== model.currentThreadId) {
+      if (this.transcriptAnchorFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.transcriptAnchorFrame)
+      this.transcriptAnchorFrame = undefined
+      this.pendingTranscriptAnchor = undefined
+      this.transcriptAnchorScrollBy = 0
+      this.transcriptWindowThread = model.currentThreadId
+      this.transcriptWindowEnd = model.items.length
+    } else if (preserveTranscriptAnchor)
+      this.transcriptWindowEnd = Math.min(
+        model.items.length,
+        this.transcriptWindowEnd + Math.max(0, model.items.length - previousItems),
+      )
+    else if (model.scrollFollow || this.transcriptWindowEnd === 0) this.transcriptWindowEnd = model.items.length
+    else this.transcriptWindowEnd = Math.min(this.transcriptWindowEnd, model.items.length)
     this.model = model
     this.queueHint.bg = cutoutBackground(this.renderer)
     this.modeLabel.bg = cutoutBackground(this.renderer)
@@ -1563,10 +1674,11 @@ export class Surface {
         detailSelection: renderModel.detailSelection,
         permissionSelection: renderModel.permissionSelection,
         width: renderModel.width,
+        windowEnd: this.transcriptWindowEnd,
       }
       if (this.transcriptChanged(transcriptInput)) {
         const built = buildTranscript(
-          boundedTranscriptModel(renderModel),
+          boundedTranscriptModel(renderModel, this.transcriptWindowEnd),
           model.busy ? spinnerFrames[this.loaderPhase % spinnerFrames.length]! : idleSpinnerFrame,
         )
         const styledLines = splitStyledLines(built.styled)
@@ -1727,16 +1839,43 @@ export class Surface {
     this.transcriptScroll.stickyScroll = model.scrollFollow
     this.anchorTranscriptAfterLayout()
     if (preserveTranscriptAnchor) {
-      queueMicrotask(() => {
-        if (this.model !== model) return
-        this.scrollProgrammatic = true
-        this.transcriptScroll.scrollTop =
-          previousScrollTop + Math.max(0, this.transcriptScroll.scrollHeight - previousScrollHeight)
-        this.scrollProgrammatic = false
-        this.syncTranscriptScrollbar()
-        this.renderer.requestRender()
-      })
-    } else if (model.scrollFollow) this.followTranscriptAfterLayout()
+      const pending = this.pendingTranscriptAnchor
+      this.pendingTranscriptAnchor =
+        pending !== undefined && pending.threadId === model.currentThreadId
+          ? { ...pending, scrollBy: pending.scrollBy + this.transcriptAnchorScrollBy }
+          : {
+              anchor: transcriptAnchor,
+              threadId: model.currentThreadId,
+              scrollHeight: previousScrollHeight,
+              scrollBy: this.transcriptAnchorScrollBy,
+            }
+      this.transcriptAnchorScrollBy = 0
+      if (this.transcriptAnchorFrame === undefined) {
+        const restore = () => {
+          this.transcriptAnchorFrame = undefined
+          const current = this.pendingTranscriptAnchor
+          this.pendingTranscriptAnchor = undefined
+          if (current === undefined || this.model?.currentThreadId !== current.threadId || this.destroyed) return
+          const anchored = current.anchor === undefined ? undefined : this.transcriptRecords.get(current.anchor.key)
+          const anchorScreenY = current.anchor?.screenY
+          const offset =
+            anchored === undefined || anchorScreenY === undefined
+              ? this.transcriptScroll.scrollHeight - current.scrollHeight
+              : anchored.renderable.screenY - anchorScreenY
+          this.scrollProgrammatic = true
+          this.transcriptScroll.scrollTop = this.transcriptScroll.scrollTop + offset
+          if (current.scrollBy !== 0) this.transcriptScroll.scrollBy(current.scrollBy)
+          this.scrollProgrammatic = false
+          this.syncTranscriptScrollbar()
+          if (current.scrollBy === 0) this.handlers.scrollGeometry?.(this.transcriptScroll.scrollTop)
+          else this.reportTranscriptScroll()
+          this.renderer.requestRender()
+        }
+        this.transcriptAnchorFrame = restore
+        this.renderer.once(CliRenderEvents.FRAME, restore)
+      }
+    } else if (this.pendingTranscriptAnchor !== undefined) this.renderer.requestRender()
+    else if (model.scrollFollow) this.followTranscriptAfterLayout()
     else if (Math.abs(this.transcriptScroll.scrollTop - model.scrollOffset) > 1) {
       this.scrollProgrammatic = true
       this.transcriptScroll.scrollTop = model.scrollOffset
@@ -1835,6 +1974,12 @@ export class Surface {
   }
 
   destroy(): void {
+    this.destroyed = true
+    this.scrollGeneration += 1
+    if (this.transcriptAnchorFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.transcriptAnchorFrame)
+    this.transcriptAnchorFrame = undefined
+    this.transcriptAnchorScrollBy = 0
+    this.pendingTranscriptAnchor = undefined
     this.cancelTimer(this.loaderTimer)
     this.loaderTimer = undefined
     this.cancelTimer(this.welcomeTimer)

@@ -1,3 +1,4 @@
+import type * as Transcript from "@rika/transcript"
 import { Function, Schema } from "effect"
 import type { Key } from "./keys"
 import { isPrintable } from "./keys"
@@ -16,58 +17,7 @@ export const Entry = Schema.Struct({
 })
 export type Entry = typeof Entry.Type
 
-export type TranscriptBlock =
-  | { readonly _tag: "Reasoning"; readonly text: string; readonly expanded: boolean }
-  | {
-      readonly _tag: "ToolCall"
-      readonly id: string
-      readonly name: string
-      readonly input: string
-      readonly status: "running" | "complete" | "failed"
-      readonly output?: string
-      readonly expanded?: boolean
-    }
-  | { readonly _tag: "ToolResult"; readonly id: string; readonly output: string; readonly failed: boolean }
-  | { readonly _tag: "Diff"; readonly path: string; readonly patch: string; readonly expanded?: boolean }
-  | { readonly _tag: "ContextUsage"; readonly text: string; readonly cost?: string }
-  | { readonly _tag: "Compaction"; readonly summary: string; readonly checkpoint?: string }
-  | { readonly _tag: "Notification"; readonly title: string; readonly detail: string }
-  | {
-      readonly _tag: "Error"
-      readonly title: string
-      readonly detail: string
-      readonly turnId?: string
-      readonly recovery?: string
-    }
-  | {
-      readonly _tag: "Permission"
-      readonly id: string
-      readonly kind: "permission" | "tool-approval"
-      readonly title: string
-      readonly detail: string
-      readonly status: "pending" | "approved" | "denied"
-    }
-  | { readonly _tag: "Queued"; readonly id: string; readonly prompt: string }
-  | {
-      readonly _tag: "ChildAgent"
-      readonly name: string
-      readonly summary: string
-      readonly status: "running" | "complete" | "failed"
-    }
-  | {
-      readonly _tag: "Workflow"
-      readonly name: string
-      readonly step: string
-      readonly status: "running" | "waiting" | "complete" | "failed"
-    }
-  | {
-      readonly _tag: "ImageAttachment"
-      readonly name: string
-      readonly mediaType: string
-      readonly width?: number
-      readonly height?: number
-      readonly bytes?: number
-    }
+export type TranscriptBlock = Transcript.Block
 
 export interface ThreadItem {
   readonly id: string
@@ -359,6 +309,17 @@ export const replaceQueue: {
     queue: [...queue],
     queueSelection: selected,
   }
+})
+
+export const replaceTurnPrompt: {
+  (model: Model, turnId: string, prompt: string): Model
+  (turnId: string, prompt: string): (model: Model) => Model
+} = Function.dual(3, (model: Model, turnId: string, prompt: string): Model => {
+  const index = model.entries.findIndex((entry) => entry.role === "user" && entry.turnId === turnId)
+  if (index < 0) return model
+  const entries = [...model.entries]
+  entries[index] = { ...entries[index]!, text: prompt }
+  return { ...model, entries }
 })
 
 export const defaultReasoningEffort = (mode: Mode): ReasoningEffort =>

@@ -2,19 +2,7 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { ChildFanOutRuntime, Client, Ids, SQLite } from "@relayfx/sdk/sqlite"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
-import {
-  Config,
-  Context,
-  Effect,
-  FileSystem,
-  Layer,
-  Logger,
-  Schedule,
-  Schema,
-  Semaphore,
-  Stdio,
-  Stream,
-} from "effect"
+import { Config, Context, Effect, FileSystem, Layer, Logger, Schedule, Schema, Semaphore, Stdio, Stream } from "effect"
 import { ProductAgent } from "../src/index"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("MultiAgentProcessFixtureError", {

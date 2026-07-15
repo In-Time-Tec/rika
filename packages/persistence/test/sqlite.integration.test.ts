@@ -1,6 +1,8 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as Transcript from "@rika/transcript"
 import { expect, test } from "bun:test"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, FileSystem, Layer, Schema } from "effect"
+import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Database, Thread, ThreadRepository, ThreadSummaryRepository } from "../src"
 import * as TurnRepository from "../src/turn-repository"
 import * as TranscriptRepository from "../src/transcript-repository"
@@ -24,6 +26,7 @@ test("creates, persists, and reopens the current schema", () => {
       const filename = `${directory}/rika.db`
       const database = Database.layer(filename)
       const layer = Layer.mergeAll(
+        database,
         ThreadRepository.layer.pipe(Layer.provide(database)),
         TurnRepository.layer.pipe(Layer.provide(database)),
         ThreadSummaryRepository.layer.pipe(Layer.provide(database)),
@@ -68,9 +71,12 @@ test("creates, persists, and reopens the current schema", () => {
         const transcript = yield* TranscriptRepository.Service
         const storedTurn = yield* turns.get(Turn.TurnId.make("turn-a"))
         if (storedTurn === undefined) return yield* Effect.die("turn-a was not stored")
-        yield* transcript.replace(storedTurn, [
-          { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
-        ])
+        yield* transcript.replace(
+          storedTurn,
+          Transcript.project(storedTurn.id, storedTurn.prompt, [
+            { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
+          ]),
+        )
         yield* transcript.append(storedTurn, {
           cursor: "cursor-b",
           sequence: 2,
@@ -83,6 +89,36 @@ test("creates, persists, and reopens the current schema", () => {
           type: "model.usage.reported",
           createdAt: 5,
         })
+        const sql = yield* SqlClient
+        const queryPlan = yield* sql`EXPLAIN QUERY PLAN
+          SELECT u.unit_json, c.revision, t.prompt
+          FROM rika_transcript_units u
+          JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id AND c.projection_version = 2
+          JOIN rika_turns t ON t.id = u.turn_id
+          WHERE u.thread_id = ${id}
+          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
+          LIMIT 51`
+        const decodedPlan = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ detail: Schema.String })))(
+          queryPlan,
+        )
+        expect(decodedPlan.map((row) => row.detail).join("\n")).not.toContain("TEMP B-TREE")
+        const cursorPlan = yield* sql`EXPLAIN QUERY PLAN
+          SELECT u.unit_json, c.revision, t.prompt
+          FROM rika_transcript_units u
+          JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id AND c.projection_version = 2
+          JOIN rika_turns t ON t.id = u.turn_id
+          WHERE u.thread_id = ${id} AND
+            (u.created_at, u.turn_id, u.unit_sequence, u.unit_part, u.unit_key) <
+            (${storedTurn.createdAt}, ${storedTurn.id}, 2, 0, "turn:turn-a:user")
+          ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
+          LIMIT 51`
+        const decodedCursorPlan = yield* Schema.decodeUnknownEffect(
+          Schema.Array(Schema.Struct({ detail: Schema.String })),
+        )(cursorPlan)
+        const cursorDetails = decodedCursorPlan.map((row) => row.detail).join("\n")
+        expect(cursorDetails).toContain("rika_transcript_units_page")
+        expect(cursorDetails).toContain("(created_at,turn_id,unit_sequence,unit_part,unit_key)<")
+        expect(cursorDetails).not.toContain("TEMP B-TREE")
       }).pipe(provideLayer(layer))
       const reopenedDatabase = Database.layer(filename)
       const reopened = Layer.mergeAll(
@@ -134,16 +170,78 @@ test("creates, persists, and reopens the current schema", () => {
             expect(result.transcript).toMatchObject({
               revision: 2,
               checkpointCursor: "cursor-b",
-              events: [
-                { cursor: "cursor-a", type: "execution.completed" },
-                { cursor: "cursor-b", type: "model.usage.reported" },
-              ],
+              projectionVersion: 2,
+              units: [{ content: { _tag: "Entry", role: "user", text: "hello" } }],
             })
           }),
         ),
       ),
     ),
   )
+})
+
+test("treats an outdated transcript projection as rebuildable", () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-version-" })
+      const database = Database.layer(`${directory}/rika.db`)
+      const layer = Layer.mergeAll(
+        database,
+        ThreadRepository.layer.pipe(Layer.provide(database)),
+        TurnRepository.layer.pipe(Layer.provide(database)),
+        TranscriptRepository.layer.pipe(Layer.provide(database)),
+      )
+      return yield* Effect.gen(function* () {
+        const threads = yield* ThreadRepository.Service
+        const turns = yield* TurnRepository.Service
+        const transcripts = yield* TranscriptRepository.Service
+        const sql = yield* SqlClient
+        yield* threads.create({ id, workspace: "/work/a", title: "First", now: 1 })
+        yield* turns.createForSubmission({
+          id: Turn.TurnId.make("turn-stale"),
+          threadId: id,
+          prompt: "hello",
+          now: 2,
+        })
+        const turn = yield* turns.get(Turn.TurnId.make("turn-stale"))
+        if (turn === undefined) return yield* Effect.die("turn-stale was not stored")
+        const projection = Transcript.project(turn.id, turn.prompt, [
+          {
+            cursor: "cursor-a",
+            sequence: 1,
+            type: "tool.call.requested",
+            createdAt: 3,
+            data: { tool_call_id: "obsolete", tool_name: "Read", input: "old" },
+          },
+        ])
+        yield* transcripts.replace(turn, projection)
+        yield* sql`UPDATE rika_transcript_checkpoints SET projection_version = 1 WHERE turn_id = ${turn.id}`
+
+        expect(yield* transcripts.get(turn.id)).toBeUndefined()
+        expect((yield* transcripts.page(id)).entries).toEqual([])
+        expect(
+          yield* transcripts.appendAll(turn, [
+            {
+              cursor: "cursor-b",
+              sequence: 2,
+              type: "model.output.completed",
+              createdAt: 4,
+              text: "rebuilt",
+            },
+          ]),
+        ).toMatchObject({
+          projectionVersion: 2,
+          checkpointCursor: "cursor-b",
+          units: [
+            { content: { _tag: "Entry", role: "user", text: "hello" } },
+            { content: { _tag: "Entry", role: "assistant", text: "rebuilt" } },
+          ],
+        })
+      }).pipe(provideLayer(layer))
+    }),
+  )
+  return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))
 })
 
 test("turn SQL mutations, ordering, and rejection branches", () => {

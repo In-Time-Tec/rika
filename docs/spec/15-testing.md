@@ -23,7 +23,7 @@ Every behavior-bearing service has a test or memory layer. Tests use determinist
 - Resident-service tests covering simultaneous bind races, starting wait, authenticated attachment, final-client grace, grace cancellation, draining, listener retention through database close, stopped replacement, and `SIGKILL` replacement and reconciliation.
 - Identity and authentication tests covering canonical/symlinked roots, separate profiles, owner-only token creation and permissions, token and profile mismatch, unauthenticated information disclosure, token replacement, incompatible protocol versions, stale diagnostics, and a foreign process occupying the endpoint.
 - Protocol tests covering frame limits, malformed frames, request idempotency across reconnect, cursor replay and acknowledgement, duplicate suppression, bounded subscription queues, slow consumers, heartbeat timeout, close codes, and reconnect during service lifecycle transitions.
-- Resident transport tests cover ordered bounded writes, serialized inbound handling, one-second stalls, close-time waiter settlement, two-sided startup capability negotiation, legacy peers, and startup failure classification.
+- Resident transport tests cover ordered bounded writes, serialized inbound handling, one-second stalls, close-time waiter settlement, required acknowledgement capability negotiation, incompatible peers, and startup failure classification.
 - Route-pin tests proving every top-level, queued, titled, child, and Workflow execution uses its immutable pre-acceptance route after settings changes and restart, and that malformed or unavailable pins fail before Relay acceptance.
 
 ## Coverage

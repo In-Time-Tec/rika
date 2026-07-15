@@ -64,9 +64,11 @@ const main = Effect.gen(function* () {
       ),
     cancel: () => Effect.void,
   })
-  const fanOutContext = yield* Layer.build(
-    SQLite.childFanOutLayer({ filename: database }, fanOutHandlers),
-  ).pipe(Effect.provide(Context.empty()), Effect.mapError(fixtureError), Effect.orDie)
+  const fanOutContext = yield* Layer.build(SQLite.childFanOutLayer({ filename: database }, fanOutHandlers)).pipe(
+    Effect.provide(Context.empty()),
+    Effect.mapError(fixtureError),
+    Effect.orDie,
+  )
   const fanOutLayer = Layer.succeed(ChildFanOutRuntime.Service, Context.get(fanOutContext, ChildFanOutRuntime.Service))
   const workflowHandlers = Layer.effect(
     WorkflowDefinitionRuntime.HandlerService,
@@ -88,9 +90,11 @@ const main = Effect.gen(function* () {
       ),
     ),
   ).pipe(Layer.provide(fanOutLayer))
-  const workflowContext = yield* Layer.build(
-    SQLite.workflowLayer({ filename: database }, workflowHandlers),
-  ).pipe(Effect.provide(Context.empty()), Effect.mapError(fixtureError), Effect.orDie)
+  const workflowContext = yield* Layer.build(SQLite.workflowLayer({ filename: database }, workflowHandlers)).pipe(
+    Effect.provide(Context.empty()),
+    Effect.mapError(fixtureError),
+    Effect.orDie,
+  )
   const workflowLayer = Layer.succeed(
     WorkflowDefinitionRuntime.Service,
     Context.get(workflowContext, WorkflowDefinitionRuntime.Service),

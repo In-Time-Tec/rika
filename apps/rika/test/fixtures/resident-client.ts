@@ -202,6 +202,42 @@ const program = Effect.gen(function* () {
                 : { type: "burst-failed", error: String(exit.cause) },
             )
           })
+        if (command === "overflow-interactive")
+          return Effect.gen(function* () {
+            const tags = new Array<string>()
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: ["overflow-events"], ephemeral: false, workspace },
+                {
+                  interactive: (_, session) => session.initialize((event) => tags.push(event._tag)),
+                },
+              ),
+            )
+            yield* emit({
+              type: exit._tag === "Failure" ? "overflow-failed" : "overflow-completed",
+              callbacks: tags.length,
+              tag: tags.at(-1),
+              tags,
+              ...(exit._tag === "Failure" ? { error: String(exit.cause) } : {}),
+            })
+          })
+        if (command === "overflow-watch")
+          return Effect.gen(function* () {
+            const tags = new Array<string>()
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: ["overflow-watch"], ephemeral: false, workspace },
+                {
+                  interactive: (_, session) => session.watchThreads((event) => tags.push(event._tag)),
+                },
+              ),
+            )
+            yield* emit({
+              type: "overflow-watch-finished",
+              outcome: exit._tag,
+              tags,
+            })
+          })
         if (command === "blocking-interactive")
           return connection
             .run(

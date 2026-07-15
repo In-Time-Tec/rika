@@ -48,6 +48,7 @@
         "@rika/persistence": "workspace:*",
         "@rika/runtime": "workspace:*",
         "@rika/tools": "workspace:*",
+        "@rika/transcript": "workspace:*",
         "@rika/tui": "workspace:*",
         "effect": "catalog:",
       },
@@ -77,6 +78,7 @@
         "@rika/persistence": "workspace:*",
         "@rika/runtime": "workspace:*",
         "@rika/tools": "workspace:*",
+        "@rika/transcript": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -121,6 +123,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-sqlite-bun": "catalog:",
+        "@rika/transcript": "workspace:*",
         "effect": "catalog:",
       },
       "devDependencies": {
@@ -164,12 +167,26 @@
         "vitest": "catalog:",
       },
     },
+    "packages/transcript": {
+      "name": "@rika/transcript",
+      "version": "0.0.0",
+      "dependencies": {
+        "effect": "catalog:",
+      },
+      "devDependencies": {
+        "@effect/vitest": "catalog:",
+        "@types/bun": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+      },
+    },
     "packages/tui": {
       "name": "@rika/tui",
       "version": "0.0.0",
       "dependencies": {
         "@opentui/core": "catalog:",
         "@pierre/diffs": "catalog:",
+        "@rika/transcript": "workspace:*",
         "cli-spinners": "catalog:",
         "effect": "catalog:",
         "marked": "catalog:",
@@ -207,7 +224,7 @@
     "@opentui/core-win32-arm64": "0.4.3",
     "@opentui/core-win32-x64": "0.4.3",
     "@pierre/diffs": "1.2.11",
-    "@relayfx/sdk": "0.3.0",
+    "@relayfx/sdk": "0.3.1",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.3.13",
     "@types/node": "24.12.2",
@@ -463,7 +480,7 @@
 
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
-    "@relayfx/sdk": ["@relayfx/sdk@0.3.0", "", { "dependencies": { "@batonfx/core": "0.4.4", "@batonfx/providers": "0.4.4", "@effect/ai-anthropic": "4.0.0-beta.93", "@effect/ai-openai": "4.0.0-beta.93", "@effect/ai-openai-compat": "4.0.0-beta.93", "@effect/ai-openrouter": "4.0.0-beta.93", "@effect/sql-mysql2": "4.0.0-beta.93", "@effect/sql-pg": "4.0.0-beta.93", "@effect/sql-sqlite-bun": "4.0.0-beta.93", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.93", "pg": "8.21.0" } }, "sha512-JKbSS4jItWQOcjkDvFvK23UmtSRbJVyAC40jpcacHB7gpEGA1dd9/kT9lUmzNMK3KnMrYeRbBrLy9/NvlvN5EQ=="],
+    "@relayfx/sdk": ["@relayfx/sdk@0.3.1", "", { "dependencies": { "@batonfx/core": "0.4.4", "@batonfx/providers": "0.4.4", "@effect/ai-anthropic": "4.0.0-beta.93", "@effect/ai-openai": "4.0.0-beta.93", "@effect/ai-openai-compat": "4.0.0-beta.93", "@effect/ai-openrouter": "4.0.0-beta.93", "@effect/sql-mysql2": "4.0.0-beta.93", "@effect/sql-pg": "4.0.0-beta.93", "@effect/sql-sqlite-bun": "4.0.0-beta.93", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.93", "pg": "8.21.0" } }, "sha512-q4V62yzIe1Q2rJyWwiGhWvNXSXDQluZBr1NVoIsVPsIdOlxq1QzA2djKK4k0JyxXWZahU0L45/VNAU+IxT/XvA=="],
 
     "@rika/app": ["@rika/app@workspace:packages/app"],
 
@@ -478,6 +495,8 @@
     "@rika/runtime": ["@rika/runtime@workspace:packages/runtime"],
 
     "@rika/tools": ["@rika/tools@workspace:packages/tools"],
+
+    "@rika/transcript": ["@rika/transcript@workspace:packages/transcript"],
 
     "@rika/tui": ["@rika/tui@workspace:packages/tui"],
 

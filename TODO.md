@@ -121,12 +121,14 @@ This file is the execution ledger. Update it in the same change that changes imp
 ## Phase 5: OpenTUI
 
 - [x] Adopt Relay 0.3.0 bidirectional execution-event pages and remove forward-only transcript recovery. Published Relay 0.3.0 and the Rika adapter page test prove the released backward page path.
-- [x] Add the durable semantic transcript projection, keyset Turn/transcript pages, checkpoints, rebuild, and migration proof. SQLite migration 9, memory/service tests, and reopen integration evidence pass.
-- [x] Ship resident protocol v2 transcript page, prepend, keyed patch, bounded delivery, and resync frames. The 1,024-frame resident queue fails closed and emits a typed resync request after overflow.
+- [x] Add the durable versioned Turn transcript cache, keyset Turn/transcript pages, checkpoints, rebuild, and migration proof. SQLite migration 9, memory/service tests, stale-version rebuild, and reopen integration evidence pass.
+- [x] Replace cached Relay event arrays with stable semantic transcript units so raw Relay pages stop at the product boundary described by ADR 0014. Projection, SQLite migration 11/reopen, keyset paging, stale-rebuild, and 450-source-event compaction tests pass.
+- [x] Ship one current resident contract with transcript page, prepend, keyed patch, acknowledged bounded delivery, and resync frames. Exact two-sided wire and capability checks prevent a current client from remaining on a pre-acknowledgement resident; there are no compatibility modes or fallbacks. Native process tests prove a normal 1,000-event burst and both finite and long-lived overflow paths, which interrupt work and emit a typed resync followed by a terminal failure event.
 - [x] Extract the interactive transcript controller and bound normal frame scheduling to one update per sixteen milliseconds.
-- [x] Replace full transcript child rebuilds with keyed reconciliation, a two-hundred-entry mounted window, anchor-preserving prepend, and a persistent streaming rich-text tail.
+- [x] Replace full transcript child rebuilds with keyed reconciliation, a movable two-hundred-entry mounted window, anchor-preserving prepend, and a persistent streaming rich-text tail.
+- [ ] Replace the controller's flat collection of explicitly loaded semantic pages with a two-way page cache so repeated navigation through an unusually long session also bounds prepend reducer work.
 - [x] Upgrade released OpenTUI and every native package to 0.4.3 after the native benchmark stop gate passes; keep the read-only upstream source submodule for research. Native 1/10/100/1,000-entry cases pass with at most 200 mounted entries.
-- [ ] Record 1/10/100/1,000-Turn performance evidence and complete Pilotty, agent-tty, package, and installed-binary acceptance.
+- [x] Refresh 1/10/100/1,000-Turn performance evidence and complete final Pilotty, agent-tty, package, and installed-binary acceptance after the resident and paging fixes. Native cases retain at most 200 mounted entries; packaging smoke passes; the installed binary opens both 10,000-entry sidebars and remains responsive after a completed Turn in Pilotty and agent-tty; the real user profile starts without socket 4403 or a draining loop.
 - [x] Connect prompt submission to durable Turn execution and terminal result projection.
 - [x] Port the initial Rika v1 color and spacing tokens.
 - [x] Port the pure view-state model for transcript, palette, mode, input, history, and queue actions.
@@ -138,7 +140,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 - [x] Port the initial command palette.
 - [x] Port thread sidebar.
 - [x] Render changed files as a complete nested tree in a full-height right sidebar with panel-bounded scrolling, colored line counts, and editor-opening file clicks.
-- [x] Virtualize and identity-cache changed-files and Workspace sidebar rows. Native 10,000-file cases keep p95 composer updates below sixteen milliseconds; the installed Pilotty flow opens the 10,000-file tree in 178 ms and displays typed input in 4 ms.
+- [x] Virtualize and identity-cache changed-files and Workspace sidebar rows. Native 10,000-file cases keep p95 composer updates below sixteen milliseconds. With one completed Turn, the installed Pilotty flow settles either 10,000-entry sidebar and subsequent input in 120–160 milliseconds; agent-tty independently proves both sidebars and captures the changed-files result.
 - [x] Keep the mode selector grouped with the narrowed composer, refresh changed files while open, and switch mutually exclusively between changed files (`Opt+S`) and the Workspace file tree (`Opt+T`).
 - [x] Bound subprocess output while draining, release terminal process entries, and stop loader animation from rebuilding the complete transcript.
 - [x] Keep generic and child waits non-actionable, preserve permission request kinds, and reconcile exhausted Relay 0.0.50 follows through parent terminal state.

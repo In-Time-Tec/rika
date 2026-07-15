@@ -2,6 +2,8 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Operation } from "@rika/app"
+import * as Thread from "@rika/persistence/thread"
+import * as Turn from "@rika/persistence/turn"
 import { Config, Console, Effect, FileSystem, Layer, Logger, Path, Schema, Semaphore } from "effect"
 import { serve } from "../../src/resident-transport"
 
@@ -14,6 +16,7 @@ const program = Effect.gen(function* () {
     yield* Config.string("RIKA_TEST_RESIDENT_FINALIZER_DELAY").pipe(Config.withDefault("0")),
   )
   const delayedWork = (yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))) === "1"
+  const outboundCapacity = yield* Config.int("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault(1_024))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const append = (name: string, value: string) =>
@@ -22,6 +25,7 @@ const program = Effect.gen(function* () {
     profile: "default",
     dataRoot,
     graceMilliseconds: Number(grace),
+    outboundCapacity,
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)
@@ -46,10 +50,45 @@ const program = Effect.gen(function* () {
                 : interactive(input, {
                     initialize: (dispatch) =>
                       Effect.sync(() => {
-                        const count = input.prompt[0] === "burst-events" ? 1_000 : 1
-                        for (let index = 0; index < count; index += 1) dispatch({ _tag: "ThreadsListed", threads: [] })
+                        const kind = input.prompt[0]
+                        const count = kind === "burst-events" ? 1_000 : kind === "overflow-events" ? 10 : 1
+                        for (let index = 0; index < count; index += 1) {
+                          if (kind !== "overflow-events") dispatch({ _tag: "ThreadsListed", threads: [] })
+                          else
+                            dispatch({
+                              _tag: "TranscriptPatched",
+                              threadId: Thread.ThreadId.make("overflow-thread"),
+                              turnId: Turn.TurnId.make("overflow-turn"),
+                              event: {
+                                cursor: `overflow-${index}`,
+                                sequence: index,
+                                type: "model.output.delta",
+                                createdAt: index,
+                                text: String(index),
+                              },
+                              revision: index,
+                            })
+                        }
                       }),
-                    watchThreads: () => Effect.never,
+                    watchThreads: (dispatch) =>
+                      input.prompt[0] === "overflow-watch"
+                        ? Effect.sync(() => {
+                            for (let index = 0; index < 10; index += 1)
+                              dispatch({
+                                _tag: "TranscriptPatched",
+                                threadId: Thread.ThreadId.make("overflow-thread"),
+                                turnId: Turn.TurnId.make("overflow-turn"),
+                                event: {
+                                  cursor: `watch-overflow-${index}`,
+                                  sequence: index,
+                                  type: "model.output.delta",
+                                  createdAt: index,
+                                  text: String(index),
+                                },
+                                revision: index,
+                              })
+                          }).pipe(Effect.andThen(Effect.never))
+                        : Effect.never,
                     submit: (prompt) =>
                       prompt === "ambiguous"
                         ? append("mutation-attempts.log", `${process.pid}\n`).pipe(

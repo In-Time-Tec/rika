@@ -26,6 +26,7 @@
     "@rika/runtime": "workspace:*",
     "@rika/tools": "workspace:*",
     "@rika/tui": "workspace:*",
+    "@rika/transcript": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {

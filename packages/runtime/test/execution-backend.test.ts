@@ -56,15 +56,14 @@ vi.mock("@relayfx/sdk", (importOriginal) =>
               readonly workflowDefinitionHandlersLayer: Layer.Layer<WorkflowDefinitionRuntime.HandlerService>
             }) => {
               native.runtimeGraphs += 1
-              const childFanOut = sqlite.SQLite
-                .childFanOutLayer({ filename: ":memory:" }, options.childFanOutHandlersLayer)
-                .pipe(EffectLayer.orDie)
-              const workflow = sqlite.SQLite
-                .workflowLayer({ filename: ":memory:" }, options.workflowDefinitionHandlersLayer)
-                .pipe(
-                  EffectLayer.orDie,
-                  EffectLayer.provideMerge(childFanOut),
-                )
+              const childFanOut = sqlite.SQLite.childFanOutLayer(
+                { filename: ":memory:" },
+                options.childFanOutHandlersLayer,
+              ).pipe(EffectLayer.orDie)
+              const workflow = sqlite.SQLite.workflowLayer(
+                { filename: ":memory:" },
+                options.workflowDefinitionHandlersLayer,
+              ).pipe(EffectLayer.orDie, EffectLayer.provideMerge(childFanOut))
               return EffectLayer.merge(childFanOut, workflow).pipe(
                 EffectLayer.provideMerge(actual.Client.testLayer(native.client!)),
               )

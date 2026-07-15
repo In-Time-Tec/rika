@@ -252,6 +252,8 @@ test("drives bypassed recorded and incognito shell commands through Operation an
               .filter((turn) => turn.status === "queued")
               .map((turn) => ({ id: turn.id, prompt: turn.prompt })),
           )
+        else if (event._tag === "QueuedTurnEdited")
+          model = ViewState.replaceTurnPrompt(model, event.turnId, event.prompt)
         else if (
           event._tag !== "ThreadSelected" &&
           event._tag !== "TranscriptPageReceived" &&

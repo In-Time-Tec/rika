@@ -8,11 +8,11 @@ The TUI currently rebuilds every transcript child when any view state changes. N
 
 ## Decision
 
-Relay exposes chronological forward and backward execution-event pages through its released public SDK. Rika persists a disposable semantic transcript projection with stable entry keys, revisions, ordering keys, source cursor bounds, and per-Turn projection checkpoints. Applying an event and advancing its checkpoint is atomic and idempotent. Missing or outdated projections rebuild from Relay pages.
+Relay exposes chronological forward and backward execution-event pages through its released public SDK. Rika persists a disposable semantic transcript projection with stable entry keys, revisions, ordering keys, source cursor bounds, and per-Turn projection checkpoints. Projection advances ingest forward source pages of at most two hundred events and upsert only semantic units whose revision changed. Applying a page and advancing its checkpoint is atomic and idempotent. Missing or outdated projections rebuild through the same bounded page path.
 
-Product interfaces return keyset transcript pages. The first page contains the newest fifty entries. The resident protocol v2 carries Schema-tagged page, prepend, keyed patch, and resync frames with a projection revision. Delivery queues are bounded; overflow asks the client to resync instead of buffering complete history.
+Product interfaces return keyset transcript pages. The first page contains the newest fifty entries. The current resident contract carries Schema-tagged page, prepend, keyed patch, and resync frames with a projection revision. Delivery queues and each action's unacknowledged event window are bounded. The client acknowledges each delivered event. The first overflow interrupts even long-lived work and asks the client to resync instead of buffering complete history.
 
-A client controller owns transcript protocol events, reducer dispatch, page requests, resync, and frame scheduling. The OpenTUI adapter reconciles a window of at most two hundred semantic entries by key and revision. Unchanged renderables retain identity. Streaming rich text updates one keyed tail renderable. Prepending older entries preserves the measured visible anchor.
+A client controller owns transcript protocol events, reducer dispatch, page requests, resync, and frame scheduling. The OpenTUI adapter reconciles a window of at most two hundred semantic entries by key and revision. Unchanged renderables retain identity. Streaming rich text updates one keyed tail renderable. Moving the window in either direction restores the measured visible anchor after OpenTUI's next layout frame before applying the requested page movement. An intervening same-Thread update keeps that pending anchor. Programmatic geometry and scrollbar synchronization cannot recursively request more history.
 
 OpenTUI source is a read-only research submodule. Rika continues to consume released packages and upgrades only after its bounded-render benchmark and native behavior suite pass.
 
@@ -20,7 +20,7 @@ OpenTUI 0.4.3's `MarkdownRenderable` streaming path was evaluated. Rika keeps it
 
 ## Consequences
 
-Durable history may be large while database reads, protocol memory, reducer work, and mounted native objects stay bounded. Relay remains execution authority and Rika owns the user-facing read model. Projection schema changes require a versioned rebuild path. Protocol v1 clients remain connection-bound and cannot use paged transcript delivery; protocol v2 compatibility is negotiated during handshake.
+Durable history may be large while source-event reads, protocol delivery memory, per-frame native reconciliation, and mounted native objects stay bounded. Semantic pages explicitly loaded by repeated upward navigation remain in client state so the user can move forward through them again; prepend reducer work therefore grows with the history deliberately loaded in that session. Relay remains execution authority and Rika owns the user-facing read model. Projection schema changes replace and rebuild the disposable read model. Interactive clients and residents must match the one acknowledged-delivery contract exactly.
 
 ## Rejected Alternatives
 

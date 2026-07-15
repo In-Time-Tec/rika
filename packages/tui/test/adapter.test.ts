@@ -292,6 +292,10 @@ describe("Surface", () => {
     expect(bounded.items).toHaveLength(200)
     expect(bounded.entries[0]?.text).toBe("answer 800")
     expect(bounded.items[0]).toEqual({ _tag: "Entry", index: 0, id: "answer-800", turnId: "turn-800" })
+    const older = boundedTranscriptModel(state, 400)
+    expect(older.entries).toHaveLength(200)
+    expect(older.entries[0]?.text).toBe("answer 200")
+    expect(older.entries.at(-1)?.text).toBe("answer 399")
   })
 
   it.effect("mounts a bounded transcript window for large histories", () =>

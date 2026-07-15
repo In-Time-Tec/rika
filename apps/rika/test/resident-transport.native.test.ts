@@ -1,6 +1,11 @@
 import * as BunFileSystem from "@effect/platform-bun/BunFileSystem"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import * as BunSocket from "@effect/platform-bun/BunSocket"
+import { ResidentService } from "@rika/app"
 import { afterEach, describe, expect, test } from "bun:test"
-import { Config, Data, Effect, FileSystem, Layer, Schema } from "effect"
+import { Cause, Config, Data, Effect, Fiber, FileSystem, Layer, Schema } from "effect"
+import * as Socket from "effect/unstable/socket/Socket"
+import { resolve } from "../src/resident-endpoint"
 
 type Process = ReturnType<typeof Bun.spawn>
 type Event = {
@@ -13,6 +18,7 @@ type Event = {
   tag?: string | undefined
   error?: string | undefined
   callbacks?: number | undefined
+  tags?: ReadonlyArray<string> | undefined
 }
 
 class FixtureFailure extends Data.TaggedError("FixtureFailure")<{
@@ -44,6 +50,7 @@ const EventSchema = Schema.Struct({
   tag: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
   callbacks: Schema.optional(Schema.Finite),
+  tags: Schema.optional(Schema.Array(Schema.String)),
 })
 
 const decodeEvent = Schema.decodeUnknownEffect(Schema.fromJsonString(EventSchema))
@@ -98,7 +105,7 @@ const readText = (path: string) =>
 const fileStat = (path: string) => Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(path))
 const fileExists = (path: string) => Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.exists(path))
 
-const start = (root: string, grace = 350, finalizerDelay = 0, delayedWork = false) => {
+const start = (root: string, grace = 350, finalizerDelay = 0, delayedWork = false, outboundCapacity = 1_024) => {
   const client = Bun.spawn(["bun", "test/fixtures/resident-client.ts"], {
     cwd: import.meta.dir.replace(/\/test$/, ""),
     stdin: "pipe",
@@ -110,6 +117,7 @@ const start = (root: string, grace = 350, finalizerDelay = 0, delayedWork = fals
       RIKA_TEST_RESIDENT_GRACE: String(grace),
       RIKA_TEST_RESIDENT_FINALIZER_DELAY: String(finalizerDelay),
       RIKA_TEST_RESIDENT_DELAYED_WORK: delayedWork ? "1" : "0",
+      RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY: String(outboundCapacity),
     },
   })
   processes.push(client)
@@ -173,6 +181,47 @@ const nextTypeEffect = (client: ReturnType<typeof start>, type: string): Effect.
   })
 
 describe("resident WebSocket process transport", () => {
+  test(
+    "rejects clients that omit a current transport capability",
+    () =>
+      Effect.runPromise(
+        provide(
+          Effect.gen(function* () {
+            const root = yield* makeRoot
+            try {
+              const client = start(root, 2_000)
+              yield* attachedEffect(client)
+              const endpoint = yield* resolve("default", root)
+              const token = (yield* readText(endpoint.tokenPath)).trim()
+              const socket = yield* Socket.makeWebSocket(endpoint.url)
+              const writer = yield* socket.writer
+              const reader = yield* Effect.forkChild(socket.runString(() => Effect.void))
+              yield* writer(
+                yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({
+                  family: "rika-resident",
+                  version: ResidentService.protocolVersion,
+                  identity: endpoint.identity,
+                  token,
+                  clientNonce: "missing-ack",
+                  clientKind: "interactive",
+                  clientVersion: "test",
+                  capabilities: ["ping"],
+                }),
+              )
+              const exit = yield* Fiber.await(reader)
+              expect(exit._tag).toBe("Failure")
+              if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toContain("4403")
+              yield* client.closeEffect
+            } finally {
+              yield* cleanRoot(root)
+            }
+          }),
+          Layer.merge(BunServices.layer, BunSocket.layerWebSocketConstructor),
+        ),
+      ),
+    15_000,
+  )
+
   test(
     "keeps a healthy connection through a one-second client stall",
     () =>
@@ -286,6 +335,59 @@ describe("resident WebSocket process transport", () => {
 
             client.send("burst-interactive")
             expect(yield* client.nextEffect).toEqual({ type: "burst-completed", text: "1000" })
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "emits transcript resync and terminal failure events when interactive delivery overflows",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = start(root, 350, 0, false, 4)
+            yield* attachedEffect(client)
+
+            client.send("overflow-interactive")
+            const event = yield* client.nextEffect
+            expect(event).toMatchObject({
+              type: "overflow-completed",
+              tag: "ExecutionFailed",
+            })
+            expect(event.callbacks).toBeLessThan(12)
+            expect(event.tags).toContain("TranscriptResyncRequired")
+            expect(event.tags?.at(-2)).toBe("TranscriptResyncRequired")
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "interrupts a long-lived interactive action on its first delivery overflow",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = start(root, 350, 0, false, 4)
+            yield* attachedEffect(client)
+
+            client.send("overflow-watch")
+            const event = yield* client.nextEffect
+            expect(event).toMatchObject({
+              type: "overflow-watch-finished",
+              tags: expect.arrayContaining(["TranscriptResyncRequired", "ExecutionFailed"]),
+            })
             yield* client.closeEffect
           } finally {
             yield* cleanRoot(root)

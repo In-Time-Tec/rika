@@ -108,6 +108,325 @@ for (const historySize of [1, 10, 100, 1_000] as const) {
     ))
 }
 
+test("moves the bounded transcript window to older mounted entries and keeps it while typing", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 500 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        surface.transcriptScroll.scrollTo(0)
+        const firstBefore = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        setup.mockInput.pressKey("\x1b[5~")
+        yield* openTui(() => setup.renderer.idle())
+        const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        const state = surface as unknown as {
+          readonly transcriptWindowEnd: number
+          readonly transcriptChildren: ReadonlyArray<Renderable>
+        }
+        expect(state.transcriptWindowEnd).toBe(400)
+        expect(firstBefore).toBe(300)
+        expect(firstAfter).toBeLessThan(300)
+        expect(firstAfter).toBeGreaterThan(200)
+        expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries)
+        surface.update({ ...base, input: "next", cursor: 4 })
+        expect(state.transcriptWindowEnd).toBe(400)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("moves the bounded transcript window forward by one measured page", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 500 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        surface.transcriptScroll.scrollTo(0)
+        setup.mockInput.pressKey("\x1b[5~")
+        yield* openTui(() => setup.renderer.idle())
+        surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
+        setup.renderer.requestRender()
+        yield* openTui(() => setup.renderer.idle())
+        const firstBefore = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        setup.mockInput.pressKey("\x1b[6~")
+        yield* openTui(() => setup.renderer.idle())
+        const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        const state = surface as unknown as {
+          readonly transcriptWindowEnd: number
+          readonly transcriptAnchorScrollBy: number
+        }
+        expect(state.transcriptWindowEnd).toBe(500)
+        expect(firstAfter).toBeGreaterThan(firstBefore)
+        expect(firstAfter).toBeLessThan(firstBefore + 50)
+        expect(state.transcriptAnchorScrollBy).toBe(0)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("coalesces repeated page keys until the transcript anchor frame", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 600 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const state = surface as unknown as { readonly transcriptWindowEnd: number }
+      try {
+        surface.update({ ...initial("/work", "high"), entries, items, scrollFollow: false })
+        yield* openTui(() => setup.renderer.idle())
+        surface.transcriptScroll.scrollTo(0)
+        setup.mockInput.pressKey("\x1b[5~")
+        setup.mockInput.pressKey("\x1b[5~")
+        expect(state.transcriptWindowEnd).toBe(500)
+        yield* openTui(() => setup.renderer.idle())
+        const firstAfterRepeatedUp = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        expect(firstAfterRepeatedUp).toBeGreaterThan(300)
+        expect(firstAfterRepeatedUp).toBeLessThan(400)
+
+        surface.transcriptScroll.scrollTo(0)
+        setup.mockInput.pressKey("\x1b[5~")
+        yield* openTui(() => setup.renderer.idle())
+        expect(state.transcriptWindowEnd).toBe(400)
+        surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
+        setup.renderer.requestRender()
+        yield* openTui(() => setup.renderer.idle())
+        const firstBeforeRepeatedDown = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        setup.mockInput.pressKey("\x1b[6~")
+        setup.mockInput.pressKey("\x1b[6~")
+        expect(state.transcriptWindowEnd).toBe(500)
+        yield* openTui(() => setup.renderer.idle())
+        const firstAfterRepeatedDown = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        expect(firstAfterRepeatedDown).toBeGreaterThan(firstBeforeRepeatedDown)
+        expect(firstAfterRepeatedDown).toBeLessThan(firstBeforeRepeatedDown + 50)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("preserves a pending prepend anchor through an intervening composer update", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 100 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        surface.transcriptScroll.scrollTo(40)
+        const firstBefore = /answer (\d+)/.exec(setup.captureCharFrame())?.[1]
+        const older = Array.from({ length: 50 }, (_, index) => ({
+          role: "assistant" as const,
+          text: `older ${index}`,
+          turnId: `older-${index}`,
+        }))
+        const prepended: Model = {
+          ...base,
+          entries: [...older, ...entries],
+          items: [
+            ...older.map((_, index) => ({
+              _tag: "Entry" as const,
+              index,
+              id: `older-${index}`,
+              turnId: `older-${index}`,
+            })),
+            ...items.map((item) => Object.assign({}, item, { index: item.index + older.length })),
+          ],
+        }
+        surface.update(prepended, true)
+        surface.update({ ...prepended, input: "x", cursor: 1 })
+        yield* openTui(() => setup.renderer.idle())
+        expect(/answer (\d+)/.exec(setup.captureCharFrame())?.[1]).toBe(firstBefore)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("suppresses programmatic scrollbar feedback and queued work after teardown", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const offsets = new Array<number>()
+      const entries = Array.from({ length: 300 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+        scroll: (offset) => offsets.push(offset),
+      })
+      try {
+        surface.update({ ...initial("/work", "high"), entries, items, scrollFollow: false })
+        yield* openTui(() => setup.renderer.idle())
+        surface.transcriptScroll.scrollTo(20)
+        surface.transcriptScrollbar.scrollPosition = 10
+        surface.destroy()
+        yield* Effect.yieldNow
+        expect(offsets).toEqual([])
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("keeps a detached transcript window stable when live entries arrive", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 500 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        const firstBefore = /answer (\d+)/.exec(setup.captureCharFrame())?.[1]
+        surface.update({
+          ...base,
+          entries: [...entries, { role: "assistant", text: "answer 500", turnId: "turn-500" }],
+          items: [...items, { _tag: "Entry", index: 500, id: "answer-500", turnId: "turn-500" }],
+        })
+        yield* openTui(() => setup.renderer.idle())
+        expect(/answer (\d+)/.exec(setup.captureCharFrame())?.[1]).toBe(firstBefore)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("reports prepend anchor geometry without requesting another page", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const requested = new Array<number>()
+      const geometry = new Array<number>()
+      const entries = Array.from({ length: 200 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const base: Model = { ...initial("/work", "high"), entries, items, scrollFollow: false }
+      const surface = new Surface(setup.renderer, {
+        key: () => undefined,
+        resize: () => undefined,
+        scroll: (offset) => requested.push(offset),
+        scrollGeometry: (offset) => geometry.push(offset),
+      })
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        const older = Array.from({ length: 50 }, (_, index) => ({
+          role: "assistant" as const,
+          text: `older ${index}`,
+          turnId: `older-${index}`,
+        }))
+        surface.update(
+          {
+            ...base,
+            entries: [...older, ...entries],
+            items: [
+              ...older.map((_, index) => ({
+                _tag: "Entry" as const,
+                index,
+                id: `older-${index}`,
+                turnId: `older-${index}`,
+              })),
+              ...items.map((item) => Object.assign({}, item, { index: item.index + older.length })),
+            ],
+          },
+          true,
+        )
+        yield* openTui(() => setup.renderer.idle())
+        expect(requested).toEqual([])
+        expect(geometry).toHaveLength(1)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
 for (const panel of ["changed", "workspace"] as const) {
   test(`keeps composer updates bounded with a large ${panel} files sidebar`, () =>
     Effect.runPromise(

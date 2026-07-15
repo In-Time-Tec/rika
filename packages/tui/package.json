@@ -17,6 +17,7 @@
   "dependencies": {
     "@opentui/core": "catalog:",
     "@pierre/diffs": "catalog:",
+    "@rika/transcript": "workspace:*",
     "cli-spinners": "catalog:",
     "effect": "catalog:",
     "marked": "catalog:",

@@ -34,6 +34,8 @@ const active = (threadId: Thread.ThreadId, id = "active"): Turn.Turn => ({
 const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   followAfterPermission: boolean = false,
   toolApprovalWaitIds: ReadonlyArray<string> = [],
+  pagedEvents?: ReadonlyArray<ExecutionBackend.Event>,
+  stalePageCursor: boolean = false,
 ) {
   const older = thread("older", 1)
   const latest = thread("latest", 2)
@@ -104,6 +106,44 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       record("replay", turnId, cursor).pipe(
         Effect.as({ turnId, status: "running" as const, events: [], lastCursor: cursor }),
       ),
+    ...(pagedEvents === undefined
+      ? {}
+      : {
+          pageEvents: (turnId: string, direction: "forward" | "backward", cursor?: string, limit = 200) => {
+            const boundary =
+              cursor === undefined
+                ? direction === "forward"
+                  ? 0
+                  : pagedEvents.length
+                : pagedEvents.findIndex((event) => event.cursor === cursor) + (direction === "forward" ? 1 : 0)
+            const page =
+              direction === "forward"
+                ? pagedEvents.slice(boundary, boundary + limit)
+                : pagedEvents.slice(Math.max(0, boundary - limit), boundary)
+            const hasMore =
+              direction === "forward" ? boundary + page.length < pagedEvents.length : boundary > page.length
+            return record("page", turnId, direction, cursor, limit).pipe(
+              Effect.as({
+                events: page,
+                hasMore,
+                ...(page[0] === undefined
+                  ? {}
+                  : {
+                      oldestCursor:
+                        direction === "backward" && stalePageCursor && cursor !== undefined ? cursor : page[0].cursor,
+                    }),
+                ...(page.at(-1) === undefined
+                  ? {}
+                  : {
+                      newestCursor:
+                        direction === "forward" && stalePageCursor && cursor !== undefined
+                          ? cursor
+                          : page.at(-1)!.cursor,
+                    }),
+              }),
+            )
+          },
+        }),
     listApprovals: (turnId) =>
       record("list-approvals", turnId).pipe(
         Effect.as(
@@ -348,7 +388,21 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, (event) => events.push(event))
       yield* session.editQueued("queued", "after", (event) => events.push(event))
       expect((yield* turns.get(Turn.TurnId.make("queued")))?.prompt).toBe("after")
+      expect(events.at(-2)).toEqual({
+        _tag: "QueuedTurnEdited",
+        threadId: "older",
+        turnId: "queued",
+        prompt: "after",
+      })
       expect(events.at(-1)).toMatchObject({ _tag: "QueueChanged", turns: [{ id: "queued", prompt: "after" }] })
+      events.length = 0
+      yield* session.selectThread(older.id, (event) => events.push(event))
+      const page = events.find((event) => event._tag === "TranscriptPageReceived")
+      expect(
+        page?._tag === "TranscriptPageReceived"
+          ? page.entries.find((entry) => entry.turn.id === "queued")?.unit.content
+          : undefined,
+      ).toEqual({ _tag: "Entry", role: "user", text: "after" })
       yield* session.dequeue("queued", (event) => events.push(event))
       expect(yield* turns.get(Turn.TurnId.make("queued"))).toBeUndefined()
       expect(events.at(-1)).toEqual({ _tag: "QueueChanged", threadId: "older", turns: [] })
@@ -482,7 +536,21 @@ describe("InteractiveSession controls", () => {
 
   it.effect("follows an approved durable permission through completion and drains the queue", () =>
     Effect.gen(function* () {
-      const { session, turns, controls, older } = yield* makeHarness(true)
+      const priorOutput = {
+        cursor: "prior-output",
+        sequence: 0,
+        type: "model.output.completed",
+        createdAt: 1,
+        text: "work before permission",
+      }
+      const priorPermission = {
+        cursor: "permission-wait",
+        sequence: 1,
+        type: "permission.ask.requested",
+        createdAt: 1,
+        data: { wait_id: "permission-wait", title: "Allow work" },
+      }
+      const { session, turns, controls, older } = yield* makeHarness(true, [], [priorOutput, priorPermission])
       yield* turns.setStatus(Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
       yield* turns.createForSubmission({
         id: Turn.TurnId.make("queued-after-wait"),
@@ -516,6 +584,23 @@ describe("InteractiveSession controls", () => {
         revision: expect.any(Number),
         event: expect.objectContaining({ cursor: "resumed-done", type: "execution.completed" }),
       })
+      events.length = 0
+      yield* session.selectThread(older.id, (event) => events.push(event))
+      const page = events.find((event) => event._tag === "TranscriptPageReceived")
+      expect(page?._tag === "TranscriptPageReceived" ? page.entries : []).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            unit: expect.objectContaining({
+              content: expect.objectContaining({ _tag: "Entry", text: "work before permission" }),
+            }),
+          }),
+          expect.objectContaining({
+            unit: expect.objectContaining({
+              content: expect.objectContaining({ _tag: "Entry", text: "created file" }),
+            }),
+          }),
+        ]),
+      )
     }),
   )
 
@@ -716,6 +801,68 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
+  it.effect("projects one Turn incrementally from bounded forward event pages", () =>
+    Effect.gen(function* () {
+      const pagedEvents = Array.from(
+        { length: 450 },
+        (_, index): ExecutionBackend.Event => ({
+          cursor: `cursor-${index + 1}`,
+          sequence: index + 1,
+          type: "model.output.completed",
+          createdAt: index + 1,
+          text: `event ${index + 1}`,
+        }),
+      )
+      const { session, controls, older } = yield* makeHarness(false, [], pagedEvents)
+      const events: Array<Operation.InteractiveEvent> = []
+
+      yield* session.selectThread(older.id, (event) => events.push(event))
+
+      const received = events.find((event) => event._tag === "TranscriptPageReceived")
+      const projected =
+        received?._tag === "TranscriptPageReceived"
+          ? received.entries.filter((entry) => entry.turn.id === "active")
+          : []
+      expect(projected).toHaveLength(2)
+      expect(projected.at(-1)?.unit).toMatchObject({
+        revision: 450,
+        content: { _tag: "Entry", role: "assistant", text: "event 450" },
+      })
+      expect(yield* Ref.get(controls)).toEqual([
+        ["page", "active", "forward", undefined, 200],
+        ["page", "active", "forward", "cursor-200", 200],
+        ["page", "active", "forward", "cursor-400", 200],
+      ])
+    }),
+  )
+
+  it.effect("fails transcript loading when forward paging stops advancing", () =>
+    Effect.gen(function* () {
+      const pagedEvents = Array.from(
+        { length: 450 },
+        (_, index): ExecutionBackend.Event => ({
+          cursor: `cursor-${index + 1}`,
+          sequence: index + 1,
+          type: "model.output.completed",
+          createdAt: index + 1,
+          text: `event ${index + 1}`,
+        }),
+      )
+      const { session, controls, older } = yield* makeHarness(false, [], pagedEvents, true)
+      const events: Array<Operation.InteractiveEvent> = []
+
+      yield* session.selectThread(older.id, (event) => events.push(event))
+
+      expect(events.find((event) => event._tag === "ExecutionFailed")).toMatchObject({
+        message: expect.stringContaining("cursor did not advance"),
+      })
+      expect(yield* Ref.get(controls)).toEqual([
+        ["page", "active", "forward", undefined, 200],
+        ["page", "active", "forward", "cursor-200", 200],
+      ])
+    }),
+  )
+
   it.effect("replays only existing executions and still emits the queued turns when selecting a thread", () =>
     Effect.gen(function* () {
       const { session, turns, controls, older } = yield* makeHarness()
@@ -743,9 +890,9 @@ describe("InteractiveSession controls", () => {
       })
       expect(events.find((event) => event._tag === "TranscriptPageReceived")).toMatchObject({
         entries: [
-          { turn: { id: "active" } },
-          { turn: { id: queued.id, status: "queued" }, events: [] },
-          { turn: { id: shell.id, status: "completed" }, events: [] },
+          { turn: { id: "active" }, unit: { content: { _tag: "Entry" } } },
+          { turn: { id: queued.id, status: "queued" }, unit: { content: { _tag: "Entry" } } },
+          { turn: { id: shell.id, status: "completed" }, unit: { content: { _tag: "Entry" } } },
         ],
       })
       expect(yield* Ref.get(controls)).toEqual([["replay", "active", undefined]])

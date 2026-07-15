@@ -19,9 +19,11 @@ import type { InteractiveSession, Interface as OperationInterface } from "./oper
 
 export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
-export const protocolVersion = { major: 2, minor: 0 } as const
+export const protocolVersion = { major: 1, minor: 0 } as const
 
 export const ProtocolVersion = Schema.Struct({ major: Schema.Int, minor: Schema.Int })
+export const isCurrentProtocolVersion = (version: typeof ProtocolVersion.Type): boolean =>
+  version.major === protocolVersion.major && version.minor === protocolVersion.minor
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])
 export const Handshake = Schema.Struct({
   family: Schema.tag("rika-resident"),
@@ -81,6 +83,13 @@ export const CancelInteractiveAction = Schema.Struct({
   sessionId: Schema.String,
   actionId: Schema.String,
 })
+export const InteractiveAck = Schema.Struct({
+  _tag: Schema.tag("interactive-ack"),
+  requestId: Schema.String,
+  sessionId: Schema.String,
+  actionId: Schema.String,
+  deliveryId: Schema.String,
+})
 export const InteractiveEnd = Schema.Struct({
   _tag: Schema.tag("interactive-end"),
   requestId: Schema.String,
@@ -92,6 +101,7 @@ export const ClientMessage = Schema.Union([
   Ping,
   OperationRequest,
   InteractiveAction,
+  InteractiveAck,
   CancelInteractiveAction,
   InteractiveEnd,
   CancelRequest,
@@ -109,10 +119,11 @@ export const InteractiveStarted = Schema.Struct({
 })
 export const InteractiveEvent = Schema.Struct({
   _tag: Schema.tag("interactive-event"),
-  version: Schema.optionalKey(ProtocolVersion),
+  version: ProtocolVersion,
   requestId: Schema.String,
   sessionId: Schema.String,
   actionId: Schema.String,
+  deliveryId: Schema.optionalKey(Schema.String),
   event: InteractiveEventSchema,
 })
 export const ActionCompleted = Schema.Struct({
@@ -253,20 +264,11 @@ export const validateHandshake: {
   ): HandshakeResult => {
     if (handshake.token !== expected.token) return { _tag: "AuthenticationFailed" }
     if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
-    if (handshake.version.major !== protocolVersion.major) return { _tag: "UpgradeRequired" }
+    if (!isCurrentProtocolVersion(handshake.version)) return { _tag: "UpgradeRequired" }
     if ((expected.capabilities ?? []).some((capability) => !handshake.capabilities.includes(capability)))
       return { _tag: "CapabilityMismatch" }
     return { _tag: "Accepted" }
   },
-)
-
-export const negotiateCapabilities: {
-  (remote: ReadonlyArray<string>): (local: ReadonlyArray<string>) => ReadonlyArray<string>
-  (local: ReadonlyArray<string>, remote: ReadonlyArray<string>): ReadonlyArray<string>
-} = Function.dual(
-  2,
-  (local: ReadonlyArray<string>, remote: ReadonlyArray<string>): ReadonlyArray<string> =>
-    local.filter((capability) => remote.includes(capability)),
 )
 
 export type LifecycleState = "starting" | "ready" | "grace" | "draining" | "stopped"

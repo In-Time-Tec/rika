@@ -3,8 +3,8 @@ import { Cause, Crypto, Deferred, Effect, Exit, Fiber, FiberSet, Layer, Ref, Sch
 import { provideLayer } from "./layer"
 import {
   canonicalServiceIdentity,
+  isCurrentProtocolVersion,
   makeLifecycle,
-  negotiateCapabilities,
   protocolVersion,
   ServerMessage,
   validateHandshake,
@@ -26,7 +26,7 @@ describe("resident service protocol", () => {
     })
   })
 
-  it("fails closed for token, identity, and major version mismatches", () => {
+  it("fails closed for token, identity, exact version, and capability mismatches", () => {
     const base = {
       family: "rika-resident" as const,
       version: protocolVersion,
@@ -35,7 +35,7 @@ describe("resident service protocol", () => {
       clientNonce: "nonce",
       clientKind: "run" as const,
       clientVersion: "1",
-      capabilities: ["operation"] as const,
+      capabilities: ["ping", "startup-state", "transcript-pages", "interactive-ack"] as const,
     }
     expect(validateHandshake(base, { identity: "identity", token: "token" })._tag).toBe("Accepted")
     expect(validateHandshake({ ...base, token: "wrong" }, { identity: "identity", token: "token" })._tag).toBe(
@@ -45,29 +45,48 @@ describe("resident service protocol", () => {
       "IdentityMismatch",
     )
     expect(
-      validateHandshake({ ...base, version: { major: 1, minor: 0 } }, { identity: "identity", token: "token" })._tag,
+      validateHandshake({ ...base, version: { major: 2, minor: 0 } }, { identity: "identity", token: "token" })._tag,
     ).toBe("UpgradeRequired")
-  })
-
-  it("enables a transport capability only when both peers advertise it", () => {
-    expect(negotiateCapabilities(["ping", "startup-state"], ["ping", "startup-state"])).toEqual([
-      "ping",
-      "startup-state",
-    ])
-    expect(negotiateCapabilities(["ping", "startup-state"], ["ping"])).toEqual(["ping"])
-    expect(negotiateCapabilities(["ping"], ["ping", "startup-state"])).toEqual(["ping"])
-  })
-
-  it("decodes protocol-v1 interactive events without a frame version", () => {
     expect(
-      Schema.decodeUnknownSync(ServerMessage)({
-        _tag: "interactive-event",
-        requestId: "request",
-        sessionId: "session",
-        actionId: "action",
-        event: { _tag: "ThreadsListed", threads: [] },
-      }),
-    ).toMatchObject({ _tag: "interactive-event", event: { _tag: "ThreadsListed" } })
+      validateHandshake(
+        { ...base, capabilities: ["ping", "startup-state", "interactive-ack"] },
+        { identity: "identity", token: "token", capabilities: base.capabilities },
+      )._tag,
+    ).toBe("CapabilityMismatch")
+    expect(isCurrentProtocolVersion(protocolVersion)).toBe(true)
+    expect(isCurrentProtocolVersion({ major: 1, minor: 1 })).toBe(false)
+  })
+
+  it("round-trips empty and semantic transcript pages without undefined wire fields", () => {
+    const message = Schema.decodeUnknownSync(ServerMessage)({
+      _tag: "interactive-event",
+      version: protocolVersion,
+      requestId: "request",
+      sessionId: "session",
+      actionId: "action",
+      deliveryId: "delivery",
+      event: {
+        _tag: "TranscriptPageReceived",
+        thread: {
+          id: "thread",
+          workspace: "/work",
+          title: "Thread",
+          labels: [],
+          pinned: false,
+          archived: false,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        entries: [],
+        hasOlder: false,
+      },
+    })
+    const encoded = Schema.encodeSync(ServerMessage)(message)
+    const wire = Schema.encodeSync(Schema.UnknownFromJsonString)(encoded)
+    expect(wire).not.toContain("oldestCursor")
+    expect(Schema.decodeUnknownSync(ServerMessage)(Schema.decodeSync(Schema.UnknownFromJsonString)(wire))).toEqual(
+      message,
+    )
   })
 })
 

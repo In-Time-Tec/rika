@@ -46,9 +46,12 @@ export const residentSocketFailure: {
 } = Function.dual(2, mapResidentSocketFailure)
 const json = Schema.encodeSync(Schema.UnknownFromJsonString)
 const parse = Schema.decodeSync(Schema.UnknownFromJsonString)
-const capabilities = ["ping", "startup-state", "transcript-pages-v2"] as const
+const capabilities = ["ping", "startup-state", "transcript-pages", "interactive-ack"] as const
+
+export const supportsCurrentResidentCapabilities = (available: ReadonlyArray<string>): boolean =>
+  capabilities.every((capability) => available.includes(capability))
 const maxFrameBytes = 1_048_576
-const outboundCapacity = 1_024
+const defaultOutboundCapacity = 1_024
 const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)
   if (failure !== null && typeof failure === "object" && "_tag" in failure && typeof failure._tag === "string")
@@ -69,6 +72,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   readonly identity: string
   readonly token: string
   readonly graceMilliseconds: number
+  readonly outboundCapacity: number
   readonly stopped: Deferred.Deferred<void>
   readonly ready: Deferred.Deferred<void>
   readonly owner: NonNullable<Parameters<ResidentService.Interface["getOrCreate"]>[0]["owner"]>
@@ -141,7 +145,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   })
   const handle = Effect.fn("ResidentTransport.connection")(function* (socket: Socket.Socket) {
     const rawWriter = yield* socket.writer
-    const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(outboundCapacity)
+    const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(options.outboundCapacity)
     const writer = (frame: string | Socket.CloseEvent) =>
       typeof frame === "string" && new TextEncoder().encode(frame).byteLength > maxFrameBytes
         ? Effect.fail(transportError("Resident frame exceeds maximum size"))
@@ -163,6 +167,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
           readonly requestId: string
           readonly sessionId: string
           readonly fiber: Fiber.Fiber<void, unknown>
+          readonly acknowledge: (deliveryId: string) => void
         }
       >(),
     )
@@ -186,9 +191,12 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const result = ResidentService.validateHandshake(message, {
                 identity: options.identity,
                 token: options.token,
-                capabilities: [],
+                capabilities,
               })
-              if (result._tag !== "Accepted") return yield* close(result._tag === "UpgradeRequired" ? 4403 : 4401)
+              if (result._tag !== "Accepted")
+                return yield* close(
+                  result._tag === "UpgradeRequired" || result._tag === "CapabilityMismatch" ? 4403 : 4401,
+                )
               if (!(yield* lifecycle.tryAttach)) {
                 yield* writer(
                   json({ _tag: "rejected", reason: "draining" } satisfies ResidentService.HandshakeRejected),
@@ -196,11 +204,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 return yield* close(4409)
               }
               yield* Ref.set(attached, true)
-              const negotiated = ResidentService.negotiateCapabilities(capabilities, message.capabilities)
               const existing = yield* Ref.get(graceFiber)
               if (existing !== undefined) yield* Fiber.interrupt(existing)
               yield* Ref.set(graceFiber, undefined)
-              if (!negotiated.includes("startup-state")) yield* Deferred.await(operationReady)
               yield* writer(
                 json({
                   _tag: "accepted",
@@ -210,14 +216,12 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   clientNonce: message.clientNonce,
                   serviceNonce,
                   connectionId,
-                  state: negotiated.includes("startup-state") ? "starting" : "ready",
-                  capabilities: negotiated,
+                  state: "starting",
+                  capabilities,
                 } satisfies ResidentService.HandshakeAccepted),
               )
-              if (negotiated.includes("startup-state")) {
-                yield* Deferred.await(operationReady)
-                yield* writer(json({ _tag: "startup-ready" } satisfies ResidentService.ServerMessage))
-              }
+              yield* Deferred.await(operationReady)
+              yield* writer(json({ _tag: "startup-ready" } satisfies ResidentService.ServerMessage))
               yield* Effect.logInfo("resident.connection.accepted").pipe(
                 Effect.annotateLogs({
                   "rika.resident.client.kind": message.clientKind,
@@ -245,6 +249,15 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               )
                 yield* Fiber.interrupt(active.fiber)
             }
+            if (message._tag === "interactive-ack") {
+              const active = (yield* Ref.get(actions)).get(message.actionId)
+              if (
+                active !== undefined &&
+                active.requestId === message.requestId &&
+                active.sessionId === message.sessionId
+              )
+                active.acknowledge(message.deliveryId)
+            }
             if (message._tag === "interactive-action") {
               const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
               if (active === undefined) return
@@ -261,8 +274,23 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               let dispatchedEvents = 0
               let overflowAt: number | undefined
               let overflowThreadId: Thread.ThreadId | undefined
+              const unacknowledged = new Set<string>()
+              const overflow = yield* Queue.bounded<{ readonly threadId?: Thread.ThreadId }>(1)
+              const markOverflow = (event: Operation.InteractiveEvent) => {
+                outputOverflowed = true
+                overflowAt ??= dispatchedEvents
+                if ("threadId" in event && event.threadId !== undefined)
+                  overflowThreadId ??= Thread.ThreadId.make(String(event.threadId))
+                Queue.offerUnsafe(overflow, overflowThreadId === undefined ? {} : { threadId: overflowThreadId })
+              }
               const dispatch = (event: Operation.InteractiveEvent) => {
+                if (outputOverflowed) return
                 dispatchedEvents += 1
+                if (unacknowledged.size >= options.outboundCapacity) {
+                  markOverflow(event)
+                  return
+                }
+                const deliveryId = `${message.actionId}:${dispatchedEvents}`
                 if (
                   !Queue.offerUnsafe(
                     outbound,
@@ -272,15 +300,15 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                       requestId: message.requestId,
                       sessionId: message.sessionId,
                       actionId: message.actionId,
+                      deliveryId,
                       event,
                     } satisfies ResidentService.ServerMessage),
                   )
                 ) {
-                  outputOverflowed = true
-                  overflowAt ??= dispatchedEvents
-                  if ("threadId" in event && event.threadId !== undefined)
-                    overflowThreadId ??= Thread.ThreadId.make(String(event.threadId))
+                  markOverflow(event)
+                  return
                 }
+                unacknowledged.add(deliveryId)
               }
               const args = message.arguments
               const action = (() => {
@@ -339,13 +367,18 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 hostWork,
                 Deferred.await(started).pipe(
                   Effect.andThen(
-                    action.pipe(
+                    Effect.raceFirst(
+                      action.pipe(Effect.as("completed" as const)),
+                      Queue.take(overflow).pipe(Effect.as("overflow" as const)),
+                    ).pipe(
                       Effect.flatMap(
-                        (): Effect.Effect<
+                        (
+                          outcome,
+                        ): Effect.Effect<
                           void,
                           ResidentService.ResidentServiceError | Operation.OperationUnavailable
                         > =>
-                          outputOverflowed
+                          outcome === "overflow" || outputOverflowed
                             ? Effect.gen(function* () {
                                 if (overflowThreadId !== undefined)
                                   yield* writer(
@@ -405,7 +438,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                             "rika.resident.action.id": message.actionId,
                             "rika.resident.action.method": message.method,
                             "rika.resident.action.event_count": dispatchedEvents,
-                            "rika.resident.action.queue_capacity": outboundCapacity,
+                            "rika.resident.action.queue_capacity": options.outboundCapacity,
                             ...(overflowAt === undefined ? {} : { "rika.resident.action.overflow_at": overflowAt }),
                             "rika.failure.kind": failure._tag,
                             "rika.duration.ms": failedAt - startedAt,
@@ -453,6 +486,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   requestId: message.requestId,
                   sessionId: message.sessionId,
                   fiber: actionFiber,
+                  acknowledge: (deliveryId) => unacknowledged.delete(deliveryId),
                 }),
               )
               yield* Deferred.succeed(started, undefined)
@@ -480,7 +514,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   const output = yield* Queue.bounded<
                     | { readonly _tag: "output"; readonly channel: "stdout" | "stderr"; readonly text: string }
                     | { readonly _tag: "finished" }
-                  >(outboundCapacity)
+                  >(options.outboundCapacity)
                   let outputOverflowed = false
                   const write = (channel: "stdout" | "stderr", values: ReadonlyArray<unknown>) => {
                     if (!Queue.offerUnsafe(output, { _tag: "output", channel, text: formatOutput(values) }))
@@ -648,7 +682,6 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   readonly clientKind: ResidentService.Handshake["clientKind"]
   readonly clientVersion: string
   readonly role: ResidentService.Connection["role"]
-  readonly version?: ResidentService.Handshake["version"]
 }) {
   const crypto = yield* Crypto.Crypto
   const connectionScope = yield* Scope.make()
@@ -659,7 +692,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
     Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor),
   )
   const rawWriter = yield* Scope.provide(socket.writer, connectionScope)
-  const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(outboundCapacity)
+  const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(defaultOutboundCapacity)
   const writer = (frame: string | Socket.CloseEvent) =>
     typeof frame === "string" && new TextEncoder().encode(frame).byteLength > maxFrameBytes
       ? Effect.fail(transportError("Resident frame exceeds maximum size"))
@@ -706,7 +739,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   )
   const handshake = json({
     family: "rika-resident",
-    version: options.version ?? ResidentService.protocolVersion,
+    version: ResidentService.protocolVersion,
     identity: options.identity,
     token: options.token,
     clientNonce,
@@ -734,9 +767,15 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
               message._tag === "accepted"
                 ? message.identity !== options.identity || message.clientNonce !== clientNonce
                   ? Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
-                  : Deferred.succeed(accepted, message).pipe(
-                      Effect.andThen(message.state === "ready" ? Deferred.succeed(startup, undefined) : Effect.void),
-                    )
+                  : !ResidentService.isCurrentProtocolVersion(message.version) ||
+                      !supportsCurrentResidentCapabilities(message.capabilities)
+                    ? Deferred.fail(
+                        connectionFailure,
+                        transportError("Resident protocol upgrade required", "upgrade-required"),
+                      )
+                    : Deferred.succeed(accepted, message).pipe(
+                        Effect.andThen(message.state === "ready" ? Deferred.succeed(startup, undefined) : Effect.void),
+                      )
                 : message._tag === "startup-ready"
                   ? Deferred.succeed(startup, undefined)
                   : message._tag === "startup-failed"
@@ -758,10 +797,22 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                               yield* (message.channel === "stdout"
                                 ? request.stdout?.(message.text)
                                 : request.stderr?.(message.text)) ?? Effect.void
-                            if (message._tag === "interactive-event")
-                              request.actions
-                                .get(message.actionId)
-                                ?.dispatch(message.event as Operation.InteractiveEvent)
+                            if (message._tag === "interactive-event") {
+                              const action = request.actions.get(message.actionId)
+                              if (action !== undefined) {
+                                action.dispatch(message.event as Operation.InteractiveEvent)
+                                if (message.deliveryId !== undefined)
+                                  yield* writer(
+                                    json({
+                                      _tag: "interactive-ack",
+                                      requestId: message.requestId,
+                                      sessionId: message.sessionId,
+                                      actionId: message.actionId,
+                                      deliveryId: message.deliveryId,
+                                    } satisfies ResidentService.ClientMessage),
+                                  )
+                              }
+                            }
                             if (message._tag === "action-completed") {
                               const action = request.actions.get(message.actionId)
                               if (action !== undefined) yield* Deferred.succeed(action.done, undefined)
@@ -1035,29 +1086,37 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const crypto = yield* Crypto.Crypto
           const connectionScope = yield* Scope.make()
           yield* Effect.addFinalizer((exit) => Scope.close(connectionScope, exit))
-          const attach = (role: ResidentService.Connection["role"], version?: ResidentService.Handshake["version"]) =>
-            connect({ ...endpoint, ...input, token, role, ...(version === undefined ? {} : { version }) })
+          const attach = (role: ResidentService.Connection["role"]) =>
+            Effect.gen(function* () {
+              const attemptScope = yield* Scope.fork(connectionScope)
+              const result = yield* Effect.exit(
+                connect({ ...endpoint, ...input, token, role }).pipe(Scope.provide(attemptScope)),
+              )
+              if (result._tag === "Failure") {
+                yield* Scope.close(attemptScope, result)
+                return yield* Effect.failCause(result.cause)
+              }
+              return result.value
+            })
           yield* Effect.logInfo("resident.connection.acquiring").pipe(
             Effect.annotateLogs("rika.resident.client.kind", input.clientKind),
           )
-          const attachWhenReady = (
-            role: ResidentService.Connection["role"],
-            version?: ResidentService.Handshake["version"],
-          ) =>
-            attach(role, version).pipe(
+          const attachWhenReady = (role: ResidentService.Connection["role"]) =>
+            attach(role).pipe(
               Effect.retry({
                 times: 400,
                 schedule: Schedule.spaced(25),
-                while: (error) => error.reason === "resident-draining",
+                while: (error) => error.reason === "resident-draining" || error.reason === "upgrade-required",
               }),
             )
           const acquire = Effect.fn("ResidentTransport.acquireConnection")(function* () {
             let first = yield* Effect.result(attachWhenReady("attached"))
             if (first._tag === "Success") return first.success
-            if (first.failure.reason === "upgrade-required") {
-              first = yield* Effect.result(attachWhenReady("attached", { major: 1, minor: 0 }))
-              if (first._tag === "Success") return first.success
-            }
+            if (first.failure.reason === "upgrade-required")
+              return yield* transportError(
+                "An older Rika resident is still active; close other Rika clients and retry",
+                "upgrade-required",
+              )
             if (first.failure.reason !== "resident-absent") return yield* first.failure
             if (input.startHost === undefined && input.owner === undefined) return yield* first.failure
             if (input.startHost !== undefined) {
@@ -1071,6 +1130,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               ...endpoint,
               token,
               graceMilliseconds: input.graceMilliseconds ?? 500,
+              outboundCapacity: defaultOutboundCapacity,
               stopped,
               ready,
               owner: input.owner,
@@ -1306,6 +1366,7 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
   readonly profile: string
   readonly dataRoot: string
   readonly graceMilliseconds?: number
+  readonly outboundCapacity?: number
   readonly owner: NonNullable<Parameters<ResidentService.Interface["getOrCreate"]>[0]["owner"]>
 }) {
   const endpoint = yield* resolve(options.profile, options.dataRoot)
@@ -1316,6 +1377,7 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
     ...endpoint,
     token,
     graceMilliseconds: options.graceMilliseconds ?? 500,
+    outboundCapacity: Math.max(1, Math.floor(options.outboundCapacity ?? defaultOutboundCapacity)),
     stopped,
     ready,
     owner: options.owner,

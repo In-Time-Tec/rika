@@ -1452,6 +1452,7 @@ if (import.meta.main) {
         let renderTimer: Fiber.Fiber<void, never> | undefined
         let replayTurns = new Map<string, Turn.Turn>()
         let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
+        let projectionRevisions = new Map<string, number>()
         const fibers = new Set<Fiber.Fiber<void, never>>()
         let followFiber: Fiber.Fiber<void, never> | undefined
         let renderSuppressed = false
@@ -1485,12 +1486,13 @@ if (import.meta.main) {
             event._tag === "TranscriptResyncRequired"
           ) {
             const controlled = InteractiveController.update(
-              { model, replayTurns, entries: loadedTranscriptEntries },
+              { model, replayTurns, entries: loadedTranscriptEntries, revisions: projectionRevisions },
               event,
             )
             model = controlled.state.model
             replayTurns = new Map(controlled.state.replayTurns)
             loadedTranscriptEntries = controlled.state.entries
+            projectionRevisions = new Map(controlled.state.revisions)
             if (event._tag === "TranscriptResyncRequired" && model.currentThreadId !== undefined)
               fork(session.selectThread(model.currentThreadId, dispatch))
             if (controlled.preserveAnchor) renderer?.surface.update(model, true)
@@ -1521,6 +1523,9 @@ if (import.meta.main) {
                     return { id: turn.id, prompt: turn.prompt, attachments }
                   }),
               )
+          } else if (event._tag === "QueuedTurnEdited") {
+            if (model.currentThreadId === undefined || model.currentThreadId === event.threadId)
+              model = ViewState.replaceTurnPrompt(model, event.turnId, event.prompt)
           } else if (event._tag === "TurnStarted") {
             if (model.currentThreadId === undefined || model.currentThreadId === event.threadId)
               model = ViewState.update(model, {
@@ -1905,6 +1910,9 @@ if (import.meta.main) {
                   ),
                 )
               }
+            },
+            scrollGeometry: (offset) => {
+              model = ViewState.update(model, { _tag: "ScrollMoved", offset })
             },
             scrollFollow: () => {
               model = ViewState.update(model, { _tag: "ScrollFollowed" })

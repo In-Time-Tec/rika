@@ -182,7 +182,7 @@ const makeMemoryImpl = (initial: ReadonlyArray<Turn> = [], preserveUnpinned = fa
           )
           .toSorted((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))
         const hasOlder = descending.length > limit
-        const turns = descending.slice(0, limit).reverse().map(clone)
+        const turns = descending.slice(0, limit).toReversed().map(clone)
         return {
           turns,
           hasOlder,
@@ -348,7 +348,7 @@ export const layer = Layer.effect(
             : yield* sql`SELECT * FROM rika_turns WHERE thread_id = ${threadId} AND (created_at < ${options.before.createdAt} OR (created_at = ${options.before.createdAt} AND id < ${options.before.id})) ORDER BY created_at DESC, id DESC LIMIT ${limit + 1}`.pipe(
                 Effect.mapError(repositoryError),
               )
-        const turns = (yield* Effect.all(rows.slice(0, limit).map(decode))).reverse()
+        const turns = (yield* Effect.all(rows.slice(0, limit).map(decode))).toReversed()
         return {
           turns,
           hasOlder: rows.length > limit,

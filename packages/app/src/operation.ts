@@ -6,6 +6,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
+import * as Transcript from "@rika/transcript"
 import * as ProductAgent from "./product-agent"
 import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
@@ -607,6 +608,12 @@ export type InteractiveEvent =
       readonly message: string
     }
   | { readonly _tag: "QueueChanged"; readonly threadId: Thread.ThreadId; readonly turns: ReadonlyArray<Turn.Turn> }
+  | {
+      readonly _tag: "QueuedTurnEdited"
+      readonly threadId: Thread.ThreadId
+      readonly turnId: Turn.TurnId
+      readonly prompt: string
+    }
   | { readonly _tag: "TurnStarted"; readonly threadId: Thread.ThreadId; readonly turn: Turn.Turn }
   | { readonly _tag: "ThreadSelected"; readonly thread: Thread.Thread; readonly turns: ReadonlyArray<Turn.Turn> }
   | {
@@ -614,14 +621,14 @@ export type InteractiveEvent =
       readonly thread: Thread.Thread
       readonly entries: ReadonlyArray<TranscriptRepository.Entry>
       readonly hasOlder: boolean
-      readonly oldestCursor: TurnRepository.PageCursor | undefined
+      readonly oldestCursor?: TranscriptRepository.PageCursor
     }
   | {
       readonly _tag: "TranscriptPagePrepended"
       readonly threadId: Thread.ThreadId
       readonly entries: ReadonlyArray<TranscriptRepository.Entry>
       readonly hasOlder: boolean
-      readonly oldestCursor: TurnRepository.PageCursor | undefined
+      readonly oldestCursor?: TranscriptRepository.PageCursor
     }
   | {
       readonly _tag: "ExecutionReplayed"
@@ -644,6 +651,19 @@ export type InteractiveEvent =
       readonly threadId: string
       readonly turns: ReadonlyArray<{ readonly prompt: string; readonly events: ReadonlyArray<ExecutionBackend.Event> }>
     }
+
+const enqueueTranscriptPatch = (
+  turn: Turn.Turn,
+  event: ExecutionBackend.Event,
+  dispatch: (event: InteractiveEvent) => void,
+) =>
+  dispatch({
+    _tag: "TranscriptPatched",
+    threadId: turn.threadId,
+    turnId: turn.id,
+    event,
+    revision: event.sequence,
+  })
 
 export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
@@ -673,6 +693,12 @@ export const InteractiveEventSchema = Schema.Union([
     message: Schema.String,
   }),
   Schema.Struct({ _tag: Schema.tag("QueueChanged"), threadId: Thread.ThreadId, turns: Schema.Array(Turn.Turn) }),
+  Schema.Struct({
+    _tag: Schema.tag("QueuedTurnEdited"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    prompt: Schema.String,
+  }),
   Schema.Struct({ _tag: Schema.tag("TurnStarted"), threadId: Thread.ThreadId, turn: Turn.Turn }),
   Schema.Struct({ _tag: Schema.tag("ThreadSelected"), thread: Thread.Thread, turns: Schema.Array(Turn.Turn) }),
   Schema.Struct({
@@ -680,14 +706,14 @@ export const InteractiveEventSchema = Schema.Union([
     thread: Thread.Thread,
     entries: Schema.Array(TranscriptRepository.EntrySchema),
     hasOlder: Schema.Boolean,
-    oldestCursor: Schema.UndefinedOr(TurnRepository.PageCursor),
+    oldestCursor: Schema.optionalKey(TranscriptRepository.PageCursor),
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptPagePrepended"),
     threadId: Thread.ThreadId,
     entries: Schema.Array(TranscriptRepository.EntrySchema),
     hasOlder: Schema.Boolean,
-    oldestCursor: Schema.UndefinedOr(TurnRepository.PageCursor),
+    oldestCursor: Schema.optionalKey(TranscriptRepository.PageCursor),
   }),
   Schema.Struct({
     _tag: Schema.tag("ExecutionReplayed"),
@@ -1026,25 +1052,18 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             : (options.shellPermission ?? "allow")
         const interactiveThread = yield* Ref.make<Thread.Thread | undefined>(undefined)
         const selectionRequest = yield* Ref.make(0)
-        const transcriptCursor = yield* Ref.make<TurnRepository.PageCursor | undefined>(undefined)
+        const transcriptCursor = yield* Ref.make<TranscriptRepository.PageCursor | undefined>(undefined)
+        const projectedTurnCursor = yield* Ref.make<TurnRepository.PageCursor | undefined>(undefined)
+        const transcriptHasUnprojectedTurns = yield* Ref.make(false)
         const transcriptHasOlder = yield* Ref.make(false)
-        const enqueuePatch = (
-          turn: Turn.Turn,
-          event: ExecutionBackend.Event,
-          dispatch: (event: InteractiveEvent) => void,
-        ) =>
-          dispatch({
-            _tag: "TranscriptPatched",
-            threadId: turn.threadId,
-            turnId: turn.id,
-            event,
-            revision: event.sequence,
-          })
-        const replaceProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
-          Effect.gen(function* () {
-            const transcripts = yield* TranscriptRepository.Service
-            yield* transcripts.replace(turn, events)
-          })
+        const projectionAdmission = yield* Semaphore.make(1)
+        const appendProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
+          projectionAdmission.withPermits(1)(
+            Effect.gen(function* () {
+              const transcripts = yield* TranscriptRepository.Service
+              yield* transcripts.appendAll(turn, events)
+            }),
+          )
         const flushProjection = Effect.void
         const followOwnership = yield* Semaphore.make(1)
         const shellApprovals = new Map<string, Deferred.Deferred<boolean>>()
@@ -1120,7 +1139,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   ...(modelTuning?.fastMode === undefined ? {} : { fastMode: modelTuning.fastMode }),
                   onEvent: (event) => {
                     deliveredCursors.add(event.cursor)
-                    enqueuePatch(turn, event, dispatch)
+                    enqueueTranscriptPatch(turn, event, dispatch)
                   },
                   ...(prepared.extensionPin === undefined ? {} : { extensionPin: prepared.extensionPin }),
                 })
@@ -1155,7 +1174,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             }
             const result = outcome.value
             for (const event of result.events)
-              if (!deliveredCursors.has(event.cursor)) enqueuePatch(turn, event, dispatch)
+              if (!deliveredCursors.has(event.cursor)) enqueueTranscriptPatch(turn, event, dispatch)
             const completedAt = yield* Clock.currentTimeMillis
             yield* Effect.logInfo("turn.finished").pipe(
               Effect.annotateLogs({
@@ -1167,7 +1186,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             )
             const updatedTurn = yield* setTurnStatus(turn.id, result.status, result.events.at(-1)?.cursor, completedAt)
             yield* projectExecutionResult(thread.id, result)
-            yield* replaceProjection(updatedTurn, result.events)
+            yield* appendProjection(updatedTurn, result.events)
             if (result.status === "completed") {
               yield* settleThread(thread, dispatch)
               if (isNewThread) yield* titleThread(thread, prompt, turn.executionRoute!, dispatch)
@@ -1255,7 +1274,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
                   startedAt: promotedAt,
                   executionRoute,
-                  onEvent: (event) => enqueuePatch(promotedTurn, event, dispatch),
+                  onEvent: (event) => enqueueTranscriptPatch(promotedTurn, event, dispatch),
                   ...(prepared.extensionPin === undefined ? {} : { extensionPin: prepared.extensionPin }),
                 })
                 return result
@@ -1272,7 +1291,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               })
             } else {
               const result = outcome.value
-              for (const event of result.events) enqueuePatch(promotedTurn, event, dispatch)
+              for (const event of result.events) enqueueTranscriptPatch(promotedTurn, event, dispatch)
               const updatedTurn = yield* setTurnStatus(
                 promotedTurn.id,
                 result.status,
@@ -1280,7 +1299,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 yield* Clock.currentTimeMillis,
               )
               yield* projectExecutionResult(thread.id, result)
-              yield* replaceProjection(updatedTurn, result.events)
+              yield* appendProjection(updatedTurn, result.events)
               if (!isTerminalStatus(result.status)) break
             }
             promoted = yield* turns.claimNextQueued(thread.id, yield* Clock.currentTimeMillis)
@@ -1360,10 +1379,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               const deliveredCursors = new Set<string>()
               const result = yield* follow(turn.id, turn.lastCursor, (event) => {
                 deliveredCursors.add(event.cursor)
-                enqueuePatch(turn, event, dispatch)
+                enqueueTranscriptPatch(turn, event, dispatch)
               })
               for (const event of result.events)
-                if (!deliveredCursors.has(event.cursor)) enqueuePatch(turn, event, dispatch)
+                if (!deliveredCursors.has(event.cursor)) enqueueTranscriptPatch(turn, event, dispatch)
               const updatedTurn = yield* setTurnStatus(
                 turn.id,
                 result.status,
@@ -1371,7 +1390,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 yield* Clock.currentTimeMillis,
               )
               yield* projectExecutionResult(turn.threadId, result)
-              yield* replaceProjection(updatedTurn, result.events)
+              yield* appendProjection(updatedTurn, result.events)
               if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
               else if (result.status !== "waiting" && result.status !== "running" && result.status !== "queued")
                 dispatch({
@@ -1419,19 +1438,42 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           })
           yield* program.pipe(Effect.orElseSucceed(() => undefined))
         })
-        const loadTranscriptPage = Effect.fn("Operation.interactive.loadTranscriptPage")(function* (
+        const projectExecutionPages = Effect.fn("Operation.interactive.projectExecutionPages")(function* (
+          backend: ExecutionBackend.Interface,
+          turn: Turn.Turn,
+          status: Turn.Status,
+        ) {
+          const transcripts = yield* TranscriptRepository.Service
+          const current = yield* transcripts.get(turn.id)
+          if (backend.pageEvents === undefined) {
+            const result = yield* backend.replay(turn.id, current?.checkpointCursor)
+            yield* appendProjection({ ...turn, status }, result.events)
+            return
+          }
+          const cursors = new Set<string>()
+          let after = current?.checkpointCursor
+          while (true) {
+            const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
+            yield* appendProjection({ ...turn, status }, page.events)
+            if (!page.hasMore) return
+            const next = page.newestCursor
+            if (next === undefined || cursors.has(next)) {
+              return yield* operationError(`Transcript event cursor did not advance for Turn ${turn.id}`)
+            }
+            cursors.add(next)
+            after = next
+          }
+        })
+        const projectTurnPage = Effect.fn("Operation.interactive.projectTurnPage")(function* (
           thread: Thread.Thread,
           request: number,
-          dispatch: (event: InteractiveEvent) => void,
           before?: TurnRepository.PageCursor,
         ) {
-          const loadedAt = yield* Clock.currentTimeMillis
           const turns = yield* TurnRepository.Service
           const transcripts = yield* TranscriptRepository.Service
           const backend = yield* ExecutionBackend.Service
           const page = yield* turns.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
-          if ((yield* Ref.get(selectionRequest)) !== request) return
-          const entries = yield* Effect.forEach(
+          yield* Effect.forEach(
             page.turns,
             (turn) =>
               Effect.gen(function* () {
@@ -1441,52 +1483,77 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   isTerminalStatus(turn.status) &&
                   projected.checkpointCursor === turn.lastCursor
                 )
-                  return projected
-                if (turn.status === "queued") return yield* transcripts.replace(turn, [])
+                  return
+                if (turn.status === "queued") {
+                  yield* projectionAdmission.withPermits(1)(
+                    transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
+                  )
+                  return
+                }
                 const execution = yield* backend.inspect(turn.id)
-                if (execution === undefined) return yield* transcripts.replace(turn, [])
-                const result =
-                  backend.pageEvents === undefined
-                    ? yield* backend.replay(turn.id)
-                    : {
-                        turnId: turn.id,
-                        status: execution.status,
-                        events: (yield* backend.pageEvents(turn.id, "backward", undefined, 200)).events,
-                      }
-                return yield* transcripts.replace({ ...turn, status: result.status }, result.events)
+                if (execution === undefined) {
+                  yield* projectionAdmission.withPermits(1)(
+                    transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
+                  )
+                  return
+                }
+                yield* projectExecutionPages(backend, turn, execution.status)
               }),
-            { concurrency: 4 },
+            { concurrency: 4, discard: true },
           )
+          if ((yield* Ref.get(selectionRequest)) !== request) return false
+          yield* Ref.set(projectedTurnCursor, page.oldestCursor)
+          yield* Ref.set(transcriptHasUnprojectedTurns, page.hasOlder)
+          return true
+        })
+        const loadTranscriptPage = Effect.fn("Operation.interactive.loadTranscriptPage")(function* (
+          thread: Thread.Thread,
+          request: number,
+          dispatch: (event: InteractiveEvent) => void,
+          before?: TranscriptRepository.PageCursor,
+        ) {
+          const loadedAt = yield* Clock.currentTimeMillis
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          if (before === undefined) {
+            if (!(yield* projectTurnPage(thread, request))) return
+          } else {
+            const available = yield* transcripts.page(thread.id, { before, limit: 50 })
+            if (!available.hasOlder && (yield* Ref.get(transcriptHasUnprojectedTurns))) {
+              const turnBefore = yield* Ref.get(projectedTurnCursor)
+              if (turnBefore !== undefined && !(yield* projectTurnPage(thread, request, turnBefore))) return
+            }
+          }
           if ((yield* Ref.get(selectionRequest)) !== request) return
+          const page = yield* transcripts.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
+          const hasOlder = page.hasOlder || (yield* Ref.get(transcriptHasUnprojectedTurns))
           const completedAt = yield* Clock.currentTimeMillis
           yield* Ref.set(transcriptCursor, page.oldestCursor)
-          yield* Ref.set(transcriptHasOlder, page.hasOlder)
+          yield* Ref.set(transcriptHasOlder, hasOlder)
           if (before === undefined) {
             yield* Ref.set(interactiveThread, thread)
             dispatch({
               _tag: "TranscriptPageReceived",
               thread,
-              entries,
-              hasOlder: page.hasOlder,
-              oldestCursor: page.oldestCursor,
+              entries: page.entries,
+              hasOlder,
+              ...(page.oldestCursor === undefined ? {} : { oldestCursor: page.oldestCursor }),
             })
             dispatch({ _tag: "QueueChanged", threadId: thread.id, turns: yield* turns.listQueued(thread.id) })
-          } else {
+          } else
             dispatch({
               _tag: "TranscriptPagePrepended",
               threadId: thread.id,
-              entries,
-              hasOlder: page.hasOlder,
-              oldestCursor: page.oldestCursor,
+              entries: page.entries,
+              hasOlder,
+              ...(page.oldestCursor === undefined ? {} : { oldestCursor: page.oldestCursor }),
             })
-          }
           yield* Effect.logInfo("transcript.page.loaded").pipe(
             Effect.annotateLogs({
               "rika.thread.id": String(thread.id),
               "rika.transcript.page.kind": before === undefined ? "initial" : "prepend",
-              "rika.transcript.page.turns": entries.length,
-              "rika.transcript.page.events": entries.reduce((count, entry) => count + entry.events.length, 0),
-              "rika.transcript.page.has_older": page.hasOlder,
+              "rika.transcript.page.units": page.entries.length,
+              "rika.transcript.page.has_older": hasOlder,
               "rika.duration.ms": completedAt - loadedAt,
             }),
           )
@@ -1497,6 +1564,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           dispatch: (event: InteractiveEvent) => void,
         ) {
           yield* Ref.set(transcriptCursor, undefined)
+          yield* Ref.set(projectedTurnCursor, undefined)
+          yield* Ref.set(transcriptHasUnprojectedTurns, false)
           yield* Ref.set(transcriptHasOlder, false)
           yield* loadTranscriptPage(thread, request, dispatch)
           if ((yield* Ref.get(selectionRequest)) !== request) return
@@ -1595,7 +1664,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               dispatch,
               Effect.gen(function* () {
                 const turns = yield* TurnRepository.Service
-                yield* turns.editQueued(Turn.TurnId.make(id), prompt, yield* Clock.currentTimeMillis)
+                const turn = yield* turns.editQueued(Turn.TurnId.make(id), prompt, yield* Clock.currentTimeMillis)
+                const transcripts = yield* TranscriptRepository.Service
+                yield* transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt))
+                dispatch({ _tag: "QueuedTurnEdited", threadId: turn.threadId, turnId: turn.id, prompt: turn.prompt })
                 yield* queueChangedCurrent(dispatch)
               }),
             ),

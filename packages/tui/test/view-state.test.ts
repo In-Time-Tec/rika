@@ -123,6 +123,21 @@ describe("ViewState", () => {
     expect(ViewState.classifyPrompt("explain $PATH")).toEqual({ _tag: "Prompt", prompt: "explain $PATH" })
   })
 
+  test("replaces the visible prompt for an existing Turn without changing execution state", () => {
+    const started = ViewState.update(ViewState.initial("/work"), {
+      _tag: "TurnStarted",
+      turnId: "queued",
+      prompt: "before",
+    })
+    const model = ViewState.replaceTurnPrompt({ ...started, busy: false, activeTurnId: undefined }, "queued", "after")
+    expect(model.entries).toEqual([{ role: "user", text: "after", turnId: "queued" }])
+    expect(model.busy).toBe(false)
+    expect(model.activeTurnId).toBeUndefined()
+    const promoted = ViewState.update(model, { _tag: "TurnStarted", turnId: "queued", prompt: "after" })
+    expect(promoted.entries).toEqual([{ role: "user", text: "after", turnId: "queued" }])
+    expect(promoted.busy).toBe(true)
+  })
+
   test("supports multiline, palette, release, and resize messages", () => {
     let model = ViewState.initial("/work", "high")
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return", shift: true }) })
