@@ -1,5 +1,6 @@
 import {
   BoxRenderable,
+  EditBufferRenderable,
   ScrollBarRenderable,
   ScrollBoxRenderable,
   type CliRenderer,
@@ -800,6 +801,10 @@ export interface Handlers {
   readonly resize: (width: number, height: number) => void
 }
 
+export interface SurfaceOptions {
+  readonly animate?: boolean
+}
+
 interface TranscriptRenderableRecord {
   readonly key: string
   revision: string
@@ -856,6 +861,13 @@ class SidebarScrollBoxRenderable extends ScrollBoxRenderable {
   }
 }
 
+class ProjectedEditorRenderable extends EditBufferRenderable {
+  sync(text: string, cursor: number): void {
+    if (this.plainText !== text) this.setText(text)
+    this.cursorOffset = Math.max(0, Math.min(text.length, cursor))
+  }
+}
+
 export class Surface {
   readonly main: BoxRenderable
   readonly contentColumn: BoxRenderable
@@ -864,6 +876,7 @@ export class Surface {
   readonly transcriptScrollbar: ScrollBarRenderable
   readonly transcriptContent: BoxRenderable
   readonly input: TextRenderable
+  readonly composerEditor: ProjectedEditorRenderable
   readonly inputBox: BoxRenderable
   readonly queueBox: BoxRenderable
   readonly queueText: TextRenderable
@@ -872,6 +885,7 @@ export class Surface {
   readonly workspaceLabel: TextRenderable
   readonly paletteBox: BoxRenderable
   readonly palette: TextRenderable
+  readonly overlayEditor: ProjectedEditorRenderable
   readonly sidebar: TextRenderable
   readonly changedFilesBox: SidebarScrollBoxRenderable
   readonly changedFilesText: TextRenderable
@@ -921,6 +935,7 @@ export class Surface {
   constructor(
     private readonly renderer: CliRenderer,
     private readonly handlers: Handlers,
+    private readonly options: SurfaceOptions = {},
   ) {
     this.main = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
     this.contentColumn = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "column" })
@@ -993,7 +1008,17 @@ export class Surface {
       flexShrink: 0,
       overflow: "hidden",
     })
-    this.input = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word" })
+    this.input = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word", visible: false })
+    this.composerEditor = new ProjectedEditorRenderable(renderer, {
+      height: 1,
+      textColor: colors.text,
+      backgroundColor: "transparent",
+      selectable: false,
+      wrapMode: "word",
+      showCursor: true,
+      cursorColor: colors.text,
+      cursorStyle: { style: "block", blinking: true },
+    })
     this.modeLabel = new TextRenderable(renderer, {
       content: "",
       position: "absolute",
@@ -1054,6 +1079,22 @@ export class Surface {
       overflow: "hidden",
     })
     this.palette = new TextRenderable(renderer, { content: "", fg: colors.text, wrapMode: "word" })
+    this.overlayEditor = new ProjectedEditorRenderable(renderer, {
+      visible: false,
+      position: "absolute",
+      left: 1,
+      top: 0,
+      width: 1,
+      height: 1,
+      zIndex: 1,
+      textColor: colors.text,
+      backgroundColor: "transparent",
+      selectable: false,
+      wrapMode: "none",
+      showCursor: true,
+      cursorColor: colors.text,
+      cursorStyle: { style: "block", blinking: true },
+    })
     this.sidebar = new TextRenderable(renderer, {
       content: "",
       width: threadSidebarWidth,
@@ -1136,7 +1177,9 @@ export class Surface {
     this.changedFilesBox.onMouseMove = this.onSidebarMouseMove
     this.changedFilesBox.onMouseOut = this.onSidebarMouseOut
     this.inputBox.add(this.input)
+    this.inputBox.add(this.composerEditor)
     this.paletteBox.add(this.palette)
+    this.paletteBox.add(this.overlayEditor)
     this.transcriptRow.add(this.transcriptScroll)
     this.transcriptRow.add(this.transcriptScrollbar)
     this.contentColumn.add(this.transcriptRow)
@@ -1423,9 +1466,9 @@ export class Surface {
     const model = this.model
     if (event.button !== 0 || model === undefined || model.shortcutsOpen) return
     if (event.y !== this.inputBox.y) {
-      const row = event.y - this.input.y
-      const column = event.x - this.input.x
-      const token = pastedTextTokenAt(model, row * Math.max(1, this.input.width) + column)
+      const row = event.y - this.composerEditor.y
+      const column = event.x - this.composerEditor.x
+      const token = pastedTextTokenAt(model, row * Math.max(1, this.composerEditor.width) + column)
       if (token !== undefined) this.handlers.expandPaste?.(token)
       return
     }
@@ -1729,7 +1772,7 @@ export class Surface {
         this.transcriptRenderInput = transcriptInput
       }
     }
-    if (animateWelcome && this.welcomeTimer === undefined) {
+    if (this.options.animate !== false && animateWelcome && this.welcomeTimer === undefined) {
       this.welcomeTimer = this.repeated(80, () => {
         const current = this.model
         if (current === undefined || current.entries.length > 0 || current.blocks.length > 0) return
@@ -1741,7 +1784,7 @@ export class Surface {
         welcome.content = welcomeContent(width, current.height, this.welcomePhase, current.mode)
         this.renderer.requestRender()
       })
-    } else if (!animateWelcome && this.welcomeTimer !== undefined) {
+    } else if ((this.options.animate === false || !animateWelcome) && this.welcomeTimer !== undefined) {
       this.cancelTimer(this.welcomeTimer)
       this.welcomeTimer = undefined
     }
@@ -1820,9 +1863,11 @@ export class Surface {
       model.height - renderedInputHeight - (queue.length > 0 ? this.queueBox.height : 0),
     )
     this.transcriptScroll.content.minHeight = this.transcriptViewportRows
-    this.input.content = model.shortcutsOpen
-      ? shortcutsContent(model, Math.max(1, contentWidth - 4))
-      : composerContent(model, inputHeight - 2)
+    this.input.visible = model.shortcutsOpen
+    this.input.content = model.shortcutsOpen ? shortcutsContent(model, Math.max(1, contentWidth - 4)) : ""
+    this.composerEditor.visible = !model.shortcutsOpen
+    this.composerEditor.height = Math.max(1, renderedInputHeight - 2)
+    this.composerEditor.sync(displayInput(model), displayCursorOffset(model))
     this.sidebar.visible = model.threadSidebar.open
     this.sidebar.content = renderSidebar(model, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
     this.changedFilesBox.visible = sidebarVisible
@@ -1886,7 +1931,7 @@ export class Surface {
       panelLoadingLabel !== undefined ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => thread.status !== "idle"))
-    if (loaderActive && this.loaderTimer === undefined) {
+    if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
       this.loaderTimer = this.repeated(spinnerInterval, () => {
         this.loaderPhase = (this.loaderPhase + 1) % spinnerFrames.length
         const current = this.model
@@ -1904,7 +1949,7 @@ export class Surface {
         }
         this.renderer.requestRender()
       })
-    } else if (!loaderActive && this.loaderTimer !== undefined) {
+    } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
       this.cancelTimer(this.loaderTimer)
       this.loaderTimer = undefined
     }
@@ -1920,7 +1965,10 @@ export class Surface {
             : undefined
     this.paletteBox.visible = overlay !== undefined
     this.palette.visible = this.paletteBox.visible
+    this.overlayEditor.visible = false
     this.paletteBox.bottomTitle = ""
+    let cursorEditor: ProjectedEditorRenderable | undefined =
+      model.shortcutsOpen || model.threadSidebar.focused ? undefined : this.composerEditor
     if (overlay === "palette") {
       const results = filter(model.palette.query)
       const boxWidth = Math.max(20, Math.min(80, model.width - 4))
@@ -1933,6 +1981,8 @@ export class Surface {
       this.paletteBox.titleColor = colors.amber
       this.paletteBox.titleAlignment = "left"
       this.palette.content = paletteContent(model, results, boxWidth - 4, boxHeight - 2)
+      this.syncOverlayEditor(`> ${model.palette.query}`, 2 + model.palette.query.length, 0, boxHeight - 2, boxWidth - 4)
+      cursorEditor = this.overlayEditor
     } else if (overlay === "modes") {
       const boxWidth = Math.min(58, contentWidth)
       const boxHeight = Math.min(9, Math.max(3, composerTop))
@@ -1944,6 +1994,7 @@ export class Surface {
       this.paletteBox.bottomTitle = " ←→ turn · esc"
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = modePickerContent(model, boxWidth - 4)
+      cursorEditor = undefined
     } else if (overlay === "files") {
       const entries = filteredFiles(model).map((file) => `@${file}`)
       const maxRows = Math.max(1, Math.min(20, composerTop - 1))
@@ -1969,8 +2020,40 @@ export class Surface {
       this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces · Esc close "
       this.paletteBox.bottomTitleAlignment = "right"
       this.palette.content = threadSwitcherContent(model, overlayWidth - 4, overlayHeight - 2)
+      this.syncOverlayEditor(
+        `> ${model.threadSwitcher.query}`,
+        2 + model.threadSwitcher.query.length,
+        1,
+        overlayHeight - 2,
+        threadSwitcherListWidth(model, overlayWidth - 4),
+      )
+      cursorEditor = this.overlayEditor
     }
+    this.focusEditor(cursorEditor)
     this.renderer.requestRender()
+  }
+
+  private syncOverlayEditor(text: string, cursor: number, top: number, height: number, width: number): void {
+    this.overlayEditor.visible = true
+    this.overlayEditor.top = top
+    this.overlayEditor.width = Math.max(1, width)
+    this.overlayEditor.height = Math.max(1, height)
+    this.overlayEditor.sync(text, cursor)
+  }
+
+  private focusEditor(editor: ProjectedEditorRenderable | undefined): void {
+    if (editor === this.composerEditor) {
+      this.overlayEditor.blur()
+      this.composerEditor.focus()
+      return
+    }
+    if (editor === this.overlayEditor) {
+      this.composerEditor.blur()
+      this.overlayEditor.focus()
+      return
+    }
+    this.composerEditor.blur()
+    this.overlayEditor.blur()
   }
 
   destroy(): void {
@@ -1991,6 +2074,8 @@ export class Surface {
     this.cancelTimer(this.junkTimer)
     this.junkTimer = undefined
     this.junkBuffer = []
+    this.composerEditor.blur()
+    this.overlayEditor.blur()
     this.composerDrag = undefined
     this.sidebarDrag = undefined
     this.setPointerShape("default")
@@ -2015,31 +2100,20 @@ const displayCursorOffset = (model: Model): number => {
   return offset
 }
 
-const composerChunks = (model: Model, visibleRows = 3): Array<TextChunk> => {
+const composerTextChunks = (model: Model, visibleRows = 3): Array<TextChunk> => {
   const displayed = displayInput(model)
   const cursor = Math.max(0, Math.min(displayed.length, displayCursorOffset(model)))
   const before = displayed.slice(0, cursor)
   const lines = displayed.split("\n")
   const cursorLine = before.split("\n").length - 1
-  const cursorColumn = before.length - (before.lastIndexOf("\n") + 1)
   const firstLine = Math.max(0, Math.min(cursorLine - visibleRows + 1, lines.length - visibleRows))
   const chunks: Array<TextChunk> = []
   lines.slice(firstLine, firstLine + visibleRows).forEach((line, index) => {
     if (index > 0) chunks.push(fg(colors.text)("\n"))
-    if (firstLine + index !== cursorLine) {
-      chunks.push(fg(colors.text)(line))
-      return
-    }
-    const underCursor = line.slice(cursorColumn, cursorColumn + 1)
-    if (cursorColumn > 0) chunks.push(fg(colors.text)(line.slice(0, cursorColumn)))
-    chunks.push(bg(colors.text)(fg(colors.surface)(underCursor.length === 0 ? " " : underCursor)))
-    if (cursorColumn + 1 < line.length) chunks.push(fg(colors.text)(line.slice(cursorColumn + 1)))
+    chunks.push(fg(colors.text)(line))
   })
   return chunks
 }
-
-const composerContent = (model: Model, visibleRows: number): StyledText =>
-  new StyledText(composerChunks(model, visibleRows))
 
 const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
   [
@@ -2101,7 +2175,7 @@ const shortcutsContent = (model: Model, innerWidth: number): StyledText => {
   }
   chunks.push(dim(fg(colors.text)("─".repeat(Math.max(1, innerWidth)))))
   chunks.push(fg(colors.text)("\n"))
-  chunks.push(...composerChunks(model))
+  chunks.push(...composerTextChunks(model))
   return new StyledText(chunks)
 }
 
@@ -2113,8 +2187,6 @@ const paletteContent = (
 ): StyledText => {
   const compact = innerHeight < results.length + 3
   const chunks: Array<TextChunk> = compact ? [] : [fg(colors.text)("\n")]
-  chunks.push(fg(colors.text)(`> ${model.palette.query}`))
-  chunks.push(bg(colors.text)(fg(colors.surface)(" ")))
   chunks.push(fg(colors.text)(compact ? "\n" : "\n\n"))
   const categoryWidth = 16
   results.forEach((command, index) => {
@@ -2374,7 +2446,7 @@ const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: nu
   const horizontal = model.width >= 120
   const showPreview = horizontal || innerHeight >= 9
   const layoutWidth = Math.max(8, innerWidth - 1)
-  const listWidth = horizontal ? Math.max(8, Math.floor((layoutWidth - 2) / 2)) : layoutWidth
+  const listWidth = threadSwitcherListWidth(model, innerWidth)
   const listHeight = horizontal
     ? innerHeight
     : showPreview
@@ -2395,10 +2467,7 @@ const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: nu
       continue
     }
     if (row === 1 && row < listHeight) {
-      chunks.push(fg(colors.text)(`> ${model.threadSwitcher.query}`.slice(0, listWidth - 1)))
-      chunks.push(bg(colors.text)(fg(colors.surface)(" ")))
-      const used = Math.min(listWidth, 3 + model.threadSwitcher.query.length)
-      chunks.push(fg(colors.text)(" ".repeat(Math.max(0, listWidth - used))))
+      chunks.push(fg(colors.text)(" ".repeat(listWidth)))
     } else {
       const listRow = listRows.get(row)
       if (listRow === undefined) chunks.push(fg(colors.text)(" ".repeat(listWidth)))
@@ -2414,6 +2483,11 @@ const threadSwitcherContent = (model: Model, innerWidth: number, innerHeight: nu
     }
   }
   return new StyledText(chunks)
+}
+
+const threadSwitcherListWidth = (model: Model, innerWidth: number): number => {
+  const layoutWidth = Math.max(8, innerWidth - 1)
+  return model.width >= 120 ? Math.max(8, Math.floor((layoutWidth - 2) / 2)) : layoutWidth
 }
 
 const filePickerContent = (model: Model, entries: ReadonlyArray<string>, innerWidth: number): StyledText => {

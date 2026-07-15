@@ -155,6 +155,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 - [x] Remove ast-grep-outline activity.
 - [x] Add character-frame tests.
 - [x] Add deterministic screenshot capture workflow.
+- [x] Render OpenTUI's native blinking cursor for the composer, command palette, and Thread browser query, and hide it for non-editable focus states.
 - [ ] Run the TUI oracle review.
 - [x] Join tracked interactive fibers before resuming shutdown; the resident-service change must narrow this to client-owned fibers and protocol disconnect.
 - [x] Await delayed TUI initialization during shutdown, destroy a late renderer, and prevent post-close watcher or session work; service runtime finalization is independently owned.

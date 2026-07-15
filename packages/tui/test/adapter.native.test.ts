@@ -68,6 +68,59 @@ test("renders input and resize updates while the renderer remains event-driven",
     }),
   ))
 
+test("uses OpenTUI's native blinking cursor for each editable surface", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const base = { ...initial("/work", "high"), width: 100, height: 30, input: "draft", cursor: 5 }
+      try {
+        surface.update(base)
+        yield* openTui(() => setup.renderer.idle())
+        const composerCursor = setup.renderer.getCursorState()
+        expect(composerCursor).toMatchObject({ visible: true, style: "block", blinking: true })
+
+        surface.update({
+          ...base,
+          paletteOpen: true,
+          palette: { open: true, query: "mode", selected: 0 },
+        })
+        yield* openTui(() => setup.renderer.idle())
+        const paletteCursor = setup.renderer.getCursorState()
+        expect(paletteCursor).toMatchObject({ visible: true, style: "block", blinking: true })
+        expect(paletteCursor.y).not.toBe(composerCursor.y)
+
+        surface.update({
+          ...base,
+          threadSwitcher: { ...base.threadSwitcher, open: true, query: "cursor" },
+        })
+        yield* openTui(() => setup.renderer.idle())
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "block", blinking: true })
+
+        surface.update({
+          ...base,
+          filePicker: { ...base.filePicker, open: true, query: "src", items: ready(["src/main.ts"]) },
+        })
+        yield* openTui(() => setup.renderer.idle())
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, style: "block", blinking: true })
+
+        surface.update({ ...base, modePicker: { open: true, selected: 0 } })
+        yield* openTui(() => setup.renderer.idle())
+        expect(setup.renderer.getCursorState().visible).toBe(false)
+
+        surface.update({
+          ...base,
+          threadSidebar: { open: true, focused: true, selected: 0, scrollTop: 0 },
+        })
+        yield* openTui(() => setup.renderer.idle())
+        expect(setup.renderer.getCursorState().visible).toBe(false)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
 for (const historySize of [1, 10, 100, 1_000] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(

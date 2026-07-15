@@ -28,6 +28,24 @@ const opentui = vi.hoisted(() => {
     destroy() {}
   }
 
+  class EditBufferRenderable extends TextRenderable {
+    plainText = ""
+    cursorOffset = 0
+    focused = false
+
+    setText(text: string) {
+      this.plainText = text
+    }
+
+    focus() {
+      this.focused = true
+    }
+
+    blur() {
+      this.focused = false
+    }
+  }
+
   class BoxRenderable {
     borderColor = ""
     title = ""
@@ -144,6 +162,7 @@ const opentui = vi.hoisted(() => {
 
   return {
     BoxRenderable,
+    EditBufferRenderable,
     RGBA,
     ScrollBarRenderable,
     ScrollBoxRenderable,
@@ -163,6 +182,7 @@ const opentui = vi.hoisted(() => {
 
 vi.mock("@opentui/core", () => ({
   BoxRenderable: opentui.BoxRenderable,
+  EditBufferRenderable: opentui.EditBufferRenderable,
   RGBA: opentui.RGBA,
   ScrollBarRenderable: opentui.ScrollBarRenderable,
   ScrollBoxRenderable: opentui.ScrollBoxRenderable,
@@ -571,8 +591,7 @@ describe("Surface", () => {
       const callbacks = handlers()
       const { surface } = yield* createScoped(callbacks)
 
-      const inputText = () =>
-        (surface.input.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
+      const inputText = () => surface.composerEditor.plainText
 
       const modeLabelText = () =>
         (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
@@ -593,12 +612,12 @@ describe("Surface", () => {
 
       surface.update(model({ width: 40, input: "one\ntwo\nthree", cursor: 13 }))
       expect(surface.inputBox.height).toBe(5)
-      expect(inputText()).toBe("one\ntwo\nthree ")
+      expect(inputText()).toBe("one\ntwo\nthree")
       expect(surface.inputBox.bottomTitle).toBe("")
 
       surface.update(model({ input: "one\ntwo\nthree\nfour", cursor: 18 }))
       expect(surface.inputBox.height).toBe(6)
-      expect(inputText()).toBe("one\ntwo\nthree\nfour ")
+      expect(inputText()).toBe("one\ntwo\nthree\nfour")
 
       surface.update(
         model({

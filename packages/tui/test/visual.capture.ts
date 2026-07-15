@@ -299,7 +299,9 @@ export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (dire
         (value) => Effect.sync(() => value.renderer.destroy()),
       )
       const surface = yield* Effect.acquireRelease(
-        Effect.sync(() => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })),
+        Effect.sync(
+          () => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false }),
+        ),
         (value) => Effect.sync(() => value.destroy()),
       )
       setup.resize(width, height)
