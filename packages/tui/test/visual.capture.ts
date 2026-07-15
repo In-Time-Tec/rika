@@ -119,7 +119,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     ["mode-picker", { ...base(), modePicker: { open: true, selected: 2 } }, 80, 24],
-    ["palette", { ...base(), paletteOpen: true, palette: { open: true, query: "mode", selected: 0 } }, 80, 24],
+    ["palette", { ...base(), paletteOpen: true, palette: { open: true, query: "", selected: 0 } }, 80, 24],
     ["shortcuts", { ...base(), shortcutsOpen: true }, 80, 24],
     [
       "file-picker",

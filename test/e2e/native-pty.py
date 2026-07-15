@@ -10,6 +10,7 @@ import time
 
 binary, cwd, env_json, *arguments = sys.argv[1:]
 idle = arguments == ["idle"]
+palette_quit = arguments == ["palette-quit"]
 environment = json.loads(env_json)
 master, slave = pty.openpty()
 baseline = termios.tcgetattr(slave)
@@ -39,6 +40,9 @@ shortcuts_sent_at = 0.0
 escape_sent_at = 0.0
 mode_sent_at = 0.0
 mode_escape_sent_at = 0.0
+palette_opened = False
+quit_sent = False
+status = None
 while time.monotonic() < deadline:
     ready, _, _ = select.select([master], [], [], 0.05)
     if ready:
@@ -51,7 +55,17 @@ while time.monotonic() < deadline:
         output.extend(chunk)
     if idle and b"Welcome to Rika" in output and time.monotonic() + 0.5 < deadline:
         deadline = time.monotonic() + 0.5
-    if not idle and not shortcuts_opened and b"Welcome to Rika" in output:
+    if palette_quit and not palette_opened and b"Welcome to Rika" in output:
+        os.write(master, b"\x0f")
+        palette_opened = True
+    if palette_quit and palette_opened and not quit_sent and b"Command Palette" in output:
+        os.write(master, b"quit\r")
+        quit_sent = True
+    if palette_quit and quit_sent:
+        waited, status = os.waitpid(pid, os.WNOHANG)
+        if waited == pid:
+            break
+    if not idle and not palette_quit and not shortcuts_opened and b"Welcome to Rika" in output:
         os.write(master, b"?")
         shortcuts_opened = True
         shortcuts_sent_at = time.monotonic()
@@ -80,11 +94,13 @@ while time.monotonic() < deadline:
         os.write(master, b" after\r")
         submitted = True
         sent_at = time.monotonic()
-    if not idle and submitted and (b"deterministic response" in output or b"ExecutionBackendError" in output or b"Execution failed" in output):
+    if not idle and not palette_quit and submitted and (b"deterministic response" in output or b"ExecutionBackendError" in output or b"Execution failed" in output):
         break
 
-os.kill(pid, signal.SIGINT)
-status = None
+fallback_signal_used = False
+if status is None:
+    fallback_signal_used = True
+    os.kill(pid, signal.SIGKILL if palette_quit else signal.SIGINT)
 deadline = time.monotonic() + 5
 while time.monotonic() < deadline:
     ready, _, _ = select.select([master], [], [], 0.05)
@@ -122,5 +138,9 @@ print(json.dumps({
     "pasteCollapsed": paste_collapsed and b"[Pasted text #1 +2 lines]" in output,
     "submitted": submitted,
     "exited": status is not None,
+    "exitCode": None if status is None else os.waitstatus_to_exitcode(status),
+    "paletteVisible": b"Command Palette" in output,
+    "quitSelected": quit_sent,
+    "fallbackSignalUsed": fallback_signal_used,
     "termiosRestored": baseline == restored,
 }))

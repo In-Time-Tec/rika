@@ -32,6 +32,8 @@ The baseline is Amp CLI's rendered output; Rika never copies Amp branding, produ
 
 Prompt editing, multiline input, history, external editor, images, file/thread mentions, queueing, steering, interruption, mode dial, command palette, thread sidebar, prior-message navigation, expandable activity, child runs, workflows, cost, context, and notifications are covered by the feature ledger.
 
+`Ctrl+O` opens a focused command palette containing exactly four actions: switch Thread, change mode, toggle fast mode, and quit Rika. Change mode opens the existing mode picker rather than listing each mode separately. Prompt submission, changed files, context and cost, Review, and reasoning effort are not duplicated in the palette; their supported input, shortcut, transcript, or CLI paths remain unchanged. Selecting quit follows the normal client-owned TUI shutdown path and does not cancel a resident-owned execution.
+
 Typing `@` opens a visible Workspace file completion overlay. Subsequent text filters the candidates, arrow keys move the selection, Enter inserts the selected Workspace-relative mention into the composer, and Escape closes the overlay. The inserted mention remains ordinary prompt text and follows the existing ordered prompt-parts and Resolved Context pipeline at submission.
 
 `Ctrl+S` opens the mode picker between Turns, selects the current mode initially, and cycles the visible selection when pressed again. Every row shows its stable mode and current Model Route label; the active route is explicitly marked. Enter applies the selected mode and Escape closes without changing it. `?` toggles a shortcuts overlay in the existing overlay region; Escape and `?` close it.

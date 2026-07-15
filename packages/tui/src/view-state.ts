@@ -1225,49 +1225,32 @@ export const update: {
         if (key.name === "return") {
           const action = results[selected]?.action as PaletteAction | undefined
           if (action === undefined) return { ...model, palette: { ...model.palette, selected: 0 } }
-          if (action?._tag === "SetMode" && !model.busy)
-            return {
-              ...model,
-              mode: action.mode,
-              reasoningEffort: action.mode === model.mode ? model.reasoningEffort : defaultReasoningEffort(action.mode),
-              paletteOpen: false,
-              palette: { open: false, query: "", selected: 0 },
-            }
-          if (action?._tag === "OpenModePicker" && !model.busy)
-            return {
-              ...model,
-              paletteOpen: false,
-              palette: { open: false, query: "", selected: 0 },
-              modePicker: { open: true, selected: ["low", "medium", "high", "ultra"].indexOf(model.mode) },
-            }
-          if (action?._tag === "SwitchThread")
+          if (action._tag === "OpenModePicker")
+            return model.busy
+              ? {
+                  ...model,
+                  paletteOpen: false,
+                  palette: { open: false, query: "", selected: 0 },
+                }
+              : {
+                  ...model,
+                  paletteOpen: false,
+                  palette: { open: false, query: "", selected: 0 },
+                  modePicker: { open: true, selected: ["low", "medium", "high", "ultra"].indexOf(model.mode) },
+                }
+          if (action._tag === "SwitchThread")
             return {
               ...model,
               paletteOpen: false,
               palette: { open: false, query: "", selected: 0 },
               threadSwitcher: { open: true, query: "", selected: 0 },
             }
-          if (action?._tag === "ToggleChangedFiles")
-            return {
-              ...model,
-              paletteOpen: false,
-              palette: { open: false, query: "", selected: 0 },
-              changedFilesOpen: !model.changedFilesOpen,
-              sidebarOpen: false,
-            }
-          if (action?._tag === "ToggleFastMode")
+          if (action._tag === "ToggleFastMode")
             return {
               ...model,
               paletteOpen: false,
               palette: { open: false, query: "", selected: 0 },
               fastMode: !model.fastMode,
-            }
-          if (action?._tag === "SetReasoningEffort")
-            return {
-              ...model,
-              paletteOpen: false,
-              palette: { open: false, query: "", selected: 0 },
-              reasoningEffort: action.effort,
             }
           return {
             ...model,

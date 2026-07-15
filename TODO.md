@@ -203,7 +203,7 @@ This file is the execution ledger. Update it in the same change that changes imp
 ## Phase 8: Amp Personal Feature Parity
 
 - [ ] Complete every included row in `docs/features/FEATURES.md`.
-- [x] Verify command palette coverage.
+- [x] Keep the command palette focused on Thread switching, mode changes, fast mode, and functional quit.
 - [x] Verify keymap coverage.
 - [x] Restore visible file mention completion, Ctrl+S route selection, and shortcuts help with packaged interaction evidence.
 - [x] Verify thread lifecycle coverage.

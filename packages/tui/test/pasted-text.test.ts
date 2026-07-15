@@ -28,6 +28,7 @@ describe("pasted text attachments", () => {
       {
         submit: (prompt, promptParts) =>
           submitted.push(promptParts === undefined ? { prompt } : { prompt, parts: promptParts }),
+        quit: () => undefined,
       },
       { _tag: "Submit", prompt: model.input, parts, mode: "ultra" },
     )
@@ -135,7 +136,7 @@ describe("pasted text attachments", () => {
     })
   })
 
-  it("executes mode actions selected from the command palette", () => {
+  it("opens the mode picker without exposing direct mode actions", () => {
     const key = {
       name: "return",
       sequence: "\r",
@@ -151,11 +152,12 @@ describe("pasted text attachments", () => {
     )
     expect(picker.modePicker.open).toBe(true)
 
-    const changed = ViewState.update(
+    const removed = ViewState.update(
       { ...ViewState.initial("/work"), palette: { open: true, query: "mode low", selected: 0 } },
       { _tag: "KeyPressed", key },
     )
-    expect(changed.mode).toBe("low")
+    expect(removed.mode).toBe("medium")
+    expect(removed.palette.open).toBe(true)
 
     const unmatched = ViewState.update(
       { ...ViewState.initial("/work"), palette: { open: true, query: "no matching command", selected: 0 } },

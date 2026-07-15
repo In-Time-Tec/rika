@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Effect } from "effect"
-import { Keys, ViewState } from "../src"
+import { Keys, Palette, ViewState } from "../src"
 
 const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,
@@ -14,6 +14,36 @@ const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
 })
 
 describe("ViewState", () => {
+  test("exposes only thread switch, mode change, fast mode, and quit in the command palette", () => {
+    expect(Palette.commands).toEqual([
+      {
+        id: "threads",
+        category: "thread",
+        label: "switch",
+        keybinding: "Ctrl+T",
+        action: { _tag: "SwitchThread" },
+      },
+      {
+        id: "mode",
+        category: "mode",
+        label: "change mode",
+        keybinding: "Ctrl+S",
+        action: { _tag: "OpenModePicker" },
+      },
+      { id: "fast-mode", category: "rika", label: "toggle fast mode", action: { _tag: "ToggleFastMode" } },
+      {
+        id: "quit",
+        category: "rika",
+        label: "quit",
+        keybinding: "Ctrl+C Ctrl+C",
+        action: { _tag: "Quit" },
+      },
+    ])
+    expect(Palette.filter("review")).toEqual([])
+    expect(Palette.filter("reasoning")).toEqual([])
+    expect(Palette.filter("changed files")).toEqual([])
+  })
+
   it.effect("completes file mentions and exposes mode and shortcuts state", () =>
     Effect.sync(() => {
       let model = ViewState.update(ViewState.initial("/work", "medium"), {
@@ -218,17 +248,35 @@ describe("ViewState", () => {
     expect(model.blocks[0]).toMatchObject({ _tag: "Reasoning", text: "checking files" })
   })
 
-  test("filters and executes palette actions and selects modes", () => {
+  test("executes every focused palette action", () => {
     let model = ViewState.initial("/work")
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
-    for (const character of "mode high")
+    for (const character of "change mode")
       model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-    expect(model.mode).toBe("high")
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "m", ctrl: true }) })
+    expect(model.modePicker.open).toBe(true)
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "down" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-    expect(model.mode).toBe("ultra")
+    expect(model.mode).toBe("high")
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
+    for (const character of "thread switch")
+      model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+    expect(model.threadSwitcher.open).toBe(true)
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
+    for (const character of "fast")
+      model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+    expect(model.fastMode).toBe(true)
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
+    for (const character of "quit")
+      model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+    expect(model.pendingAction).toEqual({ _tag: "Quit" })
   })
 
   test("keeps overlays exclusive and types @ and ? into a non-empty composer", () => {
@@ -274,12 +322,6 @@ describe("ViewState", () => {
     expect(model).toMatchObject({ sidebarOpen: true, changedFilesOpen: false })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", alt: true }) })
     expect(model).toMatchObject({ sidebarOpen: false, changedFilesOpen: false })
-    model = { ...model, sidebarOpen: true }
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "o", ctrl: true }) })
-    for (const character of "changed files")
-      model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
-    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
-    expect(model).toMatchObject({ sidebarOpen: false, changedFilesOpen: true })
   })
 
   test("selects permission decisions and executes the pending choice from keys", () => {

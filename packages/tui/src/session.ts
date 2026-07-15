@@ -20,6 +20,7 @@ export type Action =
   | { readonly _tag: "Steer"; readonly prompt: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
   | { readonly _tag: "Cancel" }
+  | { readonly _tag: "Quit" }
   | {
       readonly _tag: "DecidePermission"
       readonly id: string
@@ -30,6 +31,7 @@ export type Action =
 
 export interface Adapter {
   readonly submit: (prompt: string, parts: ReadonlyArray<PromptPart>, mode: Mode, tuning?: ModelTuning) => void
+  readonly quit: () => void
   readonly editQueued?: (id: string, prompt: string) => void
   readonly dequeue?: (id: string) => void
   readonly steerQueued?: (id: string, prompt: string) => void
@@ -67,6 +69,9 @@ export const execute: {
     case "Cancel":
       adapter.cancel?.()
       return adapter.cancel !== undefined
+    case "Quit":
+      adapter.quit()
+      return true
     case "DecidePermission":
       adapter.decidePermission?.(action.id, action.kind, action.decision)
       return adapter.decidePermission !== undefined

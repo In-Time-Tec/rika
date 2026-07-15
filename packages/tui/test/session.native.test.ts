@@ -5,6 +5,7 @@ test("routes session actions only through available adapter callbacks", () => {
   const calls: Array<string> = []
   const adapter: Session.Adapter = {
     submit: (prompt) => calls.push(`submit:${prompt}`),
+    quit: () => calls.push("quit"),
     editQueued: (index, prompt) => calls.push(`edit:${index}:${prompt}`),
     dequeue: (index) => calls.push(`dequeue:${index}`),
     steer: (prompt) => calls.push(`steer:${prompt}`),
@@ -25,6 +26,7 @@ test("routes session actions only through available adapter callbacks", () => {
   expect(Session.execute(adapter, { _tag: "Steer", prompt: "two" })).toBe(true)
   expect(Session.execute(adapter, { _tag: "InterruptAndSend", prompt: "urgent" })).toBe(true)
   expect(Session.execute(adapter, { _tag: "Cancel" })).toBe(true)
+  expect(Session.execute(adapter, { _tag: "Quit" })).toBe(true)
   expect(
     Session.execute(adapter, { _tag: "DecidePermission", id: "p", kind: "tool-approval", decision: "always" }),
   ).toBe(true)
@@ -35,6 +37,7 @@ test("routes session actions only through available adapter callbacks", () => {
     "steer:two",
     "interrupt:urgent",
     "cancel",
+    "quit",
     "p:always",
   ])
 })

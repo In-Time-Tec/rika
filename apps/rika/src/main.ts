@@ -1819,6 +1819,7 @@ if (import.meta.main) {
           )
         const adapter: Session.Adapter = {
           submit,
+          quit: () => close(),
           editQueued: (id, prompt) => run(session.editQueued(id, prompt, dispatch)),
           dequeue: (id) => run(session.dequeue(id, dispatch)),
           steerQueued: (id, prompt) => run(session.steerQueued(id, prompt, dispatch)),

@@ -1,11 +1,11 @@
 
 
+        Welcome to Rika
   ╭─ Command Palette ────────╮
   │                          │
   │ > thread                 │
   │                          │
-  │           thread         │
-╭─│ switch Ctrl+T        high ─╮
+╭─│           thread     high ─╮
 │ ╰──────────────────────────╯ │
 │                              │
 │                              │
