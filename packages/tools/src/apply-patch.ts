@@ -38,7 +38,7 @@ export const parse = (patchText: string): ReadonlyArray<Operation> => {
     const filePath = match![2]!
     if (kind === "Add") {
       const content: Array<string> = []
-      while (lines.length > 0 && !lines[0]?.startsWith("*** ")) {
+      while (lines.length > 0 && lines[0]?.startsWith("*** ") !== true) {
         const line = lines.shift()!
         if (!line.startsWith("+")) fail("add file lines must start with +")
         content.push(line.slice(1))
@@ -51,15 +51,15 @@ export const parse = (patchText: string): ReadonlyArray<Operation> => {
       continue
     }
     let moveTo: string | undefined
-    if (lines[0]?.startsWith("*** Move to: ")) moveTo = lines.shift()?.slice(13)
+    if (lines[0]?.startsWith("*** Move to: ") === true) moveTo = lines.shift()?.slice(13)
     const hunks: Array<Hunk> = []
-    while (lines.length > 0 && !lines[0]?.startsWith("*** ")) {
+    while (lines.length > 0 && lines[0]?.startsWith("*** ") !== true) {
       const hunkHeader = lines.shift()!
       if (!hunkHeader.startsWith("@@")) fail(`expected hunk header, got: ${hunkHeader}`)
       const hunkLines: Array<string> = []
       while (
         lines.length > 0 &&
-        !lines[0]?.startsWith("@@") &&
+        lines[0]?.startsWith("@@") !== true &&
         !/^\*\*\* (?:Add|Delete|Update) File: /.test(lines[0]!)
       ) {
         const line = lines.shift()!
@@ -107,7 +107,7 @@ export const apply = Effect.fn("ApplyPatch.apply")(function* (
 ) {
   const operations = yield* Effect.try({
     try: () => parse(patchText),
-    catch: (cause) => new ApplyPatchError({ message: String(cause) }),
+    catch: (cause) => ApplyPatchError.make({ message: String(cause) }),
   })
   const staged = new Map<string, string | null>()
   const originals = new Map<string, string | null>()
@@ -125,35 +125,36 @@ export const apply = Effect.fn("ApplyPatch.apply")(function* (
             ),
           )
   yield* Effect.gen(function* () {
-    yield* Effect.gen(function* () {
-      for (const operation of operations) {
-        const source = contained(workspace, operation.path, path)
-        const current = yield* load(source)
-        if (!originals.has(source)) originals.set(source, current)
-        relativePath.set(source, operation.path)
-        if (operation.kind === "add") {
-          if (current !== null) fail(`${operation.path} already exists`)
-          staged.set(source, operation.content)
-        } else if (operation.kind === "delete") {
-          if (current === null) fail(`${operation.path} does not exist`)
+    for (const operation of operations) {
+      const source = contained(workspace, operation.path, path)
+      const current = yield* load(source)
+      if (!originals.has(source)) originals.set(source, current)
+      relativePath.set(source, operation.path)
+      if (operation.kind === "add") {
+        if (current !== null) fail(`${operation.path} already exists`)
+        staged.set(source, operation.content)
+      } else if (operation.kind === "delete") {
+        if (current === null) fail(`${operation.path} does not exist`)
+        staged.set(source, null)
+      } else {
+        if (current === null) fail(`${operation.path} does not exist`)
+        let next = current!
+        for (const hunk of operation.hunks) next = replaceHunk(next, hunk)
+        if (operation.moveTo === undefined) staged.set(source, next)
+        else {
+          const destination = contained(workspace, operation.moveTo, path)
+          if ((yield* load(destination)) !== null) fail(`${operation.moveTo} already exists`)
+          if (!originals.has(destination)) originals.set(destination, null)
+          relativePath.set(destination, operation.moveTo)
           staged.set(source, null)
-        } else {
-          if (current === null) fail(`${operation.path} does not exist`)
-          let next = current!
-          for (const hunk of operation.hunks) next = replaceHunk(next, hunk)
-          if (operation.moveTo === undefined) staged.set(source, next)
-          else {
-            const destination = contained(workspace, operation.moveTo, path)
-            if ((yield* load(destination)) !== null) fail(`${operation.moveTo} already exists`)
-            if (!originals.has(destination)) originals.set(destination, null)
-            relativePath.set(destination, operation.moveTo)
-            staged.set(source, null)
-            staged.set(destination, next)
-          }
+          staged.set(destination, next)
         }
       }
-    }).pipe(Effect.sandbox)
-  }).pipe(Effect.mapError((cause) => new ApplyPatchError({ message: String(cause) })))
+    }
+  }).pipe(
+    Effect.sandbox,
+    Effect.mapError((cause) => ApplyPatchError.make({ message: String(cause) })),
+  )
   for (const [target, content] of staged) {
     if (content === null) {
       if (yield* fileSystem.exists(target)) yield* fileSystem.remove(target)

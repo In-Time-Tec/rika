@@ -7,7 +7,15 @@ import * as Turn from "../src/turn-schema"
 
 const id = Thread.ThreadId.make("thread-a")
 
-test("migrates, persists, and reopens", async () => {
+const provideLayer =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
+    Effect.gen(function* () {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provide(context))
+    })
+
+test("migrates, persists, and reopens", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -43,7 +51,7 @@ test("migrates, persists, and reopens", async () => {
           resolvedContextDigest: "context-a",
         })
         yield* turns.setStatus(Turn.TurnId.make("turn-a"), "completed", "cursor-a", 4)
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const reopenedDatabase = Database.layer(filename)
       const reopened = Layer.merge(
         ThreadRepository.layer.pipe(Layer.provide(reopenedDatabase)),
@@ -53,25 +61,35 @@ test("migrates, persists, and reopens", async () => {
         const repository = yield* ThreadRepository.Service
         const turns = yield* TurnRepository.Service
         return { thread: yield* repository.get(id), turn: yield* turns.get(Turn.TurnId.make("turn-a")) }
-      }).pipe(Effect.provide(reopened))
+      }).pipe(provideLayer(reopened))
     }),
   )
-  const thread = await Effect.runPromise(program.pipe(Effect.provide(BunServices.layer)))
-  expect(thread.thread?.title).toBe("First")
-  expect(thread.thread?.labels).toEqual(["local"])
-  expect(thread.turn?.status).toBe("completed")
-  expect(thread.turn?.lastCursor).toBe("cursor-a")
-  expect(thread.turn?.extensionPin).toEqual({
-    generation: "generation-a",
-    sourceDigest: "source-a",
-    configFingerprint: "config-a",
-    toolSchemaDigest: "tools-a",
-    mcpFingerprint: "mcp-a",
-    resolvedContextDigest: "context-a",
-  })
+  return Effect.runPromise(
+    Effect.scoped(
+      program.pipe(
+        provideLayer(BunServices.layer),
+        Effect.tap((result) =>
+          Effect.sync(() => {
+            expect(result.thread?.title).toBe("First")
+            expect(result.thread?.labels).toEqual(["local"])
+            expect(result.turn?.status).toBe("completed")
+            expect(result.turn?.lastCursor).toBe("cursor-a")
+            expect(result.turn?.extensionPin).toEqual({
+              generation: "generation-a",
+              sourceDigest: "source-a",
+              configFingerprint: "config-a",
+              toolSchemaDigest: "tools-a",
+              mcpFingerprint: "mcp-a",
+              resolvedContextDigest: "context-a",
+            })
+          }),
+        ),
+      ),
+    ),
+  )
 })
 
-test("upgrades a seeded pre-v7 database and preserves legacy active and queued rows", async () => {
+test("upgrades a seeded pre-v7 database and preserves legacy active and queued rows", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -106,7 +124,7 @@ test("upgrades a seeded pre-v7 database and preserves legacy active and queued r
         const turns = yield* TurnRepository.Service
         return { threads: yield* repository.list(), turns: yield* turns.list(id) }
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Layer.merge(
             ThreadRepository.layer.pipe(Layer.provide(database)),
             TurnRepository.layer.pipe(Layer.provide(database)),
@@ -124,11 +142,11 @@ test("upgrades a seeded pre-v7 database and preserves legacy active and queued r
       ])
       expect(result.turns.every((turn) => turn.executionRoute === undefined)).toBe(true)
     }),
-  ).pipe(Effect.provide(BunServices.layer))
-  await Effect.runPromise(program)
+  ).pipe(provideLayer(BunServices.layer))
+  return Effect.runPromise(Effect.scoped(program))
 })
 
-test("turn SQL mutations, ordering, and rejection branches", async () => {
+test("turn SQL mutations, ordering, and rejection branches", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -167,7 +185,7 @@ test("turn SQL mutations, ordering, and rejection branches", async () => {
         })
         expect((yield* turns.findActive(id))?.id).toBe(active.id)
         expect((yield* turns.listQueued(id)).map((turn) => turn.id)).toEqual([second.id, third.id])
-        expect((yield* turns.listNonterminal()).map((turn) => turn.id)).toEqual([active.id, second.id, third.id])
+        expect((yield* turns.listNonterminal).map((turn) => turn.id)).toEqual([active.id, second.id, third.id])
         expect(yield* turns.claimNextQueued(id, 5)).toBeUndefined()
         expect((yield* turns.editQueued(second.id, "edited", 6)).prompt).toBe("edited")
         expect((yield* Effect.result(turns.editQueued(active.id, "no", 6)))._tag).toBe("Failure")
@@ -176,8 +194,8 @@ test("turn SQL mutations, ordering, and rejection branches", async () => {
         yield* turns.setStatus(active.id, "completed", undefined, 7)
         expect((yield* turns.claimNextQueued(id, 8))?.id).toBe(second.id)
         expect((yield* turns.list(id)).map((turn) => turn.id)).toEqual([active.id, second.id])
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
     }),
   )
-  await Effect.runPromise(program.pipe(Effect.provide(BunServices.layer)))
+  return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))
 })

@@ -1,6 +1,5 @@
 import { createTestRenderer } from "@opentui/core/testing"
-import { mkdir, writeFile } from "node:fs/promises"
-import { join } from "node:path"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import { Surface } from "../src/adapter"
 import { initial, ready, update, type Model, type TranscriptBlock } from "../src/view-state"
 
@@ -213,6 +212,21 @@ type Captured = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captu
 
 const channel = (value: number): number => Math.round(value <= 1 ? value * 255 : value)
 const stableFrame = (frame: string): string => frame.replaceAll(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]/g, "⠿")
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const prettyJson = (value: unknown, depth = 0): string => {
+  if (value === null || typeof value !== "object") return encodeJson(value)
+  const indent = "  ".repeat(depth)
+  const nestedIndent = `${indent}  `
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]"
+    return `[\n${value.map((item) => `${nestedIndent}${prettyJson(item, depth + 1)}`).join(",\n")}\n${indent}]`
+  }
+  const entries = Object.entries(value)
+  if (entries.length === 0) return "{}"
+  return `{\n${entries
+    .map(([key, item]) => `${nestedIndent}${encodeJson(key)}: ${prettyJson(item, depth + 1)}`)
+    .join(",\n")}\n${indent}}`
+}
 
 const screenshot = (capture: Captured, width: number, height: number): string => {
   const pixels: Array<string> = []
@@ -223,33 +237,43 @@ const screenshot = (capture: Captured, width: number, height: number): string =>
     for (let x = 0; x < width; x += 1) {
       const cell = cells[x]
       const color = cell?.character === " " ? cell.span.bg : cell?.span.fg
-      pixels.push(color ? `${channel(color.r)} ${channel(color.g)} ${channel(color.b)}` : "0 0 0")
+      pixels.push(color !== undefined ? `${channel(color.r)} ${channel(color.g)} ${channel(color.b)}` : "0 0 0")
     }
   }
   return `P3\n${width} ${height}\n255\n${pixels.join("\n")}\n`
 }
 
-export const captureVisuals = async (directory: string): Promise<void> => {
-  await mkdir(directory, { recursive: true })
-  await writeFile(join(directory, "metadata.json"), `${JSON.stringify(visualMetadata, null, 2)}\n`)
-  await scenarios().reduce(async (previous, [name, source, width, height]) => {
-    await previous
-    const setup = await createTestRenderer({ width, height })
-    const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-    try {
+export const captureVisuals = Effect.fn("Visual.captureVisuals")(function* (directory: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  yield* fileSystem.makeDirectory(directory, { recursive: true })
+  yield* fileSystem.writeFileString(path.join(directory, "metadata.json"), `${prettyJson(visualMetadata)}\n`)
+  yield* Effect.forEach(scenarios(), ([name, source, width, height]) =>
+    Effect.gen(function* () {
+      const setup = yield* Effect.acquireRelease(
+        Effect.tryPromise(() => createTestRenderer({ width, height })),
+        (value) => Effect.sync(() => value.renderer.destroy()),
+      )
+      const surface = yield* Effect.acquireRelease(
+        Effect.sync(() => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })),
+        (value) => Effect.sync(() => value.destroy()),
+      )
       setup.resize(width, height)
       surface.update({ ...source, width, height })
-      await setup.flush()
+      yield* Effect.tryPromise(() => setup.flush())
       const frame = stableFrame(setup.captureCharFrame())
       const styles = setup.captureSpans()
-      await Promise.all([
-        writeFile(join(directory, `${name}.frame.txt`), `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`),
-        writeFile(join(directory, `${name}.ppm`), screenshot(styles, width, height)),
-        writeFile(join(directory, `${name}.styles.json`), `${JSON.stringify(styles, null, 2)}\n`),
-      ])
-    } finally {
-      surface.destroy()
-      setup.renderer.destroy()
-    }
-  }, Promise.resolve())
-}
+      yield* Effect.all(
+        [
+          fileSystem.writeFileString(
+            path.join(directory, `${name}.frame.txt`),
+            `${frame.replaceAll(/ +$/gm, "").trimEnd()}\n`,
+          ),
+          fileSystem.writeFileString(path.join(directory, `${name}.ppm`), screenshot(styles, width, height)),
+          fileSystem.writeFileString(path.join(directory, `${name}.styles.json`), `${prettyJson(styles)}\n`),
+        ],
+        { concurrency: 3 },
+      )
+    }).pipe(Effect.scoped),
+  )
+})

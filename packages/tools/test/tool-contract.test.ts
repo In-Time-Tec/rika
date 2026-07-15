@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Ref, Schema, Stream } from "effect"
 import { Tool } from "effect/unstable/ai"
 import { Catalog, ParallelSearch, ProcessRegistry, Runtime } from "../src"
+import { provide } from "./test-layer"
 
 describe("tool contracts", () => {
   it("defines permission and output policies for every initial tool", () => {
@@ -23,7 +24,7 @@ describe("tool contracts", () => {
       const runtime = yield* Runtime.Service
       const result = yield* runtime.run({ _tag: "GitStatus" })
       expect(result).toEqual({ text: "fixture", truncated: false })
-    }).pipe(Effect.provide(Runtime.testLayer(() => Effect.succeed({ text: "fixture", truncated: false })))),
+    }).pipe(provide(Runtime.testLayer(() => Effect.succeed({ text: "fixture", truncated: false })))),
   )
 
   it.effect("substitutes the process registry through its test layer", () =>
@@ -31,7 +32,7 @@ describe("tool contracts", () => {
       const registry = yield* ProcessRegistry.Service
       expect(yield* registry.start("command", [], "/workspace")).toBe("fixture")
     }).pipe(
-      Effect.provide(
+      provide(
         ProcessRegistry.testLayer({
           start: () => Effect.succeed("fixture"),
           poll: () => Effect.die("unused"),
@@ -101,7 +102,7 @@ describe("tool contracts", () => {
           })
           .pipe(Effect.flatMap(Stream.runDrain))
         yield* toolkit.handle("view_media", { path: "image.png" }).pipe(Effect.flatMap(Stream.runDrain))
-      }).pipe(Effect.provide(Runtime.handlerLayer.pipe(Layer.provide(runtimeLayer))))
+      }).pipe(provide(Runtime.handlerLayer.pipe(Layer.provide(runtimeLayer))))
       expect((yield* Ref.get(requests)).map((request) => request._tag)).toEqual([
         "FindFiles",
         "Grep",

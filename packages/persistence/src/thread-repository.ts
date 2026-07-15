@@ -30,22 +30,23 @@ export interface Interface {
   readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/persistence/ThreadRepository") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/persistence/thread-repository/Service") {}
 
 const Row = Schema.Struct({
   id: Schema.String,
   workspace: Schema.String,
   title: Schema.String,
   labels_json: Schema.String,
-  pinned: Schema.Number,
-  archived: Schema.Number,
-  created_at: Schema.Number,
-  updated_at: Schema.Number,
+  pinned: Schema.Finite,
+  archived: Schema.Finite,
+  created_at: Schema.Finite,
+  updated_at: Schema.Finite,
 })
 
-const repositoryError = (error: unknown) => new RepositoryError({ message: String(error) })
+const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
+const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 50, 1), 100)
-const missing = (id: ThreadId) => new RepositoryError({ message: `Thread ${id} does not exist` })
+const missing = (id: ThreadId) => RepositoryError.make({ message: `Thread ${id} does not exist` })
 const clone = (thread: Thread): Thread => structuredClone(thread)
 const compare = (left: Thread, right: Thread) =>
   Number(right.pinned) - Number(left.pinned) || right.updatedAt - left.updatedAt || left.id.localeCompare(right.id)
@@ -67,8 +68,7 @@ const select = (threads: ReadonlyArray<Thread>, input: ListInput = {}) =>
 const decode = (row: unknown) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
-    const labelsJson = yield* Effect.try(() => JSON.parse(value.labels_json))
-    const labels = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(labelsJson)
+    const labels = yield* Schema.decodeUnknownEffect(LabelsJson)(value.labels_json)
     return {
       id: ThreadId.make(value.id),
       workspace: value.workspace,
@@ -86,7 +86,7 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
     const state = yield* Ref.make(new Map(initial.map((thread) => [thread.id, clone(thread)])))
     const requireThread = Effect.fn("ThreadRepository.requireThread")(function* (id: ThreadId) {
       const thread = (yield* Ref.get(state)).get(id)
-      if (thread === undefined) return yield* Effect.fail(missing(id))
+      if (thread === undefined) return yield* missing(id)
       return thread
     })
     const update = Effect.fn("ThreadRepository.update")(function* (
@@ -103,7 +103,7 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
       create: Effect.fn("ThreadRepository.create")(function* (input) {
         const threads = yield* Ref.get(state)
         if (threads.has(input.id)) {
-          return yield* Effect.fail(new RepositoryError({ message: `Thread ${input.id} exists` }))
+          return yield* RepositoryError.make({ message: `Thread ${input.id} exists` })
         }
         const thread: Thread = {
           id: input.id,
@@ -152,7 +152,7 @@ export const layer = Layer.effect(
     })
     const requireThread = Effect.fn("ThreadRepository.requireThread")(function* (id: ThreadId) {
       const thread = yield* get(id)
-      if (thread === undefined) return yield* Effect.fail(missing(id))
+      if (thread === undefined) return yield* missing(id)
       return thread
     })
     const update = Effect.fn("ThreadRepository.update")(function* (
@@ -168,7 +168,7 @@ export const layer = Layer.effect(
       yield* requireThread(id)
       yield* sql`UPDATE rika_threads SET
         title = COALESCE(${fields.title ?? null}, title),
-        labels_json = COALESCE(${fields.labels === undefined ? null : JSON.stringify(fields.labels)}, labels_json),
+        labels_json = COALESCE(${fields.labels === undefined ? null : yield* Schema.encodeEffect(LabelsJson)(fields.labels).pipe(Effect.mapError(repositoryError))}, labels_json),
         pinned = COALESCE(${fields.pinned === undefined ? null : Number(fields.pinned)}, pinned),
         archived = COALESCE(${fields.archived === undefined ? null : Number(fields.archived)}, archived),
         updated_at = ${now}

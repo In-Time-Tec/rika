@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import { Service } from "./thread-query"
 
 const error = (tool: string, cause: { readonly _tag: string }) =>
-  new ThreadTools.ToolError({ tool, message: JSON.stringify(cause) })
+  ThreadTools.ToolError.make({ tool, message: JSON.stringify(cause) })
 
 export const handlerLayer = ThreadTools.toolkit.toLayer(
   Effect.gen(function* () {

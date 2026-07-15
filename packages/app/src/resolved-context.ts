@@ -31,7 +31,7 @@ const maximumReferenceDepth = 32
 export interface Interface {
   readonly resolve: (input: Input) => Effect.Effect<Result, PlatformError.PlatformError>
 }
-export class Service extends Context.Service<Service, Interface>()("@rika/app/context/ResolvedContext") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/resolved-context/Service") {}
 
 const digest = (value: string) => createHash("sha256").update(value).digest("hex")
 const globPattern = (value: string) => value.includes("*")
@@ -103,7 +103,7 @@ export const layer = Layer.effect(
         }
         return nested.slice(0, maximumReferenceFiles)
       })
-      const allFiles = input.references?.some(globPattern) ? yield* walk(root) : []
+      const allFiles = input.references?.some(globPattern) === true ? yield* walk(root) : []
       for (const reference of [...(input.references ?? [])].toSorted()) {
         const candidates = globPattern(reference)
           ? allFiles.filter((candidate) => globRegex(reference).test(path.relative(root, candidate)))

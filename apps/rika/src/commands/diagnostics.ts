@@ -1,14 +1,19 @@
-import { Console, Effect, Path } from "effect"
+import { Config, Console, Effect, Option, Path } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
 import * as Logging from "../logging"
 
 const dataRoot = Effect.fn("DiagnosticsCommand.dataRoot")(function* () {
   const path = yield* Path.Path
-  const home = process.env.HOME ?? process.cwd()
-  const root = path.join(home, ".rika")
+  const home = yield* Config.option(Config.string("HOME"))
+  const productDatabase = yield* Config.option(Config.string("RIKA_DATABASE"))
+  const relayDatabase = yield* Config.option(Config.string("RIKA_RELAY_DATABASE"))
+  const root = path.resolve(
+    Option.getOrElse(home, () => "."),
+    ".rika",
+  )
   return yield* Logging.resolveDataRoot(
-    process.env.RIKA_DATABASE ?? path.join(root, "rika.db"),
-    process.env.RIKA_RELAY_DATABASE ?? path.join(root, "relay.db"),
+    Option.getOrElse(productDatabase, () => path.join(root, "rika.db")),
+    Option.getOrElse(relayDatabase, () => path.join(root, "relay.db")),
   )
 })
 

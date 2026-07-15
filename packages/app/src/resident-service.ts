@@ -5,6 +5,7 @@ import {
   Encoding,
   FiberSet,
   FileSystem,
+  Function,
   Layer,
   Path,
   Ref,
@@ -206,16 +207,25 @@ export interface Interface {
   >
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/app/ResidentService") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/resident-service/Service") {}
 
 export const testLayer = (implementation: Interface): Layer.Layer<Service> => Layer.succeed(Service, implementation)
 
-export const canonicalServiceIdentity = (profile: string, canonicalDataRoot: string) =>
+export const canonicalServiceIdentity: {
+  (
+    canonicalDataRoot: string,
+  ): (profile: string) => Effect.Effect<string, import("effect/PlatformError").PlatformError, Crypto.Crypto>
+  (
+    profile: string,
+    canonicalDataRoot: string,
+  ): Effect.Effect<string, import("effect/PlatformError").PlatformError, Crypto.Crypto>
+} = Function.dual(2, (profile: string, canonicalDataRoot: string) =>
   Effect.gen(function* () {
     const crypto = yield* Crypto.Crypto
     const bytes = new TextEncoder().encode(`${profile}\0${canonicalDataRoot}`)
     return Encoding.encodeHex(yield* crypto.digest("SHA-256", bytes))
-  })
+  }),
+)
 
 export type HandshakeResult =
   | { readonly _tag: "Accepted" }
@@ -224,22 +234,39 @@ export type HandshakeResult =
   | { readonly _tag: "UpgradeRequired" }
   | { readonly _tag: "CapabilityMismatch" }
 
-export const validateHandshake = (
-  handshake: Handshake,
-  expected: { readonly identity: string; readonly token: string; readonly capabilities?: ReadonlyArray<string> },
-): HandshakeResult => {
-  if (handshake.token !== expected.token) return { _tag: "AuthenticationFailed" }
-  if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
-  if (handshake.version.major !== protocolVersion.major) return { _tag: "UpgradeRequired" }
-  if ((expected.capabilities ?? []).some((capability) => !handshake.capabilities.includes(capability)))
-    return { _tag: "CapabilityMismatch" }
-  return { _tag: "Accepted" }
-}
+export const validateHandshake: {
+  (expected: {
+    readonly identity: string
+    readonly token: string
+    readonly capabilities?: ReadonlyArray<string>
+  }): (handshake: Handshake) => HandshakeResult
+  (
+    handshake: Handshake,
+    expected: { readonly identity: string; readonly token: string; readonly capabilities?: ReadonlyArray<string> },
+  ): HandshakeResult
+} = Function.dual(
+  2,
+  (
+    handshake: Handshake,
+    expected: { readonly identity: string; readonly token: string; readonly capabilities?: ReadonlyArray<string> },
+  ): HandshakeResult => {
+    if (handshake.token !== expected.token) return { _tag: "AuthenticationFailed" }
+    if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
+    if (handshake.version.major !== protocolVersion.major) return { _tag: "UpgradeRequired" }
+    if ((expected.capabilities ?? []).some((capability) => !handshake.capabilities.includes(capability)))
+      return { _tag: "CapabilityMismatch" }
+    return { _tag: "Accepted" }
+  },
+)
 
-export const negotiateCapabilities = (
-  local: ReadonlyArray<string>,
-  remote: ReadonlyArray<string>,
-): ReadonlyArray<string> => local.filter((capability) => remote.includes(capability))
+export const negotiateCapabilities: {
+  (remote: ReadonlyArray<string>): (local: ReadonlyArray<string>) => ReadonlyArray<string>
+  (local: ReadonlyArray<string>, remote: ReadonlyArray<string>): ReadonlyArray<string>
+} = Function.dual(
+  2,
+  (local: ReadonlyArray<string>, remote: ReadonlyArray<string>): ReadonlyArray<string> =>
+    local.filter((capability) => remote.includes(capability)),
+)
 
 export type LifecycleState = "starting" | "ready" | "grace" | "draining" | "stopped"
 type LifecycleValue = { state: LifecycleState; clients: number; graceGeneration: number }
@@ -275,7 +302,7 @@ export const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<
           ] as const
         },
       ).pipe(
-        Effect.tap((result) => (result.changed ? changed("ready") : Effect.void)),
+        Effect.tap((result) => (result.changed === true ? changed("ready") : Effect.void)),
         Effect.map((result) => result.attached),
       ),
       detach: Ref.modify(value, (current) => {
@@ -295,13 +322,13 @@ export const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<
               return [true, { ...current, state: "draining" as const }] as const
             }),
           )
-          .pipe(Effect.tap((draining) => (draining ? changed("draining") : Effect.void))),
+          .pipe(Effect.tap((draining) => (draining === true ? changed("draining") : Effect.void))),
       runWork: <A, E, R>(fibers: FiberSet.FiberSet<A, E>, work: Effect.Effect<A, E, R>) =>
         admission.withPermits(1)(
           Ref.get(value).pipe(
             Effect.flatMap((current) =>
               current.state === "draining" || current.state === "stopped"
-                ? Effect.succeed(undefined)
+                ? Effect.void.pipe(Effect.as(undefined))
                 : FiberSet.run(fibers, work).pipe(Effect.map((fiber) => fiber as typeof fiber | undefined)),
             ),
           ),

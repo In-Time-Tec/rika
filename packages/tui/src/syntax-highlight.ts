@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import Prism from "prismjs"
 import "prismjs/components/prism-typescript.js"
 import "prismjs/components/prism-jsx.js"
@@ -75,7 +76,10 @@ const flatten = (tokens: ReadonlyArray<string | Prism.Token>, parent: Role, out:
 const grammarFor = (lang: string | undefined): Prism.Grammar | undefined =>
   lang === undefined || lang.length === 0 ? undefined : Prism.languages[lang.toLowerCase()]
 
-export const highlightLines = (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+export const highlightLines: {
+  (lang: string | undefined): (code: string) => ReadonlyArray<ReadonlyArray<TextChunk>>
+  (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TextChunk>>
+} = Function.dual(2, (code: string, lang: string | undefined): ReadonlyArray<ReadonlyArray<TextChunk>> => {
   const grammar = grammarFor(lang)
   const runs: Array<Run> = []
   if (grammar === undefined) runs.push({ text: code, role: "plain" })
@@ -89,4 +93,4 @@ export const highlightLines = (code: string, lang: string | undefined): Readonly
     })
   }
   return lines
-}
+})

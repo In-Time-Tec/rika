@@ -10,7 +10,7 @@ export interface AdapterInterface {
   readonly exists: (path: string) => Effect.Effect<boolean, AdapterError>
 }
 
-export class Adapter extends Context.Service<Adapter, AdapterInterface>()("@rika/app/ConfigOperationsAdapter") {}
+export class Adapter extends Context.Service<Adapter, AdapterInterface>()("@rika/app/config-operations/Adapter") {}
 
 export interface Options {
   readonly globalConfigPath: string

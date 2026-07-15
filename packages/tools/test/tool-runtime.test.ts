@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Option, Path, PlatformError, Sink, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema, Sink, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { MediaView, ParallelSearch, ProcessRegistry, ReadWebPage, Runtime } from "../src"
+import { provide } from "./test-layer"
 
 const workspace = "/workspace"
 
@@ -159,7 +160,7 @@ describe("Runtime", () => {
       expect(filtered.text).toBe("src/deep/b.ts\nsrc/unreadable.ts\nsrc/z.ts")
       expect(literal.text).toBe("a.txt:2:needle\nsrc/deep/b.ts:2:needle")
       expect(regex.text).toBe("src/z.ts:1:alpha\nsrc/z.ts:2:alpha2")
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 
   it.effect("reads with default and clamped ranges", () => {
@@ -173,7 +174,7 @@ describe("Runtime", () => {
       expect(defaults.text).toBe("1: zero\n2: needle\n3: last")
       expect(low.text).toBe("1: zero")
       expect(high.text).toBe("2: needle\n3: last")
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 
   it.effect("creates and edits files while rejecting existing, stale, and ambiguous changes", () => {
@@ -203,7 +204,7 @@ describe("Runtime", () => {
       expect(existing.message).toContain("already exists")
       expect(stale.message).toContain("stale anchor")
       expect(ambiguous.message).toContain("ambiguous anchor")
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 
   it.effect("combines process output, reports exits, invokes git status, and bounds output", () => {
@@ -239,7 +240,7 @@ describe("Runtime", () => {
         { command: "stream-failure", args: [], cwd: workspace },
         { command: "unicode-boundary", args: [], cwd: workspace },
       ])
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 
   it.effect("maps foreign filesystem and process errors to ToolError", () => {
@@ -253,7 +254,7 @@ describe("Runtime", () => {
       expect(read.message).toContain("foreign failure")
       expect(shell).toMatchObject({ _tag: "ToolError", tool: "Shell" })
       expect(shell.message).toContain("foreign failure")
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 
   it.effect("returns bounded Parallel web search results", () => {
@@ -265,11 +266,11 @@ describe("Runtime", () => {
         objective: "Find current documentation",
         searchQueries: ["current documentation"],
       })
-      expect(JSON.parse(result.text)).toEqual([
+      expect(yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(result.text)).toEqual([
         { url: "https://example.com", title: "Example", publishDate: null, excerpts: ["result"] },
       ])
       expect(result.truncated).toBe(false)
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 
   it.effect("routes patch, status, web page, and media requests and rejects escaped paths", () => {
@@ -299,6 +300,6 @@ describe("Runtime", () => {
       expect(pageOptions.text).toBe("page")
       expect(media.tool).toBe("ViewMedia")
       expect(escaped.message).toContain("escapes workspace")
-    }).pipe(Effect.provide(environment.runtime))
+    }).pipe(provide(environment.runtime))
   })
 })

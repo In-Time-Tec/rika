@@ -18,7 +18,7 @@ export const value = Effect.fn("PluginDigest.value")(function* (input: string) {
   const crypto = yield* Crypto.Crypto
   const bytes = yield* crypto
     .digest("SHA-256", new TextEncoder().encode(input))
-    .pipe(Effect.mapError((cause) => new DigestError({ message: String(cause) })))
+    .pipe(Effect.mapError((cause) => DigestError.make({ message: String(cause) })))
   return Encoding.encodeHex(bytes)
 })
 

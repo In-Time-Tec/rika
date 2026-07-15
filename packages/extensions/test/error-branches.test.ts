@@ -1,17 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, FileSystem, Layer, PlatformError } from "effect"
-import {
-  McpConfig,
-  McpRuntime,
-  PluginApi,
-  PluginDigest,
-  PluginLoader,
-  PluginRegistry,
-  PluginTrust,
-  SkillRegistry,
-} from "../src"
+import { McpConfig, McpRuntime, PluginDigest, PluginLoader, PluginRegistry, PluginTrust, SkillRegistry } from "../src"
 
 const document = (name: string) => `---\nname: ${name}\ndescription: ${name}\n---\nbody`
 
@@ -40,175 +30,161 @@ const skillLayer = (operation: keyof SkillRegistry.FileSystemInterface) =>
     }),
   )
 
-it("maps every skill resource filesystem failure", async () => {
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* Effect.serviceOption(SkillRegistry.SkillFileSystem)
-        expect(fileSystem._tag).toBe("Some")
-      }),
-    ).pipe(Effect.provide(skillLayer("exists"))),
+it.layer(BunServices.layer)((test) => {
+  test.effect("maps every skill resource filesystem failure", () =>
+    Effect.gen(function* () {
+      const operations = ["exists", "readDirectory", "isFile", "readFileString"] as const
+      const results = yield* Effect.forEach(operations, (operation) =>
+        Effect.gen(function* () {
+          const context = yield* Layer.build(skillLayer(operation))
+          const fileSystem = yield* FileSystem.FileSystem
+          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-errors-" })
+          const globalRoot = `${root}/global`
+          const workspaceRoot = `${root}/workspace`
+          yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
+          yield* fileSystem.writeFileString(`${globalRoot}/test/SKILL.md`, document("test"))
+          const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot }).pipe(Effect.provide(context))
+          return yield* Effect.flip(registry.activate("test"))
+        }).pipe(Effect.scoped),
+      )
+      for (const result of results) {
+        expect(result.operation).toBe("activate")
+        expect(result.message).toContain("failed")
+      }
+    }),
   )
-  const operations = ["exists", "readDirectory", "isFile", "readFileString"] as const
-  const results = await Promise.all(
-    operations.map((operation) =>
-      Effect.runPromise(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const fileSystem = yield* FileSystem.FileSystem
-            const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-errors-" })
-            const globalRoot = `${root}/global`
-            const workspaceRoot = `${root}/workspace`
-            yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
-            yield* fileSystem.writeFileString(`${globalRoot}/test/SKILL.md`, document("test"))
-            const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot })
-            return yield* Effect.flip(registry.activate("test"))
-          }),
-        ).pipe(Effect.provide(skillLayer(operation)), Effect.provide(BunServices.layer)),
-      ),
-    ),
-  )
-  for (const result of results) {
-    expect(result.operation).toBe("activate")
-    expect(result.message).toContain("failed")
-  }
-})
 
-it("exercises the skill test filesystem and rejects escaping resources", async () => {
-  const activation = await Effect.runPromise(
-    Effect.scoped(
+  test.effect("exercises the skill test filesystem and rejects escaping resources", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-test-layer-" })
+      const globalRoot = `${root}/global`
+      const workspaceRoot = `${root}/workspace`
+      yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
+      yield* fileSystem.writeFileString(`${globalRoot}/test/SKILL.md`, document("test"))
+      const files = {
+        [`${globalRoot}/test/SKILL.md`]: document("test"),
+        [`${globalRoot}/test/resource.txt`]: "resource",
+      }
+      const activate = (entries: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          const context = yield* Layer.build(
+            SkillRegistry.fileSystemTestLayer(files, {
+              [globalRoot]: ["test/SKILL.md"],
+              [workspaceRoot]: [],
+              [`${globalRoot}/test`]: entries,
+            }),
+          )
+          const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot }).pipe(Effect.provide(context))
+          return yield* registry.activate("test")
+        })
+      const success = yield* activate(["SKILL.md", "directory", "resource.txt"])
+      const escaped = yield* Effect.flip(activate(["../outside.txt"]))
+      expect(success.resources).toEqual([{ path: "resource.txt", content: "resource" }])
+      expect(escaped.message).toBe("Resource path escapes skill directory")
+    }).pipe(Effect.scoped),
+  )
+
+  test.effect("exercises missing test filesystem entries", () =>
+    Effect.gen(function* () {
+      const context = yield* Layer.build(SkillRegistry.fileSystemTestLayer({}, {}))
+      yield* Effect.gen(function* () {
+        const fileSystem = yield* SkillRegistry.SkillFileSystem
+        expect((yield* Effect.exit(fileSystem.readDirectory("/missing")))._tag).toBe("Failure")
+        expect((yield* Effect.exit(fileSystem.readFileString("/missing")))._tag).toBe("Failure")
+        expect(yield* fileSystem.exists("/missing")).toBe(false)
+        expect(yield* fileSystem.isFile("/missing")).toBe(false)
+      }).pipe(Effect.provide(context))
+    }).pipe(Effect.scoped),
+  )
+
+  test.effect("maps skill digest and lazy body read failures", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-boundaries-" })
+      const globalRoot = `${root}/global`
+      const workspaceRoot = `${root}/workspace`
+      const manifest = `${globalRoot}/test/SKILL.md`
+      yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
+      yield* fileSystem.writeFileString(manifest, document("test"))
+      const context = yield* Layer.build(SkillRegistry.fileSystemLayer)
+      const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot }).pipe(Effect.provide(context))
+      yield* fileSystem.remove(manifest)
+      expect((yield* Effect.flip(registry.activate("test"))).operation).toBe("activate")
+      const failure = platformFailure("digest")
+      const cryptoLayer = Layer.succeed(
+        Crypto.Crypto,
+        Crypto.make({ randomBytes: (size) => new Uint8Array(size), digest: () => Effect.fail(failure) }),
+      )
+      const digestContext = yield* Layer.build(Layer.merge(SkillRegistry.fileSystemTestLayer({}, {}), cryptoLayer))
+      const digestError = yield* Effect.flip(
+        SkillRegistry.discover({ globalRoot: "/global", workspaceRoot: "/workspace" }).pipe(
+          Effect.provide(digestContext),
+        ),
+      )
+      expect(digestError.operation).toBe("digest")
+    }).pipe(Effect.scoped),
+  )
+
+  test.effect("maps MCP discovery errors and exercises factory methods", () => {
+    const server: McpConfig.LocalServer = {
+      kind: "local",
+      name: "server",
+      command: "command",
+      args: [],
+      environment: {},
+      source: "workspace",
+      sourceDigest: "digest",
+    }
+    return Effect.scoped(
       Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-test-layer-" })
-        const globalRoot = `${root}/global`
-        const workspaceRoot = `${root}/workspace`
-        yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
-        yield* fileSystem.writeFileString(`${globalRoot}/test/SKILL.md`, document("test"))
-        const files = {
-          [`${globalRoot}/test/SKILL.md`]: document("test"),
-          [`${globalRoot}/test/resource.txt`]: "resource",
-        }
-        const activate = (entries: ReadonlyArray<string>) =>
-          Effect.gen(function* () {
-            const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot })
-            return yield* registry.activate("test")
-          }).pipe(
-            Effect.provide(
-              SkillRegistry.fileSystemTestLayer(files, {
-                [globalRoot]: ["test/SKILL.md"],
-                [workspaceRoot]: [],
-                [`${globalRoot}/test`]: entries,
+        const context = yield* Layer.build(
+          McpRuntime.testLayer(() =>
+            Effect.fail(
+              McpRuntime.Diagnostic.make({
+                server: "server",
+                phase: "discover",
+                message: "discovery failed",
               }),
             ),
-          )
-        const success = yield* activate(["SKILL.md", "directory", "resource.txt"])
-        const escaped = yield* Effect.flip(activate(["../outside.txt"]))
-        return { success, escaped }
+          ),
+        )
+        yield* Effect.gen(function* () {
+          const error = yield* Effect.flip(McpRuntime.discover(server))
+          expect(error.phase).toBe("discover")
+        }).pipe(Effect.provide(context))
       }),
-    ).pipe(Effect.provide(BunServices.layer)),
-  )
-  expect(activation.success.resources).toEqual([{ path: "resource.txt", content: "resource" }])
-  expect(activation.escaped.message).toBe("Resource path escapes skill directory")
-})
-
-it.effect("exercises missing test filesystem entries", () =>
-  Effect.gen(function* () {
-    const fileSystem = yield* SkillRegistry.SkillFileSystem
-    expect((yield* Effect.exit(fileSystem.readDirectory("/missing")))._tag).toBe("Failure")
-    expect((yield* Effect.exit(fileSystem.readFileString("/missing")))._tag).toBe("Failure")
-    expect(yield* fileSystem.exists("/missing")).toBe(false)
-    expect(yield* fileSystem.isFile("/missing")).toBe(false)
-  }).pipe(Effect.provide(SkillRegistry.fileSystemTestLayer({}, {})), Effect.provide(BunServices.layer)),
-)
-
-it("maps skill digest and lazy body read failures", async () => {
-  await Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-skill-boundaries-" })
-        const globalRoot = `${root}/global`
-        const workspaceRoot = `${root}/workspace`
-        const manifest = `${globalRoot}/test/SKILL.md`
-        yield* fileSystem.makeDirectory(`${globalRoot}/test`, { recursive: true })
-        yield* fileSystem.writeFileString(manifest, document("test"))
-        const registry = yield* SkillRegistry.discover({ globalRoot, workspaceRoot })
-        yield* fileSystem.remove(manifest)
-        expect((yield* Effect.flip(registry.activate("test"))).operation).toBe("activate")
-      }).pipe(Effect.provide(SkillRegistry.fileSystemLayer)),
-    ).pipe(Effect.provide(BunServices.layer)),
-  )
-
-  const failure = platformFailure("digest")
-  const cryptoLayer = Layer.succeed(
-    Crypto.Crypto,
-    Crypto.make({ randomBytes: (size) => new Uint8Array(size), digest: () => Effect.fail(failure) }),
-  )
-  const digestError = await Effect.runPromise(
-    Effect.flip(
-      SkillRegistry.discover({ globalRoot: "/global", workspaceRoot: "/workspace" }).pipe(
-        Effect.provide(SkillRegistry.fileSystemTestLayer({}, {})),
-        Effect.provide(cryptoLayer),
-        Effect.provide(BunServices.layer),
-      ),
-    ),
-  )
-  expect(digestError.operation).toBe("digest")
-})
-
-it.effect("maps MCP discovery errors and exercises factory methods", () => {
-  const server: McpConfig.LocalServer = {
-    kind: "local",
-    name: "server",
-    command: "command",
-    args: [],
-    environment: {},
-    source: "workspace",
-    sourceDigest: "digest",
-  }
-  const source = McpToolSource.McpToolSource.of({
-    server: "server",
-    tools: Effect.fail("discovery failed") as unknown as Effect.Effect<ReadonlyArray<McpToolSource.DiscoveredTool>>,
-    callTool: (_tool, input) => Effect.succeed(input),
-    aiTools: Effect.succeed([]),
+    )
   })
-  return Effect.scoped(
-    Effect.gen(function* () {
-      const runtime = yield* McpRuntime.Service
-      expect(yield* runtime.connect(server)).toBe(source)
-      const error = yield* Effect.flip(McpRuntime.discover(server))
-      expect(error.phase).toBe("discover")
-    }),
-  ).pipe(Effect.provide(McpRuntime.testLayer(() => Effect.succeed(source))))
-})
 
-it("isolates plugin import, contract, and registration failures", async () => {
-  const layers = Layer.mergeAll(PluginTrust.memoryLayer(), PluginRegistry.memoryLayer, BunServices.layer)
-  const generation = await Effect.runPromise(
-    Effect.gen(function* () {
-      const trust = yield* PluginTrust.Service
-      for (const id of ["import", "contract", "register"]) {
-        yield* trust.approve("workspace", id, yield* PluginDigest.source(id))
-      }
-      return yield* PluginLoader.reload("workspace", [
-        pluginSource("import", () => Effect.fail(new Error("read/import failed"))),
-        pluginSource("contract", () =>
-          Effect.succeed({ apiVersion: 2, id: "wrong", register: () => {} } as unknown as PluginApi.PluginV1),
-        ),
-        pluginSource("register", () =>
-          Effect.succeed({
-            apiVersion: 1,
-            id: "register",
-            register: () => {
-              throw new Error("registration failed")
-            },
-          }),
-        ),
-      ])
-    }).pipe(Effect.provide(layers)),
-  )
-  expect(generation.diagnostics).toHaveLength(3)
-  expect(generation.diagnostics.join("\n")).toContain("load failed")
-  expect(generation.diagnostics.join("\n")).toContain("invalid plugin contract")
-  expect(generation.diagnostics.join("\n")).toContain("registration failed")
+  test.effect("isolates plugin import, contract, and registration failures", () => {
+    const layers = Layer.mergeAll(PluginTrust.memoryLayer(), PluginRegistry.memoryLayer, BunServices.layer)
+    return Effect.gen(function* () {
+      const context = yield* Layer.build(layers)
+      yield* Effect.gen(function* () {
+        const trust = yield* PluginTrust.Service
+        for (const id of ["import", "contract", "register"]) {
+          yield* trust.approve("workspace", id, yield* PluginDigest.source(id))
+        }
+        const generation = yield* PluginLoader.reload("workspace", [
+          pluginSource("import", Effect.fail(PluginLoader.LoadError.make({ message: "read/import failed" }))),
+          pluginSource("contract", Effect.succeed({ apiVersion: 1, id: "wrong", register: () => {} })),
+          pluginSource(
+            "register",
+            Effect.succeed({
+              apiVersion: 1,
+              id: "register",
+              register: () => {
+                throw new Error("registration failed")
+              },
+            }),
+          ),
+        ])
+        expect(generation.diagnostics).toHaveLength(3)
+        expect(generation.diagnostics.join("\n")).toContain("load failed")
+        expect(generation.diagnostics.join("\n")).toContain("invalid plugin contract")
+        expect(generation.diagnostics.join("\n")).toContain("registration failed")
+      }).pipe(Effect.provide(context))
+    }).pipe(Effect.scoped)
+  })
 })

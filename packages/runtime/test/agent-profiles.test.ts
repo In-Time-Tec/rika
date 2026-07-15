@@ -40,6 +40,22 @@ describe("product agent profiles", () => {
     expect(registered.Task?.tool_names).toContain("edit_file")
   })
 
+  it("supports data-first and data-last preset model overrides", () => {
+    const oracleModel = { provider: "oracle", model: "reasoning" }
+    const taskModel = { provider: "task", model: "coding" }
+    const agentModels = { Task: taskModel }
+
+    for (const registered of [presets(model, oracleModel, agentModels), presets(oracleModel, agentModels)(model)]) {
+      expect(Object.keys(registered)).toEqual(names)
+      expect(registered.Oracle?.model).toEqual(relayModel(oracleModel))
+      expect(registered.Task?.model).toEqual(relayModel(taskModel))
+      expect(registered.Review?.model).toEqual(relayModel(model))
+    }
+
+    expect(presets(model, oracleModel).Oracle?.model).toEqual(relayModel(oracleModel))
+    expect(presets()(model).Oracle?.model).toEqual(relayModel(model))
+  })
+
   it.effect("validates deterministic structured output contracts", () =>
     Effect.gen(function* () {
       expect(yield* Schema.decodeUnknownEffect(outputSchemas.Oracle)({ answer: "A", evidence: ["file:1"] })).toEqual({

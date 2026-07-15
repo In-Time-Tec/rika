@@ -1,5 +1,5 @@
 import { FileFinder } from "@ff-labs/fff-node"
-import { Context, Effect, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
+import { Context, Data, Effect, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as ParallelSearch from "./parallel-search"
@@ -19,8 +19,8 @@ export const Grep = Schema.Struct({ _tag: Schema.tag("Grep"), pattern: Schema.St
 export const ReadFile = Schema.Struct({
   _tag: Schema.tag("ReadFile"),
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.Number),
-  limit: Schema.optionalKey(Schema.Number),
+  offset: Schema.optionalKey(Schema.Finite),
+  limit: Schema.optionalKey(Schema.Finite),
 })
 export const CreateFile = Schema.Struct({
   _tag: Schema.tag("CreateFile"),
@@ -39,12 +39,12 @@ export const Shell = Schema.Struct({
   command: Schema.String,
   args: Schema.Array(Schema.String),
   cwd: Schema.optionalKey(Schema.String),
-  waitMillis: Schema.optionalKey(Schema.Number),
+  waitMillis: Schema.optionalKey(Schema.Finite),
 })
 export const ShellCommandStatus = Schema.Struct({
   _tag: Schema.tag("ShellCommandStatus"),
   processId: Schema.String,
-  waitMillis: Schema.optionalKey(Schema.Number),
+  waitMillis: Schema.optionalKey(Schema.Finite),
 })
 export const GitStatus = Schema.Struct({ _tag: Schema.tag("GitStatus") })
 export const WebSearch = Schema.Struct({
@@ -81,7 +81,7 @@ export const Result = Schema.Struct({
   truncated: Schema.Boolean,
   running: Schema.optionalKey(Schema.Boolean),
   processId: Schema.optionalKey(Schema.String),
-  exitCode: Schema.optionalKey(Schema.Number),
+  exitCode: Schema.optionalKey(Schema.Finite),
   stdout: Schema.optionalKey(Schema.String),
   stderr: Schema.optionalKey(Schema.String),
   diff: Schema.optionalKey(Schema.String),
@@ -122,8 +122,8 @@ export const grepTool = tool("grep", "Search UTF-8 workspace files for text or a
 })
 export const readFileTool = tool("read_file", "Read a bounded UTF-8 file range with stable line numbers", {
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  limit: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  offset: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  limit: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
 })
 export const createFileTool = tool("create_file", "Create a new UTF-8 file without overwriting an existing path", {
   path: Schema.String,
@@ -152,7 +152,7 @@ export const shellTool = tool(
     command: Schema.String,
     args: Schema.Array(Schema.String),
     cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
   },
 )
 export const shellCommandStatusTool = tool(
@@ -160,7 +160,7 @@ export const shellCommandStatusTool = tool(
   "Return only new output from a running command without restarting it",
   {
     processId: Schema.String,
-    waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+    waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
   },
 )
 export const gitStatusTool = tool("git_status", "Inspect concise Git working-tree status", {
@@ -207,7 +207,7 @@ export interface Interface {
   readonly run: (request: Request) => Effect.Effect<Result, ToolError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/tools/Runtime") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/tools/tool-runtime/Service") {}
 
 export const handlerLayer = toolkit.toLayer(
   Effect.gen(function* () {
@@ -252,7 +252,11 @@ export const handlerLayer = toolkit.toLayer(
 
 const maxOutput = 40_000
 const bounded = (text: string): Result => ({ text: text.slice(0, maxOutput), truncated: text.length > maxOutput })
-const toolError = (request: Request, cause: unknown) => new ToolError({ tool: request._tag, message: String(cause) })
+const toolError = (request: Request, cause: unknown) => ToolError.make({ tool: request._tag, message: String(cause) })
+
+class RuntimeOperationError extends Data.TaggedError("RuntimeOperationError")<{ readonly message: string }> {}
+
+const operationError = (cause: unknown) => new RuntimeOperationError({ message: String(cause) })
 
 export const layer = (workspace: string) =>
   Layer.effect(
@@ -285,10 +289,10 @@ export const layer = (workspace: string) =>
           try: () => {
             const target = path.resolve(workspace, value)
             if (target !== workspace && !target.startsWith(`${workspace}${path.sep}`))
-              throw new Error(`Path escapes workspace: ${value}`)
+              throw new RuntimeOperationError({ message: `Path escapes workspace: ${value}` })
             return target
           },
-          catch: (cause) => cause,
+          catch: operationError,
         })
       const listFiles = Effect.fn("ToolRuntime.listFiles")(function* () {
         const found: Array<string> = []
@@ -333,10 +337,10 @@ export const layer = (workspace: string) =>
                   yield* Effect.try({
                     try: () => {
                       const result = finder.fileSearch(request.query, { pageSize: 1_000 })
-                      if (!result.ok) throw new Error(result.error)
+                      if (!result.ok) throw new RuntimeOperationError({ message: result.error })
                       return result.value.items.map((item) => item.relativePath).join("\n")
                     },
-                    catch: (cause) => cause,
+                    catch: operationError,
                   }),
                 )
               case "Grep": {
@@ -370,12 +374,12 @@ export const layer = (workspace: string) =>
                         maxMatchesPerFile: 1_000,
                         classifyDefinitions: true,
                       })
-                      if (!result.ok) throw new Error(result.error)
+                      if (!result.ok) throw new RuntimeOperationError({ message: result.error })
                       return result.value.items
                         .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
                         .join("\n")
                     },
-                    catch: (cause) => cause,
+                    catch: operationError,
                   }),
                 )
               }
@@ -394,7 +398,7 @@ export const layer = (workspace: string) =>
               case "CreateFile": {
                 const target = yield* resolve(request.path)
                 if (yield* fileSystem.exists(target))
-                  return yield* Effect.fail(new Error(`${request.path} already exists`))
+                  return yield* new RuntimeOperationError({ message: `${request.path} already exists` })
                 yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true })
                 yield* fileSystem.writeFileString(target, request.content)
                 return {
@@ -406,9 +410,9 @@ export const layer = (workspace: string) =>
                 const target = yield* resolve(request.path)
                 const content = yield* fileSystem.readFileString(target)
                 const first = content.indexOf(request.oldText)
-                if (first < 0) return yield* Effect.fail(new Error("stale anchor"))
+                if (first < 0) return yield* new RuntimeOperationError({ message: "stale anchor" })
                 if (content.indexOf(request.oldText, first + request.oldText.length) >= 0)
-                  return yield* Effect.fail(new Error("ambiguous anchor"))
+                  return yield* new RuntimeOperationError({ message: "ambiguous anchor" })
                 const next = content.slice(0, first) + request.newText + content.slice(first + request.oldText.length)
                 yield* fileSystem.writeFileString(target, next)
                 return {
@@ -446,7 +450,7 @@ export const layer = (workspace: string) =>
                   objective: request.objective,
                   searchQueries: request.searchQueries,
                 })
-                return bounded(JSON.stringify(results))
+                return bounded(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(results))
               }
               case "ReadWebPage":
                 return bounded(

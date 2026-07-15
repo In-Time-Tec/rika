@@ -8,6 +8,7 @@ import { Runtime as ToolRuntime } from "@rika/tools"
 import { Context, Deferred, Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { Operation, ProductAgent } from "../src/index"
+import { provideLayer } from "./layer"
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -21,7 +22,7 @@ const backend = ExecutionBackend.Service.of({
   start: () => Effect.die("unused"),
   replay: () => Effect.die("unused"),
   cancel: () => Effect.die("unused"),
-  inspect: () => Effect.succeed(undefined),
+  inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: () => Effect.die("unused"),
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.die("unused"),
@@ -53,6 +54,7 @@ const layer = (
     readonly repositoryLayer?: Layer.Layer<ThreadRepository.Service>
     readonly turnRepositoryLayer?: Layer.Layer<TurnRepository.Service>
     readonly resolveExecutionRoute?: () => Effect.Effect<Turn.ExecutionRoutePin>
+    readonly toolRuntimeLayer?: Layer.Layer<ToolRuntime.Service>
   } = {},
 ) =>
   Layer.mergeAll(
@@ -62,7 +64,7 @@ const layer = (
       turnRepositoryLayer: options.turnRepositoryLayer ?? TurnRepository.memoryLayer(),
       backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
       productAgentLayer: Layer.succeed(ProductAgent.Service, agent),
-      toolRuntimeLayer: () => Layer.succeed(ToolRuntime.Service, tool),
+      toolRuntimeLayer: () => options.toolRuntimeLayer ?? Layer.succeed(ToolRuntime.Service, tool),
       defaultWorkspace: "/work",
       makeThreadId: Effect.succeed(Thread.ThreadId.make("thread")),
       makeTurnId: Effect.succeed(Turn.TurnId.make("review-turn")),
@@ -77,7 +79,7 @@ describe("Operation review dispatcher", () => {
       const error = yield* Effect.flip(operation.run(input()))
       expect(error.message).toBe("Review requires the local tool runtime")
     }).pipe(
-      Effect.provide(
+      provideLayer(
         Operation.productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -104,12 +106,37 @@ describe("Operation review dispatcher", () => {
         yield* operation.run(input({ staged: true, paths: ["src"] }))
         yield* operation.run(input({ base: "main", json: true }))
         return yield* TestConsole.logLines
-      }).pipe(Effect.provide(layer(tool)))
+      }).pipe(provideLayer(layer(tool)))
       expect(yield* Ref.get(requests)).toMatchObject([
         { command: "git", args: ["diff", "--no-ext-diff", "--no-color", "--cached", "--", "src"] },
         { command: "git", args: ["diff", "--no-ext-diff", "--no-color", "main...HEAD"] },
       ])
       expect(output).toEqual(["No changes to review.", '{"status":"no-changes","findings":[]}'])
+    }),
+  )
+
+  it.effect("releases the review runtime after each operation", () =>
+    Effect.gen(function* () {
+      const acquisitions = yield* Ref.make(0)
+      const releases = yield* Ref.make(0)
+      const tool = ToolRuntime.Service.of({
+        run: () => Effect.succeed({ text: "", truncated: false, exitCode: 0 }),
+      })
+      const toolRuntimeLayer = Layer.effect(
+        ToolRuntime.Service,
+        Effect.acquireRelease(Ref.update(acquisitions, (count) => count + 1).pipe(Effect.as(tool)), () =>
+          Ref.update(releases, (count) => count + 1),
+        ),
+      )
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run(input())
+        expect(yield* Ref.get(acquisitions)).toBe(1)
+        expect(yield* Ref.get(releases)).toBe(1)
+        yield* operation.run(input())
+        expect(yield* Ref.get(acquisitions)).toBe(2)
+        expect(yield* Ref.get(releases)).toBe(2)
+      }).pipe(provideLayer(layer(tool, undefined, { toolRuntimeLayer })))
     }),
   )
 
@@ -124,7 +151,7 @@ describe("Operation review dispatcher", () => {
         const error = yield* Effect.gen(function* () {
           const operation = yield* Operation.Service
           return yield* Effect.flip(operation.run(input()))
-        }).pipe(Effect.provide(layer(tool)))
+        }).pipe(provideLayer(layer(tool)))
         expect(error.operation).toBe("Review")
       }
     }),
@@ -182,7 +209,7 @@ describe("Operation review dispatcher", () => {
         yield* operation.run(input())
         return yield* TestConsole.logLines
       }).pipe(
-        Effect.provide(
+        provideLayer(
           layer(tool, agent, {
             repositoryLayer: Layer.succeed(ThreadRepository.Service, threads),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -231,7 +258,7 @@ describe("Operation review dispatcher", () => {
       })
       const missingBackend = ExecutionBackend.Service.of({
         ...backend,
-        inspectFanOut: () => Effect.succeed(undefined),
+        inspectFanOut: () => Effect.void.pipe(Effect.as(undefined)),
       })
       const tool = ToolRuntime.Service.of({
         run: () => Effect.succeed({ text: "diff --git a/a b/a", truncated: false, exitCode: 0 }),

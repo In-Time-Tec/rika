@@ -24,20 +24,16 @@ export const readOrCreateToken = Effect.fn("ResidentEndpoint.readOrCreateToken")
   const generated = Encoding.encodeHex(yield* crypto.randomBytes(32))
   const created = yield* Effect.result(fs.writeFileString(tokenPath, `${generated}\n`, { flag: "wx", mode: 0o600 }))
   if (created._tag === "Failure" && !(yield* fs.exists(tokenPath))) {
-    return yield* Effect.fail(
-      new ResidentService.ResidentServiceError({
-        reason: "unsafe-token",
-        message: "Resident credential could not be created",
-      }),
-    )
+    return yield* ResidentService.ResidentServiceError.make({
+      reason: "unsafe-token",
+      message: "Resident credential could not be created",
+    })
   }
   if ((yield* Effect.result(fs.readLink(tokenPath)))._tag === "Success")
-    return yield* Effect.fail(
-      new ResidentService.ResidentServiceError({
-        reason: "unsafe-token",
-        message: "Resident credential is unsafe",
-      }),
-    )
+    return yield* ResidentService.ResidentServiceError.make({
+      reason: "unsafe-token",
+      message: "Resident credential is unsafe",
+    })
   const before = yield* fs.stat(tokenPath)
   const token = (yield* fs.readFileString(tokenPath)).trim()
   const after = yield* fs.stat(tokenPath)
@@ -57,9 +53,10 @@ export const readOrCreateToken = Effect.fn("ResidentEndpoint.readOrCreateToken")
     beforeIno !== afterIno ||
     !/^[a-f0-9]{64}$/.test(token)
   ) {
-    return yield* Effect.fail(
-      new ResidentService.ResidentServiceError({ reason: "unsafe-token", message: "Resident credential is unsafe" }),
-    )
+    return yield* ResidentService.ResidentServiceError.make({
+      reason: "unsafe-token",
+      message: "Resident credential is unsafe",
+    })
   }
   return token
 })

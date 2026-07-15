@@ -4,6 +4,14 @@ import * as ThreadRepository from "../src/thread-repository"
 import * as Thread from "../src/thread-schema"
 import { makeRecordingSql } from "./recording-sql"
 
+const provideLayer =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
+    Effect.gen(function* () {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provide(context))
+    })
+
 const id = (value: string) => Thread.ThreadId.make(value)
 
 const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) => {
@@ -42,7 +50,7 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         expect(search.map((thread) => thread.id)).toEqual([id("thread-a")])
         expect(bounded).toHaveLength(1)
         expect(removed).toBeUndefined()
-      }).pipe(Effect.provide(layer)),
+      }).pipe(provideLayer(layer)),
     )
 
     it.effect("reports duplicate and missing records", () =>
@@ -59,7 +67,7 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         const missing = yield* Effect.result(repository.rename(id("missing"), "No", 2))
         expect(duplicate._tag).toBe("Failure")
         expect(missing._tag).toBe("Failure")
-      }).pipe(Effect.provide(layer)),
+      }).pipe(provideLayer(layer)),
     )
   })
 }
@@ -84,7 +92,7 @@ const sqlTest = (
   ) => Effect.Effect<void, ThreadRepository.RepositoryError, ThreadRepository.Service>,
 ) => {
   const sql = makeRecordingSql()
-  return run(sql).pipe(Effect.provide(ThreadRepository.layer.pipe(Layer.provide(sql.layer))))
+  return run(sql).pipe(provideLayer(ThreadRepository.layer.pipe(Layer.provide(sql.layer))))
 }
 
 describe("sql layer", () => {

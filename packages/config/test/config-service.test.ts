@@ -1,6 +1,18 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Context, Effect, Layer, Redacted } from "effect"
+import { ConfigProvider, Context, Effect, Function, Layer, Redacted, Schema } from "effect"
 import { ConfigContract, ConfigService } from "../src/index"
+
+const provideLayer: {
+  <RIn, E2, ROut>(
+    layer: Layer.Layer<ROut, E2, RIn>,
+  ): <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E | E2, RIn | Exclude<R, ROut>>
+  <A, E, R, RIn, E2, ROut>(
+    effect: Effect.Effect<A, E, R>,
+    layer: Layer.Layer<ROut, E2, RIn>,
+  ): Effect.Effect<A, E | E2, RIn | Exclude<R, ROut>>
+} = Function.dual(2, <A, E, R, RIn, E2, ROut>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<ROut, E2, RIn>) =>
+  Effect.scoped(Effect.flatMap(Layer.build(layer), (context) => Effect.provide(effect, context))),
+)
 
 describe("ConfigService", () => {
   it.effect("decodes an absent environment secret without inventing a credential", () =>
@@ -8,9 +20,10 @@ describe("ConfigService", () => {
       const config = yield* ConfigService.effective()
       expect(config.environment.parallelApiKey).toBeUndefined()
       expect(config.environment.gatewayCredentials).toEqual({})
-      expect(JSON.stringify(config)).not.toContain("PARALLEL_API_KEY")
+      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(config)
+      expect(encoded).not.toContain("PARALLEL_API_KEY")
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.liveEnvironmentLayer().pipe(
           Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} }))),
         ),
@@ -24,9 +37,10 @@ describe("ConfigService", () => {
       const config = yield* ConfigService.effective()
       expect(config.environment.parallelApiKey).toBeDefined()
       expect(Redacted.value(config.environment.parallelApiKey!)).toBe(secret)
-      expect(JSON.stringify(config)).not.toContain(secret)
+      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(config)
+      expect(encoded).not.toContain(secret)
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.liveEnvironmentLayer().pipe(
           Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { PARALLEL_API_KEY: secret } }))),
         ),
@@ -69,7 +83,7 @@ describe("ConfigService", () => {
         { path: "permissions", source: "workspace", message: "workspace value applied" },
       ])
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.memoryLayer({
           global: { logging: { level: "debug" }, permissions: { read: "deny" } },
           workspace: { logging: { level: "debug" }, permissions: { shell: "allow" } },
@@ -83,13 +97,14 @@ describe("ConfigService", () => {
       const config = yield* ConfigService.effective()
       expect(Redacted.value(config.environment.parallelApiKey!)).toBe("secret")
       expect(Redacted.value(config.environment.gatewayCredentials.RIKA_MODEL_API_KEY!)).toBe("model-secret")
-      expect(JSON.stringify(config.diagnostics)).not.toContain("secret")
+      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(config.diagnostics)
+      expect(encoded).not.toContain("secret")
       expect(config.diagnostics.map((diagnostic) => diagnostic.path)).toEqual([
         "parallelApiKey",
         "gatewayCredentials.RIKA_MODEL_API_KEY",
       ])
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.testLayer({
           environment: {
             parallelApiKey: Redacted.make("secret"),
@@ -110,7 +125,7 @@ describe("ConfigService", () => {
       expect(config.settings.notifications.enabled).toBe(false)
       expect(config.settings.mcp.docs).toMatchObject({ transport: "remote" })
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.memoryLayer({
           workspace: {
             models: { local: { ...ConfigContract.defaults.models.luna!, candidates: ["fake"] } },
@@ -137,7 +152,7 @@ describe("ConfigService", () => {
         reasoning: { effort: "low" },
       })
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.memoryLayer({
           global: { models: { luna: { limits: { maxInputTokens: 500_000 } } } },
         }),
@@ -159,7 +174,7 @@ describe("ConfigService", () => {
         },
       })
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ConfigService.memoryLayer({
           global: {
             gateways: {

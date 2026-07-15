@@ -279,17 +279,24 @@ export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()("Inval
   override readonly [Runtime.errorReported] = false
 }
 
+class OperationError extends Schema.TaggedErrorClass<OperationError>()("OperationError", {
+  message: Schema.String,
+}) {}
+
+const operationError = (message: string) => OperationError.make({ message })
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+
 export interface Interface {
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/app/Operation") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/operation/Service") {}
 
 export const unavailableLayer = Layer.succeed(
   Service,
   Service.of({
     run: Effect.fn("Operation.run")(function* (input) {
-      return yield* new OperationUnavailable({
+      return yield* OperationUnavailable.make({
         operation: input._tag,
         message: `${input._tag} is specified but not implemented yet`,
       })
@@ -305,12 +312,12 @@ export interface ProductLayerOptions<ThreadError, TurnError, BackendError> {
     mode: "low" | "medium" | "high" | "ultra",
     tuning?: { readonly reasoningEffort?: string; readonly fastMode?: boolean },
     workspace?: string,
-  ) => Effect.Effect<Turn.ExecutionRoutePin, unknown, ExecutionBackend.Service>
-  readonly productAgentLayer?: Layer.Layer<ProductAgent.Service, unknown, ExecutionBackend.Service>
-  readonly toolRuntimeLayer?: (workspace: string) => Layer.Layer<ToolRuntime.Service, unknown, never>
-  readonly resolvedContextLayer?: Layer.Layer<ResolvedContext.Service, unknown>
+  ) => Effect.Effect<Turn.ExecutionRoutePin, OperationError, ExecutionBackend.Service>
+  readonly productAgentLayer?: Layer.Layer<ProductAgent.Service, OperationError, ExecutionBackend.Service>
+  readonly toolRuntimeLayer?: (workspace: string) => Layer.Layer<ToolRuntime.Service, OperationError, never>
+  readonly resolvedContextLayer?: Layer.Layer<ResolvedContext.Service, OperationError>
   readonly executionExtensions?: {
-    readonly layer: Layer.Layer<ExecutionExtensions.Service, unknown>
+    readonly layer: Layer.Layer<ExecutionExtensions.Service, OperationError>
     readonly mcpFingerprint: Effect.Effect<string>
   }
   readonly defaultWorkspace: string
@@ -318,14 +325,14 @@ export interface ProductLayerOptions<ThreadError, TurnError, BackendError> {
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly configOperations?: {
-    readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, unknown>
+    readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, OperationError>
     readonly options: ConfigOperations.Options
     readonly forWorkspace?: (workspace: string) => Effect.Effect<
       {
-        readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, unknown>
+        readonly layer: Layer.Layer<ConfigOperations.Adapter | ConfigService.Service, OperationError>
         readonly options: ConfigOperations.Options
       },
-      unknown
+      OperationError
     >
   }
   readonly extensionOperations?: {
@@ -336,7 +343,7 @@ export interface ProductLayerOptions<ThreadError, TurnError, BackendError> {
       | import("effect").Path.Path
       | import("effect").Crypto.Crypto
       | import("@rika/extensions").SkillRegistry.SkillFileSystem,
-      unknown
+      OperationError
     >
   }
   readonly interactive?: (
@@ -345,7 +352,7 @@ export interface ProductLayerOptions<ThreadError, TurnError, BackendError> {
   ) => Effect.Effect<void, OperationUnavailable>
 }
 
-export const reconcile = Effect.fn("Operation.reconcile")(function* (
+const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
   extensions?: ExecutionExtensions.Interface,
   prepare?: (
     turn: Turn.Turn,
@@ -356,14 +363,17 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
       readonly promptParts: ReadonlyArray<Turn.PromptPart> | undefined
       readonly extensionPin: Turn.ExecutionExtensionPin | undefined
     },
-    unknown,
+    OperationError,
     TurnRepository.Service | ThreadRepository.Service | ResolvedContext.Service | ExecutionExtensions.Service
   >,
-  watchReviewOwner?: (turn: Turn.Turn, inspection: ExecutionBackend.FanOutInspection) => Effect.Effect<void, unknown>,
+  watchReviewOwner?: (
+    turn: Turn.Turn,
+    inspection: ExecutionBackend.FanOutInspection,
+  ) => Effect.Effect<void, OperationError>,
 ) {
   const turns = yield* TurnRepository.Service
   const backend = yield* ExecutionBackend.Service
-  const active = yield* turns.listNonterminal()
+  const active = yield* turns.listNonterminal
   yield* Effect.forEach(
     active.filter((turn) => turn.status !== "queued"),
     (turn) => {
@@ -387,7 +397,7 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
           Effect.catch((error) =>
             Effect.gen(function* () {
               yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
-              return yield* Effect.fail(error)
+              return yield* error
             }),
           ),
         )
@@ -401,7 +411,7 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
                 return
               }
               if (prepare === undefined && extensions !== undefined && turn.extensionPin === undefined)
-                return yield* Effect.fail(new Error(`Turn ${turn.id} has no durable extension pin`))
+                return yield* operationError(`Turn ${turn.id} has no durable extension pin`)
               if (prepare === undefined && extensions !== undefined && turn.extensionPin !== undefined)
                 yield* extensions.resume(turn.extensionPin)
               const prepared =
@@ -412,7 +422,7 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
                       .pipe(
                         Effect.flatMap((thread) =>
                           thread === undefined
-                            ? Effect.fail(new Error(`Thread ${turn.threadId} does not exist`))
+                            ? operationError(`Thread ${turn.threadId} does not exist`)
                             : prepare(turn, thread.workspace),
                         ),
                       )
@@ -434,7 +444,7 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
         Effect.catch((error) =>
           Effect.gen(function* () {
             yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
-            return yield* Effect.fail(error)
+            return yield* error
           }),
         ),
       )
@@ -497,7 +507,7 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
                   promotedTurn.lastCursor,
                   yield* Clock.currentTimeMillis,
                 )
-                return yield* Effect.fail(error)
+                return yield* error
               }),
             ),
           )
@@ -512,6 +522,38 @@ export const reconcile = Effect.fn("Operation.reconcile")(function* (
         }
       }),
     { discard: true },
+  )
+})
+
+export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
+  extensions?: ExecutionExtensions.Interface,
+  prepare?: (
+    turn: Turn.Turn,
+    workspace: string,
+  ) => Effect.Effect<
+    {
+      readonly prompt: string
+      readonly promptParts: ReadonlyArray<Turn.PromptPart> | undefined
+      readonly extensionPin: Turn.ExecutionExtensionPin | undefined
+    },
+    OperationError,
+    TurnRepository.Service | ThreadRepository.Service | ResolvedContext.Service | ExecutionExtensions.Service
+  >,
+  watchReviewOwner?: (
+    turn: Turn.Turn,
+    inspection: ExecutionBackend.FanOutInspection,
+  ) => Effect.Effect<void, OperationError>,
+): Effect.fn.Return<
+  void,
+  OperationError,
+  | ExecutionBackend.Service
+  | TurnRepository.Service
+  | ThreadRepository.Service
+  | ResolvedContext.Service
+  | ExecutionExtensions.Service
+> {
+  return yield* reconcileInternal(extensions, prepare, watchReviewOwner).pipe(
+    Effect.mapError((error) => operationError(String(error))),
   )
 })
 
@@ -601,16 +643,16 @@ export interface InteractiveSession {
 }
 
 const unavailable = (input: Input, message = `${input._tag} is specified but not implemented yet`) =>
-  new OperationUnavailable({ operation: input._tag, message })
+  OperationUnavailable.make({ operation: input._tag, message })
 
-const writeThread = (thread: Thread.Thread) => Console.log(JSON.stringify(thread))
+const writeThread = (thread: Thread.Thread) => Console.log(encodeJson(thread))
 
 const requireThread = Effect.fn("Operation.requireThread")(function* (
   repository: ThreadRepository.Interface,
   id: string,
 ) {
   const thread = yield* repository.get(Thread.ThreadId.make(id))
-  if (thread === undefined) return yield* Effect.fail(new Error(`Thread ${id} does not exist`))
+  if (thread === undefined) return yield* operationError(`Thread ${id} does not exist`)
   return thread
 })
 
@@ -635,7 +677,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
       const submissionAdmission = yield* Semaphore.make(1)
       const queueDrain = yield* Semaphore.make(1)
       const reviewSettlementAdmission = yield* Semaphore.make(1)
-      const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionBackend.FanOutInspection, unknown>>()
+      const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionBackend.FanOutInspection, OperationError>>()
       const resolvedContextLayer =
         options.resolvedContextLayer ??
         ResolvedContext.testLayer({
@@ -658,7 +700,10 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         options.executionExtensions === undefined
           ? undefined
           : Context.get(dependencyContext, ExecutionExtensions.Service)
-      const executionDependencies = Layer.merge(acquiredDependencies, backendLayer)
+      const executionDependencies = Context.merge(
+        dependencyContext,
+        Context.make(ExecutionBackend.Service, acquiredBackend),
+      )
       const settleReviewOwner = Effect.fn("Operation.settleReviewOwner")(function* (
         turn: Pick<Turn.Turn, "id" | "lastCursor">,
         fanOutId: string,
@@ -671,7 +716,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           inspection = yield* backend.inspectFanOut(fanOutId)
           if (inspection === undefined) {
             yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
-            return yield* Effect.fail(new Error(`Review ${fanOutId} disappeared`))
+            return yield* operationError(`Review ${fanOutId} disappeared`)
           }
           if (inspection.state === "joining") yield* Effect.sleep("50 millis")
         }
@@ -695,6 +740,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             const fiber = yield* Effect.forkIn(
               settleReviewOwner(turn, fanOutId, initial).pipe(
                 Effect.provide(executionDependencies),
+                Effect.mapError((error) => operationError(String(error))),
                 Effect.ensuring(Effect.sync(() => reviewSettlements.delete(fanOutId))),
               ),
               ownerScope,
@@ -758,11 +804,16 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         yield* turns.setExtensionPin(turn.id, activated.pin)
         return { prompt: resolved.prompt, promptParts, extensionPin: activated.pin }
       })
-      const reconcileExecutions = Effect.gen(function* () {
-        yield* reconcile(extensionService, prepareExecution, (turn, inspection) =>
-          startReviewSettlement(turn, inspection.fanOutId, inspection).pipe(Effect.asVoid),
-        )
-      }).pipe(Effect.provide(executionDependencies), Effect.scoped)
+      const reconcileExecutions = reconcile(
+        extensionService,
+        (turn, workspace) =>
+          prepareExecution(turn, workspace).pipe(Effect.mapError((error) => operationError(String(error)))),
+        (turn, inspection) =>
+          startReviewSettlement(turn, inspection.fanOutId, inspection).pipe(
+            Effect.asVoid,
+            Effect.mapError((error) => operationError(String(error))),
+          ),
+      ).pipe(Effect.provide(executionDependencies), Effect.scoped)
       const makeInteractiveSession = Effect.fn("Operation.makeInteractiveSession")(function* (workspace: string) {
         const shellPermission =
           typeof options.shellPermission === "function"
@@ -915,11 +966,11 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             Effect.catch((error) => Effect.sync(() => dispatch({ _tag: "ExecutionFailed", message: String(error) }))),
           )
         })
-        const safe = (
+        const safe = <E>(
           dispatch: (event: InteractiveEvent) => void,
           effect: Effect.Effect<
             void,
-            unknown,
+            E,
             | ThreadRepository.Service
             | TurnRepository.Service
             | ExecutionBackend.Service
@@ -1019,7 +1070,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             }).pipe(
               Effect.provide(executionDependencies),
               Effect.scoped,
-              Effect.catch(() => Effect.succeed(0)),
+              Effect.orElseSucceed(() => 0),
             )
         const promoteThread = Effect.fn("Operation.interactive.promoteThread")(function* (
           thread: Thread.Thread,
@@ -1046,20 +1097,20 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
         ) {
           yield* promoteThread(thread, undefined, dispatch).pipe(
             Effect.catch(() => queueChanged(thread.id, dispatch)),
-            Effect.catch(() => Effect.void),
+            Effect.orElseSucceed(() => undefined),
           )
         })
         const active = Effect.fn("Operation.interactive.active")(function* () {
           const thread = yield* Ref.get(interactiveThread)
-          if (thread === undefined) return yield* Effect.fail(new Error("No thread selected"))
+          if (thread === undefined) return yield* operationError("No thread selected")
           const turns = yield* TurnRepository.Service
           const turn = yield* turns.findActive(thread.id)
-          if (turn === undefined) return yield* Effect.fail(new Error("No active turn"))
+          if (turn === undefined) return yield* operationError("No active turn")
           return turn
         })
         const threadForTurn = Effect.fn("Operation.interactive.threadForTurn")(function* (turn: Turn.Turn) {
           const thread = yield* (yield* ThreadRepository.Service).get(turn.threadId)
-          if (thread === undefined) return yield* Effect.fail(new Error(`Thread ${turn.threadId} does not exist`))
+          if (thread === undefined) return yield* operationError(`Thread ${turn.threadId} does not exist`)
           return thread
         })
         const followTurn = Effect.fn("Operation.interactive.followTurn")(function* (
@@ -1073,7 +1124,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           yield* followOwnership.withPermits(1)(
             Effect.gen(function* () {
               const turn = yield* turns.get(turnId)
-              if (turn === undefined) return yield* Effect.fail(new Error(`Turn ${turnId} does not exist`))
+              if (turn === undefined) return yield* operationError(`Turn ${turnId} does not exist`)
               const thread = yield* threadForTurn(turn)
               const deliveredCursors = new Set<string>()
               const result = yield* follow(turn.id, turn.lastCursor, (event) => {
@@ -1134,7 +1185,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             dispatch({ _tag: "ThreadTitled", threadId: String(thread.id), title })
             dispatch({ _tag: "ThreadsListed", threads: yield* threads.list() })
           })
-          yield* program.pipe(Effect.catch(() => Effect.void))
+          yield* program.pipe(Effect.orElseSucceed(() => undefined))
         })
         const loadThread = Effect.fn("Operation.interactive.loadThread")(function* (
           thread: Thread.Thread,
@@ -1229,12 +1280,17 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               }
               dispatch({ _tag: "ShellCompleted", command, text, incognito })
             })
-            return program.pipe(
-              Effect.provide(toolRuntimeLayer),
-              Effect.provide(executionDependencies),
+            return Effect.gen(function* () {
+              const toolContext = yield* Layer.build(toolRuntimeLayer)
+              yield* program.pipe(
+                Effect.provide(Context.merge(executionDependencies, toolContext)),
+                Effect.catch((error) =>
+                  Effect.sync(() => dispatch({ _tag: "ExecutionFailed", message: String(error) })),
+                ),
+              )
+            }).pipe(
               Effect.scoped,
               Effect.catch((error) => Effect.sync(() => dispatch({ _tag: "ExecutionFailed", message: String(error) }))),
-              Effect.asVoid,
             )
           },
           editQueued: (id, prompt, dispatch) =>
@@ -1264,9 +1320,9 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 const turn = yield* active()
                 const queued = yield* turns.get(Turn.TurnId.make(id))
                 if (queued === undefined || queued.status !== "queued")
-                  return yield* Effect.fail(new Error(`Turn ${id} is not queued`))
-                if (queued.promptParts?.some((part) => part.type === "image"))
-                  return yield* Effect.fail(new Error("Queued turns with images cannot be steered"))
+                  return yield* operationError(`Turn ${id} is not queued`)
+                if (queued.promptParts !== undefined && queued.promptParts.some((part) => part.type === "image"))
+                  return yield* operationError("Queued turns with images cannot be steered")
                 const steeringText =
                   queued.promptParts
                     ?.filter((part) => part.type === "text")
@@ -1307,7 +1363,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   executionRoute,
                   now: yield* Clock.currentTimeMillis,
                 })
-                if (pending.status !== "queued") return yield* Effect.fail(new Error("Pending turn was not queued"))
+                if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
                 yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
                 yield* turns.setStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
                 yield* drainQueued(thread, dispatch)
@@ -1319,7 +1375,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               Effect.gen(function* () {
                 const turns = yield* TurnRepository.Service
                 const backend = yield* ExecutionBackend.Service
-                const turn = yield* active().pipe(Effect.catch(() => Effect.succeed(undefined)))
+                const turn = yield* active().pipe(Effect.orElseSucceed(() => undefined))
                 if (turn === undefined) {
                   dispatch({ _tag: "ExecutionControlled", action: "cancelled" })
                   return
@@ -1373,7 +1429,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 const request = yield* Ref.updateAndGet(selectionRequest, (value) => value + 1)
                 const threads = yield* ThreadRepository.Service
                 const thread = yield* threads.get(Thread.ThreadId.make(id))
-                if (thread === undefined) return yield* Effect.fail(new Error(`Thread ${id} does not exist`))
+                if (thread === undefined) return yield* operationError(`Thread ${id} does not exist`)
                 yield* loadThread(thread, request, dispatch)
               }),
             ),
@@ -1395,16 +1451,17 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                           .replay(turn.id)
                           .pipe(Effect.map((result) => ({ prompt: turn.prompt, events: result.events }))),
                   ),
-                  Effect.catch(() =>
-                    Effect.succeed({ prompt: turn.prompt, events: [] as ReadonlyArray<ExecutionBackend.Event> }),
-                  ),
+                  Effect.orElseSucceed(() => ({
+                    prompt: turn.prompt,
+                    events: [] as ReadonlyArray<ExecutionBackend.Event>,
+                  })),
                 ),
               )
               dispatch({ _tag: "ThreadPreviewLoaded", threadId: id, turns: previewTurns })
             }).pipe(
               Effect.provide(executionDependencies),
               Effect.scoped,
-              Effect.catch(() => Effect.void),
+              Effect.orElseSucceed(() => undefined),
             ),
           reopenThread: (dispatch) =>
             safe(
@@ -1413,7 +1470,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 const request = yield* Ref.updateAndGet(selectionRequest, (value) => value + 1)
                 const threads = yield* ThreadRepository.Service
                 const thread = (yield* threads.list({ limit: 1 }))[0]
-                if (thread === undefined) return yield* Effect.fail(new Error("No threads exist"))
+                if (thread === undefined) return yield* operationError("No threads exist")
                 yield* loadThread(thread, request, dispatch)
               }),
             ),
@@ -1456,7 +1513,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 const backend = yield* ExecutionBackend.Service
                 const turnId = Turn.TurnId.make(id)
                 const thread = yield* Ref.get(interactiveThread)
-                if (thread === undefined) return yield* Effect.fail(new Error("No thread selected"))
+                if (thread === undefined) return yield* operationError("No thread selected")
                 dispatch({
                   _tag: "ExecutionReplayed",
                   threadId: thread.id,
@@ -1509,7 +1566,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                       .pipe(
                         Effect.flatMap((existingThread) =>
                           existingThread === undefined
-                            ? Effect.fail(new Error(`Thread ${input.threadId} does not exist`))
+                            ? operationError(`Thread ${input.threadId} does not exist`)
                             : Effect.succeed(existingThread),
                         ),
                       )
@@ -1562,7 +1619,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                         }),
                       )
                       yield* turns.setStatus(turn.id, "failed", turn.lastCursor, failedAt)
-                      return yield* Effect.fail(error)
+                      return yield* error
                     }),
                   ),
                 )
@@ -1603,7 +1660,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
           }
           if (input._tag === "Review") {
             if (options.toolRuntimeLayer === undefined)
-              return yield* Effect.fail(unavailable(input, "Review requires the local tool runtime"))
+              return yield* unavailable(input, "Review requires the local tool runtime")
             const workspace = input.workspace ?? options.defaultWorkspace
             const program = Effect.gen(function* () {
               const tools = yield* ToolRuntime.Service
@@ -1614,12 +1671,12 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               if (input.paths.length > 0) args.push("--", ...input.paths)
               const diffResult = yield* tools.run({ _tag: "Shell", command: "git", args, waitMillis: 120_000 })
               if (diffResult.exitCode === undefined)
-                return yield* Effect.fail(new Error("Git diff did not finish before the review timeout"))
-              if (diffResult.exitCode !== 0) return yield* Effect.fail(new Error(diffResult.text || "Git diff failed"))
+                return yield* operationError("Git diff did not finish before the review timeout")
+              if (diffResult.exitCode !== 0) return yield* operationError(diffResult.text || "Git diff failed")
               const diff = diffResult.text.trim()
               if (diff.length === 0) {
                 yield* Console.log(
-                  input.json ? JSON.stringify({ status: "no-changes", findings: [] }) : "No changes to review.",
+                  input.json ? encodeJson({ status: "no-changes", findings: [] }) : "No changes to review.",
                 )
                 return
               }
@@ -1678,57 +1735,67 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 error: lane.error,
               }))
               if (settled.state === "failed" || lanes.every((lane) => lane.status !== "completed"))
-                return yield* Effect.fail(
-                  new Error(
-                    lanes
-                      .map((lane) => lane.error)
-                      .filter(Boolean)
-                      .join("; ") || "Review failed",
-                  ),
+                return yield* operationError(
+                  lanes
+                    .map((lane) => lane.error)
+                    .filter((error): error is string => error !== undefined && error.length > 0)
+                    .join("; ") || "Review failed",
                 )
               if (input.json) {
-                yield* Console.log(JSON.stringify({ status: settled.state, lanes }))
+                yield* Console.log(encodeJson({ status: settled.state, lanes }))
                 return
               }
               yield* Console.log(
                 lanes
                   .map(
                     (lane) =>
-                      `## ${lane.id}\n${lane.output === undefined ? `Review lane ${lane.status}${lane.error === undefined ? "" : `: ${lane.error}`}` : typeof lane.output === "string" ? lane.output : JSON.stringify(lane.output)}`,
+                      `## ${lane.id}\n${lane.output === undefined ? `Review lane ${lane.status}${lane.error === undefined ? "" : `: ${lane.error}`}` : typeof lane.output === "string" ? lane.output : encodeJson(lane.output)}`,
                   )
                   .join("\n\n"),
               )
             })
             const agentLayer = options.productAgentLayer ?? ProductAgent.layer
-            yield* program.pipe(
-              Effect.provide(options.toolRuntimeLayer(workspace)),
-              Effect.provide(agentLayer.pipe(Layer.provide(backendLayer))),
-              Effect.provide(backendLayer),
-              Effect.provide(acquiredDependencies),
-              Effect.scoped,
-              Effect.mapError((error) => unavailable(input, error instanceof Error ? error.message : String(error))),
-            )
+            const reviewToolRuntimeLayer = options.toolRuntimeLayer(workspace)
+            yield* Effect.gen(function* () {
+              const reviewContext = yield* Layer.build(
+                Layer.mergeAll(
+                  reviewToolRuntimeLayer,
+                  agentLayer.pipe(Layer.provide(backendLayer)),
+                  backendLayer,
+                  acquiredDependencies,
+                ),
+              ).pipe(Effect.mapError((error) => unavailable(input, String(error))))
+              yield* program.pipe(
+                Effect.provide(reviewContext),
+                Effect.mapError((error) => unavailable(input, error instanceof Error ? error.message : String(error))),
+              )
+            }).pipe(Effect.scoped)
             return
           }
           if (input._tag === "ToolCatalog") {
             if (input.action === "list") {
-              yield* Console.log(JSON.stringify(ToolCatalog.definitions))
+              yield* Console.log(encodeJson(ToolCatalog.definitions))
               return
             }
             const definition = ToolCatalog.get(input.name)
-            if (definition === undefined)
-              return yield* Effect.fail(unavailable(input, `Tool ${input.name} does not exist`))
-            yield* Console.log(JSON.stringify(definition))
+            if (definition === undefined) return yield* unavailable(input, `Tool ${input.name} does not exist`)
+            yield* Console.log(encodeJson(definition))
             return
           }
           if (
             (input._tag === "Skill" || input._tag === "Mcp" || input._tag === "Extension") &&
             options.extensionOperations !== undefined
           ) {
-            yield* ExtensionOperations.run(input).pipe(
-              Effect.provide(options.extensionOperations.layer),
-              Effect.mapError((error) => unavailable(input, error instanceof Error ? error.message : String(error))),
-            )
+            const extensionOperationsLayer = options.extensionOperations.layer
+            yield* Effect.gen(function* () {
+              const extensionContext = yield* Layer.build(extensionOperationsLayer).pipe(
+                Effect.mapError((error) => unavailable(input, String(error))),
+              )
+              yield* ExtensionOperations.run(input).pipe(
+                Effect.provide(extensionContext),
+                Effect.mapError((error) => unavailable(input, error instanceof Error ? error.message : String(error))),
+              )
+            }).pipe(Effect.scoped)
             return
           }
           if (
@@ -1743,8 +1810,11 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 : yield* options.configOperations
                     .forWorkspace(input.clientWorkspace ?? options.defaultWorkspace)
                     .pipe(Effect.mapError((error) => unavailable(input, String(error))))
-            yield* ConfigOperations.run(input, workspaceConfig.options).pipe(
-              Effect.provide(workspaceConfig.layer),
+            yield* Effect.gen(function* () {
+              const configContext = yield* Layer.build(workspaceConfig.layer)
+              yield* ConfigOperations.run(input, workspaceConfig.options).pipe(Effect.provide(configContext))
+            }).pipe(
+              Effect.scoped,
               Effect.mapError((error) => unavailable(input, String(error))),
             )
             return
@@ -1754,23 +1824,20 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
               const backend = yield* ExecutionBackend.Service
               if (input.action === "start") {
                 yield* backend.registerWorkflows()
-                yield* Console.log(
-                  JSON.stringify(yield* backend.startWorkflow(input.name, input.runId, input.revision)),
-                )
+                yield* Console.log(encodeJson(yield* backend.startWorkflow(input.name, input.runId, input.revision)))
                 return
               }
               const inspection = yield* backend.inspectWorkflow(input.runId)
-              if (inspection === undefined)
-                return yield* Effect.fail(new Error(`Workflow run ${input.runId} does not exist`))
-              yield* Console.log(JSON.stringify(inspection))
+              if (inspection === undefined) return yield* operationError(`Workflow run ${input.runId} does not exist`)
+              yield* Console.log(encodeJson(inspection))
             })
             yield* program.pipe(
-              Effect.provide(backendLayer),
+              Effect.provide(Context.make(ExecutionBackend.Service, acquiredBackend)),
               Effect.mapError((error) => unavailable(input, error instanceof Error ? error.message : String(error))),
             )
             return
           }
-          if (input._tag !== "Thread") return yield* Effect.fail(unavailable(input))
+          if (input._tag !== "Thread") return yield* unavailable(input)
           const program = Effect.gen(function* () {
             const repository = yield* ThreadRepository.Service
             const turns = yield* TurnRepository.Service
@@ -1792,7 +1859,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
                   ...(input.limit === undefined ? {} : { limit: input.limit }),
                 })
-                yield* Console.log(JSON.stringify(threads))
+                yield* Console.log(encodeJson(threads))
                 return
               }
               case "search": {
@@ -1809,13 +1876,13 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                     return terms.every((term) => fields.some((field) => field.includes(term)))
                   })
                   .slice(0, Math.min(Math.max(input.limit ?? 50, 1), 100))
-                yield* Console.log(JSON.stringify(matches))
+                yield* Console.log(encodeJson(matches))
                 return
               }
               case "last":
               case "top": {
                 const thread = (yield* repository.list({ limit: 1 }))[0]
-                if (thread === undefined) return yield* Effect.fail(new Error("No threads exist"))
+                if (thread === undefined) return yield* operationError("No threads exist")
                 yield* writeThread(thread)
                 return
               }
@@ -1825,7 +1892,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                   let selected: Thread.Thread | ReadonlyArray<Thread.Thread>
                   if ("last" in input) {
                     const thread = (yield* repository.list({ limit: 1 }))[0]
-                    if (thread === undefined) return yield* Effect.fail(new Error("No threads exist"))
+                    if (thread === undefined) return yield* operationError("No threads exist")
                     selected = thread
                   } else {
                     selected = yield* Effect.forEach(input.threadIds, (id) => requireThread(repository, id))
@@ -1842,8 +1909,8 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                       return { ...thread, turns: history }
                     }),
                   )
-                  yield* Console.log(JSON.stringify(Array.isArray(selected) ? continued : continued[0]))
-                }).pipe(Effect.provide(backendLayer), Effect.scoped)
+                  yield* Console.log(encodeJson(Array.isArray(selected) ? continued : continued[0]))
+                }).pipe(Effect.provide(Context.make(ExecutionBackend.Service, acquiredBackend)), Effect.scoped)
                 return
               }
               case "rename":
@@ -1879,7 +1946,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 const threadTurns = yield* turns.list(thread.id)
                 yield* Console.log(
                   input.format === "json"
-                    ? JSON.stringify({ thread, turns: threadTurns })
+                    ? encodeJson({ thread, turns: threadTurns })
                     : markdownExport(thread, threadTurns),
                 )
                 return
@@ -1899,7 +1966,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                 const statuses = Object.fromEntries(
                   statusNames.map((status) => [status, threadTurns.filter((turn) => turn.status === status).length]),
                 )
-                yield* Console.log(JSON.stringify({ threadId: thread.id, turns: threadTurns.length, statuses }))
+                yield* Console.log(encodeJson({ threadId: thread.id, turns: threadTurns.length, statuses }))
                 return
               }
               case "fork": {
@@ -1910,9 +1977,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
                     ? sourceTurns.length - 1
                     : sourceTurns.findIndex((turn) => turn.id === input.atTurn)
                 if (boundary < 0 && input.atTurn !== undefined)
-                  return yield* Effect.fail(
-                    new Error(`Turn ${input.atTurn} does not exist in thread ${input.threadId}`),
-                  )
+                  return yield* operationError(`Turn ${input.atTurn} does not exist in thread ${input.threadId}`)
                 const fork = yield* repository.create({
                   id: yield* options.makeThreadId,
                   workspace: source.workspace,
@@ -1936,7 +2001,7 @@ export const productLayer = <ThreadError, TurnError, BackendError>(
             }
           })
           yield* program.pipe(
-            Effect.provide(Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)),
+            Effect.provide(dependencyContext),
             Effect.mapError((error) => unavailable(input, String(error))),
           )
         }),

@@ -8,6 +8,7 @@ import { Runtime as ToolRuntime } from "@rika/tools"
 import { Effect, Fiber, Layer, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { Operation } from "../src/index"
+import { provideLayer } from "./layer"
 
 const thread = (id: string, updatedAt: number): Thread.Thread => ({
   id: Thread.ThreadId.make(id),
@@ -31,7 +32,7 @@ const active = (threadId: Thread.ThreadId, id = "active"): Turn.Turn => ({
 })
 
 const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
-  followAfterPermission = false,
+  followAfterPermission: boolean = false,
   toolApprovalWaitIds: ReadonlyArray<string> = [],
 ) {
   const older = thread("older", 1)
@@ -130,7 +131,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   yield* Effect.gen(function* () {
     const operation = yield* Operation.Service
     yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-  }).pipe(Effect.provide(layer))
+  }).pipe(provideLayer(layer))
   const session = (yield* Ref.get(sessions))[0]
   if (session === undefined) return yield* Effect.die("Missing interactive session")
   return { session, repositories, turns, controls, hiddenExecutions, older, latest }
@@ -154,7 +155,7 @@ describe("InteractiveSession controls", () => {
         startWorkflow: () => Effect.die("unused"),
         inspectWorkflow: () => Effect.die("unused"),
         cancelWorkflow: () => Effect.die("unused"),
-        inspect: () => Effect.succeed(undefined),
+        inspect: () => Effect.void.pipe(Effect.as(undefined)),
         start: (input) => Effect.succeed({ turnId: input.turnId, status: "completed" as const, events: [] }),
         replay: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
@@ -189,7 +190,7 @@ describe("InteractiveSession controls", () => {
           ],
           { concurrency: "unbounded" },
         )
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const alpha = sessions.get("/alpha")
       const beta = sessions.get("/beta")
       if (alpha === undefined || beta === undefined) return yield* Effect.die("Missing interactive sessions")
@@ -245,7 +246,7 @@ describe("InteractiveSession controls", () => {
         startWorkflow: () => Effect.die("unused"),
         inspectWorkflow: () => Effect.die("unused"),
         cancelWorkflow: () => Effect.die("unused"),
-        inspect: () => Effect.succeed(undefined),
+        inspect: () => Effect.void.pipe(Effect.as(undefined)),
         start: (input) =>
           Effect.succeed({
             turnId: input.turnId,
@@ -274,7 +275,7 @@ describe("InteractiveSession controls", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("Missing interactive session")
       const events: Array<Operation.InteractiveEvent> = []
@@ -391,7 +392,7 @@ describe("InteractiveSession controls", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const checkingSession = (yield* Ref.get(sessions))[0]
       if (checkingSession === undefined) return yield* Effect.die("Missing interactive session")
       const events: Array<Operation.InteractiveEvent> = []
@@ -569,7 +570,7 @@ describe("InteractiveSession controls", () => {
               inspectWorkflow: () => Effect.die("unused"),
               cancelWorkflow: () => Effect.die("unused"),
               start: () => Effect.die("unused"),
-              inspect: () => Effect.succeed(undefined),
+              inspect: () => Effect.void.pipe(Effect.as(undefined)),
               replay: () => Effect.die("unused"),
               steer: () => Effect.die("unused"),
               cancel: () => Effect.die("unused"),
@@ -595,7 +596,7 @@ describe("InteractiveSession controls", () => {
         yield* Effect.gen(function* () {
           const operation = yield* Operation.Service
           yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false, workspace: "/client-shell" })
-        }).pipe(Effect.provide(layer))
+        }).pipe(provideLayer(layer))
         expect(yield* Ref.get(permissionWorkspaces)).toContain("/client-shell")
         const session = (yield* Ref.get(sessions))[0]
         if (session === undefined) return yield* Effect.die("Missing interactive session")

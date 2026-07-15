@@ -1,12 +1,13 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "bun:test"
-import { Effect, FileSystem } from "effect"
+import { Effect, FileSystem, Layer } from "effect"
 import { SkillRegistry } from "../src"
+import { provideLayer } from "./layer"
 
 const document = (name: string, description: string, body: string) =>
   `---\nname: ${name}\ndescription: ${description}\n---\n${body}`
 
-test("workspace skills override global skills and activation lazily loads contained resources", async () => {
+test("workspace skills override global skills and activation lazily loads contained resources", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -27,26 +28,36 @@ test("workspace skills override global skills and activation lazily loads contai
       const selected = yield* registry.source.get("review")
       const activated = yield* registry.activate("review")
       return { registry, selected, activated }
-    }).pipe(Effect.provide(SkillRegistry.fileSystemLayer)),
+    }).pipe(provideLayer(SkillRegistry.fileSystemLayer)),
   )
-  const first = await Effect.runPromise(program.pipe(Effect.provide(BunServices.layer)))
-  const second = await Effect.runPromise(program.pipe(Effect.provide(BunServices.layer)))
-  expect(first.registry.listings).toEqual(["- build: build things", "- review: workspace"])
-  expect(first.selected?.frontmatter.description).toBe("workspace")
-  expect(first.activated).toEqual({
-    body: "workspace body",
-    resources: [{ path: "references/checklist.md", content: "check" }],
-  })
-  expect(first.registry.digest).toHaveLength(64)
-  expect(first.registry.digest).toBe(second.registry.digest)
+  return Effect.runPromise(
+    Effect.gen(function* () {
+      const first = yield* program
+      const second = yield* program
+      expect(first.registry.listings).toEqual(["- build: build things", "- review: workspace"])
+      expect(first.selected?.frontmatter.description).toBe("workspace")
+      expect(first.activated).toEqual({
+        body: "workspace body",
+        resources: [{ path: "references/checklist.md", content: "check" }],
+      })
+      expect(first.registry.digest).toHaveLength(64)
+      expect(first.registry.digest).toBe(second.registry.digest)
+    }).pipe(provideLayer(BunServices.layer)),
+  )
 })
 
-test("returns a typed error for missing activation", async () => {
-  const result = await Effect.runPromise(
+test("returns a typed error for missing activation", () =>
+  Effect.runPromise(
     Effect.gen(function* () {
       const registry = yield* SkillRegistry.discover({ globalRoot: "/global", workspaceRoot: "/workspace" })
-      return yield* Effect.flip(registry.activate("missing"))
-    }).pipe(Effect.provide(SkillRegistry.fileSystemTestLayer({}, {})), Effect.provide(BunServices.layer)),
-  )
-  expect(result._tag).toBe("@rika/extensions/SkillRegistryError")
-})
+      const result = yield* Effect.flip(registry.activate("missing"))
+      expect(result._tag).toBe("@rika/extensions/SkillRegistryError")
+    }).pipe(
+      provideLayer(
+        Layer.merge(
+          SkillRegistry.fileSystemTestLayer({}, {}).pipe(Layer.provide(BunServices.layer)),
+          BunServices.layer,
+        ),
+      ),
+    ),
+  ))

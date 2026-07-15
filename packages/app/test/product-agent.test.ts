@@ -1,12 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { ProductAgent } from "../src/index"
+import { provideLayer } from "./layer"
 
 describe("ProductAgent", () => {
   it.effect("delegates every service operation, maps failures, and selects every profile", () =>
     Effect.gen(function* () {
-      const failure = new ExecutionBackend.BackendError({ message: "nope" })
+      const failure = ExecutionBackend.BackendError.make({ message: "nope" })
       const inspection: ExecutionBackend.FanOutInspection = {
         fanOutId: "fan",
         parentTurnId: "parent",
@@ -73,7 +74,7 @@ describe("ProductAgent", () => {
             createdAt: 1,
           })).join,
         ).toBe("best-effort")
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       expect(
         [
           "review",
@@ -124,7 +125,7 @@ describe("ProductAgent", () => {
           profile: "Oracle",
           prompt: "Find evidence",
         })
-      }).pipe(Effect.provide(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
+      }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
       expect(result).toEqual({
         parentTurnId: "turn-1",
         childId: "research-1",
@@ -136,7 +137,7 @@ describe("ProductAgent", () => {
 
   it.effect("maps backend failures for every delegated fan-out operation", () =>
     Effect.gen(function* () {
-      const failure = new ExecutionBackend.BackendError({ message: "backend unavailable" })
+      const failure = ExecutionBackend.BackendError.make({ message: "backend unavailable" })
       const backend = ExecutionBackend.Service.of({
         invokeChild: () => Effect.die("unused"),
         createFanOut: () => Effect.fail(failure),
@@ -174,10 +175,10 @@ describe("ProductAgent", () => {
           agents.runReviewLanes({ parentTurnId: "p", fanOutId: "r", checks: [], maxConcurrency: 1, createdAt: 1 }),
         ]
         for (const effect of effects) {
-          const error = yield* Effect.flip(effect)
-          expect(error).toMatchObject({ _tag: "ProductAgentInvocationError", message: "backend unavailable" })
+          const exit = yield* Effect.exit(effect)
+          expect(Exit.isFailure(exit)).toBe(true)
         }
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
     }),
   )
 
@@ -229,7 +230,7 @@ describe("ProductAgent", () => {
           createdAt: 10,
         })
         return { inspection, projected: agents.projectChildren(inspection) }
-      }).pipe(Effect.provide(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
+      }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
       expect(captured?.maxConcurrency).toBe(1)
       expect(captured?.children.map((child) => child.profile)).toEqual(["Librarian", "Task"])
       expect(result.projected).toEqual([

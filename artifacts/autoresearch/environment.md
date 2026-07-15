@@ -2,21 +2,21 @@
 
 Captured: 2026-07-14T18:01:22Z
 
-| Field | Value |
-| --- | --- |
-| Repository revision | `cdb91e54cb2f8b4022684652cecc93bd9a7f64b4` |
-| Branch | `main` |
-| Host | macOS 26.1 arm64 |
-| Bun executable | `1.3.5` |
-| Declared package manager | `bun@1.3.14` |
-| Effect | `4.0.0-beta.93` |
-| Baton core | `0.4.3` |
-| Relay SDK installed variants | `0.2.14`, `0.2.15` |
-| OpenTUI | `0.4.2` |
-| Packaged archive SHA-256 | `ef1c659660e0a212f9d88c58e3b5fc3ab68c012404ce3a074eb8663061dff412` |
-| Installed `rika` version | `0.0.0` |
-| Pilotty | `0.0.11` through `bunx` |
-| agent-tty | `0.5.0` through `bunx` |
+| Field                        | Value                                                              |
+| ---------------------------- | ------------------------------------------------------------------ |
+| Repository revision          | `cdb91e54cb2f8b4022684652cecc93bd9a7f64b4`                         |
+| Branch                       | `main`                                                             |
+| Host                         | macOS 26.1 arm64                                                   |
+| Bun executable               | `1.3.5`                                                            |
+| Declared package manager     | `bun@1.3.14`                                                       |
+| Effect                       | `4.0.0-beta.93`                                                    |
+| Baton core                   | `0.4.3`                                                            |
+| Relay SDK installed variants | `0.2.14`, `0.2.15`                                                 |
+| OpenTUI                      | `0.4.2`                                                            |
+| Packaged archive SHA-256     | `ef1c659660e0a212f9d88c58e3b5fc3ab68c012404ce3a074eb8663061dff412` |
+| Installed `rika` version     | `0.0.0`                                                            |
+| Pilotty                      | `0.0.11` through `bunx`                                            |
+| agent-tty                    | `0.5.0` through `bunx`                                             |
 
 ## Starting dirty paths
 

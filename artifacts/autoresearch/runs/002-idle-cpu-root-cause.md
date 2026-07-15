@@ -20,9 +20,9 @@ Issue: [Rika #117](https://github.com/dallenpyrah/rika/issues/117)
 
 A fresh source TUI and its spawned resident reproduced the packaged failure:
 
-| Process | CPU | RSS | State |
-| --- | ---: | ---: | --- |
-| Client | 38.5% | 172 MB | terminal static after completed Turn |
+| Process  |   CPU |    RSS | State                                |
+| -------- | ----: | -----: | ------------------------------------ |
+| Client   | 38.5% | 172 MB | terminal static after completed Turn |
 | Resident | 40.7% | 240 MB | terminal static after completed Turn |
 
 Ten-second macOS samples are retained at:
@@ -36,9 +36,9 @@ The profiled client and resident both stopped after `Ctrl+C`; no processes from 
 
 The following probes used the same installed Effect and Bun runtime:
 
-| Probe | CPU |
-| --- | ---: |
-| `BunRuntime.runMain(Effect.never)` | 0.0% |
+| Probe                                    |   CPU |
+| ---------------------------------------- | ----: |
+| `BunRuntime.runMain(Effect.never)`       |  0.0% |
 | `Effect.never` with Rika `Logging.layer` | 33.5% |
 
 Evidence:
@@ -64,13 +64,13 @@ sleep(window) -> flush -> forever
 
 The direct `Logger.toFile` probe recorded:
 
-| Batch window | CPU |
-| ---: | ---: |
-| 0 ms | 36.4% |
-| 1 ms | 3.1% |
-| 10 ms | 0.7% |
-| 100 ms | 0.2% |
-| 1,000 ms | 0.0% |
+| Batch window |   CPU |
+| -----------: | ----: |
+|         0 ms | 36.4% |
+|         1 ms |  3.1% |
+|        10 ms |  0.7% |
+|       100 ms |  0.2% |
+|     1,000 ms |  0.0% |
 
 Raw table and samples:
 

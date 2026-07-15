@@ -22,12 +22,12 @@ Evidence: `raw/004-baton-compaction-retry-repro.txt`
 
 ## Result
 
-| Signal | Expected | Actual |
-| --- | --- | --- |
-| Execution | retries transient summary failure, then continues | failed |
+| Signal         | Expected                                                                        | Actual                           |
+| -------------- | ------------------------------------------------------------------------------- | -------------------------------- |
+| Execution      | retries transient summary failure, then continues                               | failed                           |
 | Model requests | `streamText`, failed `generateText`, retried `generateText`, final `streamText` | `streamText`, one `generateText` |
-| Request count | 4 | 2 |
-| Terminal event | completed after recovered compaction | `execution.failed` |
+| Request count  | 4                                                                               | 2                                |
+| Terminal event | completed after recovered compaction                                            | `execution.failed`               |
 
 ## Boundary
 

@@ -2,6 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
 import { MediaView } from "../src"
+import { provide } from "./test-layer"
 
 const bytes = (signature: ReadonlyArray<number>, size = signature.length) => {
   const value = new Uint8Array(size)
@@ -21,9 +22,9 @@ const view = (
       return yield* Effect.gen(function* () {
         const service = yield* MediaView.Service
         return yield* service.view("media")
-      }).pipe(Effect.provide(MediaView.layer(workspace).pipe(Layer.provide(MediaView.analyzerTestLayer(analyze)))))
+      }).pipe(provide(MediaView.layer(workspace).pipe(Layer.provide(MediaView.analyzerTestLayer(analyze)))))
     }),
-  ).pipe(Effect.provide(BunServices.layer))
+  ).pipe(provide(BunServices.layer))
 
 describe("MediaView", () => {
   const formats = [
@@ -72,18 +73,18 @@ describe("MediaView", () => {
       expect(result.text).toHaveLength(40_000)
       expect(result.truncated).toBe(true)
       const error = yield* Effect.flip(
-        view(pdf, () => Effect.fail(new MediaView.MediaAnalysisError({ message: "no route" }))),
+        view(pdf, () => Effect.fail(MediaView.MediaAnalysisError.make({ message: "no route" }))),
       )
       expect(error.message).toBe("no route")
       const unavailable = yield* Effect.gen(function* () {
         const analyzer = yield* MediaView.MediaAnalyzer
         return yield* Effect.flip(analyzer.analyze({ path: "x", mimeType: "x", kind: "pdf", size: 0, bytes: pdf }))
-      }).pipe(Effect.provide(MediaView.analyzerUnavailableLayer))
+      }).pipe(provide(MediaView.analyzerUnavailableLayer))
       expect(unavailable.message).toContain("not configured")
       const fixture = yield* Effect.gen(function* () {
         const service = yield* MediaView.Service
         return yield* service.view("x")
-      }).pipe(Effect.provide(MediaView.testLayer(() => Effect.succeed(result))))
+      }).pipe(provide(MediaView.testLayer(() => Effect.succeed(result))))
       expect(fixture).toEqual(result)
     }),
   )
@@ -96,7 +97,7 @@ describe("MediaView", () => {
         const service = yield* MediaView.Service
         return yield* Effect.flip(service.view("x"))
       }).pipe(
-        Effect.provide(
+        provide(
           MediaView.layer("/workspace").pipe(
             Layer.provide(MediaView.analyzerUnavailableLayer),
             Layer.provide(FileSystem.layerNoop(overrides)),
@@ -133,7 +134,7 @@ describe("MediaView", () => {
           return yield* Effect.all(
             ["missing", "directory", "plain", "../escape", "huge"].map((path) => Effect.flip(service.view(path))),
           )
-        }).pipe(Effect.provide(layer))
+        }).pipe(provide(layer))
         expect(errors.map((error) => error._tag)).toEqual([
           "MediaMissingError",
           "UnsupportedMediaError",
@@ -141,7 +142,7 @@ describe("MediaView", () => {
           "MediaPathError",
           "MediaOversizedError",
         ])
-      }).pipe(Effect.provide(BunServices.layer)),
+      }).pipe(provide(BunServices.layer)),
     ),
   )
 })

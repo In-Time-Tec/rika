@@ -1,5 +1,6 @@
 import { StyledText, fg, type TextChunk } from "@opentui/core"
 import { parsePatchFiles } from "@pierre/diffs"
+import { Function } from "effect"
 import { colors } from "./theme"
 
 const clip = (text: string, width: number): string =>
@@ -16,7 +17,10 @@ type Row =
   | { readonly ellipsis: true }
   | { readonly number: number; readonly marker: " " | "+" | "-"; readonly content: string }
 
-export const renderPierreDiff = (patch: string, width: number): StyledText | undefined => {
+export const renderPierreDiff: {
+  (width: number): (patch: string) => StyledText | undefined
+  (patch: string, width: number): StyledText | undefined
+} = Function.dual(2, (patch: string, width: number): StyledText | undefined => {
   let parsed: ReturnType<typeof parsePatchFiles>
   try {
     parsed = parsePatchFiles(patch)
@@ -78,4 +82,4 @@ export const renderPierreDiff = (patch: string, width: number): StyledText | und
     chunks.push(fg(color)(`${prefix}${clip(row.content, Math.max(1, width - prefix.length))}`))
   })
   return new StyledText(chunks)
-}
+})

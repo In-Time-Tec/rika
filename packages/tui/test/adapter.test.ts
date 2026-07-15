@@ -1,4 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
+import { it } from "@effect/vitest"
+import { Effect } from "effect"
 
 const opentui = vi.hoisted(() => {
   const boxChildren: Array<object> = []
@@ -132,7 +134,7 @@ const opentui = vi.hoisted(() => {
     ScrollBoxRenderable,
     TextRenderable,
     boxChildren,
-    createCliRenderer: vi.fn(async () => renderer),
+    createCliRenderer: vi.fn((): Promise<typeof renderer> => Promise.resolve(renderer)),
     keyHandlers,
     pasteHandlers,
     renderer,
@@ -180,6 +182,12 @@ import { defaultReasoningEffort, initial, ready, type Mode, type Model } from ".
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
+
+const createScoped = (callbacks: Parameters<typeof create>[0]) =>
+  Effect.acquireRelease(
+    Effect.promise(() => create(callbacks)),
+    (created) => Effect.sync(created.releaseTerminal),
+  )
 
 test("renders changed files as an indented path tree", () => {
   const rendered = renderChangedFiles(
@@ -276,388 +284,437 @@ describe("Surface", () => {
     expect(rendered).not.toMatch(/rivet|semantic[- ]search|ast[- ]grep[- ]outline/i)
   })
 
-  test("constructs the render tree and forwards key and resize events", async () => {
-    const callbacks = handlers()
-    const { renderer } = await create(callbacks)
+  it.effect("constructs the render tree and forwards key and resize events", () =>
+    Effect.gen(function* () {
+      const callbacks = handlers()
+      const { surface } = yield* createScoped(callbacks)
 
-    expect(opentui.rootChildren).toHaveLength(6)
-    const surface = new Surface(renderer, callbacks)
-    expect(opentui.rootChildren.slice(-6)).toEqual([
-      surface.main,
-      surface.modeLabel,
-      surface.statusLabel,
-      surface.workspaceLabel,
-      surface.paletteBox,
-      surface.toastBox,
-    ])
-    expect(opentui.boxChildren).toContain(surface.input)
-    expect(opentui.boxChildren).toContain(surface.palette)
-    expect(opentui.boxChildren).toContain(surface.changedFilesText)
-    expect(opentui.boxChildren).toContain(surface.contentColumn)
-    expect(opentui.boxChildren).toContain(surface.inputBox)
-    expect(surface.changedFilesBox).toBeInstanceOf(opentui.ScrollBoxRenderable)
+      expect(opentui.rootChildren).toHaveLength(6)
+      expect(opentui.rootChildren.slice(-6)).toEqual([
+        surface.main,
+        surface.modeLabel,
+        surface.statusLabel,
+        surface.workspaceLabel,
+        surface.paletteBox,
+        surface.toastBox,
+      ])
+      expect(opentui.boxChildren).toContain(surface.input)
+      expect(opentui.boxChildren).toContain(surface.palette)
+      expect(opentui.boxChildren).toContain(surface.changedFilesText)
+      expect(opentui.boxChildren).toContain(surface.contentColumn)
+      expect(opentui.boxChildren).toContain(surface.inputBox)
+      expect(surface.changedFilesBox).toBeInstanceOf(opentui.ScrollBoxRenderable)
 
-    for (const listener of opentui.keyHandlers)
-      listener({ name: "o", ctrl: true, option: true, super: false, shift: true, sequence: "o", eventType: "repeat" })
-    for (const listener of opentui.resizeHandlers) listener(101, 37)
+      for (const listener of opentui.keyHandlers)
+        listener({ name: "o", ctrl: true, option: true, super: false, shift: true, sequence: "o", eventType: "repeat" })
+      for (const listener of opentui.resizeHandlers) listener(101, 37)
 
-    expect(callbacks.key).toHaveBeenLastCalledWith({
-      name: "o",
-      ctrl: true,
-      alt: true,
-      meta: false,
-      shift: true,
-      sequence: "o",
-      eventType: "repeat",
-    })
-    expect(callbacks.resize).toHaveBeenLastCalledWith(101, 37)
-  })
+      expect(callbacks.key).toHaveBeenLastCalledWith({
+        name: "o",
+        ctrl: true,
+        alt: true,
+        meta: false,
+        shift: true,
+        sequence: "o",
+        eventType: "repeat",
+      })
+      expect(callbacks.resize).toHaveBeenLastCalledWith(101, 37)
+    }),
+  )
 
-  test("routes image paste, text paste, and non-empty selections through their dedicated callbacks", async () => {
-    const callbacks = { key: vi.fn(), paste: vi.fn(), pasteImage: vi.fn(), resize: vi.fn() }
-    await create(callbacks)
+  it.effect("routes image paste, text paste, and non-empty selections through their dedicated callbacks", () =>
+    Effect.gen(function* () {
+      const callbacks = { key: vi.fn(), paste: vi.fn(), pasteImage: vi.fn(), resize: vi.fn() }
+      yield* createScoped(callbacks)
 
-    for (const listener of opentui.keyHandlers) {
-      listener({ name: "v", ctrl: true, option: false, super: false, shift: false, sequence: "v", eventType: "press" })
-      listener({ name: "x", ctrl: false, option: false, super: false, shift: false, sequence: "x", eventType: "press" })
-    }
-    for (const listener of opentui.pasteHandlers) {
-      listener({ bytes: new TextEncoder().encode("pasted text") })
-      listener({ bytes: Uint8Array.from([1, 2, 3]), metadata: { kind: "binary", mimeType: "image/png" } })
-      listener({ bytes: new Uint8Array() })
-    }
-    for (const listener of opentui.selectionHandlers) {
-      listener({ getSelectedText: () => "selected text\n" })
-      listener({ getSelectedText: () => "  " })
-    }
+      for (const listener of opentui.keyHandlers) {
+        listener({
+          name: "v",
+          ctrl: true,
+          option: false,
+          super: false,
+          shift: false,
+          sequence: "v",
+          eventType: "press",
+        })
+        listener({
+          name: "x",
+          ctrl: false,
+          option: false,
+          super: false,
+          shift: false,
+          sequence: "x",
+          eventType: "press",
+        })
+      }
+      for (const listener of opentui.pasteHandlers) {
+        listener({ bytes: new TextEncoder().encode("pasted text") })
+        listener({ bytes: Uint8Array.from([1, 2, 3]), metadata: { kind: "binary", mimeType: "image/png" } })
+        listener({ bytes: new Uint8Array() })
+      }
+      for (const listener of opentui.selectionHandlers) {
+        listener({ getSelectedText: () => "selected text\n" })
+        listener({ getSelectedText: () => "  " })
+      }
 
-    expect(callbacks.pasteImage).toHaveBeenCalledTimes(2)
-    expect(callbacks.pasteImage).toHaveBeenLastCalledWith({
-      bytes: Uint8Array.from([1, 2, 3]),
-      mediaType: "image/png",
-    })
-    expect(callbacks.key).toHaveBeenCalledOnce()
-    expect(callbacks.paste).toHaveBeenCalledOnce()
-    expect(callbacks.paste).toHaveBeenCalledWith("pasted text")
-    expect(opentui.renderer.copyToClipboardOSC52).toHaveBeenCalledWith("selected text")
-  })
+      expect(callbacks.pasteImage).toHaveBeenCalledTimes(2)
+      expect(callbacks.pasteImage).toHaveBeenLastCalledWith({
+        bytes: Uint8Array.from([1, 2, 3]),
+        mediaType: "image/png",
+      })
+      expect(callbacks.key).toHaveBeenCalledOnce()
+      expect(callbacks.paste).toHaveBeenCalledOnce()
+      expect(callbacks.paste).toHaveBeenCalledWith("pasted text")
+      expect(opentui.renderer.copyToClipboardOSC52).toHaveBeenCalledWith("selected text")
+    }),
+  )
 
-  test("never decodes binary paste as text without an image handler", async () => {
-    const callbacks = { key: vi.fn(), paste: vi.fn(), resize: vi.fn() }
-    await create(callbacks)
+  it.effect("never decodes binary paste as text without an image handler", () =>
+    Effect.gen(function* () {
+      const callbacks = { key: vi.fn(), paste: vi.fn(), resize: vi.fn() }
+      yield* createScoped(callbacks)
 
-    for (const listener of opentui.pasteHandlers)
-      listener({ bytes: Uint8Array.from([0xff, 0xfe]), metadata: { kind: "binary" } })
+      for (const listener of opentui.pasteHandlers)
+        listener({ bytes: Uint8Array.from([0xff, 0xfe]), metadata: { kind: "binary" } })
 
-    expect(callbacks.paste).not.toHaveBeenCalled()
-  })
+      expect(callbacks.paste).not.toHaveBeenCalled()
+    }),
+  )
 
-  test("opens a clicked changed file through the host callback", async () => {
-    const callbacks = { ...handlers(), openPath: vi.fn() }
-    const { surface } = await create(callbacks)
-    surface.update(
-      model({
-        changedFilesOpen: true,
-        changedFiles: ready([{ path: "apps/rika/src/main.ts", status: "M", added: 2, removed: 1 }]),
-      }),
-    )
-    const text = surface.changedFilesText as unknown as {
-      screenY: number
-      onMouseDown: (event: { button: number; y: number; stopPropagation: () => void }) => void
-    }
-    text.screenY = 0
-    text.onMouseDown({ button: 0, y: 3, stopPropagation: vi.fn() })
-
-    expect(callbacks.openPath).toHaveBeenCalledWith({ path: "apps/rika/src/main.ts" })
-  })
-
-  test("expands an existing collapsed attachment when the same text is pasted twice quickly", async () => {
-    const callbacks = { ...handlers(), paste: vi.fn(), expandPaste: vi.fn() }
-    const { surface } = await create(callbacks)
-    const token = String.fromCharCode(0xe000)
-    surface.update(
-      model({
-        input: token,
-        cursor: 1,
-        pastedText: [{ type: "text", token, value: "line one\nline two", label: "[Pasted text #1 +2 lines]" }],
-      }),
-    )
-
-    for (const listener of opentui.pasteHandlers) {
-      listener({ bytes: new TextEncoder().encode("line one\nline two") })
-      listener({ bytes: new TextEncoder().encode("line one\nline two") })
-    }
-
-    expect(callbacks.paste).toHaveBeenCalledOnce()
-    expect(callbacks.expandPaste).toHaveBeenCalledWith(token)
-  })
-
-  test("resizes the composer by dragging its top border", async () => {
-    const callbacks = { ...handlers(), composerResize: vi.fn() }
-    const { surface } = await create(callbacks)
-    surface.update(model())
-    const inputBox = surface.inputBox as unknown as {
-      y: number
-      height: number
-      onMouseDown: (event: object) => void
-      onMouseOver: (event: object) => void
-      onMouseMove: (event: object) => void
-      onMouseOut: () => void
-    }
-    const root = opentui.renderer.root as unknown as {
-      onMouseDrag: (event: object) => void
-      onMouseUp: (event: object) => void
-    }
-    inputBox.y = 19
-    const event = (y: number) => ({ button: 0, y, preventDefault: vi.fn(), stopPropagation: vi.fn() })
-
-    inputBox.onMouseDown(event(19))
-    root.onMouseDrag(event(15))
-    expect(callbacks.composerResize).toHaveBeenLastCalledWith(9)
-    root.onMouseUp(event(15))
-    root.onMouseDrag(event(12))
-    expect(callbacks.composerResize).toHaveBeenCalledOnce()
-
-    opentui.renderer.realStdoutWrite.mockClear()
-    inputBox.onMouseOver(event(19))
-    expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;ns-resize\u001b\\")
-    inputBox.onMouseMove(event(20))
-    expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;default\u001b\\")
-    inputBox.onMouseMove(event(19))
-    inputBox.onMouseOut()
-    expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;default\u001b\\")
-
-    surface.update(model({ shortcutsOpen: true }))
-    inputBox.onMouseDown(event(7))
-    root.onMouseDrag(event(3))
-    expect(callbacks.composerResize).toHaveBeenCalledOnce()
-  })
-
-  test("renders welcome, entries, modes, activity, cursor, and palette", async () => {
-    const callbacks = handlers()
-    const { surface } = await create(callbacks)
-
-    const inputText = () =>
-      (surface.input.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
-
-    const modeLabelText = () =>
-      (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
-
-    surface.update(model({ input: "abcd", cursor: 2 }))
-    expect(surface.transcriptContent).toBeInstanceOf(Object)
-    expect(inputText()).toBe("abcd")
-    expect(surface.inputBox.title).toBe("")
-    expect(modeLabelText()).toBe(" medium ")
-    expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.defaultForeground())
-    expect(surface.inputBox.bottomTitle).toBe("")
-    expect(surface.workspaceLabel.content).toEqual(
-      expect.objectContaining({ chunks: [expect.objectContaining({ text: " /workspace " })] }),
-    )
-    expect(surface.palette.visible).toBe(false)
-
-    surface.update(model({ width: 40, input: "one\ntwo\nthree", cursor: 13 }))
-    expect(surface.inputBox.height).toBe(5)
-    expect(inputText()).toBe("one\ntwo\nthree ")
-    expect(surface.inputBox.bottomTitle).toBe("")
-
-    surface.update(model({ input: "one\ntwo\nthree\nfour", cursor: 18 }))
-    expect(surface.inputBox.height).toBe(6)
-    expect(inputText()).toBe("one\ntwo\nthree\nfour ")
-
-    surface.update(
-      model({
-        input: `a${String.fromCharCode(0xe000)}b`,
-        cursor: 2,
-        pastedText: [
-          {
-            type: "text",
-            token: String.fromCharCode(0xe000),
-            value: "many\nlines",
-            label: "[Pasted text #1 +2 lines]",
-          },
-        ],
-      }),
-    )
-    expect(inputText()).toBe("a[Pasted text #1 +2 lines]b")
-
-    const modeColors: ReadonlyArray<readonly [Mode, string]> = [
-      ["low", "#d2a25c"],
-      ["medium", "#58a6ff"],
-      ["high", "#3fb950"],
-      ["ultra", "#ae77ff"],
-    ]
-    for (const [mode] of modeColors) {
-      surface.update(model({ mode, busy: true, reasoningEffort: defaultReasoningEffort(mode) }))
-      expect(surface.inputBox.title).toBe("")
-      expect(modeLabelText()).toBe(` $···· ─ ${mode} `)
-      expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.defaultForeground())
-      expect(surface.statusLabel.content).toEqual(
-        expect.objectContaining({
-          chunks: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining(" Waiting ") })]),
+  it.effect("opens a clicked changed file through the host callback", () =>
+    Effect.gen(function* () {
+      const callbacks = { ...handlers(), openPath: vi.fn() }
+      const { surface } = yield* createScoped(callbacks)
+      surface.update(
+        model({
+          changedFilesOpen: true,
+          changedFiles: ready([{ path: "apps/rika/src/main.ts", status: "M", added: 2, removed: 1 }]),
         }),
       )
-    }
-    surface.update(model({ mode: "medium", busy: false, costUsd: 0.0074 }))
-    expect(modeLabelText()).toBe(" $0.007 ─ medium ")
-    surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449 }))
-    expect(modeLabelText()).toBe(" $5.44 ─ medium ")
-    surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
-    expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
+      const text = surface.changedFilesText as unknown as {
+        screenY: number
+        onMouseDown: (event: { button: number; y: number; stopPropagation: () => void }) => void
+      }
+      text.screenY = 0
+      text.onMouseDown({ button: 0, y: 3, stopPropagation: vi.fn() })
 
-    surface.update(
-      model({
-        entries: [
-          { role: "user", text: "question" },
-          { role: "assistant", text: "answer" },
-          { role: "notice", text: "problem" },
-        ],
-        paletteOpen: true,
-      }),
-    )
-    expect(surface.transcriptContent).toBeInstanceOf(Object)
-    expect(
-      renderTranscriptStyled(
+      expect(callbacks.openPath).toHaveBeenCalledWith({ path: "apps/rika/src/main.ts" })
+    }),
+  )
+
+  it.effect("expands an existing collapsed attachment when the same text is pasted twice quickly", () =>
+    Effect.gen(function* () {
+      const callbacks = { ...handlers(), paste: vi.fn(), expandPaste: vi.fn() }
+      const { surface } = yield* createScoped(callbacks)
+      const token = String.fromCharCode(0xe000)
+      surface.update(
+        model({
+          input: token,
+          cursor: 1,
+          pastedText: [{ type: "text", token, value: "line one\nline two", label: "[Pasted text #1 +2 lines]" }],
+        }),
+      )
+
+      for (const listener of opentui.pasteHandlers) {
+        listener({ bytes: new TextEncoder().encode("line one\nline two") })
+        listener({ bytes: new TextEncoder().encode("line one\nline two") })
+      }
+
+      expect(callbacks.paste).toHaveBeenCalledOnce()
+      expect(callbacks.expandPaste).toHaveBeenCalledWith(token)
+    }),
+  )
+
+  it.effect("resizes the composer by dragging its top border", () =>
+    Effect.gen(function* () {
+      const callbacks = { ...handlers(), composerResize: vi.fn() }
+      const { surface } = yield* createScoped(callbacks)
+      surface.update(model())
+      const inputBox = surface.inputBox as unknown as {
+        y: number
+        height: number
+        onMouseDown: (event: object) => void
+        onMouseOver: (event: object) => void
+        onMouseMove: (event: object) => void
+        onMouseOut: () => void
+      }
+      const root = opentui.renderer.root as unknown as {
+        onMouseDrag: (event: object) => void
+        onMouseUp: (event: object) => void
+      }
+      inputBox.y = 19
+      const event = (y: number) => ({ button: 0, y, preventDefault: vi.fn(), stopPropagation: vi.fn() })
+
+      inputBox.onMouseDown(event(19))
+      root.onMouseDrag(event(15))
+      expect(callbacks.composerResize).toHaveBeenLastCalledWith(9)
+      root.onMouseUp(event(15))
+      root.onMouseDrag(event(12))
+      expect(callbacks.composerResize).toHaveBeenCalledOnce()
+
+      opentui.renderer.realStdoutWrite.mockClear()
+      inputBox.onMouseOver(event(19))
+      expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;ns-resize\u001b\\")
+      inputBox.onMouseMove(event(20))
+      expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;default\u001b\\")
+      inputBox.onMouseMove(event(19))
+      inputBox.onMouseOut()
+      expect(opentui.renderer.realStdoutWrite).toHaveBeenLastCalledWith("\u001b]22;default\u001b\\")
+
+      surface.update(model({ shortcutsOpen: true }))
+      inputBox.onMouseDown(event(7))
+      root.onMouseDrag(event(3))
+      expect(callbacks.composerResize).toHaveBeenCalledOnce()
+    }),
+  )
+
+  it.effect("renders welcome, entries, modes, activity, cursor, and palette", () =>
+    Effect.gen(function* () {
+      const callbacks = handlers()
+      const { surface } = yield* createScoped(callbacks)
+
+      const inputText = () =>
+        (surface.input.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
+
+      const modeLabelText = () =>
+        (surface.modeLabel.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
+          .map(({ text }) => text)
+          .join("")
+
+      surface.update(model({ input: "abcd", cursor: 2 }))
+      expect(surface.transcriptContent).toBeInstanceOf(Object)
+      expect(inputText()).toBe("abcd")
+      expect(surface.inputBox.title).toBe("")
+      expect(modeLabelText()).toBe(" medium ")
+      expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.defaultForeground())
+      expect(surface.inputBox.bottomTitle).toBe("")
+      expect(surface.workspaceLabel.content).toEqual(
+        expect.objectContaining({ chunks: [expect.objectContaining({ text: " /workspace " })] }),
+      )
+      expect(surface.palette.visible).toBe(false)
+
+      surface.update(model({ width: 40, input: "one\ntwo\nthree", cursor: 13 }))
+      expect(surface.inputBox.height).toBe(5)
+      expect(inputText()).toBe("one\ntwo\nthree ")
+      expect(surface.inputBox.bottomTitle).toBe("")
+
+      surface.update(model({ input: "one\ntwo\nthree\nfour", cursor: 18 }))
+      expect(surface.inputBox.height).toBe(6)
+      expect(inputText()).toBe("one\ntwo\nthree\nfour ")
+
+      surface.update(
+        model({
+          input: `a${String.fromCharCode(0xe000)}b`,
+          cursor: 2,
+          pastedText: [
+            {
+              type: "text",
+              token: String.fromCharCode(0xe000),
+              value: "many\nlines",
+              label: "[Pasted text #1 +2 lines]",
+            },
+          ],
+        }),
+      )
+      expect(inputText()).toBe("a[Pasted text #1 +2 lines]b")
+
+      const modeColors: ReadonlyArray<readonly [Mode, string]> = [
+        ["low", "#d2a25c"],
+        ["medium", "#58a6ff"],
+        ["high", "#3fb950"],
+        ["ultra", "#ae77ff"],
+      ]
+      for (const [mode] of modeColors) {
+        surface.update(model({ mode, busy: true, reasoningEffort: defaultReasoningEffort(mode) }))
+        expect(surface.inputBox.title).toBe("")
+        expect(modeLabelText()).toBe(` $···· ─ ${mode} `)
+        expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.defaultForeground())
+        expect(surface.statusLabel.content).toEqual(
+          expect.objectContaining({
+            chunks: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining(" Waiting ") })]),
+          }),
+        )
+      }
+      surface.update(model({ mode: "medium", busy: false, costUsd: 0.0074 }))
+      expect(modeLabelText()).toBe(" $0.007 ─ medium ")
+      surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449 }))
+      expect(modeLabelText()).toBe(" $5.44 ─ medium ")
+      surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
+      expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
+
+      surface.update(
         model({
           entries: [
             { role: "user", text: "question" },
             { role: "assistant", text: "answer" },
             { role: "notice", text: "problem" },
           ],
+          paletteOpen: true,
         }),
       )
-        .chunks.map(({ text }) => text)
+      expect(surface.transcriptContent).toBeInstanceOf(Object)
+      expect(
+        renderTranscriptStyled(
+          model({
+            entries: [
+              { role: "user", text: "question" },
+              { role: "assistant", text: "answer" },
+              { role: "notice", text: "problem" },
+            ],
+          }),
+        )
+          .chunks.map(({ text }) => text)
+          .join("")
+          .replace(/^\n+/, ""),
+      ).toBe("┃ question\n\nanswer\n\n! problem")
+      expect(surface.palette.visible).toBe(true)
+      expect(surface.paletteBox.visible).toBe(true)
+      expect(surface.paletteBox.title).toBe(" Command Palette ")
+      const paletteText = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
+        .map(({ text }) => text)
         .join("")
-        .replace(/^\n+/, ""),
-    ).toBe("┃ question\n\nanswer\n\n! problem")
-    expect(surface.palette.visible).toBe(true)
-    expect(surface.paletteBox.visible).toBe(true)
-    expect(surface.paletteBox.title).toBe(" Command Palette ")
-    const paletteText = (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks
-      .map(({ text }) => text)
-      .join("")
-    expect(paletteText).toContain("thread")
-    expect(paletteText).toContain("run prompt")
-    expect(opentui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(7)
-  })
-
-  test("removes its listeners on destroy", async () => {
-    const callbacks = handlers()
-    const { surface } = await create(callbacks)
-    const keyCount = opentui.keyHandlers.size
-    const pasteCount = opentui.pasteHandlers.size
-    const resizeCount = opentui.resizeHandlers.size
-    const selectionCount = opentui.selectionHandlers.size
-
-    surface.destroy()
-
-    expect(opentui.keyHandlers.size).toBe(keyCount - 1)
-    expect(opentui.pasteHandlers.size).toBe(pasteCount - 1)
-    expect(opentui.resizeHandlers.size).toBe(resizeCount - 1)
-    expect(opentui.selectionHandlers.size).toBe(selectionCount - 1)
-  })
-
-  test("renders mode picker, filtered palette, sidebar visibility, and notice transitions", async () => {
-    const { surface } = await create(handlers())
-    const paletteText = () =>
-      (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
-    surface.update(model({ modePicker: { open: true, selected: 2 } }))
-    expect(paletteText()).toContain("high")
-    expect(paletteText()).toContain("Deep reasoning for hard tasks")
-    expect(surface.paletteBox.bottomTitle).toBe(" ←→ turn · esc")
-    surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
-    expect(paletteText()).toContain("quit")
-    surface.update(model({ threads: [{ id: "a", title: "A", active: true, unread: false }], sidebarOpen: false }))
-    expect(surface.sidebar.visible).toBe(false)
-    surface.update(model({ entries: [{ role: "assistant", text: "ok" }] }))
-    expect(surface.transcriptContent).toBeInstanceOf(Object)
-  })
-})
-
-test("create configures the CLI renderer", async () => {
-  const callbacks = handlers()
-  const result = await create(callbacks)
-
-  expect(opentui.createCliRenderer).toHaveBeenLastCalledWith({
-    screenMode: "alternate-screen",
-    exitOnCtrlC: false,
-    useMouse: true,
-    enableMouseMovement: true,
-  })
-  expect(result.renderer).toBe(opentui.renderer)
-  expect(result.surface).toBeInstanceOf(Surface)
-})
-
-test("releases renderer terminal modes once when initialization fails after acquisition", async () => {
-  opentui.renderer.destroy.mockClear()
-
-  await expect(
-    create({
-      key: vi.fn(),
-      resize: () => {
-        throw new Error("resize failed")
-      },
+      expect(paletteText).toContain("thread")
+      expect(paletteText).toContain("run prompt")
+      expect(opentui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(7)
     }),
-  ).rejects.toThrow("resize failed")
+  )
 
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  it.effect("removes its listeners on destroy", () =>
+    Effect.gen(function* () {
+      const callbacks = handlers()
+      const { surface } = yield* createScoped(callbacks)
+      const keyCount = opentui.keyHandlers.size
+      const pasteCount = opentui.pasteHandlers.size
+      const resizeCount = opentui.resizeHandlers.size
+      const selectionCount = opentui.selectionHandlers.size
+
+      surface.destroy()
+
+      expect(opentui.keyHandlers.size).toBe(keyCount - 1)
+      expect(opentui.pasteHandlers.size).toBe(pasteCount - 1)
+      expect(opentui.resizeHandlers.size).toBe(resizeCount - 1)
+      expect(opentui.selectionHandlers.size).toBe(selectionCount - 1)
+    }),
+  )
+
+  it.effect("renders mode picker, filtered palette, sidebar visibility, and notice transitions", () =>
+    Effect.gen(function* () {
+      const { surface } = yield* createScoped(handlers())
+      const paletteText = () =>
+        (surface.palette.content as { chunks: ReadonlyArray<{ text: string }> }).chunks.map(({ text }) => text).join("")
+      surface.update(model({ modePicker: { open: true, selected: 2 } }))
+      expect(paletteText()).toContain("high")
+      expect(paletteText()).toContain("Deep reasoning for hard tasks")
+      expect(surface.paletteBox.bottomTitle).toBe(" ←→ turn · esc")
+      surface.update(model({ palette: { open: true, query: "quit", selected: 0 } }))
+      expect(paletteText()).toContain("quit")
+      surface.update(model({ threads: [{ id: "a", title: "A", active: true, unread: false }], sidebarOpen: false }))
+      expect(surface.sidebar.visible).toBe(false)
+      surface.update(model({ entries: [{ role: "assistant", text: "ok" }] }))
+      expect(surface.transcriptContent).toBeInstanceOf(Object)
+    }),
+  )
 })
 
-test("releases terminal modes once before other cleanup and prevents editor resume while closing", async () => {
-  opentui.renderer.destroy.mockClear()
-  opentui.renderer.suspend.mockClear()
-  opentui.renderer.resume.mockClear()
-  const created = await create(handlers())
-  const events: Array<string> = []
-  opentui.renderer.destroy.mockImplementation(() => events.push("terminal-released"))
+it.effect("create configures the CLI renderer", () =>
+  Effect.gen(function* () {
+    const callbacks = handlers()
+    const result = yield* createScoped(callbacks)
 
-  created.suspendTerminal()
-  created.releaseTerminal()
-  events.push("slow-client-cleanup")
-  created.resumeTerminal()
-  created.releaseTerminal()
+    expect(opentui.createCliRenderer).toHaveBeenLastCalledWith({
+      screenMode: "alternate-screen",
+      exitOnCtrlC: false,
+      useMouse: true,
+      enableMouseMovement: true,
+    })
+    expect("renderer" in result).toBe(false)
+    expect(result.surface).toBeInstanceOf(Surface)
+  }),
+)
 
-  expect(events).toEqual(["terminal-released", "slow-client-cleanup"])
-  expect(opentui.renderer.suspend).toHaveBeenCalledTimes(1)
-  expect(opentui.renderer.resume).not.toHaveBeenCalled()
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-})
+it.effect("releases renderer terminal modes once when initialization fails after acquisition", () =>
+  Effect.gen(function* () {
+    opentui.renderer.destroy.mockClear()
 
-test("releases terminal modes when renderer suspension fails", async () => {
-  opentui.renderer.destroy.mockReset()
-  opentui.renderer.suspend.mockImplementationOnce(() => {
-    throw new Error("suspend failed")
-  })
-  const created = await create(handlers())
+    yield* Effect.promise(() =>
+      expect(
+        create({
+          key: vi.fn(),
+          resize: () => {
+            throw new Error("resize failed")
+          },
+        }),
+      ).rejects.toThrow("resize failed"),
+    )
 
-  expect(() => created.suspendTerminal()).toThrow("suspend failed")
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  expect(() => created.releaseTerminal()).not.toThrow()
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-})
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  }),
+)
 
-test("releases terminal modes when renderer resume fails", async () => {
-  opentui.renderer.destroy.mockReset()
-  opentui.renderer.resume.mockImplementationOnce(() => {
-    throw new Error("resume failed")
-  })
-  const created = await create(handlers())
+it.effect("releases terminal modes once before other cleanup and prevents editor resume while closing", () =>
+  Effect.gen(function* () {
+    opentui.renderer.destroy.mockClear()
+    opentui.renderer.suspend.mockClear()
+    opentui.renderer.resume.mockClear()
+    const created = yield* createScoped(handlers())
+    const events: Array<string> = []
+    opentui.renderer.destroy.mockImplementation(() => events.push("terminal-released"))
 
-  created.suspendTerminal()
-  expect(() => created.resumeTerminal()).toThrow("resume failed")
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  expect(() => created.releaseTerminal()).not.toThrow()
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-})
+    created.suspendTerminal()
+    created.releaseTerminal()
+    events.push("slow-client-cleanup")
+    created.resumeTerminal()
+    created.releaseTerminal()
 
-test("destroys the renderer when surface cleanup fails", async () => {
-  opentui.renderer.destroy.mockClear()
-  const created = await create(handlers())
-  created.surface.destroy = () => {
-    throw new Error("surface cleanup failed")
-  }
+    expect(events).toEqual(["terminal-released", "slow-client-cleanup"])
+    expect(opentui.renderer.suspend).toHaveBeenCalledTimes(1)
+    expect(opentui.renderer.resume).not.toHaveBeenCalled()
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  }),
+)
 
-  expect(() => created.releaseTerminal()).not.toThrow()
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-  expect(() => created.releaseTerminal()).not.toThrow()
-  expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
-})
+it.effect("releases terminal modes when renderer suspension fails", () =>
+  Effect.gen(function* () {
+    opentui.renderer.destroy.mockReset()
+    opentui.renderer.suspend.mockImplementationOnce(() => {
+      throw new Error("suspend failed")
+    })
+    const created = yield* createScoped(handlers())
+
+    expect(() => created.suspendTerminal()).toThrow("suspend failed")
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+    expect(() => created.releaseTerminal()).not.toThrow()
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  }),
+)
+
+it.effect("releases terminal modes when renderer resume fails", () =>
+  Effect.gen(function* () {
+    opentui.renderer.destroy.mockReset()
+    opentui.renderer.resume.mockImplementationOnce(() => {
+      throw new Error("resume failed")
+    })
+    const created = yield* createScoped(handlers())
+
+    created.suspendTerminal()
+    expect(() => created.resumeTerminal()).toThrow("resume failed")
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+    expect(() => created.releaseTerminal()).not.toThrow()
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  }),
+)
+
+it.effect("destroys the renderer when surface cleanup fails", () =>
+  Effect.gen(function* () {
+    opentui.renderer.destroy.mockClear()
+    const created = yield* createScoped(handlers())
+    created.surface.destroy = () => {
+      throw new Error("surface cleanup failed")
+    }
+
+    expect(() => created.releaseTerminal()).not.toThrow()
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+    expect(() => created.releaseTerminal()).not.toThrow()
+    expect(opentui.renderer.destroy).toHaveBeenCalledTimes(1)
+  }),
+)

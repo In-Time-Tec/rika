@@ -3,6 +3,7 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Compaction, ModelRegistry } from "@batonfx/core"
+import type { TestModel as TestModelTypes } from "@batonfx/test"
 import { anthropic, anthropicClientLayerConfig } from "@batonfx/providers/anthropic"
 import { openAi, openAiClientLayerConfig } from "@batonfx/providers/openai"
 import { FileFinder } from "@ff-labs/fff-node"
@@ -33,12 +34,15 @@ import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   Cause,
+  Clock,
   Config,
   Console,
   Context,
+  Crypto,
   Effect,
   Fiber,
   FileSystem,
+  Function,
   Layer,
   Path,
   Redacted,
@@ -46,15 +50,48 @@ import {
   References,
   Schedule,
   Schema,
+  Scope,
 } from "effect"
 import { Command } from "effect/unstable/cli"
 import { createHash } from "node:crypto"
-import { mkdir, realpath, rm, stat } from "node:fs/promises"
-import { basename, dirname, isAbsolute, join, relative as relativePathFrom, resolve } from "node:path"
 import { command, version } from "./command"
 import { renderGoodbye } from "./goodbye"
 import * as Logging from "./logging"
 import { layer as residentLayer, serve as serveResident } from "./resident-transport"
+
+const pathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
+  Context.get(context, Path.Path),
+)
+const basename = pathService.basename
+const dirname = pathService.dirname
+const isAbsolute = pathService.isAbsolute
+const join = pathService.join
+const relativePathFrom = pathService.relative
+const resolve = pathService.resolve
+
+const provideLayerScoped =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.scopedWith((scope) =>
+      Effect.context<RIn | Exclude<R, ROut>>().pipe(
+        Effect.flatMap((parent) =>
+          Layer.buildWithScope(layer, scope).pipe(
+            Effect.flatMap((context) => effect.pipe(Effect.provideContext(Context.merge(parent, context)))),
+          ),
+        ),
+      ),
+    )
+
+const mkdir = (path: string, options?: { readonly recursive?: boolean }) =>
+  FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.makeDirectory(path, options)))
+const realpath = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.realPath(path)))
+const rm = (path: string, options?: { readonly force?: boolean }) =>
+  FileSystem.FileSystem.pipe(
+    Effect.flatMap((fileSystem) =>
+      options?.force === true ? fileSystem.remove(path).pipe(Effect.ignore) : fileSystem.remove(path),
+    ),
+  )
+const stat = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.stat(path)))
 
 const imageMediaType = (path: string) => {
   const lower = path.toLowerCase()
@@ -90,7 +127,7 @@ const pastedImageFormat = (bytes: Uint8Array, declaredMediaType?: string) => {
   return mediaType === undefined || mediaType === signature.mediaType ? signature : undefined
 }
 
-export const resolveWorkspacePath = (workspace: string, target: PathTarget): string => {
+const resolveWorkspacePathImpl = (workspace: string, target: PathTarget): string => {
   const root = resolve(workspace)
   const path = resolve(root, target.path)
   const relation = relativePathFrom(root, path)
@@ -103,21 +140,43 @@ export const resolveWorkspacePath = (workspace: string, target: PathTarget): str
   return path
 }
 
-export const resolveWorkspaceFile = async (workspace: string, target: PathTarget): Promise<string> => {
-  const root = await realpath(workspace)
-  const path = await realpath(resolveWorkspacePath(root, target))
+export const resolveWorkspacePath: {
+  (target: PathTarget): (workspace: string) => string
+  (workspace: string, target: PathTarget): string
+} = Function.dual(2, resolveWorkspacePathImpl)
+
+const resolveWorkspaceFileImpl = Effect.fn("Main.resolveWorkspaceFile")(function* (
+  workspace: string,
+  target: PathTarget,
+) {
+  const root = yield* realpath(workspace)
+  const path = yield* realpath(resolveWorkspacePath(root, target))
   const relation = relativePathFrom(root, path)
   if (
     relation === ".." ||
     relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
     isAbsolute(relation)
   )
-    throw new Error("Path is outside the workspace")
-  if (!(await stat(path)).isFile()) throw new Error("Path is not a file")
+    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
+  if ((yield* stat(path)).type !== "File")
+    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is not a file" })
   return path
-}
+})
 
-export const editorArguments = (editor: string, path: string, line?: number, column?: number): Array<string> => {
+export const resolveWorkspaceFile: {
+  (target: PathTarget): (workspace: string) => Promise<string>
+  (workspace: string, target: PathTarget): Promise<string>
+} = Function.dual(2, (workspace: string, target: PathTarget) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Layer.build(BunServices.layer).pipe(
+        Effect.flatMap((context) => resolveWorkspaceFileImpl(workspace, target).pipe(Effect.provideContext(context))),
+      ),
+    ),
+  ),
+)
+
+const editorArgumentsImpl = (editor: string, path: string, line?: number, column?: number): Array<string> => {
   const location = line === undefined ? path : `${path}:${line}${column === undefined ? "" : `:${column}`}`
   return editor === "code" || editor.endsWith("/code")
     ? [editor, "--goto", location]
@@ -126,50 +185,100 @@ export const editorArguments = (editor: string, path: string, line?: number, col
       : [editor, path]
 }
 
-export const defaultOpenArguments = (path: string, platform: NodeJS.Platform = process.platform): Array<string> =>
+export const editorArguments: {
+  (path: string, line?: number, column?: number): (editor: string) => Array<string>
+  (editor: string, path: string, line?: number, column?: number): Array<string>
+} = Function.dual((args) => args.length >= 2, editorArgumentsImpl)
+
+const defaultOpenArgumentsImpl = (path: string, platform: NodeJS.Platform = process.platform): Array<string> =>
   platform === "darwin" ? ["open", path] : platform === "win32" ? ["cmd", "/c", "start", "", path] : ["xdg-open", path]
+
+export const defaultOpenArguments: {
+  (platform?: NodeJS.Platform): (path: string) => Array<string>
+  (path: string, platform?: NodeJS.Platform): Array<string>
+} = Function.dual((args) => args.length >= 1, defaultOpenArgumentsImpl)
 
 export class PromptAttachmentError extends Schema.TaggedErrorClass<PromptAttachmentError>()("PromptAttachmentError", {
   path: Schema.String,
   message: Schema.String,
 }) {}
 
-export const materializePromptParts = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
-  Effect.tryPromise({
-    try: async () => {
-      const materialized = await Promise.all(
-        parts.map(async (part): Promise<Turn.PromptPart> => {
-          if (part.type === "text") return part
-          const path = part.path.startsWith("/") ? part.path : `${workspace}/${part.path}`
-          const file = Bun.file(path)
-          if (!(await file.exists()) || file.size === 0)
-            throw new PromptAttachmentError({
-              path: part.path,
-              message: `Image attachment is missing or empty: ${part.path}`,
-            })
-          const mediaType = imageMediaType(path)
-          if (!mediaType.startsWith("image/"))
-            throw new PromptAttachmentError({ path: part.path, message: `Unsupported image attachment: ${part.path}` })
-          return {
-            type: "image",
-            mediaType,
-            data: Buffer.from(await file.arrayBuffer()).toString("base64"),
-            filename: part.path,
-          }
-        }),
-      )
-      return materialized
-    },
-    catch: (cause) =>
-      cause instanceof PromptAttachmentError
-        ? cause
-        : new PromptAttachmentError({
-            path: "unknown",
+export class ModelConfigurationError extends Schema.TaggedErrorClass<ModelConfigurationError>()(
+  "ModelConfigurationError",
+  { message: Schema.String },
+) {}
+
+export class WorkspaceFileError extends Schema.TaggedErrorClass<WorkspaceFileError>()("WorkspaceFileError", {
+  path: Schema.String,
+  message: Schema.String,
+}) {}
+
+class ExternalBoundaryError extends Schema.TaggedErrorClass<ExternalBoundaryError>()("ExternalBoundaryError", {
+  operation: Schema.String,
+  message: Schema.String,
+}) {}
+
+class OperationProductError extends Schema.TaggedErrorClass<OperationProductError>()("OperationError", {
+  message: Schema.String,
+}) {}
+
+const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
+  Effect.forEach(
+    parts,
+    (part): Effect.Effect<Turn.PromptPart, PromptAttachmentError> => {
+      if (part.type === "text") return Effect.succeed(part)
+      const path = part.path.startsWith("/") ? part.path : `${workspace}/${part.path}`
+      const file = Bun.file(path)
+      return Effect.tryPromise({
+        try: () => file.exists(),
+        catch: (cause) =>
+          PromptAttachmentError.make({
+            path: part.path,
             message: `Image attachment could not be read: ${String(cause)}`,
           }),
-  })
+      }).pipe(
+        Effect.flatMap((exists) =>
+          !exists || file.size === 0
+            ? Effect.fail(
+                PromptAttachmentError.make({
+                  path: part.path,
+                  message: `Image attachment is missing or empty: ${part.path}`,
+                }),
+              )
+            : Effect.succeed(imageMediaType(path)),
+        ),
+        Effect.flatMap((mediaType) =>
+          !mediaType.startsWith("image/")
+            ? Effect.fail(
+                PromptAttachmentError.make({ path: part.path, message: `Unsupported image attachment: ${part.path}` }),
+              )
+            : Effect.tryPromise({
+                try: () => file.arrayBuffer(),
+                catch: (cause) =>
+                  PromptAttachmentError.make({
+                    path: part.path,
+                    message: `Image attachment could not be read: ${String(cause)}`,
+                  }),
+              }).pipe(
+                Effect.map((bytes) => ({
+                  type: "image" as const,
+                  mediaType,
+                  data: Buffer.from(bytes).toString("base64"),
+                  filename: part.path,
+                })),
+              ),
+        ),
+      )
+    },
+    { concurrency: "unbounded" },
+  )
 
-export const initialSubmitAction = (
+export const materializePromptParts: {
+  (workspace: string): (parts: ReadonlyArray<ViewState.PromptPart>) => ReturnType<typeof materializePromptPartsImpl>
+  (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string): ReturnType<typeof materializePromptPartsImpl>
+} = Function.dual(2, materializePromptPartsImpl)
+
+const initialSubmitActionImpl = (
   prompt: ReadonlyArray<string>,
   mode: ViewState.Mode,
 ): Extract<Session.Action, { readonly _tag: "Submit" }> | undefined => {
@@ -178,7 +287,12 @@ export const initialSubmitAction = (
   return { _tag: "Submit", prompt: value, parts: ViewState.promptParts(value), mode }
 }
 
-export const parseChangedFiles = (statusText: string, numstatText: string): ReadonlyArray<ViewState.ChangedFile> => {
+export const initialSubmitAction: {
+  (mode: ViewState.Mode): (prompt: ReadonlyArray<string>) => ReturnType<typeof initialSubmitActionImpl>
+  (prompt: ReadonlyArray<string>, mode: ViewState.Mode): ReturnType<typeof initialSubmitActionImpl>
+} = Function.dual(2, initialSubmitActionImpl)
+
+const parseChangedFilesImpl = (statusText: string, numstatText: string): ReadonlyArray<ViewState.ChangedFile> => {
   const counts = new Map<string, { added: number; removed: number }>()
   const numstatRecords = numstatText.split("\0")
   for (let index = 0; index < numstatRecords.length - 1; index += 1) {
@@ -207,6 +321,11 @@ export const parseChangedFiles = (statusText: string, numstatText: string): Read
   return files
 }
 
+export const parseChangedFiles: {
+  (numstatText: string): (statusText: string) => ReadonlyArray<ViewState.ChangedFile>
+  (statusText: string, numstatText: string): ReadonlyArray<ViewState.ChangedFile>
+} = Function.dual(2, parseChangedFilesImpl)
+
 export const countAddedLines = (bytes: Uint8Array): number => {
   if (bytes.length === 0 || bytes.includes(0)) return 0
   let lines = bytes[bytes.length - 1] === 10 ? 0 : 1
@@ -214,109 +333,122 @@ export const countAddedLines = (bytes: Uint8Array): number => {
   return lines
 }
 
-export const countAddedLinesFromFile = async (workspace: string, path: string): Promise<number> => {
-  const file = await resolveWorkspaceFile(workspace, { path })
-  const reader = Bun.file(file).stream().getReader()
-  const count = async (lines: number, finalByte: number | undefined): Promise<number> => {
-    const next = await reader.read()
-    if (next.done) return finalByte === undefined ? 0 : lines + (finalByte === 10 ? 0 : 1)
-    let nextLines = lines
-    let nextFinalByte = finalByte
-    for (const byte of next.value) {
-      if (byte === 0) {
-        void reader.cancel()
-        return 0
-      }
-      if (byte === 10) nextLines += 1
-      nextFinalByte = byte
-    }
-    return count(nextLines, nextFinalByte)
-  }
-  return count(0, undefined)
+const countAddedLinesFromFileImpl = (workspace: string, path: string) =>
+  resolveWorkspaceFileImpl(workspace, { path }).pipe(
+    Effect.flatMap((file) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.readFile(file)))),
+    Effect.map(countAddedLines),
+  )
+
+export const countAddedLinesFromFile: {
+  (path: string): (workspace: string) => Promise<number>
+  (workspace: string, path: string): Promise<number>
+} = Function.dual(2, (workspace: string, path: string) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Layer.build(BunServices.layer).pipe(
+        Effect.flatMap((context) => countAddedLinesFromFileImpl(workspace, path).pipe(Effect.provideContext(context))),
+      ),
+    ),
+  ),
+)
+
+const gitOutput = (arguments_: ReadonlyArray<string>) => {
+  const child = Bun.spawn([...arguments_], { stdout: "pipe", stderr: "ignore" })
+  return Effect.tryPromise({
+    try: () => Promise.all([new Response(child.stdout).text(), child.exited]),
+    catch: (cause) => ExternalBoundaryError.make({ operation: arguments_.join(" "), message: String(cause) }),
+  })
 }
 
-export const readChangedFiles = async (workspace: string): Promise<ReadonlyArray<ViewState.ChangedFile>> => {
-  const statusProcess = Bun.spawn(["git", "-C", workspace, "status", "--porcelain=v1", "-z", "--untracked-files=all"], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const statusText = await new Response(statusProcess.stdout).text()
-  if ((await statusProcess.exited) !== 0) return []
-  const headProcess = Bun.spawn(["git", "-C", workspace, "rev-parse", "--verify", "HEAD"], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const head = (await new Response(headProcess.stdout).text()).trim()
-  const base =
-    (await headProcess.exited) === 0
-      ? head
-      : await (async () => {
-          const emptyTreeProcess = Bun.spawn(["git", "-C", workspace, "hash-object", "-t", "tree", "/dev/null"], {
-            stdout: "pipe",
-            stderr: "ignore",
-          })
-          const emptyTree = (await new Response(emptyTreeProcess.stdout).text()).trim()
-          return (await emptyTreeProcess.exited) === 0 ? emptyTree : undefined
-        })()
-  if (base === undefined) return []
-  const numstatProcess = Bun.spawn(["git", "-C", workspace, "diff", "--numstat", "-z", "-M", base], {
-    stdout: "pipe",
-    stderr: "ignore",
-  })
-  const numstatText = await new Response(numstatProcess.stdout).text()
-  if ((await numstatProcess.exited) !== 0) return []
-  const files = [...parseChangedFiles(statusText, numstatText)]
-  const countUntracked = async (offset: number): Promise<void> => {
-    if (offset >= files.length) return
-    const counted = await Promise.all(
-      files.slice(offset, offset + 8).map(async (file) => {
-        if (file.added !== undefined || !file.status.includes("?")) return file
-        try {
-          const added = await countAddedLinesFromFile(workspace, file.path)
-          return { path: file.path, status: file.status, added, removed: 0 }
-        } catch {
-          return { path: file.path, status: file.status, added: 0, removed: 0 }
-        }
-      }),
-    )
-    files.splice(offset, counted.length, ...counted)
-    await countUntracked(offset + 8)
+const readChangedFilesEffect = Effect.fn("Main.readChangedFiles")(function* (workspace: string) {
+  const [statusText, statusExit] = yield* gitOutput([
+    "git",
+    "-C",
+    workspace,
+    "status",
+    "--porcelain=v1",
+    "-z",
+    "--untracked-files=all",
+  ])
+  if (statusExit !== 0) return []
+  const [headText, headExit] = yield* gitOutput(["git", "-C", workspace, "rev-parse", "--verify", "HEAD"])
+  let base = headExit === 0 ? headText.trim() : undefined
+  if (base === undefined) {
+    const [emptyTree, emptyTreeExit] = yield* gitOutput([
+      "git",
+      "-C",
+      workspace,
+      "hash-object",
+      "-t",
+      "tree",
+      "/dev/null",
+    ])
+    base = emptyTreeExit === 0 ? emptyTree.trim() : undefined
   }
-  await countUntracked(0)
-  return files
-}
+  if (base === undefined) return []
+  const [numstatText, numstatExit] = yield* gitOutput(["git", "-C", workspace, "diff", "--numstat", "-z", "-M", base])
+  if (numstatExit !== 0) return []
+  return yield* Effect.forEach(
+    parseChangedFiles(statusText, numstatText),
+    (file) =>
+      file.added !== undefined || !file.status.includes("?")
+        ? Effect.succeed(file)
+        : countAddedLinesFromFileImpl(workspace, file.path).pipe(
+            Effect.map((added) => ({ path: file.path, status: file.status, added, removed: 0 })),
+            Effect.orElseSucceed(() => ({ path: file.path, status: file.status, added: 0, removed: 0 })),
+          ),
+    { concurrency: 8 },
+  )
+})
+
+export const readChangedFiles = (workspace: string): Promise<ReadonlyArray<ViewState.ChangedFile>> =>
+  Effect.runPromise(
+    Effect.scoped(
+      Layer.build(BunServices.layer).pipe(
+        Effect.flatMap((context) => readChangedFilesEffect(workspace).pipe(Effect.provideContext(context))),
+      ),
+    ),
+  )
 
 type ClipboardPngExtractor = (script: string, path: string) => Promise<number>
 
 const runClipboardPngExtractor: ClipboardPngExtractor = (script, path) =>
   Bun.spawn(["osascript", "-e", script, "--", path], { stdout: "ignore", stderr: "ignore" }).exited
 
-export const pasteClipboardPng = (
+const pasteClipboardPngImpl = (
   workspace: string,
   now = Date.now,
   extract: ClipboardPngExtractor = runClipboardPngExtractor,
 ) =>
-  Effect.promise(async () => {
+  Effect.gen(function* () {
     const relative = `.rika/pasted/paste-${now()}.png`
     const absolute = `${workspace}/${relative}`
-    await mkdir(`${workspace}/.rika/pasted`, { recursive: true })
-    await Bun.write(absolute, new Uint8Array())
+    yield* mkdir(`${workspace}/.rika/pasted`, { recursive: true })
+    yield* Effect.tryPromise({
+      try: () => Bun.write(absolute, new Uint8Array()),
+      catch: (cause) => ExternalBoundaryError.make({ operation: "write clipboard image", message: String(cause) }),
+    })
     const script = `on run argv\nset pngData to (the clipboard as «class PNGf»)\nset theFile to (POSIX file (item 1 of argv))\nset fh to open for access theFile with write permission\nset eof fh to 0\nwrite pngData to fh\nclose access fh\nend run`
-    let extracted = false
-    try {
-      const exit = await extract(script, absolute)
-      const file = Bun.file(absolute)
-      extracted = exit === 0 && (await file.exists()) && file.size > 0
-      if (extracted) return relative
-      return undefined
-    } catch {
-      return undefined
-    } finally {
-      if (!extracted) await rm(absolute, { force: true })
-    }
+    const exit = yield* Effect.tryPromise({
+      try: () => extract(script, absolute),
+      catch: (cause) => ExternalBoundaryError.make({ operation: "extract clipboard image", message: String(cause) }),
+    }).pipe(Effect.orElseSucceed(() => -1))
+    const file = Bun.file(absolute)
+    const exists = yield* Effect.tryPromise({
+      try: () => file.exists(),
+      catch: (cause) => ExternalBoundaryError.make({ operation: "inspect clipboard image", message: String(cause) }),
+    })
+    const extracted = exit === 0 && exists && file.size > 0
+    if (!extracted) yield* rm(absolute, { force: true })
+    return extracted ? relative : undefined
   }).pipe(Effect.orElseSucceed(() => undefined))
 
-export const pastedImagePath = (
+export const pasteClipboardPng: {
+  (now?: () => number, extract?: ClipboardPngExtractor): (workspace: string) => ReturnType<typeof pasteClipboardPngImpl>
+  (workspace: string, now?: () => number, extract?: ClipboardPngExtractor): ReturnType<typeof pasteClipboardPngImpl>
+} = Function.dual((args) => typeof args[0] === "string", pasteClipboardPngImpl)
+
+const pastedImagePathImpl = (
   bytes: Uint8Array,
   mediaType?: string,
   now = Date.now,
@@ -326,29 +458,74 @@ export const pastedImagePath = (
   return format === undefined ? undefined : `.rika/pasted/paste-${now()}-${id()}.${format.extension}`
 }
 
-export const persistPastedImage = (workspace: string, relative: string, bytes: Uint8Array) =>
-  Effect.promise(async () => {
-    await mkdir(`${workspace}/.rika/pasted`, { recursive: true })
-    await Bun.write(`${workspace}/${relative}`, bytes)
+export const pastedImagePath: {
+  (
+    mediaType?: string,
+    now?: () => number,
+    id?: () => `${string}-${string}-${string}-${string}-${string}`,
+  ): (bytes: Uint8Array) => string | undefined
+  (
+    bytes: Uint8Array,
+    mediaType?: string,
+    now?: () => number,
+    id?: () => `${string}-${string}-${string}-${string}-${string}`,
+  ): string | undefined
+} = Function.dual((args) => args[0] instanceof Uint8Array, pastedImagePathImpl)
+
+const persistPastedImageImpl = (workspace: string, relative: string, bytes: Uint8Array) =>
+  Effect.gen(function* () {
+    yield* mkdir(`${workspace}/.rika/pasted`, { recursive: true })
+    yield* Effect.tryPromise({
+      try: () => Bun.write(`${workspace}/${relative}`, bytes),
+      catch: (cause) => ExternalBoundaryError.make({ operation: "write pasted image", message: String(cause) }),
+    })
     return true
   }).pipe(Effect.orElseSucceed(() => false))
 
-export const relayBackendLayer = (
+export const persistPastedImage: {
+  (relative: string, bytes: Uint8Array): (workspace: string) => ReturnType<typeof persistPastedImageImpl>
+  (workspace: string, relative: string, bytes: Uint8Array): ReturnType<typeof persistPastedImageImpl>
+} = Function.dual(3, persistPastedImageImpl)
+
+const relayBackendLayerImpl = (
   options: Omit<
     RelayExecutionBackend.LayerOptions<typeof ThreadTools.toolkit.tools>,
     "additionalToolkit" | "additionalHandlerLayer"
   >,
-  repositoryLayer: Layer.Layer<ThreadRepository.Service, unknown, never>,
-  turnRepositoryLayer: Layer.Layer<TurnRepository.Service, unknown, never>,
-) =>
+  repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
+  turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
+): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadTools.toolkit.tools>> =>
   RelayExecutionBackend.layer({
     ...options,
     additionalToolkit: ThreadTools.toolkit,
     additionalHandlerLayer: ThreadToolHandlers.handlerLayer.pipe(
       Layer.provide(ThreadQuery.layer),
       Layer.provide(Layer.merge(repositoryLayer, turnRepositoryLayer)),
+      Layer.catchCause((cause) =>
+        Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: Cause.pretty(cause) }))),
+      ),
     ),
   })
+
+export const relayBackendLayer: {
+  (
+    repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
+    turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
+  ): (
+    options: Omit<
+      RelayExecutionBackend.LayerOptions<typeof ThreadTools.toolkit.tools>,
+      "additionalToolkit" | "additionalHandlerLayer"
+    >,
+  ) => ReturnType<typeof relayBackendLayerImpl>
+  (
+    options: Omit<
+      RelayExecutionBackend.LayerOptions<typeof ThreadTools.toolkit.tools>,
+      "additionalToolkit" | "additionalHandlerLayer"
+    >,
+    repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
+    turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
+  ): ReturnType<typeof relayBackendLayerImpl>
+} = Function.dual(3, relayBackendLayerImpl)
 
 const testModelPartSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
@@ -375,12 +552,13 @@ const testModelTurnSchema = Schema.Union([
 const testModelScriptSchema = Schema.NonEmptyArray(testModelTurnSchema)
 
 export const parseTestModelScript = (json: string) =>
-  Effect.try({
-    try: () => JSON.parse(json),
-    catch: (cause) => new Error(`Invalid RIKA_TEST_MODEL_SCRIPT JSON: ${String(cause)}`),
-  }).pipe(Effect.flatMap(Schema.decodeUnknownEffect(testModelScriptSchema)))
+  Schema.decodeUnknownEffect(Schema.fromJsonString(testModelScriptSchema))(json)
 
-export const buildTestModelScript = Effect.fn("Main.buildTestModelScript")(function* (json: string) {
+export const buildTestModelScript: (
+  json: string,
+) => Effect.Effect<ReadonlyArray<TestModelTypes.Step>, Error | Schema.SchemaError> = Effect.fn(
+  "Main.buildTestModelScript",
+)(function* (json: string) {
   const script = yield* parseTestModelScript(json)
   const { TestModel } = yield* Effect.promise(() => import("@batonfx/test"))
   return script.map((turn) => {
@@ -477,7 +655,7 @@ export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
   }
 }
 
-export const executionRoutePin = (
+const executionRoutePinImpl = (
   settings: ConfigContract.Settings,
   mode: ConfigContract.ModeId,
   tuning?: { readonly reasoningEffort?: string; readonly fastMode?: boolean },
@@ -560,10 +738,32 @@ export const executionRoutePin = (
   }
 }
 
-export const credentialForRoute = (
+export const executionRoutePin: {
+  (
+    mode: ConfigContract.ModeId,
+    tuning?: { readonly reasoningEffort?: string; readonly fastMode?: boolean },
+  ): (settings: ConfigContract.Settings) => Turn.ExecutionRoutePin
+  (
+    settings: ConfigContract.Settings,
+    mode: ConfigContract.ModeId,
+    tuning?: { readonly reasoningEffort?: string; readonly fastMode?: boolean },
+  ): Turn.ExecutionRoutePin
+} = Function.dual((args) => typeof args[0] === "object", executionRoutePinImpl)
+
+const credentialForRouteImpl = (
   route: ConfigContract.ResolvedModelRoute,
   gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
 ) => (route.gateway.auth.type === "none" ? undefined : gatewayCredentials[route.gateway.auth.variable])
+
+export const credentialForRoute: {
+  (
+    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  ): (route: ConfigContract.ResolvedModelRoute) => Redacted.Redacted<string> | undefined
+  (
+    route: ConfigContract.ResolvedModelRoute,
+    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  ): Redacted.Redacted<string> | undefined
+} = Function.dual(2, credentialForRouteImpl)
 
 const registrationForRoute = (
   route: ConfigContract.ResolvedModelRoute,
@@ -576,7 +776,7 @@ const registrationForRoute = (
         config: route.options as NonNullable<Parameters<typeof openAi>[0]["config"]>,
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.gatewayName })),
-        Effect.provide(
+        provideLayerScoped(
           openAiClientLayerConfig({
             apiUrl: Config.succeed(route.gateway.baseUrl),
             apiKey: route.gateway.auth.type === "none" ? Config.succeed(undefined) : apiKeyConfig,
@@ -589,7 +789,7 @@ const registrationForRoute = (
         config: route.options as NonNullable<Parameters<typeof anthropic>[0]["config"]>,
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.gatewayName })),
-        Effect.provide(
+        provideLayerScoped(
           anthropicClientLayerConfig({
             apiUrl: Config.succeed(route.gateway.baseUrl),
             apiKey: route.gateway.auth.type === "none" ? Config.succeed(undefined) : apiKeyConfig,
@@ -606,7 +806,11 @@ const registrationForPinnedRoute = (
     : undefined
   const credential = credentialVariable === undefined ? undefined : gatewayCredentials[credentialVariable]
   if (credentialVariable !== undefined && credential === undefined)
-    return Effect.fail(new Error(`Missing environment variable ${credentialVariable} for gateway ${route.provider}`))
+    return Effect.fail(
+      ModelConfigurationError.make({
+        message: `Missing environment variable ${credentialVariable} for gateway ${route.provider}`,
+      }),
+    )
   const apiKey = Config.succeed(credential)
   return route.gatewayProtocol === "openai"
     ? openAi({
@@ -615,7 +819,7 @@ const registrationForPinnedRoute = (
         config: (route.providerOptions ?? {}) as NonNullable<Parameters<typeof openAi>[0]["config"]>,
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.provider })),
-        Effect.provide(
+        provideLayerScoped(
           openAiClientLayerConfig({ apiUrl: Config.succeed(route.gatewayBaseUrl), apiKey }).pipe(
             Layer.provide(sanitizedFetchLayer),
             Layer.orDie,
@@ -628,7 +832,7 @@ const registrationForPinnedRoute = (
         config: (route.providerOptions ?? {}) as NonNullable<Parameters<typeof anthropic>[0]["config"]>,
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.provider })),
-        Effect.provide(
+        provideLayerScoped(
           anthropicClientLayerConfig({ apiUrl: Config.succeed(route.gatewayBaseUrl), apiKey }).pipe(
             Layer.provide(sanitizedFetchLayer),
             Layer.orDie,
@@ -652,20 +856,31 @@ export const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.Resolve
     )
   })
 
-export const registrationsForRoutes = (
+const registrationsForRoutesImpl = (
   routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
-) => {
-  return Effect.forEach(distinctModelRoutes(routes), (route) => {
+) =>
+  Effect.forEach(distinctModelRoutes(routes), (route) => {
     if (route.gateway.auth.type === "none") return registrationForRoute(route, Config.succeed(Redacted.make("unused")))
     const credential = credentialForRoute(route, gatewayCredentials)
     if (credential === undefined)
       return Effect.fail(
-        new Error(`Missing environment variable ${route.gateway.auth.variable} for gateway ${route.gatewayName}`),
+        ModelConfigurationError.make({
+          message: `Missing environment variable ${route.gateway.auth.variable} for gateway ${route.gatewayName}`,
+        }),
       )
     return registrationForRoute(route, Config.succeed(credential))
   })
-}
+
+export const registrationsForRoutes: {
+  (
+    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  ): (routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) => ReturnType<typeof registrationsForRoutesImpl>
+  (
+    routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  ): ReturnType<typeof registrationsForRoutesImpl>
+} = Function.dual(2, registrationsForRoutesImpl)
 
 export const productionCompaction = (
   route?: Pick<ConfigContract.ResolvedModelRoute, "compaction">,
@@ -681,11 +896,11 @@ const registrationTuple = (candidate: {
   readonly registrationKey?: string
 }) => `${candidate.provider}\0${candidate.model}\0${candidate.registrationKey ?? ""}`
 
-export const configuredBackendLayer = (
+const configuredBackendLayerImpl = (
   filename: string,
   workspace: string,
-  repositoryLayer: Layer.Layer<ThreadRepository.Service, unknown, never>,
-  turnRepositoryLayer: Layer.Layer<TurnRepository.Service, unknown, never>,
+  repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
+  turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
   parallelApiKey?: import("effect").Redacted.Redacted<string>,
   modelRoute?: ConfigContract.ResolvedModelRoute,
   gatewayCredentials: Readonly<Record<string, import("effect").Redacted.Redacted<string>>> = {},
@@ -693,10 +908,14 @@ export const configuredBackendLayer = (
   oracleRoute?: ConfigContract.ResolvedModelRoute,
   persistedModelRoutes: ReadonlyArray<Turn.ExecutionModelRoute> = [],
   compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
-) =>
+): Layer.Layer<
+  Layer.Success<ReturnType<typeof relayBackendLayer>>,
+  Layer.Error<ReturnType<typeof relayBackendLayer>> | Config.ConfigError | Error | Schema.SchemaError,
+  never
+> =>
   Layer.unwrap(
     Effect.gen(function* () {
-      yield* Effect.promise(() => mkdir(dirname(filename), { recursive: true }))
+      yield* mkdir(dirname(filename), { recursive: true })
       const route = modelRoute ?? ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
       const resolvedOracleRoute = oracleRoute ?? route
       const resolvedCompactionSummaryRoute =
@@ -707,7 +926,9 @@ export const configuredBackendLayer = (
       const testResponse = yield* Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE"))
       const testScript = yield* Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT"))
       if (testResponse._tag === "Some" && testScript._tag === "Some") {
-        return yield* Effect.fail(new Error("RIKA_TEST_MODEL_RESPONSE and RIKA_TEST_MODEL_SCRIPT cannot both be set"))
+        return yield* ModelConfigurationError.make({
+          message: "RIKA_TEST_MODEL_RESPONSE and RIKA_TEST_MODEL_SCRIPT cannot both be set",
+        })
       }
       yield* Effect.logInfo("model.backend.configured").pipe(
         Effect.annotateLogs(
@@ -748,7 +969,7 @@ export const configuredBackendLayer = (
         )
         const registrations = [...configuredRegistrations, ...persistedRegistrations]
         if (registrations.length === 0)
-          return yield* Effect.fail(new Error("No configured model routes could be registered"))
+          return yield* ModelConfigurationError.make({ message: "No configured model routes could be registered" })
         registration = registrations[0]!
         additionalRegistrations = registrations.slice(1)
         selection = routePlan.selection
@@ -771,32 +992,49 @@ export const configuredBackendLayer = (
             TurnRepository.Service.pipe(
               Effect.flatMap((turns) => turns.get(Turn.TurnId.make(turnId))),
               Effect.map((turn) => turn?.executionRoute),
-              Effect.provide(turnRepositoryLayer),
-              Effect.mapError((cause) => new ExecutionBackend.BackendError({ message: String(cause) })),
+              provideLayerScoped(turnRepositoryLayer),
+              Effect.mapError((cause) => ExecutionBackend.BackendError.make({ message: String(cause) })),
             ),
-          toolRuntimeLayerForWorkspace: ToolRuntime.layer,
+          toolRuntimeLayerForWorkspace: (runtimeWorkspace) =>
+            ToolRuntime.layer(runtimeWorkspace).pipe(
+              Layer.provide(
+                MediaView.analyzerTestLayer(() =>
+                  Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
+                ),
+              ),
+              Layer.provide(
+                Layer.merge(
+                  ParallelSearch.layer(parallelApiKey === undefined ? {} : { apiKey: parallelApiKey }),
+                  ReadWebPage.layer(parallelApiKey === undefined ? {} : { apiKey: parallelApiKey }),
+                ).pipe(Layer.provide(FetchHttpClient.layer)),
+              ),
+              Layer.provide(BunServices.layer),
+              Layer.catchCause((cause) =>
+                Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: Cause.pretty(cause) }))),
+              ),
+            ),
           resolveWorkspace: (durableExecutionId) =>
             Effect.gen(function* () {
               const turnId = RelayExecutionBackend.turnIdFromExecutionId(durableExecutionId)
               if (turnId === undefined)
-                return yield* new ExecutionBackend.BackendError({
+                return yield* ExecutionBackend.BackendError.make({
                   message: `Execution ${durableExecutionId} is not attached to a Rika Turn`,
                 })
               const turns = yield* TurnRepository.Service
               const turn = yield* turns.get(Turn.TurnId.make(turnId))
               if (turn === undefined)
-                return yield* new ExecutionBackend.BackendError({ message: `Turn ${turnId} does not exist` })
+                return yield* ExecutionBackend.BackendError.make({ message: `Turn ${turnId} does not exist` })
               const threads = yield* ThreadRepository.Service
               const thread = yield* threads.get(turn.threadId)
               if (thread === undefined)
-                return yield* new ExecutionBackend.BackendError({ message: `Thread ${turn.threadId} does not exist` })
+                return yield* ExecutionBackend.BackendError.make({ message: `Thread ${turn.threadId} does not exist` })
               return thread.workspace
             }).pipe(
-              Effect.provide(Layer.merge(repositoryLayer, turnRepositoryLayer)),
+              provideLayerScoped(Layer.merge(repositoryLayer, turnRepositoryLayer)),
               Effect.mapError((cause) =>
-                cause instanceof ExecutionBackend.BackendError
+                Schema.is(ExecutionBackend.BackendError)(cause)
                   ? cause
-                  : new ExecutionBackend.BackendError({ message: String(cause) }),
+                  : ExecutionBackend.BackendError.make({ message: String(cause) }),
               ),
             ),
           ...(parallelApiKey === undefined ? {} : { parallelApiKey }),
@@ -805,9 +1043,39 @@ export const configuredBackendLayer = (
         turnRepositoryLayer,
       ).pipe(Layer.provide(BunCrypto.layer))
     }),
-  )
+  ).pipe(Layer.provide(BunServices.layer))
 
-const lazyBackendLayer = (backendLayer: Layer.Layer<ExecutionBackend.Service, unknown>) =>
+export const configuredBackendLayer: {
+  (
+    workspace: string,
+    repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
+    turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
+    parallelApiKey?: import("effect").Redacted.Redacted<string>,
+    modelRoute?: ConfigContract.ResolvedModelRoute,
+    gatewayCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>,
+    allModelRoutes?: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+    oracleRoute?: ConfigContract.ResolvedModelRoute,
+    persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>,
+    compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
+  ): (filename: string) => ReturnType<typeof configuredBackendLayerImpl>
+  (
+    filename: string,
+    workspace: string,
+    repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
+    turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
+    parallelApiKey?: import("effect").Redacted.Redacted<string>,
+    modelRoute?: ConfigContract.ResolvedModelRoute,
+    gatewayCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>,
+    allModelRoutes?: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+    oracleRoute?: ConfigContract.ResolvedModelRoute,
+    persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>,
+    compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
+  ): ReturnType<typeof configuredBackendLayerImpl>
+} = Function.dual((args) => args.length >= 4, configuredBackendLayerImpl)
+
+const lazyBackendLayer = (
+  backendLayer: Layer.Layer<ExecutionBackend.Service, Layer.Error<ReturnType<typeof configuredBackendLayerImpl>>>,
+) =>
   Layer.effect(
     ExecutionBackend.Service,
     Effect.gen(function* () {
@@ -828,7 +1096,7 @@ const lazyBackendLayer = (backendLayer: Layer.Layer<ExecutionBackend.Service, un
                 ),
               ),
             ),
-            Effect.mapError((cause) => new ExecutionBackend.BackendError({ message: String(cause) })),
+            Effect.mapError((cause) => ExecutionBackend.BackendError.make({ message: String(cause) })),
           ),
           scope,
         ).pipe(Effect.flatMap(Fiber.join), Effect.uninterruptible),
@@ -897,11 +1165,12 @@ export const loadSettingsFile = Effect.fn("Main.loadSettingsFile")(function* (fi
   if (!(yield* fileSystem.exists(filename))) return {}
   const text = yield* fileSystem
     .readFileString(filename)
-    .pipe(Effect.mapError((error) => new ConfigContract.ConfigFileError({ path: filename, message: String(error) })))
-  const value = yield* Effect.try({
-    try: () => JSON.parse(text),
-    catch: (error) => new ConfigContract.ConfigFileError({ path: filename, message: `Invalid JSON: ${String(error)}` }),
-  })
+    .pipe(Effect.mapError((error) => ConfigContract.ConfigFileError.make({ path: filename, message: String(error) })))
+  const value = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(text).pipe(
+    Effect.mapError((error) =>
+      ConfigContract.ConfigFileError.make({ path: filename, message: `Invalid JSON: ${String(error)}` }),
+    ),
+  )
   return ConfigContract.decodeSettingsInput(filename, value)
 })
 
@@ -914,15 +1183,15 @@ const failureKind = (cause: Cause.Cause<unknown>) => {
 }
 
 const main = Command.run(command, { version }).pipe(
-  Effect.catchTag("OperationUnavailable", (error: Operation.OperationUnavailable) =>
-    Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-  ),
-  Effect.catchTag("InvalidInput", (error: Operation.InvalidInput) =>
-    Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
-  ),
+  Effect.catchTags({
+    OperationUnavailable: (error: Operation.OperationUnavailable) =>
+      Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
+    InvalidInput: (error: Operation.InvalidInput) =>
+      Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
+  }),
 )
 
-export const withClientWorkspace = (input: Operation.Input, workspace: string): Operation.Input => {
+const withClientWorkspaceImpl = (input: Operation.Input, workspace: string): Operation.Input => {
   if (input._tag === "Interactive" || input._tag === "Run" || input._tag === "Review")
     return { ...input, clientWorkspace: workspace, workspace: input.workspace ?? workspace }
   if (input._tag === "Mcp" && input.action === "approve")
@@ -939,7 +1208,12 @@ export const withClientWorkspace = (input: Operation.Input, workspace: string): 
   return input
 }
 
-export const gatewayCredentialsForRoutes = (
+export const withClientWorkspace: {
+  (workspace: string): (input: Operation.Input) => Operation.Input
+  (input: Operation.Input, workspace: string): Operation.Input
+} = Function.dual(2, withClientWorkspaceImpl)
+
+const gatewayCredentialsForRoutesImpl = (
   configuredRoutes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   persistedRoutes: ReadonlyArray<Turn.ExecutionModelRoute>,
   initial: Readonly<Record<string, Redacted.Redacted<string>>>,
@@ -959,6 +1233,20 @@ export const gatewayCredentialsForRoutes = (
   return credentials
 }
 
+export const gatewayCredentialsForRoutes: {
+  (
+    persistedRoutes: ReadonlyArray<Turn.ExecutionModelRoute>,
+    initial: Readonly<Record<string, Redacted.Redacted<string>>>,
+    readEnvironment: (name: string) => string | undefined,
+  ): (configuredRoutes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) => Record<string, Redacted.Redacted<string>>
+  (
+    configuredRoutes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+    persistedRoutes: ReadonlyArray<Turn.ExecutionModelRoute>,
+    initial: Readonly<Record<string, Redacted.Redacted<string>>>,
+    readEnvironment: (name: string) => string | undefined,
+  ): Record<string, Redacted.Redacted<string>>
+} = Function.dual(4, gatewayCredentialsForRoutesImpl)
+
 export const persistedModelRoutesForStartup = (turns: ReadonlyArray<Turn.Turn>) =>
   turns.flatMap((turn) =>
     turn.executionRoute === undefined
@@ -971,77 +1259,157 @@ export const persistedModelRoutesForStartup = (turns: ReadonlyArray<Turn.Turn>) 
         ],
   )
 
-export const canonicalDatabaseRoot = async (productDatabase: string, relayDatabase: string) => {
+const canonicalDatabaseRootImpl = Effect.fn("Main.canonicalDatabaseRoot")(function* (
+  productDatabase: string,
+  relayDatabase: string,
+) {
   if (basename(productDatabase) !== "rika.db" || basename(relayDatabase) !== "relay.db")
-    throw new Error("RIKA_DATABASE and RIKA_RELAY_DATABASE must name rika.db and relay.db in one data directory")
+    return yield* ExternalBoundaryError.make({
+      operation: "canonicalize database root",
+      message: "RIKA_DATABASE and RIKA_RELAY_DATABASE must name rika.db and relay.db in one data directory",
+    })
   const productRoot = dirname(resolve(productDatabase))
   const relayRoot = dirname(resolve(relayDatabase))
-  await Promise.all([mkdir(productRoot, { recursive: true }), mkdir(relayRoot, { recursive: true })])
-  const [canonicalProductRoot, canonicalRelayRoot] = await Promise.all([realpath(productRoot), realpath(relayRoot)])
+  yield* Effect.all([mkdir(productRoot, { recursive: true }), mkdir(relayRoot, { recursive: true })], {
+    concurrency: 2,
+  })
+  const [canonicalProductRoot, canonicalRelayRoot] = yield* Effect.all([realpath(productRoot), realpath(relayRoot)], {
+    concurrency: 2,
+  })
   if (canonicalProductRoot !== canonicalRelayRoot)
-    throw new Error("RIKA_DATABASE and RIKA_RELAY_DATABASE must use one data directory")
+    return yield* ExternalBoundaryError.make({
+      operation: "canonicalize database root",
+      message: "RIKA_DATABASE and RIKA_RELAY_DATABASE must use one data directory",
+    })
   return canonicalProductRoot
-}
+})
+
+export const canonicalDatabaseRoot: {
+  (relayDatabase: string): (productDatabase: string) => Promise<string>
+  (productDatabase: string, relayDatabase: string): Promise<string>
+} = Function.dual(2, (productDatabase: string, relayDatabase: string) =>
+  Effect.runPromise(
+    Effect.scoped(
+      Layer.build(BunServices.layer).pipe(
+        Effect.flatMap((context) =>
+          canonicalDatabaseRootImpl(productDatabase, relayDatabase).pipe(Effect.provideContext(context)),
+        ),
+      ),
+    ),
+  ),
+)
 
 export const interruptTrackedFibers = (fibers: Iterable<Fiber.Fiber<void, never>>) =>
   Effect.forEach([...fibers], Fiber.interrupt, { concurrency: "unbounded", discard: true })
 
-export const interruptAndClearTrackedFiber = (
+const interruptAndClearTrackedFiberImpl = (
   fiber: Fiber.Fiber<void, never>,
   clear: (fiber: Fiber.Fiber<void, never>) => void,
 ) => Fiber.interrupt(fiber).pipe(Effect.ensuring(Effect.sync(() => clear(fiber))))
 
-export const refreshThreadsOnSwitcherOpen = (
-  wasOpen: boolean,
-  isOpen: boolean,
-  initialize: Effect.Effect<void, never>,
-) => (!wasOpen && isOpen ? initialize : Effect.void)
+export const interruptAndClearTrackedFiber: {
+  (
+    clear: (fiber: Fiber.Fiber<void, never>) => void,
+  ): (fiber: Fiber.Fiber<void, never>) => ReturnType<typeof interruptAndClearTrackedFiberImpl>
+  (
+    fiber: Fiber.Fiber<void, never>,
+    clear: (fiber: Fiber.Fiber<void, never>) => void,
+  ): ReturnType<typeof interruptAndClearTrackedFiberImpl>
+} = Function.dual(2, interruptAndClearTrackedFiberImpl)
 
-export const settleTuiInitialization = async <T>(
+const refreshThreadsOnSwitcherOpenImpl = (wasOpen: boolean, isOpen: boolean, initialize: Effect.Effect<void, never>) =>
+  !wasOpen && isOpen ? initialize : Effect.void
+
+export const refreshThreadsOnSwitcherOpen: {
+  (isOpen: boolean, initialize: Effect.Effect<void, never>): (wasOpen: boolean) => Effect.Effect<void, never>
+  (wasOpen: boolean, isOpen: boolean, initialize: Effect.Effect<void, never>): Effect.Effect<void, never>
+} = Function.dual(3, refreshThreadsOnSwitcherOpenImpl)
+
+const settleTuiInitializationImpl = <T>(
   task: Promise<T>,
   isClosed: () => boolean,
   destroy: (value: T) => Promise<void>,
-) => {
-  const value = await task
-  if (!isClosed()) return value
-  await destroy(value)
-  return undefined
-}
+) =>
+  Effect.tryPromise({
+    try: () => task,
+    catch: (cause) => ExternalBoundaryError.make({ operation: "initialize TUI", message: String(cause) }),
+  }).pipe(
+    Effect.flatMap((value) =>
+      !isClosed()
+        ? Effect.succeed(value)
+        : Effect.tryPromise({
+            try: () => destroy(value),
+            catch: (cause) => ExternalBoundaryError.make({ operation: "destroy TUI", message: String(cause) }),
+          }).pipe(Effect.as(undefined)),
+    ),
+  )
+
+export const settleTuiInitialization: {
+  <T>(isClosed: () => boolean, destroy: (value: T) => Promise<void>): (task: Promise<T>) => Promise<T | undefined>
+  <T>(task: Promise<T>, isClosed: () => boolean, destroy: (value: T) => Promise<void>): Promise<T | undefined>
+} = Function.dual(3, <T>(task: Promise<T>, isClosed: () => boolean, destroy: (value: T) => Promise<void>) =>
+  Effect.runPromise(settleTuiInitializationImpl(task, isClosed, destroy)),
+)
 
 if (import.meta.main) {
-  const hostDataRoot = process.env.RIKA_INTERNAL_RESIDENT_DATA_ROOT
-  const defaultDataRoot = `${process.env.HOME ?? process.cwd()}/.rika`
+  const environment = Effect.runSync(
+    Config.all({
+      hostDataRoot: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_DATA_ROOT")),
+      home: Config.option(Config.string("HOME")),
+      database: Config.option(Config.string("RIKA_DATABASE")),
+      relayDatabase: Config.option(Config.string("RIKA_RELAY_DATABASE")),
+      visual: Config.option(Config.string("VISUAL")),
+      editor: Config.option(Config.string("EDITOR")),
+      testModelResponse: Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE")),
+      testModelScript: Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT")),
+      residentProfile: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_PROFILE")),
+      residentGrace: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_GRACE")),
+      residentHost: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_HOST")),
+    }),
+  )
+  const hostDataRoot = environment.hostDataRoot._tag === "Some" ? environment.hostDataRoot.value : undefined
+  const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
+  const defaultDataRoot = `${home}/.rika`
   const database =
     hostDataRoot === undefined
-      ? (process.env.RIKA_DATABASE ?? `${defaultDataRoot}/rika.db`)
+      ? environment.database._tag === "Some"
+        ? environment.database.value
+        : `${defaultDataRoot}/rika.db`
       : join(hostDataRoot, "rika.db")
   const relayDatabase =
     hostDataRoot === undefined
-      ? (process.env.RIKA_RELAY_DATABASE ?? `${defaultDataRoot}/relay.db`)
+      ? environment.relayDatabase._tag === "Some"
+        ? environment.relayDatabase.value
+        : `${defaultDataRoot}/relay.db`
       : join(hostDataRoot, "relay.db")
-  const globalConfig = `${process.env.HOME ?? process.cwd()}/.config/rika/settings.json`
+  const globalConfig = `${home}/.config/rika/settings.json`
   const workspaceConfig = `${process.cwd()}/.rika/settings.json`
   const extensionLayer = Layer.mergeAll(
     ExtensionOperations.layer({
-      globalRoot: `${process.env.HOME ?? process.cwd()}/.config/rika/skills`,
+      globalRoot: `${home}/.config/rika/skills`,
       workspaceRoot: `${process.cwd()}/.rika/skills`,
       configPath: `${process.cwd()}/.rika/mcp.json`,
-      trustPath: `${process.env.HOME ?? process.cwd()}/.config/rika/mcp-trust.json`,
+      trustPath: `${home}/.config/rika/mcp-trust.json`,
       generationsPath: `${process.cwd()}/.rika/extensions.json`,
     }),
     SkillRegistry.fileSystemLayer,
     McpOAuth.layer.pipe(
       Layer.provide(McpOAuth.hostLayer),
-      Layer.provide(McpOAuth.tokenStoreLayer(`${process.env.HOME ?? process.cwd()}/.config/rika/mcp-oauth.json`)),
+      Layer.provide(McpOAuth.tokenStoreLayer(`${home}/.config/rika/mcp-oauth.json`)),
     ),
   ).pipe(Layer.provide(BunServices.layer), Layer.merge(BunServices.layer), Layer.merge(FetchHttpClient.layer))
-  const editor = process.env.VISUAL ?? process.env.EDITOR
+  const editor =
+    environment.visual._tag === "Some"
+      ? environment.visual.value
+      : environment.editor._tag === "Some"
+        ? environment.editor.value
+        : undefined
   const productDatabase = Layer.unwrap(
-    Effect.promise(async () => {
-      await Promise.all([
-        mkdir(dirname(database), { recursive: true }),
-        mkdir(dirname(relayDatabase), { recursive: true }),
-      ])
+    Effect.gen(function* () {
+      yield* Effect.all(
+        [mkdir(dirname(database), { recursive: true }), mkdir(dirname(relayDatabase), { recursive: true })],
+        { concurrency: 2 },
+      )
       return Database.layer(database)
     }),
   )
@@ -1067,8 +1435,8 @@ if (import.meta.main) {
         let renderer: Awaited<ReturnType<typeof createTui>> | undefined
         let initialization: Promise<void> | undefined
         let closed = false
-        let previewTimer: ReturnType<typeof setTimeout> | undefined
-        let renderTimer: ReturnType<typeof setTimeout> | undefined
+        let previewTimer: Fiber.Fiber<void, never> | undefined
+        let renderTimer: Fiber.Fiber<void, never> | undefined
         let replayTurns = new Map<string, Turn.Turn>()
         const fibers = new Set<Fiber.Fiber<void, never>>()
         let followFiber: Fiber.Fiber<void, never> | undefined
@@ -1076,16 +1444,22 @@ if (import.meta.main) {
         const render = (immediate = false) => {
           if (renderer === undefined || renderSuppressed) return
           if (immediate) {
-            if (renderTimer !== undefined) clearTimeout(renderTimer)
+            if (renderTimer !== undefined) fork(Fiber.interrupt(renderTimer))
             renderTimer = undefined
             renderer.surface.update(model)
             return
           }
           if (renderTimer !== undefined) return
-          renderTimer = setTimeout(() => {
-            renderTimer = undefined
-            renderer?.surface.update(model)
-          }, 50)
+          renderTimer = fork(
+            Effect.sleep("50 millis").pipe(
+              Effect.andThen(
+                Effect.sync(() => {
+                  renderTimer = undefined
+                  renderer?.surface.update(model)
+                }),
+              ),
+            ),
+          )
         }
         const dispatch = (event: Operation.InteractiveEvent) => {
           if (closed) return
@@ -1244,13 +1618,17 @@ if (import.meta.main) {
             closed = true
             process.off("SIGINT", interrupt)
             process.off("SIGTERM", close)
-            if (previewTimer !== undefined) clearTimeout(previewTimer)
+            if (previewTimer !== undefined) yield* Fiber.interrupt(previewTimer)
             previewTimer = undefined
-            if (renderTimer !== undefined) clearTimeout(renderTimer)
+            if (renderTimer !== undefined) yield* Fiber.interrupt(renderTimer)
             renderTimer = undefined
             renderer?.releaseTerminal()
             if (initialization !== undefined)
-              yield* Effect.promise(() => initialization!).pipe(Effect.catch(() => Effect.void))
+              yield* Effect.tryPromise({
+                try: () => initialization!,
+                catch: (cause) =>
+                  ExternalBoundaryError.make({ operation: "await TUI initialization", message: String(cause) }),
+              }).pipe(Effect.ignore)
             yield* interruptTrackedFibers([...fibers])
             if (showGoodbye) goodbye()
             yield* Effect.logInfo("tui.teardown.completed")
@@ -1311,8 +1689,13 @@ if (import.meta.main) {
           fibers.add(fiber)
           fork(Fiber.await(fiber).pipe(Effect.tap(() => Effect.sync(() => fibers.delete(fiber)))))
         }
-        const run = (effect: Effect.Effect<void, never>) => {
-          const fiber = fork(effect)
+        const run = <E>(effect: Effect.Effect<void, E, FileSystem.FileSystem>) => {
+          const fiber = fork(
+            effect.pipe(
+              provideLayerScoped(BunServices.layer),
+              Effect.catchCause((cause) => Effect.logError(Cause.pretty(cause))),
+            ),
+          )
           fibers.add(fiber)
           fork(Fiber.await(fiber).pipe(Effect.tap(() => Effect.sync(() => fibers.delete(fiber)))))
         }
@@ -1342,69 +1725,97 @@ if (import.meta.main) {
             yield* Effect.sync(startSelectedFollow)
           })
         const loadChangedFiles = () =>
-          Effect.promise(async () => {
-            const files = await readChangedFiles(model.workspace)
-            model = ViewState.update(model, { _tag: "ChangedFilesReplaced", files })
-            renderer?.surface.update(model)
-          }).pipe(Effect.asVoid)
+          readChangedFilesEffect(model.workspace).pipe(
+            Effect.tap((files) =>
+              Effect.sync(() => {
+                model = ViewState.update(model, { _tag: "ChangedFilesReplaced", files })
+                renderer?.surface.update(model)
+              }),
+            ),
+            Effect.asVoid,
+          )
         const watchChangedFiles = Effect.suspend(() =>
           model.changedFilesOpen ? loadChangedFiles() : Effect.void,
         ).pipe(Effect.repeat({ schedule: Schedule.spaced("1 second") }), Effect.asVoid)
         const editComposer = () =>
-          Effect.promise(async () => {
-            if (editor === undefined) {
-              renderer?.surface.showToast("Set VISUAL or EDITOR to edit the prompt", "#e06c75")
-              return
-            }
-            const relative = `.rika/compose-${Date.now()}.md`
-            const file = `${model.workspace}/${relative}`
-            await mkdir(`${model.workspace}/.rika`, { recursive: true })
-            await Bun.write(file, ViewState.displayInput(model))
-            renderer?.suspendTerminal()
-            try {
-              await Bun.spawn([editor, file], { stdin: "inherit", stdout: "inherit", stderr: "inherit" }).exited
-            } finally {
-              renderer?.resumeTerminal()
-            }
-            const edited = await Bun.file(file).text()
-            await rm(file, { force: true })
-            model = ViewState.update(model, { _tag: "ComposerReplaced", text: edited.replace(/\n$/, "") })
-            renderer?.surface.update(model)
-          }).pipe(Effect.asVoid)
+          Clock.currentTimeMillis.pipe(
+            Effect.flatMap((now) =>
+              Effect.gen(function* () {
+                if (editor === undefined) {
+                  renderer?.surface.showToast("Set VISUAL or EDITOR to edit the prompt", "#e06c75")
+                  return
+                }
+                const relative = `.rika/compose-${now}.md`
+                const file = `${model.workspace}/${relative}`
+                yield* mkdir(`${model.workspace}/.rika`, { recursive: true })
+                yield* Effect.tryPromise({
+                  try: () => Bun.write(file, ViewState.displayInput(model)),
+                  catch: (cause) => ExternalBoundaryError.make({ operation: "write composer", message: String(cause) }),
+                })
+                renderer?.suspendTerminal()
+                yield* Effect.tryPromise({
+                  try: () =>
+                    Bun.spawn([editor, file], { stdin: "inherit", stdout: "inherit", stderr: "inherit" }).exited,
+                  catch: (cause) => ExternalBoundaryError.make({ operation: "run editor", message: String(cause) }),
+                }).pipe(Effect.ensuring(Effect.sync(() => renderer?.resumeTerminal())))
+                const edited = yield* Effect.tryPromise({
+                  try: () => Bun.file(file).text(),
+                  catch: (cause) => ExternalBoundaryError.make({ operation: "read composer", message: String(cause) }),
+                })
+                yield* rm(file, { force: true })
+                model = ViewState.update(model, { _tag: "ComposerReplaced", text: edited.replace(/\n$/, "") })
+                renderer?.surface.update(model)
+              }),
+            ),
+            Effect.asVoid,
+          )
         const openPath = (target: PathTarget) =>
           run(
-            Effect.promise(async () => {
-              let path: string
-              try {
-                path = await resolveWorkspaceFile(model.workspace, target)
-              } catch {
-                renderer?.surface.showToast("Refusing to open a path outside the workspace", "#e06c75")
-                return
-              }
-              if (editor === undefined) {
-                try {
-                  const exit = await Bun.spawn(defaultOpenArguments(path), {
-                    stdin: "ignore",
-                    stdout: "ignore",
-                    stderr: "ignore",
-                  }).exited
-                  if (exit === 0) return
-                } catch {}
-                renderer?.surface.showToast("Could not open the file in the default application", "#e06c75")
-                return
-              }
-              renderer?.suspendTerminal()
-              try {
-                await Bun.spawn(editorArguments(editor, path, target.line, target.column), {
-                  stdin: "inherit",
-                  stdout: "inherit",
-                  stderr: "inherit",
-                }).exited
-              } finally {
-                renderer?.resumeTerminal()
-                if (!closed) renderer?.surface.update(model)
-              }
-            }).pipe(Effect.asVoid),
+            resolveWorkspaceFileImpl(model.workspace, target).pipe(
+              Effect.matchEffect({
+                onFailure: () =>
+                  Effect.sync(() => {
+                    renderer?.surface.showToast("Refusing to open a path outside the workspace", "#e06c75")
+                  }),
+                onSuccess: (path) =>
+                  Effect.gen(function* () {
+                    if (editor === undefined) {
+                      const exit = yield* Effect.tryPromise({
+                        try: () =>
+                          Bun.spawn(defaultOpenArguments(path), {
+                            stdin: "ignore",
+                            stdout: "ignore",
+                            stderr: "ignore",
+                          }).exited,
+                        catch: () =>
+                          ExternalBoundaryError.make({ operation: "open file", message: "Could not open file" }),
+                      }).pipe(Effect.orElseSucceed(() => -1))
+                      if (exit === 0) return
+                      renderer?.surface.showToast("Could not open the file in the default application", "#e06c75")
+                      return
+                    }
+                    renderer?.suspendTerminal()
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        Bun.spawn(editorArguments(editor, path, target.line, target.column), {
+                          stdin: "inherit",
+                          stdout: "inherit",
+                          stderr: "inherit",
+                        }).exited,
+                      catch: (cause) =>
+                        ExternalBoundaryError.make({ operation: "open editor", message: String(cause) }),
+                    }).pipe(
+                      Effect.ensuring(
+                        Effect.sync(() => {
+                          renderer?.resumeTerminal()
+                          if (!closed) renderer?.surface.update(model)
+                        }),
+                      ),
+                    )
+                  }),
+              }),
+              Effect.asVoid,
+            ),
           )
         const adapter: Session.Adapter = {
           submit,
@@ -1415,7 +1826,7 @@ if (import.meta.main) {
           interruptAndSend: (prompt) => run(session.interruptAndSend(prompt, dispatch)),
           cancel: () => run(session.cancel(dispatch)),
           decidePermission: (id, kind, decision) => run(session.resolvePermission(id, kind, decision, dispatch)),
-          selectThread: (id) => run(loadSelected(session.selectThread(id, dispatch))),
+          selectThread: (id) => run(session.selectThread(id, dispatch).pipe(loadSelected)),
           replay: (cursor) => {
             const turnId = model.activeTurnId
             if (turnId !== undefined) run(session.replay(turnId, cursor, dispatch))
@@ -1522,8 +1933,18 @@ if (import.meta.main) {
                 renderer?.surface.showToast(`Reasoning effort: ${model.reasoningEffort}`, "#58a6ff")
               if (!wasChangedFilesOpen && model.changedFilesOpen) run(loadChangedFiles())
               if (afterPreviewId !== undefined && afterPreviewId !== beforePreviewId) {
-                if (previewTimer !== undefined) clearTimeout(previewTimer)
-                previewTimer = setTimeout(() => run(session.previewThread(afterPreviewId, dispatch)), 120)
+                if (previewTimer !== undefined) fork(Fiber.interrupt(previewTimer))
+                const selectedPreviewTimer = fork(
+                  Effect.sleep("120 millis").pipe(
+                    Effect.andThen(session.previewThread(afterPreviewId, dispatch)),
+                    Effect.ensuring(
+                      Effect.sync(() => {
+                        if (previewTimer === selectedPreviewTimer) previewTimer = undefined
+                      }),
+                    ),
+                  ),
+                )
+                previewTimer = selectedPreviewTimer
               }
               if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined)
                 Session.execute(adapter, {
@@ -1553,8 +1974,9 @@ if (import.meta.main) {
             },
           }),
           () => closed,
-          async (created) => {
+          (created) => {
             created.releaseTerminal()
+            return Promise.resolve()
           },
         )
           .then((created) => {
@@ -1566,18 +1988,21 @@ if (import.meta.main) {
             }
             model = ViewState.update(model, { _tag: "FilesRequested" })
             created.surface.update(model)
-            created.renderer.start()
             run(Effect.logInfo("tui.renderer.started"))
             if (closed) return
             run(watchChangedFiles)
             run(
-              Effect.promise(async () => {
-                const gitListing = Bun.spawn(
-                  ["git", "-C", model.workspace, "ls-files", "--cached", "--others", "--exclude-standard"],
-                  { stdout: "pipe", stderr: "ignore" },
-                )
-                const gitText = await new Response(gitListing.stdout).text()
-                if ((await gitListing.exited) === 0) {
+              Effect.gen(function* () {
+                const [gitText, gitExit] = yield* gitOutput([
+                  "git",
+                  "-C",
+                  model.workspace,
+                  "ls-files",
+                  "--cached",
+                  "--others",
+                  "--exclude-standard",
+                ])
+                if (gitExit === 0) {
                   const files = gitText.split("\n").filter((line) => line.length > 0)
                   if (files.length > 0) {
                     model = ViewState.update(model, { _tag: "FilesReplaced", files: files.toSorted() })
@@ -1585,46 +2010,54 @@ if (import.meta.main) {
                     return
                   }
                 }
-                let initialized: ReturnType<typeof FileFinder.create> | undefined
-                try {
-                  initialized = FileFinder.create({ basePath: model.workspace, aiMode: true })
-                } catch {
-                  initialized = undefined
-                }
+                const initialized = yield* Effect.try({
+                  try: () => FileFinder.create({ basePath: model.workspace, aiMode: true }),
+                  catch: (cause) =>
+                    ExternalBoundaryError.make({ operation: "create file finder", message: String(cause) }),
+                }).pipe(Effect.orElseSucceed(() => undefined))
                 if (initialized?.ok !== true) {
-                  const files: Array<string> = []
-                  for await (const file of new Bun.Glob("**/*").scan({ cwd: model.workspace, onlyFiles: true }))
-                    if (!file.startsWith(".git/") && !file.startsWith("node_modules/")) files.push(file)
+                  const files = yield* Effect.tryPromise({
+                    try: () => Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: model.workspace, onlyFiles: true })),
+                    catch: (cause) =>
+                      ExternalBoundaryError.make({ operation: "scan workspace files", message: String(cause) }),
+                  })
                   model = ViewState.update(model, { _tag: "FilesReplaced", files: files.toSorted() })
                   created.surface.update(model)
                   return
                 }
-                try {
-                  await initialized.value.waitForScan(10_000)
-                  const result = initialized.value.glob("**/*", { pageSize: 10_000 })
-                  if (!result.ok) throw new Error(result.error)
-                  model = ViewState.update(model, {
-                    _tag: "FilesReplaced",
-                    files: result.value.items.map((item) => item.relativePath),
-                  })
-                  created.surface.update(model)
-                } finally {
-                  initialized.value.destroy()
-                }
+                yield* Effect.tryPromise({
+                  try: () => initialized.value.waitForScan(10_000),
+                  catch: (cause) =>
+                    ExternalBoundaryError.make({ operation: "scan file index", message: String(cause) }),
+                }).pipe(
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      const result = initialized.value.glob("**/*", { pageSize: 10_000 })
+                      if (!result.ok) throw new Error(result.error)
+                      model = ViewState.update(model, {
+                        _tag: "FilesReplaced",
+                        files: result.value.items.map((item) => item.relativePath),
+                      })
+                      created.surface.update(model)
+                    }),
+                  ),
+                  Effect.ensuring(Effect.sync(() => initialized.value.destroy())),
+                )
               }).pipe(Effect.asVoid),
             )
             run(
-              Effect.promise(async () => {
-                const proc = Bun.spawn(["git", "-C", model.workspace, "symbolic-ref", "--short", "HEAD"], {
-                  stdout: "pipe",
-                  stderr: "ignore",
-                })
-                const branch = (await new Response(proc.stdout).text()).trim()
-                if ((await proc.exited) === 0 && branch.length > 0 && branch !== "HEAD") {
-                  model = ViewState.update(model, { _tag: "BranchDetected", branch })
-                  created.surface.update(model)
-                }
-              }).pipe(Effect.asVoid),
+              gitOutput(["git", "-C", model.workspace, "symbolic-ref", "--short", "HEAD"]).pipe(
+                Effect.tap(([text, exit]) =>
+                  Effect.sync(() => {
+                    const branch = text.trim()
+                    if (exit === 0 && branch.length > 0 && branch !== "HEAD") {
+                      model = ViewState.update(model, { _tag: "BranchDetected", branch })
+                      created.surface.update(model)
+                    }
+                  }),
+                ),
+                Effect.asVoid,
+              ),
             )
             run(
               session.initialize(dispatch).pipe(
@@ -1651,7 +2084,9 @@ if (import.meta.main) {
               Effect.logError("tui.renderer.failed").pipe(
                 Effect.annotateLogs("rika.failure.kind", cause instanceof Error ? cause.name : typeof cause),
                 Effect.andThen(
-                  Effect.fail(new Operation.OperationUnavailable({ operation: "Interactive", message: String(cause) })),
+                  Effect.fail(
+                    Operation.OperationUnavailable.make({ operation: "Interactive", message: String(cause) }),
+                  ),
                 ),
               ),
             )
@@ -1673,9 +2108,9 @@ if (import.meta.main) {
           global: globalSettings,
           workspace: workspaceSettings,
         })
-        const effectiveConfig = yield* ConfigService.effective().pipe(Effect.provide(applicationConfigLayer))
+        const effectiveConfig = yield* ConfigService.effective().pipe(provideLayerScoped(applicationConfigLayer))
         const testModelConfigured =
-          process.env.RIKA_TEST_MODEL_RESPONSE !== undefined || process.env.RIKA_TEST_MODEL_SCRIPT !== undefined
+          environment.testModelResponse._tag === "Some" || environment.testModelScript._tag === "Some"
         const resolveWorkspaceExecutionRoute = (
           mode: "low" | "medium" | "high" | "ultra",
           tuning: { readonly reasoningEffort?: string; readonly fastMode?: boolean } | undefined,
@@ -1687,7 +2122,9 @@ if (import.meta.main) {
               global: globalSettings,
               workspace: settings,
             })
-            const resolvedWorkspaceConfig = yield* ConfigService.effective().pipe(Effect.provide(workspaceConfigLayer))
+            const resolvedWorkspaceConfig = yield* ConfigService.effective().pipe(
+              provideLayerScoped(workspaceConfigLayer),
+            )
             const routes = (["low", "medium", "high", "ultra"] as const).flatMap((candidate) => [
               ConfigContract.resolveModelRoute(resolvedWorkspaceConfig.settings, candidate, "main"),
               ConfigContract.resolveModelRoute(resolvedWorkspaceConfig.settings, candidate, "oracle"),
@@ -1707,7 +2144,7 @@ if (import.meta.main) {
               if (backend.registerModels !== undefined) yield* backend.registerModels(registrations)
             }
             return executionRoutePin(resolvedWorkspaceConfig.settings, mode, tuning)
-          }).pipe(Effect.provide(BunServices.layer))
+          }).pipe(provideLayerScoped(BunServices.layer))
         const parallelApiKey = effectiveConfig.environment.parallelApiKey
         const allModelRoutes = (["low", "medium", "high", "ultra"] as const).flatMap((mode) => [
           ConfigContract.resolveModelRoute(effectiveConfig.settings, mode, "main"),
@@ -1721,15 +2158,30 @@ if (import.meta.main) {
         )
         const repositories = Layer.succeedContext(yield* Layer.build(Layer.merge(repositoryLayer, turnRepositoryLayer)))
         const persistedModelRoutes = yield* TurnRepository.Service.pipe(
-          Effect.flatMap((turns) => turns.listNonterminal()),
+          Effect.flatMap((turns) => turns.listNonterminal),
           Effect.map(persistedModelRoutesForStartup),
-          Effect.provide(repositories),
+          provideLayerScoped(repositories),
+        )
+        const credentialNames = [
+          ...allModelRoutes.flatMap((route) =>
+            route.gateway.auth.type === "bearer-env" ? [route.gateway.auth.variable] : [],
+          ),
+          ...persistedModelRoutes.flatMap((route) =>
+            route.gatewayAuth.startsWith("bearer-env:") ? [route.gatewayAuth.slice("bearer-env:".length)] : [],
+          ),
+        ]
+        const environmentCredentials = Object.fromEntries(
+          yield* Effect.forEach(credentialNames, (name) =>
+            Config.option(Config.string(name)).pipe(
+              Effect.map((value) => [name, value._tag === "Some" ? value.value : undefined] as const),
+            ),
+          ),
         )
         const gatewayCredentials = gatewayCredentialsForRoutes(
           allModelRoutes,
           persistedModelRoutes,
           effectiveConfig.environment.gatewayCredentials,
-          (name) => process.env[name],
+          (name) => environmentCredentials[name],
         )
         const backendLayer = configuredBackendLayer(
           relayDatabase,
@@ -1754,12 +2206,12 @@ if (import.meta.main) {
               exists: (filename) =>
                 fileSystem
                   .exists(filename)
-                  .pipe(Effect.mapError((error) => new ConfigOperations.AdapterError({ message: String(error) }))),
+                  .pipe(Effect.mapError((error) => ConfigOperations.AdapterError.make({ message: String(error) }))),
               edit: (filename) =>
                 Effect.scoped(
                   Effect.gen(function* () {
                     if (editor === undefined)
-                      return yield* new ConfigOperations.AdapterError({
+                      return yield* ConfigOperations.AdapterError.make({
                         message: "Set VISUAL or EDITOR to edit configuration",
                       })
                     yield* fileSystem.makeDirectory(path.dirname(filename), { recursive: true })
@@ -1767,13 +2219,13 @@ if (import.meta.main) {
                     const handle = yield* spawner.spawn(ChildProcess.make(editor, [filename]))
                     const code = yield* handle.exitCode
                     if (Number(code) !== 0)
-                      return yield* new ConfigOperations.AdapterError({ message: `Editor exited with status ${code}` })
+                      return yield* ConfigOperations.AdapterError.make({ message: `Editor exited with status ${code}` })
                   }),
                 ).pipe(
                   Effect.mapError((error) =>
-                    error instanceof ConfigOperations.AdapterError
+                    Schema.is(ConfigOperations.AdapterError)(error)
                       ? error
-                      : new ConfigOperations.AdapterError({ message: String(error) }),
+                      : ConfigOperations.AdapterError.make({ message: String(error) }),
                   ),
                 ),
             })
@@ -1783,13 +2235,20 @@ if (import.meta.main) {
           repositoryLayer: repositories,
           turnRepositoryLayer: repositories,
           resolvedContextLayer,
-          backendLayer: lazyBackendLayer(backendLayer),
-          resolveExecutionRoute: resolveWorkspaceExecutionRoute,
+          backendLayer: lazyBackendLayer(backendLayer).pipe(
+            Layer.catchCause((cause) =>
+              Layer.effectContext(Effect.fail(OperationProductError.make({ message: Cause.pretty(cause) }))),
+            ),
+          ),
+          resolveExecutionRoute: (...arguments_) =>
+            resolveWorkspaceExecutionRoute(...arguments_).pipe(
+              Effect.mapError((error) => OperationProductError.make({ message: String(error) })),
+            ),
           toolRuntimeLayer: (workspace) =>
             ToolRuntime.layer(workspace).pipe(
               Layer.provide(
                 MediaView.analyzerTestLayer(() =>
-                  Effect.fail(new MediaView.MediaAnalysisError({ message: "Media analysis is unavailable" })),
+                  Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
                 ),
               ),
               Layer.provide(
@@ -1805,13 +2264,28 @@ if (import.meta.main) {
             Effect.gen(function* () {
               const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
               const layer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings })
-              const config = yield* ConfigService.effective().pipe(Effect.provide(layer))
+              const config = yield* ConfigService.effective().pipe(provideLayerScoped(layer))
               return config.settings.permissions.shell === "allow" ? "allow" : "ask"
-            }).pipe(Effect.provide(BunServices.layer), Effect.orDie),
-          makeThreadId: Effect.sync(() => Thread.ThreadId.make(crypto.randomUUID())),
-          makeTurnId: Effect.sync(() => Turn.TurnId.make(crypto.randomUUID())),
+            }).pipe(provideLayerScoped(BunServices.layer), Effect.orDie),
+          makeThreadId: Crypto.Crypto.pipe(
+            Effect.flatMap((crypto) => crypto.randomUUIDv4),
+            Effect.map(Thread.ThreadId.make),
+            Effect.orDie,
+            provideLayerScoped(BunCrypto.layer),
+          ),
+          makeTurnId: Crypto.Crypto.pipe(
+            Effect.flatMap((crypto) => crypto.randomUUIDv4),
+            Effect.map(Turn.TurnId.make),
+            Effect.orDie,
+            provideLayerScoped(BunCrypto.layer),
+          ),
           configOperations: {
-            layer: Layer.merge(configAdapter, applicationConfigLayer).pipe(Layer.provide(BunServices.layer)),
+            layer: Layer.merge(configAdapter, applicationConfigLayer).pipe(
+              Layer.provide(BunServices.layer),
+              Layer.catchCause((cause) =>
+                Layer.effectContext(Effect.fail(OperationProductError.make({ message: Cause.pretty(cause) }))),
+              ),
+            ),
             options: {
               globalConfigPath: globalConfig,
               workspaceConfigPath: workspaceConfig,
@@ -1829,7 +2303,12 @@ if (import.meta.main) {
                   layer: Layer.merge(
                     configAdapter,
                     ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings }),
-                  ).pipe(Layer.provide(BunServices.layer)),
+                  ).pipe(
+                    Layer.provide(BunServices.layer),
+                    Layer.catchCause((cause) =>
+                      Layer.effectContext(Effect.fail(OperationProductError.make({ message: Cause.pretty(cause) }))),
+                    ),
+                  ),
                   options: {
                     globalConfigPath: globalConfig,
                     workspaceConfigPath: `${workspace}/.rika/settings.json`,
@@ -1841,7 +2320,10 @@ if (import.meta.main) {
                     ],
                   },
                 }
-              }).pipe(Effect.provide(BunServices.layer)),
+              }).pipe(
+                provideLayerScoped(BunServices.layer),
+                Effect.mapError((error) => OperationProductError.make({ message: String(error) })),
+              ),
           },
           extensionOperations: { layer: extensionLayer },
           interactive: injectedInteractive,
@@ -1851,54 +2333,65 @@ if (import.meta.main) {
     )
   const residentOwner = (
     interactive: Parameters<NonNullable<Parameters<ResidentService.Interface["getOrCreate"]>[0]["owner"]>>[0],
-  ) =>
-    Layer.build(
-      operationLayer(interactive).pipe(
-        Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
-        Layer.orDie,
+  ): Effect.Effect<Operation.Interface, ResidentService.ResidentServiceError, Scope.Scope> =>
+    Effect.scope.pipe(
+      Effect.flatMap((scope) =>
+        Layer.buildWithScope(
+          operationLayer(interactive).pipe(
+            Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
+            Layer.orDie,
+          ),
+          scope,
+        ),
       ),
-    ).pipe(
       Effect.map((context) => Context.get(context, Operation.Service)),
       Effect.tapCause((cause) =>
         Effect.logError("resident.owner.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
       ),
-      Effect.mapError(
-        (cause) =>
-          new ResidentService.ResidentServiceError({
-            reason: "transport-failed",
-            message: String(cause),
-          }),
+      Effect.mapError((cause) =>
+        ResidentService.ResidentServiceError.make({
+          reason: "transport-failed",
+          message: String(cause),
+        }),
       ),
     )
   const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
-    Effect.logInfo("process.started").pipe(
-      Effect.andThen(
-        Effect.gen(function* () {
-          const globalSettings = yield* loadSettingsFile(globalConfig)
-          const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
-          const effectiveConfig = yield* ConfigService.effective().pipe(
-            Effect.provide(ConfigService.memoryLayer({ global: globalSettings, workspace: workspaceSettings })),
-          )
-          return yield* program.pipe(
-            Effect.provideService(
-              References.MinimumLogLevel,
-              Logging.minimumLevel(effectiveConfig.settings.logging.level),
-            ),
-          )
-        }),
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((startedAt) =>
+        Effect.logInfo("process.started").pipe(
+          Effect.andThen(
+            Effect.gen(function* () {
+              const globalSettings = yield* loadSettingsFile(globalConfig)
+              const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
+              const effectiveConfig = yield* ConfigService.effective().pipe(
+                provideLayerScoped(ConfigService.memoryLayer({ global: globalSettings, workspace: workspaceSettings })),
+              )
+              return yield* program.pipe(
+                Effect.provideService(
+                  References.MinimumLogLevel,
+                  Logging.minimumLevel(effectiveConfig.settings.logging.level),
+                ),
+              )
+            }),
+          ),
+          Effect.tapCause((cause) =>
+            Effect.logError("process.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+          ),
+          Effect.ensuring(Effect.logInfo("process.stopped")),
+          Effect.annotateLogs({
+            "rika.process.role": role,
+            "rika.process.instance": `${startedAt}-${process.pid}`,
+            "rika.process.pid": process.pid,
+            "rika.version": version,
+          }),
+        ),
       ),
-      Effect.tapCause((cause) =>
-        Effect.logError("process.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+      provideLayerScoped(
+        Layer.merge(
+          Logging.layer({ dataRoot, role, version }).pipe(Layer.provide(BunServices.layer)),
+          BunServices.layer,
+        ),
       ),
-      Effect.ensuring(Effect.logInfo("process.stopped")),
-      Effect.annotateLogs({
-        "rika.process.role": role,
-        "rika.process.instance": `${Date.now()}-${process.pid}`,
-        "rika.process.pid": process.pid,
-        "rika.version": version,
-      }),
-      Effect.provide(Logging.layer({ dataRoot, role, version })),
-      Effect.provide(BunServices.layer),
     )
   const dispatcherLayer = Layer.effect(
     Operation.Service,
@@ -1946,29 +2439,29 @@ if (import.meta.main) {
                                     RIKA_INTERNAL_RESIDENT_HOST: "1",
                                     RIKA_INTERNAL_RESIDENT_PROFILE: "default",
                                     RIKA_INTERNAL_RESIDENT_DATA_ROOT: dataRoot,
-                                    ...(process.env.RIKA_TEST_MODEL_RESPONSE === undefined
+                                    ...(environment.testModelResponse._tag === "None"
                                       ? {}
-                                      : { RIKA_TEST_MODEL_RESPONSE: process.env.RIKA_TEST_MODEL_RESPONSE }),
-                                    ...(process.env.RIKA_TEST_MODEL_SCRIPT === undefined
+                                      : { RIKA_TEST_MODEL_RESPONSE: environment.testModelResponse.value }),
+                                    ...(environment.testModelScript._tag === "None"
                                       ? {}
-                                      : { RIKA_TEST_MODEL_SCRIPT: process.env.RIKA_TEST_MODEL_SCRIPT }),
+                                      : { RIKA_TEST_MODEL_SCRIPT: environment.testModelScript.value }),
                                   },
                                 }),
                               )
-                              yield* handle.unref
+                              yield* yield* handle.unref
                               yield* Effect.logInfo("resident.spawned")
                             }).pipe(
                               Effect.mapError((cause) =>
-                                cause instanceof ResidentService.ResidentServiceError
+                                Schema.is(ResidentService.ResidentServiceError)(cause)
                                   ? cause
-                                  : new ResidentService.ResidentServiceError({
+                                  : ResidentService.ResidentServiceError.make({
                                       reason: "transport-failed",
                                       message: String(cause),
                                     }),
                               ),
                             ),
                         })
-                        .pipe(Effect.provide(Layer.merge(BunServices.layer, BunCrypto.layer))),
+                        .pipe(provideLayerScoped(Layer.merge(BunServices.layer, BunCrypto.layer))),
                     )
                     if (connected._tag === "Success") {
                       const connection = connected.success
@@ -1983,9 +2476,9 @@ if (import.meta.main) {
                         })
                         .pipe(
                           Effect.mapError((error) =>
-                            error instanceof Operation.OperationUnavailable
+                            Schema.is(Operation.OperationUnavailable)(error)
                               ? error
-                              : new Operation.OperationUnavailable({
+                              : Operation.OperationUnavailable.make({
                                   operation: clientInput._tag,
                                   message: error.message,
                                 }),
@@ -1994,7 +2487,7 @@ if (import.meta.main) {
                         )
                       return
                     }
-                    return yield* new Operation.OperationUnavailable({
+                    return yield* Operation.OperationUnavailable.make({
                       operation: clientInput._tag,
                       message: connected.failure.message,
                     })
@@ -2006,14 +2499,19 @@ if (import.meta.main) {
                 ),
               ),
             ),
-            Effect.provide(BunServices.layer),
+            provideLayerScoped(BunServices.layer),
+            Effect.mapError((error) =>
+              Schema.is(Operation.OperationUnavailable)(error)
+                ? error
+                : Operation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
+            ),
           ),
         ),
       })
     }),
   )
   const clientProgram = main.pipe(
-    Effect.provide(
+    provideLayerScoped(
       Layer.mergeAll(
         BunServices.layer,
         BunCrypto.layer,
@@ -2027,13 +2525,15 @@ if (import.meta.main) {
       ? Effect.die("Resident host data root is unavailable")
       : Effect.scoped(
           serveResident({
-            profile: process.env.RIKA_INTERNAL_RESIDENT_PROFILE ?? "default",
+            profile: environment.residentProfile._tag === "Some" ? environment.residentProfile.value : "default",
             dataRoot: hostDataRoot,
-            graceMilliseconds: Number(process.env.RIKA_INTERNAL_RESIDENT_GRACE ?? "500"),
+            graceMilliseconds: Number(
+              environment.residentGrace._tag === "Some" ? environment.residentGrace.value : "500",
+            ),
             owner: residentOwner,
           }),
-        ).pipe(Effect.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)))
-  if (process.env.RIKA_INTERNAL_RESIDENT_HOST === "1")
+        ).pipe(provideLayerScoped(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)))
+  if (environment.residentHost._tag === "Some" && environment.residentHost.value === "1")
     BunRuntime.runMain(observedProgram("resident", hostDataRoot ?? defaultDataRoot, hostProgram))
   else BunRuntime.runMain(clientProgram)
 }

@@ -3,6 +3,7 @@ import { ConfigOperations } from "../src/index"
 import { ConfigService } from "@rika/config"
 import { Effect, Layer, Redacted, Ref } from "effect"
 import { TestConsole } from "effect/testing"
+import { provideLayer } from "./layer"
 
 const options: ConfigOperations.Options = {
   globalConfigPath: "/home/config.json",
@@ -25,7 +26,7 @@ it.effect("prints effective redacted config and keymap", () =>
       yield* ConfigOperations.run({ _tag: "Config", action: "list" }, options)
       yield* ConfigOperations.run({ _tag: "Config", action: "keymap" }, options)
       return yield* TestConsole.logLines
-    }).pipe(Effect.provide(layer))
+    }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"parallelApiKey": "present"')
     expect(lines.join("\n")).not.toContain("never-print-this")
     expect(lines[0]).toContain('"gatewayName": "openai"')
@@ -50,7 +51,7 @@ it.effect("edits the selected path and reports secret-safe doctor status", () =>
       yield* ConfigOperations.run({ _tag: "Config", action: "edit", workspace: true }, options)
       yield* ConfigOperations.run({ _tag: "Doctor" }, options)
       return yield* TestConsole.logLines
-    }).pipe(Effect.provide(layer))
+    }).pipe(provideLayer(layer))
     expect(yield* Ref.get(edits)).toEqual([options.globalConfigPath, options.workspaceConfigPath])
     expect(lines[0]).toContain('"product": "present"')
     expect(lines[0]).toContain('"parallel": "missing"')
@@ -82,7 +83,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
       yield* ConfigOperations.run({ _tag: "Mcp", action: "doctor" }, presentOptions)
       yield* ConfigOperations.run({ _tag: "Doctor" }, presentOptions)
       return yield* TestConsole.logLines
-    }).pipe(Effect.provide(layer))
+    }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"apiKey": "present"')
     expect(lines[1]).toContain('"transport": "command"')
     expect(lines[3]).toContain('"relay": "missing"')
@@ -106,7 +107,7 @@ it.effect("reports missing config and mixed doctor paths", () =>
       yield* ConfigOperations.run({ _tag: "Config", action: "list" }, options)
       yield* ConfigOperations.run({ _tag: "Doctor" }, options)
       return yield* TestConsole.logLines
-    }).pipe(Effect.provide(layer))
+    }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"parallelApiKey": "missing"')
     expect(lines[1]).toContain('"product": "missing"')
     expect(lines[1]).toContain('"relay": "present"')

@@ -10,6 +10,16 @@ import { Effect, Layer, Ref, Schema } from "effect"
 import { TestConsole } from "effect/testing"
 import { Operation, ResolvedContext } from "../src/index"
 
+const provideLayer =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const context = yield* Layer.build(layer)
+        return yield* Effect.provide(effect, context)
+      }),
+    )
+
 const nonActivation = (list: ReadonlyArray<Operation.InteractiveEvent>) =>
   list.filter((event) => event._tag !== "ThreadActivated")
 
@@ -44,7 +54,7 @@ const backend = ExecutionBackend.Service.of({
     }),
   replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
-  inspect: () => Effect.succeed(undefined),
+  inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: () => Effect.void,
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.void,
@@ -66,7 +76,7 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, repository),
@@ -125,7 +135,7 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -175,7 +185,7 @@ describe("Operation", () => {
           ),
       })
       yield* Operation.reconcile().pipe(
-        Effect.provide(
+        provideLayer(
           Layer.mergeAll(
             reconcileDependencies(unusedExtensions),
             ThreadRepository.memoryLayer(),
@@ -234,9 +244,9 @@ describe("Operation", () => {
         Layer.succeed(TurnRepository.Service, turns),
         Layer.succeed(ExecutionBackend.Service, routeOwnerBackend),
       )
-      yield* Operation.reconcile().pipe(Effect.provide(dependencies))
+      yield* Operation.reconcile().pipe(provideLayer(dependencies))
       expect((yield* turns.get(owner))?.status).toBe("running")
-      yield* Operation.reconcile().pipe(Effect.provide(dependencies))
+      yield* Operation.reconcile().pipe(provideLayer(dependencies))
       expect((yield* turns.get(owner))?.status).toBe("failed")
       expect(yield* Ref.get(starts)).toBe(0)
     }),
@@ -273,7 +283,7 @@ describe("Operation", () => {
           ),
       })
       yield* Operation.reconcile().pipe(
-        Effect.provide(
+        provideLayer(
           Layer.mergeAll(
             reconcileDependencies(unusedExtensions),
             ThreadRepository.memoryLayer(),
@@ -328,7 +338,7 @@ describe("Operation", () => {
           ),
       })
       yield* Operation.reconcile().pipe(
-        Effect.provide(
+        provideLayer(
           Layer.mergeAll(
             reconcileDependencies(unusedExtensions),
             ThreadRepository.memoryLayer(),
@@ -350,7 +360,7 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Doctor" })
-      }).pipe(Effect.provide(Operation.testLayer(calls)))
+      }).pipe(provideLayer(Operation.testLayer(calls)))
       expect(yield* Ref.get(calls)).toEqual([{ _tag: "Doctor" }])
     }),
   )
@@ -371,7 +381,7 @@ describe("Operation", () => {
       )
       expect(unavailable._tag).toBe("Failure")
       expect(run._tag).toBe("Failure")
-    }).pipe(Effect.provide(Operation.unavailableLayer)),
+    }).pipe(provideLayer(Operation.unavailableLayer)),
   )
 
   it.effect("starts, inspects, and reports missing workflow runs", () =>
@@ -425,7 +435,7 @@ describe("Operation", () => {
         yield* operation.run({ _tag: "Workflow", action: "start", name: "delivery", runId: "run", revision: 2 })
         yield* operation.run({ _tag: "Workflow", action: "inspect", runId: "run" })
         return yield* Effect.result(operation.run({ _tag: "Workflow", action: "inspect", runId: "missing" }))
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       expect(output._tag).toBe("Failure")
       expect(yield* Ref.get(calls)).toEqual(["register", "start:delivery:run:2", "inspect:run", "inspect:missing"])
     }),
@@ -470,8 +480,8 @@ describe("Operation", () => {
         yield* operation.run({ _tag: "Thread", action: "delete", threadId: "thread-a" })
         expect(missing._tag).toBe("Failure")
         return yield* TestConsole.logLines
-      }).pipe(Effect.provide(layer))
-      const lines = Schema.decodeUnknownSync(Schema.Array(Schema.String))(output)
+      }).pipe(provideLayer(layer))
+      const lines = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(output)
       expect(lines.some((line) => line.includes('"title":"Named"'))).toBe(true)
       expect(lines.some((line) => line.includes('"workspace":"/client-work"'))).toBe(true)
       expect(lines.some((line) => line.includes('"name":"read_file"'))).toBe(true)
@@ -518,7 +528,7 @@ describe("Operation", () => {
         yield* operation.run({ _tag: "Thread", action: "export", threadId: "thread-a", format: "markdown" })
         yield* operation.run({ _tag: "Thread", action: "usage", threadId: "thread-a" })
         return yield* TestConsole.logLines
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       expect(output[0]).toContain('"id":"thread-a"')
       expect(output[0]).toContain('"status":"completed"')
       expect(output[1]).toContain('"id":"thread-a"')
@@ -571,7 +581,7 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Thread", action: "fork", threadId: "source", atTurn: "one" })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       expect(yield* turns.list(Thread.ThreadId.make("fork"))).toMatchObject([{ prompt: "one", status: "completed" }])
       expect(yield* repository.get(Thread.ThreadId.make("fork"))).toMatchObject({ title: "Source", labels: ["kept"] })
     }),
@@ -590,7 +600,7 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run(input)
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer(),
             turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -610,8 +620,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
-      const dispatch = (event: Operation.InteractiveEvent) =>
-        Effect.runSync(Ref.update(events, (all) => [...all, event]))
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+      const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const layer = Operation.productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer([
@@ -633,7 +643,7 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("missing session")
       yield* session.initialize(dispatch)
@@ -661,8 +671,8 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
-      const dispatch = (event: Operation.InteractiveEvent) =>
-        Effect.runSync(Ref.update(events, (all) => [...all, event]))
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+      const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const ensured = yield* Ref.make<ReadonlyArray<readonly [string, number]>>([])
       const notified = yield* Ref.make<ReadonlyArray<readonly [string, string | undefined]>>([])
       const promoters = yield* Ref.make<ReadonlyArray<ExecutionBackend.TurnPromoter>>([])
@@ -721,7 +731,7 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("missing session")
       yield* session.selectThread("hosted", dispatch)
@@ -781,8 +791,9 @@ describe("Operation", () => {
       ])
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const dispatch = (event: Operation.InteractiveEvent) =>
-        Effect.runSync(Ref.update(events, (current) => [...current, event]))
+        runSync(Ref.update(events, (current) => [...current, event]))
       const controlBackend = ExecutionBackend.Service.of({
         ...backend,
         inspect: (turnId) =>
@@ -805,7 +816,7 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -867,11 +878,12 @@ describe("Operation", () => {
       ])
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -889,9 +901,9 @@ describe("Operation", () => {
       )
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("Missing session")
-      yield* session.reopenThread((event) => Effect.runSync(Ref.update(events, (all) => [...all, event])))
+      yield* session.reopenThread((event) => runSync(Ref.update(events, (all) => [...all, event])))
       yield* session.interruptAndSend("replacement prompt", (event) =>
-        Effect.runSync(Ref.update(events, (all) => [...all, event])),
+        runSync(Ref.update(events, (all) => [...all, event])),
       )
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({ status: "cancelled" })
       expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "completed" })
@@ -905,6 +917,7 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const liveBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -928,12 +941,10 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("Missing interactive session")
-      yield* session.submit("exact prompt", (event) =>
-        Effect.runSync(Ref.update(events, (values) => [...values, event])),
-      )
+      yield* session.submit("exact prompt", (event) => runSync(Ref.update(events, (values) => [...values, event])))
       const dispatched = yield* Ref.get(events)
       expect(dispatched.slice(0, 5)).toEqual([
         { _tag: "ThreadActivated", threadId: "thread-interactive", title: "exact prompt" },
@@ -1003,7 +1014,7 @@ describe("Operation", () => {
                         },
                       ],
                     })
-                  : Effect.fail(new ExecutionBackend.BackendError({ message: `${mode} backend must not start` })),
+                  : Effect.fail(ExecutionBackend.BackendError.make({ message: `${mode} backend must not start` })),
               ),
             ),
         })
@@ -1019,7 +1030,7 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("Missing interactive session")
       yield* session.submit("Build groceries", () => {}, "high")
@@ -1040,11 +1051,12 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const titleFailingBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
           input.turnId.startsWith("title:")
-            ? Effect.fail(new ExecutionBackend.BackendError({ message: "title unavailable" }))
+            ? Effect.fail(ExecutionBackend.BackendError.make({ message: "title unavailable" }))
             : backend.start(input),
       })
       const layer = Operation.productLayer({
@@ -1059,12 +1071,10 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("Missing interactive session")
-      yield* session.submit("Stable seed title", (event) =>
-        Effect.runSync(Ref.update(events, (values) => [...values, event])),
-      )
+      yield* session.submit("Stable seed title", (event) => runSync(Ref.update(events, (values) => [...values, event])))
 
       expect(yield* turns.get(Turn.TurnId.make("turn-title-failure"))).toMatchObject({ status: "completed" })
       expect(yield* repository.get(Thread.ThreadId.make("thread-title-failure"))).toMatchObject({
@@ -1081,9 +1091,10 @@ describe("Operation", () => {
       const turns = yield* TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const promotionFailingBackend = ExecutionBackend.Service.of({
         ...backend,
-        ensureThreadHost: () => Effect.fail(new ExecutionBackend.BackendError({ message: "promotion failed" })),
+        ensureThreadHost: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "promotion failed" })),
         notifyThreadHost: () => Effect.void,
         registerTurnPromoter: () => Effect.void,
       })
@@ -1099,11 +1110,11 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const session = (yield* Ref.get(sessions))[0]
       if (session === undefined) return yield* Effect.die("Missing interactive session")
       yield* session.submit("Completed response", (event) =>
-        Effect.runSync(Ref.update(events, (values) => [...values, event])),
+        runSync(Ref.update(events, (values) => [...values, event])),
       )
 
       expect(yield* turns.get(Turn.TurnId.make("turn-promotion-failure"))).toMatchObject({ status: "completed" })
@@ -1119,6 +1130,7 @@ describe("Operation", () => {
           const turns = yield* TurnRepository.makeMemory()
           const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
           const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+          const runSync = Effect.runSyncWith(yield* Effect.context<never>())
           const caseBackend = ExecutionBackend.Service.of({
             ...backend,
             start: (input) =>
@@ -1132,9 +1144,9 @@ describe("Operation", () => {
                         now: 1,
                       })
                       .pipe(
-                        Effect.mapError((cause) => new ExecutionBackend.BackendError({ message: cause.message })),
+                        Effect.mapError((cause) => ExecutionBackend.BackendError.make({ message: cause.message })),
                         Effect.andThen(
-                          Effect.fail(new ExecutionBackend.BackendError({ message: "interactive backend failed" })),
+                          Effect.fail(ExecutionBackend.BackendError.make({ message: "interactive backend failed" })),
                         ),
                       )
                   : backend.start(input)
@@ -1159,7 +1171,7 @@ describe("Operation", () => {
             const operation = yield* Operation.Service
             yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
           }).pipe(
-            Effect.provide(
+            provideLayer(
               Operation.productLayer({
                 repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
                 turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -1173,7 +1185,7 @@ describe("Operation", () => {
           )
           const session = (yield* Ref.get(sessions))[0]
           if (session === undefined) return yield* Effect.die("Missing interactive session")
-          yield* session.submit("prompt", (event) => Effect.runSync(Ref.update(events, (values) => [...values, event])))
+          yield* session.submit("prompt", (event) => runSync(Ref.update(events, (values) => [...values, event])))
           return {
             events: yield* Ref.get(events),
             turn: yield* turns.get(Turn.TurnId.make(`turn-${status}`)),
@@ -1266,7 +1278,7 @@ describe("Operation", () => {
           streamJsonThinking: false,
         })
         return yield* TestConsole.logLines
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const thread = yield* repository.get(Thread.ThreadId.make("thread-new"))
       const turn = yield* turns.get(Turn.TurnId.make("turn-new"))
       expect(thread).toMatchObject({
@@ -1326,20 +1338,14 @@ describe("Operation", () => {
           streamJsonThinking: false,
         })
         return yield* TestConsole.logLines
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       const persisted = yield* repository.list({ includeArchived: true })
       const turn = yield* turns.get(Turn.TurnId.make("turn-existing"))
       expect(persisted).toEqual([thread])
       expect(turn).toMatchObject({ threadId: "thread-existing", prompt: "existing prompt", status: "completed" })
       expect(output.filter((line): line is string => typeof line === "string" && line.startsWith("{"))).toEqual([
-        JSON.stringify({
-          cursor: "cursor-a",
-          sequence: 1,
-          type: "model.output.completed",
-          createdAt: 1,
-          text: "answer",
-        }),
-        JSON.stringify({ cursor: "cursor-b", sequence: 2, type: "execution.completed", createdAt: 2 }),
+        '{"cursor":"cursor-a","sequence":1,"type":"model.output.completed","createdAt":1,"text":"answer"}',
+        '{"cursor":"cursor-b","sequence":2,"type":"execution.completed","createdAt":2}',
       ])
     }),
   )
@@ -1361,10 +1367,10 @@ describe("Operation", () => {
       expect(error).toMatchObject({
         _tag: "OperationUnavailable",
         operation: "Run",
-        message: "Error: Thread missing does not exist",
       })
+      expect(error.message).toContain("Thread missing does not exist")
     }).pipe(
-      Effect.provide(
+      provideLayer(
         Operation.productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -1428,7 +1434,7 @@ describe("Operation", () => {
           streamJsonInput: false,
           streamJsonThinking: false,
         })
-      }).pipe(Effect.provide(operationLayer))
+      }).pipe(provideLayer(operationLayer))
       expect(yield* Ref.get(starts)).toBe(0)
       expect((yield* turns.get(Turn.TurnId.make("queued")))?.status).toBe("queued")
     }),
@@ -1453,7 +1459,7 @@ describe("Operation", () => {
       })
       expect(error.message).toContain("backend failed")
     }).pipe(
-      Effect.provide(
+      provideLayer(
         Operation.productLayer({
           repositoryLayer: ThreadRepository.memoryLayer(),
           turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -1461,7 +1467,7 @@ describe("Operation", () => {
             ExecutionBackend.Service,
             ExecutionBackend.Service.of({
               ...backend,
-              start: () => Effect.fail(new ExecutionBackend.BackendError({ message: "backend failed" })),
+              start: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "backend failed" })),
             }),
           ),
           defaultWorkspace: "/work",
@@ -1550,7 +1556,7 @@ describe("Operation", () => {
           streamJsonThinking: false,
         })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -1582,7 +1588,7 @@ describe("Operation", () => {
       }
       const extensions = ExecutionExtensions.Service.of({
         future: () => Effect.die("unused"),
-        resume: () => Effect.fail(new PluginRegistry.GenerationUnavailable({ generation: "missing" })),
+        resume: () => Effect.fail(PluginRegistry.GenerationUnavailable.make({ generation: "missing" })),
       })
       const run = (resumeFails: boolean) =>
         Effect.gen(function* () {
@@ -1598,7 +1604,7 @@ describe("Operation", () => {
             }),
           )
         }).pipe(
-          Effect.provide(
+          provideLayer(
             Operation.productLayer({
               repositoryLayer: ThreadRepository.memoryLayer(),
               turnRepositoryLayer: TurnRepository.memoryLayer(),
@@ -1630,12 +1636,15 @@ describe("Operation", () => {
         },
       ])
       const failure = yield* Operation.reconcile(extensions).pipe(
-        Effect.provide(
+        provideLayer(
           Layer.mergeAll(
             reconcileDependencies(extensions),
             ThreadRepository.memoryLayer(),
             Layer.succeed(TurnRepository.Service, existing),
-            Layer.succeed(ExecutionBackend.Service, { ...backend, inspect: () => Effect.succeed(undefined) }),
+            Layer.succeed(ExecutionBackend.Service, {
+              ...backend,
+              inspect: () => Effect.void.pipe(Effect.as(undefined)),
+            }),
           ),
         ),
         Effect.result,
@@ -1682,14 +1691,14 @@ describe("Operation", () => {
         },
       ])
       yield* Operation.reconcile(extensions).pipe(
-        Effect.provide(
+        provideLayer(
           Layer.mergeAll(
             reconcileDependencies(extensions),
             ThreadRepository.memoryLayer(),
             Layer.succeed(TurnRepository.Service, pinned),
             Layer.succeed(ExecutionBackend.Service, {
               ...backend,
-              inspect: () => Effect.succeed(undefined),
+              inspect: () => Effect.void.pipe(Effect.as(undefined)),
               start: (input) => Effect.succeed({ turnId: input.turnId, status: "completed", events: [] }),
             }),
           ),
@@ -1710,12 +1719,15 @@ describe("Operation", () => {
         true,
       )
       yield* Operation.reconcile(extensions).pipe(
-        Effect.provide(
+        provideLayer(
           Layer.mergeAll(
             reconcileDependencies(extensions),
             ThreadRepository.memoryLayer(),
             Layer.succeed(TurnRepository.Service, unpinned),
-            Layer.succeed(ExecutionBackend.Service, { ...backend, inspect: () => Effect.succeed(undefined) }),
+            Layer.succeed(ExecutionBackend.Service, {
+              ...backend,
+              inspect: () => Effect.void.pipe(Effect.as(undefined)),
+            }),
           ),
         ),
       )
@@ -1755,7 +1767,7 @@ describe("Operation", () => {
           streamJsonThinking: false,
         })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([mentioned]),
             turnRepositoryLayer: TurnRepository.memoryLayer([
@@ -1809,7 +1821,7 @@ describe("Operation", () => {
         yield* operation.run({ _tag: "Thread", action: "top" })
         yield* operation.run({ _tag: "Thread", action: "list", limit: 1 })
         yield* operation.run({ _tag: "Thread", action: "fork", threadId: thread.id })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
     }),
   )
 
@@ -1848,8 +1860,8 @@ describe("Operation", () => {
       )
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
-      const dispatch = (event: Operation.InteractiveEvent) =>
-        Effect.runSync(Ref.update(events, (all) => [...all, event]))
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+      const dispatch = (event: Operation.InteractiveEvent) => runSync(Ref.update(events, (all) => [...all, event]))
       const modeBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -1865,7 +1877,7 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Interactive", prompt: [], mode: "high", ephemeral: false })
       }).pipe(
-        Effect.provide(
+        provideLayer(
           Operation.productLayer({
             repositoryLayer: ThreadRepository.memoryLayer([thread]),
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
@@ -1892,12 +1904,13 @@ describe("Operation", () => {
   it.effect("pins the selected mode for non-interactive runs and maps workflow defects", () =>
     Effect.gen(function* () {
       const modes = yield* Ref.make<ReadonlyArray<string>>([])
+      const runSync = Effect.runSyncWith(yield* Effect.context<never>())
       const layer = Operation.productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
         turnRepositoryLayer: TurnRepository.memoryLayer(),
         backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
         resolveExecutionRoute: (mode) => {
-          Effect.runSync(Ref.update(modes, (all) => [...all, mode]))
+          runSync(Ref.update(modes, (all) => [...all, mode]))
           return Effect.succeed({
             version: 1,
             mode,
@@ -1947,7 +1960,7 @@ describe("Operation", () => {
           streamJsonInput: false,
           streamJsonThinking: false,
         })
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       expect(yield* Ref.get(modes)).toEqual(["ultra"])
 
       const workflowLayer = Operation.productLayer({
@@ -1957,7 +1970,7 @@ describe("Operation", () => {
           ExecutionBackend.Service,
           ExecutionBackend.Service.of({
             ...backend,
-            inspectWorkflow: () => Effect.fail(new ExecutionBackend.BackendError({ message: "workflow failure" })),
+            inspectWorkflow: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "workflow failure" })),
           }),
         ),
         defaultWorkspace: "/work",
@@ -1970,7 +1983,7 @@ describe("Operation", () => {
         const update = yield* Effect.result(operation.run({ _tag: "Update" }))
         const skill = yield* Effect.result(operation.run({ _tag: "Skill", action: "list" }))
         return [workflow, update, skill]
-      }).pipe(Effect.provide(workflowLayer))
+      }).pipe(provideLayer(workflowLayer))
       expect(result.every((value) => value._tag === "Failure")).toBe(true)
     }),
   )

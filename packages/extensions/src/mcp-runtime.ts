@@ -12,7 +12,7 @@ export interface Interface {
   readonly connect: (server: Server) => Effect.Effect<McpToolSource.Interface, Diagnostic, Scope.Scope>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/McpRuntime") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/extensions/mcp-runtime/Service") {}
 
 export const layerWithStore = Layer.effect(
   Service,
@@ -48,7 +48,9 @@ export const layerWithStore = Layer.effect(
           }),
         ).pipe(
           Effect.map((context) => Context.get(context, McpToolSource.McpToolSource)),
-          Effect.mapError((error) => new Diagnostic({ server: server.name, phase: "connect", message: error.message })),
+          Effect.mapError((error) =>
+            Diagnostic.make({ server: server.name, phase: "connect", message: error.message }),
+          ),
         )
       }),
     })
@@ -64,7 +66,7 @@ export const discover = Effect.fn("McpRuntime.discover")(function* (server: Serv
   const source = yield* runtime.connect(server)
   return yield* source.tools.pipe(
     Effect.map((tools) => tools.toSorted((left, right) => left.name.localeCompare(right.name))),
-    Effect.mapError((error) => new Diagnostic({ server: server.name, phase: "discover", message: String(error) })),
+    Effect.mapError((error) => Diagnostic.make({ server: server.name, phase: "discover", message: String(error) })),
   )
 })
 
@@ -77,5 +79,5 @@ export const call = Effect.fn("McpRuntime.call")(function* (
   const source = yield* runtime.connect(server)
   return yield* source
     .callTool(tool, input)
-    .pipe(Effect.mapError((error) => new Diagnostic({ server: server.name, phase: "call", message: error.message })))
+    .pipe(Effect.mapError((error) => Diagnostic.make({ server: server.name, phase: "call", message: error.message })))
 })

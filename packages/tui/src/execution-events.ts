@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Message, TranscriptBlock } from "./view-state"
 
 export interface Event {
@@ -223,7 +224,10 @@ export const messages = (event: Event): ReadonlyArray<Message> => {
   return projected === undefined ? [] : [replayed(projected, "")]
 }
 
-export const project = (model: import("./view-state").Model, events: ReadonlyArray<Event>) => {
+export const project: {
+  (events: ReadonlyArray<Event>): (model: import("./view-state").Model) => import("./view-state").Model
+  (model: import("./view-state").Model, events: ReadonlyArray<Event>): import("./view-state").Model
+} = Function.dual(2, (model: import("./view-state").Model, events: ReadonlyArray<Event>) => {
   let next = model
   const seen = new Set(next.seenExecutionEventKeys)
   let eventCursor = next.eventCursor
@@ -240,17 +244,27 @@ export const project = (model: import("./view-state").Model, events: ReadonlyArr
     seenExecutionEventKeys: keys.length > 2048 ? keys.slice(-2048) : keys,
     eventCursor,
   }
-}
+})
 
-export const projectTurn = (
-  model: import("./view-state").Model,
-  turnId: string,
-  prompt: string,
-  events: ReadonlyArray<Event>,
-) =>
-  project(
-    importViewStateUpdate(model, { _tag: "TurnStarted", turnId, prompt }),
-    events.map((event) => ({ ...event, turnId })),
-  )
+export const projectTurn: {
+  (
+    turnId: string,
+    prompt: string,
+    events: ReadonlyArray<Event>,
+  ): (model: import("./view-state").Model) => import("./view-state").Model
+  (
+    model: import("./view-state").Model,
+    turnId: string,
+    prompt: string,
+    events: ReadonlyArray<Event>,
+  ): import("./view-state").Model
+} = Function.dual(
+  4,
+  (model: import("./view-state").Model, turnId: string, prompt: string, events: ReadonlyArray<Event>) =>
+    project(
+      importViewStateUpdate(model, { _tag: "TurnStarted", turnId, prompt }),
+      events.map((event) => ({ ...event, turnId })),
+    ),
+)
 
 import { update as importViewStateUpdate } from "./view-state"

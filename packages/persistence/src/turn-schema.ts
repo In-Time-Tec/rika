@@ -31,9 +31,9 @@ export const ExecutionModelRoute = Schema.Struct({
   requestVariant: Schema.String,
   providerOptions: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
   compaction: Schema.Struct({
-    contextWindow: Schema.Number,
-    reserveTokens: Schema.Number,
-    keepRecentTokens: Schema.Number,
+    contextWindow: Schema.Finite,
+    reserveTokens: Schema.Finite,
+    keepRecentTokens: Schema.Finite,
   }),
 })
 export type ExecutionModelRoute = typeof ExecutionModelRoute.Type
@@ -41,7 +41,7 @@ export type ExecutionModelRoute = typeof ExecutionModelRoute.Type
 export const ExecutionRoutePin = Schema.Struct({
   version: Schema.Literal(1),
   mode: Schema.Literals(["low", "medium", "high", "ultra", "test"]),
-  tokenBudget: Schema.optionalKey(Schema.Number),
+  tokenBudget: Schema.optionalKey(Schema.Finite),
   compactionSummary: Schema.optionalKey(ExecutionModelRoute),
   main: ExecutionModelRoute,
   oracle: ExecutionModelRoute,
@@ -108,7 +108,7 @@ export const Turn = Schema.Struct({
   extensionPin: Schema.optionalKey(ExecutionExtensionPin),
   executionRoute: Schema.optionalKey(ExecutionRoutePin),
   reviewFanOutId: Schema.optionalKey(Schema.String),
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 })
 export type Turn = typeof Turn.Type

@@ -6,7 +6,7 @@ export class WorkflowError extends Schema.TaggedErrorClass<WorkflowError>()("Pro
 }) {}
 
 export interface Interface {
-  readonly register: () => Effect.Effect<
+  readonly register: Effect.Effect<
     ReadonlyArray<{ readonly name: string; readonly revision: number; readonly digest: string }>,
     WorkflowError
   >
@@ -19,15 +19,15 @@ export interface Interface {
   readonly cancel: (runId: string) => Effect.Effect<ExecutionBackend.WorkflowInspection | undefined, WorkflowError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/app/Workflow") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/workflow/Service") {}
 
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const backend = yield* ExecutionBackend.Service
-    const mapError = (cause: ExecutionBackend.BackendError) => new WorkflowError({ message: cause.message })
+    const mapError = (cause: ExecutionBackend.BackendError) => WorkflowError.make({ message: cause.message })
     return Service.of({
-      register: Effect.fn("Workflow.register")(() => backend.registerWorkflows().pipe(Effect.mapError(mapError))),
+      register: backend.registerWorkflows().pipe(Effect.mapError(mapError)),
       start: Effect.fn("Workflow.start")((name, runId, revision) =>
         backend.startWorkflow(name, runId, revision).pipe(Effect.mapError(mapError)),
       ),

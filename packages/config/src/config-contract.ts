@@ -1,4 +1,4 @@
-import { Schema, type Redacted } from "effect"
+import { Function, Schema, type Redacted } from "effect"
 import { defaults as modelDefaults, supportedEfforts } from "./models"
 
 export type ModeId = "low" | "medium" | "high" | "ultra"
@@ -140,7 +140,7 @@ const object = (value: unknown): value is Record<string, unknown> =>
 
 const exactKeys = (path: string, label: string, value: Record<string, unknown>, allowed: ReadonlyArray<string>) => {
   const unknown = Object.keys(value).find((key) => !allowed.includes(key))
-  if (unknown !== undefined) throw new ConfigFileError({ path, message: `${label} contains unknown key ${unknown}` })
+  if (unknown !== undefined) throw ConfigFileError.make({ path, message: `${label} contains unknown key ${unknown}` })
 }
 
 const positiveInteger = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value > 0
@@ -207,16 +207,16 @@ const credentialOptionPath = (value: unknown, path: string): string | undefined 
 const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): ResolvedModelRoute => {
   const alias = settings.models[route.alias]
   if (alias === undefined)
-    throw new ModelRouteError({ mode: owner, message: `${owner} references missing model alias ${route.alias}` })
+    throw ModelRouteError.make({ mode: owner, message: `${owner} references missing model alias ${route.alias}` })
   const gateway = settings.gateways[alias.gateway]
   if (gateway === undefined)
-    throw new ModelRouteError({
+    throw ModelRouteError.make({
       mode: owner,
       message: `Model alias ${route.alias} references missing gateway ${alias.gateway}`,
     })
   const variant = alias.variants[route.effort]?.[route.fast === true ? "fast" : "normal"]
   if (variant === undefined)
-    throw new ModelRouteError({
+    throw ModelRouteError.make({
       mode: owner,
       message: `${owner} requests unavailable ${route.alias}/${route.effort}${route.fast === true ? "/fast" : ""} variant`,
     })
@@ -240,17 +240,30 @@ const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): Reso
   }
 }
 
-export const resolveModelRoute = (settings: Settings, mode: ModeId, role: Role = "main"): ResolvedModelRoute =>
-  resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`)
+export const resolveModelRoute: {
+  (mode: ModeId, role?: Role): (settings: Settings) => ResolvedModelRoute
+  (settings: Settings, mode: ModeId, role?: Role): ResolvedModelRoute
+} = Function.dual(
+  (args) => typeof args[0] === "object",
+  (settings: Settings, mode: ModeId, role: Role = "main") =>
+    resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
+)
 
-export const resolveAgentRoute = (settings: Settings, agent: AgentId): ResolvedModelRoute =>
-  resolveRoute(settings, settings.agents[agent], `Agent ${agent}`)
+export const resolveAgentRoute: {
+  (agent: AgentId): (settings: Settings) => ResolvedModelRoute
+  (settings: Settings, agent: AgentId): ResolvedModelRoute
+} = Function.dual(2, (settings: Settings, agent: AgentId) =>
+  resolveRoute(settings, settings.agents[agent], `Agent ${agent}`),
+)
 
 export const resolveCompactionSummaryRoute = (settings: Settings): ResolvedModelRoute =>
   resolveRoute(settings, settings.compaction.summaryModel, "Compaction summary model")
 
-export const decodeSettingsInput = (path: string, value: unknown): SettingsInput => {
-  if (!object(value)) throw new ConfigFileError({ path, message: "Configuration must be a JSON object" })
+export const decodeSettingsInput: {
+  (value: unknown): (path: string) => SettingsInput
+  (path: string, value: unknown): SettingsInput
+} = Function.dual(2, (path: string, value: unknown): SettingsInput => {
+  if (!object(value)) throw ConfigFileError.make({ path, message: "Configuration must be a JSON object" })
   exactKeys(path, "Configuration", value, [
     "gateways",
     "models",
@@ -265,39 +278,39 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
     "logging",
   ])
   for (const [name, gateway] of Object.entries((value.gateways ?? {}) as Record<string, unknown>)) {
-    if (!object(gateway)) throw new ConfigFileError({ path, message: `Gateway ${name} must be an object` })
+    if (!object(gateway)) throw ConfigFileError.make({ path, message: `Gateway ${name} must be an object` })
     if (gateway.protocol !== "openai" && gateway.protocol !== "anthropic")
-      throw new ConfigFileError({ path, message: `Gateway ${name} requires an explicit supported protocol` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} requires an explicit supported protocol` })
     exactKeys(path, `Gateway ${name}`, gateway, ["protocol", "baseUrl", "auth"])
     if (!object(gateway.auth) || (gateway.auth.type !== "none" && gateway.auth.type !== "bearer-env"))
-      throw new ConfigFileError({ path, message: `Gateway ${name} auth must be none or bearer-env` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} auth must be none or bearer-env` })
     exactKeys(path, `Gateway ${name} auth`, gateway.auth, ["type", "variable"])
     if (
       gateway.auth.type === "bearer-env" &&
       (typeof gateway.auth.variable !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(gateway.auth.variable))
     )
-      throw new ConfigFileError({ path, message: `Gateway ${name} bearer-env auth requires an environment variable` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} bearer-env auth requires an environment variable` })
     if (gateway.auth.type === "none" && gateway.auth.variable !== undefined)
-      throw new ConfigFileError({ path, message: `Gateway ${name} none auth cannot name an environment variable` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} none auth cannot name an environment variable` })
     if (typeof gateway.baseUrl !== "string")
-      throw new ConfigFileError({ path, message: `Gateway ${name} baseUrl must be a string` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} baseUrl must be a string` })
     let gatewayUrl: URL
     try {
       gatewayUrl = new URL(gateway.baseUrl)
     } catch {
-      throw new ConfigFileError({ path, message: `Gateway ${name} baseUrl must be an absolute HTTP or HTTPS URL` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} baseUrl must be an absolute HTTP or HTTPS URL` })
     }
     if ((gatewayUrl.protocol !== "http:" && gatewayUrl.protocol !== "https:") || gatewayUrl.hostname.length === 0)
-      throw new ConfigFileError({ path, message: `Gateway ${name} baseUrl must be an absolute HTTP or HTTPS URL` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} baseUrl must be an absolute HTTP or HTTPS URL` })
     if (
       gatewayUrl.username.length > 0 ||
       gatewayUrl.password.length > 0 ||
       Array.from(gatewayUrl.searchParams.keys()).some(credentialLikeKey)
     )
-      throw new ConfigFileError({ path, message: `Gateway ${name} baseUrl cannot contain credentials` })
+      throw ConfigFileError.make({ path, message: `Gateway ${name} baseUrl cannot contain credentials` })
   }
   for (const [name, model] of Object.entries((value.models ?? {}) as Record<string, unknown>)) {
-    if (!object(model)) throw new ConfigFileError({ path, message: `Model alias ${name} must be an object` })
+    if (!object(model)) throw ConfigFileError.make({ path, message: `Model alias ${name} must be an object` })
     exactKeys(path, `Model alias ${name}`, model, ["gateway", "candidates", "limits", "variants"])
     const builtIn = (modelDefaults as Readonly<Record<string, ModelAlias>>)[name]
     const resolved = {
@@ -312,12 +325,12 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
       resolved.candidates.length === 0 ||
       resolved.candidates.some((id: unknown) => typeof id !== "string")
     )
-      throw new ConfigFileError({
+      throw ConfigFileError.make({
         path,
         message: `Model alias ${name} requires gateway and non-empty string candidates`,
       })
     if (!object(resolved.limits))
-      throw new ConfigFileError({ path, message: `Model alias ${name} requires valid model limits` })
+      throw ConfigFileError.make({ path, message: `Model alias ${name} requires valid model limits` })
     const { maxInputTokens, maxOutputTokens, keepRecentTokens } = resolved.limits
     if (
       !positiveInteger(maxInputTokens) ||
@@ -326,10 +339,10 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
       (keepRecentTokens as number) >= (maxInputTokens as number) ||
       (maxInputTokens as number) + (maxOutputTokens as number) > Number.MAX_SAFE_INTEGER
     )
-      throw new ConfigFileError({ path, message: `Model alias ${name} requires valid model limits` })
+      throw ConfigFileError.make({ path, message: `Model alias ${name} requires valid model limits` })
     if (model.limits !== undefined) {
       if (!object(model.limits))
-        throw new ConfigFileError({ path, message: `Model alias ${name} requires valid model limits` })
+        throw ConfigFileError.make({ path, message: `Model alias ${name} requires valid model limits` })
       exactKeys(path, `Model alias ${name} limits`, model.limits, [
         "maxInputTokens",
         "maxOutputTokens",
@@ -337,23 +350,23 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
       ])
     }
     if (!object(resolved.variants) || Object.keys(resolved.variants).length === 0)
-      throw new ConfigFileError({ path, message: `Model alias ${name} requires variants` })
+      throw ConfigFileError.make({ path, message: `Model alias ${name} requires variants` })
     for (const [effort, variants] of Object.entries(resolved.variants)) {
       if (!efforts.includes(effort as Effort) || !object(variants) || !object(variants.normal))
-        throw new ConfigFileError({ path, message: `Model alias ${name} has invalid effort variant ${effort}` })
+        throw ConfigFileError.make({ path, message: `Model alias ${name} has invalid effort variant ${effort}` })
       exactKeys(path, `Model alias ${name} ${effort}`, variants, ["normal", "fast"])
       for (const variant of [variants.normal, variants.fast].filter((item) => item !== undefined)) {
         if (!object(variant) || !object(variant.options))
-          throw new ConfigFileError({ path, message: `Model alias ${name} ${effort} variant requires options` })
+          throw ConfigFileError.make({ path, message: `Model alias ${name} ${effort} variant requires options` })
         exactKeys(path, `Model alias ${name} ${effort} variant`, variant, ["options"])
         if ("max_tokens" in variant.options || "max_output_tokens" in variant.options)
-          throw new ConfigFileError({
+          throw ConfigFileError.make({
             path,
             message: `Model alias ${name} ${effort} provider output limit must use limits.maxOutputTokens`,
           })
         const credentialPath = credentialOptionPath(variant.options, `models.${name}.variants.${effort}.options`)
         if (credentialPath !== undefined)
-          throw new ConfigFileError({
+          throw ConfigFileError.make({
             path,
             message: `Model alias ${name} ${effort} variant contains credential-like provider option key at ${credentialPath}`,
           })
@@ -361,10 +374,10 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
     }
   }
   for (const [mode, config] of Object.entries((value.modes ?? {}) as Record<string, unknown>)) {
-    if (!object(config)) throw new ConfigFileError({ path, message: `Mode ${mode} must be an object` })
+    if (!object(config)) throw ConfigFileError.make({ path, message: `Mode ${mode} must be an object` })
     exactKeys(path, `Mode ${mode}`, config, ["main", "oracle"])
     if (!object(config.main) || !object(config.oracle))
-      throw new ConfigFileError({ path, message: `Mode ${mode} requires main and oracle` })
+      throw ConfigFileError.make({ path, message: `Mode ${mode} requires main and oracle` })
     for (const [role, route] of [
       ["main", config.main],
       ["oracle", config.oracle],
@@ -375,27 +388,27 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
         !efforts.includes(route.effort as Effort) ||
         (route.fast !== undefined && typeof route.fast !== "boolean")
       )
-        throw new ConfigFileError({ path, message: `Mode ${mode} ${role} requires alias and supported effort` })
+        throw ConfigFileError.make({ path, message: `Mode ${mode} ${role} requires alias and supported effort` })
     }
   }
   const agents = (value.agents ?? {}) as Record<string, unknown>
   exactKeys(path, "Agents", agents, ["librarian", "painter", "review", "readThread", "task"])
   for (const [agent, route] of Object.entries(agents)) {
-    if (!object(route)) throw new ConfigFileError({ path, message: `Agent ${agent} route must be an object` })
+    if (!object(route)) throw ConfigFileError.make({ path, message: `Agent ${agent} route must be an object` })
     exactKeys(path, `Agent ${agent}`, route, ["alias", "effort", "fast"])
     if (
       typeof route.alias !== "string" ||
       !efforts.includes(route.effort as Effort) ||
       (route.fast !== undefined && typeof route.fast !== "boolean")
     )
-      throw new ConfigFileError({ path, message: `Agent ${agent} requires alias and supported effort` })
+      throw ConfigFileError.make({ path, message: `Agent ${agent} requires alias and supported effort` })
   }
   if (value.compaction !== undefined) {
-    if (!object(value.compaction)) throw new ConfigFileError({ path, message: "Compaction must be an object" })
+    if (!object(value.compaction)) throw ConfigFileError.make({ path, message: "Compaction must be an object" })
     exactKeys(path, "Compaction", value.compaction, ["summaryModel"])
     if (value.compaction.summaryModel !== undefined) {
       if (!object(value.compaction.summaryModel))
-        throw new ConfigFileError({ path, message: "Compaction summary model must be an object" })
+        throw ConfigFileError.make({ path, message: "Compaction summary model must be an object" })
       exactKeys(path, "Compaction summary model", value.compaction.summaryModel, ["alias", "effort", "fast"])
       const route = value.compaction.summaryModel
       if (
@@ -403,14 +416,14 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
         !efforts.includes(route.effort as Effort) ||
         (route.fast !== undefined && typeof route.fast !== "boolean")
       )
-        throw new ConfigFileError({
+        throw ConfigFileError.make({
           path,
           message: "Compaction summary model requires alias and supported effort",
         })
     }
   }
   if (value.logging !== undefined) {
-    if (!object(value.logging)) throw new ConfigFileError({ path, message: "Logging must be an object" })
+    if (!object(value.logging)) throw ConfigFileError.make({ path, message: "Logging must be an object" })
     exactKeys(path, "Logging", value.logging, ["level"])
     if (
       value.logging.level !== undefined &&
@@ -419,10 +432,10 @@ export const decodeSettingsInput = (path: string, value: unknown): SettingsInput
       value.logging.level !== "warning" &&
       value.logging.level !== "error"
     )
-      throw new ConfigFileError({ path, message: "Logging level must be debug, info, warning, or error" })
+      throw ConfigFileError.make({ path, message: "Logging level must be debug, info, warning, or error" })
   }
   return value as SettingsInput
-}
+})
 
 export const defaults: Settings = {
   gateways: {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
-import { Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
 import * as ThreadHost from "../src/thread-host"
 
@@ -58,12 +58,11 @@ describe("ThreadHost", () => {
   )
 
   it.effect("returns no thread ids without a trailing wait result", () =>
-    Effect.sync(() => {
+    Effect.gen(function* () {
+      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(pendingPayload("t", "x"))
       expect(ThreadHost.pendingThreadIds(promptWith([]))).toEqual([])
       expect(
-        ThreadHost.pendingThreadIds(
-          promptWith([{ role: "user", content: [{ type: "text", text: JSON.stringify(pendingPayload("t", "x")) }] }]),
-        ),
+        ThreadHost.pendingThreadIds(promptWith([{ role: "user", content: [{ type: "text", text: encoded }] }])),
       ).toEqual([])
       expect(
         ThreadHost.pendingThreadIds(promptWith([waitResultMessage({ status: "timed_out", messages: [] })])),
@@ -73,6 +72,7 @@ describe("ThreadHost", () => {
 
   it.effect("waits for messages, promotes the delivered batch, and waits again", () =>
     Effect.gen(function* () {
+      const crypto = yield* Layer.build(BunCrypto.layer)
       const registry = yield* ThreadHost.makeRegistry
       const promoted: Array<string> = []
       yield* registry.register((threadId) =>
@@ -87,8 +87,10 @@ describe("ThreadHost", () => {
         promote_turn: ({ threadId }) => registry.promote(threadId).pipe(Effect.map((count) => ({ promoted: count }))),
         [ThreadHost.waitToolName]: () => Effect.succeed(batch),
       })
-      const registration = yield* ThreadHost.hostRegistration
-      const provideModel = Effect.provide(Layer.merge(registration.layer, handlers))
+      const registration = yield* ThreadHost.hostRegistration.pipe(Effect.provide(crypto))
+      const provideModel = Effect.provide(
+        Context.merge(yield* Layer.build(Layer.merge(registration.layer, handlers)), crypto),
+      )
       const parked = yield* LanguageModel.generateText({
         prompt: promptWith([{ role: "user", content: [{ type: "text", text: "create" }] }]),
         toolkit,
@@ -102,28 +104,29 @@ describe("ThreadHost", () => {
       expect(woken.toolCalls[0]?.params).toEqual({ threadId: "thread-a" })
       expect(woken.toolResults[0]?.result).toEqual({ promoted: 2 })
       expect(promoted).toEqual(["thread-a"])
-    }).pipe(Effect.provide(BunCrypto.layer)),
+    }),
   )
 
   it.effect("uses distinct tool call ids after the host model is rebuilt", () =>
     Effect.gen(function* () {
+      const crypto = yield* Layer.build(BunCrypto.layer)
       const toolkit = Toolkit.make(waitTool)
       const handlers = toolkit.toLayer({
         [ThreadHost.waitToolName]: () => Effect.succeed({ status: "timed_out", messages: [] }),
       })
       const runInitialCall = Effect.gen(function* () {
-        const registration = yield* ThreadHost.hostRegistration
+        const registration = yield* ThreadHost.hostRegistration.pipe(Effect.provide(crypto))
         return yield* LanguageModel.generateText({
           prompt: promptWith([{ role: "user", content: [{ type: "text", text: "create" }] }]),
           toolkit,
-        }).pipe(Effect.provide(Layer.merge(registration.layer, handlers)))
+        }).pipe(Effect.provide(Context.merge(yield* Layer.build(Layer.merge(registration.layer, handlers)), crypto)))
       })
 
       const first = yield* runInitialCall
       const second = yield* runInitialCall
 
       expect(first.toolCalls[0]?.id).not.toBe(second.toolCalls[0]?.id)
-    }).pipe(Effect.provide(BunCrypto.layer)),
+    }),
   )
 
   it.effect("registry promotes through the registered promoter and defaults to zero", () =>

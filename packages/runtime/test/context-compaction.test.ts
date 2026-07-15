@@ -1,7 +1,7 @@
 import { Session, ToolOutput } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Option } from "effect"
+import { Effect, Layer, Option, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
 import { ContextCompaction } from "../src/index"
 
@@ -80,7 +80,7 @@ describe("ContextCompaction", () => {
           contextTokens: 20,
           checkpoint: current,
         },
-      ).pipe(Effect.provide(fixture.layer))
+      ).pipe(Effect.provide(yield* Layer.build(fixture.layer)))
       expect(result).toEqual({ history, prompt, checkpoint: current })
     }),
   )
@@ -107,7 +107,7 @@ describe("ContextCompaction", () => {
           path: [entry("0", "old"), entry("1", "recent")],
           contextTokens: 100,
         },
-      ).pipe(Effect.provide(fixture.layer))
+      ).pipe(Effect.provide(yield* Layer.build(fixture.layer)))
       expect(result.checkpoint).toMatchObject({ cursor: "7", firstKeptEntryId: "1" })
       expect(result.checkpoint?.summary).toContain("Finish runtime coverage")
     }),
@@ -132,14 +132,18 @@ describe("ContextCompaction", () => {
         },
       ).pipe(
         Effect.provide(
-          Layer.mergeAll(
-            fixture.layer,
-            ToolOutput.testLayer({ put: () => Effect.succeed(Option.some("memory:tool-output")) }),
+          yield* Layer.build(
+            Layer.mergeAll(
+              fixture.layer,
+              ToolOutput.testLayer({ put: () => Effect.succeed(Option.some("memory:tool-output")) }),
+            ),
           ),
         ),
       )
       expect(result.checkpoint).toEqual(current)
-      expect(JSON.stringify(result.prompt.content)).toContain("memory:tool-output")
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(result.prompt.content)).toContain(
+        "memory:tool-output",
+      )
     }),
   )
 })

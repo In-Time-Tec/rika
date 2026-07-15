@@ -1,13 +1,20 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Operation } from "@rika/app"
-import { Effect, Layer, Ref } from "effect"
+import { Effect, Layer, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
 import { parseJsonLines, readStreamInput, run } from "../src/command"
 
 const workspace = process.cwd()
 
-const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>) => effect.pipe(Effect.provide(layer))
+const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope
+      const context = yield* Layer.buildWithScope(layer, scope)
+      return yield* Effect.provide(effect, context)
+    }),
+  )
 
 const capture = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
@@ -21,7 +28,7 @@ const failsWithoutDispatch = (argv: ReadonlyArray<string>) =>
   Effect.gen(function* () {
     const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
     const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
-    const exit = yield* Effect.exit(run(argv).pipe(Effect.provide(layer)))
+    const exit = yield* Effect.exit(execute(run(argv), layer))
     expect(exit._tag).toBe("Failure")
     expect(yield* Ref.get(calls)).toEqual([])
   })
@@ -41,24 +48,14 @@ const streamInput = (prompt: ReadonlyArray<string> = []) => ({
   streamJsonThinking: false,
 })
 
-const validChunks = async function* () {
-  yield '"one"\n'
-  yield '{"prompt":"two"}\n'
-}
+const validChunks = () => Stream.toAsyncIterable(Stream.make('"one"\n', '{"prompt":"two"}\n'))
 
 it.effect("reads valid, invalid, and empty JSONL stream input", () =>
   Effect.gen(function* () {
     expect((yield* readStreamInput(streamInput(), validChunks())).prompt).toEqual(["one", "two"])
-    expect((yield* readStreamInput(streamInput(), (async function* () {})())).prompt).toEqual([])
+    expect((yield* readStreamInput(streamInput(), Stream.toAsyncIterable(Stream.empty))).prompt).toEqual([])
     expect(
-      (yield* Effect.result(
-        readStreamInput(
-          streamInput(),
-          (async function* () {
-            yield "bad"
-          })(),
-        ),
-      ))._tag,
+      (yield* Effect.result(readStreamInput(streamInput(), Stream.toAsyncIterable(Stream.make("bad")))))._tag,
     ).toBe("Failure")
     expect((yield* readStreamInput(streamInput(["existing"]), validChunks())).prompt).toEqual(["existing"])
   }),
@@ -66,11 +63,7 @@ it.effect("reads valid, invalid, and empty JSONL stream input", () =>
 
 it.effect("maps stdin failures and dispatch failures", () =>
   Effect.gen(function* () {
-    const broken = {
-      [Symbol.asyncIterator]() {
-        throw new Error("stdin unavailable")
-      },
-    }
+    const broken = Stream.toAsyncIterable(Stream.fail(new Error("stdin unavailable")))
     const read = yield* Effect.result(readStreamInput(streamInput(), broken))
     expect(read._tag === "Failure" && read.failure.message).toContain("Unable to read JSON input")
     const layer = Layer.mergeAll(
@@ -80,11 +73,11 @@ it.effect("maps stdin failures and dispatch failures", () =>
         Operation.Service,
         Operation.Service.of({
           run: () =>
-            Effect.fail(new Operation.OperationUnavailable({ operation: "Doctor", message: "dispatch failed" })),
+            Effect.fail(Operation.OperationUnavailable.make({ operation: "Doctor", message: "dispatch failed" })),
         }),
       ),
     )
-    expect((yield* Effect.exit(run(["doctor"]).pipe(Effect.provide(layer))))._tag).toBe("Failure")
+    expect((yield* Effect.exit(execute(run(["doctor"]), layer)))._tag).toBe("Failure")
   }),
 )
 

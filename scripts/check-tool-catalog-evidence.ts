@@ -1,4 +1,6 @@
-import { existsSync } from "node:fs"
+import * as BunRuntime from "@effect/platform-bun/BunRuntime"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Data, Effect, FileSystem, Layer } from "effect"
 import * as Catalog from "../packages/tools/src/tool-catalog"
 
 const evidence = {
@@ -22,18 +24,28 @@ const evidence = {
   task: "packages/app/test/specialty-transcripts.test.ts",
 } as const
 
-const catalogNames = Catalog.definitions.map(({ name }) => name).toSorted()
-const evidenceNames = Object.keys(evidence).toSorted()
+class CatalogEvidenceError extends Data.TaggedError("CatalogEvidenceError")<{ readonly message: string }> {}
 
-if (JSON.stringify(catalogNames) !== JSON.stringify(evidenceNames)) {
+const program = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const catalogNames = Catalog.definitions.map(({ name }) => name).toSorted()
+  const evidenceNames = Object.keys(evidence).toSorted()
   const missing = catalogNames.filter((name) => !evidenceNames.includes(name))
   const unknown = evidenceNames.filter((name) => !catalogNames.includes(name))
-  throw new Error(`Catalog evidence mismatch: missing=${missing.join(",")} unknown=${unknown.join(",")}`)
-}
+  if (missing.length > 0 || unknown.length > 0) {
+    return yield* new CatalogEvidenceError({
+      message: `Catalog evidence mismatch: missing=${missing.join(",")} unknown=${unknown.join(",")}`,
+    })
+  }
+  const matrices = [...new Set(Object.values(evidence))]
+  const missingFiles = yield* Effect.filter(matrices, (file) =>
+    fileSystem.exists(file).pipe(Effect.map((exists) => !exists)),
+  )
+  if (missingFiles.length > 0)
+    return yield* new CatalogEvidenceError({ message: `Missing catalog evidence files: ${missingFiles.join(",")}` })
+  yield* Effect.log(`Catalog evidence complete: ${catalogNames.length} entries across ${matrices.length} matrices`)
+})
 
-const missingFiles = [...new Set(Object.values(evidence))].filter((path) => !existsSync(path))
-if (missingFiles.length > 0) throw new Error(`Missing catalog evidence files: ${missingFiles.join(",")}`)
-
-console.log(
-  `Catalog evidence complete: ${catalogNames.length} entries across ${new Set(Object.values(evidence)).size} matrices`,
+BunRuntime.runMain(
+  Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(program, context))),
 )

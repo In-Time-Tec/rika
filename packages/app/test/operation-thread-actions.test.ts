@@ -7,6 +7,7 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { Effect, Layer, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { Operation } from "../src/index"
+import { provideLayer } from "./layer"
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -25,7 +26,7 @@ const backend = ExecutionBackend.Service.of({
       events: [],
     }),
   cancel: () => Effect.die("unused"),
-  inspect: () => Effect.succeed(undefined),
+  inspect: () => Effect.void.pipe(Effect.as(undefined)),
   steer: () => Effect.die("unused"),
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.die("unused"),
@@ -115,7 +116,7 @@ describe("Operation thread actions", () => {
         ).toBe(true)
         expect(lines.some((line) => String(line).includes("# Release Alpha"))).toBe(true)
         expect(lines.some((line) => line === "[]")).toBe(true)
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
 
       const emptyLayer = Operation.productLayer({
         repositoryLayer: ThreadRepository.memoryLayer(),
@@ -132,7 +133,7 @@ describe("Operation thread actions", () => {
         expect((yield* Effect.result(operation.run({ _tag: "Thread", action: "continue", last: true })))._tag).toBe(
           "Failure",
         )
-      }).pipe(Effect.provide(emptyLayer))
+      }).pipe(provideLayer(emptyLayer))
     }),
   )
 
@@ -185,7 +186,7 @@ describe("Operation thread actions", () => {
         expect(
           (yield* Effect.result(operation.run({ _tag: "Thread", action: "fork", threadId: "missing" })))._tag,
         ).toBe("Failure")
-      }).pipe(Effect.provide(layer))
+      }).pipe(provideLayer(layer))
       expect(yield* turns.list(Thread.ThreadId.make("bounded"))).toHaveLength(1)
       expect(yield* turns.list(Thread.ThreadId.make("complete"))).toMatchObject([
         { prompt: "one", status: "completed", lastCursor: "a" },

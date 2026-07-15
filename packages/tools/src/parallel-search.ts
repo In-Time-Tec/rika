@@ -38,14 +38,14 @@ export interface Interface {
   readonly search: (input: SearchInput) => Effect.Effect<ReadonlyArray<SearchResult>, SearchError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/tools/ParallelSearch") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/tools/parallel-search/Service") {}
 
 export interface LayerOptions {
   readonly apiKey?: Redacted.Redacted<string>
   readonly baseUrl?: string
 }
 
-const searchError = (cause: unknown) => new SearchError({ message: String(cause) })
+const searchError = (cause: unknown) => SearchError.make({ message: String(cause) })
 
 export const layer = (options: LayerOptions) =>
   Layer.effect(
@@ -55,7 +55,7 @@ export const layer = (options: LayerOptions) =>
       return Service.of({
         search: Effect.fn("ParallelSearch.search")(function* (input) {
           if (options.apiKey === undefined) {
-            return yield* Effect.fail(new SearchError({ message: "PARALLEL_API_KEY is not configured" }))
+            return yield* SearchError.make({ message: "PARALLEL_API_KEY is not configured" })
           }
           const request = HttpClientRequest.post(`${options.baseUrl ?? "https://api.parallel.ai"}/v1/search`, {
             headers: { "x-api-key": Redacted.value(options.apiKey) },

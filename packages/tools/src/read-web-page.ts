@@ -23,7 +23,7 @@ export interface Interface {
   readonly read: (input: Input) => Effect.Effect<string, Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/tools/ReadWebPage") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/tools/read-web-page/Service") {}
 
 export interface LayerOptions {
   readonly apiKey?: Redacted.Redacted<string>
@@ -41,7 +41,7 @@ const ApiResult = Schema.Struct({
 const ApiExtractionError = Schema.Struct({
   url: Schema.String,
   error_type: Schema.String,
-  http_status_code: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  http_status_code: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
   content: Schema.String,
 })
 
@@ -60,10 +60,10 @@ const validateUrl = (value: string) =>
       if (url.username !== "" || url.password !== "") throw new Error("URL credentials are not allowed")
       return url.toString()
     },
-    catch: (cause) => new ContentError({ message: `Invalid URL: ${String(cause)}` }),
+    catch: (cause) => ContentError.make({ message: `Invalid URL: ${String(cause)}` }),
   })
 
-const httpError = (cause: unknown) => new HttpError({ message: String(cause) })
+const httpError = (cause: unknown) => HttpError.make({ message: String(cause) })
 
 export const layer = (options: LayerOptions) =>
   Layer.effect(
@@ -73,7 +73,7 @@ export const layer = (options: LayerOptions) =>
       return Service.of({
         read: Effect.fn("ReadWebPage.read")(function* (input) {
           if (options.apiKey === undefined) {
-            return yield* Effect.fail(new HttpError({ message: "PARALLEL_API_KEY is not configured" }))
+            return yield* HttpError.make({ message: "PARALLEL_API_KEY is not configured" })
           }
           const url = yield* validateUrl(input.url)
           const advancedSettings = {
@@ -96,28 +96,22 @@ export const layer = (options: LayerOptions) =>
             .execute(request)
             .pipe(Effect.flatMap(HttpClientResponse.schemaBodyJson(ApiResponse)), Effect.mapError(httpError))
           if (response.errors.length > 0) {
-            return yield* Effect.fail(
-              new ContentError({
-                message: response.errors
-                  .map(
-                    (error) =>
-                      `${error.url}: ${error.error_type}${error.http_status_code == null ? "" : ` (${error.http_status_code})`}: ${error.content}`,
-                  )
-                  .join("\n"),
-              }),
-            )
+            return yield* ContentError.make({
+              message: response.errors
+                .map(
+                  (error) =>
+                    `${error.url}: ${error.error_type}${error.http_status_code == null ? "" : ` (${error.http_status_code})`}: ${error.content}`,
+                )
+                .join("\n"),
+            })
           }
           if (response.results.length === 0) {
-            return yield* Effect.fail(
-              new ContentError({ message: `Extract ${response.extract_id} returned no results` }),
-            )
+            return yield* ContentError.make({ message: `Extract ${response.extract_id} returned no results` })
           }
           if (input.fullContent === true) {
             const missing = response.results.find((result) => result.full_content == null)
             if (missing !== undefined) {
-              return yield* Effect.fail(
-                new ContentError({ message: `Parallel returned no full content for ${missing.url}` }),
-              )
+              return yield* ContentError.make({ message: `Parallel returned no full content for ${missing.url}` })
             }
             return response.results.map((result) => result.full_content!).join("\n\n")
           }

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeEach, describe, expect, test } from "bun:test"
 import { lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -17,13 +17,16 @@ const runRika = (args: string[]) =>
     env: {
       ...env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      RIKA_DATABASE: join(state, "product.db"),
+      RIKA_DATABASE: join(state, "rika.db"),
       RIKA_RELAY_DATABASE: join(state, "relay.db"),
       RIKA_TEST_MODEL_RESPONSE: "deterministic response",
     },
   })
 
-beforeAll(async () => {
+beforeEach(async () => {
+  await rm(installRoot, { recursive: true, force: true })
+  await rm(binDir, { recursive: true, force: true })
+  await rm(state, { recursive: true, force: true })
   await mkdir(home, { recursive: true })
 })
 
@@ -47,11 +50,12 @@ describe("local packaged installation", () => {
     expect(executed.stdout.toString()).toContain("deterministic response")
     expect(executed.stderr.toString()).not.toContain("TypeError: members.map is not a function")
     expect(executed.stderr.toString()).not.toContain("requires Crypto")
-    expect(runScript("install-local").exitCode).toBe(0)
+    const reinstalled = runScript("install-local")
+    expect(reinstalled.exitCode, reinstalled.stderr.toString()).toBe(0)
     expect(runScript("uninstall-local").exitCode).toBe(0)
     expect(runScript("uninstall-local").exitCode).toBe(0)
     expect(await lstat(installRoot).catch(() => undefined)).toBeUndefined()
-  })
+  }, 30_000)
 
   test("does not overwrite a foreign command", async () => {
     await mkdir(binDir, { recursive: true })

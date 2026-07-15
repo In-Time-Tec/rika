@@ -1,13 +1,13 @@
 import { Compaction, Session } from "@batonfx/core"
 import { createHash } from "node:crypto"
-import { Effect, Option, Schema } from "effect"
+import { Effect, Function, Option, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
 
 export const Config = Schema.Struct({
-  contextWindow: Schema.Number,
-  reserveTokens: Schema.Number,
-  keepRecentTokens: Schema.Number,
-  toolOutputMaxBytes: Schema.Number,
+  contextWindow: Schema.Finite,
+  reserveTokens: Schema.Finite,
+  keepRecentTokens: Schema.Finite,
+  toolOutputMaxBytes: Schema.Finite,
 })
 export type Config = typeof Config.Type
 
@@ -36,12 +36,18 @@ export interface CompactOutput {
   readonly checkpoint?: Checkpoint
 }
 
-export const checkpoint = (cursor: string, summary: string, firstKeptEntryId: string): Checkpoint => ({
-  cursor,
-  digest: createHash("sha256").update(`${cursor}\0${firstKeptEntryId}\0${summary}`).digest("hex"),
-  summary,
-  firstKeptEntryId,
-})
+export const checkpoint: {
+  (cursor: string, summary: string, firstKeptEntryId: string): Checkpoint
+  (summary: string, firstKeptEntryId: string): (cursor: string) => Checkpoint
+} = Function.dual(
+  3,
+  (cursor: string, summary: string, firstKeptEntryId: string): Checkpoint => ({
+    cursor,
+    digest: createHash("sha256").update(`${cursor}\0${firstKeptEntryId}\0${summary}`).digest("hex"),
+    summary,
+    firstKeptEntryId,
+  }),
+)
 
 export const checkpointFromReplay = (
   events: ReadonlyArray<{ readonly cursor: string; readonly metadata?: unknown }>,
@@ -56,8 +62,10 @@ export const checkpointFromReplay = (
   return undefined
 }
 
-export const shouldPersistCheckpoint = (current: Checkpoint | undefined, next: Checkpoint) =>
-  current?.digest !== next.digest
+export const shouldPersistCheckpoint: {
+  (current: Checkpoint | undefined, next: Checkpoint): boolean
+  (next: Checkpoint): (current: Checkpoint | undefined) => boolean
+} = Function.dual(2, (current: Checkpoint | undefined, next: Checkpoint) => current?.digest !== next.digest)
 
 export const relayMetadata = (value: Checkpoint) => ({ kind: "context-compaction", checkpoint: value })
 

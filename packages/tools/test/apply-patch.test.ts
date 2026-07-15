@@ -2,6 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Path, PlatformError } from "effect"
 import { ApplyPatch } from "../src"
+import { provide } from "./test-layer"
 
 const run = (
   patchText: string,
@@ -18,7 +19,7 @@ const run = (
       yield* setup(fileSystem, workspace)
       return yield* ApplyPatch.apply(workspace, patchText, fileSystem, path)
     }),
-  ).pipe(Effect.provide(BunServices.layer))
+  ).pipe(provide(BunServices.layer))
 
 const failure = (patchText: string, setup?: Parameters<typeof run>[1]) => Effect.flip(run(patchText, setup))
 

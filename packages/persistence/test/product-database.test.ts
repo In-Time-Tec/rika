@@ -9,7 +9,7 @@ const filenames: Array<string> = []
 const migrationTables: Array<string> = []
 const migrationNames: Array<string> = []
 
-type Migration = Effect.Effect<void, unknown, SqlClient>
+type Migration = Effect.Effect<void, never, SqlClient>
 type MigrationRecord = Record<string, Migration>
 
 vi.mock("@effect/sql-sqlite-bun/SqliteClient", () => ({
@@ -46,8 +46,8 @@ it.effect("builds the client directory and applies all product migrations in ord
   const filename = "/data/rika/product.sqlite"
 
   return Effect.gen(function* () {
-    yield* Effect.void.pipe(Effect.provide(clientLayer(filename)), Effect.provide(dependencies))
-    yield* Effect.void.pipe(Effect.provide(layer(filename)), Effect.provide(dependencies))
+    yield* Layer.build(clientLayer(filename).pipe(Layer.provide(dependencies)))
+    yield* Layer.build(layer(filename).pipe(Layer.provide(dependencies)))
 
     expect(directories).toEqual([
       ["/data/rika", { recursive: true }],

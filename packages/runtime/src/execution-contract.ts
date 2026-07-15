@@ -6,9 +6,9 @@ export type Status = typeof Status.Type
 
 export const Event = Schema.Struct({
   cursor: Schema.String,
-  sequence: Schema.Number,
+  sequence: Schema.Finite,
   type: Schema.String,
-  createdAt: Schema.Number,
+  createdAt: Schema.Finite,
   text: Schema.optionalKey(Schema.String),
   content: Schema.optionalKey(Schema.Array(Schema.Unknown)),
   data: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),
@@ -188,7 +188,9 @@ export interface Interface {
     cancelledAt: number,
     reason?: string,
   ) => Effect.Effect<FanOutInspection, BackendError>
-  readonly registerWorkflows: () => Effect.Effect<
+  readonly registerWorkflows: (
+    _?: void,
+  ) => Effect.Effect<
     ReadonlyArray<{ readonly name: string; readonly revision: number; readonly digest: string }>,
     BackendError
   >
@@ -231,4 +233,4 @@ export interface Interface {
   ) => Effect.Effect<void, BackendError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/runtime/ExecutionBackend") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/runtime/execution-contract/Service") {}

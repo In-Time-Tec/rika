@@ -10,7 +10,7 @@ export const Thread = Schema.Struct({
   labels: Schema.Array(Schema.String),
   pinned: Schema.Boolean,
   archived: Schema.Boolean,
-  createdAt: Schema.Number,
-  updatedAt: Schema.Number,
+  createdAt: Schema.Finite,
+  updatedAt: Schema.Finite,
 })
 export type Thread = typeof Thread.Type

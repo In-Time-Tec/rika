@@ -3,13 +3,13 @@ import { TestModel } from "@batonfx/test"
 import { Runtime } from "@rika/tools"
 import { expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
-import { Effect, FileSystem, Schedule } from "effect"
+import { Effect, FileSystem, Layer, Schedule } from "effect"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 
 const terminal = (status: string) => status === "completed" || status === "failed" || status === "cancelled"
 
-test("model spawns a durable Oracle child through the handoff tool and resumes with its result", async () => {
+test("model spawns a durable Oracle child through the handoff tool and resumes with its result", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -38,6 +38,7 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
           keepRecentTokens: 100,
         },
       })
+      const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         const started = yield* backend.start({
@@ -53,7 +54,10 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
           }),
         )
         const inspection = yield* backend.inspect("turn-subagent")
-        const database = new Database(`${directory}/relay.db`, { readonly: true })
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          (connection) => Effect.sync(() => connection.close()),
+        )
         const childExecutionId = inspection?.children[0]?.executionId
         const child = database
           .query<
@@ -79,28 +83,39 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
                   [string]
                 >("select count(*) as count from relay_execution_events where execution_id = ?")
                 .get(child.id)?.count ?? 0)
-        database.close()
         return { started, settled, inspection, child, childFailure, childEventCount }
-      }).pipe(Effect.provide(backendLayer))
+      }).pipe(Effect.provide(backendContext))
     }),
-  ).pipe(Effect.provide(BunServices.layer))
-  const { started, settled, inspection, child, childFailure, childEventCount } = await Effect.runPromise(program)
-  const settledTypes = settled.events.map((event) => event.type)
-  const requested = settled.events.filter((event) => event.type === "tool.call.requested")
-  expect(started.status).not.toBe("failed")
-  expect(requested.some((event) => (event.data?.tool_name as string | undefined) === "transfer_to_oracle")).toBe(true)
-  expect(settledTypes).toContain("child_run.spawned")
-  expect(settled.status).toBe("completed")
-  expect(inspection?.children).toHaveLength(1)
-  expect(child?.status).toBe("completed")
-  expect(child?.session_id).toBe(`session:child:${child?.id}`)
-  expect(childFailure).toBeNull()
-  expect(childEventCount).toBeGreaterThan(1_000)
-  expect(inspection?.children[0]?.status).toBe("completed")
-  expect(
-    settled.events
-      .filter((event) => event.type === "model.output.delta")
-      .map((event) => event.text)
-      .join(""),
-  ).toBe("Parent synthesized the child answer.")
+  )
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const bunContext = yield* Layer.build(BunServices.layer)
+        return yield* program.pipe(Effect.provide(bunContext))
+      }),
+    ).pipe(
+      Effect.tap(({ started, settled, inspection, child, childFailure, childEventCount }) =>
+        Effect.sync(() => {
+          const settledTypes = settled.events.map((event) => event.type)
+          const requested = settled.events.filter((event) => event.type === "tool.call.requested")
+          expect(started.status).not.toBe("failed")
+          expect(requested.some((event) => event.data?.tool_name === "transfer_to_oracle")).toBe(true)
+          expect(settledTypes).toContain("child_run.spawned")
+          expect(settled.status).toBe("completed")
+          expect(inspection?.children).toHaveLength(1)
+          expect(child?.status).toBe("completed")
+          expect(child?.session_id).toBe(`session:child:${child?.id}`)
+          expect(childFailure).toBeNull()
+          expect(childEventCount).toBeGreaterThan(1_000)
+          expect(inspection?.children[0]?.status).toBe("completed")
+          expect(
+            settled.events
+              .filter((event) => event.type === "model.output.delta")
+              .map((event) => event.text)
+              .join(""),
+          ).toBe("Parent synthesized the child answer.")
+        }),
+      ),
+    ),
+  )
 }, 60_000)

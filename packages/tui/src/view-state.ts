@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Function, Schema } from "effect"
 import type { Key } from "./keys"
 import { isPrintable } from "./keys"
 import { filter, type PaletteAction } from "./palette"
@@ -145,14 +145,19 @@ export type Loadable<T> =
   | { readonly _tag: "Loading" }
   | { readonly _tag: "Ready"; readonly value: T }
 
-const LoadableIdleSchema = Schema.Struct({ _tag: Schema.Literal("Idle") })
-const LoadableLoadingSchema = Schema.Struct({ _tag: Schema.Literal("Loading") })
+const LoadableIdleSchema = Schema.TaggedStruct("Idle", {})
+const LoadableLoadingSchema = Schema.TaggedStruct("Loading", {})
 
 export const idle: Loadable<never> = { _tag: "Idle" }
 export const loading: Loadable<never> = { _tag: "Loading" }
 export const ready = <T>(value: T): Loadable<T> => ({ _tag: "Ready", value })
-export const readyOr = <T>(loadable: Loadable<T>, fallback: T): T =>
-  loadable._tag === "Ready" ? loadable.value : fallback
+export const readyOr: {
+  <T>(loadable: Loadable<T>, fallback: T): T
+  <T>(fallback: T): (loadable: Loadable<T>) => T
+} = Function.dual(
+  2,
+  <T>(loadable: Loadable<T>, fallback: T): T => (loadable._tag === "Ready" ? loadable.value : fallback),
+)
 export const isReady = <T>(loadable: Loadable<T>): loadable is { readonly _tag: "Ready"; readonly value: T } =>
   loadable._tag === "Ready"
 export const isLoading = <T>(loadable: Loadable<T>): boolean => loadable._tag === "Loading"
@@ -160,19 +165,19 @@ export const isLoading = <T>(loadable: Loadable<T>): boolean => loadable._tag ==
 const WorkspaceFilesSchema = Schema.Union([
   LoadableIdleSchema,
   LoadableLoadingSchema,
-  Schema.Struct({ _tag: Schema.Literal("Ready"), value: Schema.Array(Schema.String) }),
+  Schema.TaggedStruct("Ready", { value: Schema.Array(Schema.String) }),
 ])
 
-const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Number })
-const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Number })
+const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
+const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
-  selected: Schema.Number,
+  selected: Schema.Finite,
   items: WorkspaceFilesSchema,
   kind: Schema.Literals(["file", "thread"]),
 })
-const ThreadSwitcherStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Number })
+const ThreadSwitcherStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
 const PastedTextAttachmentSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), token: Schema.String, value: Schema.String, label: Schema.String }),
   Schema.Struct({ type: Schema.Literal("image"), token: Schema.String, path: Schema.String, label: Schema.String }),
@@ -185,21 +190,20 @@ const ComposerDraftSchema = Schema.Struct({
 export const ChangedFile = Schema.Struct({
   path: Schema.String,
   status: Schema.String,
-  added: Schema.optional(Schema.Number),
-  removed: Schema.optional(Schema.Number),
+  added: Schema.optional(Schema.Finite),
+  removed: Schema.optional(Schema.Finite),
 })
 export type ChangedFile = typeof ChangedFile.Type
 
 const ChangedFilesSchema = Schema.Union([
   LoadableIdleSchema,
   LoadableLoadingSchema,
-  Schema.Struct({ _tag: Schema.Literal("Ready"), value: Schema.Array(ChangedFile) }),
+  Schema.TaggedStruct("Ready", { value: Schema.Array(ChangedFile) }),
 ])
 const ThreadPreviewSchema = Schema.Union([
   LoadableIdleSchema,
   LoadableLoadingSchema,
-  Schema.Struct({
-    _tag: Schema.Literal("Ready"),
+  Schema.TaggedStruct("Ready", {
     value: Schema.Struct({
       threadId: Schema.String,
       turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(Schema.Unknown) })),
@@ -215,16 +219,16 @@ export const Model = Schema.Struct({
   blocks: Schema.Array(Schema.Unknown),
   items: Schema.Array(Schema.Unknown),
   input: Schema.String,
-  cursor: Schema.Number,
+  cursor: Schema.Finite,
   pastedText: Schema.Array(PastedTextAttachmentSchema),
   history: Schema.Array(Schema.String),
   historyComposers: Schema.Array(ComposerDraftSchema),
   historyDraft: Schema.optional(ComposerDraftSchema),
-  historyIndex: Schema.optional(Schema.Number),
+  historyIndex: Schema.optional(Schema.Finite),
   historySearch: Schema.String,
   busy: Schema.Boolean,
   busyStatus: Schema.optional(Schema.String),
-  costUsd: Schema.optional(Schema.Number),
+  costUsd: Schema.optional(Schema.Finite),
   paletteOpen: Schema.Boolean,
   palette: PaletteStateSchema,
   modePicker: ModePickerStateSchema,
@@ -232,15 +236,15 @@ export const Model = Schema.Struct({
   threadSwitcher: ThreadSwitcherStateSchema,
   shortcutsOpen: Schema.Boolean,
   pendingAction: Schema.optional(Schema.Unknown),
-  composerHeight: Schema.Number,
-  width: Schema.Number,
-  height: Schema.Number,
-  scrollOffset: Schema.Number,
+  composerHeight: Schema.Finite,
+  width: Schema.Finite,
+  height: Schema.Finite,
+  scrollOffset: Schema.Finite,
   scrollFollow: Schema.Boolean,
   threads: Schema.Array(Schema.Unknown),
   sidebarOpen: Schema.Boolean,
-  selectedThread: Schema.Number,
-  permissionSelection: Schema.Number,
+  selectedThread: Schema.Finite,
+  permissionSelection: Schema.Finite,
   queueSelection: Schema.optional(Schema.String),
   queue: Schema.Array(Schema.Unknown),
   detailSelection: Schema.optional(Schema.String),
@@ -254,7 +258,7 @@ export const Model = Schema.Struct({
   reasoningEffort: ReasoningEffort,
   changedFilesOpen: Schema.Boolean,
   changedFiles: ChangedFilesSchema,
-  sidebarWidth: Schema.Number,
+  sidebarWidth: Schema.Finite,
   threadLoading: Schema.Boolean,
   toolCallDrafts: Schema.Array(
     Schema.Struct({ id: Schema.String, name: Schema.optional(Schema.String), text: Schema.String }),
@@ -325,14 +329,17 @@ export interface QueueItem {
   readonly attachments?: ReadonlyArray<string>
 }
 
-export const replaceQueue = (model: Model, queue: ReadonlyArray<QueueItem>): Model => {
+export const replaceQueue: {
+  (model: Model, queue: ReadonlyArray<QueueItem>): Model
+  (queue: ReadonlyArray<QueueItem>): (model: Model) => Model
+} = Function.dual(2, (model: Model, queue: ReadonlyArray<QueueItem>): Model => {
   const selected = queue.some((item) => item.id === model.queueSelection) ? model.queueSelection : undefined
   return {
     ...model,
     queue: [...queue],
     queueSelection: selected,
   }
-}
+})
 
 export const defaultReasoningEffort = (mode: Mode): ReasoningEffort =>
   mode === "low" ? "low" : mode === "medium" ? "medium" : "high"
@@ -340,48 +347,54 @@ export const defaultReasoningEffort = (mode: Mode): ReasoningEffort =>
 const clampSidebarWidth = (width: number, terminalWidth: number): number =>
   Math.max(24, Math.min(width, Math.max(24, terminalWidth - 40)))
 
-export const initial = (workspace: string, mode: Mode = "medium"): Model => ({
-  workspace,
-  mode,
-  entries: [],
-  blocks: [],
-  items: [],
-  input: "",
-  cursor: 0,
-  pastedText: [],
-  history: [],
-  historyComposers: [],
-  historySearch: "",
-  busy: false,
-  paletteOpen: false,
-  palette: { open: false, query: "", selected: 0 },
-  modePicker: { open: false, selected: 0 },
-  filePicker: { open: false, query: "", selected: 0, items: idle, kind: "file" },
-  threadSwitcher: { open: false, query: "", selected: 0 },
-  shortcutsOpen: false,
-  composerHeight: 5,
-  width: 80,
-  height: 24,
-  scrollOffset: 0,
-  scrollFollow: true,
-  threads: [],
-  sidebarOpen: false,
-  selectedThread: 0,
-  permissionSelection: 0,
-  queueSelection: undefined,
-  queue: [],
-  seenEventIds: [],
-  seenExecutionEventKeys: [],
-  activeTurnId: undefined,
-  fastMode: false,
-  reasoningEffort: defaultReasoningEffort(mode),
-  changedFilesOpen: false,
-  changedFiles: idle,
-  sidebarWidth: 36,
-  threadLoading: false,
-  threadPreview: idle,
-  toolCallDrafts: [],
-})
+export const initial: {
+  (workspace: string, mode?: Mode): Model
+  (mode?: Mode): (workspace: string) => Model
+} = Function.dual(
+  (args) => args.length > 1 || !Mode.literals.includes(args[0]),
+  (workspace: string, mode: Mode = "medium"): Model => ({
+    workspace,
+    mode,
+    entries: [],
+    blocks: [],
+    items: [],
+    input: "",
+    cursor: 0,
+    pastedText: [],
+    history: [],
+    historyComposers: [],
+    historySearch: "",
+    busy: false,
+    paletteOpen: false,
+    palette: { open: false, query: "", selected: 0 },
+    modePicker: { open: false, selected: 0 },
+    filePicker: { open: false, query: "", selected: 0, items: idle, kind: "file" },
+    threadSwitcher: { open: false, query: "", selected: 0 },
+    shortcutsOpen: false,
+    composerHeight: 5,
+    width: 80,
+    height: 24,
+    scrollOffset: 0,
+    scrollFollow: true,
+    threads: [],
+    sidebarOpen: false,
+    selectedThread: 0,
+    permissionSelection: 0,
+    queueSelection: undefined,
+    queue: [],
+    seenEventIds: [],
+    seenExecutionEventKeys: [],
+    activeTurnId: undefined,
+    fastMode: false,
+    reasoningEffort: defaultReasoningEffort(mode),
+    changedFilesOpen: false,
+    changedFiles: idle,
+    sidebarWidth: 36,
+    threadLoading: false,
+    threadPreview: idle,
+    toolCallDrafts: [],
+  }),
+)
 
 export const inputRows = (model: Model): number => {
   const width = Math.max(1, model.width - 4)
@@ -440,18 +453,21 @@ const appendParsedText = (parts: Array<PromptPart>, text: string): void => {
   if (offset < text.length) appendPromptPart(parts, { type: "text", text: text.slice(offset) })
 }
 
-export const promptParts = (
-  input: string,
-  pastedText: ReadonlyArray<ComposerAttachment> = [],
-): ReadonlyArray<PromptPart> => {
-  const parts: Array<PromptPart> = []
-  for (const value of input.split(/([\uE000-\uF8FF])/u)) {
-    const attachment = pastedText.find((candidate) => candidate.token === value)
-    if (attachment?.type === "image") appendPromptPart(parts, { type: "image", path: attachment.path })
-    else appendParsedText(parts, attachment?.type === "text" ? attachment.value : value)
-  }
-  return parts.length === 0 ? [{ type: "text", text: "" }] : parts
-}
+export const promptParts: {
+  (input: string, pastedText?: ReadonlyArray<ComposerAttachment>): ReadonlyArray<PromptPart>
+  (pastedText?: ReadonlyArray<ComposerAttachment>): (input: string) => ReadonlyArray<PromptPart>
+} = Function.dual(
+  (args) => args.length > 1 || typeof args[0] === "string",
+  (input: string, pastedText: ReadonlyArray<ComposerAttachment> = []): ReadonlyArray<PromptPart> => {
+    const parts: Array<PromptPart> = []
+    for (const value of input.split(/([\uE000-\uF8FF])/u)) {
+      const attachment = pastedText.find((candidate) => candidate.token === value)
+      if (attachment?.type === "image") appendPromptPart(parts, { type: "image", path: attachment.path })
+      else appendParsedText(parts, attachment?.type === "text" ? attachment.value : value)
+    }
+    return parts.length === 0 ? [{ type: "text", text: "" }] : parts
+  },
+)
 
 const insert = (model: Model, value: string): Model => ({
   ...model,
@@ -524,14 +540,21 @@ const removeImage = (model: Model, path: string): Model => {
 export const displayInput = (model: Model): string =>
   model.pastedText.reduce((text, attachment) => text.replaceAll(attachment.token, attachment.label), model.input)
 
-export const expandPastedText = (input: string, pastedText: ReadonlyArray<ComposerAttachment>): string =>
+export const expandPastedText: {
+  (input: string, pastedText: ReadonlyArray<ComposerAttachment>): string
+  (pastedText: ReadonlyArray<ComposerAttachment>): (input: string) => string
+} = Function.dual(2, (input: string, pastedText: ReadonlyArray<ComposerAttachment>): string =>
   pastedText.reduce(
     (text, attachment) =>
       text.replaceAll(attachment.token, attachment.type === "image" ? attachment.label : attachment.value),
     input,
-  )
+  ),
+)
 
-export const pastedTextTokenAt = (model: Model, displayOffset: number): string | undefined => {
+export const pastedTextTokenAt: {
+  (model: Model, displayOffset: number): string | undefined
+  (displayOffset: number): (model: Model) => string | undefined
+} = Function.dual(2, (model: Model, displayOffset: number): string | undefined => {
   let offset = 0
   for (const part of model.input.split(/([\uE000-\uF8FF])/u)) {
     const attachment = model.pastedText.find((candidate) => candidate.token === part)
@@ -540,7 +563,7 @@ export const pastedTextTokenAt = (model: Model, displayOffset: number): string |
     offset += width
   }
   return undefined
-}
+})
 
 const expandPastedTextAttachment = (model: Model, token: string): Model => {
   const attachment = model.pastedText.find((candidate) => candidate.token === token)
@@ -604,7 +627,10 @@ export const canSubmit = (model: Model): boolean =>
     return candidate._tag !== "Permission" || candidate.status !== "pending"
   })
 
-export const update = (model: Model, message: Message): Model => {
+export const update: {
+  (model: Model, message: Message): Model
+  (message: Message): (model: Model) => Model
+} = Function.dual(2, (model: Model, message: Message): Model => {
   switch (message._tag) {
     case "Pasted":
       return insertPaste(model, message.text)
@@ -654,7 +680,7 @@ export const update = (model: Model, message: Message): Model => {
       }
     case "ThreadSelectionConfirmed": {
       const thread = (model.threads as ReadonlyArray<ThreadItem>)[model.selectedThread]
-      return thread ? { ...model, pendingAction: { _tag: "SelectThread", id: thread.id } } : model
+      return thread !== undefined ? { ...model, pendingAction: { _tag: "SelectThread", id: thread.id } } : model
     }
     case "PermissionSelectionMoved":
       return { ...model, permissionSelection: (model.permissionSelection + message.offset + 3) % 3 }
@@ -1433,4 +1459,4 @@ export const update = (model: Model, message: Message): Model => {
       return isPrintable(key) ? insert(model, key.sequence) : model
     }
   }
-}
+})

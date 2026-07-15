@@ -26,7 +26,7 @@ export interface Interface {
   readonly resume: (pin: Pin) => Effect.Effect<Activated, PluginRegistry.GenerationUnavailable>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/ExecutionExtensions") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/extensions/execution-extensions/Service") {}
 
 export const layer = Layer.effect(
   Service,
@@ -35,7 +35,7 @@ export const layer = Layer.effect(
     return Service.of({
       future: Effect.fn("ExecutionExtensions.future")(function* (mcpFingerprint, resolvedContextDigest) {
         const current = yield* registry.current
-        if (Option.isNone(current)) return yield* new NoGeneration()
+        if (Option.isNone(current)) return yield* NoGeneration.make()
         const generation = current.value
         return {
           generation,

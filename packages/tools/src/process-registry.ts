@@ -1,4 +1,17 @@
-import { Context, Deferred, Effect, Exit, Layer, Option, Ref, Scope, Stream } from "effect"
+import {
+  Context,
+  Data,
+  Deferred,
+  Effect,
+  Exit,
+  Function,
+  Layer,
+  Option,
+  PlatformError,
+  Ref,
+  Scope,
+  Stream,
+} from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 export interface Output {
@@ -45,7 +58,10 @@ const appendOutput = (pending: PendingOutput, channel: "stdout" | "stderr", text
   }
 }
 
-export const collectBoundedText = <E, R>(stream: Stream.Stream<Uint8Array, E, R>, limit: number) =>
+export const collectBoundedText: {
+  (limit: number): <E, R>(stream: Stream.Stream<Uint8Array, E, R>) => Effect.Effect<BoundedText, E, R>
+  <E, R>(stream: Stream.Stream<Uint8Array, E, R>, limit: number): Effect.Effect<BoundedText, E, R>
+} = Function.dual(2, <E, R>(stream: Stream.Stream<Uint8Array, E, R>, limit: number) =>
   Effect.gen(function* () {
     const decoder = new TextDecoder()
     const collected = yield* Stream.runFold(
@@ -63,18 +79,21 @@ export const collectBoundedText = <E, R>(stream: Stream.Stream<Uint8Array, E, R>
       text: collected.text + accepted,
       truncated: collected.truncated || accepted.length < final.length,
     }
-  })
+  }),
+)
 
-export class ProcessNotFound extends Error {
-  readonly _tag = "ProcessNotFound"
-}
+export class ProcessNotFound extends Data.TaggedError("ProcessNotFound")<{ readonly message: string }> {}
 
 export interface Interface {
-  readonly start: (command: string, args: ReadonlyArray<string>, cwd: string) => Effect.Effect<string, unknown>
+  readonly start: (
+    command: string,
+    args: ReadonlyArray<string>,
+    cwd: string,
+  ) => Effect.Effect<string, PlatformError.PlatformError>
   readonly poll: (processId: string, waitMillis: number, outputLimit: number) => Effect.Effect<Output, ProcessNotFound>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/tools/ProcessRegistry") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/tools/process-registry/Service") {}
 
 export const layer = Layer.effect(
   Service,
@@ -107,7 +126,7 @@ export const layer = Layer.effect(
             const drain = (
               channel: "stdout" | "stderr",
               decoder: TextDecoder,
-              stream: Stream.Stream<Uint8Array, unknown>,
+              stream: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
             ) =>
               Stream.runForEach(stream, (bytes) =>
                 Ref.update(output, (pending) =>
@@ -132,7 +151,7 @@ export const layer = Layer.effect(
       }),
       poll: Effect.fn("ProcessRegistry.poll")(function* (processId, waitMillis, outputLimit) {
         const entry = (yield* Ref.get(entries)).get(processId)
-        if (entry === undefined) return yield* Effect.fail(new ProcessNotFound(`Unknown process id: ${processId}`))
+        if (entry === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
         if (waitMillis > 0)
           yield* Deferred.await(entry.exit).pipe(Effect.timeout(`${waitMillis} millis`), Effect.ignore)
         const pendingExit = yield* Deferred.poll(entry.exit)

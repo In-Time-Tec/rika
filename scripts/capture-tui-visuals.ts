@@ -1,20 +1,27 @@
-import { cp, mkdtemp, rm } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
+import * as BunRuntime from "@effect/platform-bun/BunRuntime"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Effect, FileSystem, Layer, Path } from "effect"
 import { captureVisuals } from "../packages/tui/test/visual.capture"
 
-const candidate = await mkdtemp(join(tmpdir(), "rika-visual-candidate-"))
-try {
-  await captureVisuals(candidate)
-  if (process.argv.includes("--approve")) {
-    const approved = join(import.meta.dir, "../packages/tui/test/fixtures/visual")
-    await rm(approved, { recursive: true, force: true })
-    await cp(candidate, approved, { recursive: true })
-    console.log(`Approved visual baseline: ${approved}`)
+const program = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const approve = Bun.argv.includes("--approve")
+  const candidate = yield* approve
+    ? fileSystem.makeTempDirectoryScoped({ prefix: "rika-visual-candidate-" })
+    : fileSystem.makeTempDirectory({ prefix: "rika-visual-candidate-" })
+  yield* Effect.promise(() => captureVisuals(candidate))
+  if (approve) {
+    const approved = path.join(import.meta.dir, "../packages/tui/test/fixtures/visual")
+    yield* fileSystem.remove(approved, { recursive: true, force: true })
+    yield* fileSystem.copy(candidate, approved)
+    yield* Effect.log(`Approved visual baseline: ${approved}`)
   } else {
-    console.log(`Captured visual candidate: ${candidate}`)
-    console.log("Review it, then run with --approve to replace the frozen baseline.")
+    yield* Effect.log(`Captured visual candidate: ${candidate}`)
+    yield* Effect.log("Review it, then run with --approve to replace the frozen baseline.")
   }
-} finally {
-  if (process.argv.includes("--approve")) await rm(candidate, { recursive: true, force: true })
-}
+})
+
+BunRuntime.runMain(
+  Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(program, context))),
+)

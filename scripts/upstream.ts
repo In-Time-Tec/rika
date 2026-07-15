@@ -1,6 +1,6 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Effect, FileSystem, Path } from "effect"
+import { Data, Effect, FileSystem, Layer, Path } from "effect"
 import { Command } from "effect/unstable/cli"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
@@ -19,12 +19,14 @@ const consumers = [
   ["packages/runtime", ["@batonfx/core", "@batonfx/test", "@relayfx/sdk"]],
 ] as const
 
+class UpstreamError extends Data.TaggedError("UpstreamError")<{ readonly message: string }> {}
+
 const run = Effect.fn("Upstream.run")((command: string, args: ReadonlyArray<string>, cwd: string) =>
   Effect.gen(function* () {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const exitCode = yield* spawner.exitCode(ChildProcess.make(command, args, { cwd }))
     if (Number(exitCode) !== 0)
-      return yield* Effect.fail(new Error(`${command} ${args.join(" ")} exited with ${exitCode}`))
+      return yield* new UpstreamError({ message: `${command} ${args.join(" ")} exited with ${exitCode}` })
   }),
 )
 
@@ -46,7 +48,7 @@ const status = Effect.gen(function* () {
       const actual = yield* fileSystem.realPath(installed)
       const expected = path.join(projects, relative)
       if (actual !== expected) {
-        return yield* Effect.fail(new Error(`${consumer}:${name} resolves to ${actual}; expected ${expected}`))
+        return yield* new UpstreamError({ message: `${consumer}:${name} resolves to ${actual}; expected ${expected}` })
       }
     }
   }
@@ -58,7 +60,7 @@ const link = Effect.gen(function* () {
   for (const repository of ["batonfx", "relayfx"] as const) {
     const repositoryPath = path.join(projects, repository)
     if (!(yield* fileSystem.exists(repositoryPath))) {
-      return yield* Effect.fail(new Error(`Missing sibling repository: ${repositoryPath}`))
+      return yield* new UpstreamError({ message: `Missing sibling repository: ${repositoryPath}` })
     }
   }
   yield* run("bun", ["run", "build"], path.join(projects, "relayfx", "packages", "relay"))
@@ -94,4 +96,6 @@ const command = Command.make("upstream").pipe(
 
 const main = Command.run(command, { version: "0.0.0" })
 
-BunRuntime.runMain(main.pipe(Effect.provide(BunServices.layer)))
+BunRuntime.runMain(
+  Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(main, context))),
+)

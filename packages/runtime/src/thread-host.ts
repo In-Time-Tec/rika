@@ -21,7 +21,7 @@ const PromoteTurnFailure = Schema.Struct({
 export const promoteTurnTool = Tool.make("promote_turn", {
   description: "Claim and start every currently claimable queued Rika turn for a thread",
   parameters: Schema.Struct({ threadId: Schema.String }),
-  success: Schema.Struct({ promoted: Schema.Number }),
+  success: Schema.Struct({ promoted: Schema.Finite }),
   failure: PromoteTurnFailure,
   failureMode: "return",
 })
@@ -35,7 +35,7 @@ export interface RegistryInterface {
   readonly promote: (threadId: string) => Effect.Effect<number>
 }
 
-export class Registry extends Context.Service<Registry, RegistryInterface>()("@rika/runtime/ThreadHostRegistry") {}
+export class Registry extends Context.Service<Registry, RegistryInterface>()("@rika/runtime/thread-host/Registry") {}
 
 export const makeRegistry: Effect.Effect<RegistryInterface> = Effect.gen(function* () {
   const slot = yield* Ref.make(Option.none<Promoter>())
@@ -86,7 +86,7 @@ const parseJson = (value: string): Record<string, unknown> | undefined => {
 }
 
 const usage = (): Response.Usage =>
-  new Response.Usage({
+  Response.Usage.make({
     inputTokens: { uncached: undefined, total: undefined, cacheRead: undefined, cacheWrite: undefined },
     outputTokens: { total: undefined, text: undefined, reasoning: undefined },
   })

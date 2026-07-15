@@ -7,8 +7,8 @@ export const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   permission: Permission,
-  timeoutMillis: Schema.Number,
-  outputLimit: Schema.Number,
+  timeoutMillis: Schema.Finite,
+  outputLimit: Schema.Finite,
 })
 export type Definition = typeof Definition.Type
 

@@ -1,5 +1,4 @@
-import { FileSystem } from "effect"
-import { Effect, Schema } from "effect"
+import { Data, Effect, FileSystem, Layer, Schema } from "effect"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 
@@ -19,6 +18,8 @@ const externalFrameworks = new Set([
   "@relayfx/sdk",
 ])
 
+class DependencyCheckError extends Data.TaggedError("DependencyCheckError")<{ readonly message: string }> {}
+
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const source = yield* fileSystem.readFileString("package.json")
@@ -29,7 +30,9 @@ const program = Effect.gen(function* () {
     if (externalFrameworks.has(name) && version === "workspace:*") return [`${name} uses external workspace linking`]
     return []
   })
-  if (violations.length > 0) return yield* Effect.fail(new Error(violations.join("\n")))
+  if (violations.length > 0) return yield* new DependencyCheckError({ message: violations.join("\n") })
 })
 
-BunRuntime.runMain(program.pipe(Effect.provide(BunServices.layer)))
+BunRuntime.runMain(
+  Effect.scoped(Effect.flatMap(Layer.build(BunServices.layer), (context) => Effect.provide(program, context))),
+)

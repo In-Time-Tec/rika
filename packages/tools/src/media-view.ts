@@ -7,7 +7,7 @@ export const AnalysisInput = Schema.Struct({
   path: Schema.String,
   mimeType: Schema.String,
   kind: MediaKind,
-  size: Schema.Number,
+  size: Schema.Finite,
   bytes: Schema.Uint8Array,
 })
 export type AnalysisInput = typeof AnalysisInput.Type
@@ -16,9 +16,9 @@ export const Artifact = Schema.Struct({
   path: Schema.String,
   mimeType: Schema.String,
   kind: MediaKind,
-  size: Schema.Number,
-  width: Schema.optionalKey(Schema.Number),
-  height: Schema.optionalKey(Schema.Number),
+  size: Schema.Finite,
+  width: Schema.optionalKey(Schema.Finite),
+  height: Schema.optionalKey(Schema.Finite),
 })
 export type Artifact = typeof Artifact.Type
 
@@ -33,8 +33,8 @@ export class MediaMissingError extends Schema.TaggedErrorClass<MediaMissingError
 }) {}
 export class MediaOversizedError extends Schema.TaggedErrorClass<MediaOversizedError>()("MediaOversizedError", {
   path: Schema.String,
-  size: Schema.Number,
-  maximum: Schema.Number,
+  size: Schema.Finite,
+  maximum: Schema.Finite,
 }) {}
 export class UnsupportedMediaError extends Schema.TaggedErrorClass<UnsupportedMediaError>()("UnsupportedMediaError", {
   path: Schema.String,
@@ -46,11 +46,13 @@ export class MediaPathError extends Schema.TaggedErrorClass<MediaPathError>()("M
 export interface AnalyzerInterface {
   readonly analyze: (input: AnalysisInput) => Effect.Effect<string, MediaAnalysisError>
 }
-export class MediaAnalyzer extends Context.Service<MediaAnalyzer, AnalyzerInterface>()("@rika/tools/MediaAnalyzer") {}
+export class MediaAnalyzer extends Context.Service<MediaAnalyzer, AnalyzerInterface>()(
+  "@rika/tools/media-view/MediaAnalyzer",
+) {}
 export const analyzerTestLayer = (analyze: AnalyzerInterface["analyze"]) =>
   Layer.succeed(MediaAnalyzer, MediaAnalyzer.of({ analyze }))
 export const analyzerUnavailableLayer = analyzerTestLayer(() =>
-  Effect.fail(new MediaAnalysisError({ message: "Media analysis route is not configured" })),
+  Effect.fail(MediaAnalysisError.make({ message: "Media analysis route is not configured" })),
 )
 
 export interface Interface {
@@ -61,7 +63,7 @@ export interface Interface {
     MediaMissingError | MediaOversizedError | UnsupportedMediaError | MediaPathError | MediaAnalysisError
   >
 }
-export class Service extends Context.Service<Service, Interface>()("@rika/tools/MediaView") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/tools/media-view/Service") {}
 
 const maximumSize = 25 * 1024 * 1024
 const outputLimit = 40_000
@@ -104,23 +106,23 @@ export const layer = (workspace: string) =>
         view: Effect.fn("MediaView.view")(function* (relativePath) {
           const target = pathService.resolve(workspace, relativePath)
           if (target !== workspace && !target.startsWith(`${workspace}${pathService.sep}`))
-            return yield* new MediaPathError({ path: relativePath })
+            return yield* MediaPathError.make({ path: relativePath })
           const exists = yield* fileSystem
             .exists(target)
-            .pipe(Effect.mapError(() => new MediaMissingError({ path: relativePath })))
-          if (!exists) return yield* new MediaMissingError({ path: relativePath })
+            .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))
+          if (!exists) return yield* MediaMissingError.make({ path: relativePath })
           const info = yield* fileSystem
             .stat(target)
-            .pipe(Effect.mapError(() => new MediaMissingError({ path: relativePath })))
+            .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))
           const size = Number(info.size)
-          if (info.type !== "File") return yield* new UnsupportedMediaError({ path: relativePath })
+          if (info.type !== "File") return yield* UnsupportedMediaError.make({ path: relativePath })
           if (size > maximumSize)
-            return yield* new MediaOversizedError({ path: relativePath, size, maximum: maximumSize })
+            return yield* MediaOversizedError.make({ path: relativePath, size, maximum: maximumSize })
           const bytes = yield* fileSystem
             .readFile(target)
-            .pipe(Effect.mapError(() => new MediaMissingError({ path: relativePath })))
+            .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))
           const media = classify(bytes)
-          if (media === undefined) return yield* new UnsupportedMediaError({ path: relativePath })
+          if (media === undefined) return yield* UnsupportedMediaError.make({ path: relativePath })
           const artifact = {
             path: relativePath,
             mimeType: media.mimeType,
@@ -128,7 +130,10 @@ export const layer = (workspace: string) =>
             size,
             ...dimensions(bytes, media.mimeType),
           }
-          if (media.kind === "image") return { text: JSON.stringify(artifact), artifact, truncated: false }
+          if (media.kind === "image") {
+            const text = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(artifact).pipe(Effect.orDie)
+            return { text, artifact, truncated: false }
+          }
           const analysis = yield* analyzer.analyze({ ...artifact, bytes })
           return { text: analysis.slice(0, outputLimit), artifact, truncated: analysis.length > outputLimit }
         }),

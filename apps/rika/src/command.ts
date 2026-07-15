@@ -1,5 +1,5 @@
 import * as Operation from "@rika/app/operation"
-import { Console, Effect, Option } from "effect"
+import { Console, Effect, Option, Schema, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { command as ConfigCommand } from "./commands/config"
 import { command as DiagnosticsCommand } from "./commands/diagnostics"
@@ -55,10 +55,10 @@ const runInput = (values: {
 
 const validateRunInput = (input: RunOperation) => {
   if (input.streamJsonInput && !input.streamJson) {
-    return Effect.fail(new Operation.InvalidInput({ message: "--stream-json-input requires --stream-json" }))
+    return Effect.fail(Operation.InvalidInput.make({ message: "--stream-json-input requires --stream-json" }))
   }
   if (input.streamJsonThinking && !input.streamJson) {
-    return Effect.fail(new Operation.InvalidInput({ message: "--stream-json-thinking requires --stream-json" }))
+    return Effect.fail(Operation.InvalidInput.make({ message: "--stream-json-thinking requires --stream-json" }))
   }
   return Effect.succeed(input)
 }
@@ -72,31 +72,49 @@ export const parseJsonLines = (input: string): ReadonlyArray<string> =>
       try {
         value = JSON.parse(line)
       } catch {
-        throw new Operation.InvalidInput({ message: `Invalid JSON on stdin line ${index + 1}` })
+        throw Operation.InvalidInput.make({ message: `Invalid JSON on stdin line ${index + 1}` })
       }
       if (typeof value === "string") return value
       if (typeof value === "object" && value !== null && "prompt" in value && typeof value.prompt === "string")
         return value.prompt
-      throw new Operation.InvalidInput({ message: `JSON on stdin line ${index + 1} must be a string or prompt object` })
+      throw Operation.InvalidInput.make({
+        message: `JSON on stdin line ${index + 1} must be a string or prompt object`,
+      })
     })
 
-export const readStreamInput = (input: RunOperation, stdin: AsyncIterable<unknown> = process.stdin) => {
+export function readStreamInput(
+  stdin?: AsyncIterable<unknown>,
+): (input: RunOperation) => Effect.Effect<RunOperation, Operation.InvalidInput>
+export function readStreamInput(
+  input: RunOperation,
+  stdin?: AsyncIterable<unknown>,
+): Effect.Effect<RunOperation, Operation.InvalidInput>
+export function readStreamInput(
+  inputOrStdin?: RunOperation | AsyncIterable<unknown>,
+  stdin: AsyncIterable<unknown> = process.stdin,
+):
+  | Effect.Effect<RunOperation, Operation.InvalidInput>
+  | ((input: RunOperation) => Effect.Effect<RunOperation, Operation.InvalidInput>) {
+  if (inputOrStdin === undefined || !("_tag" in inputOrStdin)) {
+    const selectedStdin = inputOrStdin ?? stdin
+    return (input) => readStreamInput(input, selectedStdin)
+  }
+  const input = inputOrStdin
   if (!input.streamJsonInput || input.prompt.length > 0) return Effect.succeed(input)
-  return Effect.tryPromise({
-    try: async () => {
-      let text = ""
-      for await (const chunk of stdin) text += String(chunk)
-      return text
-    },
-    catch: (cause) => new Operation.InvalidInput({ message: `Unable to read JSON input: ${String(cause)}` }),
-  }).pipe(
+  return Stream.fromAsyncIterable(stdin, (cause) =>
+    Operation.InvalidInput.make({ message: `Unable to read JSON input: ${String(cause)}` }),
+  ).pipe(
+    Stream.runFold(
+      () => "",
+      (text, chunk) => text + String(chunk),
+    ),
     Effect.flatMap((text) =>
       Effect.try({
         try: () => ({ ...input, prompt: [...input.prompt, ...parseJsonLines(text)] }),
         catch: (cause) =>
-          cause instanceof Operation.InvalidInput
+          Schema.is(Operation.InvalidInput)(cause)
             ? cause
-            : new Operation.InvalidInput({ message: `Unable to parse JSON input: ${String(cause)}` }),
+            : Operation.InvalidInput.make({ message: `Unable to parse JSON input: ${String(cause)}` }),
       }),
     ),
   )
@@ -157,7 +175,7 @@ export const command = Command.make(
     if (values.execute)
       return validateRunInput(runInput(values)).pipe(Effect.flatMap(readStreamInput), Effect.flatMap(dispatch))
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking) {
-      return Effect.fail(new Operation.InvalidInput({ message: "stream flags require --execute or the run command" }))
+      return Effect.fail(Operation.InvalidInput.make({ message: "stream flags require --execute or the run command" }))
     }
     const selectedMode = optionalValue(values.mode)
     const selectedWorkspace = optionalValue(values.workspace)

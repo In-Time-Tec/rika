@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Model, TranscriptBlock, TranscriptItem } from "./view-state"
 
 export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
@@ -50,7 +51,10 @@ const stringValue = (value: Record<string, unknown>, keys: ReadonlyArray<string>
   return undefined
 }
 
-export const toolDetail = (block: number, call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ToolDetail => {
+export const toolDetail: {
+  (call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): (block: number) => ToolDetail
+  (block: number, call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ToolDetail
+} = Function.dual(2, (block: number, call: Extract<TranscriptBlock, { _tag: "ToolCall" }>): ToolDetail => {
   const input = inputValue(call.input)
   const kind = toolKind(call.name)
   const path = stringValue(input, ["path", "file_path", "file"])
@@ -73,10 +77,18 @@ export const toolDetail = (block: number, call: Extract<TranscriptBlock, { _tag:
   if (kind === "edit") return { block, label: `Edit ${path ?? call.name}`, ...(target === undefined ? {} : { target }) }
   if (kind === "shell") return { block, label: `$ ${stringValue(input, ["command", "cmd", "script"]) ?? call.input}` }
   return { block, label: call.name }
-}
+})
 
-export const toolDetails = (model: Model, unit: Extract<TranscriptUnit, { kind: "tool" }>): ReadonlyArray<ToolDetail> =>
-  unit.blocks.map((block) => toolDetail(block, model.blocks[block] as Extract<TranscriptBlock, { _tag: "ToolCall" }>))
+export const toolDetails: {
+  (unit: Extract<TranscriptUnit, { kind: "tool" }>): (model: Model) => ReadonlyArray<ToolDetail>
+  (model: Model, unit: Extract<TranscriptUnit, { kind: "tool" }>): ReadonlyArray<ToolDetail>
+} = Function.dual(
+  2,
+  (model: Model, unit: Extract<TranscriptUnit, { kind: "tool" }>): ReadonlyArray<ToolDetail> =>
+    unit.blocks.map((block) =>
+      toolDetail(block, model.blocks[block] as Extract<TranscriptBlock, { _tag: "ToolCall" }>),
+    ),
+)
 
 export const toolKind = (rawName: string): ToolKind => {
   const name = rawName.toLowerCase()
@@ -159,7 +171,10 @@ export const isExpandableUnit = (unit: TranscriptUnit): boolean =>
 export const expandableUnits = (model: Model): ReadonlyArray<TranscriptUnit> =>
   transcriptUnits(model).filter(isExpandableUnit)
 
-export const transcriptUnitId = (model: Model, unit: TranscriptUnit): TranscriptUnitId => {
+export const transcriptUnitId: {
+  (model: Model, unit: TranscriptUnit): TranscriptUnitId
+  (unit: TranscriptUnit): (model: Model) => TranscriptUnitId
+} = Function.dual(2, (model: Model, unit: TranscriptUnit): TranscriptUnitId => {
   if (unit.kind === "entry") return `entry:${unit.entry}`
   if (unit.kind === "tool") {
     const ids = unit.blocks.map((index) => {
@@ -171,7 +186,7 @@ export const transcriptUnitId = (model: Model, unit: TranscriptUnit): Transcript
   const block = model.blocks[unit.block] as TranscriptBlock
   if ("id" in block && typeof block.id === "string") return `block:${block.id}`
   return `block:${block._tag}:${unit.block}`
-}
+})
 
 export const unitToggleTargets = (unit: TranscriptUnit): ReadonlyArray<number> =>
   unit.kind === "tool" ? unit.blocks : unit.kind === "reasoning" || unit.kind === "diff" ? [unit.block] : []

@@ -15,17 +15,17 @@ Owner candidates: Relay SDK policy persistence and Relay runtime steering projec
 - Ten sequential `read_file` tool calls followed by one text completion
 - No steering or follow-up input sent
 
-The reduction is retained at `/tmp/rika-baton-turn-cap-repro.ts`. Output is retained at `raw/003-relay-turn-policy-repro.json`.
+The reduction is retained at `/tmp/rika-baton-turn-cap-repro.ts`. Output is retained at `raw/003-relay-turn-policy-repro.txt`.
 
 ## Results
 
-| Signal | Expected | Actual |
-| --- | ---: | ---: |
-| Baton model requests | at most the default turn policy | 11 |
-| Tool turns | at most 8 | 10 |
-| Durable `steering.received` events without steering | 0 | 11 |
-| Total durable execution events | bounded by useful work | 48 |
-| Execution result | turn-policy termination before excess calls | completed after all scripted calls |
+| Signal                                              |                                    Expected |                             Actual |
+| --------------------------------------------------- | ------------------------------------------: | ---------------------------------: |
+| Baton model requests                                |             at most the default turn policy |                                 11 |
+| Tool turns                                          |                                   at most 8 |                                 10 |
+| Durable `steering.received` events without steering |                                           0 |                                 11 |
+| Total durable execution events                      |                      bounded by useful work |                                 48 |
+| Execution result                                    | turn-policy termination before excess calls | completed after all scripted calls |
 
 ## Policy-loss boundary
 

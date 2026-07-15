@@ -24,7 +24,7 @@ export interface Interface {
   readonly pinned: (id: string) => Effect.Effect<Generation, GenerationUnavailable>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/PluginRegistry") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/extensions/plugin-registry/Service") {}
 
 export const memoryLayer = Layer.sync(Service, () => {
   const generations = new Map<string, Generation>()
@@ -35,7 +35,7 @@ export const memoryLayer = Layer.sync(Service, () => {
     current: Effect.sync(() => (current === undefined ? Option.none() : Option.some(current))),
     pinned: (id) => {
       const found = generations.get(id)
-      return found === undefined ? Effect.fail(new GenerationUnavailable({ generation: id })) : Effect.succeed(found)
+      return found === undefined ? Effect.fail(GenerationUnavailable.make({ generation: id })) : Effect.succeed(found)
     },
   })
 })

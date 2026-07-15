@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Path } from "effect"
 import * as FileMentions from "../src/file-mentions"
+import { provideLayer } from "./layer"
 
 describe("FileMentions", () => {
   it("parses quoted, delimited, empty, and duplicate mentions", () => {
@@ -17,6 +18,6 @@ describe("FileMentions", () => {
     Effect.gen(function* () {
       const path = yield* Path.Path
       expect(FileMentions.resolve("/work", "@b.ts @a.ts @b.ts", path)).toEqual(["/work/a.ts", "/work/b.ts"])
-    }).pipe(Effect.provide(Path.layer)),
+    }).pipe(provideLayer(Path.layer)),
   )
 })

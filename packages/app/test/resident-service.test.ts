@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it } from "@effect/vitest"
 import { Cause, Crypto, Deferred, Effect, Exit, Fiber, FiberSet, Layer, Ref } from "effect"
+import { provideLayer } from "./layer"
 import {
   canonicalServiceIdentity,
   makeLifecycle,
@@ -9,7 +10,7 @@ import {
 } from "../src/resident-service"
 
 describe("resident service protocol", () => {
-  it("uses canonical profile and data root identity", async () => {
+  it.effect("uses canonical profile and data root identity", () => {
     const crypto = Layer.succeed(
       Crypto.Crypto,
       Crypto.make({
@@ -17,10 +18,11 @@ describe("resident service protocol", () => {
         digest: (_algorithm, data) => Effect.succeed(data),
       }),
     )
-    const identity = (profile: string) =>
-      Effect.runPromise(canonicalServiceIdentity(profile, "/tmp/rika").pipe(Effect.provide(crypto)))
-    expect(await identity("default")).toBe(await identity("default"))
-    expect(await identity("other")).not.toBe(await identity("default"))
+    const identity = (profile: string) => canonicalServiceIdentity(profile, "/tmp/rika").pipe(provideLayer(crypto))
+    return Effect.gen(function* () {
+      expect(yield* identity("default")).toBe(yield* identity("default"))
+      expect(yield* identity("other")).not.toBe(yield* identity("default"))
+    })
   })
 
   it("fails closed for token, identity, and major version mismatches", () => {
@@ -57,9 +59,9 @@ describe("resident service protocol", () => {
 })
 
 describe("resident service lifecycle", () => {
-  it("cancels grace when another authenticated client attaches", async () => {
-    const states = await Effect.runPromise(
-      Effect.gen(function* () {
+  it("cancels grace when another authenticated client attaches", () =>
+    Effect.gen(function* () {
+      const states = yield* Effect.gen(function* () {
         const observed = yield* Ref.make<Array<string>>([])
         const lifecycle = yield* makeLifecycle((state) => Ref.update(observed, (values) => [...values, state]))
         yield* lifecycle.tryAttach
@@ -67,14 +69,13 @@ describe("resident service lifecycle", () => {
         yield* lifecycle.detach
         yield* lifecycle.tryAttach
         return yield* Ref.get(observed)
-      }),
-    )
-    expect(states).toEqual(["ready", "grace", "ready"])
-  })
+      }).pipe(Effect.withSpan("ResidentService.test"))
+      expect(states).toEqual(["ready", "grace", "ready"])
+    }))
 
-  it("drains only after the final client grace expires", async () => {
-    const state = await Effect.runPromise(
-      Effect.gen(function* () {
+  it("drains only after the final client grace expires", () =>
+    Effect.gen(function* () {
+      const state = yield* Effect.gen(function* () {
         const lifecycle = yield* makeLifecycle(() => Effect.void)
         yield* lifecycle.tryAttach
         yield* lifecycle.tryAttach
@@ -86,14 +87,13 @@ describe("resident service lifecycle", () => {
         expect(generation).toBeDefined()
         yield* lifecycle.expireGrace(generation!)
         return yield* lifecycle.state
-      }),
-    )
-    expect(state).toBe("draining")
-  })
+      }).pipe(Effect.withSpan("ResidentService.test"))
+      expect(state).toBe("draining")
+    }))
 
-  it("does not let a stale grace timer stop a reattached service", async () => {
-    const state = await Effect.runPromise(
-      Effect.gen(function* () {
+  it("does not let a stale grace timer stop a reattached service", () =>
+    Effect.gen(function* () {
+      const state = yield* Effect.gen(function* () {
         const lifecycle = yield* makeLifecycle(() => Effect.void)
         yield* lifecycle.tryAttach
         yield* lifecycle.ready
@@ -102,14 +102,13 @@ describe("resident service lifecycle", () => {
         yield* lifecycle.detach
         expect(yield* lifecycle.expireGrace(stale!)).toBe(false)
         return yield* lifecycle.state
-      }),
-    )
-    expect(state).toBe("grace")
-  })
+      }).pipe(Effect.withSpan("ResidentService.test"))
+      expect(state).toBe("grace")
+    }))
 
-  it("never admits a client after draining starts", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
+  it("never admits a client after draining starts", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.gen(function* () {
         const lifecycle = yield* makeLifecycle(() => Effect.void)
         expect(yield* lifecycle.tryAttach).toBe(true)
         yield* lifecycle.ready
@@ -118,28 +117,26 @@ describe("resident service lifecycle", () => {
         const attached = yield* lifecycle.tryAttach
         yield* lifecycle.ready
         return { attached, state: yield* lifecycle.state }
-      }),
-    )
-    expect(result).toEqual({ attached: false, state: "draining" })
-  })
+      }).pipe(Effect.withSpan("ResidentService.test"))
+      expect(result).toEqual({ attached: false, state: "draining" })
+    }))
 
-  it("begins cooperative drain monotonically", async () => {
-    const result = await Effect.runPromise(
-      Effect.gen(function* () {
+  it("begins cooperative drain monotonically", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.gen(function* () {
         const lifecycle = yield* makeLifecycle(() => Effect.void)
         expect(yield* lifecycle.tryAttach).toBe(true)
         yield* lifecycle.ready
         yield* lifecycle.beginDrain
         yield* lifecycle.ready
         return { attached: yield* lifecycle.tryAttach, state: yield* lifecycle.state }
-      }),
-    )
-    expect(result).toEqual({ attached: false, state: "draining" })
-  })
+      }).pipe(Effect.withSpan("ResidentService.test"))
+      expect(result).toEqual({ attached: false, state: "draining" })
+    }))
 
-  it("atomically rejects work once draining starts", async () => {
-    const result = await Effect.runPromise(
-      Effect.scoped(
+  it("atomically rejects work once draining starts", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.scoped(
         Effect.gen(function* () {
           const lifecycle = yield* makeLifecycle(() => Effect.void)
           const fibers = yield* FiberSet.make<void>()
@@ -148,14 +145,13 @@ describe("resident service lifecycle", () => {
           const fiber = yield* lifecycle.runWork(fibers, Effect.void)
           return { admitted: fiber !== undefined, size: yield* FiberSet.size(fibers) }
         }),
-      ),
-    )
-    expect(result).toEqual({ admitted: false, size: 0 })
-  })
+      )
+      expect(result).toEqual({ admitted: false, size: 0 })
+    }))
 
-  it("serializes work admission with drain and lets the host interrupt accepted work", async () => {
-    const result = await Effect.runPromise(
-      Effect.scoped(
+  it("serializes work admission with drain and lets the host interrupt accepted work", () =>
+    Effect.gen(function* () {
+      const result = yield* Effect.scoped(
         Effect.gen(function* () {
           const lifecycle = yield* makeLifecycle(() => Effect.void)
           const fibers = yield* FiberSet.make<void>()
@@ -181,8 +177,7 @@ describe("resident service lifecycle", () => {
             admittedAfterDrain: (yield* lifecycle.runWork(fibers, Effect.void)) !== undefined,
           }
         }),
-      ),
-    )
-    expect(result).toEqual({ interrupted: true, finalized: true, admittedAfterDrain: false })
-  })
+      )
+      expect(result).toEqual({ interrupted: true, finalized: true, admittedAfterDrain: false })
+    }))
 })

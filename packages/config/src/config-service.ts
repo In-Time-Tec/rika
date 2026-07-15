@@ -15,7 +15,7 @@ export interface Interface {
   readonly effective: Effect.Effect<EffectiveConfig>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/config/ConfigService") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/config/config-service/Service") {}
 
 const mergeModels = (...sources: ReadonlyArray<Readonly<Record<string, ModelAliasInput>> | undefined>) => {
   const models: Record<string, ModelAlias> = { ...defaults.models }

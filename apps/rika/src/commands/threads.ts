@@ -48,15 +48,17 @@ const continueCommand = Command.make(
   ({ last, threadIds }) =>
     Effect.gen(function* () {
       if (last && threadIds.length > 0) {
-        return yield* new Operation.InvalidInput({ message: "threads continue accepts --last or thread ids, not both" })
+        return yield* Operation.InvalidInput.make({
+          message: "threads continue accepts --last or thread ids, not both",
+        })
       }
       if (!last && threadIds.length === 0) {
-        return yield* new Operation.InvalidInput({
+        return yield* Operation.InvalidInput.make({
           message: "threads continue requires --last or at least one thread id",
         })
       }
       if (threadIds.length > 1) {
-        return yield* new Operation.InvalidInput({ message: "threads continue accepts exactly one thread id" })
+        return yield* Operation.InvalidInput.make({ message: "threads continue accepts exactly one thread id" })
       }
       if (last) {
         yield* dispatch({ _tag: "Interactive", prompt: [], last: true, ephemeral: false })

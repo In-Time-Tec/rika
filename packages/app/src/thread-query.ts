@@ -26,7 +26,7 @@ export interface Interface {
   readonly read: (input: ReadInput) => Effect.Effect<Result, QueryError | ThreadNotFoundError | ArchivedThreadError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/app/ThreadQuery") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/thread-query/Service") {}
 
 export class QueryError extends Schema.TaggedErrorClass<QueryError>()("ThreadQueryError", {
   message: Schema.String,
@@ -98,9 +98,9 @@ export const layer = Layer.effect(
           .list({
             includeArchived: input.includeArchived === true,
             limit: 100,
-            ...(parsed.text ? { query: parsed.text } : {}),
+            ...(parsed.text.length > 0 ? { query: parsed.text } : {}),
           })
-          .pipe(Effect.mapError((error) => new QueryError({ message: error.message })))
+          .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
         const selected = found.filter((thread) => matches(thread, parsed.terms)).slice(0, limit)
         return bound(
           selected
@@ -124,13 +124,13 @@ export const layer = Layer.effect(
         const threadId = Thread.ThreadId.make(input.threadId)
         const thread = yield* threads
           .get(threadId)
-          .pipe(Effect.mapError((error) => new QueryError({ message: error.message })))
-        if (thread === undefined) return yield* Effect.fail(new ThreadNotFoundError({ threadId: input.threadId }))
+          .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
+        if (thread === undefined) return yield* ThreadNotFoundError.make({ threadId: input.threadId })
         if (thread.archived && input.includeArchived !== true)
-          return yield* Effect.fail(new ArchivedThreadError({ threadId: input.threadId }))
+          return yield* ArchivedThreadError.make({ threadId: input.threadId })
         const allTurns = yield* turns
           .list(threadId)
-          .pipe(Effect.mapError((error) => new QueryError({ message: error.message })))
+          .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
         const selected = allTurns.slice(0, Math.min(Math.max(1, input.maxTurns ?? 50), 200))
         const sections = selected.map((turn) =>
           [`## Turn ${turn.id} (${turn.status})`, `User: ${turn.prompt}`].join("\n"),

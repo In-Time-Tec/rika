@@ -2,6 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { ContextFileSystem } from "../src"
+import { provideLayer } from "./layer"
 
 describe("ContextFileSystem", () => {
   it.effect("delegates filesystem operations and converts directory errors to absence", () =>
@@ -18,7 +19,9 @@ describe("ContextFileSystem", () => {
         expect(yield* context.readFileString(`${root}/file.txt`)).toBe("content")
         expect((yield* Effect.result(context.readFileString(`${root}/missing`)))._tag).toBe("Failure")
       }),
-    ).pipe(Effect.provide(ContextFileSystem.liveLayer), Effect.provide(BunServices.layer)),
+    ).pipe(
+      provideLayer(Layer.merge(ContextFileSystem.liveLayer.pipe(Layer.provide(BunServices.layer)), BunServices.layer)),
+    ),
   )
 
   it.effect("provides normalized deterministic test files and directories", () =>
@@ -32,8 +35,11 @@ describe("ContextFileSystem", () => {
       expect(yield* context.readFileString("./file.txt")).toBe("content")
       expect((yield* Effect.exit(context.readFileString("./missing")))._tag).toBe("Failure")
     }).pipe(
-      Effect.provide(ContextFileSystem.testLayer({ "./file.txt": "content" }, { "./directory": ["entry"] })),
-      Effect.provide(Layer.merge(BunServices.layer, Path.layer)),
+      provideLayer(
+        ContextFileSystem.testLayer({ "./file.txt": "content" }, { "./directory": ["entry"] }).pipe(
+          Layer.provide(Layer.merge(BunServices.layer, Path.layer)),
+        ),
+      ),
     ),
   )
 })

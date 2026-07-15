@@ -1,12 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ReadWebPage } from "../src"
+import { provide } from "./test-layer"
 
 const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
+    new Response(Schema.encodeSync(Schema.UnknownFromJsonString)(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    }),
   )
 
 const clientLayer = (run: (request: HttpClientRequest.HttpClientRequest) => HttpClientResponse.HttpClientResponse) =>
@@ -40,9 +44,7 @@ const run = (
     const reader = yield* ReadWebPage.Service
     return yield* reader.read(input)
   }).pipe(
-    Effect.provide(
-      ReadWebPage.layer({ apiKey, baseUrl: "https://parallel.test" }).pipe(Layer.provide(clientLayer(handler))),
-    ),
+    provide(ReadWebPage.layer({ apiKey, baseUrl: "https://parallel.test" }).pipe(Layer.provide(clientLayer(handler)))),
   )
 
 describe("ReadWebPage", () => {
@@ -57,7 +59,9 @@ describe("ReadWebPage", () => {
       expect(captured?.url).toBe("https://parallel.test/v1/extract")
       expect(captured?.headers["x-api-key"]).toBe("secret")
       if (captured?.body._tag !== "Uint8Array") return yield* Effect.die("Expected JSON request")
-      expect(JSON.parse(new TextDecoder().decode(captured.body.body))).toEqual({
+      expect(
+        yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(new TextDecoder().decode(captured.body.body)),
+      ).toEqual({
         urls: ["https://example.com/docs"],
         objective: "Find API details",
         max_chars_total: 40_000,
@@ -104,7 +108,7 @@ describe("ReadWebPage", () => {
       yield* reader.read({ url: "https://example.com" })
       expect(captured).toBe("https://api.parallel.ai/v1/extract")
     }).pipe(
-      Effect.provide(
+      provide(
         ReadWebPage.layer({ apiKey: Redacted.make("secret") }).pipe(
           Layer.provide(
             clientLayer((request) => {
@@ -124,9 +128,7 @@ describe("ReadWebPage", () => {
       expect(error._tag).toBe("ReadWebPageHttpError")
       expect(error.message).toContain("PARALLEL_API_KEY")
     }).pipe(
-      Effect.provide(
-        ReadWebPage.layer({}).pipe(Layer.provide(clientLayer((request) => response(request, apiResponse())))),
-      ),
+      provide(ReadWebPage.layer({}).pipe(Layer.provide(clientLayer((request) => response(request, apiResponse()))))),
     ),
   )
 

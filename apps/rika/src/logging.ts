@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect"
+import { Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect"
 
 export type ProcessRole = "client" | "resident"
 export type LogLevel = "debug" | "info" | "warning" | "error"
@@ -69,7 +69,7 @@ const prepareDirectory = Effect.fn("Logging.prepareDirectory")(function* (dataRo
     yield* fs.makeDirectory(diagnostics, { recursive: true, mode: 0o700 })
   }
   yield* fs.chmod(diagnostics, 0o700)
-  const now = Date.now()
+  const now = yield* Clock.currentTimeMillis
   const names = yield* fs.readDirectory(diagnostics)
   yield* Effect.forEach(
     names.filter((name) => isLogFile(name) && !name.includes(".open.")),
@@ -112,11 +112,14 @@ export const layer = (options: {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const diagnostics = yield* prepareDirectory(options.dataRoot)
-    const now = (options.now ?? new Date()).toISOString().replace(/[:.]/g, "-")
+    const timestamp = options.now === undefined ? yield* DateTime.now : DateTime.makeUnsafe(options.now)
+    const now = DateTime.formatIso(timestamp).replace(/[:.]/g, "-")
     const closed = path.join(diagnostics, `${options.role}-${now}-${options.pid ?? process.pid}.jsonl`)
     const open = closed.replace(/\.jsonl$/, ".open.jsonl")
     yield* Effect.addFinalizer(() => fs.rename(open, closed).pipe(Effect.ignore))
-    return yield* Logger.formatJson.pipe(Logger.toFile(open, { flag: "ax", mode: 0o600, batchWindow: 0 }))
+    return yield* Logger.formatJson.pipe(
+      Logger.toFile(open, { flag: "ax", mode: 0o600, batchWindow: Duration.seconds(1) }),
+    )
   })
   return Layer.merge(
     Logger.layer([logger]),

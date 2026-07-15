@@ -12,7 +12,7 @@ export interface HostInterface {
   readonly callback: (redirectUrl: string) => Effect.Effect<string, Error>
 }
 
-export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/McpOAuthHost") {}
+export class Host extends Context.Service<Host, HostInterface>()("@rika/extensions/mcp-oauth/Host") {}
 
 export const hostTestLayer = (implementation: HostInterface) => Layer.succeed(Host, Host.of(implementation))
 
@@ -20,38 +20,42 @@ export const hostLayer = Layer.succeed(
   Host,
   Host.of({
     open: Effect.fn("McpOAuthHost.open")((url) =>
-      Effect.tryPromise({
-        try: async () => {
-          const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open"
-          const args = process.platform === "win32" ? ["/c", "start", "", url] : [url]
-          const child = Bun.spawn([command, ...args], { stdout: "ignore", stderr: "ignore" })
-          if ((await child.exited) !== 0) throw new globalThis.Error("browser command failed")
-        },
-        catch: (cause) => new Error({ server: url, operation: "open-browser", message: String(cause) }),
+      Effect.gen(function* () {
+        const exitCode = yield* Effect.tryPromise({
+          try: () => {
+            const command = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open"
+            const args = process.platform === "win32" ? ["/c", "start", "", url] : [url]
+            const child = Bun.spawn([command, ...args], { stdout: "ignore", stderr: "ignore" })
+            return child.exited
+          },
+          catch: (cause) => Error.make({ server: url, operation: "open-browser", message: String(cause) }),
+        })
+        if (exitCode !== 0) {
+          return yield* Error.make({ server: url, operation: "open-browser", message: "browser command failed" })
+        }
       }),
     ),
     callback: Effect.fn("McpOAuthHost.callback")((redirectUrl) =>
-      Effect.tryPromise({
-        try: () =>
-          new Promise<string>((resolve, reject) => {
-            const target = new URL(redirectUrl)
-            try {
-              const server = Bun.serve({
-                hostname: target.hostname,
-                port: Number(target.port),
-                fetch(request) {
-                  const url = new URL(request.url)
-                  if (url.pathname !== target.pathname) return new Response("Not found", { status: 404 })
-                  resolve(url.toString())
-                  queueMicrotask(() => server.stop())
-                  return new Response("Authentication complete. You may close this window.")
-                },
-              })
-            } catch (cause) {
-              reject(cause)
-            }
-          }),
-        catch: (cause) => new Error({ server: redirectUrl, operation: "callback", message: String(cause) }),
+      Effect.callback<string, Error>((resume) => {
+        let server: ReturnType<typeof Bun.serve> | undefined
+        try {
+          const target = new URL(redirectUrl)
+          const active = Bun.serve({
+            hostname: target.hostname,
+            port: Number(target.port),
+            fetch(request) {
+              const url = new URL(request.url)
+              if (url.pathname !== target.pathname) return new Response("Not found", { status: 404 })
+              resume(Effect.succeed(url.toString()))
+              queueMicrotask(() => active.stop())
+              return new Response("Authentication complete. You may close this window.")
+            },
+          })
+          server = active
+        } catch (cause) {
+          resume(Effect.fail(Error.make({ server: redirectUrl, operation: "callback", message: String(cause) })))
+        }
+        return Effect.sync(() => server?.stop())
       }),
     ),
   }),
@@ -68,13 +72,13 @@ export const tokenStoreLayer = (
       const read = Effect.fn("McpOAuthTokenStore.read")(() =>
         fileSystem.exists(filename).pipe(
           Effect.flatMap((exists) => (exists ? fileSystem.readFileString(filename) : Effect.succeed("{}"))),
-          Effect.flatMap((text) =>
-            Effect.try({ try: () => JSON.parse(text) as Record<string, string>, catch: String }),
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String))),
           ),
         ),
       )
       const failure = (server: string, operation: string, cause: unknown) =>
-        new OAuth.OAuthProviderError({ server, operation, message: String(cause) })
+        OAuth.OAuthProviderError.make({ server, operation, message: String(cause) })
       return OAuth.TokenStore.of({
         load: Effect.fn("McpOAuthTokenStore.load")((server) =>
           read().pipe(
@@ -87,17 +91,18 @@ export const tokenStoreLayer = (
         save: Effect.fn("McpOAuthTokenStore.save")((server, tokens) =>
           read().pipe(
             Effect.flatMap((values) =>
-              fileSystem
-                .makeDirectory(path.dirname(filename), { recursive: true })
-                .pipe(
-                  Effect.andThen(
-                    fileSystem.writeFileString(
-                      filename,
-                      JSON.stringify({ ...values, [server]: Redacted.value(tokens) }),
-                    ),
+              fileSystem.makeDirectory(path.dirname(filename), { recursive: true }).pipe(
+                Effect.andThen(
+                  fileSystem.writeFileString(
+                    filename,
+                    Schema.encodeSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))({
+                      ...values,
+                      [server]: Redacted.value(tokens),
+                    }),
                   ),
-                  Effect.andThen(fileSystem.chmod(filename, 0o600)),
                 ),
+                Effect.andThen(fileSystem.chmod(filename, 0o600)),
+              ),
             ),
             Effect.mapError((cause) => failure(server, "save", cause)),
           ),
@@ -105,11 +110,16 @@ export const tokenStoreLayer = (
         remove: Effect.fn("McpOAuthTokenStore.remove")((server) =>
           read().pipe(
             Effect.flatMap((values) => {
-              delete values[server]
+              const remaining = Object.fromEntries(Object.entries(values).filter(([name]) => name !== server))
               return fileSystem
                 .makeDirectory(path.dirname(filename), { recursive: true })
                 .pipe(
-                  Effect.andThen(fileSystem.writeFileString(filename, JSON.stringify(values))),
+                  Effect.andThen(
+                    fileSystem.writeFileString(
+                      filename,
+                      Schema.encodeSync(Schema.fromJsonString(Schema.Record(Schema.String, Schema.String)))(remaining),
+                    ),
+                  ),
                   Effect.andThen(fileSystem.chmod(filename, 0o600)),
                 )
             }),
@@ -126,7 +136,7 @@ export interface Interface {
   readonly status: (server: string, url: string) => Effect.Effect<"authenticated" | "unauthenticated", Error>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/McpOAuth") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/extensions/mcp-oauth/Service") {}
 
 const redirectUrl = "http://127.0.0.1:17839/oauth/callback"
 
@@ -149,9 +159,8 @@ export const layer: Layer.Layer<Service, never, Host | OAuth.TokenStore> = Layer
         Effect.provideService(OAuth.TokenStore, store),
       )
     const map = (server: string, operation: string) =>
-      Effect.mapError(
-        (cause: unknown) =>
-          new Error({ server, operation, message: cause instanceof globalThis.Error ? cause.message : String(cause) }),
+      Effect.mapError((cause: unknown) =>
+        Error.make({ server, operation, message: cause instanceof globalThis.Error ? cause.message : String(cause) }),
       )
     return Service.of({
       login: Effect.fn("McpOAuth.login")(function* (server, url) {

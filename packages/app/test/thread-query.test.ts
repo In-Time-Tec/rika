@@ -3,9 +3,10 @@ import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
-import { Effect, Layer, Stream } from "effect"
+import { Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "../src"
 import { ThreadTools } from "@rika/tools"
+import { provideLayer } from "./layer"
 
 const thread = (
   id: string,
@@ -55,7 +56,7 @@ describe("ThreadQuery", () => {
       expect(found.text).toContain('"id":"one"')
       expect(found.text).not.toContain('"id":"two"')
       expect(found.truncated).toBe(false)
-    }).pipe(Effect.provide(queryLayer)),
+    }).pipe(provideLayer(queryLayer)),
   )
 
   it.effect("requires explicit archived access and reports missing threads", () =>
@@ -64,7 +65,7 @@ describe("ThreadQuery", () => {
       expect((yield* Effect.flip(query.read({ threadId: "two" })))._tag).toBe("ArchivedThreadError")
       expect((yield* Effect.flip(query.read({ threadId: "missing" })))._tag).toBe("ThreadNotFoundError")
       expect((yield* query.read({ threadId: "two", includeArchived: true })).text).toContain("# Old work")
-    }).pipe(Effect.provide(queryLayer)),
+    }).pipe(provideLayer(queryLayer)),
   )
 
   it.effect("reads and truncates deterministic transcripts", () =>
@@ -75,7 +76,7 @@ describe("ThreadQuery", () => {
       expect(full.text).toContain("User: please fix auth")
       expect(bounded.text).toHaveLength(20)
       expect(bounded.truncated).toBe(true)
-    }).pipe(Effect.provide(queryLayer)),
+    }).pipe(provideLayer(queryLayer)),
   )
 
   it.effect("routes deterministic model tool calls through the product port", () =>
@@ -84,8 +85,8 @@ describe("ThreadQuery", () => {
       const chunks = yield* toolkit
         .handle("read_thread", { threadId: "one", maxChars: 200 })
         .pipe(Effect.flatMap(Stream.runCollect))
-      expect(JSON.stringify([...chunks])).toContain("please fix auth")
-    }).pipe(Effect.provide(ThreadToolHandlers.handlerLayer.pipe(Layer.provide(queryLayer)))),
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])).toContain("please fix auth")
+    }).pipe(provideLayer(ThreadToolHandlers.handlerLayer.pipe(Layer.provide(queryLayer)))),
   )
 
   it.effect("maps query failures through both tool handlers", () =>
@@ -93,15 +94,15 @@ describe("ThreadQuery", () => {
       const toolkit = yield* ThreadTools.toolkit
       const find = yield* toolkit.handle("find_thread", { query: "x" }).pipe(Effect.flatMap(Stream.runCollect))
       const read = yield* toolkit.handle("read_thread", { threadId: "x" }).pipe(Effect.flatMap(Stream.runCollect))
-      expect(JSON.stringify([...find])).toContain("find failed")
-      expect(JSON.stringify([...read])).toContain("ThreadNotFoundError")
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...find])).toContain("find failed")
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...read])).toContain("ThreadNotFoundError")
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ThreadToolHandlers.handlerLayer.pipe(
           Layer.provide(
             ThreadQuery.testLayer({
-              find: () => Effect.fail(new ThreadQuery.QueryError({ message: "find failed" })),
-              read: () => Effect.fail(new ThreadQuery.ThreadNotFoundError({ threadId: "x" })),
+              find: () => Effect.fail(ThreadQuery.QueryError.make({ message: "find failed" })),
+              read: () => Effect.fail(ThreadQuery.ThreadNotFoundError.make({ threadId: "x" })),
             }),
           ),
         ),
@@ -119,7 +120,7 @@ describe("ThreadQuery", () => {
       expect(unmatched.text).toBe("")
       expect(empty.text).toContain('"id":"one"')
       expect((yield* query.read({ threadId: "one", maxTurns: 0, maxChars: 0 })).text).toHaveLength(1)
-    }).pipe(Effect.provide(queryLayer)),
+    }).pipe(provideLayer(queryLayer)),
   )
 
   it.effect("applies workspace aliases, date boundaries, unknown terms, and turn limits", () =>
@@ -132,13 +133,13 @@ describe("ThreadQuery", () => {
       expect((yield* query.find({ query: "unknown:value" })).text).toBe("")
       const limited = yield* query.read({ threadId: "one", maxTurns: 999, maxChars: 99_999 })
       expect(limited.truncated).toBe(false)
-    }).pipe(Effect.provide(queryLayer)),
+    }).pipe(provideLayer(queryLayer)),
   )
 
   it.effect("maps thread listing, lookup, and turn listing repository failures", () =>
     Effect.gen(function* () {
-      const threadFailure = new ThreadRepository.RepositoryError({ message: "thread storage unavailable" })
-      const turnFailure = new TurnRepository.RepositoryError({ message: "turn storage unavailable" })
+      const threadFailure = ThreadRepository.RepositoryError.make({ message: "thread storage unavailable" })
+      const turnFailure = TurnRepository.RepositoryError.make({ message: "turn storage unavailable" })
       const baseThreads = yield* ThreadRepository.makeMemory([thread("one", "Failure test")])
       const baseTurns = yield* TurnRepository.makeMemory()
       const run = (threads: ThreadRepository.Interface, turns: TurnRepository.Interface) =>
@@ -146,7 +147,7 @@ describe("ThreadQuery", () => {
           const query = yield* ThreadQuery.Service
           return query
         }).pipe(
-          Effect.provide(
+          provideLayer(
             ThreadQuery.layer.pipe(
               Layer.provide(
                 Layer.merge(

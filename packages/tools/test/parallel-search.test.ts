@@ -1,12 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ParallelSearch } from "../src"
+import { provide } from "./test-layer"
 
 const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
   HttpClientResponse.fromWeb(
     request,
-    new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } }),
+    new Response(Schema.encodeSync(Schema.UnknownFromJsonString)(body), {
+      status,
+      headers: { "content-type": "application/json" },
+    }),
   )
 
 const clientLayer = (run: (request: HttpClientRequest.HttpClientRequest) => HttpClientResponse.HttpClientResponse) =>
@@ -28,7 +32,9 @@ describe("ParallelSearch", () => {
       expect(captured?.url).toBe("https://parallel.test/v1/search")
       expect(captured?.headers["x-api-key"]).toBe("secret")
       if (captured?.body._tag !== "Uint8Array") return yield* Effect.die("Expected JSON request")
-      expect(JSON.parse(new TextDecoder().decode(captured.body.body))).toEqual({
+      expect(
+        yield* Schema.decodeEffect(Schema.UnknownFromJsonString)(new TextDecoder().decode(captured.body.body)),
+      ).toEqual({
         objective: "Find current Parallel documentation",
         search_queries: ["Parallel search documentation", "Parallel API reference"],
         mode: "advanced",
@@ -43,7 +49,7 @@ describe("ParallelSearch", () => {
         },
       ])
     }).pipe(
-      Effect.provide(
+      provide(
         ParallelSearch.layer({ apiKey: Redacted.make("secret"), baseUrl: "https://parallel.test" }).pipe(
           Layer.provide(
             clientLayer((request) => {
@@ -73,7 +79,7 @@ describe("ParallelSearch", () => {
       const error = yield* Effect.flip(search.search({ objective: "Current docs", searchQueries: ["current docs"] }))
       expect(error.message).toContain("PARALLEL_API_KEY")
     }).pipe(
-      Effect.provide(
+      provide(
         ParallelSearch.layer({}).pipe(Layer.provide(clientLayer((request) => response(request, { unused: true })))),
       ),
     ),
@@ -88,7 +94,7 @@ describe("ParallelSearch", () => {
       const error = yield* Effect.flip(search.search({ objective: "Current docs", searchQueries: ["current docs"] }))
       expect(error._tag).toBe("ParallelSearchError")
     }).pipe(
-      Effect.provide(
+      provide(
         ParallelSearch.layer({ apiKey: Redacted.make("secret") }).pipe(
           Layer.provide(clientLayer((request) => response(request, body, status))),
         ),

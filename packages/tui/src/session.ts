@@ -1,3 +1,4 @@
+import { Function } from "effect"
 import type { Mode, PermissionDecision, PromptPart, ReasoningEffort, UiEvent } from "./view-state"
 
 export interface ModelTuning {
@@ -40,7 +41,10 @@ export interface Adapter {
   readonly replay?: (cursor: string | undefined, emit: (event: UiEvent) => void) => void
 }
 
-export const execute = (adapter: Adapter, action: Action): boolean => {
+export const execute: {
+  (action: Action): (adapter: Adapter) => boolean
+  (adapter: Adapter, action: Action): boolean
+} = Function.dual(2, (adapter: Adapter, action: Action): boolean => {
   switch (action._tag) {
     case "Submit":
       adapter.submit(action.prompt, action.parts, action.mode, action.tuning)
@@ -70,4 +74,4 @@ export const execute = (adapter: Adapter, action: Action): boolean => {
       adapter.selectThread?.(action.id)
       return adapter.selectThread !== undefined
   }
-}
+})

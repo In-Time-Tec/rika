@@ -24,7 +24,7 @@ export const findThreadTool = Tool.make("find_thread", {
   parameters: Schema.Struct({
     query: Schema.String,
     includeArchived: Schema.optionalKey(Schema.Boolean),
-    limit: Schema.optionalKey(Schema.Number),
+    limit: Schema.optionalKey(Schema.Finite),
   }),
   success: Result,
   failure: ToolFailure,
@@ -36,8 +36,8 @@ export const readThreadTool = Tool.make("read_thread", {
   parameters: Schema.Struct({
     threadId: Schema.String,
     includeArchived: Schema.optionalKey(Schema.Boolean),
-    maxTurns: Schema.optionalKey(Schema.Number),
-    maxChars: Schema.optionalKey(Schema.Number),
+    maxTurns: Schema.optionalKey(Schema.Finite),
+    maxChars: Schema.optionalKey(Schema.Finite),
   }),
   success: Result,
   failure: ToolFailure,

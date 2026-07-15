@@ -43,7 +43,7 @@ export const makeRecordingSql = (): RecordingSql => {
     error: (message) =>
       outcomes.push({
         _tag: "Error",
-        error: new SqlError({ reason: new UnknownError({ cause: message, message }) }),
+        error: SqlError.make({ reason: UnknownError.make({ cause: message, message }) }),
       }),
     layer: Layer.effect(
       SqlClient.SqlClient,

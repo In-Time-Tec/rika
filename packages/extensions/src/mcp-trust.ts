@@ -27,12 +27,12 @@ export interface Interface {
   readonly approve: (record: Record) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/McpTrust") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/extensions/mcp-trust/Service") {}
 
 const digest = (crypto: Crypto.Crypto, value: string) =>
   crypto.digest("SHA-256", new TextEncoder().encode(value)).pipe(
     Effect.map(Encoding.encodeHex),
-    Effect.mapError((cause) => new TrustError({ operation: "fingerprint", message: String(cause) })),
+    Effect.mapError((cause) => TrustError.make({ operation: "fingerprint", message: String(cause) })),
   )
 
 export const layer = Layer.effect(
@@ -48,7 +48,7 @@ export const layer = Layer.effect(
     ) {
       const environmentNameFingerprint = yield* digest(crypto, Object.keys(server.environment).toSorted().join("\n"))
       const effectiveCwd = path.resolve(workspaceRoot, server.cwd ?? ".")
-      const base = JSON.stringify([
+      const base = yield* Schema.encodeEffect(Schema.fromJsonString(Schema.Array(Schema.Unknown)))([
         workspaceIdentity,
         server.name,
         server.command,
@@ -56,7 +56,7 @@ export const layer = Layer.effect(
         environmentNameFingerprint,
         effectiveCwd,
         server.sourceDigest,
-      ])
+      ]).pipe(Effect.orDie)
       const fingerprint = yield* digest(crypto, base)
       return {
         workspaceIdentity,
@@ -86,7 +86,7 @@ export const testLayer = (initial: ReadonlyArray<string> = []) =>
     Effect.sync(() => {
       const approved = new Set(initial)
       return Service.of({
-        create: () => Effect.fail(new TrustError({ operation: "create", message: "Not configured in test layer" })),
+        create: () => Effect.fail(TrustError.make({ operation: "create", message: "Not configured in test layer" })),
         isTrusted: (record) => Effect.succeed(approved.has(record.fingerprint)),
         approve: (record) =>
           Effect.sync(() => {

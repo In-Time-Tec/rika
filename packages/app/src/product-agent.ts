@@ -61,7 +61,7 @@ export interface Interface {
   readonly cancelChild: (id: string, at: number) => Effect.Effect<ExecutionBackend.Result, InvocationError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/app/ProductAgent") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/product-agent/Service") {}
 
 export const layer = Layer.effect(
   Service,
@@ -69,23 +69,23 @@ export const layer = Layer.effect(
     const backend = yield* ExecutionBackend.Service
     return Service.of({
       invoke: Effect.fn("ProductAgent.invoke")((input) =>
-        backend.invokeChild(input).pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+        backend.invokeChild(input).pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       fanOut: Effect.fn("ProductAgent.fanOut")((input) =>
-        backend.createFanOut(input).pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+        backend.createFanOut(input).pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       inspectFanOut: Effect.fn("ProductAgent.inspectFanOut")((id) =>
-        backend.inspectFanOut(id).pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+        backend.inspectFanOut(id).pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       cancelFanOut: Effect.fn("ProductAgent.cancelFanOut")((id, at, reason) =>
         backend
           .cancelFanOut(id, at, reason)
-          .pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+          .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       cancelChild: Effect.fn("ProductAgent.cancelChild")((id, at) =>
         backend
           .cancel(`child:${id}`, at)
-          .pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+          .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       runParallel: Effect.fn("ProductAgent.runParallel")((input) =>
         backend
@@ -104,7 +104,7 @@ export const layer = Layer.effect(
             ...(input.quorum === undefined ? {} : { quorum: input.quorum }),
             createdAt: input.createdAt,
           })
-          .pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+          .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       runReviewLanes: Effect.fn("ProductAgent.runReviewLanes")((input) =>
         backend
@@ -119,7 +119,7 @@ export const layer = Layer.effect(
             ...(input.quorum === undefined ? {} : { quorum: input.quorum }),
             createdAt: input.createdAt,
           })
-          .pipe(Effect.mapError((cause) => new InvocationError({ message: cause.message }))),
+          .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       projectChildren: (inspection) =>
         inspection.members.map((member) => ({

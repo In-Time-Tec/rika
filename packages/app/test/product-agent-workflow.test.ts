@@ -2,8 +2,9 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Effect, Layer } from "effect"
 import { ProductAgent, Workflow } from "../src"
+import { provideLayer } from "./layer"
 
-const failure = new ExecutionBackend.BackendError({ message: "backend failed" })
+const failure = ExecutionBackend.BackendError.make({ message: "backend failed" })
 const fanOut = (id: string, state: ExecutionBackend.FanOutInspection["state"]): ExecutionBackend.FanOutInspection => ({
   fanOutId: id,
   parentTurnId: "turn",
@@ -33,7 +34,7 @@ const backend = ExecutionBackend.Service.of({
   registerWorkflows: () => Effect.succeed([{ name: "delivery", revision: 1, digest: "digest" }]),
   startWorkflow: (_name, runId) => Effect.succeed(workflow(runId, "running")),
   inspectWorkflow: (runId) => Effect.succeed(workflow(runId, "completed")),
-  cancelWorkflow: () => Effect.succeed(undefined),
+  cancelWorkflow: () => Effect.void.pipe(Effect.as(undefined)),
   start: () => Effect.die("unused"),
   replay: () => Effect.die("unused"),
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
@@ -97,11 +98,11 @@ describe("ProductAgent and Workflow", () => {
       ).toHaveLength(2)
       expect((yield* agents.cancelChild("one", 3)).status).toBe("cancelled")
       const workflows = yield* Workflow.Service
-      expect(yield* workflows.register()).toEqual([{ name: "delivery", revision: 1, digest: "digest" }])
+      expect(yield* workflows.register).toEqual([{ name: "delivery", revision: 1, digest: "digest" }])
       expect((yield* workflows.start("delivery", "run", 2)).status).toBe("running")
       expect((yield* workflows.inspect("run"))?.status).toBe("completed")
       expect(yield* workflows.cancel("run")).toBeUndefined()
-    }).pipe(Effect.provide(Layer.merge(ProductAgent.layer, Workflow.layer).pipe(Layer.provide(layer)))),
+    }).pipe(provideLayer(Layer.merge(ProductAgent.layer, Workflow.layer).pipe(Layer.provide(layer)))),
   )
 
   it.effect("maps every backend failure to product errors", () =>
@@ -122,13 +123,13 @@ describe("ProductAgent and Workflow", () => {
         ),
         Effect.flip(agents.inspectFanOut("f")),
         Effect.flip(agents.cancelFanOut("f", 1)),
-        Effect.flip(workflows.register()),
+        Effect.flip(workflows.register),
         Effect.flip(workflows.start("delivery", "r")),
         Effect.flip(workflows.inspect("r")),
         Effect.flip(workflows.cancel("r")),
       ])
       expect(results.every((error) => error.message === "backend failed")).toBe(true)
-    }).pipe(Effect.provide(Layer.merge(ProductAgent.layer, Workflow.layer).pipe(Layer.provide(failedLayer)))),
+    }).pipe(provideLayer(Layer.merge(ProductAgent.layer, Workflow.layer).pipe(Layer.provide(failedLayer)))),
   )
 
   it("selects all product profiles", () => {

@@ -3,75 +3,72 @@ import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
 import { Crypto, Effect, Layer, PlatformError } from "effect"
 import * as Extensions from "../src"
+import { provideLayer } from "./layer"
 
-const run = <A, E>(effect: Effect.Effect<A, E, never>) => Effect.runPromise(effect)
+it.effect("exports every extension namespace from the package entrypoint", () =>
+  Effect.gen(function* () {
+    const entrypoint = yield* Effect.promise(() => import("../src/index"))
+    expect(Object.keys(entrypoint).toSorted()).toEqual([
+      "ExecutionExtensions",
+      "McpConfig",
+      "McpOAuth",
+      "McpRuntime",
+      "McpTrust",
+      "PluginApi",
+      "PluginDigest",
+      "PluginLoader",
+      "PluginRegistry",
+      "PluginTrust",
+      "SkillRegistry",
+    ])
+  }),
+)
 
-it("exports every extension namespace from the package entrypoint", async () => {
-  const entrypoint = await import("../src/index")
-  expect(Object.keys(entrypoint).toSorted()).toEqual([
-    "ExecutionExtensions",
-    "McpConfig",
-    "McpOAuth",
-    "McpRuntime",
-    "McpTrust",
-    "PluginApi",
-    "PluginDigest",
-    "PluginLoader",
-    "PluginRegistry",
-    "PluginTrust",
-    "SkillRegistry",
-  ])
-})
-
-it("validates every MCP configuration shape and composition conflict", async () => {
-  const compose = (workspace: string) =>
-    Extensions.McpConfig.compose({ workspace }).pipe(Effect.provide(BunServices.layer))
-  const valid = await run(
-    compose(
-      JSON.stringify({
-        servers: {
-          z: { url: "https://example.test/mcp", headers: { Authorization: "x" } },
-          a: { command: "cmd", env: { HOME: "/tmp" } },
-        },
-      }),
-    ),
-  )
-  expect(valid.map((server) => server.name)).toEqual(["a", "z"])
-  const errors = await Promise.all(
-    [
-      "null",
-      "[]",
-      '{"servers":[]}',
-      '{"servers":{"x":null}}',
-      '{"servers":{"x":{"command":"c","args":[1]}}}',
-      '{"servers":{"x":{"command":"c","env":{"A":1}}}}',
-      '{"servers":{"x":{"command":"c","cwd":1}}}',
-      '{"servers":{"x":{"url":"https://example.test","headers":{"A":1}}}}',
-      '{"servers":{"x":{"url":"not a url"}}}',
-      '{"servers":{"x":{}}}',
-    ].map((document) => run(Effect.flip(compose(document)))),
-  )
-  for (const error of errors) {
-    expect(error._tag).toBe("@rika/extensions/McpConfigError")
-  }
-  const duplicate = await run(
-    Effect.flip(
-      Extensions.McpConfig.compose({
-        workspace: '{"x":{"command":"a"}}',
-        activatedSkills: [
-          {
-            name: "s",
-            digest: "d",
-            resources: [
-              { path: "ignored", content: "{" },
-              { path: "mcp.json", content: '{"x":{"command":"b"}}' },
-            ],
-          },
-        ],
-      }).pipe(Effect.provide(BunServices.layer)),
-    ),
-  )
-  expect(duplicate.message).toBe("Duplicate server: x")
+it.effect("validates every MCP configuration shape and composition conflict", () => {
+  const compose = (workspace: string) => provideLayer(Extensions.McpConfig.compose({ workspace }), BunServices.layer)
+  return Effect.gen(function* () {
+    const valid = yield* compose(
+      '{"servers":{"z":{"url":"https://example.test/mcp","headers":{"Authorization":"x"}},"a":{"command":"cmd","env":{"HOME":"/tmp"}}}}',
+    )
+    expect(valid.map((server) => server.name)).toEqual(["a", "z"])
+    const errors = yield* Effect.all(
+      [
+        "null",
+        "[]",
+        '{"servers":[]}',
+        '{"servers":{"x":null}}',
+        '{"servers":{"x":{"command":"c","args":[1]}}}',
+        '{"servers":{"x":{"command":"c","env":{"A":1}}}}',
+        '{"servers":{"x":{"command":"c","cwd":1}}}',
+        '{"servers":{"x":{"url":"https://example.test","headers":{"A":1}}}}',
+        '{"servers":{"x":{"url":"not a url"}}}',
+        '{"servers":{"x":{}}}',
+      ].map((document) => Effect.flip(compose(document))),
+      { concurrency: "unbounded" },
+    )
+    for (const error of errors) {
+      expect(error._tag).toBe("@rika/extensions/McpConfigError")
+    }
+    const duplicate = yield* provideLayer(
+      Effect.flip(
+        Extensions.McpConfig.compose({
+          workspace: '{"x":{"command":"a"}}',
+          activatedSkills: [
+            {
+              name: "s",
+              digest: "d",
+              resources: [
+                { path: "ignored", content: "{" },
+                { path: "mcp.json", content: '{"x":{"command":"b"}}' },
+              ],
+            },
+          ],
+        }),
+      ),
+      BunServices.layer,
+    )
+    expect(duplicate.message).toBe("Duplicate server: x")
+  })
 })
 
 it.effect("maps MCP discovery, call, and connection errors", () =>
@@ -89,33 +86,33 @@ it.effect("maps MCP discovery, call, and connection errors", () =>
         server: "remote",
         tools: Effect.succeed([]),
         callTool: () =>
-          Effect.fail(new McpToolSource.McpToolCallError({ server: "remote", tool: "x", message: "call failed" })),
+          Effect.fail(McpToolSource.McpToolCallError.make({ server: "remote", tool: "x", message: "call failed" })),
         aiTools: Effect.succeed([]),
       })
       const call = yield* Effect.flip(
-        Extensions.McpRuntime.call(server, "x", {}).pipe(
-          Effect.provide(Extensions.McpRuntime.testLayer(() => Effect.succeed(source))),
+        provideLayer(
+          Extensions.McpRuntime.call(server, "x", {}),
+          Extensions.McpRuntime.testLayer(() => Effect.succeed(source)),
         ),
       )
       const connect = yield* Effect.flip(
-        Extensions.McpRuntime.discover(server).pipe(
-          Effect.provide(
-            Extensions.McpRuntime.testLayer(() =>
-              Effect.fail(new Extensions.McpRuntime.Diagnostic({ server: "remote", phase: "connect", message: "no" })),
-            ),
+        provideLayer(
+          Extensions.McpRuntime.discover(server),
+          Extensions.McpRuntime.testLayer(() =>
+            Effect.fail(Extensions.McpRuntime.Diagnostic.make({ server: "remote", phase: "connect", message: "no" })),
           ),
         ),
       )
       const discover = yield* Effect.flip(
-        Extensions.McpRuntime.discover(server).pipe(
-          Effect.provide(
-            Extensions.McpRuntime.testLayer(() =>
-              Effect.succeed(
-                McpToolSource.McpToolSource.of({
-                  ...source,
-                  tools: Effect.fail(new globalThis.Error("discovery failed")) as never,
-                }),
-              ),
+        provideLayer(
+          Extensions.McpRuntime.discover(server),
+          Extensions.McpRuntime.testLayer(() =>
+            Effect.fail(
+              Extensions.McpRuntime.Diagnostic.make({
+                server: "remote",
+                phase: "discover",
+                message: "discovery failed",
+              }),
             ),
           ),
         ),
@@ -125,7 +122,7 @@ it.effect("maps MCP discovery, call, and connection errors", () =>
   ),
 )
 
-it("covers live MCP transport construction failures for local and remote servers", async () => {
+it.effect("covers live MCP transport construction failures for local and remote servers", () => {
   const servers: ReadonlyArray<Extensions.McpConfig.Server> = [
     {
       kind: "local",
@@ -138,24 +135,31 @@ it("covers live MCP transport construction failures for local and remote servers
     },
     { kind: "remote", name: "bad-remote", url: "not-a-url", headers: {}, source: "workspace", sourceDigest: "d" },
   ]
-  const results = await Promise.all(
-    servers.map((server) =>
-      Effect.runPromiseExit(
-        Effect.scoped(
-          Effect.gen(function* () {
-            const runtime = yield* Extensions.McpRuntime.Service
-            yield* runtime.connect(server)
-          }),
-        ).pipe(Effect.provide(Extensions.McpRuntime.layer), Effect.provide(BunServices.layer)),
+  return Effect.gen(function* () {
+    const results = yield* Effect.all(
+      servers.map((server) =>
+        Effect.exit(
+          Effect.scoped(
+            Effect.gen(function* () {
+              const runtime = yield* Extensions.McpRuntime.Service
+              yield* runtime.connect(server)
+            }),
+          ).pipe(
+            provideLayer(
+              Layer.merge(Extensions.McpRuntime.layer.pipe(Layer.provide(BunServices.layer)), BunServices.layer),
+            ),
+          ),
+        ),
       ),
-    ),
-  )
-  for (const result of results) {
-    expect(result._tag).toBe("Failure")
-  }
+      { concurrency: "unbounded" },
+    )
+    for (const result of results) {
+      expect(result._tag).toBe("Failure")
+    }
+  })
 })
 
-it("exercises MCP trust defaults and test trust state", async () => {
+it.effect("exercises MCP trust defaults and test trust state", () => {
   const record: Extensions.McpTrust.Record = {
     workspaceIdentity: "w",
     server: "s",
@@ -166,27 +170,30 @@ it("exercises MCP trust defaults and test trust state", async () => {
     sourceDigest: "d",
     fingerprint: "f",
   }
-  const result = await run(
-    Effect.gen(function* () {
-      const trust = yield* Extensions.McpTrust.Service
-      const before = yield* trust.isTrusted(record)
-      yield* trust.approve(record)
-      const after = yield* trust.isTrusted(record)
-      const create = yield* Effect.flip(
-        trust.create("w", "/", {
-          kind: "local",
-          name: "s",
-          command: "c",
-          args: [],
-          environment: {},
-          source: "workspace",
-          sourceDigest: "d",
-        }),
-      )
-      return { before, after, create }
-    }).pipe(Effect.provide(Extensions.McpTrust.testLayer(["already"]))),
-  )
-  expect([result.before, result.after, result.create.operation]).toEqual([false, true, "create"])
+  return Effect.gen(function* () {
+    const result = yield* provideLayer(
+      Effect.gen(function* () {
+        const trust = yield* Extensions.McpTrust.Service
+        const before = yield* trust.isTrusted(record)
+        yield* trust.approve(record)
+        const after = yield* trust.isTrusted(record)
+        const create = yield* Effect.flip(
+          trust.create("w", "/", {
+            kind: "local",
+            name: "s",
+            command: "c",
+            args: [],
+            environment: {},
+            source: "workspace",
+            sourceDigest: "d",
+          }),
+        )
+        return { before, after, create }
+      }),
+      Extensions.McpTrust.testLayer(["already"]),
+    )
+    expect([result.before, result.after, result.create.operation]).toEqual([false, true, "create"])
+  })
 })
 
 it.effect("covers digest canonical forms and execution extension empty, resume, and fingerprint paths", () =>
@@ -205,9 +212,13 @@ it.effect("covers digest canonical forms and execution extension empty, resume, 
     expect(empty._tag).toBe("@rika/extensions/NoExtensionGeneration")
     expect(yield* Extensions.ExecutionExtensions.mcpFingerprint(["b", "a"])).toHaveLength(64)
   }).pipe(
-    Effect.provide(Extensions.ExecutionExtensions.layer),
-    Effect.provide(Extensions.PluginRegistry.memoryLayer),
-    Effect.provide(BunServices.layer),
+    provideLayer(
+      Layer.mergeAll(
+        Extensions.ExecutionExtensions.layer.pipe(Layer.provide(Extensions.PluginRegistry.memoryLayer)),
+        Extensions.PluginRegistry.memoryLayer,
+        BunServices.layer,
+      ),
+    ),
   ),
 )
 
@@ -237,7 +248,14 @@ it.effect("resumes a pinned execution generation", () =>
     }
     expect(yield* service.resume(pin)).toEqual({ pin, generation })
     expect((yield* Effect.flip(service.resume({ ...pin, generation: "missing" }))).generation).toBe("missing")
-  }).pipe(Effect.provide(Extensions.ExecutionExtensions.layer), Effect.provide(Extensions.PluginRegistry.memoryLayer)),
+  }).pipe(
+    provideLayer(
+      Layer.merge(
+        Extensions.ExecutionExtensions.layer.pipe(Layer.provide(Extensions.PluginRegistry.memoryLayer)),
+        Extensions.PluginRegistry.memoryLayer,
+      ),
+    ),
+  ),
 )
 
 it.effect("maps cryptographic digest failures", () => {
@@ -269,7 +287,15 @@ it.effect("maps cryptographic digest failures", () => {
       }),
     )
     expect(error.operation).toBe("fingerprint")
-  }).pipe(Effect.provide(Extensions.McpTrust.layer), Effect.provide(cryptoLayer), Effect.provide(BunServices.layer))
+  }).pipe(
+    provideLayer(
+      Layer.mergeAll(
+        Extensions.McpTrust.layer.pipe(Layer.provide(Layer.merge(BunServices.layer, cryptoLayer))),
+        BunServices.layer,
+        cryptoLayer,
+      ),
+    ),
+  )
 })
 
 it.effect("uses the workspace root for MCP commands without a configured cwd", () =>
@@ -285,5 +311,7 @@ it.effect("uses the workspace root for MCP commands without a configured cwd", (
       sourceDigest: "source",
     })
     expect(record.effectiveCwd).toBe("/workspace")
-  }).pipe(Effect.provide(Extensions.McpTrust.layer), Effect.provide(BunServices.layer)),
+  }).pipe(
+    provideLayer(Layer.merge(Extensions.McpTrust.layer.pipe(Layer.provide(BunServices.layer)), BunServices.layer)),
+  ),
 )

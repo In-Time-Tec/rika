@@ -32,18 +32,22 @@ const add = Command.make(
     Effect.gen(function* () {
       const selectedUrl = Option.getOrUndefined(url)
       if ((selectedUrl === undefined) === (command.length === 0)) {
-        return yield* new Operation.InvalidInput({ message: "mcp add requires exactly one of --url or a command" })
+        return yield* Operation.InvalidInput.make({ message: "mcp add requires exactly one of --url or a command" })
       }
       const [firstCommand, ...commandArgs] = command
       if (selectedUrl !== undefined) {
         yield* dispatch({ _tag: "Mcp", action: "add", name, url: selectedUrl })
         return
       }
+      const decodedCommand = yield* Schema.decodeUnknownEffect(Schema.NonEmptyArray(Schema.String))([
+        firstCommand,
+        ...commandArgs,
+      ]).pipe(Effect.mapError(() => Operation.InvalidInput.make({ message: "mcp add requires a command" })))
       yield* dispatch({
         _tag: "Mcp",
         action: "add",
         name,
-        command: Schema.decodeUnknownSync(Schema.NonEmptyArray(Schema.String))([firstCommand, ...commandArgs]),
+        command: decodedCommand,
       })
     }),
 )

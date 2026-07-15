@@ -12,7 +12,7 @@ import { MediaView, ParallelSearch, ReadWebPage, Runtime as ToolRuntime } from "
 import { ViewState } from "@rika/tui"
 import { Surface } from "@rika/tui/adapter"
 import { expect, test } from "bun:test"
-import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Redacted } from "effect"
+import { Clock, Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
   credentialForRoute,
@@ -30,15 +30,15 @@ test("selects only the credential named by each high and ultra main and Oracle g
   const highOracle = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
   const ultraMain = ConfigContract.resolveModelRoute(ConfigContract.defaults, "ultra", "main")
   const ultraOracle = ConfigContract.resolveModelRoute(ConfigContract.defaults, "ultra", "oracle")
-  expect(credentialForRoute(highMain, credentials)).toBe(openai)
-  expect(credentialForRoute(highOracle, credentials)).toBe(anthropic)
-  expect(credentialForRoute(ultraMain, credentials)).toBe(anthropic)
-  expect(credentialForRoute(ultraOracle, credentials)).toBe(openai)
+  expect(credentialForRoute(highMain, credentials)).toEqual(openai)
+  expect(credentialForRoute(highOracle, credentials)).toEqual(anthropic)
+  expect(credentialForRoute(ultraMain, credentials)).toEqual(anthropic)
+  expect(credentialForRoute(ultraOracle, credentials)).toEqual(openai)
 })
 
-test("awaits tracked fiber cleanup before releasing its enclosing lease", async () => {
+test("awaits tracked fiber cleanup before releasing its enclosing lease", () => {
   const events: Array<string> = []
-  await Effect.runPromise(
+  return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push("lease-released")).pipe(Effect.asVoid))
@@ -53,15 +53,18 @@ test("awaits tracked fiber cleanup before releasing its enclosing lease", async 
         yield* interruptTrackedFibers([fiber])
         events.push("shutdown-resumed")
       }),
+    ).pipe(
+      Effect.andThen(
+        Effect.sync(() => expect(events).toEqual(["fiber-cleaned", "shutdown-resumed", "lease-released"])),
+      ),
     ),
   )
-  expect(events).toEqual(["fiber-cleaned", "shutdown-resumed", "lease-released"])
 })
 
-test("clears an interrupted follow so a newly selected thread can be followed", async () => {
+test("clears an interrupted follow so a newly selected thread can be followed", () => {
   let followed = 0
   let tracked: Fiber.Fiber<void, never> | undefined
-  await Effect.runPromise(
+  return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
         const startFollow = Effect.gen(function* () {
@@ -77,72 +80,89 @@ test("clears an interrupted follow so a newly selected thread can be followed", 
         yield* startFollow
         expect(tracked).not.toBe(previous)
       }),
-    ),
+    ).pipe(Effect.andThen(Effect.sync(() => expect(followed).toBe(2)))),
   )
-  expect(followed).toBe(2)
 })
 
-test("refreshes threads only when the switcher transitions from closed to open", async () => {
-  let refreshes = 0
-  const initialize = Effect.sync(() => {
-    refreshes += 1
-  })
-  await Effect.runPromise(refreshThreadsOnSwitcherOpen(false, true, initialize))
-  await Effect.runPromise(refreshThreadsOnSwitcherOpen(true, true, initialize))
-  await Effect.runPromise(refreshThreadsOnSwitcherOpen(true, false, initialize))
-  expect(refreshes).toBe(1)
-})
+test("refreshes threads only when the switcher transitions from closed to open", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      let refreshes = 0
+      const initialize = Effect.sync(() => {
+        refreshes += 1
+      })
+      yield* refreshThreadsOnSwitcherOpen(false, true, initialize)
+      yield* refreshThreadsOnSwitcherOpen(true, true, initialize)
+      yield* refreshThreadsOnSwitcherOpen(true, false, initialize)
+      expect(refreshes).toBe(1)
+    }),
+  ))
 
-test("awaits delayed TUI initialization and tears down its renderer before lease finalization", async () => {
+test("awaits delayed TUI initialization and tears down its renderer before lease finalization", () => {
   const events: Array<string> = []
-  let resolveCreation: ((value: { readonly renderer: string }) => void) | undefined
-  const creation = new Promise<{ readonly renderer: string }>((resolve) => {
-    resolveCreation = resolve
-  })
   let closed = false
-  await Effect.runPromise(
+  return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
+        const creation = yield* Deferred.make<{ readonly renderer: string }>()
+        const context = yield* Effect.context<never>()
         yield* Effect.addFinalizer(() => Effect.sync(() => events.push("lease-finalized")).pipe(Effect.asVoid))
-        const initialization = settleTuiInitialization(
-          creation,
-          () => closed,
-          async () => {
-            events.push("renderer-stopped", "renderer-idle", "renderer-destroyed")
-          },
-        ).then((created) => {
-          if (created !== undefined && !closed) events.push("post-close-work-started")
-        })
+        const initialization = Effect.promise(() =>
+          settleTuiInitialization(
+            Effect.runPromiseWith(context)(Deferred.await(creation)),
+            () => closed,
+            () =>
+              Effect.runPromiseWith(context)(
+                Effect.sync(() => events.push("renderer-stopped", "renderer-idle", "renderer-destroyed")).pipe(
+                  Effect.asVoid,
+                ),
+              ),
+          ),
+        ).pipe(
+          Effect.tap((created) =>
+            created !== undefined && !closed ? Effect.sync(() => events.push("post-close-work-started")) : Effect.void,
+          ),
+        )
         closed = true
         events.push("close-started")
-        const close = Effect.promise(() => initialization).pipe(
+        const close = initialization.pipe(
           Effect.andThen(Effect.sync(() => events.push("shutdown-resumed"))),
           Effect.asVoid,
         )
         const closeFiber = yield* Effect.forkChild(close)
         yield* Effect.yieldNow
         expect(events).toEqual(["close-started"])
-        resolveCreation?.({ renderer: "delayed" })
+        yield* Deferred.succeed(creation, { renderer: "delayed" })
         yield* Fiber.join(closeFiber)
       }),
+    ).pipe(
+      Effect.andThen(
+        Effect.sync(() =>
+          expect(events).toEqual([
+            "close-started",
+            "renderer-stopped",
+            "renderer-idle",
+            "renderer-destroyed",
+            "shutdown-resumed",
+            "lease-finalized",
+          ]),
+        ),
+      ),
     ),
   )
-  expect(events).toEqual([
-    "close-started",
-    "renderer-stopped",
-    "renderer-idle",
-    "renderer-destroyed",
-    "shutdown-resumed",
-    "lease-finalized",
-  ])
 })
 
-test("drives bypassed recorded and incognito shell commands through Operation and native OpenTUI", async () => {
+test("drives bypassed recorded and incognito shell commands through Operation and native OpenTUI", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
-      const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-shell-session-" })
-      const filename = `${workspace}/rika.db`
+      const path = yield* Path.Path
+      const temporaryDirectory = yield* Config.string("TMPDIR").pipe(Config.withDefault("/tmp"))
+      const workspace = yield* fileSystem.makeTempDirectoryScoped({
+        directory: temporaryDirectory,
+        prefix: "rika-shell-session-",
+      })
+      const filename = path.join(workspace, "rika.db")
       const database = Database.layer(filename)
       const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
       const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
@@ -158,7 +178,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         inspectWorkflow: () => Effect.die("unused"),
         cancelWorkflow: () => Effect.die("unused"),
         start: () => Effect.die("unused"),
-        inspect: () => Effect.succeed(undefined),
+        inspect: () => Effect.sync(() => undefined),
         replay: () => Effect.die("unused"),
         steer: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
@@ -174,7 +194,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           ToolRuntime.layer(directory).pipe(
             Layer.provide(
               MediaView.analyzerTestLayer(() =>
-                Effect.fail(new MediaView.MediaAnalysisError({ message: "Media analysis is unavailable" })),
+                Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
               ),
             ),
             Layer.provide(
@@ -189,6 +209,10 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         interactive: (_, session) => Effect.sync(() => sessions.push(session)),
       })
       const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Operation.Service)
+      const repositories = yield* Layer.buildWithScope(
+        Layer.merge(repositoryLayer, turnRepositoryLayer),
+        yield* Effect.scope,
+      )
       yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
       const session = sessions[0]
       if (session === undefined) return yield* Effect.die("Missing interactive session")
@@ -258,7 +282,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           threads: yield* threads.list({ includeArchived: true }),
           turns: yield* turns.list(Thread.ThreadId.make("shell-thread")),
         }
-      }).pipe(Effect.provide(Layer.merge(repositoryLayer, turnRepositoryLayer)))
+      }).pipe(Effect.provide(repositories))
       expect(persisted.threads).toHaveLength(1)
       expect(persisted.turns).toHaveLength(1)
       expect(persisted.turns[0]?.prompt).toContain("recorded-output")
@@ -266,22 +290,30 @@ test("drives bypassed recorded and incognito shell commands through Operation an
 
       yield* Effect.gen(function* () {
         const turns = yield* TurnRepository.Service
+        const now = yield* Clock.currentTimeMillis
         yield* turns.createForSubmission({
           id: Turn.TurnId.make("active"),
           threadId: Thread.ThreadId.make("shell-thread"),
           prompt: "active",
-          now: 10,
+          now,
         })
-      }).pipe(Effect.provide(turnRepositoryLayer))
+      }).pipe(Effect.provide(repositories))
       yield* run("$ printf queued-output")
       const queued = yield* Effect.gen(function* () {
         const turns = yield* TurnRepository.Service
         return yield* turns.listQueued(Thread.ThreadId.make("shell-thread"))
-      }).pipe(Effect.provide(turnRepositoryLayer))
+      }).pipe(Effect.provide(repositories))
       expect(queued).toHaveLength(1)
       expect(queued[0]?.prompt).toContain("queued-output")
       expect(setup.captureCharFrame()).toContain("queued-output")
     }),
   )
-  await Effect.runPromise(program.pipe(Effect.provide(BunServices.layer)))
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const services = yield* Layer.build(BunServices.layer)
+        return yield* Effect.provide(program, services)
+      }),
+    ),
+  )
 })

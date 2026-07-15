@@ -1,41 +1,42 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { McpToolSource } from "@batonfx/mcp"
 import { expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Layer } from "effect"
 import { McpConfig, McpRuntime, McpTrust } from "../src"
+import { provideLayer } from "./layer"
 
 const local = JSON.stringify({
   servers: { shell: { command: "runner", args: ["--mcp"], env: { TOKEN: "secret", HOME: "/home" }, cwd: "tools" } },
 })
 
-it("skill MCP configuration is composed only from activated skill resources", async () => {
-  const hidden = await Effect.runPromise(McpConfig.compose({}).pipe(Effect.provide(BunServices.layer)))
-  const visible = await Effect.runPromise(
-    McpConfig.compose({
+it.effect("skill MCP configuration is composed only from activated skill resources", () =>
+  Effect.gen(function* () {
+    const hidden = yield* McpConfig.compose({})
+    const visible = yield* McpConfig.compose({
       activatedSkills: [
         {
           name: "review",
           digest: "skill-digest",
-          resources: [{ path: "mcp.json", content: JSON.stringify({ docs: { url: "https://example.test/mcp" } }) }],
+          resources: [{ path: "mcp.json", content: '{"docs":{"url":"https://example.test/mcp"}}' }],
         },
       ],
-    }).pipe(Effect.provide(BunServices.layer)),
-  )
-  expect(hidden).toEqual([])
-  expect(visible).toEqual([
-    {
-      kind: "remote",
-      name: "docs",
-      url: "https://example.test/mcp",
-      headers: {},
-      source: "skill:review",
-      sourceDigest: "skill-digest",
-    },
-  ])
-})
+    })
+    expect(hidden).toEqual([])
+    expect(visible).toEqual([
+      {
+        kind: "remote",
+        name: "docs",
+        url: "https://example.test/mcp",
+        headers: {},
+        source: "skill:review",
+        sourceDigest: "skill-digest",
+      },
+    ])
+  }).pipe(provideLayer(BunServices.layer)),
+)
 
-it("trust fingerprints include names and configuration but never environment values", async () => {
-  const program = Effect.gen(function* () {
+it.effect("trust fingerprints include names and configuration but never environment values", () =>
+  Effect.gen(function* () {
     const [server] = yield* McpConfig.compose({ workspace: local })
     if (server === undefined || server.kind !== "local") return yield* Effect.die("Expected local server")
     const trust = yield* McpTrust.Service
@@ -43,17 +44,15 @@ it("trust fingerprints include names and configuration but never environment val
     const before = yield* trust.isTrusted(record)
     yield* trust.approve(record)
     const after = yield* trust.isTrusted(record)
-    return { record, before, after }
-  }).pipe(Effect.provide(McpTrust.layer), Effect.provide(BunServices.layer))
-  const result = await Effect.runPromise(program)
-  expect(result.before).toBe(false)
-  expect(result.after).toBe(true)
-  expect(result.record.effectiveCwd).toBe("/workspace/tools")
-  expect(JSON.stringify(result.record)).not.toContain("secret")
-  expect(result.record.environmentNameFingerprint).toHaveLength(64)
-})
+    expect(before).toBe(false)
+    expect(after).toBe(true)
+    expect(record.effectiveCwd).toBe("/workspace/tools")
+    expect(Object.values(record).join(" ")).not.toContain("secret")
+    expect(record.environmentNameFingerprint).toHaveLength(64)
+  }).pipe(provideLayer(Layer.merge(McpTrust.layer.pipe(Layer.provide(BunServices.layer)), BunServices.layer))),
+)
 
-it("runtime discovers and calls through a deterministic Baton MCP tool source", async () => {
+it.effect("runtime discovers and calls through a deterministic Baton MCP tool source", () => {
   const source = McpToolSource.McpToolSource.of({
     server: "docs",
     tools: Effect.succeed([
@@ -70,14 +69,18 @@ it("runtime discovers and calls through a deterministic Baton MCP tool source", 
     source: "workspace",
     sourceDigest: "digest",
   }
-  const program = Effect.scoped(
-    Effect.gen(function* () {
-      const tools = yield* McpRuntime.discover(server)
-      const output = yield* McpRuntime.call(server, "find", { query: "rika" })
-      return { tools, output }
-    }),
-  ).pipe(Effect.provide(McpRuntime.testLayer(() => Effect.succeed(source))))
-  const result = await Effect.runPromise(program)
-  expect(result.tools.map((tool) => tool.name)).toEqual(["docs_find"])
-  expect(result.output).toEqual({ query: "rika" })
+  return Effect.gen(function* () {
+    const result = yield* provideLayer(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const tools = yield* McpRuntime.discover(server)
+          const output = yield* McpRuntime.call(server, "find", { query: "rika" })
+          return { tools, output }
+        }),
+      ),
+      McpRuntime.testLayer(() => Effect.succeed(source)),
+    )
+    expect(result.tools.map((tool) => tool.name)).toEqual(["docs_find"])
+    expect(result.output).toEqual({ query: "rika" })
+  })
 })

@@ -45,49 +45,54 @@ const record = (value: unknown): Readonly<Record<string, string>> | undefined =>
 }
 
 const parse = (content: string, source: Source, digest: string): Effect.Effect<ReadonlyArray<Server>, ConfigError> =>
-  Effect.try({
-    try: () => {
-      const document: unknown = JSON.parse(content)
-      if (typeof document !== "object" || document === null || Array.isArray(document))
-        throw new Error("Expected object")
-      const servers = "servers" in document ? document.servers : document
-      if (typeof servers !== "object" || servers === null || Array.isArray(servers))
-        throw new Error("Expected servers object")
-      const parsed: Array<Server> = []
-      for (const [name, raw] of Object.entries(servers)) {
-        if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new Error(`Invalid server: ${name}`)
-        if ("command" in raw && typeof raw.command === "string") {
-          const args = "args" in raw ? raw.args : []
-          const environment = "env" in raw ? record(raw.env) : {}
-          if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string") || environment === undefined)
-            throw new Error(`Invalid local server: ${name}`)
-          const cwd = "cwd" in raw ? raw.cwd : undefined
-          if (cwd !== undefined && typeof cwd !== "string") throw new Error(`Invalid cwd: ${name}`)
-          parsed.push({
-            kind: "local",
-            name,
-            command: raw.command,
-            args,
-            environment,
-            cwd,
-            source,
-            sourceDigest: digest,
-          })
-          continue
-        }
-        if ("url" in raw && typeof raw.url === "string") {
-          const headers = "headers" in raw ? record(raw.headers) : {}
-          if (headers === undefined) throw new Error(`Invalid headers: ${name}`)
-          const url = new URL(raw.url).toString()
-          parsed.push({ kind: "remote", name, url, headers, source, sourceDigest: digest })
-          continue
-        }
-        throw new Error(`Server requires command or url: ${name}`)
-      }
-      return parsed
-    },
-    catch: (cause) => new ConfigError({ source, message: cause instanceof Error ? cause.message : String(cause) }),
-  })
+  Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(content).pipe(
+    Effect.mapError((cause) => ConfigError.make({ source, message: String(cause) })),
+    Effect.flatMap((document) =>
+      Effect.try({
+        try: () => {
+          if (typeof document !== "object" || document === null || Array.isArray(document))
+            throw new Error("Expected object")
+          const servers = "servers" in document ? document.servers : document
+          if (typeof servers !== "object" || servers === null || Array.isArray(servers))
+            throw new Error("Expected servers object")
+          const parsed: Array<Server> = []
+          for (const [name, raw] of Object.entries(servers)) {
+            if (typeof raw !== "object" || raw === null || Array.isArray(raw))
+              throw new Error(`Invalid server: ${name}`)
+            if ("command" in raw && typeof raw.command === "string") {
+              const args = "args" in raw ? raw.args : []
+              const environment = "env" in raw ? record(raw.env) : {}
+              if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string") || environment === undefined)
+                throw new Error(`Invalid local server: ${name}`)
+              const cwd = "cwd" in raw ? raw.cwd : undefined
+              if (cwd !== undefined && typeof cwd !== "string") throw new Error(`Invalid cwd: ${name}`)
+              parsed.push({
+                kind: "local",
+                name,
+                command: raw.command,
+                args,
+                environment,
+                cwd,
+                source,
+                sourceDigest: digest,
+              })
+              continue
+            }
+            if ("url" in raw && typeof raw.url === "string") {
+              const headers = "headers" in raw ? record(raw.headers) : {}
+              if (headers === undefined) throw new Error(`Invalid headers: ${name}`)
+              const url = new URL(raw.url).toString()
+              parsed.push({ kind: "remote", name, url, headers, source, sourceDigest: digest })
+              continue
+            }
+            throw new Error(`Server requires command or url: ${name}`)
+          }
+          return parsed
+        },
+        catch: (cause) => ConfigError.make({ source, message: cause instanceof Error ? cause.message : String(cause) }),
+      }),
+    ),
+  )
 
 export const compose = Effect.fn("McpConfig.compose")(function* (input: Input) {
   const crypto = yield* Crypto.Crypto
@@ -95,7 +100,7 @@ export const compose = Effect.fn("McpConfig.compose")(function* (input: Input) {
   if (input.workspace !== undefined) {
     const bytes = yield* crypto
       .digest("SHA-256", new TextEncoder().encode(input.workspace))
-      .pipe(Effect.mapError((cause) => new ConfigError({ source: "workspace", message: String(cause) })))
+      .pipe(Effect.mapError((cause) => ConfigError.make({ source: "workspace", message: String(cause) })))
     configured.push(...(yield* parse(input.workspace, "workspace", Encoding.encodeHex(bytes))))
   }
   for (const skill of input.activatedSkills ?? []) {
@@ -107,7 +112,7 @@ export const compose = Effect.fn("McpConfig.compose")(function* (input: Input) {
   const names = new Set<string>()
   for (const server of configured) {
     if (names.has(server.name))
-      return yield* new ConfigError({ source: server.source, message: `Duplicate server: ${server.name}` })
+      return yield* ConfigError.make({ source: server.source, message: `Duplicate server: ${server.name}` })
     names.add(server.name)
   }
   return configured.toSorted((left, right) => left.name.localeCompare(right.name))

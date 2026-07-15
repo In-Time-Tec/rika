@@ -18,26 +18,41 @@ export interface Interface {
   readonly options: Options
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/app/ExtensionOperations") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/app/extension-operations/Service") {}
 
 export const layer = (options: Options) => Layer.succeed(Service, Service.of({ options }))
+
+const Json = Schema.UnknownFromJsonString
+const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+const encodeJson = Schema.encodeSync(Json)
+const encodePrettyJson = (value: unknown, depth = 0): string => {
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "[]"
+    const indentation = "  ".repeat(depth + 1)
+    return `[\n${indentation}${value.map((item) => encodePrettyJson(item, depth + 1)).join(`,\n${indentation}`)}\n${"  ".repeat(depth)}]`
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.entries(value).filter(([, item]) => item !== undefined)
+    if (entries.length === 0) return "{}"
+    const indentation = "  ".repeat(depth + 1)
+    return `{\n${indentation}${entries
+      .map(([key, item]) => `${encodeJson(key)}: ${encodePrettyJson(item, depth + 1)}`)
+      .join(`,\n${indentation}`)}\n${"  ".repeat(depth)}}`
+  }
+  return encodeJson(value)
+}
 
 const readDocument = (fileSystem: FileSystem.FileSystem, filename: string) =>
   fileSystem.exists(filename).pipe(
     Effect.flatMap((exists) => (exists ? fileSystem.readFileString(filename) : Effect.succeed("{}"))),
-    Effect.flatMap((text) =>
-      Effect.try({
-        try: () => JSON.parse(text) as Record<string, unknown>,
-        catch: (cause) => new Error({ message: String(cause) }),
-      }),
-    ),
-    Effect.mapError((cause) => (cause instanceof Error ? cause : new Error({ message: String(cause) }))),
+    Effect.flatMap(Schema.decodeUnknownEffect(JsonObject)),
+    Effect.mapError((cause) => (Schema.is(Error)(cause) ? cause : Error.make({ message: String(cause) }))),
   )
 
 const writeDocument = (fileSystem: FileSystem.FileSystem, path: Path.Path, filename: string, value: unknown) =>
   fileSystem.makeDirectory(path.dirname(filename), { recursive: true }).pipe(
-    Effect.andThen(fileSystem.writeFileString(filename, `${JSON.stringify(value, undefined, 2)}\n`)),
-    Effect.mapError((cause) => new Error({ message: String(cause) })),
+    Effect.andThen(fileSystem.writeFileString(filename, `${encodePrettyJson(value)}\n`)),
+    Effect.mapError((cause) => Error.make({ message: String(cause) })),
   )
 
 export const run = Effect.fn("ExtensionOperations.run")(function* (
@@ -61,20 +76,20 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
       const discovered = yield* SkillRegistry.discover({
         globalRoot: options.globalRoot,
         workspaceRoot: options.workspaceRoot,
-      }).pipe(Effect.mapError((cause) => new Error({ message: cause.message })))
-      yield* Console.log(JSON.stringify(discovered.listings))
+      }).pipe(Effect.mapError((cause) => Error.make({ message: cause.message })))
+      yield* Console.log(encodeJson(discovered.listings))
       return
     }
     if (input.action === "inspect") {
       const discovered = yield* SkillRegistry.discover({
         globalRoot: options.globalRoot,
         workspaceRoot: options.workspaceRoot,
-      }).pipe(Effect.mapError((cause) => new Error({ message: cause.message })))
+      }).pipe(Effect.mapError((cause) => Error.make({ message: cause.message })))
       yield* Console.log(
-        JSON.stringify(
+        encodeJson(
           yield* discovered
             .activate(input.name)
-            .pipe(Effect.mapError((cause) => new Error({ message: cause.message }))),
+            .pipe(Effect.mapError((cause) => Error.make({ message: cause.message }))),
         ),
       )
       return
@@ -82,11 +97,11 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
     if (input.action === "remove") {
       yield* fileSystem
         .remove(path.join(options.workspaceRoot, input.name), { recursive: true })
-        .pipe(Effect.mapError((cause) => new Error({ message: String(cause) })))
+        .pipe(Effect.mapError((cause) => Error.make({ message: String(cause) })))
     } else if ("source" in input) {
       yield* fileSystem
         .copy(input.source, path.join(options.workspaceRoot, path.basename(input.source)), { overwrite: false })
-        .pipe(Effect.mapError((cause) => new Error({ message: String(cause) })))
+        .pipe(Effect.mapError((cause) => Error.make({ message: String(cause) })))
     }
     return
   }
@@ -98,37 +113,37 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
         : {}
     if (input.action === "oauth-login" || input.action === "oauth-logout" || input.action === "oauth-status") {
       const oauth = yield* McpOAuth.Service
-      const configured = yield* McpConfig.compose({ workspace: JSON.stringify({ servers }) }).pipe(
-        Effect.mapError((cause) => new Error({ message: cause.message })),
+      const configured = yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
+        Effect.mapError((cause) => Error.make({ message: cause.message })),
       )
       const remote = configured.filter((server) => server.kind === "remote")
       const name = input.name
       const selected =
         input.action === "oauth-status" && name === undefined ? remote : remote.filter((server) => server.name === name)
       if (selected.length === 0 && name !== undefined)
-        return yield* new Error({ message: `Remote MCP server not found: ${name}` })
+        return yield* Error.make({ message: `Remote MCP server not found: ${name}` })
       if (input.action === "oauth-login")
         yield* oauth
           .login(input.name, selected[0]!.url)
-          .pipe(Effect.mapError((cause) => new Error({ message: cause.message })))
+          .pipe(Effect.mapError((cause) => Error.make({ message: cause.message })))
       if (input.action === "oauth-logout")
         yield* oauth
           .logout(input.name, selected[0]!.url)
-          .pipe(Effect.mapError((cause) => new Error({ message: cause.message })))
+          .pipe(Effect.mapError((cause) => Error.make({ message: cause.message })))
       if (input.action === "oauth-status") {
         const statuses = yield* Effect.forEach(selected, (server) =>
           oauth.status(server.name, server.url).pipe(Effect.map((status) => ({ name: server.name, status }))),
-        ).pipe(Effect.mapError((cause) => new Error({ message: cause.message })))
-        yield* Console.log(JSON.stringify(statuses))
+        ).pipe(Effect.mapError((cause) => Error.make({ message: cause.message })))
+        yield* Console.log(encodeJson(statuses))
       }
       return
     }
     if (input.action === "list" || input.action === "doctor") {
-      const composed = yield* McpConfig.compose({ workspace: JSON.stringify({ servers }) }).pipe(
-        Effect.mapError((cause) => new Error({ message: cause.message })),
+      const composed = yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
+        Effect.mapError((cause) => Error.make({ message: cause.message })),
       )
       yield* Console.log(
-        JSON.stringify(
+        encodeJson(
           composed.map((server) => ({
             name: server.name,
             kind: server.kind,
@@ -166,7 +181,7 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
     ...(state.extensions as Record<string, { enabled: boolean; generation: number }> | undefined),
   }
   if (input.action === "list") {
-    yield* Console.log(JSON.stringify(extensions))
+    yield* Console.log(encodeJson(extensions))
     return
   }
   const current = extensions[input.name] ?? { enabled: false, generation: 1 }
@@ -175,6 +190,6 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
   if (input.action === "rollback")
     extensions[input.name] = { ...current, generation: Math.max(1, current.generation - 1) }
   if (input.action === "create-skill" || input.action === "create-plugin")
-    return yield* new Error({ message: `${input.action} is outside extension lifecycle behavior` })
+    return yield* Error.make({ message: `${input.action} is outside extension lifecycle behavior` })
   yield* writeDocument(fileSystem, path, options.generationsPath, { extensions })
 })

@@ -1,6 +1,6 @@
 import { SkillSource } from "@batonfx/core"
 import { SkillLoader } from "@batonfx/skills"
-import { Context, Crypto, Effect, Encoding, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
+import { Context, Crypto, Effect, Encoding, FileSystem, Function, Layer, Path, PlatformError, Schema } from "effect"
 
 export interface Options {
   readonly globalRoot: string
@@ -43,7 +43,7 @@ export interface FileSystemInterface {
 }
 
 export class SkillFileSystem extends Context.Service<SkillFileSystem, FileSystemInterface>()(
-  "@rika/extensions/SkillFileSystem",
+  "@rika/extensions/skill-registry/SkillFileSystem",
 ) {}
 
 export const fileSystemLayer = Layer.effect(
@@ -59,7 +59,7 @@ export const fileSystemLayer = Layer.effect(
   }),
 )
 
-export const fileSystemTestLayer = (
+const fileSystemTestLayerImpl = (
   files: Readonly<Record<string, string>>,
   directories: Readonly<Record<string, ReadonlyArray<string>>>,
 ) =>
@@ -87,8 +87,18 @@ export const fileSystemTestLayer = (
     }),
   )
 
+export const fileSystemTestLayer: {
+  (
+    files: Readonly<Record<string, string>>,
+  ): (directories: Readonly<Record<string, ReadonlyArray<string>>>) => Layer.Layer<SkillFileSystem, never, Path.Path>
+  (
+    files: Readonly<Record<string, string>>,
+    directories: Readonly<Record<string, ReadonlyArray<string>>>,
+  ): Layer.Layer<SkillFileSystem, never, Path.Path>
+} = Function.dual(2, fileSystemTestLayerImpl)
+
 const failure = (operation: string, path: string, cause: unknown) =>
-  new SkillRegistryError({ operation, path, message: cause instanceof Error ? cause.message : String(cause), cause })
+  SkillRegistryError.make({ operation, path, message: cause instanceof Error ? cause.message : String(cause), cause })
 
 const contained = (path: Path.Path, root: string, candidate: string): boolean => {
   const relative = path.relative(path.resolve(root), path.resolve(candidate))
@@ -122,7 +132,7 @@ export const discover = (
     const activate = Effect.fn("SkillRegistry.activate")((name: string) =>
       Effect.gen(function* () {
         const skill = yield* source.get(name).pipe(Effect.mapError(failure.bind(undefined, "activate", name)))
-        if (skill === undefined) return yield* Effect.fail(failure("activate", name, "Skill not found"))
+        if (skill === undefined) return yield* failure("activate", name, "Skill not found")
         const body = yield* skill.body.pipe(Effect.mapError(failure.bind(undefined, "activate", name)))
         const workspaceSkill = yield* workspace
           .get(name)
@@ -141,7 +151,7 @@ export const discover = (
           const resourcePath = path.resolve(directory, entry)
           if (path.basename(resourcePath) === "SKILL.md") continue
           if (!contained(path, directory, resourcePath))
-            return yield* Effect.fail(failure("activate", resourcePath, "Resource path escapes skill directory"))
+            return yield* failure("activate", resourcePath, "Resource path escapes skill directory")
           const isFile = yield* skillFileSystem
             .isFile(resourcePath)
             .pipe(Effect.mapError((cause) => failure("activate", resourcePath, cause)))

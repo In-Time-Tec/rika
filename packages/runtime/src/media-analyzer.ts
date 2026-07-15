@@ -32,11 +32,10 @@ export const layer = (
               }),
             )
             .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new MediaView.MediaAnalysisError({
-                    message: `Media analysis failed for ${input.kind} (${input.mimeType}): ${String(cause)}`,
-                  }),
+              Effect.mapError((cause) =>
+                MediaView.MediaAnalysisError.make({
+                  message: `Media analysis failed for ${input.kind} (${input.mimeType}): ${String(cause)}`,
+                }),
               ),
             )
         }),

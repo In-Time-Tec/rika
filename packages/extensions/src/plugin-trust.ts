@@ -21,7 +21,7 @@ export interface Interface {
   readonly approve: (workspaceIdentity: string, extensionId: string, sourceDigest: string) => Effect.Effect<void>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/extensions/PluginTrust") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/extensions/plugin-trust/Service") {}
 
 const key = (workspace: string, extension: string, digest: string) => JSON.stringify([workspace, extension, digest])
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Path, PlatformError } from "effect"
 import { ContextFileSystem, ContextMentions, FileMentions, ResolvedContext } from "../src/index"
+import { provideLayer } from "./layer"
 
 const files = {
   "/work/AGENTS.md": "root",
@@ -43,7 +44,7 @@ describe("ResolvedContext", () => {
         "pkg/src/AGENTS.md",
       ])
       expect(first.digest).toMatch(/^[a-f0-9]{64}$/)
-    }).pipe(Effect.provide(contextLayer)),
+    }).pipe(provideLayer(contextLayer)),
   )
 
   it.effect("diagnoses escaping and missing references", () =>
@@ -51,7 +52,7 @@ describe("ResolvedContext", () => {
       const resolver = yield* ResolvedContext.Service
       const result = yield* resolver.resolve({ workspace: "/work", references: ["../secret", "missing.md"] })
       expect(result.diagnostics.map((item) => item._tag)).toEqual(["PathOutsideWorkspace", "ReferenceNotFound"])
-    }).pipe(Effect.provide(contextLayer)),
+    }).pipe(provideLayer(contextLayer)),
   )
 
   it.effect("diagnoses unreadable selected files and unmatched globs", () =>
@@ -61,7 +62,7 @@ describe("ResolvedContext", () => {
       expect(result.sources).toEqual([])
       expect(result.diagnostics.map((item) => item._tag)).toEqual(["ReferenceReadFailed", "ReferenceNotFound"])
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ResolvedContext.layer.pipe(
           Layer.provide(
             Layer.succeed(ContextFileSystem.Service, {
@@ -102,7 +103,7 @@ describe("ResolvedContext", () => {
         ["pkg/src/AGENTS.md", "guidance"],
       ])
       expect(result.diagnostics.map((item) => item._tag)).toEqual(["PathOutsideWorkspace"])
-    }).pipe(Effect.provide(contextLayer)),
+    }).pipe(provideLayer(contextLayer)),
   )
 
   it.effect("uses CLAUDE.md when primary guidance names are absent", () =>
@@ -111,7 +112,7 @@ describe("ResolvedContext", () => {
       const result = yield* resolver.resolve({ workspace: "/other" })
       expect(result.sources.map((source) => source.path)).toEqual(["CLAUDE.md"])
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ResolvedContext.layer.pipe(
           Layer.provide(
             ContextFileSystem.testLayer({ "/other/CLAUDE.md": "fallback" }, { "/other": ["CLAUDE.md"] }).pipe(
@@ -135,7 +136,7 @@ describe("ResolvedContext", () => {
       expect(result.sources.map((source) => source.path)).toEqual(["AGENTS.md", "docs/nested/reference.md"])
       expect(result.diagnostics).toEqual([])
     }).pipe(
-      Effect.provide(
+      provideLayer(
         ResolvedContext.layer.pipe(
           Layer.provide(
             ContextFileSystem.testLayer(
@@ -164,7 +165,7 @@ describe("ResolvedContext", () => {
         "/work/docs/read me.md",
         "/work/pkg/a.ts",
       ])
-    }).pipe(Effect.provide(Path.layer)),
+    }).pipe(provideLayer(Path.layer)),
   )
 
   it("parses typed file, guidance, thread, and image mentions without collisions", () => {

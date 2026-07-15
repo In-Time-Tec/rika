@@ -19,11 +19,13 @@ import {
   Context,
   Duration,
   Effect,
+  Function,
   Layer,
   LayerMap,
   Option,
   Redacted,
   Schedule,
+  Schema,
   Semaphore,
   Stream,
 } from "effect"
@@ -51,6 +53,9 @@ import * as ThreadHost from "./thread-host"
 import { definitions, idFor } from "./workflow-definitions"
 
 export type ModelVariantPolicy = "registration-key" | "fixed-selection"
+
+type ToolRuntimeRequirements =
+  ReturnType<typeof RikaToolRuntime.layer> extends Layer.Layer<infer _A, infer _E, infer R> ? R : never
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)
@@ -97,7 +102,7 @@ export interface CompactionPolicy {
   }
 }
 
-export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> = {}> {
+export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> = {}, RuntimeRequirements = never> {
   readonly filename: string
   readonly workspace: string
   readonly parallelApiKey?: Redacted.Redacted<string>
@@ -113,69 +118,84 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly oracleCompaction?: Compaction.DefaultOptions
   readonly permissionPolicy?: Permissions.Ruleset
   readonly additionalToolkit?: Toolkit.Toolkit<AdditionalTools>
-  readonly additionalHandlerLayer?: Layer.Layer<Tool.HandlersFor<AdditionalTools>, unknown, never>
-  readonly toolRuntimeLayer?: Layer.Layer<RikaToolRuntime.Service, unknown, never>
-  readonly toolRuntimeLayerForWorkspace?: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, unknown, any>
+  readonly additionalHandlerLayer?: Layer.Layer<Tool.HandlersFor<AdditionalTools>, BackendError, never>
+  readonly toolRuntimeLayer?: Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
+  readonly toolRuntimeLayerForWorkspace?: (
+    workspace: string,
+  ) => Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
   readonly resolveWorkspace?: (executionId: string) => Effect.Effect<string, BackendError>
   readonly toolNeedsApproval?: (name: string) => boolean
   readonly resolveExecutionRoute?: (turnId: string) => Effect.Effect<ExecutionRoutePin | undefined, BackendError>
 }
 
-export const routedToolRuntimeLayer = (
-  layerForWorkspace: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, unknown, any>,
-  resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
-) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const runtimes = yield* LayerMap.make(layerForWorkspace, { idleTimeToLive: "1 minute" })
-      const run = ((request: RikaToolRuntime.Request) =>
-        Effect.scoped(
-          Effect.gen(function* () {
-            const call = yield* RelayToolRuntime.ToolCallInfo
-            const workspace = yield* resolveWorkspace(String(call.executionId))
-            const context = yield* runtimes.contextEffect(workspace)
-            const runtime = Context.get(context, RikaToolRuntime.Service)
-            const startedAt = yield* Clock.currentTimeMillis
-            yield* Effect.logInfo("tool.started")
-            return yield* runtime.run(request).pipe(
-              Effect.tap(() =>
-                Clock.currentTimeMillis.pipe(
-                  Effect.flatMap((completedAt) =>
-                    Effect.logInfo("tool.completed").pipe(
-                      Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+export const routedToolRuntimeLayer: {
+  <E, R>(
+    resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
+  ): (
+    layerForWorkspace: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, E, R>,
+  ) => Layer.Layer<RikaToolRuntime.Service, E, R>
+  <E, R>(
+    layerForWorkspace: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, E, R>,
+    resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
+  ): Layer.Layer<RikaToolRuntime.Service, E, R>
+} = Function.dual(
+  2,
+  <E, R>(
+    layerForWorkspace: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, E, R>,
+    resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
+  ) =>
+    Layer.unwrap(
+      Effect.gen(function* () {
+        const runtimes = yield* LayerMap.make(layerForWorkspace, { idleTimeToLive: "1 minute" })
+        const run = ((request: RikaToolRuntime.Request) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const call = yield* RelayToolRuntime.ToolCallInfo
+              const workspace = yield* resolveWorkspace(String(call.executionId))
+              const context = yield* runtimes.contextEffect(workspace)
+              const runtime = Context.get(context, RikaToolRuntime.Service)
+              const startedAt = yield* Clock.currentTimeMillis
+              yield* Effect.logInfo("tool.started")
+              return yield* runtime.run(request).pipe(
+                Effect.tap(() =>
+                  Clock.currentTimeMillis.pipe(
+                    Effect.flatMap((completedAt) =>
+                      Effect.logInfo("tool.completed").pipe(
+                        Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Effect.tapCause((cause) =>
-                Clock.currentTimeMillis.pipe(
-                  Effect.flatMap((failedAt) =>
-                    Effect.logError("tool.failed").pipe(
-                      Effect.annotateLogs({
-                        "rika.duration.ms": failedAt - startedAt,
-                        "rika.failure.kind": failureKind(cause),
-                      }),
+                Effect.tapCause((cause) =>
+                  Clock.currentTimeMillis.pipe(
+                    Effect.flatMap((failedAt) =>
+                      Effect.logError("tool.failed").pipe(
+                        Effect.annotateLogs({
+                          "rika.duration.ms": failedAt - startedAt,
+                          "rika.failure.kind": failureKind(cause),
+                        }),
+                      ),
                     ),
                   ),
                 ),
-              ),
-              Effect.annotateLogs({
-                "rika.execution.id": String(call.executionId),
-                "rika.tool.call.id": String(call.call.id),
-                "rika.tool.name": String(call.call.name),
-              }),
-            )
-          }),
-        ).pipe(
-          Effect.mapError((cause) =>
-            cause instanceof RikaToolRuntime.ToolError
-              ? cause
-              : new RikaToolRuntime.ToolError({ tool: request._tag, message: String(cause) }),
-          ),
-        )) as RikaToolRuntime.Interface["run"]
-      return Layer.succeed(RikaToolRuntime.Service, RikaToolRuntime.Service.of({ run }))
-    }),
-  )
+                Effect.annotateLogs({
+                  "rika.execution.id": String(call.executionId),
+                  "rika.tool.call.id": String(call.call.id),
+                  "rika.tool.name": String(call.call.name),
+                }),
+              )
+            }),
+          ).pipe(
+            Effect.mapError((cause) =>
+              Schema.is(RikaToolRuntime.ToolError)(cause)
+                ? cause
+                : RikaToolRuntime.ToolError.make({ tool: request._tag, message: String(cause) }),
+            ),
+          )) as RikaToolRuntime.Interface["run"]
+        return Layer.succeed(RikaToolRuntime.Service, RikaToolRuntime.Service.of({ run }))
+      }),
+    ),
+)
 
 const withResilience = (
   registration: ModelRegistry.Registration,
@@ -189,18 +209,25 @@ const withResilience = (
   return { ...registration, layer: modelLayer }
 }
 
-const registrationFor = <AdditionalTools extends Record<string, Tool.Any>>(
-  options: LayerOptions<AdditionalTools>,
+const registrationFor = <AdditionalTools extends Record<string, Tool.Any>, R>(
+  options: LayerOptions<AdditionalTools, R>,
 ): ModelRegistry.Registration => withResilience(options.registration, options.modelResilience)
 
-const registrationsFor = <AdditionalTools extends Record<string, Tool.Any>>(
-  options: LayerOptions<AdditionalTools>,
+const registrationsFor = <AdditionalTools extends Record<string, Tool.Any>, R>(
+  options: LayerOptions<AdditionalTools, R>,
 ): Array<ModelRegistry.Registration> => [
   registrationFor(options),
   ...(options.additionalRegistrations ?? []).map((registration) =>
     withResilience(registration, options.modelResilience),
   ),
 ]
+
+function closeRelayClientRequirements<A, E, R>(
+  layer: Layer.Layer<A, E, R | Client.RuntimeRequirements>,
+): Layer.Layer<A, E, R>
+function closeRelayClientRequirements<A, E, R>(layer: Layer.Layer<A, E, R>) {
+  return layer
+}
 
 const relayModelSelection = (selection: ModelRegistry.ModelSelection) => ({
   provider: selection.provider,
@@ -250,7 +277,10 @@ const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
 export const remoteToolOptions = (parallelApiKey: Redacted.Redacted<string> | undefined) =>
   parallelApiKey === undefined ? {} : { apiKey: parallelApiKey }
 
-export const modelVariantKey = (effort: string, fast: boolean) => `effort:${effort}${fast ? ":fast" : ""}`
+export const modelVariantKey: {
+  (fast: boolean): (effort: string) => string
+  (effort: string, fast: boolean): string
+} = Function.dual(2, (effort: string, fast: boolean) => `effort:${effort}${fast ? ":fast" : ""}`)
 
 const variantSelection = (
   selection: ModelRegistry.ModelSelection,
@@ -285,7 +315,7 @@ export const turnIdFromExecutionId = (value: string): string | undefined => {
 const sessionId = (threadId: string) => Ids.SessionId.make(`session:${threadId}`)
 const childSessionId = (childExecutionId: Ids.ChildExecutionId) =>
   Ids.SessionId.make(`session:child:${String(childExecutionId)}`)
-const error = (cause: unknown) => new BackendError({ message: String(cause) })
+const error = (cause: unknown) => BackendError.make({ message: String(cause) })
 const executionInput = (input: { readonly prompt: string; readonly promptParts?: ReadonlyArray<PromptPart> }) =>
   input.promptParts?.map((part) =>
     part.type === "text"
@@ -433,7 +463,7 @@ const followExecution = (
             existing === undefined ||
             (existing.status !== "completed" && existing.status !== "failed" && existing.status !== "cancelled")
           ) {
-            return yield* Effect.fail(streamError)
+            return yield* streamError
           }
           const replay = yield* client.replayExecution({ execution_id: executionId(turnId) })
           for (const item of replay.events) {
@@ -454,9 +484,9 @@ const followExecution = (
                 item.type !== "execution.cancelled",
             )
           ) {
-            return yield* Effect.fail(streamError)
+            return yield* streamError
           }
-        }).pipe(Effect.catch(() => Effect.fail(streamError))),
+        }).pipe(Effect.mapError(() => streamError)),
       ),
     )
     const status = statusFromEvents(events)
@@ -622,9 +652,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             return "terminal" as const
           }
           if (inspection.waiting_on.length === 0) {
-            return yield* Effect.fail(
-              new Client.ClientError({ message: `Thread host for ${threadId} is not parked yet` }),
-            )
+            return yield* Client.ClientError.make({ message: `Thread host for ${threadId} is not parked yet` })
           }
           return "parked" as const
         }).pipe(
@@ -666,18 +694,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               Effect.gen(function* () {
                 const created = yield* hostInstance(threadId, now)
                 const instance = yield* awaitParkedHost(threadId, created, now)
+                const notification = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({
+                  kind: "pending-turn",
+                  thread_id: threadId,
+                  ...(turnId === undefined ? {} : { turn_id: turnId }),
+                })
                 yield* client.send({
                   from: addressId,
                   to: instance.address_id,
-                  content: [
-                    Content.text(
-                      JSON.stringify({
-                        kind: "pending-turn",
-                        thread_id: threadId,
-                        ...(turnId === undefined ? {} : { turn_id: turnId }),
-                      }),
-                    ),
-                  ],
+                  content: [Content.text(notification)],
                   idempotency_key: turnId === undefined ? `rika:nudge:${threadId}:${now}` : `rika:turn:${turnId}`,
                 })
               }),
@@ -704,7 +729,10 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             (options.resolveExecutionRoute === undefined
               ? undefined
               : yield* options.resolveExecutionRoute(input.parentTurnId))
-          const durableRoute = routePin === undefined ? undefined : JSON.parse(JSON.stringify(routePin))
+          const durableRoute =
+            routePin === undefined
+              ? undefined
+              : yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
           const summaryModel = routePin?.compactionSummary
           const routeForProfile = (profile: AgentProfile) => {
             if (profile === "Oracle") return routePin?.oracle
@@ -746,7 +774,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                     product_profile: profile,
                     steering_enabled: true,
                     ...(input.workspace === undefined ? {} : { rika_workspace: input.workspace }),
-                    ...(routePin === undefined
+                    ...(durableRoute === undefined
                       ? {}
                       : {
                           rika_execution_route: durableRoute,
@@ -768,7 +796,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           const result = yield* client
             .inspectChildFanOut({ fan_out_id: Ids.ChildFanOutId.make(fanOutId) })
             .pipe(Effect.mapError(error))
-          return result.fan_out === undefined ? undefined : mapFanOut(result.fan_out)
+          return result.fan_out === null ? undefined : mapFanOut(result.fan_out)
         }),
         cancelFanOut: Effect.fn("ExecutionBackend.cancelFanOut")(function* (fanOutId, cancelledAt, reason) {
           const result = yield* client
@@ -985,7 +1013,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           }).pipe(Effect.mapError(error))
         }),
         inspect: Effect.fn("ExecutionBackend.inspect")(function* (turnId) {
-          const existing = yield* client.getExecution(executionId(turnId)).pipe(Effect.mapError(error))
+          const existing = yield* client.getExecution(executionId(turnId))
           if (existing === undefined) return undefined
           return yield* client.inspectExecution(executionId(turnId)).pipe(
             Effect.map((value) => ({
@@ -1008,9 +1036,8 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 status: Status.make(child.status),
               })),
             })),
-            Effect.mapError(error),
           )
-        }),
+        }, Effect.mapError(error)),
         steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, createdAt) {
           yield* client
             .steer({
@@ -1063,7 +1090,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     }),
   )
 
-export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(options: LayerOptions<AdditionalTools>) =>
+export const layer = <
+  AdditionalTools extends Record<string, Tool.Any> = {},
+  RuntimeRequirements extends ToolRuntimeRequirements = never,
+>(
+  options: LayerOptions<AdditionalTools, RuntimeRequirements>,
+) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const sqliteModule = yield* Effect.promise(() => import("@relayfx/sdk/sqlite"))
@@ -1132,42 +1164,38 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
           const handlerClientLayer = Layer.fresh(Client.layerFromRuntime)
           const childResult = (client: Client.Interface, childId: string) => {
             const childExecutionId = Ids.ExecutionId.make(childId)
-            return client
-              .streamExecution({ execution_id: childExecutionId })
-              .pipe(
-                Stream.takeUntil(
-                  (item) =>
-                    item.type === "execution.completed" ||
-                    item.type === "execution.failed" ||
-                    item.type === "execution.cancelled",
-                ),
-                Stream.runCollect,
-              )
-              .pipe(
-                Effect.map((events) => {
-                  const terminal = events.findLast(
-                    (executionEvent) =>
-                      executionEvent.type === "execution.completed" ||
-                      executionEvent.type === "execution.failed" ||
-                      executionEvent.type === "execution.cancelled",
-                  )
-                  const modelOutput = events.findLast(
-                    (executionEvent) => executionEvent.type === "model.output.completed",
-                  )
-                  return {
-                    status:
-                      terminal?.type === "execution.completed"
-                        ? ("completed" as const)
-                        : terminal?.type === "execution.cancelled"
-                          ? ("cancelled" as const)
-                          : ("failed" as const),
-                    output:
-                      terminal?.content === undefined || terminal.content.length === 0
-                        ? (modelOutput?.content ?? [])
-                        : terminal.content,
-                  }
-                }),
-              )
+            return client.streamExecution({ execution_id: childExecutionId }).pipe(
+              Stream.takeUntil(
+                (item) =>
+                  item.type === "execution.completed" ||
+                  item.type === "execution.failed" ||
+                  item.type === "execution.cancelled",
+              ),
+              Stream.runCollect,
+              Effect.map((events) => {
+                const terminal = events.findLast(
+                  (executionEvent) =>
+                    executionEvent.type === "execution.completed" ||
+                    executionEvent.type === "execution.failed" ||
+                    executionEvent.type === "execution.cancelled",
+                )
+                const modelOutput = events.findLast(
+                  (executionEvent) => executionEvent.type === "model.output.completed",
+                )
+                return {
+                  status:
+                    terminal?.type === "execution.completed"
+                      ? ("completed" as const)
+                      : terminal?.type === "execution.cancelled"
+                        ? ("cancelled" as const)
+                        : ("failed" as const),
+                  output:
+                    terminal?.content === undefined || terminal.content.length === 0
+                      ? (modelOutput?.content ?? [])
+                      : terminal.content,
+                }
+              }),
+            )
           }
           const fanOutHandlers: Layer.Layer<
             ChildFanOutRuntimeModule.HandlerService,
@@ -1248,12 +1276,15 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
                       return yield* childResult(client, String(child.child_execution_id))
                     }),
                   cancel: (childExecutionId: any) =>
-                    client
-                      .cancelExecution({
-                        execution_id: Ids.ExecutionId.make(String(childExecutionId)),
-                        cancelled_at: Date.now(),
-                      })
-                      .pipe(Effect.asVoid),
+                    Clock.currentTimeMillis.pipe(
+                      Effect.flatMap((cancelledAt) =>
+                        client.cancelExecution({
+                          execution_id: Ids.ExecutionId.make(String(childExecutionId)),
+                          cancelled_at: cancelledAt,
+                        }),
+                      ),
+                      Effect.asVoid,
+                    ),
                 }),
               ),
             ),
@@ -1296,14 +1327,16 @@ export const layer = <AdditionalTools extends Record<string, Tool.Any> = {}>(opt
               })
             }),
           ).pipe(Layer.provide(handlerClientLayer))
-          const runtimeLayer = Runtime.layerEmbedded({
-            databaseLayer: SQLite.runtimeDatabaseLayer({ filename: options.filename }),
-            languageModelLayer: sharedLanguageModelLayer,
-            toolRuntimeLayer,
-            schemaRegistryLayer,
-            childFanOutHandlersLayer: fanOutHandlers,
-            workflowDefinitionHandlersLayer: workflowHandlers,
-          }) as Layer.Layer<Runtime.EmbeddedOutput, Runtime.AcquisitionError, never>
+          const runtimeLayer = closeRelayClientRequirements(
+            Runtime.layerEmbedded({
+              databaseLayer: SQLite.runtimeDatabaseLayer({ filename: options.filename }),
+              languageModelLayer: sharedLanguageModelLayer,
+              toolRuntimeLayer,
+              schemaRegistryLayer,
+              childFanOutHandlersLayer: fanOutHandlers,
+              workflowDefinitionHandlersLayer: workflowHandlers,
+            }),
+          )
           return layerFromClient({
             ...options,
             registerModels: (registrations) =>

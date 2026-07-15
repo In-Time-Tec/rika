@@ -5,6 +5,7 @@ import {
   Cause,
   Clock,
   Console,
+  Context,
   Crypto,
   Deferred,
   Effect,
@@ -28,9 +29,9 @@ import { readOrCreateToken, resolve } from "./resident-endpoint"
 const decodeClient = Schema.decodeUnknownSync(ResidentService.ClientMessage)
 const decodeServer = Schema.decodeUnknownSync(ResidentService.ServerMessage)
 const transportError = (message: string, reason: ResidentService.ResidentServiceError["reason"] = "transport-failed") =>
-  new ResidentService.ResidentServiceError({ reason, message })
-const json = (value: unknown) => JSON.stringify(value)
-const parse = (value: string) => JSON.parse(value) as unknown
+  ResidentService.ResidentServiceError.make({ reason, message })
+const json = Schema.encodeSync(Schema.UnknownFromJsonString)
+const parse = Schema.decodeSync(Schema.UnknownFromJsonString)
 const capabilities = ["ping", "startup-state"] as const
 const maxFrameBytes = 1_048_576
 const outboundCapacity = 4_096
@@ -42,9 +43,9 @@ const failureKind = (cause: Cause.Cause<unknown>) => {
   return typeof failure
 }
 const isDisconnectedOperation = (error: unknown) =>
-  error instanceof Operation.OperationUnavailable && error.operation === "ResidentConnection"
+  Schema.is(Operation.OperationUnavailable)(error) && error.operation === "ResidentConnection"
 const isReconnectableTransport = (error: unknown) =>
-  error instanceof ResidentService.ResidentServiceError &&
+  Schema.is(ResidentService.ResidentServiceError)(error) &&
   (error.reason === "resident-absent" || error.reason === "resident-draining" || error.reason === "transport-failed")
 const formatOutput = (values: ReadonlyArray<unknown>) =>
   `${values.map((value) => (typeof value === "string" ? value : Formatter.format(value))).join(" ")}\n`
@@ -68,7 +69,10 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const lifecycle = yield* ResidentService.makeLifecycle(() => Effect.void)
   const hostWork = yield* FiberSet.make<void, unknown>()
   const drainingFailure = (requestId: string, operation: string) =>
-    writerFailure(requestId, new Operation.OperationUnavailable({ operation, message: "Resident service is draining" }))
+    writerFailure(
+      requestId,
+      Operation.OperationUnavailable.make({ operation, message: "Resident service is draining" }),
+    )
   const writerFailure = (requestId: string, error: Operation.OperationUnavailable) =>
     json({ _tag: "operation-failed", requestId, error } satisfies ResidentService.ServerMessage)
   const scheduleGrace = (generation: number) =>
@@ -99,19 +103,19 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   ) {
     const requestId = requestByInput.get(input)
     if (requestId === undefined)
-      return yield* new Operation.OperationUnavailable({
+      return yield* Operation.OperationUnavailable.make({
         operation: "Interactive",
         message: "Missing interactive request",
       })
     const route = (yield* Ref.get(routes)).get(requestId)
     if (route === undefined)
-      return yield* new Operation.OperationUnavailable({
+      return yield* Operation.OperationUnavailable.make({
         operation: "Interactive",
         message: "Interactive client disconnected",
       })
     const sessionId = yield* crypto.randomUUIDv4.pipe(
-      Effect.mapError(
-        (error) => new Operation.OperationUnavailable({ operation: "Interactive", message: String(error) }),
+      Effect.mapError((error) =>
+        Operation.OperationUnavailable.make({ operation: "Interactive", message: String(error) }),
       ),
     )
     const ended = yield* Deferred.make<void>()
@@ -155,12 +159,14 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         inbound.withPermits(1)(
           Effect.gen(function* () {
             if (new TextEncoder().encode(text).byteLength > maxFrameBytes) return yield* close(4400)
-            let message: ResidentService.ClientMessage
-            try {
-              message = decodeClient(parse(text))
-            } catch {
-              return yield* close(4400)
-            }
+            const decoded = yield* Effect.result(
+              Effect.try({
+                try: () => decodeClient(parse(text)),
+                catch: () => transportError("Invalid resident request"),
+              }),
+            )
+            if (decoded._tag === "Failure") return yield* close(4400)
+            const message = decoded.success
             if (!(yield* Ref.get(attached))) {
               if (!("family" in message)) return yield* close(4401)
               const result = ResidentService.validateHandshake(message, {
@@ -312,38 +318,42 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 Deferred.await(started).pipe(
                   Effect.andThen(
                     action.pipe(
-                      Effect.andThen(() =>
-                        outputOverflowed
-                          ? Effect.fail(
-                              new Operation.OperationUnavailable({
-                                operation: message.method,
-                                message: "Resident client is too slow to receive interactive events",
-                              }),
-                            )
-                          : Clock.currentTimeMillis.pipe(
-                              Effect.flatMap((completedAt) =>
-                                Effect.logInfo("resident.interactive_action.completed").pipe(
-                                  Effect.annotateLogs({
-                                    "rika.resident.request.id": message.requestId,
-                                    "rika.resident.session.id": message.sessionId,
-                                    "rika.resident.action.id": message.actionId,
-                                    "rika.resident.action.method": message.method,
-                                    "rika.resident.action.event_count": dispatchedEvents,
-                                    "rika.duration.ms": completedAt - startedAt,
-                                  }),
+                      Effect.flatMap(
+                        (): Effect.Effect<
+                          void,
+                          ResidentService.ResidentServiceError | Operation.OperationUnavailable
+                        > =>
+                          outputOverflowed
+                            ? Effect.fail(
+                                Operation.OperationUnavailable.make({
+                                  operation: message.method,
+                                  message: "Resident client is too slow to receive interactive events",
+                                }),
+                              )
+                            : Clock.currentTimeMillis.pipe(
+                                Effect.flatMap((completedAt) =>
+                                  Effect.logInfo("resident.interactive_action.completed").pipe(
+                                    Effect.annotateLogs({
+                                      "rika.resident.request.id": message.requestId,
+                                      "rika.resident.session.id": message.sessionId,
+                                      "rika.resident.action.id": message.actionId,
+                                      "rika.resident.action.method": message.method,
+                                      "rika.resident.action.event_count": dispatchedEvents,
+                                      "rika.duration.ms": completedAt - startedAt,
+                                    }),
+                                  ),
+                                ),
+                                Effect.andThen(
+                                  writer(
+                                    json({
+                                      _tag: "action-completed",
+                                      requestId: message.requestId,
+                                      sessionId: message.sessionId,
+                                      actionId: message.actionId,
+                                    } satisfies ResidentService.ServerMessage),
+                                  ),
                                 ),
                               ),
-                              Effect.andThen(
-                                writer(
-                                  json({
-                                    _tag: "action-completed",
-                                    requestId: message.requestId,
-                                    sessionId: message.sessionId,
-                                    actionId: message.actionId,
-                                  } satisfies ResidentService.ServerMessage),
-                                ),
-                              ),
-                            ),
                       ),
                       Effect.asVoid,
                     ),
@@ -360,15 +370,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                             "rika.resident.action.event_count": dispatchedEvents,
                             "rika.resident.action.queue_capacity": outboundCapacity,
                             ...(overflowAt === undefined ? {} : { "rika.resident.action.overflow_at": overflowAt }),
-                            "rika.failure.kind":
-                              failure !== null &&
-                              typeof failure === "object" &&
-                              "_tag" in failure &&
-                              typeof failure._tag === "string"
-                                ? failure._tag
-                                : failure instanceof Error
-                                  ? failure.name
-                                  : typeof failure,
+                            "rika.failure.kind": failure._tag,
                             "rika.duration.ms": failedAt - startedAt,
                           }),
                         ),
@@ -380,13 +382,12 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                             requestId: message.requestId,
                             sessionId: message.sessionId,
                             actionId: message.actionId,
-                            error:
-                              failure instanceof Operation.OperationUnavailable
-                                ? failure
-                                : new Operation.OperationUnavailable({
-                                    operation: message.method,
-                                    message: String(failure),
-                                  }),
+                            error: Schema.is(Operation.OperationUnavailable)(failure)
+                              ? failure
+                              : Operation.OperationUnavailable.make({
+                                  operation: message.method,
+                                  message: String(failure),
+                                }),
                           } satisfies ResidentService.ServerMessage),
                         ),
                       ),
@@ -402,7 +403,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     requestId: message.requestId,
                     sessionId: message.sessionId,
                     actionId: message.actionId,
-                    error: new Operation.OperationUnavailable({
+                    error: Operation.OperationUnavailable.make({
                       operation: message.method,
                       message: "Resident service is draining",
                     }),
@@ -427,7 +428,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 }),
               )
               requestByInput.set(message.input, message.requestId)
-              const send = (frame: string) => writer(frame).pipe(Effect.catch(() => Effect.void))
+              const send = (frame: string) => writer(frame).pipe(Effect.ignore)
               yield* Ref.update(routes, (current) =>
                 current.set(message.requestId, {
                   send,
@@ -479,56 +480,60 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   )
                   yield* Queue.offer(output, { _tag: "finished" })
                   yield* Fiber.join(sender)
-                  yield* Exit.match(
-                    outputOverflowed ? Exit.fail("Resident client output queue is overloaded") : result,
-                    {
-                      onFailure: (cause) => {
-                        const failure = Cause.squash(cause)
-                        const error =
-                          failure instanceof Operation.OperationUnavailable
-                            ? failure
-                            : new Operation.OperationUnavailable({
-                                operation: message.input._tag,
-                                message: String(failure),
-                              })
-                        return Clock.currentTimeMillis.pipe(
-                          Effect.flatMap((failedAt) =>
-                            Effect.logError("resident.operation.failed").pipe(
-                              Effect.annotateLogs({
-                                "rika.duration.ms": failedAt - startedAt,
-                                "rika.failure.kind": failureKind(cause),
-                              }),
-                            ),
-                          ),
-                          Effect.andThen(
-                            send(
-                              json({
-                                _tag: "operation-failed",
-                                requestId: message.requestId,
-                                error,
-                              } satisfies ResidentService.ServerMessage),
-                            ),
-                          ),
-                        )
-                      },
-                      onSuccess: () =>
-                        Clock.currentTimeMillis.pipe(
-                          Effect.flatMap((completedAt) =>
-                            Effect.logInfo("resident.operation.completed").pipe(
-                              Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
-                            ),
-                          ),
-                          Effect.andThen(
-                            send(
-                              json({
-                                _tag: "operation-completed",
-                                requestId: message.requestId,
-                              } satisfies ResidentService.ServerMessage),
-                            ),
+                  const outcome = outputOverflowed
+                    ? Exit.fail(
+                        Operation.OperationUnavailable.make({
+                          operation: message.input._tag,
+                          message: "Resident client output queue is overloaded",
+                        }),
+                      )
+                    : result
+                  yield* Exit.match(outcome, {
+                    onFailure: (cause) => {
+                      const failure = Cause.squash(cause)
+                      const error = Schema.is(Operation.OperationUnavailable)(failure)
+                        ? failure
+                        : Operation.OperationUnavailable.make({
+                            operation: message.input._tag,
+                            message: String(failure),
+                          })
+                      return Clock.currentTimeMillis.pipe(
+                        Effect.flatMap((failedAt) =>
+                          Effect.logError("resident.operation.failed").pipe(
+                            Effect.annotateLogs({
+                              "rika.duration.ms": failedAt - startedAt,
+                              "rika.failure.kind": failureKind(cause),
+                            }),
                           ),
                         ),
+                        Effect.andThen(
+                          send(
+                            json({
+                              _tag: "operation-failed",
+                              requestId: message.requestId,
+                              error,
+                            } satisfies ResidentService.ServerMessage),
+                          ),
+                        ),
+                      )
                     },
-                  )
+                    onSuccess: () =>
+                      Clock.currentTimeMillis.pipe(
+                        Effect.flatMap((completedAt) =>
+                          Effect.logInfo("resident.operation.completed").pipe(
+                            Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+                          ),
+                        ),
+                        Effect.andThen(
+                          send(
+                            json({
+                              _tag: "operation-completed",
+                              requestId: message.requestId,
+                            } satisfies ResidentService.ServerMessage),
+                          ),
+                        ),
+                      ),
+                  })
                 }).pipe(
                   Effect.annotateLogs({
                     "rika.operation": message.input._tag,
@@ -610,7 +615,11 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   const crypto = yield* Crypto.Crypto
   const connectionScope = yield* Scope.make()
   yield* Effect.addFinalizer(() => Scope.close(connectionScope, Exit.void))
-  const socket = yield* Socket.makeWebSocket(options.url).pipe(Effect.provide(BunSocket.layerWebSocketConstructor))
+  const webSocketContext = yield* Scope.provide(Layer.build(BunSocket.layerWebSocketConstructor), connectionScope)
+  const webSocketConstructor = Context.get(webSocketContext, Socket.WebSocketConstructor)
+  const socket = yield* Socket.makeWebSocket(options.url).pipe(
+    Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor),
+  )
   const rawWriter = yield* Scope.provide(socket.writer, connectionScope)
   const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(outboundCapacity)
   const writer = (frame: string | Socket.CloseEvent) =>
@@ -728,7 +737,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                               request.input._tag === "Interactive" &&
                               request.interactive !== undefined
                             ) {
-                              const invoke = Effect.fn("ResidentTransport.interactiveAction")(function* (
+                              const invokeRaw = Effect.fn("ResidentTransport.interactiveAction")(function* (
                                 method: string,
                                 args: ReadonlyArray<unknown>,
                                 dispatch: (event: Operation.InteractiveEvent) => void,
@@ -745,13 +754,13 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                                     method,
                                     arguments: args,
                                   } satisfies ResidentService.ClientMessage),
-                                ).pipe(Effect.catch(() => Effect.void))
+                                ).pipe(Effect.ignore)
                                 yield* Effect.raceFirst(
                                   Deferred.await(done),
                                   Deferred.await(closed).pipe(
                                     Effect.andThen(
                                       Effect.fail(
-                                        new Operation.OperationUnavailable({
+                                        Operation.OperationUnavailable.make({
                                           operation: "ResidentConnection",
                                           message: "Resident connection closed before the action outcome was known",
                                         }),
@@ -778,6 +787,11 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                                   ),
                                 )
                               })
+                              const invoke = (
+                                method: string,
+                                args: ReadonlyArray<unknown>,
+                                dispatch: (event: Operation.InteractiveEvent) => void,
+                              ) => invokeRaw(method, args, dispatch).pipe(Effect.orDie)
                               const session: Operation.InteractiveSession = {
                                 initialize: (dispatch) => invoke("initialize", [], dispatch),
                                 submit: (prompt, dispatch, mode, parts, tuning) =>
@@ -813,25 +827,21 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
             ),
           ),
         ),
-      { onOpen: writer(handshake).pipe(Effect.catch(() => Effect.void)) },
+      { onOpen: writer(handshake).pipe(Effect.ignore) },
     )
     .pipe(
       Effect.catch((cause) =>
         Effect.gen(function* () {
-          const failure =
-            cause instanceof ResidentService.ResidentServiceError
-              ? cause
-              : transportError(
-                  String(cause),
-                  (yield* Deferred.isDone(accepted)) ? "transport-failed" : "resident-absent",
-                )
+          const failure = Schema.is(ResidentService.ResidentServiceError)(cause)
+            ? cause
+            : transportError(String(cause), (yield* Deferred.isDone(accepted)) ? "transport-failed" : "resident-absent")
           yield* Deferred.fail(connectionFailure, failure)
         }),
       ),
       Effect.ensuring(
         Effect.gen(function* () {
           const failure = transportError("Resident connection closed", "resident-absent")
-          const operationFailure = new Operation.OperationUnavailable({
+          const operationFailure = Operation.OperationUnavailable.make({
             operation: "ResidentConnection",
             message: failure.message,
           })
@@ -854,10 +864,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   )
   const whileConnected = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.raceFirst(effect, disconnected)
   const sendBestEffort = (frame: string | Socket.CloseEvent) =>
-    writer(frame).pipe(
-      Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.void }),
-      Effect.catch(() => Effect.void),
-    )
+    writer(frame).pipe(Effect.timeoutOrElse({ duration: "250 millis", orElse: () => Effect.void }), Effect.ignore)
   const response = yield* Effect.raceFirst(Deferred.await(accepted), disconnected).pipe(
     Effect.timeoutOrElse({
       duration: "15 seconds",
@@ -880,7 +887,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   const ping = Effect.acquireUseRelease(
     Effect.gen(function* () {
       const id = yield* crypto.randomUUIDv4
-      const completed = yield* Deferred.make<void>()
+      const completed = yield* Deferred.make<void, ResidentService.ResidentServiceError>()
       yield* Ref.update(pongs, (current) => current.set(id, completed))
       yield* writer(json({ _tag: "ping", id } satisfies ResidentService.ClientMessage))
       return { id, completed }
@@ -895,7 +902,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
     ({ id }) => Ref.update(pongs, (current) => (current.delete(id), current)),
   ).pipe(
     Effect.mapError((cause) =>
-      cause instanceof ResidentService.ResidentServiceError
+      Schema.is(ResidentService.ResidentServiceError)(cause)
         ? cause
         : transportError(`Resident ping failed: ${String(cause)}`),
     ),
@@ -969,7 +976,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
           ),
       ).pipe(
         Effect.mapError((error) =>
-          error instanceof Operation.OperationUnavailable ? error : transportError(String(error)),
+          Schema.is(Operation.OperationUnavailable)(error) ? error : transportError(String(error)),
         ),
       ),
     closed: Deferred.await(closed),
@@ -985,6 +992,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const endpoint = yield* resolve(input.profile, input.dataRoot)
           const token = yield* readOrCreateToken(endpoint.tokenPath)
           const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+          const crypto = yield* Crypto.Crypto
           const connectionScope = yield* Scope.make()
           yield* Effect.addFinalizer((exit) => Scope.close(connectionScope, exit))
           const attach = (role: ResidentService.Connection["role"]) => connect({ ...endpoint, ...input, token, role })
@@ -994,16 +1002,15 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const acquire = Effect.fn("ResidentTransport.acquireConnection")(function* () {
             const first = yield* Effect.result(attach("attached"))
             if (first._tag === "Success") return first.success
-            if (first.failure.reason !== "resident-absent") return yield* Effect.fail(first.failure)
-            if (input.startHost === undefined && input.owner === undefined) return yield* Effect.fail(first.failure)
+            if (first.failure.reason !== "resident-absent") return yield* first.failure
+            if (input.startHost === undefined && input.owner === undefined) return yield* first.failure
             if (input.startHost !== undefined) {
               yield* input.startHost()
               return yield* attach("attached").pipe(Effect.retry({ times: 400, schedule: Schedule.spaced(25) }))
             }
             const stopped = yield* Deferred.make<void>()
             const ready = yield* Deferred.make<void>()
-            if (input.owner === undefined)
-              return yield* Effect.fail(transportError("Resident owner operation layer is unavailable"))
+            if (input.owner === undefined) return yield* transportError("Resident owner operation layer is unavailable")
             const owner = yield* host({
               ...endpoint,
               token,
@@ -1024,6 +1031,10 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const acquireReady = acquire().pipe(
             Scope.provide(connectionScope),
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
+            Effect.provideService(Crypto.Crypto, crypto),
+            Effect.mapError((error) =>
+              Schema.is(ResidentService.ResidentServiceError)(error) ? error : transportError(String(error)),
+            ),
             Effect.tapError((error) =>
               Effect.logWarning("resident.connection.failed").pipe(
                 Effect.annotateLogs({
@@ -1033,7 +1044,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                 }),
               ),
             ),
-          ) as Effect.Effect<ResidentService.Connection, ResidentService.ResidentServiceError>
+          )
           const initial = yield* acquireReady
           const logicalClosed = yield* Deferred.make<void>()
           const supervise = Effect.fn("ResidentTransport.superviseInteractive")(function* (
@@ -1224,7 +1235,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           } satisfies ResidentService.Connection
         }).pipe(
           Effect.mapError((cause) =>
-            cause instanceof ResidentService.ResidentServiceError ? cause : transportError(String(cause)),
+            Schema.is(ResidentService.ResidentServiceError)(cause) ? cause : transportError(String(cause)),
           ),
         ),
     }),

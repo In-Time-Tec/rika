@@ -2,8 +2,16 @@ import * as Thread from "../src/thread-schema"
 import * as TurnRepository from "../src/turn-repository"
 import * as Turn from "../src/turn-schema"
 import { expect, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Schema } from "effect"
 import { makeRecordingSql } from "./recording-sql"
+
+const provideLayer =
+  <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R | ROut>) =>
+    Effect.gen(function* () {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provide(context))
+    })
 
 it.effect("memory turns preserve structured image prompt parts", () =>
   Effect.gen(function* () {
@@ -19,7 +27,7 @@ it.effect("memory turns preserve structured image prompt parts", () =>
       now: 1,
     })
     expect((yield* repository.get(created.id))?.promptParts).toEqual(created.promptParts)
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory turns preserve immutable execution extension pins", () =>
@@ -43,7 +51,7 @@ it.effect("memory turns preserve immutable execution extension pins", () =>
     expect(
       (yield* Effect.result(repository.setExtensionPin(created.id, { ...pin, generation: "generation-b" })))._tag,
     ).toBe("Failure")
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory turns preserve immutable execution route pins", () =>
@@ -60,7 +68,7 @@ it.effect("memory turns preserve immutable execution route pins", () =>
     expect(
       (yield* Effect.result(repository.setExecutionRoute(created.id, Turn.testExecutionRoute("ultra"))))._tag,
     ).toBe("Failure")
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory turns preserve review fan-out route ownership while nonterminal", () =>
@@ -79,8 +87,8 @@ it.effect("memory turns preserve review fan-out route ownership while nontermina
       status: "running",
       reviewFanOutId: "review:review-owner",
     })
-    expect((yield* repository.listNonterminal()).map((turn) => turn.id)).toContain(created.id)
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+    expect((yield* repository.listNonterminal).map((turn) => turn.id)).toContain(created.id)
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory turns preserve deterministic identity and status", () =>
@@ -105,7 +113,7 @@ it.effect("memory turns preserve deterministic identity and status", () =>
     expect(completed.lastCursor).toBe("cursor-a")
     expect(failed.lastCursor).toBeUndefined()
     expect(listed.map((turn) => turn.id)).toEqual([Turn.TurnId.make("turn-a"), Turn.TurnId.make("turn-b")])
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory terminal status does not regress to nonterminal", () =>
@@ -120,7 +128,7 @@ it.effect("memory terminal status does not regress to nonterminal", () =>
     yield* repository.setStatus(created.id, "completed", "terminal-cursor", 2)
     const unchanged = yield* repository.setStatus(created.id, "running", "stale-cursor", 3)
     expect(unchanged).toMatchObject({ status: "completed", lastCursor: "terminal-cursor", updatedAt: 2 })
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory turns reject duplicates and missing updates", () =>
@@ -137,7 +145,7 @@ it.effect("memory turns reject duplicates and missing updates", () =>
     const missing = yield* Effect.result(repository.setStatus(Turn.TurnId.make("missing"), "failed", undefined, 2))
     expect(duplicate._tag).toBe("Failure")
     expect(missing._tag).toBe("Failure")
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory submissions queue while active and promote one in FIFO order", () =>
@@ -169,7 +177,7 @@ it.effect("memory submissions queue while active and promote one in FIFO order",
     yield* repository.setStatus(first.id, "completed", undefined, 3)
     expect((yield* repository.claimNextQueued(threadId, 4))?.id).toBe(third.id)
     expect(yield* repository.claimNextQueued(threadId, 4)).toBeUndefined()
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory claim is empty when no turn is queued", () =>
@@ -179,14 +187,14 @@ it.effect("memory claim is empty when no turn is queued", () =>
     expect(yield* repository.findActive(threadId)).toBeUndefined()
     expect(yield* repository.listQueued(threadId)).toEqual([])
     expect(yield* repository.claimNextQueued(threadId, 2)).toBeUndefined()
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 it.effect("memory lists nonterminal turns and rejects a missing extension pin", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
     const threadId = Thread.ThreadId.make("thread-a")
-    expect((yield* repository.listNonterminal()).map((turn) => turn.id)).toEqual([
+    expect((yield* repository.listNonterminal).map((turn) => turn.id)).toEqual([
       Turn.TurnId.make("b"),
       Turn.TurnId.make("a"),
     ])
@@ -204,7 +212,7 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
       ))._tag,
     ).toBe("Failure")
   }).pipe(
-    Effect.provide(
+    provideLayer(
       TurnRepository.memoryLayer([
         {
           id: Turn.TurnId.make("b"),
@@ -249,7 +257,7 @@ it.effect("memory edits and dequeues only queued turns", () =>
     yield* repository.dequeue(queued.id)
     expect(yield* repository.get(queued.id)).toBeUndefined()
     expect((yield* Effect.result(repository.dequeue(queued.id)))._tag).toBe("Failure")
-  }).pipe(Effect.provide(TurnRepository.memoryLayer())),
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
 const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
@@ -266,10 +274,10 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
 const sqlTest = (
   run: (
     sql: ReturnType<typeof makeRecordingSql>,
-  ) => Effect.Effect<void, TurnRepository.RepositoryError, TurnRepository.Service>,
+  ) => Effect.Effect<void, TurnRepository.RepositoryError | Schema.SchemaError, TurnRepository.Service>,
 ) => {
   const sql = makeRecordingSql()
-  return run(sql).pipe(Effect.provide(TurnRepository.layer.pipe(Layer.provide(sql.layer))))
+  return run(sql).pipe(provideLayer(TurnRepository.layer.pipe(Layer.provide(sql.layer))))
 }
 
 it.effect("sql turns create, get, list, and decode cursor variants", () =>
@@ -450,18 +458,19 @@ it.effect("sql lists nonterminal turns and mutates extension pins", () =>
         resolvedContextDigest: "context-a",
       }
       sql.rows(row(), row({ id: "turn-b", status: "waiting" }))
-      sql.rows(row({ extension_pin_json: JSON.stringify(pin) }))
+      const encodedPin = yield* Schema.encodeEffect(Schema.fromJsonString(Turn.ExecutionExtensionPin))(pin)
+      sql.rows(row({ extension_pin_json: encodedPin }))
       sql.rows()
       sql.error("list failed")
       sql.error("pin failed")
       const repository = yield* TurnRepository.Service
-      expect((yield* repository.listNonterminal()).map((turn) => turn.id)).toEqual([
+      expect((yield* repository.listNonterminal).map((turn) => turn.id)).toEqual([
         Turn.TurnId.make("turn-a"),
         Turn.TurnId.make("turn-b"),
       ])
       expect((yield* repository.setExtensionPin(Turn.TurnId.make("turn-a"), pin)).extensionPin).toEqual(pin)
       expect((yield* Effect.result(repository.setExtensionPin(Turn.TurnId.make("missing"), pin)))._tag).toBe("Failure")
-      expect((yield* Effect.result(repository.listNonterminal()))._tag).toBe("Failure")
+      expect((yield* Effect.result(repository.listNonterminal))._tag).toBe("Failure")
       expect((yield* Effect.result(repository.setExtensionPin(Turn.TurnId.make("turn-a"), pin)))._tag).toBe("Failure")
     }),
   ),

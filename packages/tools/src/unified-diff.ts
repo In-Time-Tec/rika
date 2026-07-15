@@ -1,3 +1,5 @@
+import { Function } from "effect"
+
 const splitLines = (text: string): ReadonlyArray<string> => {
   if (text.length === 0) return []
   const lines = text.split("\n")
@@ -70,41 +72,47 @@ const context = 3
 
 const marker = (tag: Op["tag"]): string => (tag === "delete" ? "-" : tag === "insert" ? "+" : " ")
 
-export const unifiedDiff = (path: string, oldText: string, newText: string, created = false): string | undefined => {
-  if (oldText === newText) return undefined
-  const ops = diffLines(splitLines(oldText), splitLines(newText))
-  const annotated: Array<Annotated> = []
-  let oldNo = 1
-  let newNo = 1
-  for (const op of ops) {
-    if (op.tag === "equal") annotated.push({ tag: "equal", oldNo: oldNo++, newNo: newNo++, line: op.line })
-    else if (op.tag === "delete") annotated.push({ tag: "delete", oldNo: oldNo++, newNo, line: op.line })
-    else annotated.push({ tag: "insert", oldNo, newNo: newNo++, line: op.line })
-  }
-  const changes = annotated.flatMap((entry, index) => (entry.tag === "equal" ? [] : [index]))
-  if (changes.length === 0) return undefined
-  const clusters: Array<[number, number]> = []
-  for (const index of changes) {
-    const last = clusters.at(-1)
-    if (last !== undefined && index - last[1] <= context * 2 + 1) last[1] = index
-    else clusters.push([index, index])
-  }
-  const body = clusters.map(([firstChange, lastChange]) => {
-    const start = Math.max(0, firstChange - context)
-    const end = Math.min(annotated.length - 1, lastChange + context)
-    const slice = annotated.slice(start, end + 1)
-    const oldCount = slice.filter((entry) => entry.tag !== "insert").length
-    const newCount = slice.filter((entry) => entry.tag !== "delete").length
-    const first = slice[0]!
-    const oldSpec = oldCount === 0 ? `${first.oldNo - 1},0` : `${first.oldNo},${oldCount}`
-    const newSpec = newCount === 0 ? `${first.newNo - 1},0` : `${first.newNo},${newCount}`
-    return [`@@ -${oldSpec} +${newSpec} @@`, ...slice.map((entry) => `${marker(entry.tag)}${entry.line}`)].join("\n")
-  })
-  const header = [
-    `diff --git a/${path} b/${path}`,
-    ...(created ? ["new file mode 100644"] : []),
-    `--- ${created ? "/dev/null" : `a/${path}`}`,
-    `+++ b/${path}`,
-  ]
-  return [...header, ...body].join("\n")
-}
+export const unifiedDiff: {
+  (oldText: string, newText: string, created?: boolean): (path: string) => string | undefined
+  (path: string, oldText: string, newText: string, created?: boolean): string | undefined
+} = Function.dual(
+  (args) => args.length >= 3,
+  (path: string, oldText: string, newText: string, created = false): string | undefined => {
+    if (oldText === newText) return undefined
+    const ops = diffLines(splitLines(oldText), splitLines(newText))
+    const annotated: Array<Annotated> = []
+    let oldNo = 1
+    let newNo = 1
+    for (const op of ops) {
+      if (op.tag === "equal") annotated.push({ tag: "equal", oldNo: oldNo++, newNo: newNo++, line: op.line })
+      else if (op.tag === "delete") annotated.push({ tag: "delete", oldNo: oldNo++, newNo, line: op.line })
+      else annotated.push({ tag: "insert", oldNo, newNo: newNo++, line: op.line })
+    }
+    const changes = annotated.flatMap((entry, index) => (entry.tag === "equal" ? [] : [index]))
+    if (changes.length === 0) return undefined
+    const clusters: Array<[number, number]> = []
+    for (const index of changes) {
+      const last = clusters.at(-1)
+      if (last !== undefined && index - last[1] <= context * 2 + 1) last[1] = index
+      else clusters.push([index, index])
+    }
+    const body = clusters.map(([firstChange, lastChange]) => {
+      const start = Math.max(0, firstChange - context)
+      const end = Math.min(annotated.length - 1, lastChange + context)
+      const slice = annotated.slice(start, end + 1)
+      const oldCount = slice.filter((entry) => entry.tag !== "insert").length
+      const newCount = slice.filter((entry) => entry.tag !== "delete").length
+      const first = slice[0]!
+      const oldSpec = oldCount === 0 ? `${first.oldNo - 1},0` : `${first.oldNo},${oldCount}`
+      const newSpec = newCount === 0 ? `${first.newNo - 1},0` : `${first.newNo},${newCount}`
+      return [`@@ -${oldSpec} +${newSpec} @@`, ...slice.map((entry) => `${marker(entry.tag)}${entry.line}`)].join("\n")
+    })
+    const header = [
+      `diff --git a/${path} b/${path}`,
+      ...(created === true ? ["new file mode 100644"] : []),
+      `--- ${created === true ? "/dev/null" : `a/${path}`}`,
+      `+++ b/${path}`,
+    ]
+    return [...header, ...body].join("\n")
+  },
+)

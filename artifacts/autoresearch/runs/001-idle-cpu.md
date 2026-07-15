@@ -19,10 +19,10 @@ Issue: [Rika #117](https://github.com/dallenpyrah/rika/issues/117)
 
 ## Results
 
-| Check | Client | Resident | Result |
-| --- | ---: | ---: | --- |
-| Run 1 idle after about one minute | 39.6% CPU, 224 MB RSS | 39.9% CPU, 129 MB RSS | Failed |
-| Run 2 idle after about 50 seconds | 52.9% CPU, 216 MB RSS | 47.0% CPU, 176 MB RSS | Failed |
+| Check                                        |                 Client |               Resident | Result |
+| -------------------------------------------- | ---------------------: | ---------------------: | ------ |
+| Run 1 idle after about one minute            |  39.6% CPU, 224 MB RSS |  39.9% CPU, 129 MB RSS | Failed |
+| Run 2 idle after about 50 seconds            |  52.9% CPU, 216 MB RSS |  47.0% CPU, 176 MB RSS | Failed |
 | Run 2 terminal idle CPU time over 10 seconds | `0:48.09` to `0:52.92` | `0:47.02` to `0:51.80` | Failed |
 
 Run 2 reached the deterministic visible result in 860 ms after input dispatch. During a later 15-second terminal-idle window, Pilotty's retained byte count stayed exactly `786046`, so the screen was static while both processes continued consuming about half a CPU core.

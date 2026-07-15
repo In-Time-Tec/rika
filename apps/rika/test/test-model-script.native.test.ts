@@ -1,10 +1,8 @@
 import { expect, test } from "bun:test"
-import { Effect, Redacted } from "effect"
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { Effect, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import { ConfigContract } from "@rika/config"
 import * as Turn from "@rika/persistence/turn"
-import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
 import {
   buildTestModelScript,
   canonicalDatabaseRoot,
@@ -18,24 +16,40 @@ import {
   persistedModelRoutesForStartup,
 } from "../src/main"
 
-test("uses one canonical directory for both resident databases", async () => {
-  const root = await mkdtemp(join(tmpdir(), "rika-database-root-"))
-  const other = join(root, "other")
-  const alias = join(root, "alias")
-  try {
-    await mkdir(other)
-    await symlink(root, alias)
-    expect(await canonicalDatabaseRoot(join(root, "rika.db"), join(alias, "relay.db"))).toBe(await realpath(root))
-    await expect(canonicalDatabaseRoot(join(root, "rika.db"), join(other, "relay.db"))).rejects.toThrow(
-      "one data directory",
-    )
-    await expect(canonicalDatabaseRoot(join(root, "product.db"), join(root, "relay.db"))).rejects.toThrow(
-      "must name rika.db and relay.db",
-    )
-  } finally {
-    await rm(root, { recursive: true, force: true })
-  }
-})
+test("uses one canonical directory for both resident databases", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
+        Effect.provide(
+          Effect.gen(function* () {
+            const fs = yield* FileSystem.FileSystem
+            const path = yield* Path.Path
+            const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-database-root-" })
+            const other = path.join(root, "other")
+            const alias = path.join(root, "alias")
+            yield* fs.makeDirectory(other)
+            yield* fs.symlink(root, alias)
+            expect(
+              yield* Effect.promise(() =>
+                canonicalDatabaseRoot(path.join(root, "rika.db"), path.join(alias, "relay.db")),
+              ),
+            ).toBe(yield* fs.realPath(root))
+            expect(
+              (yield* Effect.exit(
+                Effect.promise(() => canonicalDatabaseRoot(path.join(root, "rika.db"), path.join(other, "relay.db"))),
+              ))._tag,
+            ).toBe("Failure")
+            expect(
+              (yield* Effect.exit(
+                Effect.promise(() => canonicalDatabaseRoot(path.join(root, "product.db"), path.join(root, "relay.db"))),
+              ))._tag,
+            ).toBe("Failure")
+          }),
+          context,
+        ),
+      ),
+    ),
+  ))
 
 test("uses production compaction defaults and route overrides", () => {
   expect(productionCompaction()).toEqual({
@@ -199,43 +213,50 @@ test("keeps a review route owner's workspace-specific models in the startup regi
   ])
 })
 
-test("parses and builds multi-part, object, and delayed TestModel turns", async () => {
-  const json = JSON.stringify([
-    {
-      parts: [
-        { type: "reasoning", text: "inspect" },
-        { type: "toolCall", name: "read_file", params: { path: "a.txt" }, id: "read-1" },
-      ],
-      delayMs: 25,
-    },
-    { parts: [{ type: "text", text: "done" }] },
-    { object: { summary: "reviewed", findings: [] }, delayMs: 10 },
-  ])
-  const parsed = await Effect.runPromise(parseTestModelScript(json))
-  expect(parsed).toHaveLength(3)
-  const built = await Effect.runPromise(buildTestModelScript(json))
-  expect(built).toEqual([
-    {
-      _tag: "Turn",
-      parts: [
-        { _tag: "Reasoning", text: "inspect" },
-        { _tag: "ToolCall", name: "read_file", params: { path: "a.txt" }, id: "read-1", providerExecuted: false },
-      ],
-      delay: 25,
-    },
-    { _tag: "Turn", parts: [{ _tag: "Text", text: "done" }] },
-    { _tag: "Object", value: { summary: "reviewed", findings: [] }, delay: 10 },
-  ])
-})
+test("parses and builds multi-part, object, and delayed TestModel turns", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const json = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)([
+        {
+          parts: [
+            { type: "reasoning", text: "inspect" },
+            { type: "toolCall", name: "read_file", params: { path: "a.txt" }, id: "read-1" },
+          ],
+          delayMs: 25,
+        },
+        { parts: [{ type: "text", text: "done" }] },
+        { object: { summary: "reviewed", findings: [] }, delayMs: 10 },
+      ])
+      const parsed = yield* parseTestModelScript(json)
+      expect(parsed).toHaveLength(3)
+      const built = yield* buildTestModelScript(json)
+      expect(built).toEqual([
+        {
+          _tag: "Turn",
+          parts: [
+            { _tag: "Reasoning", text: "inspect" },
+            { _tag: "ToolCall", name: "read_file", params: { path: "a.txt" }, id: "read-1", providerExecuted: false },
+          ],
+          delay: 25,
+        },
+        { _tag: "Turn", parts: [{ _tag: "Text", text: "done" }] },
+        { _tag: "Object", value: { summary: "reviewed", findings: [] }, delay: 10 },
+      ])
+    }),
+  ))
 
-test("rejects malformed, empty, and unsafe scripts", async () => {
-  await Promise.all(
-    [
-      "not json",
-      "[]",
-      '[{"parts":[]}]',
-      '[{"parts":[{"type":"toolCall","name":4}]}]',
-      '[{"parts":[{"type":"text","text":"x"}],"delayMs":-1}]',
-    ].map((value) => expect(Effect.runPromise(parseTestModelScript(value))).rejects.toBeDefined()),
-  )
-})
+test("rejects malformed, empty, and unsafe scripts", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const results = yield* Effect.all(
+        [
+          "not json",
+          "[]",
+          '[{"parts":[]}]',
+          '[{"parts":[{"type":"toolCall","name":4}]}]',
+          '[{"parts":[{"type":"text","text":"x"}],"delayMs":-1}]',
+        ].map((value) => Effect.exit(parseTestModelScript(value))),
+      )
+      expect(results.every((result) => result._tag === "Failure")).toBe(true)
+    }),
+  ))

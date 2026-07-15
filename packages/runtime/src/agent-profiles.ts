@@ -1,6 +1,6 @@
 import { Agent, type ModelRegistry } from "@batonfx/core"
 import { Runtime as Tools } from "@rika/tools"
-import { Effect, Schema } from "effect"
+import { Effect, Function, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 
 export const names = ["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"] as const
@@ -76,7 +76,7 @@ const definitions = {
   },
 } as const
 
-export const resolve = (name: Name, model: ModelRegistry.ModelSelection) => {
+const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   const definition = definitions[name]
   const toolkit = Toolkit.make(...definition.tools)
   const relayModel = {
@@ -99,30 +99,54 @@ export const resolve = (name: Name, model: ModelRegistry.ModelSelection) => {
   }
 }
 
+type ResolvedProfile = ReturnType<typeof resolveImpl>
+
+export const resolve: {
+  (name: Name, model: ModelRegistry.ModelSelection): ResolvedProfile
+  (model: ModelRegistry.ModelSelection): (name: Name) => ResolvedProfile
+} = Function.dual(2, resolveImpl)
+
 export const resolvePainter = Effect.fn("AgentProfiles.resolvePainter")(function* (
   model: ModelRegistry.ModelSelection,
   mediaAvailable: boolean,
 ) {
   if (!mediaAvailable) {
-    return yield* Effect.fail(
-      new PainterUnavailableError({
-        message: "The configured model route does not provide the required media capability",
-        provider: model.provider,
-        model: model.model,
-      }),
-    )
+    return yield* PainterUnavailableError.make({
+      message: "The configured model route does not provide the required media capability",
+      provider: model.provider,
+      model: model.model,
+    })
   }
   return resolve("Painter", model)
 })
 
-export const presets = (
+const presetsImpl = (
   model: ModelRegistry.ModelSelection,
-  oracleModel: ModelRegistry.ModelSelection = model,
-  agentModels: Partial<Readonly<Record<Name, ModelRegistry.ModelSelection>>> = {},
-) =>
+  oracleModel?: ModelRegistry.ModelSelection,
+  agentModels?: Partial<Readonly<Record<Name, ModelRegistry.ModelSelection>>>,
+): Record<string, ResolvedProfile["preset"]> =>
   Object.fromEntries(
-    names.map((name) => [name, resolve(name, agentModels[name] ?? (name === "Oracle" ? oracleModel : model)).preset]),
+    names.map((name) => [
+      name,
+      resolve(name, agentModels?.[name] ?? (name === "Oracle" ? (oracleModel ?? model) : model)).preset,
+    ]),
   )
+
+export const presets: {
+  (
+    model: ModelRegistry.ModelSelection,
+    oracleModel?: ModelRegistry.ModelSelection,
+    agentModels?: Partial<Readonly<Record<Name, ModelRegistry.ModelSelection>>>,
+  ): Record<string, ResolvedProfile["preset"]>
+  (
+    oracleModel?: ModelRegistry.ModelSelection,
+    agentModels?: Partial<Readonly<Record<Name, ModelRegistry.ModelSelection>>>,
+  ): (model: ModelRegistry.ModelSelection) => Record<string, ResolvedProfile["preset"]>
+} = Function.dual(
+  (arguments_) =>
+    arguments_.length > 0 && (arguments_.length !== 2 || arguments_[1] === undefined || "provider" in arguments_[1]),
+  presetsImpl,
+)
 
 export const parentPermissions = [...new Set(names.flatMap((name) => definitions[name].permissions))].map((name) => ({
   name,

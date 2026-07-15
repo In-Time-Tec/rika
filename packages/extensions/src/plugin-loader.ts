@@ -9,7 +9,7 @@ export interface Source {
   readonly id: string
   readonly content: string
   readonly configuration: Json
-  readonly load: () => Effect.Effect<PluginV1, unknown>
+  readonly load: Effect.Effect<PluginV1, LoadError>
 }
 
 export class LoadError extends Schema.TaggedErrorClass<LoadError>()("@rika/extensions/PluginLoadError", {
@@ -39,7 +39,7 @@ export const reload = Effect.fn("PluginLoader.reload")(function* (
       diagnostics.push(`${source.id}: workspace trust required for ${sourceDigest}`)
       continue
     }
-    const loaded = yield* Effect.exit(source.load())
+    const loaded = yield* Effect.exit(source.load)
     if (Exit.isFailure(loaded)) {
       diagnostics.push(`${source.id}: load failed: ${String(loaded.cause)}`)
       continue

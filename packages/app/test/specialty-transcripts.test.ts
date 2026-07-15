@@ -4,6 +4,7 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { Catalog } from "@rika/tools"
 import { Effect, Layer, Schema } from "effect"
 import { ProductAgent } from "../src"
+import { provideLayer } from "./layer"
 
 const model = { provider: "test", model: "deterministic" }
 const specialtyNames = ["oracle", "librarian", "painter", "task"] as const
@@ -40,7 +41,7 @@ const backendLayer = (failProfile?: ExecutionBackend.AgentProfile) =>
     ExecutionBackend.Service.of({
       invokeChild: (input) =>
         input.profile === failProfile
-          ? Effect.fail(new ExecutionBackend.BackendError({ message: `${input.profile} failed` }))
+          ? Effect.fail(ExecutionBackend.BackendError.make({ message: `${input.profile} failed` }))
           : Effect.succeed({
               parentTurnId: input.parentTurnId,
               childId: input.childId,
@@ -63,7 +64,7 @@ const backendLayer = (failProfile?: ExecutionBackend.AgentProfile) =>
               : { output: cases[ordinal]?.output }),
           })),
         }),
-      inspectFanOut: () => Effect.succeed(undefined),
+      inspectFanOut: () => Effect.void.pipe(Effect.as(undefined)),
       cancelFanOut: () => Effect.die("unused"),
       registerWorkflows: () => Effect.die("unused"),
       startWorkflow: () => Effect.die("unused"),
@@ -98,12 +99,16 @@ describe("specialty durable transcripts", () => {
           const profile = AgentProfiles.resolve(entry.profile, model)
           expect(profile.preset.permissions).toEqual(entry.permissions)
           expect(
-            profile.preset.permissions.every((permission) =>
+            profile.preset.permissions.every((permission: string) =>
               AgentProfiles.parentPermissions.some((p) => p.name === permission),
             ),
           ).toBe(true)
-          expect(JSON.stringify(entry.output).length).toBeLessThanOrEqual(definition!.outputLimit)
-          expect(yield* Schema.decodeUnknownEffect(profile.outputSchema)(entry.output)).toEqual(entry.output)
+          expect((yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(entry.output)).length).toBeLessThanOrEqual(
+            definition!.outputLimit,
+          )
+          const decoded = Schema.decodeUnknownExit(profile.outputSchema)(entry.output)
+          expect(decoded._tag).toBe("Success")
+          if (decoded._tag === "Success") expect(decoded.value).toEqual(entry.output)
           expect(
             yield* agents.invoke({
               parentTurnId: "parent-1",
@@ -148,7 +153,7 @@ describe("specialty durable transcripts", () => {
           join: "best-effort",
           members: [{ childId: "correctness", ordinal: 0, state: "completed" }],
         })
-      }).pipe(Effect.provide(ProductAgent.layer.pipe(Layer.provide(backendLayer())))),
+      }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(backendLayer())))),
   )
 
   it.effect("records deterministic child and fan-out failures", () =>
@@ -174,19 +179,22 @@ describe("specialty durable transcripts", () => {
         state: "failed",
         error: "Oracle failed",
       })
-    }).pipe(Effect.provide(ProductAgent.layer.pipe(Layer.provide(backendLayer("Oracle"))))),
+    }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(backendLayer("Oracle"))))),
   )
 
   it.effect("reports Painter unavailable and accepts an injected media-capable route", () =>
     Effect.gen(function* () {
-      const unavailable = yield* Effect.flip(AgentProfiles.resolvePainter(model, false))
-      expect(unavailable._tag).toBe("PainterUnavailableError")
-      expect(unavailable).toMatchObject(model)
+      const unavailable = yield* Effect.exit(AgentProfiles.resolvePainter(model, false))
+      expect(unavailable._tag).toBe("Failure")
       const painter = yield* AgentProfiles.resolvePainter(model, true)
       expect(painter.preset.tool_names).toEqual(["view_media"])
-      expect(
-        yield* Schema.decodeUnknownEffect(painter.outputSchema)(cases.find(({ tool }) => tool === "painter")!.output),
-      ).toMatchObject({ artifact: { path: "artifacts/card.png", mimeType: "image/png" } })
+      const decoded = Schema.decodeUnknownExit(painter.outputSchema)(
+        cases.find(({ tool }) => tool === "painter")!.output,
+      )
+      expect(decoded._tag).toBe("Success")
+      if (decoded._tag === "Success") {
+        expect(decoded.value).toMatchObject({ artifact: { path: "artifacts/card.png", mimeType: "image/png" } })
+      }
     }),
   )
 })

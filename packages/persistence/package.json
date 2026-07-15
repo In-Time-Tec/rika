@@ -14,9 +14,9 @@
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@effect/*'",
-    "lint": "bun --cwd ../.. oxlint packages/persistence/src packages/persistence/test",
-    "test": "bun --cwd ../.. vitest run packages/persistence/test/thread-repository.test.ts packages/persistence/test/turn-repository.test.ts && bun test ./test/sqlite.integration.test.ts",
-    "typecheck": "bun tsc --noEmit"
+    "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/persistence/src packages/persistence/test",
+    "test": "bun --cwd ../.. --bun vitest run packages/persistence/test/thread-repository.test.ts packages/persistence/test/turn-repository.test.ts && bun test ./test/sqlite.integration.test.ts",
+    "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
     "@effect/sql-sqlite-bun": "catalog:",

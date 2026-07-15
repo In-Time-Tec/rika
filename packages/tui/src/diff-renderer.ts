@@ -1,7 +1,12 @@
+import { Function } from "effect"
+
 const clip = (text: string, width: number): string =>
   text.length <= width ? text : width <= 1 ? "…" : `${text.slice(0, width - 1)}…`
 
-export const renderDiff = (patch: string, width: number): string => {
+export const renderDiff: {
+  (width: number): (patch: string) => string
+  (patch: string, width: number): string
+} = Function.dual(2, (patch: string, width: number): string => {
   const lines = patch.split("\n")
   const rendered: Array<string> = []
   let oldLine = 0
@@ -10,12 +15,12 @@ export const renderDiff = (patch: string, width: number): string => {
     1,
     ...lines.flatMap((line) => {
       const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line)
-      return match ? [match[1]?.length ?? 1, match[2]?.length ?? 1] : []
+      return match !== null ? [match[1]?.length ?? 1, match[2]?.length ?? 1] : []
     }),
   )
   for (const line of lines) {
     const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(line)
-    if (hunk) {
+    if (hunk !== null) {
       oldLine = Number(hunk[1])
       newLine = Number(hunk[2])
       rendered.push(clip(line, width))
@@ -31,9 +36,12 @@ export const renderDiff = (patch: string, width: number): string => {
     }
   }
   return rendered.length === 0 ? "(empty diff)" : rendered.join("\n")
-}
+})
 
-export const renderDiffStyled = (patch: string, width: number): StyledText => {
+export const renderDiffStyled: {
+  (width: number): (patch: string) => StyledText
+  (patch: string, width: number): StyledText
+} = Function.dual(2, (patch: string, width: number): StyledText => {
   const lines = renderDiff(patch, width).split("\n")
   const chunks: Array<TextChunk> = []
   lines.forEach((line, index) => {
@@ -42,6 +50,6 @@ export const renderDiffStyled = (patch: string, width: number): StyledText => {
     if (index < lines.length - 1) chunks.push(fg(colors.text)("\n"))
   })
   return new StyledText(chunks)
-}
+})
 import { StyledText, bold, fg, type TextChunk } from "@opentui/core"
 import { colors } from "./theme"
