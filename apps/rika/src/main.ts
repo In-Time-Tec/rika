@@ -634,16 +634,13 @@ const normalizedBaseUrl = (value: string) => {
 }
 
 export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
-  const auth =
-    route.gateway.auth.type === "none"
-      ? { type: "none" }
-      : { type: "bearer-env", variable: route.gateway.auth.variable }
+  const apiKeyEnv = route.providerConnection.apiKeyEnv
   const registrationKey = `sha256:${createHash("sha256")
     .update(
       canonical({
-        protocol: route.gateway.protocol,
-        baseUrl: normalizedBaseUrl(route.gateway.baseUrl),
-        auth,
+        protocol: route.providerConnection.protocol,
+        baseUrl: normalizedBaseUrl(route.providerConnection.baseUrl),
+        apiKeyEnv,
         model: route.model,
         effort: route.effort,
         fast: route.fast,
@@ -653,7 +650,7 @@ export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
     .digest("hex")}`
   return {
     registrationKey,
-    selection: { provider: route.gatewayName, model: route.model, registrationKey },
+    selection: { provider: route.providerId, model: route.model, registrationKey },
     compaction: productionCompaction(route),
   }
 }
@@ -726,9 +723,11 @@ const executionRoutePinImpl = (
       provider: plan.selection.provider,
       model: plan.selection.model,
       registrationKey: plan.registrationKey,
-      gatewayProtocol: route.gateway.protocol,
-      gatewayBaseUrl: normalizedBaseUrl(route.gateway.baseUrl),
-      gatewayAuth: route.gateway.auth.type === "none" ? "none" : `bearer-env:${route.gateway.auth.variable}`,
+      providerProtocol: route.providerConnection.protocol,
+      providerBaseUrl: normalizedBaseUrl(route.providerConnection.baseUrl),
+      ...(route.providerConnection.apiKeyEnv === undefined
+        ? {}
+        : { providerApiKeyEnv: route.providerConnection.apiKeyEnv }),
       effort: route.effort,
       fast: route.fast,
       requestVariant: plan.registrationKey,
@@ -745,9 +744,11 @@ const executionRoutePinImpl = (
       provider: plan.selection.provider,
       model: plan.selection.model,
       registrationKey: plan.registrationKey,
-      gatewayProtocol: route.gateway.protocol,
-      gatewayBaseUrl: normalizedBaseUrl(route.gateway.baseUrl),
-      gatewayAuth: route.gateway.auth.type === "none" ? "none" : `bearer-env:${route.gateway.auth.variable}`,
+      providerProtocol: route.providerConnection.protocol,
+      providerBaseUrl: normalizedBaseUrl(route.providerConnection.baseUrl),
+      ...(route.providerConnection.apiKeyEnv === undefined
+        ? {}
+        : { providerApiKeyEnv: route.providerConnection.apiKeyEnv }),
       effort: route.effort,
       fast: route.fast,
       requestVariant: plan.registrationKey,
@@ -767,9 +768,11 @@ const executionRoutePinImpl = (
       provider: titlePlan.selection.provider,
       model: titlePlan.selection.model,
       registrationKey: titlePlan.registrationKey,
-      gatewayProtocol: titleRoute.gateway.protocol,
-      gatewayBaseUrl: normalizedBaseUrl(titleRoute.gateway.baseUrl),
-      gatewayAuth: titleRoute.gateway.auth.type === "none" ? "none" : `bearer-env:${titleRoute.gateway.auth.variable}`,
+      providerProtocol: titleRoute.providerConnection.protocol,
+      providerBaseUrl: normalizedBaseUrl(titleRoute.providerConnection.baseUrl),
+      ...(titleRoute.providerConnection.apiKeyEnv === undefined
+        ? {}
+        : { providerApiKeyEnv: titleRoute.providerConnection.apiKeyEnv }),
       effort: titleRoute.effort,
       fast: titleRoute.fast,
       requestVariant: titlePlan.registrationKey,
@@ -782,10 +785,11 @@ const executionRoutePinImpl = (
       provider: summaryPlan.selection.provider,
       model: summaryPlan.selection.model,
       registrationKey: summaryPlan.registrationKey,
-      gatewayProtocol: summaryRoute.gateway.protocol,
-      gatewayBaseUrl: normalizedBaseUrl(summaryRoute.gateway.baseUrl),
-      gatewayAuth:
-        summaryRoute.gateway.auth.type === "none" ? "none" : `bearer-env:${summaryRoute.gateway.auth.variable}`,
+      providerProtocol: summaryRoute.providerConnection.protocol,
+      providerBaseUrl: normalizedBaseUrl(summaryRoute.providerConnection.baseUrl),
+      ...(summaryRoute.providerConnection.apiKeyEnv === undefined
+        ? {}
+        : { providerApiKeyEnv: summaryRoute.providerConnection.apiKeyEnv }),
       effort: summaryRoute.effort,
       fast: summaryRoute.fast,
       requestVariant: summaryPlan.registrationKey,
@@ -835,16 +839,17 @@ export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecution
 
 const credentialForRouteImpl = (
   route: ConfigContract.ResolvedModelRoute,
-  gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
-) => (route.gateway.auth.type === "none" ? undefined : gatewayCredentials[route.gateway.auth.variable])
+  providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+) =>
+  route.providerConnection.apiKeyEnv === undefined ? undefined : providerCredentials[route.providerConnection.apiKeyEnv]
 
 export const credentialForRoute: {
   (
-    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+    providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
   ): (route: ConfigContract.ResolvedModelRoute) => Redacted.Redacted<string> | undefined
   (
     route: ConfigContract.ResolvedModelRoute,
-    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+    providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
   ): Redacted.Redacted<string> | undefined
 } = Function.dual(2, credentialForRouteImpl)
 
@@ -852,17 +857,17 @@ const registrationForRoute = (
   route: ConfigContract.ResolvedModelRoute,
   apiKeyConfig: Config.Config<Redacted.Redacted<string>>,
 ) =>
-  route.gateway.protocol === "openai"
+  route.providerConnection.protocol === "openai"
     ? openAi({
         model: route.model,
         registrationKey: modelRoutePlan(route).registrationKey,
         config: route.options as NonNullable<Parameters<typeof openAi>[0]["config"]>,
       }).pipe(
-        Effect.map((registration) => ({ ...registration, provider: route.gatewayName })),
+        Effect.map((registration) => ({ ...registration, provider: route.providerId })),
         provideLayerScoped(
           openAiClientLayerConfig({
-            apiUrl: Config.succeed(route.gateway.baseUrl),
-            apiKey: route.gateway.auth.type === "none" ? Config.succeed(undefined) : apiKeyConfig,
+            apiUrl: Config.succeed(route.providerConnection.baseUrl),
+            apiKey: route.providerConnection.apiKeyEnv === undefined ? Config.succeed(undefined) : apiKeyConfig,
           }).pipe(Layer.provide(sanitizedFetchLayer), Layer.orDie),
         ),
       )
@@ -871,31 +876,29 @@ const registrationForRoute = (
         registrationKey: modelRoutePlan(route).registrationKey,
         config: route.options as NonNullable<Parameters<typeof anthropic>[0]["config"]>,
       }).pipe(
-        Effect.map((registration) => ({ ...registration, provider: route.gatewayName })),
+        Effect.map((registration) => ({ ...registration, provider: route.providerId })),
         provideLayerScoped(
           anthropicClientLayerConfig({
-            apiUrl: Config.succeed(route.gateway.baseUrl),
-            apiKey: route.gateway.auth.type === "none" ? Config.succeed(undefined) : apiKeyConfig,
+            apiUrl: Config.succeed(route.providerConnection.baseUrl),
+            apiKey: route.providerConnection.apiKeyEnv === undefined ? Config.succeed(undefined) : apiKeyConfig,
           }).pipe(Layer.provide(sanitizedFetchLayer), Layer.orDie),
         ),
       )
 
 const registrationForPinnedRoute = (
   route: Turn.ExecutionModelRoute,
-  gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
 ): Effect.Effect<ModelRegistry.Registration, ModelConfigurationError> => {
-  const credentialVariable = route.gatewayAuth.startsWith("bearer-env:")
-    ? route.gatewayAuth.slice("bearer-env:".length)
-    : undefined
-  const credential = credentialVariable === undefined ? undefined : gatewayCredentials[credentialVariable]
+  const credentialVariable = route.providerApiKeyEnv
+  const credential = credentialVariable === undefined ? undefined : providerCredentials[credentialVariable]
   if (credentialVariable !== undefined && credential === undefined)
     return Effect.fail(
       ModelConfigurationError.make({
-        message: `Missing environment variable ${credentialVariable} for gateway ${route.provider}`,
+        message: `Missing environment variable ${credentialVariable} for provider ${route.provider}`,
       }),
     )
   const apiKey = Config.succeed(credential)
-  return route.gatewayProtocol === "openai"
+  return route.providerProtocol === "openai"
     ? openAi({
         model: route.model,
         registrationKey: route.registrationKey,
@@ -903,7 +906,7 @@ const registrationForPinnedRoute = (
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.provider })),
         provideLayerScoped(
-          openAiClientLayerConfig({ apiUrl: Config.succeed(route.gatewayBaseUrl), apiKey }).pipe(
+          openAiClientLayerConfig({ apiUrl: Config.succeed(route.providerBaseUrl), apiKey }).pipe(
             Layer.provide(sanitizedFetchLayer),
             Layer.orDie,
           ),
@@ -916,7 +919,7 @@ const registrationForPinnedRoute = (
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.provider })),
         provideLayerScoped(
-          anthropicClientLayerConfig({ apiUrl: Config.succeed(route.gatewayBaseUrl), apiKey }).pipe(
+          anthropicClientLayerConfig({ apiUrl: Config.succeed(route.providerBaseUrl), apiKey }).pipe(
             Layer.provide(sanitizedFetchLayer),
             Layer.orDie,
           ),
@@ -941,15 +944,16 @@ export const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.Resolve
 
 const registrationsForRoutesImpl = (
   routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
-  gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
 ) =>
   Effect.forEach(distinctModelRoutes(routes), (route) => {
-    if (route.gateway.auth.type === "none") return registrationForRoute(route, Config.succeed(Redacted.make("unused")))
-    const credential = credentialForRoute(route, gatewayCredentials)
+    if (route.providerConnection.apiKeyEnv === undefined)
+      return registrationForRoute(route, Config.succeed(Redacted.make("unused")))
+    const credential = credentialForRoute(route, providerCredentials)
     if (credential === undefined)
       return Effect.fail(
         ModelConfigurationError.make({
-          message: `Missing environment variable ${route.gateway.auth.variable} for gateway ${route.gatewayName}`,
+          message: `Missing environment variable ${route.providerConnection.apiKeyEnv} for provider ${route.providerId}`,
         }),
       )
     return registrationForRoute(route, Config.succeed(credential))
@@ -957,11 +961,11 @@ const registrationsForRoutesImpl = (
 
 export const registrationsForRoutes: {
   (
-    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+    providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
   ): (routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) => ReturnType<typeof registrationsForRoutesImpl>
   (
     routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
-    gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+    providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
   ): ReturnType<typeof registrationsForRoutesImpl>
 } = Function.dual(2, registrationsForRoutesImpl)
 
@@ -1002,16 +1006,16 @@ export const isLegacyUnavailableExecutionRoute = (route: Turn.ExecutionRoutePin)
 
 export const registrationsForPersistedRoutes = Effect.fn("Main.registrationsForPersistedRoutes")(function* (
   routes: ReadonlyArray<Turn.ExecutionModelRoute>,
-  gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
 ) {
   const results = yield* Effect.forEach(
     routes.filter(
       (candidate, index, all) =>
-        candidate.gatewayProtocol !== "test" &&
+        candidate.providerProtocol !== "test" &&
         all.findIndex((other) => registrationTuple(other) === registrationTuple(candidate)) === index,
     ),
     (route) =>
-      registrationForPinnedRoute(route, gatewayCredentials).pipe(
+      registrationForPinnedRoute(route, providerCredentials).pipe(
         Effect.matchCauseEffect({
           onFailure: (cause) =>
             Cause.hasInterruptsOnly(cause)
@@ -1086,7 +1090,7 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
       readonly registrationKey?: string
     }>
     readonly unavailable: ReadonlyArray<PersistedRouteRegistrationFailure>
-    readonly gatewayCredentials: Readonly<Record<string, Redacted.Redacted<string>>>
+    readonly providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>
     readonly resolveLegacyRoute?: (input: ExecutionBackend.StartInput) => Effect.Effect<
       {
         readonly executionRoute: Turn.ExecutionRoutePin
@@ -1121,7 +1125,7 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
       Effect.gen(function* () {
         const missing = executionModelRoutes(route).filter(
           (candidate, index, all) =>
-            candidate.gatewayProtocol !== "test" &&
+            candidate.providerProtocol !== "test" &&
             !registered.has(registrationTuple(candidate)) &&
             all.findIndex((other) => registrationTuple(other) === registrationTuple(candidate)) === index,
         )
@@ -1135,7 +1139,7 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
         const registrations = yield* Effect.forEach(
           missing,
           (candidate) =>
-            registrationForPinnedRoute(candidate, options.gatewayCredentials).pipe(
+            registrationForPinnedRoute(candidate, options.providerCredentials).pipe(
               Effect.matchCauseEffect({
                 onFailure: (cause) =>
                   Cause.hasInterruptsOnly(cause)
@@ -1182,7 +1186,7 @@ const configuredBackendLayerImpl = (
   turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
   parallelApiKey?: import("effect").Redacted.Redacted<string>,
   modelRoute?: ConfigContract.ResolvedModelRoute,
-  gatewayCredentials: Readonly<Record<string, import("effect").Redacted.Redacted<string>>> = {},
+  providerCredentials: Readonly<Record<string, import("effect").Redacted.Redacted<string>>> = {},
   allModelRoutes?: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   oracleRoute?: ConfigContract.ResolvedModelRoute,
   persistedModelRoutes: ReadonlyArray<Turn.ExecutionModelRoute> = [],
@@ -1248,12 +1252,12 @@ const configuredBackendLayerImpl = (
       } else {
         const configuredRegistrations = yield* registrationsForRoutes(
           allModelRoutes ?? [route, resolvedOracleRoute, resolvedCompactionSummaryRoute],
-          gatewayCredentials,
+          providerCredentials,
         )
         const configuredKeys = new Set(configuredRegistrations.map(registrationTuple))
         const persistedRegistrationState = yield* registrationsForPersistedRoutes(
           persistedModelRoutes.filter((candidate) => !configuredKeys.has(registrationTuple(candidate))),
-          gatewayCredentials,
+          providerCredentials,
         )
         const registrations = [...configuredRegistrations, ...persistedRegistrationState.registrations]
         unavailablePersistedRoutes = persistedRegistrationState.unavailable
@@ -1310,7 +1314,7 @@ const configuredBackendLayerImpl = (
             withPinnedRouteRegistration(backend, {
               registeredRoutes: [registration, ...additionalRegistrations],
               unavailable: unavailablePersistedRoutes,
-              gatewayCredentials,
+              providerCredentials,
               ...(resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute }),
             }),
           ),
@@ -1326,7 +1330,7 @@ export const configuredBackendLayer: {
     turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
     parallelApiKey?: import("effect").Redacted.Redacted<string>,
     modelRoute?: ConfigContract.ResolvedModelRoute,
-    gatewayCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>,
+    providerCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>,
     allModelRoutes?: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
     oracleRoute?: ConfigContract.ResolvedModelRoute,
     persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>,
@@ -1340,7 +1344,7 @@ export const configuredBackendLayer: {
     turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
     parallelApiKey?: import("effect").Redacted.Redacted<string>,
     modelRoute?: ConfigContract.ResolvedModelRoute,
-    gatewayCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>,
+    providerCredentials?: Readonly<Record<string, import("effect").Redacted.Redacted<string>>>,
     allModelRoutes?: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
     oracleRoute?: ConfigContract.ResolvedModelRoute,
     persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>,
@@ -1483,7 +1487,7 @@ export const withClientWorkspace: {
   (input: Operation.Input, workspace: string): Operation.Input
 } = Function.dual(2, withClientWorkspaceImpl)
 
-const gatewayCredentialsForRoutesImpl = (
+const providerCredentialsForRoutesImpl = (
   configuredRoutes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   persistedRoutes: ReadonlyArray<Turn.ExecutionModelRoute>,
   initial: Readonly<Record<string, Redacted.Redacted<string>>>,
@@ -1491,9 +1495,8 @@ const gatewayCredentialsForRoutesImpl = (
 ) => {
   const variables = new Set<string>()
   for (const route of configuredRoutes)
-    if (route.gateway.auth.type === "bearer-env") variables.add(route.gateway.auth.variable)
-  for (const route of persistedRoutes)
-    if (route.gatewayAuth.startsWith("bearer-env:")) variables.add(route.gatewayAuth.slice("bearer-env:".length))
+    if (route.providerConnection.apiKeyEnv !== undefined) variables.add(route.providerConnection.apiKeyEnv)
+  for (const route of persistedRoutes) if (route.providerApiKeyEnv !== undefined) variables.add(route.providerApiKeyEnv)
   const credentials: Record<string, Redacted.Redacted<string>> = { ...initial }
   for (const variable of variables) {
     if (credentials[variable] !== undefined) continue
@@ -1503,7 +1506,7 @@ const gatewayCredentialsForRoutesImpl = (
   return credentials
 }
 
-export const gatewayCredentialsForRoutes: {
+export const providerCredentialsForRoutes: {
   (
     persistedRoutes: ReadonlyArray<Turn.ExecutionModelRoute>,
     initial: Readonly<Record<string, Redacted.Redacted<string>>>,
@@ -1515,7 +1518,7 @@ export const gatewayCredentialsForRoutes: {
     initial: Readonly<Record<string, Redacted.Redacted<string>>>,
     readEnvironment: (name: string) => string | undefined,
   ): Record<string, Redacted.Redacted<string>>
-} = Function.dual(4, gatewayCredentialsForRoutesImpl)
+} = Function.dual(4, providerCredentialsForRoutesImpl)
 
 export const persistedModelRoutesForStartup = (turns: ReadonlyArray<Turn.Turn>) =>
   turns.flatMap((turn) => executionModelRoutes(turn.executionRoute))
@@ -2506,7 +2509,7 @@ if (import.meta.main) {
             )
             return {
               ...resolvedRoute,
-              gatewayCredentials: resolvedWorkspaceConfig.environment.gatewayCredentials,
+              providerCredentials: resolvedWorkspaceConfig.environment.providerCredentials,
             }
           }).pipe(provideLayerScoped(BunServices.layer))
         const resolveWorkspaceExecutionRoute = (
@@ -2519,7 +2522,7 @@ if (import.meta.main) {
             if (!testModelConfigured) {
               const registrations = yield* registrationsForRoutes(
                 resolvedRoute.routes,
-                resolvedRoute.gatewayCredentials,
+                resolvedRoute.providerCredentials,
               )
               const backend = yield* ExecutionBackend.Service
               if (backend.registerModels !== undefined) yield* backend.registerModels(registrations)
@@ -2548,10 +2551,10 @@ if (import.meta.main) {
         )
         const credentialNames = [
           ...allModelRoutes.flatMap((route) =>
-            route.gateway.auth.type === "bearer-env" ? [route.gateway.auth.variable] : [],
+            route.providerConnection.apiKeyEnv === undefined ? [] : [route.providerConnection.apiKeyEnv],
           ),
           ...persistedModelRoutes.flatMap((route) =>
-            route.gatewayAuth.startsWith("bearer-env:") ? [route.gatewayAuth.slice("bearer-env:".length)] : [],
+            route.providerApiKeyEnv === undefined ? [] : [route.providerApiKeyEnv],
           ),
         ]
         const environmentCredentials = Object.fromEntries(
@@ -2561,10 +2564,10 @@ if (import.meta.main) {
             ),
           ),
         )
-        const gatewayCredentials = gatewayCredentialsForRoutes(
+        const providerCredentials = providerCredentialsForRoutes(
           allModelRoutes,
           persistedModelRoutes,
-          effectiveConfig.environment.gatewayCredentials,
+          effectiveConfig.environment.providerCredentials,
           (name) => environmentCredentials[name],
         )
         const resolveLegacyRoute = (input: ExecutionBackend.StartInput) =>
@@ -2578,7 +2581,7 @@ if (import.meta.main) {
             const resolved = yield* workspaceExecutionRoutePlan("medium", undefined, thread.workspace)
             const registrations = testModelConfigured
               ? []
-              : yield* registrationsForRoutes(resolved.routes, resolved.gatewayCredentials)
+              : yield* registrationsForRoutes(resolved.routes, resolved.providerCredentials)
             return { executionRoute: resolved.executionRoute, registrations }
           }).pipe(
             provideLayerScoped(repositories),
@@ -2595,7 +2598,7 @@ if (import.meta.main) {
           repositories,
           parallelApiKey,
           ConfigContract.resolveModelRoute(effectiveConfig.settings, "medium", "main"),
-          gatewayCredentials,
+          providerCredentials,
           allModelRoutes,
           ConfigContract.resolveModelRoute(effectiveConfig.settings, "medium", "oracle"),
           persistedModelRoutes,

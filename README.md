@@ -27,22 +27,21 @@ rika --version
 
 ## Configuration
 
-Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a gateway names the environment variable that supplies its token.
+Global settings live at `~/.config/rika/settings.json`. A workspace can override them with `.rika/settings.json`. Credentials stay out of JSON: a provider override names the environment variable that supplies its API key.
 
 ```json
 {
-  "gateways": {
-    "local": {
-      "protocol": "openai",
+  "providers": {
+    "openai": {
       "baseUrl": "http://127.0.0.1:9000/v1",
-      "auth": { "type": "bearer-env", "variable": "RIKA_MODEL_API_KEY" }
+      "apiKeyEnv": "RIKA_MODEL_API_KEY"
     }
   }
 }
 ```
 
 ```bash
-export RIKA_MODEL_API_KEY="your-gateway-key"
+export RIKA_MODEL_API_KEY="your-provider-key"
 rika config list
 rika doctor
 rika

@@ -25,9 +25,9 @@ export interface ExecutionModelRoute {
   readonly provider: string
   readonly model: string
   readonly registrationKey: string
-  readonly gatewayProtocol: "openai" | "anthropic" | "test"
-  readonly gatewayBaseUrl: string
-  readonly gatewayAuth: string
+  readonly providerProtocol: "openai" | "anthropic" | "test"
+  readonly providerBaseUrl: string
+  readonly providerApiKeyEnv?: string
   readonly effort: string
   readonly fast: boolean
   readonly requestVariant: string

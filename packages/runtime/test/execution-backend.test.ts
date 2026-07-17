@@ -30,9 +30,8 @@ const routeFor = (
   alias: role,
   ...model,
   registrationKey: model.registrationKey ?? "default",
-  gatewayProtocol: "test" as const,
-  gatewayBaseUrl: "test://model",
-  gatewayAuth: "none",
+  providerProtocol: "test" as const,
+  providerBaseUrl: "test://model",
   effort: "medium",
   fast: false,
   requestVariant: "test",
@@ -1471,10 +1470,18 @@ describe("ExecutionBackend Relay client adapter", () => {
           })
         },
       })
-      const oracleSelection = { provider: "oracle-gateway", model: "oracle-model", registrationKey: "sol:high:normal" }
-      const taskSelection = { provider: "task-gateway", model: "task-model", registrationKey: "terra:medium:normal" }
+      const oracleSelection = {
+        provider: "oracle-provider",
+        model: "oracle-model",
+        registrationKey: "sol:high:normal",
+      }
+      const taskSelection = {
+        provider: "task-provider",
+        model: "task-model",
+        registrationKey: "terra:medium:normal",
+      }
       const summarySelection = {
-        provider: "summary-gateway",
+        provider: "summary-provider",
         model: "summary-model",
         registrationKey: "terra:low:normal",
       }
@@ -1530,7 +1537,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         reserve_tokens: 128_000,
         keep_recent_tokens: 32_000,
         summary_model: {
-          provider: "summary-gateway",
+          provider: "summary-provider",
           model: "summary-model",
           registration_key: "terra:low:normal",
         },
@@ -1545,7 +1552,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         reserve_tokens: 128_000,
         keep_recent_tokens: 64_000,
         summary_model: {
-          provider: "summary-gateway",
+          provider: "summary-provider",
           model: "summary-model",
           registration_key: "terra:low:normal",
         },

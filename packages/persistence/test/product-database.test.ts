@@ -14,10 +14,10 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows).toHaveLength(12)
+          expect(migrationRows).toHaveLength(13)
           expect(migrationRows.at(-1)).toEqual({
-            migration_id: 12,
-            name: "queue_state_and_current_transcripts",
+            migration_id: 13,
+            name: "provider_execution_routes",
           })
           const objects = yield* sql`SELECT name FROM sqlite_schema
             WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'

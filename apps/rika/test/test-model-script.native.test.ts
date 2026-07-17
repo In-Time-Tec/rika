@@ -24,7 +24,7 @@ import {
   resolveExecutionRouteForSettings,
   resolveExecutionWorkspace,
   withClientWorkspace,
-  gatewayCredentialsForRoutes,
+  providerCredentialsForRoutes,
   persistedModelRoutesForStartup,
   persistedTitleModelRoutesForStartup,
   registrationsForPersistedRoutes,
@@ -126,40 +126,45 @@ test("content-addresses non-secret model execution semantics deterministically",
   expect(key).toMatch(/^sha256:[a-f0-9]{64}$/)
   expect(modelRoutePlan(route).registrationKey).toBe(key)
   expect(
-    modelRoutePlan({ ...route, gateway: { ...route.gateway, baseUrl: `${route.gateway.baseUrl}/` } }).registrationKey,
+    modelRoutePlan({
+      ...route,
+      providerConnection: { ...route.providerConnection, baseUrl: `${route.providerConnection.baseUrl}/` },
+    }).registrationKey,
   ).toBe(key)
   expect(
-    modelRoutePlan({ ...route, gateway: { ...route.gateway, baseUrl: `${route.gateway.baseUrl}#primary` } })
-      .registrationKey,
+    modelRoutePlan({
+      ...route,
+      providerConnection: { ...route.providerConnection, baseUrl: `${route.providerConnection.baseUrl}#primary` },
+    }).registrationKey,
   ).toBe(key)
   const firstQuery = modelRoutePlan({
     ...route,
-    gateway: { ...route.gateway, baseUrl: `${route.gateway.baseUrl}/?tenant=first` },
+    providerConnection: { ...route.providerConnection, baseUrl: `${route.providerConnection.baseUrl}/?tenant=first` },
   }).registrationKey
   const secondQuery = modelRoutePlan({
     ...route,
-    gateway: { ...route.gateway, baseUrl: `${route.gateway.baseUrl}?tenant=second` },
+    providerConnection: { ...route.providerConnection, baseUrl: `${route.providerConnection.baseUrl}?tenant=second` },
   }).registrationKey
   expect(firstQuery).not.toBe(secondQuery)
   expect(
     modelRoutePlan({
       ...route,
-      gateway: { ...route.gateway, baseUrl: `${route.gateway.baseUrl}?tenant=first#ignored` },
+      providerConnection: {
+        ...route.providerConnection,
+        baseUrl: `${route.providerConnection.baseUrl}?tenant=first#ignored`,
+      },
     }).registrationKey,
   ).toBe(firstQuery)
   const changes = [
-    { ...route, gateway: { ...route.gateway, protocol: "anthropic" as const } },
-    { ...route, gateway: { ...route.gateway, baseUrl: "https://models.example.test/v1" } },
+    { ...route, providerConnection: { ...route.providerConnection, protocol: "anthropic" as const } },
+    { ...route, providerConnection: { ...route.providerConnection, baseUrl: "https://models.example.test/v1" } },
     { ...route, model: "claude-opus-4-8" },
     { ...route, effort: "high" as const },
     { ...route, fast: true },
     { ...route, options: { ...route.options, max_tokens: 64_000 } },
     { ...route, options: { ...route.options, service_tier: "priority" } },
-    { ...route, gateway: { ...route.gateway, auth: { type: "none" as const } } },
-    {
-      ...route,
-      gateway: { ...route.gateway, auth: { type: "bearer-env" as const, variable: "OTHER_API_KEY" } },
-    },
+    { ...route, providerConnection: { ...route.providerConnection, apiKeyEnv: undefined } },
+    { ...route, providerConnection: { ...route.providerConnection, apiKeyEnv: "OTHER_API_KEY" } },
   ]
   for (const changed of changes) expect(modelRoutePlan(changed).registrationKey).not.toBe(key)
   expect(JSON.stringify(modelRoutePlan(route))).not.toContain("API_KEY_VALUE")
@@ -185,7 +190,7 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
       const route = executionRoutePin(ConfigContract.defaults, mode, { fastMode })
       for (const selected of [route.main, route.oracle, route.title!]) {
         expect(selected.model).toMatch(/^gpt-5\.6-/)
-        expect(selected.gatewayProtocol).toBe("openai")
+        expect(selected.providerProtocol).toBe("openai")
       }
       expect(route.main.providerOptions).toMatchObject({
         reasoning: { effort: ConfigContract.defaults.modes[mode].main.effort },
@@ -199,7 +204,7 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
         role: "title",
         alias: "luna",
         model: "gpt-5.6-luna",
-        gatewayProtocol: "openai",
+        providerProtocol: "openai",
         effort: "low",
         fast: false,
         providerOptions: { reasoning: { effort: "low" } },
@@ -355,12 +360,11 @@ test("prepares each mode request with its configured fixed reasoning effort", ()
   })
   const settings: ConfigContract.Settings = {
     ...ConfigContract.defaults,
-    gateways: {
-      ...ConfigContract.defaults.gateways,
+    providers: {
+      ...ConfigContract.defaults.providers,
       openai: {
-        ...ConfigContract.defaults.gateways.openai!,
+        protocol: "openai",
         baseUrl: server.url.toString(),
-        auth: { type: "none" },
       },
     },
   }
@@ -399,11 +403,11 @@ test("constructs the retained Anthropic provider registration", () =>
       Effect.gen(function* () {
         const settings: ConfigContract.Settings = {
           ...ConfigContract.defaults,
-          gateways: {
-            ...ConfigContract.defaults.gateways,
+          providers: {
+            ...ConfigContract.defaults.providers,
             anthropic: {
-              ...ConfigContract.defaults.gateways.anthropic!,
-              auth: { type: "none" },
+              protocol: "anthropic",
+              baseUrl: ConfigContract.defaults.providers.anthropic!.baseUrl,
             },
           },
           modes: {
@@ -431,8 +435,8 @@ test("constructs the retained Anthropic provider registration", () =>
 
 test("keeps registrations distinct by the exact Baton registry tuple", () => {
   const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
-  const second = { ...route, gatewayName: `${route.gatewayName}-secondary` }
-  expect(modelRoutePlan(second).registrationKey).toBe(modelRoutePlan(route).registrationKey)
+  const second = { ...route, fast: true }
+  expect(modelRoutePlan(second).registrationKey).not.toBe(modelRoutePlan(route).registrationKey)
   expect(distinctModelRoutes([route, second, route])).toEqual([route, second])
 })
 
@@ -475,10 +479,10 @@ test("loads credentials named by configured and persisted routes", () => {
   const configured = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
   const persisted = {
     ...executionRoutePin(ConfigContract.defaults, "medium").oracle,
-    gatewayAuth: "bearer-env:RESTART_ORACLE_KEY",
+    providerApiKeyEnv: "RESTART_ORACLE_KEY",
   }
   const values = { OPENAI_API_KEY: "starter", RESTART_ORACLE_KEY: "persisted" } as const
-  const credentials = gatewayCredentialsForRoutes(
+  const credentials = providerCredentialsForRoutes(
     [configured],
     [persisted],
     {},
@@ -495,13 +499,13 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
     Effect.scoped(
       Effect.gen(function* () {
         const route = executionRoutePin(ConfigContract.defaults, "medium")
-        const healthy = { ...route.main, gatewayAuth: "none" }
+        const { providerApiKeyEnv: _, ...healthy } = route.main
         const stale = {
           ...route.main,
           alias: "retired",
-          provider: "retired-gateway",
+          provider: "retired-provider",
           registrationKey: "retired-registration",
-          gatewayAuth: "bearer-env:RETIRED_API_KEY",
+          providerApiKeyEnv: "RETIRED_API_KEY",
           requestVariant: "retired-registration",
         }
         const startup = yield* registrationsForPersistedRoutes([healthy, stale], {})
@@ -515,7 +519,7 @@ test("isolates a stale persisted route while healthy routes keep starting", () =
         const isolated = yield* withPinnedRouteRegistration(backend, {
           registeredRoutes: [healthy],
           unavailable: startup.unavailable,
-          gatewayCredentials: {},
+          providerCredentials: {},
         })
         const input = {
           threadId: "thread",
@@ -572,9 +576,12 @@ test("builds the configured backend when one persisted route cannot be registere
           const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(productDatabaseLayer))
           const settings: ConfigContract.Settings = {
             ...ConfigContract.defaults,
-            gateways: {
-              ...ConfigContract.defaults.gateways,
-              openai: { ...ConfigContract.defaults.gateways.openai!, auth: { type: "none" } },
+            providers: {
+              ...ConfigContract.defaults.providers,
+              openai: {
+                protocol: "openai",
+                baseUrl: ConfigContract.defaults.providers.openai!.baseUrl,
+              },
             },
           }
           const routes = modelRoutesForExecution(settings, "medium")
@@ -587,7 +594,7 @@ test("builds the configured backend when one persisted route cannot be registere
             alias: "retired-startup",
             provider: "retired-startup",
             registrationKey: "retired-startup",
-            gatewayAuth: "bearer-env:RETIRED_STARTUP_API_KEY",
+            providerApiKeyEnv: "RETIRED_STARTUP_API_KEY",
             requestVariant: "retired-startup",
           }
           const context = yield* Layer.buildWithScope(
@@ -644,8 +651,8 @@ test("resolves a legacy unavailable route to the current default when it starts"
         provider: "legacy-unavailable",
         model: "legacy-unavailable",
         registrationKey: "legacy-unavailable",
-        gatewayProtocol: "test" as const,
-        gatewayBaseUrl: "test://legacy-unavailable",
+        providerProtocol: "test" as const,
+        providerBaseUrl: "test://legacy-unavailable",
         requestVariant: "legacy-unavailable",
       }
       const legacy: Turn.ExecutionRoutePin = {
@@ -663,7 +670,7 @@ test("resolves a legacy unavailable route to the current default when it starts"
           ...Object.values(current.agents!),
         ],
         unavailable: [],
-        gatewayCredentials: {},
+        providerCredentials: {},
         resolveLegacyRoute: () => Effect.succeed({ executionRoute: current, registrations: [] }),
       })
       yield* isolated.start({
@@ -688,7 +695,7 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
       const isolated = yield* withPinnedRouteRegistration(recordingBackend(starts, registrations), {
         registeredRoutes: [],
         unavailable: [],
-        gatewayCredentials: { OPENAI_API_KEY: Redacted.make("unused") },
+        providerCredentials: { OPENAI_API_KEY: Redacted.make("unused") },
       })
       yield* isolated.start({
         threadId: "interrupt-thread",
