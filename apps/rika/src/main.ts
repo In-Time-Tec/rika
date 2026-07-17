@@ -63,6 +63,8 @@ import { command, version } from "./command"
 import { renderGoodbye } from "./goodbye"
 import * as InteractiveController from "./interactive-controller"
 import * as Logging from "./logging"
+import * as OpenAiAuthAdapter from "./openai-auth-adapter"
+import * as OpenAiCredentialStore from "./openai-credential-store"
 import { layer as residentLayer } from "./resident-client-transport"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
@@ -1475,6 +1477,7 @@ const withClientWorkspaceImpl = (input: Operation.Input, workspace: string): Ope
     input._tag === "Mcp" ||
     input._tag === "Extension" ||
     input._tag === "Config" ||
+    input._tag === "Auth" ||
     input._tag === "Doctor" ||
     input._tag === "Thread"
   )
@@ -1665,6 +1668,38 @@ if (import.meta.main) {
       Layer.provide(McpOAuth.tokenStoreLayer(`${home}/.config/rika/mcp-oauth.json`)),
     ),
   ).pipe(Layer.provide(BunServices.layer), Layer.merge(BunServices.layer), Layer.merge(FetchHttpClient.layer))
+  const profile = environment.residentProfile._tag === "Some" ? environment.residentProfile.value : "default"
+  const profileIdentity = createHash("sha256").update(profile).digest("hex")
+  const openAiAuthLayer = OpenAiAuthAdapter.layer.pipe(
+    Layer.provide(
+      OpenAiCredentialStore.layer(join(dirname(database), "auth", profileIdentity, "openai.json"), {
+        trustedRoot: dirname(database),
+        ...(typeof process.getuid === "function" ? { currentUid: process.getuid() } : {}),
+      }),
+    ),
+    Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
+  )
+  const authOperations: Operation.AuthOperationOptions = {
+    layer: openAiAuthLayer,
+    assertOpenAiDirect: (workspace) =>
+      Effect.gen(function* () {
+        const globalSettings = yield* loadSettingsFile(globalConfig)
+        const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+        const workspaceConfigLayer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings })
+        const resolved = yield* ConfigService.effective().pipe(provideLayerScoped(workspaceConfigLayer))
+        if (resolved.settings.providers.openai?.baseUrl !== ConfigContract.defaults.providers.openai?.baseUrl) {
+          return yield* OperationProductError.make({
+            message:
+              "OpenAI account login cannot be used while providers.openai.baseUrl is customized; remove the override first",
+          })
+        }
+      }).pipe(
+        provideLayerScoped(BunServices.layer),
+        Effect.mapError((error) =>
+          Schema.is(OperationProductError)(error) ? error : OperationProductError.make({ message: String(error) }),
+        ),
+      ),
+  }
   const editor =
     environment.visual._tag === "Some"
       ? environment.visual.value
@@ -2741,6 +2776,7 @@ if (import.meta.main) {
               ),
           },
           extensionOperations: { layer: extensionLayer },
+          authOperations,
           interactive: injectedInteractive,
         })
         return product
@@ -2749,22 +2785,28 @@ if (import.meta.main) {
   const residentOwner: ResidentService.Owner = (interactive) =>
     Effect.scope.pipe(
       Effect.flatMap((scope) =>
-        Layer.buildWithScope(
-          operationLayer(interactive).pipe(
-            Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
-          ),
-          scope,
-        ),
-      ),
-      Effect.map((context) => Context.get(context, Operation.Service)),
-      Effect.tapCause((cause) =>
-        Effect.logError("resident.owner.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
-      ),
-      Effect.mapError((cause) =>
-        ResidentService.ResidentServiceError.make({
-          reason: "startup-failed",
-          message:
-            cause !== null && typeof cause === "object" && "message" in cause ? String(cause.message) : String(cause),
+        Effect.gen(function* () {
+          const loadProduct = yield* Effect.cached(
+            Layer.buildWithScope(
+              operationLayer(interactive).pipe(
+                Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
+              ),
+              scope,
+            ).pipe(Effect.map((context) => Context.get(context, Operation.Service))),
+          )
+          return Operation.Service.of({
+            run: (input) =>
+              input._tag === "Auth"
+                ? Effect.scoped(Operation.runAuth(input, authOperations, process.cwd()))
+                : loadProduct.pipe(
+                    Effect.flatMap((service) => service.run(input)),
+                    Effect.mapError((error) =>
+                      Schema.is(Operation.OperationUnavailable)(error)
+                        ? error
+                        : Operation.OperationUnavailable.make({ operation: input._tag, message: String(error) }),
+                    ),
+                  ),
+          })
         }),
       ),
     )

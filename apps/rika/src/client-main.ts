@@ -34,6 +34,7 @@ const withClientWorkspace = (input: Operation.Input, workspace: string): Operati
     input._tag === "Mcp" ||
     input._tag === "Extension" ||
     input._tag === "Config" ||
+    input._tag === "Auth" ||
     input._tag === "Doctor" ||
     input._tag === "Thread"
   )

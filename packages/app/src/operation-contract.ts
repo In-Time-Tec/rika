@@ -122,6 +122,14 @@ const ConfigEdit = Schema.Struct({
   workspace: Schema.Boolean,
 })
 
+const Auth = Schema.Struct({
+  ...ClientWorkspace,
+  _tag: Schema.tag("Auth"),
+  action: Schema.Literals(["login", "status", "logout"]),
+  provider: Schema.tag("openai"),
+  deviceCode: Schema.optionalKey(Schema.Boolean),
+})
+
 const McpNoInput = Schema.Struct({
   ...ClientWorkspace,
   _tag: Schema.tag("Mcp"),
@@ -220,6 +228,7 @@ export const Input = Schema.Union([
   ThreadExport,
   ConfigNoInput,
   ConfigEdit,
+  Auth,
   McpNoInput,
   McpAddCommand,
   McpAddUrl,

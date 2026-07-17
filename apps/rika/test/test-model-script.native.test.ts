@@ -461,6 +461,12 @@ test("sends each client's workspace to the resident service", () => {
     action: "list",
     clientWorkspace: "/client-c",
   })
+  expect(withClientWorkspace({ _tag: "Auth", action: "status", provider: "openai" }, "/client-auth")).toEqual({
+    _tag: "Auth",
+    action: "status",
+    provider: "openai",
+    clientWorkspace: "/client-auth",
+  })
   expect(withClientWorkspace({ _tag: "Thread", action: "new" }, "/client-d")).toEqual({
     _tag: "Thread",
     action: "new",

@@ -10,6 +10,7 @@ import * as ProductAgent from "./product-agent"
 import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
 import * as ExtensionOperations from "./extension-operations"
+import * as OpenAiAuth from "./openai-auth"
 import { Catalog as ToolCatalog, Runtime as ToolRuntime } from "@rika/tools"
 import {
   Cause,
@@ -151,11 +152,57 @@ export interface ProductLayerOptions<
       OperationError
     >
   }
+  readonly authOperations?: AuthOperationOptions
   readonly interactive?: (
     input: Extract<Input, { readonly _tag: "Interactive" }>,
     session: InteractiveSession,
   ) => Effect.Effect<void, OperationUnavailable>
 }
+
+export interface AuthOperationOptions {
+  readonly layer: Layer.Layer<OpenAiAuth.Service, OperationError>
+  readonly assertOpenAiDirect: (workspace: string) => Effect.Effect<void, OperationError>
+}
+
+export const runAuth = Effect.fn("Operation.runAuth")(function* (
+  input: Extract<Input, { readonly _tag: "Auth" }>,
+  options: AuthOperationOptions,
+  defaultWorkspace: string,
+) {
+  if (input.action === "login") {
+    yield* options
+      .assertOpenAiDirect(input.clientWorkspace ?? defaultWorkspace)
+      .pipe(Effect.mapError((error) => unavailable(input, error.message)))
+  }
+  const context = yield* Layer.build(options.layer).pipe(Effect.mapError((error) => unavailable(input, String(error))))
+  const auth = Context.get(context, OpenAiAuth.Service)
+  if (input.action === "login") {
+    yield* (input.deviceCode === true ? auth.loginDevice : auth.loginBrowser()).pipe(
+      Effect.flatMap(() => Console.log("OpenAI account login complete.")),
+      Effect.mapError((error) => unavailable(input, error.message)),
+    )
+    return
+  }
+  if (input.action === "logout") {
+    const result = yield* auth.logout.pipe(Effect.mapError((error) => unavailable(input, error.message)))
+    yield* Console.log(
+      result.removed
+        ? "OpenAI account credentials removed. Server revocation is not supported."
+        : "No OpenAI account credentials were stored. Server revocation is not supported.",
+    )
+    return
+  }
+  const status = yield* auth.status.pipe(Effect.mapError((error) => unavailable(input, error.message)))
+  yield* Console.log(
+    status._tag === "Unauthenticated"
+      ? "OpenAI account: unauthenticated"
+      : status._tag === "Present"
+        ? "OpenAI account: credentials present (remote validity not checked)"
+        : status._tag === "RefreshRequired"
+          ? "OpenAI account: refresh required (remote validity not checked)"
+          : "OpenAI account: credential store is corrupt; log in again after removing it",
+  )
+})
 
 const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
   extensions?: ExecutionExtensions.Interface,
@@ -2744,6 +2791,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             if (definition === undefined) return yield* unavailable(input, `Tool ${input.name} does not exist`)
             yield* Console.log(encodeJson(definition))
             return
+          }
+          if (input._tag === "Auth" && options.authOperations !== undefined) {
+            return yield* Effect.scoped(runAuth(input, options.authOperations, options.defaultWorkspace))
           }
           if (
             (input._tag === "Skill" || input._tag === "Mcp" || input._tag === "Extension") &&

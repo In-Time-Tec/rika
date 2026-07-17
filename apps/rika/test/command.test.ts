@@ -136,6 +136,13 @@ it.effect("rejects stream input without stream output", () =>
   }),
 )
 
+it.effect("exposes only the openai account provider name", () =>
+  Effect.gen(function* () {
+    yield* failsWithoutDispatch(["auth", "login", "chatgpt"])
+    yield* failsWithoutDispatch(["auth", "status", "codex"])
+  }),
+)
+
 it.effect("normalizes optional thread-list values", () =>
   Effect.gen(function* () {
     expect(yield* capture(["threads", "list", "--limit", "5"])).toEqual([{ _tag: "Thread", action: "list", limit: 5 }])
@@ -240,6 +247,13 @@ it.effect("dispatches catalog, extension, review, and maintenance operations", (
       [["config", "list"], { _tag: "Config", action: "list" }],
       [["config", "edit", "--workspace"], { _tag: "Config", action: "edit", workspace: true }],
       [["config", "keymap"], { _tag: "Config", action: "keymap" }],
+      [["auth", "login", "openai"], { _tag: "Auth", action: "login", provider: "openai", deviceCode: false }],
+      [
+        ["auth", "login", "openai", "--device-code"],
+        { _tag: "Auth", action: "login", provider: "openai", deviceCode: true },
+      ],
+      [["auth", "status", "openai"], { _tag: "Auth", action: "status", provider: "openai" }],
+      [["auth", "logout", "openai"], { _tag: "Auth", action: "logout", provider: "openai" }],
       [["tools", "list"], { _tag: "ToolCatalog", action: "list" }],
       [["tools", "list", "--mode", "ultra"], { _tag: "ToolCatalog", action: "list", mode: "ultra" }],
       [["tools", "show", "read"], { _tag: "ToolCatalog", action: "show", name: "read" }],
