@@ -2,7 +2,6 @@ import * as BunHttpServer from "@effect/platform-bun/BunHttpServer"
 import * as Operation from "@rika/app/operation-contract"
 import * as InteractiveFeedOverflow from "@rika/app/interactive-feed-overflow"
 import * as ResidentService from "@rika/app/resident-service"
-import * as Thread from "@rika/persistence/thread"
 import {
   Cause,
   Clock,
@@ -109,6 +108,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       {
         readonly connectionId: string
         readonly send: (text: string) => Effect.Effect<void, Operation.OperationUnavailable>
+        readonly sendFrames: (frames: ReadonlyArray<string>) => Effect.Effect<void, Operation.OperationUnavailable>
         readonly sessions: Map<string, ResidentSession>
       }
     >(),
@@ -143,6 +143,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     const feed = yield* Queue.bounded<
       | { readonly _tag: "Event"; readonly event: Operation.InteractiveEvent }
       | { readonly _tag: "Replay"; readonly afterSequence: number }
+      | { readonly _tag: "Overflow" }
     >(options.outboundCapacity)
     const inFlightCapacity = Math.min(options.outboundCapacity, interactiveFeedInFlightCapacity)
     const sendPermits = yield* Queue.bounded<void>(inFlightCapacity)
@@ -152,6 +153,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       number,
       { readonly frames: ReadonlyArray<string>; readonly detail: boolean; readonly barrier: boolean }
     >()
+    const barrierAcknowledgements = new Map<number, Deferred.Deferred<void>>()
     const commands = new Map<number, Deferred.Deferred<void>>()
     const commandQueue = yield* Queue.bounded<{
       readonly sequence: number
@@ -191,6 +193,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       if (outstandingDetails >= options.outboundCapacity || !Queue.offerUnsafe(feed, { _tag: "Event", event })) {
         overflow = InteractiveFeedOverflow.make()
         remember(overflow, event)
+        Queue.offerUnsafe(feed, { _tag: "Overflow" })
         return
       }
       outstandingDetails += 1
@@ -239,22 +242,35 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               "rika.resident.feed.fragments": frames.length,
             }),
           )
-        yield* Effect.forEach(frames, route.send, { discard: true })
+        yield* route.sendFrames(frames)
+        return sequence
       })
     const sendBarrier = (events: ReadonlyArray<Operation.InteractiveEvent>) =>
-      sendNew(
-        (sequence) => ({
-          _tag: "interactive-feed-resync",
-          connectionId: route.connectionId,
-          requestId,
-          sessionId,
-          feedGeneration,
-          sequence,
-          events,
-        }),
-        false,
-        true,
-      ).pipe(Effect.tap(() => Effect.logInfo("resident.feed.barrier_sent")))
+      Effect.gen(function* () {
+        const sequence = yield* sendNew(
+          (messageSequence) => ({
+            _tag: "interactive-feed-resync",
+            connectionId: route.connectionId,
+            requestId,
+            sessionId,
+            feedGeneration,
+            sequence: messageSequence,
+            events,
+          }),
+          false,
+          true,
+        )
+        yield* Effect.logInfo("resident.feed.barrier_sent")
+        const acknowledged = yield* Deferred.make<void>()
+        const alreadyAcknowledged = yield* feedAdmission.withPermits(1)(
+          Effect.sync(() => {
+            if (acknowledgedThrough >= sequence) return true
+            barrierAcknowledgements.set(sequence, acknowledged)
+            return false
+          }),
+        )
+        if (!alreadyAcknowledged) yield* Deferred.await(acknowledged)
+      })
     const sender = Effect.gen(function* () {
       while (true) {
         const item = yield* Queue.take(feed)
@@ -272,20 +288,19 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             true,
             false,
           )
-        else {
+        else if (item._tag === "Replay") {
           const outsideWindow = item.afterSequence < replayFloor - 1
           if (outsideWindow) {
             const retainedBarrier = replayWindow.get(replayFloor)
             if (retainedBarrier !== undefined && retainedBarrier.barrier)
-              yield* Effect.forEach(retainedBarrier.frames, route.send, { discard: true })
+              yield* route.sendFrames(retainedBarrier.frames)
             else
               yield* sendBarrier(
                 genericRecovery("Resident replay request fell outside its bounded current-session window"),
               )
           } else
             for (const [sequence, frame] of replayWindow)
-              if (sequence > item.afterSequence && sequence >= replayFloor)
-                yield* Effect.forEach(frame.frames, route.send, { discard: true })
+              if (sequence > item.afterSequence && sequence >= replayFloor) yield* route.sendFrames(frame.frames)
         }
         if (item._tag === "Event") {
           sentDetails += 1
@@ -301,12 +316,16 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         if ((yield* Queue.size(feed)) === 0 && overflow !== undefined) {
           const state = overflow
           overflow = undefined
+          const reason = state.criticalOverflowed
+            ? "Resident event feed exceeded its bounded non-recoverable event capacity"
+            : "Resident event feed exceeded its bounded current-session window"
+          const events = recoveryEvents(state, reason)
+          yield* sendBarrier(state.criticalOverflowed ? [...events, ...genericRecovery(reason)] : events)
           if (state.criticalOverflowed)
             return yield* Operation.OperationUnavailable.make({
               operation: "InteractiveSession.events",
-              message: "Resident event feed exceeded its bounded non-recoverable event capacity",
+              message: reason,
             })
-          yield* sendBarrier(recoveryEvents(state, "Resident event feed exceeded its bounded current-session window"))
         }
       }
     })
@@ -323,6 +342,11 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             if (frame.detail) outstandingDetails -= 1
           }
           acknowledgedThrough = throughSequence
+          for (const [sequence, acknowledged] of barrierAcknowledgements) {
+            if (sequence > throughSequence) break
+            barrierAcknowledgements.delete(sequence)
+            yield* Deferred.succeed(acknowledged, undefined)
+          }
           for (let index = 0; index < released; index += 1) yield* Queue.offer(sendPermits, undefined)
           return true
         }),
@@ -449,17 +473,13 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const handle = Effect.fn("ResidentTransport.connection")(function* (socket: Socket.Socket) {
     const rawWriter = yield* socket.writer
     const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(options.outboundCapacity)
+    const outboundMessages = yield* Semaphore.make(1)
     const closeWritten = yield* Deferred.make<void>()
-    const writer = (frame: string | Socket.CloseEvent) =>
-      typeof frame === "string" && new TextEncoder().encode(frame).byteLength > maxFrameBytes
-        ? Effect.fail(transportError("Resident frame exceeds maximum size"))
-        : Queue.offer(outbound, frame).pipe(
-            Effect.timeoutOrElse({
-              duration: "1 second",
-              orElse: () => Effect.fail(transportError("Resident outbound queue is overloaded")),
-            }),
-            Effect.asVoid,
-          )
+    const writer = (frame: string | Socket.CloseEvent): Effect.Effect<void, ResidentService.ResidentServiceError> => {
+      if (typeof frame === "string" && new TextEncoder().encode(frame).byteLength > maxFrameBytes)
+        return Effect.fail(transportError("Resident frame exceeds maximum size"))
+      return Queue.offer(outbound, frame).pipe(Effect.asVoid)
+    }
     yield* Effect.forkChild(
       Effect.gen(function* () {
         while (true) {
@@ -719,10 +739,13 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     }),
                   ),
                 )
+              const sendFrames = (frames: ReadonlyArray<string>) =>
+                outboundMessages.withPermits(1)(Effect.forEach(frames, send, { discard: true }))
               yield* Ref.update(routes, (current) =>
                 current.set(message.requestId, {
                   connectionId,
                   send,
+                  sendFrames,
                   sessions: new Map(),
                 }),
               )
@@ -902,6 +925,16 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
 
   const app = Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest
+    if (request.url === "/resident/v1") {
+      const socket = yield* request.upgrade
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const writer = yield* socket.writer
+          yield* writer(new Socket.CloseEvent(4403, "Resident protocol upgrade required"))
+        }),
+      )
+      return HttpServerResponse.empty()
+    }
     if (request.url !== "/resident") return HttpServerResponse.empty({ status: 404 })
     const socket = yield* request.upgrade
     yield* handle(socket)

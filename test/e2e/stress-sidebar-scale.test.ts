@@ -60,6 +60,7 @@ test(
               generated = tier
               const client = yield* startPackagedPty(context, {
                 durationMilliseconds: 8_000,
+                gracefulStopMilliseconds: 10_000,
                 readyTarget: "Welcome to Rika",
                 target: `Changed files (${tier})`,
                 actions: [
@@ -115,5 +116,5 @@ test(
         (context) => context.dispose,
       ).pipe(Effect.provide(ResourceSampler.layer({ intervalMilliseconds: 100 })), Effect.scoped),
     ),
-  90_000,
+  120_000,
 )

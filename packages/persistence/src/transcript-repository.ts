@@ -357,9 +357,7 @@ export const layer = Layer.effect(
                     row.prompt_parts_json === null
                       ? undefined
                       : yield* Schema.decodeUnknownEffect(PromptPartsJson)(row.prompt_parts_json)
-                  const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(
-                    row.execution_route_json,
-                  )
+                  const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(row.execution_route_json)
                   const extensionPin =
                     row.extension_pin_json === null
                       ? undefined

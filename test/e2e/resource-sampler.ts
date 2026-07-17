@@ -109,6 +109,9 @@ const parseProcessTable = (output: string) =>
     .map(parseOrphan)
     .filter((entry): entry is OrphanProcess => entry !== undefined)
 
+const isOwnProbe = (entry: OrphanProcess) =>
+  entry.parentPid === process.pid && /^\(?(?:ps|pgrep|lsof)\)?$/.test(entry.command.split("/").at(-1) ?? "")
+
 const descendantClosure = (processes: ReadonlyArray<OrphanProcess>, roots: ReadonlySet<number>) => {
   const related = new Set(roots)
   let changed = true
@@ -157,7 +160,10 @@ export const layer = (options: { readonly intervalMilliseconds?: number } = {}) 
         pids: new Set<number>(),
         processGroupIds: new Set<number>(),
       })
-      const processTable = output("ps", ["-axo", "pid=,ppid=,pgid=,stat=,comm="]).pipe(Effect.map(parseProcessTable))
+      const processTable = output("ps", ["-axo", "pid=,ppid=,pgid=,stat=,comm="]).pipe(
+        Effect.map(parseProcessTable),
+        Effect.map((processes) => processes.filter((entry) => !isOwnProbe(entry))),
+      )
       const capture = Effect.fn("ResourceSampler.capture")(function* () {
         const processes = yield* processTable
         const state = yield* Ref.get(tracked)
@@ -169,15 +175,19 @@ export const layer = (options: { readonly intervalMilliseconds?: number } = {}) 
         const captured = processes.filter((entry) => related.has(entry.pid))
         yield* Ref.set(tracked, {
           pids: new Set([...state.pids, ...captured.map((entry) => entry.pid)]),
-          processGroupIds: new Set([...state.processGroupIds, ...captured.map((entry) => entry.processGroupId)]),
+          processGroupIds: state.processGroupIds,
         })
         return captured
       })
       const track = Effect.fn("ResourceSampler.track")(function* (pids: ReadonlyArray<number>) {
         const valid = pids.filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid)
+        const processes = yield* processTable
+        const ownedProcessGroups = processes
+          .filter((entry) => valid.includes(entry.pid) && entry.processGroupId === entry.pid)
+          .map((entry) => entry.processGroupId)
         yield* Ref.update(tracked, (state) => ({
           pids: new Set([...state.pids, ...valid]),
-          processGroupIds: new Set([...state.processGroupIds, ...valid]),
+          processGroupIds: new Set([...state.processGroupIds, ...ownedProcessGroups]),
         }))
         yield* capture()
       })

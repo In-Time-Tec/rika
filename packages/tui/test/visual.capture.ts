@@ -240,7 +240,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     [
       "queued-turn",
       {
-        ...replaceQueue({ ...base(), busy: true, busyStatus: "Running Tools" }, [
+        ...replaceQueue({ ...base(), busy: true, activity: { _tag: "Tool", label: "Running Tools" } }, [
           { id: "queued-turn", prompt: "Run verification next" },
         ]),
         queueSelection: "queued-turn",

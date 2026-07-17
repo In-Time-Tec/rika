@@ -56,6 +56,7 @@ const layer = (
     readonly turnRepositoryLayer?: Layer.Layer<TurnRepository.Service>
     readonly resolveExecutionRoute?: () => Effect.Effect<Turn.ExecutionRoutePin>
     readonly toolRuntimeLayer?: Layer.Layer<ToolRuntime.Service>
+    readonly backend?: ExecutionBackend.Interface
   } = {},
 ) =>
   Layer.mergeAll(
@@ -63,7 +64,7 @@ const layer = (
     Operation.productLayer({
       repositoryLayer: options.repositoryLayer ?? ThreadRepository.memoryLayer(),
       turnRepositoryLayer: options.turnRepositoryLayer ?? TurnRepository.memoryLayer(),
-      backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+      backendLayer: Layer.succeed(ExecutionBackend.Service, options.backend ?? backend),
       productAgentLayer: Layer.succeed(ProductAgent.Service, agent),
       toolRuntimeLayer: () => options.toolRuntimeLayer ?? Layer.succeed(ToolRuntime.Service, tool),
       defaultWorkspace: "/work",
@@ -227,9 +228,12 @@ describe("Operation review dispatcher", () => {
         reviewFanOutId: "review:review-turn",
       })
       expect((yield* threads.get(Thread.ThreadId.make("thread")))?.workspace).toBe("/work")
-      expect(output[0]).toContain("## correctness\nok")
-      expect(output[0]).toContain("Review lane failed: bad")
-      expect(output[0]).toContain('{"count":1}')
+      const rendered = output.find(
+        (line): line is string => typeof line === "string" && line.includes("## correctness"),
+      )
+      expect(rendered).toContain("## correctness\nok")
+      expect(rendered).toContain("Review lane failed: bad")
+      expect(rendered).toContain('{"count":1}')
     }),
   )
 
@@ -283,6 +287,88 @@ describe("Operation review dispatcher", () => {
       const error = yield* Effect.flip(operation.run(input()))
       expect(error.message).toContain("Review review:review-turn disappeared")
       expect((yield* turns.get(Turn.TurnId.make("review-turn")))?.status).toBe("failed")
+    }).pipe(Effect.scoped),
+  )
+
+  it.effect("keeps an active review running while reconcile scans it", () =>
+    Effect.gen(function* () {
+      const turns = yield* TurnRepository.makeMemory()
+      const scans = yield* Ref.make(0)
+      const secondScan = yield* Deferred.make<void>()
+      const countedTurns = TurnRepository.Service.of({
+        ...turns,
+        listNonterminal: Ref.updateAndGet(scans, (count) => count + 1).pipe(
+          Effect.tap((count) => (count >= 2 ? Deferred.succeed(secondScan, undefined) : Effect.void)),
+          Effect.andThen(turns.listNonterminal),
+        ),
+      })
+      const reviewStarted = yield* Deferred.make<void>()
+      const registerFanOut = yield* Deferred.make<void>()
+      const fanOutRegistered = yield* Ref.make(false)
+      const inspections = yield* Ref.make(0)
+      const reviewInspection = (state: "joining" | "satisfied") => ({
+        fanOutId: "review:review-turn",
+        parentTurnId: Turn.TurnId.make("review-turn"),
+        state,
+        maxConcurrency: 3,
+        join: "best-effort" as const,
+        members: [],
+      })
+      const agent = ProductAgent.Service.of({
+        invoke: () => Effect.die("unused"),
+        fanOut: () => Effect.die("unused"),
+        inspectFanOut: () => Effect.die("unused"),
+        cancelFanOut: () => Effect.die("unused"),
+        runParallel: () => Effect.die("unused"),
+        runReviewLanes: () =>
+          Deferred.succeed(reviewStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(registerFanOut)),
+            Effect.as(reviewInspection("joining")),
+          ),
+        projectChildren: (inspection) => [
+          {
+            ...inspection,
+            childId: `${inspection.fanOutId}:correctness`,
+            ordinal: 0,
+            state: "completed",
+            output: "ok",
+          },
+        ],
+        cancelChild: () => Effect.die("unused"),
+      })
+      const reviewBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspectWorkflow: () => Effect.sync((): ExecutionBackend.WorkflowInspection | undefined => undefined),
+        inspectFanOut: () =>
+          Ref.update(inspections, (count) => count + 1).pipe(
+            Effect.andThen(Ref.get(fanOutRegistered)),
+            Effect.map((registered) => (registered ? reviewInspection("satisfied") : undefined)),
+          ),
+      })
+      const tool = ToolRuntime.Service.of({
+        run: () => Effect.succeed({ text: "diff --git a/a b/a", truncated: false, exitCode: 0 }),
+      })
+      const context = yield* Layer.build(
+        layer(tool, agent, {
+          turnRepositoryLayer: Layer.succeed(TurnRepository.Service, countedTurns),
+          backend: reviewBackend,
+        }),
+      )
+      const operation = Context.get(context, Operation.Service)
+      const review = yield* Effect.forkChild(operation.run(input()))
+      yield* Deferred.await(reviewStarted)
+
+      yield* Effect.result(operation.run({ _tag: "Workflow", action: "inspect", runId: "missing" }))
+      yield* Deferred.await(secondScan)
+      yield* Effect.yieldNow
+
+      expect(yield* turns.get(Turn.TurnId.make("review-turn"))).toMatchObject({ status: "running" })
+      expect(yield* Ref.get(inspections)).toBe(0)
+
+      yield* Ref.set(fanOutRegistered, true)
+      yield* Deferred.succeed(registerFanOut, undefined)
+      yield* Fiber.join(review)
+      expect(yield* turns.get(Turn.TurnId.make("review-turn"))).toMatchObject({ status: "completed" })
     }).pipe(Effect.scoped),
   )
 

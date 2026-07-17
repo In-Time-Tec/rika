@@ -8,8 +8,8 @@
 ╭─────────────────────────────────────────────────────────────────────── high ─╮
 │ Ctrl+O command palette          Ctrl+R prompt history                        │
 │ Ctrl+V paste images             Shift+Enter newline                          │
-│ Ctrl+S switch modes             Opt+D toggle reasoning effort                │
-│ Ctrl+G edit in $EDITOR          Opt+T toggle tool details                    │
+│ Ctrl+S switch modes                                                          │
+│ Ctrl+G edit in $EDITOR          Opt+T toggle file tree                       │
 │ @ / @@ mention files/threads    Tab/Shift+Tab navigate messages              │
 │ ? toggle this help                                                           │
 │                                                                              │

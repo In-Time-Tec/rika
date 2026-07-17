@@ -66,6 +66,8 @@ export interface PackagedPtyOptions {
   readonly durationMilliseconds?: number
   readonly target?: string
   readonly readyTarget?: string
+  readonly readyTimeoutMilliseconds?: number
+  readonly gracefulStopMilliseconds?: number
   readonly rows?: number
   readonly columns?: number
   readonly actions?: ReadonlyArray<PackagedPtyAction>
@@ -124,6 +126,8 @@ export const startPackagedPty = Effect.fn("PackagedPty.start")(function* (
   const encodedOptions = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
     arguments: options.arguments ?? [],
     durationMs: options.durationMilliseconds ?? 30_000,
+    readyTimeoutMs: options.readyTimeoutMilliseconds ?? 10_000,
+    gracefulStopMs: options.gracefulStopMilliseconds ?? 2_000,
     rows: options.rows ?? 40,
     columns: options.columns ?? 120,
     actions,
@@ -188,7 +192,7 @@ export const startPackagedPty = Effect.fn("PackagedPty.start")(function* (
   if (options.readyTarget !== undefined)
     yield* Deferred.await(screenReady).pipe(
       Effect.timeoutOrElse({
-        duration: "10 seconds",
+        duration: options.readyTimeoutMilliseconds ?? 10_000,
         orElse: () => Effect.die(`Packaged PTY ${processPid} did not render ${options.readyTarget}`),
       }),
     )

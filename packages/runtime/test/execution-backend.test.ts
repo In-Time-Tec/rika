@@ -161,8 +161,13 @@ vi.mock("@relayfx/sdk/sqlite", () =>
                     handler.child(
                       "execution:parent" as never,
                       { id: "grounded", address_id: "address:other", preset_name: "Task", input: { a: 1 } } as never,
+                      { idempotency_key: "workflow-grounded" } as never,
                     ),
-                    handler.child("execution:parent" as never, { id: "default", input: undefined } as never),
+                    handler.child(
+                      "execution:parent" as never,
+                      { id: "default", input: undefined } as never,
+                      { idempotency_key: "workflow-default" } as never,
+                    ),
                     handler.approval("execution:parent" as never, { prompt: "approve" } as never),
                     handler.timer("execution:parent" as never, { duration_ms: 0 } as never),
                     handler.branch(),
@@ -1318,6 +1323,137 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("round-trips every inspected child execution identifier through execution operations", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ cancelStatus: "cancelled" })
+      const childExecutionId = Ids.ChildExecutionId.make("execution:parent:child:Review:call-review")
+      Object.assign(fixture.implementation, {
+        getExecution: () => Effect.succeed({ status: "running" }),
+        inspectExecution: () =>
+          Effect.succeed({
+            status: "running",
+            waiting_on: [],
+            pending_tool_calls: [],
+            child_runs: [{ child_execution_id: childExecutionId, status: "running" }],
+          }),
+      })
+      const inspectedChildId = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        const inspection = yield* backend.inspect("parent")
+        const childId = inspection?.children[0]?.executionId
+        if (childId === undefined) return yield* Effect.die("Missing inspected child")
+        yield* backend.replay(childId)
+        if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
+        yield* backend.pageEvents(childId, "forward")
+        yield* backend.cancel(childId, 10)
+        return childId
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(inspectedChildId).toBe(childExecutionId)
+      expect((yield* Ref.get(fixture.replays)).map((input) => input.execution_id)).toEqual([
+        childExecutionId,
+        childExecutionId,
+      ])
+      expect((yield* Ref.get(fixture.pages)).map((input) => input.execution_id)).toEqual([childExecutionId])
+      expect((yield* Ref.get(fixture.cancellations)).map((input) => input.execution_id)).toEqual([childExecutionId])
+    }),
+  )
+
+  it.effect("surfaces nested child permission asks and approvals through the parent execution", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      const rootExecutionId = Ids.ExecutionId.make("execution:parent")
+      const childExecutionId = Ids.ChildExecutionId.make("execution:parent:child:Review:call-review")
+      const spawned = {
+        ...relayEvent("child_run.spawned", 1, undefined, { child_execution_id: childExecutionId }),
+        execution_id: rootExecutionId,
+        child_execution_id: childExecutionId,
+      }
+      const requested = {
+        ...relayEvent("permission.ask.requested", 1, undefined, {
+          wait_id: "wait-child",
+          tool_call_id: "call-child",
+          tool_name: "read_file",
+        }),
+        execution_id: Ids.ExecutionId.make(childExecutionId),
+      }
+      Object.assign(fixture.implementation, {
+        inspectExecution: (id: Ids.ExecutionId) =>
+          Effect.succeed(
+            id === rootExecutionId
+              ? {
+                  status: "waiting",
+                  waiting_on: [],
+                  pending_tool_calls: [],
+                  child_runs: [{ child_execution_id: childExecutionId, status: "waiting" }],
+                }
+              : {
+                  status: "waiting",
+                  waiting_on: [
+                    {
+                      wait_id: "wait-child",
+                      execution_id: childExecutionId,
+                      mode: "reply",
+                      state: "open",
+                      metadata: {},
+                      created_at: 2,
+                    },
+                  ],
+                  pending_tool_calls: [],
+                  child_runs: [],
+                },
+          ),
+        followExecution: (input: { readonly execution_id: Ids.ExecutionId }) =>
+          Stream.fromIterable(
+            (input.execution_id === rootExecutionId ? [spawned] : [requested]).map((event) => ({
+              _tag: "event" as const,
+              event,
+            })),
+          ),
+        listPendingApprovals: (input: { readonly execution_id: Ids.ExecutionId }) =>
+          Effect.succeed({
+            approvals:
+              String(input.execution_id) === String(childExecutionId)
+                ? [
+                    {
+                      wait_id: "approval-child",
+                      execution_id: childExecutionId,
+                      tool_call_id: "call-approval-child",
+                      tool_name: "shell",
+                      input: { command: "pwd" },
+                      requested_at: 3,
+                    },
+                  ]
+                : [],
+          }),
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        if (backend.follow === undefined) return yield* Effect.die("Missing execution follow")
+        return {
+          followed: yield* backend.follow("parent", undefined),
+          approvals: yield* backend.listApprovals("parent"),
+        }
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.followed.status).toBe("waiting")
+      expect(result.followed.events.find((event) => event.type === "permission.ask.requested")?.data).toMatchObject({
+        wait_id: "wait-child",
+        execution_id: childExecutionId,
+      })
+      expect(result.approvals).toEqual([
+        {
+          waitId: "approval-child",
+          executionId: childExecutionId,
+          callId: "call-approval-child",
+          toolName: "shell",
+          input: { command: "pwd" },
+          requestedAt: 3,
+        },
+      ])
+    }),
+  )
+
   it.effect("durably carries workspace, route, token budget, and compaction through fan-out", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
@@ -1684,11 +1820,11 @@ describe("ExecutionBackend Relay client adapter", () => {
       const starts = yield* Ref.get(fixture.starts)
       expect(registrations.length).toBeGreaterThan(0)
       expect(starts).toHaveLength(registrations.length)
-      expect(starts.map((start) => (start as { agent_revision?: number }).agent_revision)).toEqual(
+      expect(starts.map((entry) => (entry as { agent_revision?: number }).agent_revision)).toEqual(
         registrations.map((_, index) => 40 + index),
       )
-      for (const start of starts) {
-        expect(start.session_id).toBe(`session:child:${String(start.execution_id)}`)
+      for (const entry of starts) {
+        expect(entry.session_id).toBe(`session:child:${String(entry.execution_id)}`)
       }
       for (const registration of registrations) {
         const typed = registration as { metadata?: Record<string, unknown>; handoff_targets?: unknown }

@@ -31,7 +31,7 @@ test("native character frames and deterministic screenshots match the frozen bas
         )
         for (const frame of frames)
           for (const removedActivity of removedActivityLabels) expect(frame).not.toMatch(removedActivity)
-        expect(yield* fileSystem.readFileString(path.join(actual, "tool.frame.txt"))).toContain("⠿ Exploring 1 file ▸")
+        expect(yield* fileSystem.readFileString(path.join(actual, "tool.frame.txt"))).toContain("⠭ Exploring 1 file ▸")
         const evidenceScenarios = [
           "markdown",
           "diff-complex",

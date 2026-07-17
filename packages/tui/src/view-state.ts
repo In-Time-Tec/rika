@@ -7,8 +7,6 @@ import { filter, type PaletteAction } from "./palette"
 import { expandableRowIds, transcriptUnitId, transcriptUnits } from "./transcript-units"
 
 export const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
-export const ReasoningEffort = Schema.Literals(["low", "medium", "high", "xhigh"])
-export type ReasoningEffort = typeof ReasoningEffort.Type
 export type Mode = typeof Mode.Type
 
 export const Activity = Schema.Union([
@@ -51,7 +49,7 @@ export const formatActivity = (activity: Activity | undefined): string | undefin
   return activity._tag
 }
 
-export const streamActivity = (
+const streamActivityImpl = (
   current: Activity | undefined,
   tag: "Thinking" | "Streaming",
   text: string,
@@ -62,6 +60,15 @@ export const streamActivity = (
     current?._tag === tag && current.blockId === blockId ? current.bytes + utf8ByteLength(text) : utf8ByteLength(text),
   ...(blockId === undefined ? {} : { blockId }),
 })
+
+export const streamActivity: {
+  (current: Activity | undefined, tag: "Thinking" | "Streaming", text: string, blockId: string | undefined): Activity
+  (
+    tag: "Thinking" | "Streaming",
+    text: string,
+    blockId: string | undefined,
+  ): (current: Activity | undefined) => Activity
+} = Function.dual(4, streamActivityImpl)
 
 export const Entry = Schema.Struct({
   role: Schema.Literals(["user", "assistant", "notice"]),
@@ -228,15 +235,14 @@ const ChangedFilesSchema = Schema.Union([
   LoadableLoadingSchema,
   Schema.TaggedStruct("Ready", { value: Schema.Array(ChangedFile) }),
 ])
+const ThreadPreviewValueSchema = Schema.Struct({
+  threadId: Schema.String,
+  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(Schema.Unknown) })),
+})
 const ThreadPreviewSchema = Schema.Union([
   LoadableIdleSchema,
-  LoadableLoadingSchema,
-  Schema.TaggedStruct("Ready", {
-    value: Schema.Struct({
-      threadId: Schema.String,
-      turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(Schema.Unknown) })),
-    }),
-  }),
+  Schema.TaggedStruct("Loading", { previous: Schema.optionalKey(ThreadPreviewValueSchema) }),
+  Schema.TaggedStruct("Ready", { value: ThreadPreviewValueSchema }),
 ])
 
 export const QueueItem = Schema.Struct({
@@ -275,6 +281,7 @@ export const Model = Schema.Struct({
   filePicker: FilePickerStateSchema,
   threadSwitcher: ThreadSwitcherStateSchema,
   shortcutsOpen: Schema.Boolean,
+  shortcutsTrigger: Schema.optional(Schema.Finite),
   pendingAction: Schema.optional(Schema.Unknown),
   composerHeight: Schema.Finite,
   width: Schema.Finite,
@@ -300,7 +307,6 @@ export const Model = Schema.Struct({
   currentThreadId: Schema.optional(Schema.String),
   currentThreadTitle: Schema.optional(Schema.String),
   fastMode: Schema.Boolean,
-  reasoningEffort: ReasoningEffort,
   changedFilesOpen: Schema.Boolean,
   changedFiles: ChangedFilesSchema,
   sidebarWidth: Schema.Finite,
@@ -347,7 +353,6 @@ export type Message =
   | { readonly _tag: "DetailToggled"; readonly id?: string }
   | { readonly _tag: "AllDetailsToggled" }
   | { readonly _tag: "FastModeToggled" }
-  | { readonly _tag: "ReasoningEffortCycled" }
   | { readonly _tag: "SidebarViewToggled" }
   | { readonly _tag: "SidebarWidthChanged"; readonly width: number }
   | { readonly _tag: "ComposerReplaced"; readonly text: string }
@@ -478,9 +483,6 @@ export const replaceTurnPrompt: {
   return { ...model, entries }
 })
 
-export const defaultReasoningEffort = (mode: Mode): ReasoningEffort =>
-  mode === "low" ? "low" : mode === "medium" ? "medium" : "high"
-
 const clampSidebarWidth = (width: number, terminalWidth: number): number =>
   Math.max(24, Math.min(width, Math.max(24, terminalWidth - 40)))
 
@@ -508,6 +510,7 @@ export const initial: {
     filePicker: { open: false, query: "", selected: 0, items: idle },
     threadSwitcher: { open: false, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     shortcutsOpen: false,
+    shortcutsTrigger: undefined,
     composerHeight: 5,
     width: 80,
     height: 24,
@@ -524,7 +527,6 @@ export const initial: {
     seenExecutionEventKeys: [],
     activeTurnId: undefined,
     fastMode: false,
-    reasoningEffort: defaultReasoningEffort(mode),
     changedFilesOpen: false,
     changedFiles: idle,
     sidebarWidth: 36,
@@ -647,6 +649,47 @@ const erase = (value: Model, length: number): Model => ({
   input: value.input.slice(0, Math.max(0, value.cursor - length)) + value.input.slice(value.cursor),
   cursor: Math.max(0, value.cursor - length),
 })
+
+const questionKey = (key: Key): boolean => !key.ctrl && !key.alt && !key.meta && key.sequence === "?"
+
+const composerContext = (model: Model): boolean =>
+  !model.threadSwitcher.open &&
+  !model.threadSidebar.focused &&
+  !model.paletteOpen &&
+  !model.palette.open &&
+  !model.modePicker.open &&
+  !model.filePicker.open
+
+const continueShortcutsAfterEdit = (before: Model, after: Model): Model => {
+  const trigger = before.shortcutsTrigger
+  if (trigger === undefined || before.input[trigger] !== "?" || !composerContext(after))
+    return { ...after, shortcutsOpen: false, shortcutsTrigger: undefined }
+  if (before.input === after.input) return { ...after, shortcutsOpen: true, shortcutsTrigger: trigger }
+  let prefix = 0
+  while (prefix < before.input.length && prefix < after.input.length && before.input[prefix] === after.input[prefix])
+    prefix += 1
+  let suffix = 0
+  while (
+    suffix < before.input.length - prefix &&
+    suffix < after.input.length - prefix &&
+    before.input[before.input.length - 1 - suffix] === after.input[after.input.length - 1 - suffix]
+  )
+    suffix += 1
+  const oldEnd = before.input.length - suffix
+  const nextTrigger =
+    trigger < prefix ? trigger : trigger >= oldEnd ? trigger + after.input.length - before.input.length : -1
+  return nextTrigger >= 0 && after.input[nextTrigger] === "?"
+    ? { ...after, shortcutsOpen: true, shortcutsTrigger: nextTrigger }
+    : { ...after, shortcutsOpen: false, shortcutsTrigger: undefined }
+}
+
+const insertWhileShortcutsOpen = (model: Model, value: string): Model => {
+  const trigger = model.shortcutsTrigger
+  const next = insert(model, value)
+  return trigger === undefined
+    ? next
+    : { ...next, shortcutsTrigger: model.cursor <= trigger ? trigger + value.length : trigger }
+}
 
 const pastedImagePath = (value: string): string | undefined => {
   const trimmed = value.trim()
@@ -807,8 +850,10 @@ export const update: {
   (message: Message): (model: Model) => Model
 } = Function.dual(2, (model: Model, message: Message): Model => {
   switch (message._tag) {
-    case "Pasted":
-      return insertPaste(model, message.text)
+    case "Pasted": {
+      const next = insertPaste(model, message.text)
+      return model.shortcutsOpen ? continueShortcutsAfterEdit(model, next) : next
+    }
     case "ImageInserted":
       return insertImage(model, message.path)
     case "ImageRemoved":
@@ -991,7 +1036,7 @@ export const update: {
                     : incoming._tag === "ToolResult"
                       ? undefined
                       : incoming._tag === "Reasoning"
-                        ? streamActivity(model.activity, "Thinking", incoming.text)
+                        ? streamActivity(model.activity, "Thinking", incoming.text, undefined)
                         : incoming._tag === "Permission" && incoming.status === "pending"
                           ? { _tag: "Approval" as const }
                           : model.activity,
@@ -1071,13 +1116,13 @@ export const update: {
           ...model,
           blocks,
           items: [...model.items, { _tag: "Block", index: model.blocks.length }],
-          ...(model.busy ? { activity: streamActivity(model.activity, "Thinking", message.text) } : {}),
+          ...(model.busy ? { activity: streamActivity(model.activity, "Thinking", message.text, undefined) } : {}),
         }
       }
       return {
         ...model,
         blocks,
-        ...(model.busy ? { activity: streamActivity(model.activity, "Thinking", message.text) } : {}),
+        ...(model.busy ? { activity: streamActivity(model.activity, "Thinking", message.text, undefined) } : {}),
       }
     }
     case "ReasoningToggled": {
@@ -1127,7 +1172,7 @@ export const update: {
                 } as const,
               ],
         busy: true,
-        activity: streamActivity(model.activity, "Streaming", message.text),
+        activity: streamActivity(model.activity, "Streaming", message.text, undefined),
       }
     }
     case "AssistantCompleted": {
@@ -1164,7 +1209,7 @@ export const update: {
                 },
               ],
         busy: model.busy,
-        activity: model.busy ? model.activity : undefined,
+        activity: undefined,
       }
     }
     case "ExecutionCompleted":
@@ -1220,7 +1265,7 @@ export const update: {
       else expanded.add(id)
       return {
         ...model,
-        detailSelection: id,
+        detailSelection: message.id === undefined ? id : model.detailSelection,
         expandedRowKeys: [...expanded],
       }
     }
@@ -1233,10 +1278,6 @@ export const update: {
     }
     case "FastModeToggled":
       return { ...model, fastMode: !model.fastMode }
-    case "ReasoningEffortCycled": {
-      const efforts = ["low", "medium", "high", "xhigh"] as const
-      return { ...model, reasoningEffort: efforts[(efforts.indexOf(model.reasoningEffort) + 1) % efforts.length]! }
-    }
     case "SidebarViewToggled":
       return { ...model, changedFilesOpen: !model.changedFilesOpen, workspaceFilesOpen: false }
     case "ChangedFilesRequested":
@@ -1245,12 +1286,19 @@ export const update: {
       if (model.changedFiles._tag === "Ready" && sameChangedFiles(model.changedFiles.value, message.files)) return model
       return { ...model, changedFiles: ready([...message.files]) }
     }
-    case "ThreadPreviewRequested":
+    case "ThreadPreviewRequested": {
+      const previous =
+        model.threadPreview._tag === "Ready"
+          ? model.threadPreview.value
+          : model.threadPreview._tag === "Loading"
+            ? model.threadPreview.previous
+            : undefined
       return {
         ...model,
-        threadPreview: loading,
+        threadPreview: { _tag: "Loading", ...(previous === undefined ? {} : { previous }) },
         threadSwitcher: { ...model.threadSwitcher, previewScroll: 0 },
       }
+    }
     case "ThreadOpenRequested":
       return { ...model, threadLoading: true }
     case "ThreadOpenCompleted":
@@ -1264,7 +1312,14 @@ export const update: {
         }),
       }
     case "ComposerReplaced":
-      return { ...model, input: message.text, cursor: message.text.length, pastedText: [] }
+      return {
+        ...model,
+        input: message.text,
+        cursor: message.text.length,
+        pastedText: [],
+        shortcutsOpen: false,
+        shortcutsTrigger: undefined,
+      }
     case "KeyPressed": {
       const key = message.key
       if (key.eventType === "release") return model
@@ -1486,15 +1541,6 @@ export const update: {
           shortcutsOpen: false,
         }
       }
-      if (!key.ctrl && !key.alt && !key.meta && key.sequence === "?" && !model.busy && model.input.length === 0)
-        return {
-          ...model,
-          shortcutsOpen: !model.shortcutsOpen,
-          paletteOpen: false,
-          palette: { open: false, query: "", selected: 0 },
-          modePicker: { ...model.modePicker, open: false },
-          filePicker: { ...model.filePicker, open: false },
-        }
       if (key.ctrl && key.name === "c" && model.busy)
         return { ...model, activity: { _tag: "Cancelling" }, pendingAction: { _tag: "Cancel" } }
       if (key.ctrl && key.name === "s" && model.busy && model.input.length > 0)
@@ -1504,7 +1550,6 @@ export const update: {
       if (key.alt && key.name === "t") {
         return update(model, { _tag: "WorkspaceFilesToggled" })
       }
-      if (key.alt && key.name === "d") return update(model, { _tag: "ReasoningEffortCycled" })
       if (key.alt && key.name === "s") return update(model, { _tag: "SidebarViewToggled" })
       if (
         key.name === "escape" &&
@@ -1517,8 +1562,17 @@ export const update: {
           modePicker: { ...model.modePicker, open: false },
           filePicker: { ...model.filePicker, open: false, query: "", selected: 0 },
           shortcutsOpen: false,
+          shortcutsTrigger: undefined,
         }
-      if (model.shortcutsOpen) return model
+      if (model.shortcutsOpen) {
+        if (questionKey(key)) return { ...model, shortcutsOpen: false, shortcutsTrigger: undefined }
+        if (isPrintable(key)) return insertWhileShortcutsOpen(model, key.sequence)
+        const next = update(
+          { ...model, shortcutsOpen: false, shortcutsTrigger: undefined },
+          { _tag: "KeyPressed", key },
+        )
+        return continueShortcutsAfterEdit(model, next)
+      }
       if (model.modePicker.open) {
         const selected =
           key.name === "left" || key.name === "up"
@@ -1527,9 +1581,8 @@ export const update: {
               ? (model.modePicker.selected + 1) % 4
               : model.modePicker.selected
         const mode = model.busy ? model.mode : (["low", "medium", "high", "ultra"] as const)[selected]!
-        const reasoningEffort = mode === model.mode ? model.reasoningEffort : defaultReasoningEffort(mode)
-        if (key.name === "return") return { ...model, mode, reasoningEffort, modePicker: { open: false, selected } }
-        return { ...model, mode, reasoningEffort, modePicker: { open: true, selected } }
+        if (key.name === "return") return { ...model, mode, modePicker: { open: false, selected } }
+        return { ...model, mode, modePicker: { open: true, selected } }
       }
       if (model.palette.open) {
         const results = filter(model.palette.query)
@@ -1643,6 +1696,20 @@ export const update: {
         if (key.name === "right" || key.name === "down" || key.name === "tab")
           return update(model, { _tag: "PermissionSelectionMoved", offset: 1 })
         if (key.name === "return") return update(model, { _tag: "PermissionDecisionSelected", id: permission.id })
+        if (questionKey(key)) return model
+      }
+      if (questionKey(key)) {
+        const trigger = model.cursor
+        const next = insert(model, "?")
+        return {
+          ...next,
+          shortcutsOpen: true,
+          shortcutsTrigger: trigger,
+          paletteOpen: false,
+          palette: { open: false, query: "", selected: 0 },
+          modePicker: { ...model.modePicker, open: false },
+          filePicker: { ...model.filePicker, open: false },
+        }
       }
       if ((key.name === "tab" || key.name === "backtab") && !key.ctrl && !key.alt && !key.meta)
         return update(model, { _tag: "DetailMoved", offset: key.name === "backtab" || key.shift ? -1 : 1 })

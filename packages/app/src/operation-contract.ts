@@ -515,7 +515,6 @@ export const InteractiveCommand = Schema.Union([
     promptParts: Schema.optionalKey(Schema.Array(Turn.PromptPart)),
     modelTuning: Schema.optionalKey(
       Schema.Struct({
-        reasoningEffort: Schema.optionalKey(Schema.String),
         fastMode: Schema.optionalKey(Schema.Boolean),
       }),
     ),
@@ -527,6 +526,7 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("Steer"), text: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
+  Schema.Struct({ _tag: Schema.tag("NewThread") }),
   Schema.Struct({
     _tag: Schema.tag("ResolvePermission"),
     waitId: Schema.String,
@@ -556,7 +556,7 @@ export interface InteractiveSession {
     prompt: string,
     mode?: "low" | "medium" | "high" | "ultra",
     promptParts?: ReadonlyArray<Turn.PromptPart>,
-    modelTuning?: { readonly reasoningEffort?: string; readonly fastMode?: boolean },
+    modelTuning?: { readonly fastMode?: boolean },
   ) => Effect.Effect<void, OperationUnavailable>
   readonly shell: (command: string, incognito: boolean) => Effect.Effect<void, OperationUnavailable>
   readonly editQueued: (turnId: string, prompt: string) => Effect.Effect<void, OperationUnavailable>
@@ -565,6 +565,7 @@ export interface InteractiveSession {
   readonly steer: (text: string) => Effect.Effect<void, OperationUnavailable>
   readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly cancel: Effect.Effect<void, OperationUnavailable>
+  readonly newThread: Effect.Effect<void, OperationUnavailable>
   readonly resolvePermission: (
     waitId: string,
     kind: "permission" | "tool-approval",
@@ -596,6 +597,8 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.interruptAndSend(command.prompt)
     case "Cancel":
       return session.cancel
+    case "NewThread":
+      return session.newThread
     case "ResolvePermission":
       return session.resolvePermission(command.waitId, command.kind, command.decision)
     case "SelectThread":

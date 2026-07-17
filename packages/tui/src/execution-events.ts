@@ -51,22 +51,13 @@ const projectUnitsImpl = (
 export const projectUnits: {
   (model: import("./view-state").Model, units: ReadonlyArray<Unit>): import("./view-state").Model
   (units: ReadonlyArray<Unit>): (model: import("./view-state").Model) => import("./view-state").Model
-} = Function.dual(
-  2,
-  (model: import("./view-state").Model, units: ReadonlyArray<Unit>): import("./view-state").Model =>
-    projectUnitsImpl(model, units),
+} = Function.dual(2, (model: import("./view-state").Model, units: ReadonlyArray<Unit>): import("./view-state").Model =>
+  projectUnitsImpl(model, units),
 )
 
 export const projectChildUnits: {
-  (
-    model: import("./view-state").Model,
-    parentId: string,
-    units: ReadonlyArray<Unit>,
-  ): import("./view-state").Model
-  (
-    parentId: string,
-    units: ReadonlyArray<Unit>,
-  ): (model: import("./view-state").Model) => import("./view-state").Model
+  (model: import("./view-state").Model, parentId: string, units: ReadonlyArray<Unit>): import("./view-state").Model
+  (parentId: string, units: ReadonlyArray<Unit>): (model: import("./view-state").Model) => import("./view-state").Model
 } = Function.dual(3, (model: import("./view-state").Model, parentId: string, units: ReadonlyArray<Unit>) =>
   projectUnitsImpl(model, units, parentId),
 )

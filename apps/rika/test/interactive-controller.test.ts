@@ -3,7 +3,7 @@ import type * as Operation from "@rika/app/operation"
 import * as Thread from "@rika/persistence/thread"
 import * as Turn from "@rika/persistence/turn"
 import * as Transcript from "@rika/transcript"
-import { ViewState } from "@rika/tui"
+import { Keys, Palette, ViewState } from "@rika/tui"
 import { expect, it } from "vitest"
 
 const thread: Thread.Thread = {
@@ -60,6 +60,16 @@ const initialState = (): InteractiveController.State => ({
   projections: new Map(),
   threadCostUsd: 0,
   selectionEpoch: 0,
+})
+
+const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
+  name: input.name,
+  ctrl: input.ctrl ?? false,
+  alt: input.alt ?? false,
+  meta: input.meta ?? false,
+  shift: input.shift ?? false,
+  sequence: input.sequence ?? "",
+  eventType: input.eventType ?? "press",
 })
 
 it("projects prepended pages without rebuilding the loaded transcript", () => {
@@ -133,6 +143,67 @@ it("clears queue edit mode when a selection loads a thread", () => {
   })
   expect(loaded.state.model.editingTurnId).toBeUndefined()
   expect(loaded.state.model.editReturn).toBeUndefined()
+})
+
+it("maps the new-thread palette action to a command and resets the transcript from the fresh selection", () => {
+  const populated = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 1,
+    queue: [{ id: Turn.TurnId.make("queued"), prompt: "queued" }],
+    thread,
+    entries: entries("old", 1, [
+      { cursor: "answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "old answer" },
+    ]),
+    hasOlder: false,
+    threadCostUsd: 1,
+  }).state
+
+  expect(InteractiveController.paletteCommand({ _tag: "NewThread" })).toEqual({ _tag: "NewThread" })
+  expect(InteractiveController.paletteCommands).toContainEqual({
+    id: "new-thread",
+    category: "thread",
+    label: "New thread",
+    action: { _tag: "NewThread" },
+  })
+  const palette: Array<InteractiveController.PaletteCommand> = []
+  InteractiveController.installPaletteCommands(palette)
+  InteractiveController.installPaletteCommands(palette)
+  expect(palette).toEqual(InteractiveController.paletteCommands)
+  InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
+  let paletteModel = ViewState.update(ViewState.initial("/work"), {
+    _tag: "KeyPressed",
+    key: key({ name: "o", ctrl: true }),
+  })
+  paletteModel = ViewState.update(paletteModel, { _tag: "KeyPressed", key: key({ name: "return" }) })
+  expect(paletteModel.pendingAction).toEqual({ _tag: "NewThread" })
+  const freshThread = { ...thread, id: Thread.ThreadId.make("fresh"), title: "New thread" }
+  const reset = InteractiveController.update(populated, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread: freshThread,
+    entries: [],
+    hasOlder: false,
+    threadCostUsd: 0,
+  }).state
+
+  expect(reset.model).toMatchObject({
+    currentThreadId: "fresh",
+    currentThreadTitle: "New thread",
+    entries: [],
+    blocks: [],
+    items: [],
+    queue: [],
+    queueRevision: 0,
+    costUsd: 0,
+  })
+  expect(reset.replayTurns.size).toBe(0)
+  expect(reset.projections.size).toBe(0)
+  expect(reset.revisions.size).toBe(0)
 })
 
 it("defaults the queue selection to the newest item when the prior selection is gone", () => {
@@ -470,6 +541,54 @@ it("projects replayed child execution tools beneath the matching subagent", () =
   expect(child.state.revisions.get("parent:child:agent")).toBe(0)
 })
 
+it("maps semantic stream events to counters and inline tool activity without Waiting", () => {
+  let state = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("active", 2),
+    hasOlder: false,
+    threadCostUsd: 0,
+    activeTurn: entries("active", 2)[0]!.turn,
+  }).state
+  const patch = (sequence: number, type: string, text?: string, data?: Readonly<Record<string, unknown>>) => {
+    state = InteractiveController.update(state, {
+      _tag: "TranscriptPatched",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      turnId: Turn.TurnId.make("active"),
+      event: {
+        cursor: `event-${sequence}`,
+        sequence,
+        type,
+        createdAt: sequence,
+        ...(text === undefined ? {} : { text }),
+        ...(data === undefined ? {} : { data }),
+      },
+      revision: sequence,
+    }).state
+  }
+
+  patch(0, "model.reasoning.delta", "12345678")
+  expect(ViewState.formatActivity(state.model.activity)).toBe("Thinking 2 tok")
+  patch(1, "model.reasoning.delta", "🙂")
+  expect(ViewState.formatActivity(state.model.activity)).toBe("Thinking 3 tok")
+  patch(2, "model.output.delta", "abcdefgh")
+  expect(ViewState.formatActivity(state.model.activity)).toBe("Streaming 2 tok")
+  patch(3, "tool.call.requested", undefined, {
+    tool_call_id: "read",
+    tool_name: "read_file",
+    input: { path: "src/a.ts" },
+  })
+  expect(ViewState.formatActivity(state.model.activity)).toBe("Exploring src/a.ts")
+  patch(4, "tool.result.received", undefined, { tool_call_id: "read", output: "contents" })
+  expect(ViewState.formatActivity(state.model.activity)).toBeUndefined()
+  expect(JSON.stringify(state.model)).not.toContain("Waiting")
+})
+
 it("keeps the authoritative thread cost stable while older pages are prepended", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
@@ -510,7 +629,7 @@ it("clears working state when the semantic event stream reaches a terminal event
   const completed = InteractiveController.update(
     {
       ...page.state,
-      model: { ...page.state.model, activeTurnId: "new", busy: true, busyStatus: "Waiting" },
+      model: { ...page.state.model, activeTurnId: "new", busy: true, activity: { _tag: "Sending" } },
     },
     {
       _tag: "TranscriptPatched",
@@ -522,7 +641,7 @@ it("clears working state when the semantic event stream reaches a terminal event
     },
   )
 
-  expect(completed.state.model).toMatchObject({ busy: false, busyStatus: undefined, activeTurnId: undefined })
+  expect(completed.state.model).toMatchObject({ busy: false, activity: undefined, activeTurnId: undefined })
 })
 
 it("keeps the newest logical selection when delayed A to B to A work arrives", () => {

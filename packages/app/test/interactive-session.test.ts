@@ -450,7 +450,7 @@ describe("InteractiveSession controls", () => {
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
 
-      const active = yield* Effect.forkChild(
+      const activeFiber = yield* Effect.forkChild(
         session.submit("active").pipe(Effect.andThen(Deferred.succeed(activeSubmitted, undefined))),
       )
       yield* Deferred.await(activeStarted)
@@ -493,7 +493,7 @@ describe("InteractiveSession controls", () => {
       yield* Deferred.succeed(releaseActive, undefined)
       yield* Deferred.await(pendingStarted)
       yield* Effect.yieldNow
-      yield* Fiber.join(active)
+      yield* Fiber.join(activeFiber)
       yield* Fiber.join(pending)
       yield* Fiber.join(removed)
       expect(yield* turns.get(Turn.TurnId.make("turn-1"))).toMatchObject({ status: "completed" })

@@ -223,7 +223,7 @@ const program = Effect.scoped(
             () => fileSystem.remove(resolutionPackage, { recursive: true, force: true }).pipe(Effect.ignore),
           )
         }
-        const compile = (entry: string, output: string) =>
+        const compile = (entry: string, outputName: string) =>
           run(
             "bun",
             [
@@ -234,10 +234,10 @@ const program = Effect.scoped(
                 .filter((packageName) => packageName !== target.opentui)
                 .flatMap((packageName) => ["--external", packageName]),
               "--outfile",
-              path.join(stage, "bin", output),
+              path.join(stage, "bin", outputName),
               path.join(root, "apps/rika/src", entry),
             ],
-            `build ${name} ${output}`,
+            `build ${name} ${outputName}`,
           )
         yield* compile("client-main.ts", "rika")
         yield* compile("main.ts", ".rika-runtime")

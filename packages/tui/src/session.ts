@@ -1,8 +1,7 @@
 import { Function } from "effect"
-import type { Mode, PermissionDecision, PromptPart, ReasoningEffort } from "./view-state"
+import type { Mode, PermissionDecision, PromptPart } from "./view-state"
 
 export interface ModelTuning {
-  readonly reasoningEffort?: ReasoningEffort
   readonly fastMode?: boolean
 }
 

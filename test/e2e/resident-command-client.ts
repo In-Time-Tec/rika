@@ -82,8 +82,16 @@ const openClient = async (context: Sandbox, threadId: string): Promise<ResidentC
       if (message._tag === "interactive-started") {
         sessionId = String(message.sessionId)
         feedGeneration = String(message.feedGeneration)
-        clearTimeout(timer)
-        resolve()
+        commandSequence += 1
+        send({
+          _tag: "interactive-command",
+          connectionId,
+          requestId,
+          sessionId,
+          feedGeneration,
+          commandSequence,
+          command: { _tag: "SelectThread", threadId, selectionEpoch: 1 },
+        })
         return
       }
       if (message._tag === "interactive-feed-event" || message._tag === "interactive-feed-resync") {
@@ -100,6 +108,19 @@ const openClient = async (context: Sandbox, threadId: string): Promise<ResidentC
           throughSequence: sequence,
         })
         changed()
+        if (
+          events.some(
+            (event) =>
+              event._tag === "SelectionLoaded" &&
+              typeof event.thread === "object" &&
+              event.thread !== null &&
+              "id" in event.thread &&
+              event.thread.id === threadId,
+          )
+        ) {
+          clearTimeout(timer)
+          resolve()
+        }
         return
       }
       if (message._tag === "interactive-command-completed" || message._tag === "interactive-command-failed") {

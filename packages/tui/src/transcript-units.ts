@@ -265,11 +265,8 @@ export const transcriptUnitId: {
     return `entry:${item?.id ?? `${entry?.turnId ?? "legacy"}:${entry?.role ?? "entry"}:${unit.entry}`}`
   }
   if (unit.kind === "tool") {
-    const ids = unit.blocks.map((index) => {
-      const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
-      return block.id
-    })
-    return `tool:${ids.join("+")}`
+    const block = model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
+    return `tool:${block.id}`
   }
   const block = model.blocks[unit.block] as TranscriptBlock
   const item = orderedTranscriptItems(model).find(

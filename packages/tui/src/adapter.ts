@@ -16,8 +16,11 @@ import {
   italic,
   underline,
   RGBA,
+  SystemClock,
   StyledText,
+  type Clock as OpenTuiClock,
   type TextChunk,
+  type TimerHandle,
 } from "@opentui/core"
 import type { ColorInput, KeyEvent, MouseEvent, PasteEvent } from "@opentui/core"
 import cliSpinners from "cli-spinners"
@@ -29,10 +32,10 @@ import { fromOpenTui, type Key } from "./keys"
 import {
   composerHeight,
   contentColumnWidth,
-  defaultReasoningEffort,
   displayInput,
   filteredFiles,
   filteredThreads,
+  formatActivity,
   initial,
   isLoading,
   isNarrow,
@@ -70,8 +73,55 @@ import {
 } from "./transcript-units"
 
 export const spinnerFrames: ReadonlyArray<string> = cliSpinners.dots.frames
-export const spinnerInterval = 160
-export const idleSpinnerFrame = "⠿"
+export const statusSpinnerFrames: ReadonlyArray<string> = ["∼", "≈", "≋", "≈", "∼"]
+export const spinnerInterval = 200
+export const idleSpinnerFrame = "⠭"
+
+export class ToolSpinner {
+  private state = [true, false, true, false, true, false, true, false]
+  private previousState: ReadonlyArray<boolean> = []
+  private generation = 0
+  private readonly neighborMap = [
+    [1, 3, 4, 5, 7],
+    [0, 2, 4, 5, 6],
+    [1, 3, 5, 6, 7],
+    [0, 2, 4, 6, 7],
+    [0, 1, 3, 5, 7],
+    [0, 1, 2, 4, 6],
+    [1, 2, 3, 5, 7],
+    [0, 2, 3, 4, 6],
+  ]
+
+  constructor(private readonly random: () => number = Math.random) {}
+
+  step(): void {
+    const next = this.state.map((alive, index) => {
+      const neighbors = this.neighborMap[index]!.filter((neighbor) => this.state[neighbor]).length
+      return alive ? neighbors === 2 || neighbors === 3 : neighbors === 3 || neighbors === 6
+    })
+    const stable = next.every((alive, index) => alive === this.state[index])
+    const repeats = this.previousState.length > 0 && next.every((alive, index) => alive === this.previousState[index])
+    this.previousState = [...this.state]
+    this.state = next
+    this.generation += 1
+    const live = next.filter(Boolean).length
+    if (stable || repeats || this.generation >= 15 || live < 2) {
+      let seeded: Array<boolean>
+      do seeded = Array.from({ length: 8 }, () => this.random() > 0.6)
+      while (seeded.filter(Boolean).length < 3)
+      this.state = seeded
+      this.previousState = []
+      this.generation = 0
+    }
+  }
+
+  toBraille(): string {
+    const dots = [0, 1, 2, 6, 3, 4, 5, 7]
+    let point = 0x2800
+    for (const [index, alive] of this.state.entries()) if (alive) point |= 1 << dots[index]!
+    return String.fromCharCode(point)
+  }
+}
 
 const markdownWidthForColumn = (width: number): number => Math.max(8, width - spacing.transcript * 2 - 2)
 
@@ -88,7 +138,7 @@ export const loaderFrame: {
   (phase: string | undefined, frame: number): string
   (frame: number): (phase: string | undefined) => string
 } = Function.dual(2, (phase: string | undefined, frame: number): string =>
-  phase === undefined ? "" : spinnerFrames[frame % spinnerFrames.length]!,
+  phase === undefined ? "" : statusSpinnerFrames[frame % statusSpinnerFrames.length]!,
 )
 
 export const renderBlock: {
@@ -441,7 +491,29 @@ export const boundedTranscriptModel: {
         blocks: model.blocks.slice(-limit),
       }
     const windowEnd = Math.min(model.items.length, Math.max(0, Math.floor(end)))
-    const source = (model.items as ReadonlyArray<TranscriptItem>).slice(Math.max(0, windowEnd - limit), windowEnd)
+    const allItems = model.items as ReadonlyArray<TranscriptItem>
+    let source = allItems.slice(Math.max(0, windowEnd - limit), windowEnd)
+    const parentItems = new Map<string, { readonly item: TranscriptItem; readonly position: number }>()
+    for (const [position, item] of allItems.entries()) {
+      if (item._tag !== "Block") continue
+      const block = model.blocks[item.index] as TranscriptBlock | undefined
+      if (block?._tag === "ToolCall") parentItems.set(block.id, { item, position })
+    }
+    const included = new Set(source)
+    const ancestors: Array<{ readonly item: TranscriptItem; readonly position: number }> = []
+    for (let cursor = 0; cursor < source.length + ancestors.length; cursor += 1) {
+      const item = cursor < source.length ? source[cursor] : ancestors[cursor - source.length]?.item
+      if (item?._tag !== "Block" || item.parentId === undefined) continue
+      const parent = parentItems.get(item.parentId)
+      if (parent === undefined || included.has(parent.item)) continue
+      included.add(parent.item)
+      ancestors.push(parent)
+    }
+    if (ancestors.length > 0)
+      source = [
+        ...ancestors.toSorted((left, right) => left.position - right.position).map(({ item }) => item),
+        ...source,
+      ]
     const entries: Array<Model["entries"][number]> = []
     const blocks: Array<Model["blocks"][number]> = []
     const entryIndices = new Map<number, number>()
@@ -679,16 +751,22 @@ export const buildTranscript: {
     const renderShellSingleBody = (unit: ToolUnit, selected: boolean, expanded: boolean) => {
       const command = shellCommandText(unit.block)
       const failed = unit.block.status === "failed"
+      const running = unit.block.status === "running"
       const lines = command.split("\n")
       const expandable = unit.block.output !== undefined && unit.block.output.length > 0
       const exitCode = shellExitCode(unit.block)
       if (selected) {
         const exit = failed ? ` (exit code: ${exitCode ?? 1})` : ""
-        highlight(`$ ${lines.join("\n    ")}${exit}${expandable ? markerText(expanded) : ""}`)
+        highlight(
+          `${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${expandable ? markerText(expanded) : ""}`,
+        )
       } else {
         lines.forEach((current, lineIndex) => {
           if (lineIndex === 0) {
-            append(dim(fg(colors.text)("$ ")))
+            if (running) {
+              append(statusIcon(false, true))
+              append(fg(colors.text)(" "))
+            } else append(dim(fg(colors.text)("$ ")))
             append(fg(colors.text)(current))
           } else append(fg(colors.text)(`\n    ${current}`))
         })
@@ -741,9 +819,9 @@ export const buildTranscript: {
       const label = running ? unit.block.presentation.activeLabel : unit.block.presentation.completeLabel
       const detail = unit.block.detail.length === 0 ? "" : ` ${unit.block.detail}`
       const agent = unit.block.presentation.family === "agent"
-      const expandable = hasChildren || (agent
-        ? unit.block.detail.length > 0
-        : unit.block.output !== undefined && unit.block.output.length > 0)
+      const expandable =
+        hasChildren ||
+        (agent ? unit.block.detail.length > 0 : unit.block.output !== undefined && unit.block.output.length > 0)
       if (selected)
         highlight(
           `${iconChar(failed, running, spinnerFrame)} ${label}${agent ? "" : detail}${expandable ? markerText(expanded) : ""}`,
@@ -932,12 +1010,14 @@ export interface Handlers {
 
 export interface SurfaceOptions {
   readonly animate?: boolean
+  readonly clock?: OpenTuiClock
 }
 
 interface TranscriptRenderableRecord {
   readonly key: string
   revision: string
   readonly renderable: TextRenderable
+  spinnerChunk?: number
 }
 
 interface TranscriptRenderableDescriptor {
@@ -945,6 +1025,7 @@ interface TranscriptRenderableDescriptor {
   readonly revision: string
   readonly content: StyledText
   readonly selectable?: boolean
+  readonly spinnerChunk?: number
   readonly onMouseDown?: TextRenderable["onMouseDown"]
 }
 
@@ -1064,9 +1145,6 @@ export class Surface {
   private welcomeKey = ""
   private welcomeTimer: Fiber.Fiber<void> | undefined
   private toastTimer: Fiber.Fiber<void> | undefined
-  private reasoningFlash = false
-  private reasoningFlashTimer: Fiber.Fiber<void> | undefined
-  private lastReasoningEffort: string | undefined
   private lastPaste: { readonly text: string; readonly at: number } | undefined
   private model: Model | undefined
   private transcriptChildren: Array<TextRenderable> = []
@@ -1086,8 +1164,14 @@ export class Surface {
   private sidebarLayoutFrame: (() => void) | undefined
   private scrollProgrammatic = false
   private scrollFramePending = false
+  private wheelTimer: TimerHandle | undefined
+  private wheelDirection: "up" | "down" | undefined
+  private wheelScrollBy = 0
+  private userScrollDetached = false
   private loaderPhase = 0
-  private loaderTimer: Fiber.Fiber<void> | undefined
+  private loaderTimer: TimerHandle | undefined
+  private readonly clock: OpenTuiClock
+  private readonly toolSpinner = new ToolSpinner()
   private transcriptViewportRows = 0
   private transcriptWindowEnd = 0
   private transcriptWindowThread: string | undefined
@@ -1106,6 +1190,7 @@ export class Surface {
     private readonly handlers: Handlers,
     private readonly options: SurfaceOptions = {},
   ) {
+    this.clock = options.clock ?? new SystemClock()
     this.main = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
     this.contentColumn = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "column" })
     this.transcriptRow = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
@@ -1117,7 +1202,7 @@ export class Surface {
       viewportCulling: true,
       verticalScrollbarOptions: { visible: false },
       contentOptions: { flexDirection: "column", justifyContent: "flex-end" },
-      onMouseScroll: () => this.queueTranscriptScroll(() => this.handleTranscriptScroll()),
+      onMouseScroll: (event) => this.handleTranscriptWheel(event),
     })
     this.transcriptScroll.verticalScrollBar.visible = false
     this.transcriptContent = new BoxRenderable(renderer, {
@@ -1141,7 +1226,11 @@ export class Surface {
       onChange: (position) => {
         if (this.scrollbarSyncing || this.destroyed) return
         this.transcriptScroll.scrollTop = position
-        this.queueTranscriptScroll(() => this.reportTranscriptScroll())
+        if (!this.atTranscriptBottom() && this.model?.scrollFollow === true) {
+          this.userScrollDetached = true
+          this.transcriptScroll.stickyScroll = false
+          this.handlers.scroll?.(position)
+        } else this.queueTranscriptScroll(() => this.reportTranscriptScroll())
       },
     })
     this.queueBox = new BoxRenderable(renderer, {
@@ -1403,6 +1492,7 @@ export class Surface {
     if (this.suppressMouseJunk(mapped)) return
     this.wakeCursor()
     if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "pageup") {
+      this.userScrollDetached = true
       this.transcriptScroll.stickyScroll = false
       const amount = Math.max(1, this.transcriptScroll.viewport.height - 1)
       if (this.queuePendingTranscriptScroll(-amount)) return
@@ -1417,6 +1507,7 @@ export class Surface {
       this.transcriptScroll.scrollBy(amount)
       this.reportTranscriptScroll()
     } else if (!mapped.ctrl && !mapped.alt && !mapped.meta && mapped.name === "end") {
+      this.userScrollDetached = false
       this.handlers.scrollFollow?.()
     } else if (mapped.ctrl && mapped.name === "v" && this.handlers.pasteImage !== undefined) this.handlers.pasteImage()
     else this.handlers.key(mapped)
@@ -1444,9 +1535,47 @@ export class Surface {
       return
     this.reportTranscriptScroll()
   }
+  private handleTranscriptWheel(event: MouseEvent): void {
+    const direction = event.scroll?.direction
+    if (direction !== "up" && direction !== "down") return
+    this.wheelDirection = direction
+    if (direction === "up") {
+      const detach = !this.userScrollDetached && this.model?.scrollFollow === true
+      this.userScrollDetached = true
+      this.transcriptScroll.stickyScroll = false
+      if (detach) this.handlers.scroll?.(this.transcriptScroll.scrollTop)
+    } else if (this.atTranscriptBottom()) {
+      this.cancelWheelReport()
+      this.userScrollDetached = false
+      this.handlers.scrollFollow?.()
+      return
+    } else if (this.atMountedTranscriptBottom()) this.wheelScrollBy += event.scroll?.delta ?? 1
+    if (this.wheelTimer === undefined)
+      this.wheelTimer = this.clock.setTimeout(() => {
+        this.wheelTimer = undefined
+        const pendingDirection = this.wheelDirection
+        const scrollBy = this.wheelScrollBy
+        this.wheelDirection = undefined
+        this.wheelScrollBy = 0
+        if (
+          pendingDirection === "down" &&
+          this.atMountedTranscriptBottom() &&
+          this.shiftTranscriptWindow(100, true, scrollBy)
+        )
+          return
+        this.handleTranscriptScroll()
+      }, 16)
+  }
+  private cancelWheelReport(): void {
+    if (this.wheelTimer === undefined) return
+    this.clock.clearTimeout(this.wheelTimer)
+    this.wheelTimer = undefined
+    this.wheelDirection = undefined
+    this.wheelScrollBy = 0
+  }
   private shiftTranscriptWindow(delta: number, preserveAnchor: boolean, scrollBy = 0): boolean {
     const model = this.model
-    if (model === undefined || model.items.length <= maxMountedTranscriptEntries) return false
+    if (model === undefined) return false
     const minimumEnd = Math.min(maxMountedTranscriptEntries, model.items.length)
     const end = Math.min(model.items.length, Math.max(minimumEnd, this.transcriptWindowEnd + delta))
     if (end === this.transcriptWindowEnd) return false
@@ -1466,8 +1595,10 @@ export class Surface {
   private readonly reportTranscriptScroll = () => {
     if (this.scrollProgrammatic || this.destroyed) return
     this.syncTranscriptScrollbar()
-    if (this.atTranscriptBottom()) this.handlers.scrollFollow?.()
-    else this.handlers.scroll?.(this.transcriptScroll.scrollTop)
+    if (this.atTranscriptBottom()) {
+      this.userScrollDetached = false
+      this.handlers.scrollFollow?.()
+    } else this.handlers.scroll?.(this.transcriptScroll.scrollTop)
   }
   private syncTranscriptScrollbar(): void {
     if (this.destroyed) return
@@ -1499,7 +1630,7 @@ export class Surface {
     this.scrollFramePending = true
     this.defer(() => {
       this.scrollFramePending = false
-      if (this.model?.scrollFollow !== true) return
+      if (this.model?.scrollFollow !== true || this.userScrollDetached) return
       this.scrollProgrammatic = true
       this.transcriptScroll.scrollTo(
         Math.max(0, this.transcriptScroll.scrollHeight - this.transcriptScroll.viewport.height),
@@ -1532,6 +1663,36 @@ export class Surface {
         Effect.asVoid,
       ),
     )
+  }
+
+  private tickLoader(): void {
+    this.loaderPhase += 1
+    this.toolSpinner.step()
+    const current = this.model
+    if (current !== undefined) {
+      const label = formatActivity(current.activity) ?? panelLoading(current)
+      if (label !== undefined)
+        this.statusLabel.content = new StyledText([
+          fg(colors.text)(" "),
+          fg(colors.blue)(loaderFrame(label, this.loaderPhase)),
+          dim(fg(colors.text)(` ${label} `)),
+        ])
+      const glyph = this.toolSpinner.toBraille()
+      for (const record of this.transcriptRecords.values()) {
+        if (record.spinnerChunk === undefined) continue
+        const content = record.renderable.content
+        const chunks = [...content.chunks]
+        const chunk = chunks[record.spinnerChunk]
+        if (chunk === undefined) continue
+        chunks[record.spinnerChunk] = { ...chunk, text: glyph }
+        const next = new StyledText(chunks)
+        record.revision = JSON.stringify(next.chunks)
+        record.renderable.content = next
+      }
+      if (current.threadSidebar.open)
+        this.sidebar.content = renderSidebar(current, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
+    }
+    this.renderer.requestRender()
   }
 
   private readonly flushJunkBuffer = () => {
@@ -1747,6 +1908,8 @@ export class Surface {
           existing.revision = descriptor.revision
           existing.renderable.content = descriptor.content
         }
+        if (descriptor.spinnerChunk === undefined) delete existing.spinnerChunk
+        else existing.spinnerChunk = descriptor.spinnerChunk
         existing.renderable.selectable = descriptor.selectable ?? true
         existing.renderable.onMouseDown = descriptor.onMouseDown
         return existing
@@ -1757,7 +1920,12 @@ export class Surface {
         selectable: descriptor.selectable ?? true,
       })
       renderable.onMouseDown = descriptor.onMouseDown
-      const record = { key: descriptor.key, revision: descriptor.revision, renderable }
+      const record = {
+        key: descriptor.key,
+        revision: descriptor.revision,
+        renderable,
+        ...(descriptor.spinnerChunk === undefined ? {} : { spinnerChunk: descriptor.spinnerChunk }),
+      }
       this.transcriptRecords.set(record.key, record)
       return record
     })
@@ -1869,10 +2037,16 @@ export class Surface {
   update(model: Model, preserveTranscriptAnchor = false): void {
     const previousScrollHeight = this.transcriptScroll.scrollHeight
     const previousModel = this.model
+    if (
+      previousModel?.currentThreadId !== model.currentThreadId ||
+      (previousModel?.scrollFollow === false && model.scrollFollow)
+    )
+      this.userScrollDetached = false
+    const scrollFollow = model.scrollFollow && !this.userScrollDetached
     const transcriptWidthChanged =
       previousModel !== undefined &&
       previousModel.currentThreadId === model.currentThreadId &&
-      !model.scrollFollow &&
+      !scrollFollow &&
       (model.entries.length > 0 || model.blocks.length > 0) &&
       contentColumnWidth(previousModel) !== contentColumnWidth(model)
     const preserveTranscriptPosition = preserveTranscriptAnchor || transcriptWidthChanged
@@ -1890,7 +2064,7 @@ export class Surface {
         model.items.length,
         this.transcriptWindowEnd + Math.max(0, model.items.length - previousItems),
       )
-    else if (model.scrollFollow || this.transcriptWindowEnd === 0) this.transcriptWindowEnd = model.items.length
+    else if (scrollFollow || this.transcriptWindowEnd === 0) this.transcriptWindowEnd = model.items.length
     else this.transcriptWindowEnd = Math.min(this.transcriptWindowEnd, model.items.length)
     this.model = model
     this.queueHint.bg = cutoutBackground(this.renderer)
@@ -1949,10 +2123,8 @@ export class Surface {
         windowEnd: this.transcriptWindowEnd,
       }
       if (this.transcriptChanged(transcriptInput)) {
-        const built = buildTranscript(
-          boundedTranscriptModel(renderModel, this.transcriptWindowEnd),
-          model.busy ? spinnerFrames[this.loaderPhase % spinnerFrames.length]! : idleSpinnerFrame,
-        )
+        const toolSpinnerGlyph = this.toolSpinner.toBraille()
+        const built = buildTranscript(boundedTranscriptModel(renderModel, this.transcriptWindowEnd), toolSpinnerGlyph)
         const styledLines = splitStyledLines(built.styled)
         const descriptors: Array<TranscriptRenderableDescriptor> = []
         for (const range of built.ranges.slice(-maxMountedTranscriptEntries)) {
@@ -1963,11 +2135,13 @@ export class Surface {
               content: new StyledText([fg(colors.text)(" ")]),
             })
           const headerContent = new StyledText(styledLines[range.start] ?? [])
+          const spinnerChunk = headerContent.chunks.findIndex((chunk) => chunk.text === toolSpinnerGlyph)
           descriptors.push({
             key: `${range.unit}:header`,
             revision: JSON.stringify(headerContent.chunks),
             content: headerContent,
             selectable: !range.expandable,
+            ...(spinnerChunk < 0 ? {} : { spinnerChunk }),
             ...(range.expandable
               ? {
                   onMouseDown: (event: MouseEvent) => {
@@ -2069,7 +2243,6 @@ export class Surface {
     this.inputBox.borderColor = colors.text
     const costText = model.costUsd !== undefined ? formatCost(model.costUsd) : model.busy ? "$····" : ""
     this.inputBox.title = ""
-    const modeText = `${model.mode}${effortSuperscript(model)}`
     const modeChunks: Array<TextChunk> = []
     if (costText.length > 0) {
       modeChunks.push(dim(fg(colors.text)(` ${costText} `)))
@@ -2077,7 +2250,7 @@ export class Surface {
     }
     modeChunks.push(fg(colors.text)(" "))
     if (model.fastMode) modeChunks.push(fg(colors.amber)("↯"))
-    modeChunks.push(fg(colors[model.mode])(modeText))
+    modeChunks.push(fg(colors[model.mode])(model.mode))
     modeChunks.push(fg(colors.text)(" "))
     this.modeLabel.right = sidebarWidth + 2
     this.modeLabel.width = modeChunks.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
@@ -2086,8 +2259,9 @@ export class Surface {
       ? ""
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
     const panelLoadingLabel = panelLoading(model)
-    if (model.busy || panelLoadingLabel !== undefined) {
-      const statusName = model.busy ? (model.busyStatus ?? "Waiting") : panelLoadingLabel!
+    const activityLabel = formatActivity(model.activity)
+    if (activityLabel !== undefined || panelLoadingLabel !== undefined) {
+      const statusName = activityLabel ?? panelLoadingLabel!
       this.inputBox.bottomTitle = ""
       this.statusLabel.content = new StyledText([
         fg(colors.text)(" "),
@@ -2096,21 +2270,8 @@ export class Surface {
       ])
     } else {
       this.inputBox.bottomTitle = ""
-      if (this.lastReasoningEffort !== undefined && this.lastReasoningEffort !== model.reasoningEffort) {
-        this.cancelTimer(this.reasoningFlashTimer)
-        this.reasoningFlash = true
-        this.reasoningFlashTimer = this.delayed(2500, () => {
-          this.reasoningFlash = false
-          this.reasoningFlashTimer = undefined
-          this.renderer.requestRender()
-        })
-      }
-      this.statusLabel.content =
-        this.reasoningFlash && !isNarrow(model)
-          ? new StyledText([dim(fg(colors.text)(` reasoning ${model.reasoningEffort} `))])
-          : ""
+      this.statusLabel.content = ""
     }
-    this.lastReasoningEffort = model.reasoningEffort
     this.workspaceLabel.right = sidebarWidth + 2
     this.workspaceLabel.content = new StyledText([dim(fg(colors.text)(workspaceTitle))])
     this.inputBox.height = renderedInputHeight
@@ -2149,7 +2310,7 @@ export class Surface {
     } else {
       this.changedFilesHoveredRow = undefined
     }
-    this.transcriptScroll.stickyScroll = model.scrollFollow
+    this.transcriptScroll.stickyScroll = scrollFollow
     this.anchorTranscriptAfterLayout()
     if (preserveTranscriptPosition) {
       const pending = this.pendingTranscriptAnchor
@@ -2188,37 +2349,22 @@ export class Surface {
         this.renderer.once(CliRenderEvents.FRAME, restore)
       }
     } else if (this.pendingTranscriptAnchor !== undefined) this.renderer.requestRender()
-    else if (model.scrollFollow) this.followTranscriptAfterLayout()
-    else if (Math.abs(this.transcriptScroll.scrollTop - model.scrollOffset) > 1) {
+    else if (scrollFollow) this.followTranscriptAfterLayout()
+    else if (this.wheelTimer === undefined && Math.abs(this.transcriptScroll.scrollTop - model.scrollOffset) > 1) {
       this.scrollProgrammatic = true
       this.transcriptScroll.scrollTop = model.scrollOffset
       this.scrollProgrammatic = false
     }
     const loaderActive =
       model.busy ||
+      model.activity !== undefined ||
       panelLoadingLabel !== undefined ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => thread.status !== "idle"))
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
-      this.loaderTimer = this.repeated(spinnerInterval, () => {
-        this.loaderPhase = (this.loaderPhase + 1) % spinnerFrames.length
-        const current = this.model
-        if (current !== undefined) {
-          const label = current.busy ? (current.busyStatus ?? "Waiting") : panelLoading(current)
-          if (label !== undefined) {
-            this.statusLabel.content = new StyledText([
-              fg(colors.text)(" "),
-              fg(colors.blue)(loaderFrame(label, this.loaderPhase)),
-              dim(fg(colors.text)(` ${label} `)),
-            ])
-          }
-          if (current.threadSidebar.open)
-            this.sidebar.content = renderSidebar(current, spinnerFrames[this.loaderPhase % spinnerFrames.length]!)
-        }
-        this.renderer.requestRender()
-      })
+      this.loaderTimer = this.clock.setInterval(() => this.tickLoader(), spinnerInterval)
     } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
-      this.cancelTimer(this.loaderTimer)
+      this.clock.clearInterval(this.loaderTimer)
       this.loaderTimer = undefined
     }
     const composerTop = model.height - renderedInputHeight
@@ -2354,14 +2500,13 @@ export class Surface {
     this.sidebarLayoutFrame = undefined
     this.transcriptAnchorScrollBy = 0
     this.pendingTranscriptAnchor = undefined
-    this.cancelTimer(this.loaderTimer)
+    this.cancelWheelReport()
+    if (this.loaderTimer !== undefined) this.clock.clearInterval(this.loaderTimer)
     this.loaderTimer = undefined
     this.cancelTimer(this.welcomeTimer)
     this.welcomeTimer = undefined
     this.cancelTimer(this.toastTimer)
     this.toastTimer = undefined
-    this.cancelTimer(this.reasoningFlashTimer)
-    this.reasoningFlashTimer = undefined
     this.cancelTimer(this.junkTimer)
     this.junkTimer = undefined
     this.junkBuffer = []
@@ -2414,10 +2559,7 @@ const shortcutRows: ReadonlyArray<ReadonlyArray<readonly [string, string]>> = [
     ["Ctrl+V", "paste images"],
     ["Shift+Enter", "newline"],
   ],
-  [
-    ["Ctrl+S", "switch modes"],
-    ["Opt+D", "toggle reasoning effort"],
-  ],
+  [["Ctrl+S", "switch modes"]],
   [
     ["Ctrl+G", "edit in $EDITOR"],
     ["Opt+T", "toggle file tree"],
@@ -2603,9 +2745,14 @@ const previewTranscriptLines = (
     }
   | undefined => {
   const selected = selectedThreadMetadata(model)
-  if (!isReady(model.threadPreview) || selected === undefined) return undefined
-  const preview = model.threadPreview.value
-  if (preview.threadId !== selected.id || preview.turns.length === 0) return undefined
+  const preview = isReady(model.threadPreview)
+    ? selected?.id === model.threadPreview.value.threadId
+      ? model.threadPreview.value
+      : undefined
+    : model.threadPreview._tag === "Loading"
+      ? model.threadPreview.previous
+      : undefined
+  if (preview === undefined || preview.turns.length === 0) return undefined
   let previewModel: Model = { ...initial(model.workspace, model.mode), width: Math.max(8, width), height: 200 }
   preview.turns.forEach((turn, index) => {
     previewModel = projectUnits(
@@ -2712,30 +2859,7 @@ export const previewBoxRows: {
         fg(colors.muted)("│"),
       ])
     })
-  } else if (isLoading(model.threadPreview)) {
-    const pattern = (welcomeMarkFrames[5] ?? welcomeMarkFrames[0]).slice(3)
-    const availableRows = Math.max(1, height - 3)
-    const visibleRows = Math.min(availableRows, pattern.length)
-    const sourceTop = Math.max(0, Math.floor((pattern.length - visibleRows) / 2))
-    const top = 2 + Math.max(0, Math.floor((availableRows - visibleRows) / 2))
-    const sourceWidth = 40
-    const visibleWidth = Math.min(inner, sourceWidth)
-    const sourceLeft = Math.max(0, Math.floor((sourceWidth - visibleWidth) / 2))
-    const left = Math.max(0, Math.floor((inner - visibleWidth) / 2))
-    pattern.slice(sourceTop, sourceTop + visibleRows).forEach((source, index) => {
-      const chunks: Array<TextChunk> = [fg(colors.muted)("│"), fg(colors.text)(" ".repeat(left))]
-      for (const glyph of source.slice(sourceLeft, sourceLeft + visibleWidth)) {
-        if (glyph === " ") chunks.push(fg(colors.text)(glyph))
-        else {
-          const [red, green, blue] = welcomeMarkColor((sourceTop + index) / 17, model.mode)
-          chunks.push(fg(`#${hex2(red)}${hex2(green)}${hex2(blue)}`)(glyph))
-        }
-      }
-      chunks.push(fg(colors.text)(" ".repeat(Math.max(0, inner - left - visibleWidth))))
-      chunks.push(fg(colors.muted)("│"))
-      rows.set(top + index, chunks)
-    })
-  } else {
+  } else if (!isLoading(model.threadPreview)) {
     const status = "No preview"
     const statusLeft = Math.max(0, Math.floor((inner - status.length) / 2))
     rows.set(2, [
@@ -2867,15 +2991,6 @@ const formatCost = (usd: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: Math.abs(usd) < 0.01 ? 3 : 2,
   })
-
-const effortLevels = ["low", "medium", "high", "xhigh"] as const
-const effortSuperscripts = ["", "²", "³", "⁴"] as const
-
-const effortSuperscript = (model: Model): string => {
-  if (model.reasoningEffort === defaultReasoningEffort(model.mode)) return ""
-  const index = effortLevels.indexOf(model.reasoningEffort)
-  return index <= 0 ? "" : effortSuperscripts[index]!
-}
 
 const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
   "                                        ",

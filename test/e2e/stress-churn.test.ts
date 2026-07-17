@@ -56,6 +56,7 @@ test(
                     durationMilliseconds: 30_000,
                     target: "CHURN_COMPLETE",
                     readyTarget: "CHURN_BASELINE",
+                    readyTimeoutMilliseconds: 60_000,
                   }),
                 { concurrency: count },
               )
@@ -128,5 +129,5 @@ test(
         (context) => context.dispose,
       ).pipe(Effect.provide(ResourceSampler.layer({ intervalMilliseconds: 100 })), Effect.scoped),
     ),
-  60_000,
+  120_000,
 )

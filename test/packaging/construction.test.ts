@@ -14,7 +14,8 @@ const sourceImports = (source: string) => {
 }
 
 const resolveSource = async (path: string) => {
-  for (const candidate of [path, `${path}.ts`, join(path, "index.ts")]) if (await Bun.file(candidate).exists()) return candidate
+  for (const candidate of [path, `${path}.ts`, join(path, "index.ts")])
+    if (await Bun.file(candidate).exists()) return candidate
   return undefined
 }
 

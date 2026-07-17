@@ -1,8 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Operation } from "@rika/app"
-import { Effect, Layer, Ref, Stream } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
+import { run as runClient } from "../src/client-main"
 import { parseJsonLines, readStreamInput, run } from "../src/command"
 
 const workspace = process.cwd()
@@ -96,6 +97,29 @@ it.effect("renders help without dispatching an operation", () =>
     expect(output.join("\n")).toContain("diagnostics")
     expect(yield* Ref.get(calls)).toEqual([])
   }),
+)
+
+it.effect("renders client help without creating the configured data root", () =>
+  execute(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-client-help-" })
+        const dataRoot = path.join(root, "nested")
+        const provider = ConfigProvider.fromEnv({
+          env: {
+            HOME: path.join(root, "home"),
+            RIKA_DATABASE: path.join(dataRoot, "rika.db"),
+            RIKA_RELAY_DATABASE: path.join(dataRoot, "relay.db"),
+          },
+        })
+        yield* runClient(["--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+        expect(yield* fileSystem.exists(dataRoot)).toBe(false)
+      }),
+    ),
+    Layer.merge(BunServices.layer, TestConsole.layer),
+  ),
 )
 
 it.effect("dispatches a parsed doctor operation", () =>

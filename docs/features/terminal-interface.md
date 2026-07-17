@@ -10,6 +10,8 @@ Markdown tables render as bounded rounded grids with header and body separators.
 
 The renderer inherits the terminal-default transparent background and paints no application background. Wrapping is bounded by terminal display-cell width, including CJK and emoji. Thread previews use a two-cell content gutter. Automatic composer and queue heights follow their wrapped line counts. Rapid resize bursts are coalesced at the trailing edge and converge to the exact final terminal size.
 
+Users select modes, and each mode sends its configured reasoning effort. Fast mode remains a separate toggle; the terminal has no reasoning-effort override.
+
 Read and search calls form exploration groups. Shell and edits use family groups; unknown tools remain generic. A single-file edit expands directly to its diff. Multi-file edits and multi-command shell groups have independently expandable children. Process waits name the original command. Subagents reveal their delegated task. Every underlying call appears once.
 
 Tool-call argument deltas update the final ToolCall row. A running patch expands automatically and streams per-file diff lines. The result replaces that preview on the same row, without a draft row or delayed duplicate.

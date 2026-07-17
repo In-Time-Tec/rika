@@ -208,6 +208,79 @@ test(
 )
 
 test(
+  "routes workflow child tools through the workspace of the owning turn",
+  () =>
+    runNative(
+      Effect.gen(function* () {
+        const result = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem
+            const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-workflow-workspace-" })
+            const workspace = `${directory}/workspace`
+            yield* fileSystem.makeDirectory(workspace)
+            yield* fileSystem.writeFileString(`${workspace}/fixture.txt`, "workflow workspace marker")
+            const fixture = yield* TestModel.make([
+              TestModel.toolCall("read_file", { path: "fixture.txt" }, { id: "call-workflow-read" }),
+              TestModel.text("investigated"),
+              TestModel.object({ answer: "investigated", evidence: [] }),
+              TestModel.text("implemented"),
+              TestModel.object({ summary: "implemented", files: [] }),
+              TestModel.text("reviewed"),
+              TestModel.object({ summary: "reviewed", findings: [] }),
+              TestModel.text("fixed"),
+              TestModel.object({ summary: "fixed", files: [] }),
+              TestModel.text("verified"),
+              TestModel.object({ summary: "verified", files: [] }),
+            ])
+            const workspaces = new Map([["turn-workflow", workspace]])
+            const backendLayer = RelayExecutionBackend.layer({
+              filename: `${directory}/relay.db`,
+              workspace: directory,
+              registration: fixture.registration,
+              selection: fixture.selection,
+              modelVariantPolicy: "fixed-selection",
+              toolRuntimeLayerForWorkspace: RikaToolRuntime.layer,
+              resolveWorkspace: (executionId) => {
+                const turnId = RelayExecutionBackend.turnIdFromExecutionId(executionId)
+                const resolved = turnId === undefined ? undefined : workspaces.get(turnId)
+                return resolved === undefined
+                  ? Effect.fail(
+                      ExecutionBackend.BackendError.make({
+                        message:
+                          turnId === undefined ? `Unknown execution ${executionId}` : `Turn ${turnId} does not exist`,
+                      }),
+                    )
+                  : Effect.succeed(resolved)
+              },
+              toolNeedsApproval: () => false,
+              permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
+            })
+            return yield* provide(
+              Effect.gen(function* () {
+                const backend = yield* ExecutionBackend.Service
+                yield* backend.registerWorkflows()
+                yield* backend.startWorkflow("delivery", "workspace-run", undefined, "turn-workflow")
+                const completed = yield* backend.inspectWorkflow("workspace-run", "turn-workflow").pipe(
+                  Effect.repeat({
+                    while: (inspection) => inspection?.status === "running",
+                    schedule: Schedule.both(Schedule.spaced("20 millis"), Schedule.recurs(1_000)),
+                  }),
+                )
+                return { completed, requests: yield* fixture.requests }
+              }),
+              backendLayer,
+            )
+          }),
+        )
+
+        expect(result.completed?.status).toBe("completed")
+        expect(encodeJson(result.requests)).toContain("workflow workspace marker")
+      }),
+    ),
+  60_000,
+)
+
+test(
   "streams grouped model parts and persists usage through Relay SQLite",
   () =>
     runNative(

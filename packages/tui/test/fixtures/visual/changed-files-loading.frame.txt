@@ -21,4 +21,4 @@
 │                                                                              │
 │                                                                              │
 │                                                                              │
-╰ ⠿ Loading changed files ──────────────────────────────────────── /workspace ─╯
+╰ ∼ Loading changed files ──────────────────────────────────────── /workspace ─╯

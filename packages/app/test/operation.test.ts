@@ -6,7 +6,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
-import { Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
+import { Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
 import { Operation, ResolvedContext } from "../src/index"
@@ -207,6 +207,7 @@ describe("Operation", () => {
           session.steer("steer"),
           session.interruptAndSend("interrupt"),
           session.cancel,
+          session.newThread,
           session.resolvePermission("wait", "permission", "allow"),
           session.selectThread("thread", 1),
           session.readQueue("thread"),
@@ -436,6 +437,60 @@ describe("Operation", () => {
         { threadId: "thread-restart", turnId: "turn-restart", prompt: "resume", startedAt: 2 },
       ])
       expect((yield* turns.get(Turn.TurnId.make("turn-restart")))?.status).toBe("completed")
+    }),
+  )
+
+  it.effect("does not restart a turn dequeued after the reconcile scan", () =>
+    Effect.gen(function* () {
+      const turnId = Turn.TurnId.make("stale-reconcile-turn")
+      const threadId = Thread.ThreadId.make("stale-reconcile-thread")
+      const queued: Turn.Turn = {
+        id: turnId,
+        threadId,
+        prompt: "do not restart",
+        executionRoute: executionRoute(),
+        status: "queued",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const turns = yield* TurnRepository.makeMemory([queued])
+      const scanned = yield* Deferred.make<void>()
+      const continueReconcile = yield* Deferred.make<void>()
+      const delayedTurns = TurnRepository.Service.of({
+        ...turns,
+        listNonterminal: Deferred.succeed(scanned, undefined).pipe(
+          Effect.andThen(Deferred.await(continueReconcile)),
+          Effect.as([{ ...queued, status: "running" as const }]),
+        ),
+      })
+      const starts = yield* Ref.make(0)
+      const staleBackend = ExecutionBackend.Service.of({
+        ...backend,
+        start: (input) =>
+          Ref.update(starts, (count) => count + 1).pipe(
+            Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+          ),
+      })
+      const repair = yield* Effect.forkChild(
+        Operation.reconcile().pipe(
+          provideLayer(
+            Layer.mergeAll(
+              reconcileDependencies(unusedExtensions),
+              ThreadRepository.memoryLayer(),
+              Layer.succeed(TurnRepository.Service, delayedTurns),
+              Layer.succeed(ExecutionBackend.Service, staleBackend),
+            ),
+          ),
+        ),
+      )
+
+      yield* Deferred.await(scanned)
+      yield* turns.dequeue(turnId)
+      yield* Deferred.succeed(continueReconcile, undefined)
+      yield* Fiber.join(repair)
+
+      expect(yield* Ref.get(starts)).toBe(0)
+      expect(yield* turns.get(turnId)).toBeUndefined()
     }),
   )
 
@@ -876,6 +931,95 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("keeps fork copy and publication atomic against racing submissions", () =>
+    Effect.gen(function* () {
+      const source = selectionThread("atomic-fork-source")
+      const forkId = Thread.ThreadId.make("atomic-fork")
+      const repository = yield* ThreadRepository.makeMemory([source])
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: Turn.TurnId.make("atomic-fork-active"),
+          threadId: source.id,
+          prompt: "source active",
+          executionRoute: executionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: Turn.TurnId.make("atomic-fork-queued"),
+          threadId: source.id,
+          prompt: "source queued",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const copyEntered = yield* Deferred.make<void>()
+      const releaseCopy = yield* Deferred.make<void>()
+      const delayedTurns = TurnRepository.Service.of({
+        ...turns,
+        copy: (turn, capacity) =>
+          turn.threadId === forkId && turn.prompt === "source active"
+            ? Deferred.succeed(copyEntered, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseCopy)),
+                Effect.andThen(turns.copy(turn, capacity)),
+              )
+            : turns.copy(turn, capacity),
+      })
+      const forkBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
+        replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
+        start: (input) => Effect.succeed({ turnId: input.turnId, status: "running", events: [] }),
+      })
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const turnSequence = yield* Ref.make(0)
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, delayedTurns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, forkBackend),
+        defaultWorkspace: "/work",
+        pendingTurnCapacity: 1,
+        makeThreadId: Effect.succeed(forkId),
+        makeTurnId: Ref.updateAndGet(turnSequence, (value) => value + 1).pipe(
+          Effect.map((value) => Turn.TurnId.make(`atomic-fork-copy-${value}`)),
+        ),
+        interactive: holdSession(sessions),
+      })
+
+      const forkResult = yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        const fork = yield* Effect.forkChild(
+          Effect.result(operation.run({ _tag: "Thread", action: "fork", threadId: source.id })),
+        )
+        yield* Deferred.await(copyEntered)
+        yield* session.selectThread(forkId, 1)
+        const submissions = yield* Effect.forEach(["racing one", "racing two"], (prompt) =>
+          Effect.forkChild(session.submit(prompt)),
+        )
+        yield* settleEvents
+        yield* Deferred.succeed(releaseCopy, undefined)
+        const result = yield* Fiber.join(fork)
+        yield* Effect.forEach(submissions, Fiber.join, { discard: true })
+        return result
+      }).pipe(provideLayer(layer))
+
+      expect(forkResult._tag).toBe("Success")
+      expect((yield* turns.list(forkId)).map((turn) => [turn.prompt, turn.status])).toEqual([
+        ["source active", "running"],
+        ["source queued", "queued"],
+      ])
+      expect(yield* repository.get(forkId)).toMatchObject({ archived: false })
+    }),
+  )
+
   it.effect("uses the configured interactive operation", () =>
     Effect.gen(function* () {
       const received = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
@@ -972,6 +1116,53 @@ describe("Operation", () => {
         yield* settleEvents
         expect(yield* Ref.get(starts)).toEqual(["repair-one", "repair-two"])
       }).pipe(provideLayer(layer))
+    }),
+  )
+
+  it.effect("coalesces concurrent reconnect repairs into one scan and one requested rescan", () =>
+    Effect.gen(function* () {
+      const turns = yield* TurnRepository.makeMemory()
+      const scans = yield* Ref.make(0)
+      const firstScanStarted = yield* Deferred.make<void>()
+      const releaseFirstScan = yield* Deferred.make<void>()
+      const countedTurns = TurnRepository.Service.of({
+        ...turns,
+        listNonterminal: Ref.updateAndGet(scans, (count) => count + 1).pipe(
+          Effect.tap((count) => (count === 1 ? Deferred.succeed(firstScanStarted, undefined) : Effect.void)),
+          Effect.tap((count) => (count === 1 ? Deferred.await(releaseFirstScan) : Effect.void)),
+          Effect.andThen(turns.listNonterminal),
+        ),
+      })
+      const layer = Operation.productLayer({
+        repositoryLayer: ThreadRepository.memoryLayer(),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, countedTurns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.die("unused"),
+        makeTurnId: Effect.die("unused"),
+        interactive: () => Effect.void,
+      })
+
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* Effect.forEach(
+          Array.from({ length: 20 }),
+          (_, index) =>
+            operation.run({
+              _tag: "Interactive",
+              prompt: [],
+              workspace: `/reconnect-${index}`,
+              ephemeral: false,
+            }),
+          { concurrency: "unbounded", discard: true },
+        )
+        yield* Deferred.await(firstScanStarted)
+        yield* Deferred.succeed(releaseFirstScan, undefined)
+        while ((yield* Ref.get(scans)) < 2) yield* Effect.yieldNow
+        yield* settleEvents
+      }).pipe(provideLayer(layer))
+
+      expect(yield* Ref.get(scans)).toBe(2)
     }),
   )
 
@@ -1344,6 +1535,65 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("does not let a failed selection overwrite a newer selection", () =>
+    Effect.gen(function* () {
+      const previous = selectionThread("selection-rollback-previous")
+      const current = selectionThread("selection-rollback-current")
+      const repository = yield* ThreadRepository.makeMemory([previous, current])
+      const failedLookup = yield* Deferred.make<void>()
+      const interleavingRepository = ThreadRepository.Service.of({
+        ...repository,
+        get: (id) =>
+          id === "selection-rollback-missing"
+            ? Deferred.succeed(failedLookup, undefined).pipe(Effect.as(undefined))
+            : repository.get(id),
+      })
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, interleavingRepository),
+        turnRepositoryLayer: TurnRepository.memoryLayer(),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.die("unused"),
+        makeTurnId: Effect.die("unused"),
+        interactive: holdSession(sessions),
+      })
+
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        const received: Array<Operation.InteractiveEvent> = []
+        yield* collectEvents(session, received)
+        yield* session.selectThread(previous.id, 1)
+        received.length = 0
+        const selectCurrent = yield* Effect.forkChild(
+          Deferred.await(failedLookup).pipe(
+            Effect.andThen(session.selectThread(current.id, 3)),
+            Effect.provideService(Scheduler.MaxOpsBeforeYield, 2_048),
+          ),
+        )
+        yield* session.selectThread("selection-rollback-missing", 2)
+        yield* Fiber.join(selectCurrent)
+        yield* session.readQueue(current.id)
+        yield* settleEvents
+
+        expect(received).toContainEqual(
+          expect.objectContaining({
+            _tag: "SelectionLoaded",
+            selectionEpoch: 3,
+            thread: expect.objectContaining({ id: current.id }),
+          }),
+        )
+        expect(received).toContainEqual(
+          expect.objectContaining({ _tag: "QueueUpdated", selectionEpoch: 3, threadId: current.id }),
+        )
+      }).pipe(provideLayer(layer), Effect.provideService(Scheduler.MaxOpsBeforeYield, 3))
+    }),
+  )
+
   it.effect("delivers critical target events while selection is in flight", () =>
     Effect.gen(function* () {
       const harness = yield* makeSelectionLoadHarness(1)
@@ -1436,6 +1686,46 @@ describe("Operation", () => {
         expect(received.some((event) => event._tag === "TranscriptResyncRequired" && event.selectionEpoch === 3)).toBe(
           false,
         )
+        yield* harness.releaseExecution
+      }).pipe(provideLayer(harness.layer))
+    }),
+  )
+
+  it.effect("bounds activity buffered for an initial thread that has not been selected", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeSelectionLoadHarness(8_193)
+      yield* Effect.gen(function* () {
+        const source = yield* openInteractiveSession(harness.sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        const initial = yield* openInteractiveSession(harness.sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          threadId: harness.target.id,
+          ephemeral: false,
+        })
+        const received: Array<Operation.InteractiveEvent> = []
+        yield* collectEvents(initial, received)
+        yield* source.selectThread(harness.target.id, 1)
+        received.length = 0
+
+        yield* source.submit("overflow before initial selection")
+        yield* Deferred.await(harness.liveEventsEmitted)
+        yield* initial.selectThread(harness.target.id, 1)
+        yield* settleEvents
+
+        expect(
+          received
+            .filter(
+              (event) =>
+                (event._tag === "SelectionLoaded" || event._tag === "TranscriptResyncRequired") &&
+                event.selectionEpoch === 1,
+            )
+            .map((event) => event._tag),
+        ).toEqual(["SelectionLoaded", "TranscriptResyncRequired"])
+        expect(received.filter((event) => event._tag === "TranscriptPatched")).toHaveLength(0)
         yield* harness.releaseExecution
       }).pipe(provideLayer(harness.layer))
     }),
@@ -1767,6 +2057,84 @@ describe("Operation", () => {
       )
       expect(yield* Ref.get(steers)).toEqual([])
       expect(yield* turns.get(Turn.TurnId.make("steer-race-queued"))).toMatchObject({ status: "accepted" })
+    }),
+  )
+
+  it.effect("restores a queued prompt when steering the active turn fails", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("steer-failure-thread")
+      const queuedId = Turn.TurnId.make("steer-failure-queued")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: Turn.TurnId.make("steer-failure-active"),
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: queuedId,
+          threadId: thread.id,
+          prompt: "keep this prompt",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+        {
+          id: Turn.TurnId.make("steer-failure-later"),
+          threadId: thread.id,
+          prompt: "later prompt",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 3,
+          updatedAt: 3,
+        },
+      ])
+      const failingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
+        steer: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "forced steer failure" })),
+      })
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const received: Array<Operation.InteractiveEvent> = []
+
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* collectEvents(session, received)
+        yield* session.selectThread(thread.id, 1)
+        received.length = 0
+        yield* session.steerQueued(queuedId, "unused fallback")
+        yield* settleEvents
+      }).pipe(
+        provideLayer(
+          Operation.productLayer({
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionBackend.Service, failingBackend),
+            defaultWorkspace: "/work",
+            pendingTurnCapacity: 2,
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+
+      expect(yield* turns.get(queuedId)).toMatchObject({ status: "queued", prompt: "keep this prompt", createdAt: 2 })
+      expect((yield* turns.readQueue(thread.id)).turns.map((turn) => turn.id)).toEqual([
+        "steer-failure-queued",
+        "steer-failure-later",
+      ])
+      expect(received).toContainEqual(
+        expect.objectContaining({ _tag: "ExecutionFailed", message: expect.stringContaining("forced steer failure") }),
+      )
     }),
   )
 

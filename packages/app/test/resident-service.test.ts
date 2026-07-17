@@ -95,6 +95,7 @@ describe("resident service protocol", () => {
       { _tag: "InterruptAndSend", prompt: "replace" },
       { _tag: "Cancel" },
       { _tag: "ResolvePermission", waitId: "wait", kind: "permission", decision: "always" },
+      { _tag: "NewThread" },
       { _tag: "SelectThread", threadId: "thread", selectionEpoch: 3 },
       { _tag: "ReadQueue", threadId: "thread" },
       { _tag: "LoadOlder" },

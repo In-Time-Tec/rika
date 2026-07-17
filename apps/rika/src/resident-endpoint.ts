@@ -2,6 +2,7 @@ import * as ResidentService from "@rika/app/resident-service"
 import { Crypto, Effect, Encoding, FileSystem, Option, Path } from "effect"
 
 const tokenName = "resident.token"
+const residentLog = /^resident-.+-(\d+)\.open\.jsonl$/
 
 export const resolve = Effect.fn("ResidentEndpoint.resolve")(function* (profile: string, dataRoot: string) {
   const fs = yield* FileSystem.FileSystem
@@ -14,9 +15,48 @@ export const resolve = Effect.fn("ResidentEndpoint.resolve")(function* (profile:
     canonicalDataRoot,
     port,
     url: `ws://127.0.0.1:${port}/resident`,
+    legacyUrl: `ws://127.0.0.1:${port}/resident/v1`,
     tokenPath: path.join(canonicalDataRoot, tokenName),
     startupPath: path.join(canonicalDataRoot, `resident-${identity}.startup`),
   }
+})
+
+export const recordedResidentProcesses = Effect.fn("ResidentEndpoint.recordedProcesses")(function* (endpoint: {
+  readonly canonicalDataRoot: string
+}) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined
+  const processes = new Map<number, Array<string>>()
+  const diagnostics = path.join(endpoint.canonicalDataRoot, "diagnostics")
+  if (!(yield* fs.exists(diagnostics)) || (yield* Effect.result(fs.readLink(diagnostics)))._tag === "Success") return []
+  const directory = yield* Effect.result(fs.stat(diagnostics))
+  if (
+    directory._tag === "Failure" ||
+    directory.success.type !== "Directory" ||
+    (expectedUid !== undefined && Option.getOrUndefined(directory.success.uid) !== expectedUid)
+  )
+    return []
+  for (const name of yield* fs.readDirectory(diagnostics)) {
+    const match = residentLog.exec(name)
+    if (match === null) continue
+    const filename = path.join(diagnostics, name)
+    if ((yield* Effect.result(fs.readLink(filename)))._tag === "Success") continue
+    const info = yield* Effect.result(fs.stat(filename))
+    if (
+      info._tag === "Success" &&
+      info.success.type === "File" &&
+      (info.success.mode & 0o077) === 0 &&
+      (expectedUid === undefined || Option.getOrUndefined(info.success.uid) === expectedUid)
+    ) {
+      const pid = Number(match[1])
+      if (!Number.isSafeInteger(pid) || pid <= 0) continue
+      const markers = processes.get(pid) ?? []
+      markers.push(filename)
+      processes.set(pid, markers)
+    }
+  }
+  return [...processes].map(([pid, markers]) => ({ pid, markers }))
 })
 
 export const readOrCreateToken = Effect.fn("ResidentEndpoint.readOrCreateToken")(function* (tokenPath: string) {

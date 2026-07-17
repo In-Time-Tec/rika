@@ -120,6 +120,7 @@ export interface ChildProjection {
 }
 export interface WorkflowInspection {
   readonly runId: string
+  readonly ownerTurnId?: string
   readonly workflow: string
   readonly revision: number
   readonly digest: string
@@ -171,6 +172,7 @@ export interface Inspection {
 
 export interface Approval {
   readonly waitId: string
+  readonly executionId?: string
   readonly callId: string
   readonly toolName: string
   readonly input: unknown
@@ -212,9 +214,16 @@ export interface Interface {
     name: string,
     runId: string,
     revision?: number,
+    ownerTurnId?: string,
   ) => Effect.Effect<WorkflowInspection, BackendError>
-  readonly inspectWorkflow: (runId: string) => Effect.Effect<WorkflowInspection | undefined, BackendError>
-  readonly cancelWorkflow: (runId: string) => Effect.Effect<WorkflowInspection | undefined, BackendError>
+  readonly inspectWorkflow: (
+    runId: string,
+    ownerTurnId?: string,
+  ) => Effect.Effect<WorkflowInspection | undefined, BackendError>
+  readonly cancelWorkflow: (
+    runId: string,
+    ownerTurnId?: string,
+  ) => Effect.Effect<WorkflowInspection | undefined, BackendError>
   readonly wakeThreadHost?: (wake: ThreadQueueWake) => Effect.Effect<void, BackendError>
   readonly registerTurnPromoter?: (promoter: TurnPromoter) => Effect.Effect<void>
   readonly start: (input: StartInput) => Effect.Effect<Result, BackendError>

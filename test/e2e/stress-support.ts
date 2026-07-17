@@ -145,8 +145,8 @@ export const waitForHostConnections = Effect.fn("StressSupport.waitForHostConnec
     readDiagnosticEvents(dataRoot).pipe(
       Effect.map((events) =>
         hostConnections(events)
-          .filter((host) => !excludedHostPids.has(host.hostPid))
-          .find((host) => host.active.length >= minimum),
+          .filter((connection) => !excludedHostPids.has(connection.hostPid))
+          .find((connection) => connection.active.length >= minimum),
       ),
     ),
     30_000,

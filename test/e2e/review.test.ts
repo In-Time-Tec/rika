@@ -43,8 +43,6 @@ test(
     runTest(
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem
-        expect((yield* run(context, ["review"])).stdout).toBe("No changes to review.")
-        yield* fileSystem.writeFileString(`${context.workspace}/review.txt`, "after\n")
         const output = { summary: "deterministic response", findings: [] }
         context.env.RIKA_TEST_MODEL_SCRIPT = Schema.encodeSync(Schema.UnknownFromJsonString)([
           ...Array.from({ length: 3 }, () => ({ parts: [{ type: "text", text: "deterministic response" }] })),
@@ -53,6 +51,8 @@ test(
           ...Array.from({ length: 3 }, () => ({ object: output })),
         ])
         delete context.env.RIKA_TEST_MODEL_RESPONSE
+        expect((yield* run(context, ["review"])).stdout).toBe("No changes to review.")
+        yield* fileSystem.writeFileString(`${context.workspace}/review.txt`, "after\n")
         const text = yield* run(context, ["review", "review.txt"], { timeout: 60_000 })
         const laneOutput = `deterministic response${Schema.encodeSync(Schema.UnknownFromJsonString)({ type: "structured", value: output, schema_ref: "rika.agent.review.v1" })}`
         expect(text.exitCode).toBe(0)

@@ -279,7 +279,8 @@ export const validateHandshake: {
   (handshake: Handshake, expected: { readonly identity: string; readonly token: string }): HandshakeResult => {
     if (handshake.token !== expected.token) return { _tag: "AuthenticationFailed" }
     if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
-    if (handshake.protocolVersion !== protocolVersion) return { _tag: "ProtocolMismatch" }
+    if (handshake.protocolVersion !== undefined && handshake.protocolVersion !== protocolVersion)
+      return { _tag: "ProtocolMismatch" }
     return { _tag: "Accepted" }
   },
 )

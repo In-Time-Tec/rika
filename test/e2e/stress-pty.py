@@ -33,7 +33,11 @@ os.close(slave)
 print(json.dumps({"type": "ready", "pid": pid}), flush=True)
 output = bytearray()
 started = time.monotonic()
-deadline = started + options.get("durationMs", 30000) / 1000
+deadline = started + (
+    options.get("readyTimeoutMs", 10000)
+    if options.get("readyTarget") is not None
+    else options.get("durationMs", 30000)
+) / 1000
 requested_stop = False
 requested_stop_at = None
 quit_sent = False
@@ -215,8 +219,9 @@ while time.monotonic() < deadline:
 
 if status is None:
     request_stop()
-    exit_deadline = time.monotonic() + 5
-    next_interrupt = time.monotonic() + 2
+    graceful_stop_seconds = options.get("gracefulStopMs", 2000) / 1000
+    exit_deadline = time.monotonic() + max(5, graceful_stop_seconds + 3)
+    next_interrupt = time.monotonic() + graceful_stop_seconds
     while time.monotonic() < exit_deadline:
         now = time.monotonic()
         continue_stop(now)

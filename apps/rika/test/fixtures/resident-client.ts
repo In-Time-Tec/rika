@@ -1,6 +1,5 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as ResidentService from "@rika/app/resident-service"
 import {
   Clock,
   Config,
@@ -30,6 +29,7 @@ const program = Effect.gen(function* () {
   const finalizerDelay = yield* Config.string("RIKA_TEST_RESIDENT_FINALIZER_DELAY").pipe(Config.withDefault("0"))
   const delayedWork = yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))
   const startupHold = yield* Config.string("RIKA_TEST_RESIDENT_STARTUP_HOLD").pipe(Config.withDefault("0"))
+  const outboundCapacity = yield* Config.string("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault("1024"))
   const stdio = yield* Stdio.Stdio
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -66,6 +66,7 @@ const program = Effect.gen(function* () {
             RIKA_TEST_RESIDENT_FINALIZER_DELAY: finalizerDelay,
             RIKA_TEST_RESIDENT_DELAYED_WORK: delayedWork,
             RIKA_TEST_RESIDENT_STARTUP_HOLD: startupHold,
+            RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY: outboundCapacity,
           },
         }),
     }),
@@ -114,7 +115,7 @@ const program = Effect.gen(function* () {
             .run(
               { _tag: "Interactive", prompt: [], ephemeral: false, workspace },
               {
-                interactive: (_, session) =>
+                interactive: (_input, session) =>
                   Effect.gen(function* () {
                     yield* emit({ type: "interactive-callback", callbacks: 1 })
                     const events = yield* Queue.unbounded<string>()
@@ -154,7 +155,7 @@ const program = Effect.gen(function* () {
             .run(
               { _tag: "Interactive", prompt: [], ephemeral: false, workspace },
               {
-                interactive: (_, session) =>
+                interactive: (_input, session) =>
                   Effect.gen(function* () {
                     yield* emit({ type: "interactive-callback", callbacks: 1 })
                     const attachedFeeds = yield* Queue.unbounded<void>()
@@ -214,7 +215,7 @@ const program = Effect.gen(function* () {
             .run(
               { _tag: "Interactive", prompt: ["serialized-commands"], ephemeral: false, workspace },
               {
-                interactive: (_, session) =>
+                interactive: (_input, session) =>
                   Effect.gen(function* () {
                     yield* Effect.all(
                       Array.from({ length: 100 }, (_, index) => session.submit(`serialized-${index}`)),
@@ -291,6 +292,69 @@ const program = Effect.gen(function* () {
             if (exit._tag === "Failure")
               yield* emit({ type: "oversized-interactive-event-failed", error: String(exit.cause) })
           })
+        if (command === "wire-limit-reattach")
+          return Effect.gen(function* () {
+            const messages = yield* Queue.unbounded<string>()
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: ["wire-limit-event"], ephemeral: false, workspace },
+                {
+                  interactive: (_, session) =>
+                    Effect.gen(function* () {
+                      const feed = yield* Effect.forkChild(
+                        session.events((event) => {
+                          if (
+                            event._tag === "ExecutionFailed" &&
+                            event.message.includes("omitted an event larger than 16 MiB")
+                          )
+                            Queue.offerUnsafe(messages, event.message)
+                        }),
+                      )
+                      yield* Queue.take(messages)
+                      const residentPid = yield* Ref.get(hostPid)
+                      yield* kill(residentPid)
+                      yield* Queue.take(messages)
+                      yield* Fiber.interrupt(feed)
+                    }),
+                },
+              ),
+            )
+            yield* emit({
+              type: exit._tag === "Failure" ? "wire-limit-reattach-failed" : "wire-limit-reattach-completed",
+              callbacks: 2,
+              ...(exit._tag === "Failure" ? { error: String(exit.cause) } : {}),
+            })
+          })
+        if (command === "fragment-burst")
+          return Effect.gen(function* () {
+            const lengths = yield* Effect.forEach(
+              ["large-event-a", "large-event-b"],
+              (kind) =>
+                Effect.gen(function* () {
+                  const messages = yield* Queue.unbounded<string>()
+                  let length = 0
+                  yield* connection.run(
+                    { _tag: "Interactive", prompt: [kind], ephemeral: false, workspace },
+                    {
+                      interactive: (_, session) =>
+                        Effect.gen(function* () {
+                          const feed = yield* Effect.forkChild(
+                            session.events((event) => {
+                              if (event._tag === "ExecutionFailed") Queue.offerUnsafe(messages, event.message)
+                            }),
+                          )
+                          const message = yield* Queue.take(messages)
+                          length = message.length
+                          yield* Fiber.interrupt(feed)
+                        }),
+                    },
+                  )
+                  return length
+                }),
+              { concurrency: 2 },
+            )
+            yield* emit({ type: "fragment-burst-completed", text: lengths.join(",") })
+          }).pipe(Effect.catch((error) => emit({ type: "fragment-burst-failed", error: error.message })))
         if (command === "overflow-interactive")
           return Effect.gen(function* () {
             const tags = new Array<string>()
@@ -317,6 +381,36 @@ const program = Effect.gen(function* () {
               type: exit._tag === "Failure" ? "overflow-failed" : "overflow-completed",
               callbacks: tags.length,
               tag: tags.at(-1),
+              tags,
+              ...(exit._tag === "Failure" ? { error: String(exit.cause) } : {}),
+            })
+          })
+        if (command === "slow-consumer")
+          return Effect.gen(function* () {
+            const tags = new Array<string>()
+            const completed = yield* Queue.unbounded<void>()
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: ["slow-consumer-events"], ephemeral: false, workspace },
+                {
+                  interactive: (_, session) =>
+                    Effect.gen(function* () {
+                      yield* Effect.sleep("350 millis")
+                      const feed = yield* Effect.forkChild(
+                        session.events((event) => {
+                          tags.push(event._tag === "TranscriptPatched" ? event.event.type : event._tag)
+                          if (event._tag === "TranscriptResyncRequired") Queue.offerUnsafe(completed, undefined)
+                        }),
+                      )
+                      yield* Queue.take(completed)
+                      yield* Fiber.interrupt(feed)
+                    }),
+                },
+              ),
+            )
+            yield* emit({
+              type: exit._tag === "Failure" ? "slow-consumer-failed" : "slow-consumer-completed",
+              callbacks: tags.length,
               tags,
               ...(exit._tag === "Failure" ? { error: String(exit.cause) } : {}),
             })
@@ -471,7 +565,14 @@ const program = Effect.gen(function* () {
   )
 })
 
-const MainLayer = Layer.mergeAll(BunServices.layer, Logger.layer([]))
+let supersedeStatusCount = 0
+const statusLogger = Logger.make(({ message }) => {
+  if (!Array.isArray(message) || !message.some((value: unknown) => String(value) === "resident.startup.superseding"))
+    return
+  supersedeStatusCount += 1
+  process.stdout.write(`${JSON.stringify({ type: "resident-status", callbacks: supersedeStatusCount })}\n`)
+})
+const MainLayer = Layer.mergeAll(BunServices.layer, Logger.layer([statusLogger]))
 
 BunRuntime.runMain(
   Effect.scoped(

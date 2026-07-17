@@ -26,7 +26,6 @@ const eventText = (event: ResidentEvent) => {
 
 const queueScript = (prefix: string) => [
   { parts: [{ type: "text", text: `${prefix}_000` }], delayMs: 4_000 },
-  { parts: [{ type: "text", text: `${prefix}_TITLE` }] },
   ...Array.from({ length: capacity }, (_, index) => ({
     parts: [{ type: "text", text: `${prefix}_${String(index + 1).padStart(3, "0")}` }],
   })),
@@ -139,7 +138,7 @@ test(
 )
 
 test(
-  "the packaged TUI projects queued prompts when the build supports queue markers",
+  "the packaged TUI keeps every queued prompt visible without the old queue marker",
   () =>
     runTest(
       Effect.acquireUseRelease(
@@ -162,23 +161,22 @@ test(
             const client = yield* startPackagedPty(context, {
               durationMilliseconds: 7_000,
               readyTarget: "Welcome to Rika",
-              target: "queued 6/6",
+              target: "queue ui prompt 6",
               actions,
             })
             const result = yield* client.result
-            const queueUiAvailable = result.captureText.includes("queued ")
             const residue = yield* findResidueFiles(context.env.HOME!)
             yield* printMetrics("queue-storm-ui", {
               submitted: 7,
-              queueUiAvailable,
               projectedFullPendingSet: result.observedTarget,
+              oldQueueMarkerVisible: result.captureText.includes("queued 6/6"),
               residueFiles: residue.length,
             })
             expect(result.exitCode).toBe(0)
-            if (queueUiAvailable) {
-              expect(result.observedTarget).toBe(true)
-              yield* assertNoResidueFiles(context.env.HOME!)
-            }
+            expect(result.observedTarget).toBe(true)
+            expect(result.captureText).toContain("queue ui prompt 6")
+            expect(result.captureText).not.toContain("queued 6/6")
+            yield* assertNoResidueFiles(context.env.HOME!)
           }),
         (context) => context.dispose,
       ).pipe(Effect.provide(ResourceSampler.layer({ intervalMilliseconds: 100 })), Effect.scoped),
@@ -221,7 +219,9 @@ test.skipIf(Bun.env.RIKA_STRESS_MULTI_CLIENT !== "1")(
               ),
             )
             const events = clients[0]!.events
-            const queueFull = events.filter((event) => event._tag === "QueueFull")
+            const queueFull = clients.flatMap((commandClient) =>
+              commandClient.events.filter((event) => event._tag === "QueueFull"),
+            )
             const queueUpdates = events.filter((event) => event._tag === "QueueUpdated")
             const additions = queueUpdates.filter(
               (event) =>

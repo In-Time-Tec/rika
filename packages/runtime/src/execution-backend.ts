@@ -13,6 +13,7 @@ import type {
   ChildFanOutRuntime as ChildFanOutRuntimeModule,
   WorkflowDefinitionRuntime as WorkflowDefinitionRuntimeModule,
 } from "@relayfx/sdk/sqlite"
+import { Session as RelaySession } from "@relayfx/sdk/ai"
 import {
   Cause,
   Clock,
@@ -24,13 +25,15 @@ import {
   Layer,
   LayerMap,
   Option,
+  Queue,
   Redacted,
   Schedule,
   Schema,
   Semaphore,
+  Scope,
   Stream,
 } from "effect"
-import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
+import { LanguageModel, Prompt, Response, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
   type AgentProfile,
@@ -65,6 +68,9 @@ const failureKind = (cause: Cause.Cause<unknown>) => {
   if (failure instanceof Error) return failure.name
   return typeof failure
 }
+
+const isExecutionNotFound = (failure: unknown) =>
+  failure !== null && typeof failure === "object" && "_tag" in failure && failure._tag === "ExecutionNotFound"
 
 const observableEventTypes = new Set([
   "execution.accepted",
@@ -209,6 +215,127 @@ const withResilience = (
   return { ...registration, layer: modelLayer }
 }
 
+const executionNamespaceFromSessionEntry = (value: string) => /^.+:entry:(.+):\d+:complete:\d+:\d+$/.exec(value)?.[1]
+
+const currentExecutionNamespace = (fallback: string) =>
+  Effect.serviceOption(RelaySession.SessionStore).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(fallback),
+        onSome: (session) =>
+          session.path().pipe(
+            Effect.map((entries) => executionNamespaceFromSessionEntry(String(entries.at(-1)?.id ?? "")) ?? fallback),
+            Effect.orElseSucceed(() => fallback),
+          ),
+      }),
+    ),
+  )
+
+const toolCallPrefix = (namespace: string) => `rika:${encodeURIComponent(namespace)}:`
+const namespaceToolCallId = (namespace: string, id: string) => {
+  const prefix = toolCallPrefix(namespace)
+  return id.startsWith(prefix) ? id : `${prefix}${id}`
+}
+const providerToolCallId = (namespace: string, id: string) => {
+  const prefix = toolCallPrefix(namespace)
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id
+}
+
+const childExecutionIdFromEvent = (item: Execution.ExecutionEvent) => {
+  const value = item.child_execution_id ?? item.data?.child_execution_id
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+const mapPromptPart = (namespace: string, part: Prompt.Part): Prompt.Part => {
+  if (part.type === "tool-call" || part.type === "tool-result")
+    return { ...part, id: providerToolCallId(namespace, part.id) }
+  if (part.type === "tool-approval-request")
+    return { ...part, toolCallId: providerToolCallId(namespace, part.toolCallId) }
+  return part
+}
+
+const providerPrompt = (namespace: string, input: Prompt.RawInput) => {
+  const prompt = Prompt.make(input)
+  return Prompt.fromMessages(
+    prompt.content.map((message) =>
+      typeof message.content === "string"
+        ? message
+        : (Object.assign({}, message, {
+            content: message.content.map((part) => mapPromptPart(namespace, part)),
+          }) as Prompt.Message),
+    ),
+  )
+}
+
+const mapResponsePart = <A extends Response.AnyPart>(namespace: string, part: A): A => {
+  if (
+    part.type === "tool-params-start" ||
+    part.type === "tool-params-delta" ||
+    part.type === "tool-params-end" ||
+    part.type === "tool-call" ||
+    part.type === "tool-result"
+  )
+    return { ...part, id: namespaceToolCallId(namespace, part.id) } as A
+  if (part.type === "tool-approval-request")
+    return { ...part, toolCallId: namespaceToolCallId(namespace, part.toolCallId) } as A
+  return part
+}
+
+const namespaceLanguageModel = (model: LanguageModel.Service, fallback: string): LanguageModel.Service => ({
+  ...model,
+  generateText: ((options: any) =>
+    currentExecutionNamespace(fallback).pipe(
+      Effect.flatMap((namespace) =>
+        model
+          .generateText({ ...options, prompt: providerPrompt(namespace, options.prompt) })
+          .pipe(
+            Effect.map(
+              (result) =>
+                new LanguageModel.GenerateTextResponse(result.content.map((part) => mapResponsePart(namespace, part))),
+            ),
+          ),
+      ),
+    )) as LanguageModel.Service["generateText"],
+  generateObject: ((options: any) =>
+    currentExecutionNamespace(fallback).pipe(
+      Effect.flatMap((namespace) =>
+        (
+          model.generateObject as (
+            options: any,
+          ) => Effect.Effect<LanguageModel.GenerateObjectResponse<Record<string, Tool.Any>, unknown>, never, never>
+        )({ ...options, prompt: providerPrompt(namespace, options.prompt) }).pipe(
+          Effect.map(
+            (result) =>
+              new LanguageModel.GenerateObjectResponse(
+                result.value,
+                result.content.map((part) => mapResponsePart(namespace, part)),
+              ),
+          ),
+        ),
+      ),
+    )) as LanguageModel.Service["generateObject"],
+  streamText: ((options: any) =>
+    Stream.unwrap(
+      currentExecutionNamespace(fallback).pipe(
+        Effect.map((namespace) =>
+          model
+            .streamText({ ...options, prompt: providerPrompt(namespace, options.prompt) })
+            .pipe(Stream.map((part) => mapResponsePart(namespace, part))),
+        ),
+      ),
+    )) as LanguageModel.Service["streamText"],
+})
+
+const withNamespacedLanguageModel = <A, E, R>(
+  fallback: string,
+  effect: Effect.Effect<A, E, R>,
+): Effect.Effect<A, E, R | LanguageModel.LanguageModel> =>
+  LanguageModel.LanguageModel.pipe(
+    Effect.flatMap((model) =>
+      effect.pipe(Effect.provideService(LanguageModel.LanguageModel, namespaceLanguageModel(model, fallback))),
+    ),
+  )
+
 const registrationFor = <AdditionalTools extends Record<string, Tool.Any>, R>(
   options: LayerOptions<AdditionalTools, R>,
 ): ModelRegistry.Registration => withResilience(options.registration, options.modelResilience)
@@ -297,9 +424,39 @@ const addressId = Ids.AddressId.make("address:rika")
 const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
   Ids.AgentId.make(`agent:rika:fan-out:${String(fanOutId)}:${String(childExecutionId)}`)
 const executionId = (turnId: string) =>
-  Ids.ExecutionId.make(turnId.startsWith("child:") ? turnId : `execution:${turnId}`)
+  Ids.ExecutionId.make(turnId.startsWith("child:") || turnId.startsWith("execution:") ? turnId : `execution:${turnId}`)
 const makeChildExecutionId = (parentTurnId: string, childId: string) =>
   Ids.ChildExecutionId.make(`child:${encodeURIComponent(parentTurnId)}:${childId}`)
+const workflowExecutionId = (runId: string, ownerTurnId?: string) =>
+  Ids.ExecutionId.make(
+    ownerTurnId === undefined
+      ? `workflow:${runId}`
+      : `workflow:turn:${encodeURIComponent(ownerTurnId)}:run:${encodeURIComponent(runId)}`,
+  )
+const attachedWorkflow = (value: string) => {
+  const match = /^workflow:turn:([^:]+):run:(.+)$/.exec(value)
+  if (match === null) return undefined
+  try {
+    return { ownerTurnId: decodeURIComponent(match[1]!), runId: decodeURIComponent(match[2]!) }
+  } catch {
+    return undefined
+  }
+}
+const childParentExecutionId = (value: string) => {
+  if (!value.startsWith("child:")) return undefined
+  const separator = value.indexOf(":", "child:".length)
+  if (separator < 0) return undefined
+  try {
+    return decodeURIComponent(value.slice("child:".length, separator))
+  } catch {
+    return undefined
+  }
+}
+const belongsToWorkflow = (value: string): boolean => {
+  if (value.startsWith("workflow:")) return true
+  const parent = childParentExecutionId(value)
+  return parent === undefined ? false : belongsToWorkflow(parent)
+}
 const childIdFromExecutionId = (parentTurnId: string, value: unknown) => {
   const id = String(value)
   const prefix = `child:${encodeURIComponent(parentTurnId)}:`
@@ -311,15 +468,20 @@ export const turnIdFromExecutionId = (value: string): string | undefined => {
     const separator = id.indexOf(":child:")
     return separator < 0 ? id : id.slice(0, separator)
   }
-  if (!value.startsWith("child:")) return undefined
-  const separator = value.indexOf(":", "child:".length)
-  if (separator < 0) return undefined
-  return decodeURIComponent(value.slice("child:".length, separator))
+  const workflowOwner = attachedWorkflow(value)?.ownerTurnId
+  if (workflowOwner !== undefined) return workflowOwner
+  const parent = childParentExecutionId(value)
+  if (parent === undefined) return undefined
+  if (parent.startsWith("workflow:") || parent.startsWith("execution:") || parent.startsWith("child:"))
+    return turnIdFromExecutionId(parent)
+  return parent
 }
 const sessionId = (threadId: string) => Ids.SessionId.make(`session:${threadId}`)
 const childSessionId = (childExecutionId: Ids.ChildExecutionId) =>
   Ids.SessionId.make(`session:child:${String(childExecutionId)}`)
-const error = (cause: unknown) => BackendError.make({ message: String(cause) })
+const isBackendError = Schema.is(BackendError)
+const error = (cause: unknown): BackendError =>
+  isBackendError(cause) ? cause : BackendError.make({ message: String(cause) })
 const executionInput = (input: { readonly prompt: string; readonly promptParts?: ReadonlyArray<PromptPart> }) =>
   input.promptParts?.map((part) =>
     part.type === "text"
@@ -356,17 +518,22 @@ const mapFanOut = (value: any) => {
   }
 }
 
-const workflow = (value: any) => ({
-  runId: String(value.execution_id).replace(/^workflow:/, ""),
-  workflow: String(value.pin.workflow_definition_id)
-    .replace(/^rika:/, "")
-    .replace(/:v1$/, ""),
-  revision: value.pin.workflow_definition_revision,
-  digest: value.pin.workflow_definition_digest,
-  status: value.status,
-  createdAt: value.created_at,
-  updatedAt: value.updated_at,
-})
+const workflow = (value: any) => {
+  const execution = String(value.execution_id)
+  const attached = attachedWorkflow(execution)
+  return {
+    runId: attached?.runId ?? execution.replace(/^workflow:/, ""),
+    ...(attached === undefined ? {} : { ownerTurnId: attached.ownerTurnId }),
+    workflow: String(value.pin.workflow_definition_id)
+      .replace(/^rika:/, "")
+      .replace(/:v1$/, ""),
+    revision: value.pin.workflow_definition_revision,
+    digest: value.pin.workflow_definition_digest,
+    status: value.status,
+    createdAt: value.created_at,
+    updatedAt: value.updated_at,
+  }
+}
 
 const event = (value: {
   readonly cursor: string
@@ -411,6 +578,24 @@ const statusFromEvents = (events: ReadonlyArray<Event>): Status => {
 const isActionableWait = (item: Event) =>
   item.type === "permission.ask.requested" || item.type === "tool.approval.requested"
 
+const executionTreeIds = (client: Client.Interface, root: Ids.ExecutionId) =>
+  Effect.gen(function* () {
+    const pending = [root]
+    const seen = new Set<string>()
+    const ids: Array<Ids.ExecutionId> = []
+    while (pending.length > 0) {
+      const current = pending.shift()!
+      if (seen.has(String(current))) continue
+      seen.add(String(current))
+      ids.push(current)
+      const inspection = yield* client.inspectExecution(current)
+      for (const child of inspection.child_runs) {
+        pending.push(Ids.ExecutionId.make(String(child.child_execution_id)))
+      }
+    }
+    return ids
+  })
+
 const traceWithoutResult = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   Effect.suspend(() => {
     let result!: A
@@ -433,90 +618,194 @@ const followExecution = (
   onEvent: ((item: Event) => void) | undefined,
   stopAtActionableWait = true,
 ) =>
-  Effect.gen(function* () {
-    const startedAt = yield* Clock.currentTimeMillis
-    yield* Effect.logInfo("execution.follow.started")
-    const events: Array<Event> = []
-    let stoppedAtActionableWait = false
-    let stoppedStatus: Status | undefined
-    const append = (item: Execution.ExecutionEvent) => {
-      const mapped = event(item)
-      events.push(mapped)
-      onEvent?.(mapped)
-      return mapped
-    }
-    const consume = (cursor: string | undefined) =>
-      Stream.runForEachWhile(
-        client.followExecution({
-          execution_id: executionId(turnId),
-          ...(cursor === undefined ? {} : { after_cursor: cursor }),
-        }),
-        (item) => {
-          if (item._tag === "reconnecting")
-            return Effect.logWarning("execution.follow.reconnecting").pipe(
-              Effect.annotateLogs({
-                "rika.reconnect.attempt": item.attempt,
-                "rika.reconnect.message": item.message,
-              }),
-              Effect.as(true),
-            )
-          if (item._tag === "stopped") {
-            stoppedAtActionableWait = item.reason._tag === "actionable_wait"
-            if (item.reason._tag === "terminal") stoppedStatus = item.reason.status
-            return Effect.succeed(false)
+  Effect.scoped(
+    Effect.gen(function* () {
+      const startedAt = yield* Clock.currentTimeMillis
+      yield* Effect.logInfo("execution.follow.started")
+      const rootExecutionId = executionId(turnId)
+      const events: Array<Event> = []
+      const followed = new Set<string>()
+      const updates = yield* Queue.unbounded<
+        | {
+            readonly _tag: "event"
+            readonly event: Event
+            readonly actionable: boolean
+            readonly terminal?: Status
           }
-          const mapped = append(item.event)
-          if (
-            mapped.type === "execution.completed" ||
-            mapped.type === "execution.failed" ||
-            mapped.type === "execution.cancelled"
+        | { readonly _tag: "stopped"; readonly status: Status; readonly actionable: boolean }
+        | { readonly _tag: "failed"; readonly error: BackendError }
+      >()
+      const attributedEvent = (item: Execution.ExecutionEvent, childExecutionId: string | undefined) =>
+        event(
+          childExecutionId === undefined
+            ? item
+            : {
+                ...item,
+                data: { ...item.data, execution_id: childExecutionId },
+              },
+        )
+      let launch!: (
+        execution: Ids.ExecutionId,
+        root: boolean,
+        cursor?: string,
+      ) => Effect.Effect<void, never, Scope.Scope>
+      const followOne = (execution: Ids.ExecutionId, root: boolean, cursor: string | undefined) => {
+        const consume = (nextCursor: string | undefined) =>
+          Stream.runForEachWhile(
+            client.followExecution({
+              execution_id: execution,
+              ...(nextCursor === undefined ? {} : { after_cursor: nextCursor }),
+            }),
+            (item) => {
+              if (item._tag === "reconnecting")
+                return root
+                  ? Effect.logWarning("execution.follow.reconnecting").pipe(
+                      Effect.annotateLogs({
+                        "rika.reconnect.attempt": item.attempt,
+                        "rika.reconnect.message": item.message,
+                      }),
+                      Effect.as(true),
+                    )
+                  : Effect.succeed(true)
+              if (item._tag === "stopped") {
+                if (!root || item.reason._tag === "actionable_wait") {
+                  if (item.reason._tag !== "actionable_wait") return Effect.succeed(false)
+                  return Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true }).pipe(
+                    Effect.as(false),
+                  )
+                }
+                return Queue.offer(updates, {
+                  _tag: "stopped",
+                  status: Status.make(item.reason.status),
+                  actionable: false,
+                }).pipe(Effect.as(false))
+              }
+              const spawnedChild = childExecutionIdFromEvent(item.event)
+              const mapped = attributedEvent(item.event, root ? undefined : String(execution))
+              const terminal =
+                mapped.type === "execution.completed"
+                  ? Status.make("completed")
+                  : mapped.type === "execution.failed"
+                    ? Status.make("failed")
+                    : mapped.type === "execution.cancelled"
+                      ? Status.make("cancelled")
+                      : undefined
+              const inspectActionable =
+                stopAtActionableWait && isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
+                  ? client
+                      .inspectExecution(execution)
+                      .pipe(
+                        Effect.map((inspection) =>
+                          inspection.waiting_on.some((wait) => wait.wait_id === mapped.data?.wait_id),
+                        ),
+                      )
+                  : Effect.succeed(false)
+              return Effect.gen(function* () {
+                if (root || spawnedChild !== undefined) {
+                  yield* Queue.offer(updates, {
+                    _tag: "event",
+                    event: mapped,
+                    actionable: false,
+                    ...(terminal === undefined ? {} : { terminal }),
+                  })
+                }
+                if (spawnedChild !== undefined) yield* launch(Ids.ExecutionId.make(spawnedChild), false)
+                const actionable = yield* inspectActionable
+                if (actionable && !root) yield* Queue.offer(updates, { _tag: "event", event: mapped, actionable: true })
+                if (actionable && root)
+                  yield* Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true })
+                return terminal === undefined && !actionable
+              })
+            },
           )
-            return Effect.succeed(false)
-          if (!stopAtActionableWait || !isActionableWait(mapped)) return Effect.succeed(true)
-          const waitId = mapped.data?.wait_id
-          if (typeof waitId !== "string") return Effect.succeed(true)
-          return client.inspectExecution(executionId(turnId)).pipe(
-            Effect.map((inspection) => {
-              const actionable = inspection.waiting_on.some((wait) => wait.wait_id === waitId)
-              if (actionable) stoppedAtActionableWait = true
-              return !actionable
+        return Effect.gen(function* () {
+          const inspection = yield* client.inspectExecution(execution).pipe(
+            Effect.retry({
+              while: isExecutionNotFound,
+              schedule: Schedule.spaced("10 millis"),
+              times: 100,
             }),
           )
-        },
+          yield* Effect.forEach(
+            inspection.child_runs,
+            (child) => launch(Ids.ExecutionId.make(String(child.child_execution_id)), false),
+            { discard: true },
+          )
+          yield* consume(cursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => consume(undefined)))
+        }).pipe(
+          Effect.catchCause((cause) =>
+            root
+              ? Queue.offer(updates, {
+                  _tag: "failed",
+                  error: BackendError.make({ message: Cause.pretty(cause) }),
+                }).pipe(Effect.asVoid)
+              : Effect.logWarning("execution.child.follow.failed").pipe(
+                  Effect.annotateLogs({
+                    "rika.execution.id": String(execution),
+                    "rika.failure.kind": failureKind(cause),
+                  }),
+                ),
+          ),
+        )
+      }
+      launch = (execution, root, cursor) =>
+        Effect.suspend(() => {
+          const key = String(execution)
+          if (followed.has(key)) return Effect.void
+          followed.add(key)
+          return followOne(execution, root, cursor).pipe(Effect.forkScoped, Effect.asVoid)
+        })
+      yield* launch(rootExecutionId, true, afterCursor)
+      let stoppedAtActionableWait = false
+      let stoppedStatus: Status | undefined
+      while (stoppedStatus === undefined) {
+        const update = yield* Queue.take(updates)
+        if (update._tag === "failed") return yield* update.error
+        if (update._tag === "stopped") {
+          stoppedAtActionableWait = update.actionable
+          stoppedStatus = update.status
+          continue
+        }
+        events.push(update.event)
+        onEvent?.(update.event)
+        if (update.actionable) {
+          stoppedAtActionableWait = true
+          stoppedStatus = "waiting"
+        } else if (update.terminal !== undefined) stoppedStatus = update.terminal
+      }
+      const status = stoppedStatus ?? statusFromEvents(events)
+      yield* Effect.forEach(
+        events.filter((item) => observableEventTypes.has(item.type)),
+        (item) =>
+          Effect.logInfo("execution.event").pipe(
+            Effect.annotateLogs({
+              "rika.event.cursor": item.cursor,
+              "rika.event.sequence": item.sequence,
+              "rika.event.type": item.type,
+            }),
+          ),
+        { discard: true },
       )
-    yield* consume(afterCursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => consume(undefined)))
-    const status = stoppedStatus ?? statusFromEvents(events)
-    yield* Effect.forEach(
-      events.filter((item) => observableEventTypes.has(item.type)),
-      (item) =>
-        Effect.logInfo("execution.event").pipe(
-          Effect.annotateLogs({
-            "rika.event.cursor": item.cursor,
-            "rika.event.sequence": item.sequence,
-            "rika.event.type": item.type,
-          }),
-        ),
-      { discard: true },
-    )
-    const completedAt = yield* Clock.currentTimeMillis
-    yield* Effect.logInfo("execution.follow.completed").pipe(
-      Effect.annotateLogs({
-        "rika.duration.ms": completedAt - startedAt,
-        "rika.event.count": events.length,
-        "rika.execution.status": status,
-      }),
-    )
-    return {
-      turnId,
-      status:
-        status === "running" || status === "queued"
-          ? stoppedAtActionableWait
-            ? Status.make("waiting")
-            : status
-          : status,
-      events,
-    }
-  }).pipe(
+      const completedAt = yield* Clock.currentTimeMillis
+      yield* Effect.logInfo("execution.follow.completed").pipe(
+        Effect.annotateLogs({
+          "rika.duration.ms": completedAt - startedAt,
+          "rika.event.count": events.length,
+          "rika.execution.status": status,
+        }),
+      )
+      return {
+        turnId,
+        status:
+          status === "running" || status === "queued"
+            ? stoppedAtActionableWait
+              ? Status.make("waiting")
+              : status
+            : status,
+        events,
+      }
+    }),
+  ).pipe(
     Effect.tapCause((cause) =>
       Effect.logError("execution.follow.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
     ),
@@ -791,25 +1080,25 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             Effect.mapError(error),
           )
         }),
-        startWorkflow: Effect.fn("ExecutionBackend.startWorkflow")(function* (name, runId, revision) {
+        startWorkflow: Effect.fn("ExecutionBackend.startWorkflow")(function* (name, runId, revision, ownerTurnId) {
           const result = yield* client
             .startWorkflowRun({
-              execution_id: Ids.ExecutionId.make(`workflow:${runId}`),
+              execution_id: workflowExecutionId(runId, ownerTurnId),
               workflow_definition_id: idFor(name),
               ...(revision === undefined ? {} : { revision }),
             })
             .pipe(Effect.mapError(error))
           return workflow(result)
         }),
-        inspectWorkflow: Effect.fn("ExecutionBackend.inspectWorkflow")(function* (runId) {
+        inspectWorkflow: Effect.fn("ExecutionBackend.inspectWorkflow")(function* (runId, ownerTurnId) {
           const result = yield* client
-            .inspectWorkflowRun(Ids.ExecutionId.make(`workflow:${runId}`))
+            .inspectWorkflowRun(workflowExecutionId(runId, ownerTurnId))
             .pipe(Effect.mapError(error))
           return result === undefined ? undefined : workflow(result)
         }),
-        cancelWorkflow: Effect.fn("ExecutionBackend.cancelWorkflow")(function* (runId) {
+        cancelWorkflow: Effect.fn("ExecutionBackend.cancelWorkflow")(function* (runId, ownerTurnId) {
           const result = yield* client
-            .cancelWorkflowRun(Ids.ExecutionId.make(`workflow:${runId}`))
+            .cancelWorkflowRun(workflowExecutionId(runId, ownerTurnId))
             .pipe(Effect.mapError(error))
           return result === undefined ? undefined : workflow(result)
         }),
@@ -878,7 +1167,10 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               const registered = yield* client.registerAgent({
                 id: agentId,
                 address: addressId,
-                agent: Agent.make("rika", { model: selection, toolkit: toolkitFor(options) }),
+                agent: Agent.make(`rika-${encodeURIComponent(input.turnId)}`, {
+                  model: selection,
+                  toolkit: toolkitFor(options),
+                }),
                 permissions: [...parentPermissions, childRunSpawnPermission],
                 ...(options.permissionPolicy === undefined ? {} : { permission_rules: options.permissionPolicy }),
                 metadata,
@@ -1070,18 +1362,22 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             .pipe(Effect.mapError(error))
         }),
         listApprovals: Effect.fn("ExecutionBackend.listApprovals")(function* (turnId) {
-          return yield* client.listPendingApprovals({ execution_id: executionId(turnId) }).pipe(
-            Effect.map((result) =>
+          return yield* Effect.gen(function* () {
+            const ids = yield* executionTreeIds(client, executionId(turnId))
+            const approvals = yield* Effect.forEach(ids, (execution) =>
+              client.listPendingApprovals({ execution_id: execution }),
+            )
+            return approvals.flatMap((result, index) =>
               result.approvals.map((approval) => ({
                 waitId: approval.wait_id,
+                executionId: String(ids[index]),
                 callId: approval.tool_call_id,
                 toolName: approval.tool_name,
                 input: approval.input,
                 requestedAt: approval.requested_at,
               })),
-            ),
-            Effect.mapError(error),
-          )
+            )
+          }).pipe(Effect.mapError(error))
         }),
         resolveToolApproval: Effect.fn("ExecutionBackend.resolveToolApproval")(
           function* (waitId, approved, resolvedAt, comment) {
@@ -1151,10 +1447,26 @@ export const layer = <
             LanguageModelService.Service === undefined
               ? undefined
               : Context.get(yield* Layer.build(languageModelLayer), LanguageModelService.Service)
-          const sharedLanguageModelLayer =
+          const namespacedLanguageModelService =
             languageModelService === undefined
+              ? undefined
+              : LanguageModelService.Service.of({
+                  ...languageModelService,
+                  provide: (selection, effect) =>
+                    languageModelService.provide(
+                      selection,
+                      withNamespacedLanguageModel(
+                        `${selection.provider}:${selection.model}:${selection.registration_key ?? "default"}`,
+                        effect,
+                      ),
+                    ),
+                  provideForAgent: (agent, effect) =>
+                    languageModelService.provideForAgent(agent, withNamespacedLanguageModel(agent.name, effect)),
+                })
+          const sharedLanguageModelLayer =
+            namespacedLanguageModelService === undefined
               ? languageModelLayer
-              : Layer.succeed(LanguageModelService.Service, languageModelService)
+              : Layer.succeed(LanguageModelService.Service, namespacedLanguageModelService)
           const modelRegistry = Context.get(
             yield* Layer.build(ModelRegistry.layer(registrationsFor(options))),
             ModelRegistry.Service,
@@ -1163,7 +1475,11 @@ export const layer = <
           const schemaRegistryLayer = SchemaRegistry.layer(outputSchemaRegistrations)
           const rikaToolRuntimeLayer =
             options.toolRuntimeLayerForWorkspace !== undefined && options.resolveWorkspace !== undefined
-              ? routedToolRuntimeLayer(options.toolRuntimeLayerForWorkspace, options.resolveWorkspace)
+              ? routedToolRuntimeLayer(options.toolRuntimeLayerForWorkspace, (durableExecutionId) =>
+                  turnIdFromExecutionId(durableExecutionId) === undefined && belongsToWorkflow(durableExecutionId)
+                    ? Effect.succeed(options.workspace)
+                    : options.resolveWorkspace!(durableExecutionId),
+                )
               : (options.toolRuntimeLayer ?? RikaToolRuntime.layer(options.workspace))
           const toolRuntimeLayer = ToolRuntime.layerFromToolkit(runnerToolkit, (tool) => ({
             needsApproval:
@@ -1323,25 +1639,81 @@ export const layer = <
               const client = yield* Client.Service
               const childFanOut = yield* ChildFanOutRuntime.Service
               return WorkflowDefinitionRuntime.HandlerService.of({
-                child: (parentId: any, operation: any) => {
-                  const childId = Ids.ChildExecutionId.make(`child:${parentId}:${operation.id}`)
+                child: (parentId: any, operation: any, context: any) => {
+                  const parentExecutionId = String(parentId)
+                  const childId = makeChildExecutionId(parentExecutionId, String(operation.id))
                   const grounded = "address_id" in operation
-                  return client
-                    .spawnChildRun({
-                      execution_id: parentId,
-                      child_execution_id: childId,
-                      address_id: grounded ? operation.address_id : addressId,
-                      ...(grounded ? { preset_name: operation.preset_name } : {}),
-                      input: [Content.text(JSON.stringify(operation.input ?? {}))],
-                      wait: false,
+                  const profileName = grounded ? String(operation.preset_name) : "Task"
+                  const availablePresets = presets(options.selection, options.oracleSelection)
+                  const preset = availablePresets[profileName] ?? availablePresets.Task!
+                  const childSelection = {
+                    provider: preset.model.provider,
+                    model: preset.model.model,
+                    ...(preset.model.registration_key === undefined
+                      ? {}
+                      : { registrationKey: preset.model.registration_key }),
+                  }
+                  const childToolkit = Toolkit.make(
+                    ...Object.values(toolkit.tools).filter((tool) => preset.tool_names.includes(tool.name)),
+                  )
+                  const childAgentId = Ids.AgentId.make(
+                    `agent:rika:workflow:${encodeURIComponent(parentExecutionId)}:${String(operation.id)}`,
+                  )
+                  const policy = compactionPolicy(
+                    profileName === "Oracle" ? (options.oracleCompaction ?? options.compaction) : options.compaction,
+                    options.compactionSummarySelection,
+                  )
+                  return Effect.gen(function* () {
+                    const startedAt = yield* Clock.currentTimeMillis
+                    const encodedInput = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(operation.input ?? {})
+                    const registered = yield* client.registerAgent({
+                      id: childAgentId,
+                      address: grounded ? operation.address_id : addressId,
+                      agent: Agent.make(`rika-workflow-${String(childId)}`, {
+                        instructions: preset.instructions,
+                        model: childSelection,
+                        toolkit: childToolkit,
+                      }),
+                      permissions: preset.permissions.map((name) => ({ name, value: true })),
+                      ...(options.permissionPolicy === undefined ? {} : { permission_rules: options.permissionPolicy }),
+                      output_schema_ref: preset.output_schema_ref,
+                      metadata: { ...preset.metadata, steering_enabled: true },
+                      ...(policy === undefined ? {} : { compaction_policy: policy }),
                     })
-                    .pipe(
-                      Effect.andThen(childResult(client, String(childId))),
-                      Effect.map((result) => result.output),
-                      Effect.mapError((cause) =>
-                        WorkflowDefinitionRuntime.WorkflowRuntimeError.make({ message: String(cause) }),
-                      ),
-                    )
+                    yield* client
+                      .startExecutionByAgentDefinition({
+                        root_address_id: grounded ? operation.address_id : addressId,
+                        session_id: childSessionId(childId),
+                        agent_id: childAgentId,
+                        agent_revision: registered.record.current_revision,
+                        execution_id: Ids.ExecutionId.make(String(childId)),
+                        input: [Content.text(encodedInput)],
+                        idempotency_key: context.idempotency_key,
+                        started_at: startedAt,
+                        completed_at: startedAt,
+                        metadata: {
+                          parent_execution_id: parentId,
+                          child_execution_id: childId,
+                          workflow_operation_id: operation.id,
+                        },
+                      })
+                      .pipe(
+                        Effect.catchTag("ClientError", (startError) =>
+                          client
+                            .getExecution(Ids.ExecutionId.make(String(childId)))
+                            .pipe(
+                              Effect.flatMap((existing) =>
+                                existing === undefined ? Effect.fail(startError) : Effect.succeed(existing),
+                              ),
+                            ),
+                        ),
+                      )
+                    return (yield* childResult(client, String(childId))).output
+                  }).pipe(
+                    Effect.mapError((cause) =>
+                      WorkflowDefinitionRuntime.WorkflowRuntimeError.make({ message: String(cause) }),
+                    ),
+                  )
                 },
                 approval: (_parentId: any, operation: any) =>
                   Effect.succeed({ approved: true, prompt: operation.prompt }),

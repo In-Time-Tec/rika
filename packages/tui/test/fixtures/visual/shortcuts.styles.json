@@ -1435,7 +1435,7 @@
           "width": 6
         },
         {
-          "text": " switch modes             ",
+          "text": " switch modes",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1453,52 +1453,10 @@
             }
           },
           "attributes": 0,
-          "width": 26
+          "width": 13
         },
         {
-          "text": "Opt+D",
-          "fg": {
-            "buffer": {
-              "0": 1024,
-              "1": 256,
-              "2": 128,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 0,
-              "2": 0,
-              "3": 0
-            }
-          },
-          "attributes": 0,
-          "width": 5
-        },
-        {
-          "text": " toggle reasoning effort",
-          "fg": {
-            "buffer": {
-              "0": 1984,
-              "1": 448,
-              "2": 192,
-              "3": 255
-            }
-          },
-          "bg": {
-            "buffer": {
-              "0": 0,
-              "1": 0,
-              "2": 0,
-              "3": 0
-            }
-          },
-          "attributes": 0,
-          "width": 24
-        },
-        {
-          "text": "                ",
+          "text": "                                                          ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1516,7 +1474,7 @@
             }
           },
           "attributes": 0,
-          "width": 16
+          "width": 58
         },
         {
           "text": "│",
@@ -1649,7 +1607,7 @@
           "width": 5
         },
         {
-          "text": " toggle tool details",
+          "text": " toggle file tree",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1667,10 +1625,10 @@
             }
           },
           "attributes": 0,
-          "width": 20
+          "width": 17
         },
         {
-          "text": "                    ",
+          "text": "                       ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1688,7 +1646,7 @@
             }
           },
           "attributes": 0,
-          "width": 20
+          "width": 23
         },
         {
           "text": "│",

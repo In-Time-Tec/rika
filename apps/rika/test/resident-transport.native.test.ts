@@ -1,10 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as BunSocket from "@effect/platform-bun/BunSocket"
-import * as ResidentService from "@rika/app/resident-service"
 import { afterEach, describe, expect, test } from "bun:test"
-import { Cause, Config, Data, Effect, Fiber, FileSystem, Layer, Queue, Ref, Schema, Scope, Stream } from "effect"
+import { Cause, Clock, Config, Data, Effect, Fiber, FileSystem, Layer, Queue, Ref, Schema, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as Socket from "effect/unstable/socket/Socket"
 import { resolve } from "../src/resident-endpoint"
 
 type Event = {
@@ -103,6 +100,45 @@ const readText = (path: string) =>
   Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.readFileString(path))
 const fileStat = (path: string) => Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.stat(path))
 const fileExists = (path: string) => Effect.flatMap(FileSystem.FileSystem, (fileSystem) => fileSystem.exists(path))
+
+const legacyClose = (url: string) =>
+  Effect.callback<{ readonly code: number; readonly reason: string }, FixtureFailure>((resume) => {
+    const socket = new WebSocket(url)
+    socket.addEventListener("close", (event) => resume(Effect.succeed({ code: event.code, reason: event.reason })))
+    socket.addEventListener("error", (cause) =>
+      resume(Effect.fail(new FixtureFailure({ operation: "connect legacy resident client", cause }))),
+    )
+    return Effect.sync(() => socket.close())
+  }).pipe(
+    Effect.timeoutOrElse({
+      duration: "2 seconds",
+      orElse: () => Effect.fail(new FixtureFailure({ operation: "wait for legacy close", cause: "timed out" })),
+    }),
+  )
+
+const startOldResident = Effect.fn("ResidentTransportTest.startOldResident")(function* (
+  root: string,
+  recordPid: boolean = true,
+  mode: "legacy" | "schema-reject" = "legacy",
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const old = yield* spawner.spawn(
+    ChildProcess.make("bun", ["test/fixtures/resident-old-host.ts"], {
+      cwd: import.meta.dir.replace(/\/test$/, ""),
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "pipe",
+      env: {
+        RIKA_TEST_RESIDENT_DATA_ROOT: root,
+        RIKA_TEST_RESIDENT_RECORD_PID: recordPid ? "1" : "0",
+        RIKA_TEST_RESIDENT_MODE: mode,
+      },
+      extendEnv: true,
+    }),
+  )
+  yield* waitUntil(fileExists(`${root}/old-resident-ready`), 3_000)
+  return old
+})
 
 interface ResidentClient {
   readonly pid: number
@@ -229,6 +265,143 @@ const nextTypeEffect = (client: ResidentClient, type: string): Effect.Effect<Eve
   })
 
 describe("resident WebSocket process transport", () => {
+  test(
+    "supersedes an authenticated old resident before starting the current host",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const old = yield* startOldResident(root)
+            const startedAt = yield* Clock.currentTimeMillis
+            const client = yield* start(root, 1_000)
+            expect(yield* client.nextEffect).toEqual({ type: "resident-status", callbacks: 1 })
+            const attached = yield* attachedEffect(client)
+            expect(attached.hostPid).not.toBe(Number(old.pid))
+            expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(8_000)
+            yield* waitUntil(fileExists(`${root}/old-resident-stopped`), 2_000)
+            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${attached.hostPid}\n`)
+            yield* client.send("ping")
+            expect((yield* client.nextEffect).type).toBe("pong")
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "closes an old-path client with a clean incompatibility signal",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root, 1_000)
+            yield* attachedEffect(client)
+            const endpoint = yield* resolve("default", root)
+            const closed = yield* legacyClose(endpoint.legacyUrl)
+            const oldClientFailure =
+              closed.code === 4403
+                ? { reason: "upgrade-required", message: "Resident protocol upgrade required", startsHost: false }
+                : { reason: "resident-absent", message: closed.reason, startsHost: true }
+            expect(closed).toEqual({
+              code: 4403,
+              reason: "Resident protocol upgrade required",
+            })
+            expect(oldClientFailure).toEqual({
+              reason: "upgrade-required",
+              message: "Resident protocol upgrade required",
+              startsHost: false,
+            })
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "supersedes a recorded resident that rejects both handshake schemas",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const old = yield* startOldResident(root, true, "schema-reject")
+            const client = yield* start(root, 1_000)
+            expect(yield* client.nextEffect).toEqual({ type: "resident-status", callbacks: 1 })
+            const attached = yield* attachedEffect(client)
+            expect(attached.hostPid).not.toBe(Number(old.pid))
+            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${attached.hostPid}\n`)
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "fails once without spawning when an authenticated stale listener PID cannot be verified",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          const old = yield* startOldResident(root, false)
+          try {
+            const startedAt = yield* Clock.currentTimeMillis
+            const client = yield* start(root, 1_000)
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              error: expect.stringContaining("its PID could not be verified"),
+            })
+            expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(4_000)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
+          } finally {
+            yield* old.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    10_000,
+  )
+
+  test(
+    "does not supersede a listener matched only by a stale PID marker",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          const old = yield* startOldResident(root, false, "schema-reject")
+          try {
+            const fs = yield* FileSystem.FileSystem
+            const staleMarker = `${root}/diagnostics/resident-stale-${old.pid}.open.jsonl`
+            yield* fs.writeFileString(staleMarker, "", {
+              mode: 0o600,
+            })
+            yield* fs.utimes(staleMarker, 0, 0)
+            const client = yield* start(root, 1_000)
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              error: expect.stringContaining("could not be verified"),
+            })
+            expect(alive(Number(old.pid))).toBe(true)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
+          } finally {
+            yield* old.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    10_000,
+  )
+
   test(
     "keeps a healthy connection through a one-second client stall",
     () =>
@@ -443,6 +616,50 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
+    "backpressures two fragment-heavy sessions without failing either session",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root, 350, 0, false, 2)
+            yield* attachedEffect(client)
+            yield* client.send("fragment-burst")
+            expect(yield* client.nextEffect).toEqual({
+              type: "fragment-burst-completed",
+              text: "8000000,8000000",
+            })
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    30_000,
+  )
+
+  test(
+    "degrades a 20 MB event and survives replay after resident replacement",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root, 1_000)
+            yield* attachedEffect(client)
+            yield* client.send("wire-limit-reattach")
+            expect(yield* nextTypeEffect(client, "wire-limit-reattach-completed")).toMatchObject({ callbacks: 2 })
+            expect((yield* readText(`${root}/owner-acquisitions.log`)).trim().split("\n")).toHaveLength(2)
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    30_000,
+  )
+
+  test(
     "resyncs transcript delivery without failing the current physical feed",
     () =>
       run(
@@ -461,6 +678,30 @@ describe("resident WebSocket process transport", () => {
             expect(event.callbacks).toBeLessThan(12)
             expect(event.tags).toContain("TranscriptResyncRequired")
             expect((event.tags ?? []).includes("ExecutionFailed")).toBe(false)
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "holds feed acknowledgements until a slow consumer releases capacity",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root, 350, 0, false, 4)
+            yield* attachedEffect(client)
+            yield* client.send("slow-consumer")
+            const event = yield* client.nextEffect
+            expect(event.type).toBe("slow-consumer-completed")
+            expect(event.tags).toContain("TranscriptResyncRequired")
+            expect(event.tags).not.toContain("execution.completed")
+            expect(event.callbacks).toBeLessThan(10)
             yield* client.closeEffect
           } finally {
             yield* cleanRoot(root)
@@ -599,6 +840,13 @@ describe("resident WebSocket process transport", () => {
             const firstClient = yield* start(root, 100, 0, false, 1_024, 2_000)
             const first = yield* attachedEffect(firstClient)
             yield* firstClient.closeEffect
+            yield* firstClient.awaitExit.pipe(
+              Effect.timeoutOrElse({
+                duration: "500 millis",
+                orElse: () => Effect.die("resident startup owner did not exit after detaching its live host"),
+              }),
+            )
+            expect(alive(first.hostPid!)).toBe(true)
             yield* Effect.sleep("500 millis")
 
             const lateClient = yield* start(root, 100, 0, false, 1_024, 2_000)

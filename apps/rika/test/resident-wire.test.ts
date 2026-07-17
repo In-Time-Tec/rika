@@ -67,4 +67,147 @@ describe("resident server message frames", () => {
     expect(Math.max(...frames.map((frame) => encoder.encode(frame).byteLength))).toBeLessThanOrEqual(maxFrameBytes)
     expect(decoded).toEqual([message])
   })
+
+  it("expires abandoned fragment sequences and reuses their bounded storage", () => {
+    let now = 0
+    const decodeFrame = makeServerMessageFrameDecoder({
+      now: () => now,
+      fragmentTtlMilliseconds: 100,
+    })
+    const abandoned = Array.from({ length: 16 }, (_, index) =>
+      serverMessageFrames(
+        `abandoned-${index}`,
+        Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+          _tag: "interactive-feed-event",
+          connectionId: "connection",
+          requestId: "request",
+          sessionId: "session",
+          feedGeneration: "generation",
+          sequence: index + 1,
+          event: {
+            _tag: "ExecutionFailed",
+            selectionEpoch: 1,
+            message: "x".repeat(1_100_000),
+          },
+        }),
+      ),
+    )
+    for (const frames of abandoned) expect(decodeFrame(frames[0]!)).toBeUndefined()
+    now = 101
+
+    const message = Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+      _tag: "interactive-feed-event",
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "generation",
+      sequence: 17,
+      event: {
+        _tag: "ExecutionFailed",
+        selectionEpoch: 1,
+        message: "y".repeat(1_100_000),
+      },
+    })
+    expect(serverMessageFrames("reused", message).map(decodeFrame).filter(Boolean)).toEqual([message])
+    for (const frame of abandoned[0]!.slice(1)) expect(() => decodeFrame(frame)).not.toThrow()
+  })
+
+  it("bounds total incomplete reassembly bytes across message ids", () => {
+    const makeMessage = (sequence: number, text: string) =>
+      Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+        _tag: "interactive-feed-event",
+        connectionId: "connection",
+        requestId: "request",
+        sessionId: "session",
+        feedGeneration: "generation",
+        sequence,
+        event: { _tag: "ExecutionFailed", selectionEpoch: 1, message: text },
+      })
+    const first = serverMessageFrames("first", makeMessage(1, "x".repeat(1_100_000)))
+    const secondMessage = makeMessage(2, "y".repeat(1_100_000))
+    const second = serverMessageFrames("second", secondMessage)
+    const decodeFrame = makeServerMessageFrameDecoder({ maxPendingBytes: 1_500_000 })
+
+    expect(decodeFrame(first[0]!)).toBeUndefined()
+    expect(decodeFrame(second[0]!)).toBeUndefined()
+    expect(second.slice(1).map(decodeFrame).filter(Boolean)).toEqual([secondMessage])
+    for (const frame of first.slice(1)) expect(() => decodeFrame(frame)).not.toThrow()
+  })
+
+  it("degrades a single event larger than the wire limit into an explicit marker", () => {
+    const message = Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+      _tag: "interactive-feed-event",
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "generation",
+      sequence: 1,
+      event: {
+        _tag: "ExecutionFailed",
+        selectionEpoch: 1,
+        message: "x".repeat(20_000_000),
+      },
+    })
+    const decodeFrame = makeServerMessageFrameDecoder()
+    const decoded = serverMessageFrames("oversized", message)
+      .map(decodeFrame)
+      .filter((value) => value !== undefined)
+
+    expect(decoded).toHaveLength(1)
+    expect(decoded[0]).toMatchObject({
+      _tag: "interactive-feed-event",
+      sequence: 1,
+      event: {
+        _tag: "ExecutionFailed",
+        message: expect.stringContaining("omitted an event larger than 16 MiB"),
+      },
+    })
+  })
+
+  it("keeps a transcript resync target when an oversized patch is omitted", () => {
+    const message = Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+      _tag: "interactive-feed-event",
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "generation",
+      sequence: 1,
+      event: {
+        _tag: "TranscriptPatched",
+        selectionEpoch: 3,
+        threadId: "thread",
+        turnId: "turn",
+        event: {
+          cursor: "cursor",
+          sequence: 1,
+          type: "model.output.delta",
+          createdAt: 1,
+          text: "x".repeat(20_000_000),
+        },
+        revision: 1,
+      },
+    })
+    const decodeFrame = makeServerMessageFrameDecoder()
+    const decoded = serverMessageFrames("oversized-patch", message)
+      .map(decodeFrame)
+      .filter((value) => value !== undefined)
+
+    expect(decoded).toEqual([
+      {
+        _tag: "interactive-feed-event",
+        connectionId: "connection",
+        requestId: "request",
+        sessionId: "session",
+        feedGeneration: "generation",
+        sequence: 1,
+        event: {
+          _tag: "TranscriptResyncRequired",
+          selectionEpoch: 3,
+          threadId: "thread",
+          reason:
+            "Resident live delivery omitted an event larger than 16 MiB; reload the durable transcript for the full content",
+        },
+      },
+    ])
+  })
 })

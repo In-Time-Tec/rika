@@ -65,9 +65,68 @@ const program = Effect.gen(function* () {
                     }),
                   )
                 : interactive(input, {
-                    events: (dispatch) =>
-                      Effect.sync(() => {
-                        const kind = input.prompt[0]
+                    events: (dispatch) => {
+                      const kind = input.prompt[0]
+                      if (kind === "wire-limit-event")
+                        return Effect.sync(() =>
+                          dispatch({
+                            _tag: "ExecutionFailed",
+                            selectionEpoch: 0,
+                            message: "x".repeat(20_000_000),
+                          }),
+                        ).pipe(Effect.andThen(Effect.never))
+                      if (kind === "large-event-a" || kind === "large-event-b")
+                        return Effect.sync(() =>
+                          dispatch({
+                            _tag: "ExecutionFailed",
+                            selectionEpoch: 0,
+                            message: kind.at(-1)!.repeat(8_000_000),
+                          }),
+                        ).pipe(Effect.andThen(Effect.never))
+                      if (kind === "slow-consumer-events")
+                        return Effect.gen(function* () {
+                          const emitPatch = (index: number) =>
+                            Effect.sync(() =>
+                              dispatch({
+                                _tag: "TranscriptPatched",
+                                selectionEpoch: 0,
+                                threadId: Thread.ThreadId.make("slow-consumer-thread"),
+                                turnId: Turn.TurnId.make("slow-consumer-turn"),
+                                event: {
+                                  cursor: `slow-consumer-${index}`,
+                                  sequence: index,
+                                  type: "model.output.delta",
+                                  createdAt: index,
+                                  text: String(index),
+                                },
+                                revision: index,
+                              }),
+                            )
+                          yield* Effect.forEach(
+                            Array.from({ length: outboundCapacity }, (_, index) => index),
+                            emitPatch,
+                            { discard: true },
+                          )
+                          yield* Effect.sleep("250 millis")
+                          yield* emitPatch(outboundCapacity)
+                          yield* Effect.sync(() =>
+                            dispatch({
+                              _tag: "TranscriptPatched",
+                              selectionEpoch: 0,
+                              threadId: Thread.ThreadId.make("slow-consumer-thread"),
+                              turnId: Turn.TurnId.make("slow-consumer-turn"),
+                              event: {
+                                cursor: "slow-consumer-completed",
+                                sequence: outboundCapacity + 1,
+                                type: "execution.completed",
+                                createdAt: outboundCapacity + 1,
+                              },
+                              revision: outboundCapacity + 1,
+                            }),
+                          )
+                          return yield* Effect.never
+                        })
+                      return Effect.sync(() => {
                         if (kind === "feed-takeover") {
                           dispatch({ _tag: "ThreadsListed", threads: [] })
                           return true
@@ -151,7 +210,8 @@ const program = Effect.gen(function* () {
                                   )
                                 : Effect.never,
                         ),
-                      ),
+                      )
+                    },
                     submit: (prompt) =>
                       prompt === "ambiguous"
                         ? append("mutation-attempts.log", `${process.pid}\n`).pipe(
@@ -202,6 +262,7 @@ const program = Effect.gen(function* () {
                     steer: () => Effect.void,
                     interruptAndSend: () => Effect.void,
                     cancel: Effect.void,
+                    newThread: Effect.void,
                     resolvePermission: () => Effect.void,
                     selectThread: () => Effect.void,
                     readQueue: () => Effect.void,

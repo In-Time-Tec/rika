@@ -45,10 +45,10 @@ test(
                 { atMilliseconds: 1_500, type: "signal", signal: "stop" },
                 { atMilliseconds: 13_500, type: "signal", signal: "continue" },
                 { atMilliseconds: 17_000, type: "write", text: "prove rendering resumed" },
-                { atMilliseconds: 17_100, type: "write", key: "enter" },
                 {
-                  atMilliseconds: 17_200,
-                  type: "probe",
+                  atMilliseconds: 17_100,
+                  type: "write",
+                  key: "enter",
                   expectedMarker: "BLOCKED_RESUMED_OK",
                   markerTimeoutMilliseconds: 7_000,
                 },

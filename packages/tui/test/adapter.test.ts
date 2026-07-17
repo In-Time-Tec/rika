@@ -140,6 +140,24 @@ const opentui = vi.hoisted(() => {
     }
   }
 
+  class SystemClock {
+    now() {
+      return 0
+    }
+
+    setTimeout(_action: () => void, _delay: number) {
+      return 0
+    }
+
+    clearTimeout(_handle: number) {}
+
+    setInterval(_action: () => void, _delay: number) {
+      return 0
+    }
+
+    clearInterval(_handle: number) {}
+  }
+
   const renderer = {
     _usesProcessStdout: true,
     stdout: { write: vi.fn() },
@@ -190,6 +208,7 @@ const opentui = vi.hoisted(() => {
     RGBA,
     ScrollBarRenderable,
     ScrollBoxRenderable,
+    SystemClock,
     TextRenderable,
     boxChildren,
     createCliRenderer: vi.fn(() => Effect.runPromise(Effect.succeed(renderer))),
@@ -211,6 +230,7 @@ vi.mock("@opentui/core", () => ({
   RGBA: opentui.RGBA,
   ScrollBarRenderable: opentui.ScrollBarRenderable,
   ScrollBoxRenderable: opentui.ScrollBoxRenderable,
+  SystemClock: opentui.SystemClock,
   CliRenderEvents: { FRAME: "frame", RESIZE: "resize", SELECTION: "selection" },
   TextRenderable: opentui.TextRenderable,
   createCliRenderer: opentui.createCliRenderer,
@@ -243,16 +263,7 @@ import {
   renderTranscript,
   renderTranscriptStyled,
 } from "../src/adapter"
-import {
-  defaultReasoningEffort,
-  initial,
-  loading,
-  ready,
-  update,
-  type Mode,
-  type Model,
-  type ThreadItem,
-} from "../src/view-state"
+import { initial, ready, update, type Mode, type Model, type ThreadItem } from "../src/view-state"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 
@@ -308,59 +319,67 @@ test("draws every thread-preview row at the exact box width with a two-cell gutt
   expect(stringWidth(contentRow![1]!.text)).toBe(2)
 })
 
-test("shows the centered mode orb while a thread preview loads, then the transcript tail", () => {
+test("keeps the previous thread preview visible until the next preview is ready", () => {
   const width = 64
   const height = 24
-  const pendingModel = model({
+  const firstPending = update(
+    model({
+      mode: "high",
+      threads: [thread({ id: "a", title: "Alpha" })],
+      threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    }),
+    { _tag: "ThreadPreviewRequested" },
+  )
+  const firstPendingText = [...previewBoxRows(firstPending, width, height).values()]
+    .flatMap((row) => row.map((chunk) => chunk.text))
+    .join("")
+  expect(firstPendingText).not.toContain("Loading preview")
+  expect(firstPendingText).not.toContain("No preview")
+  expect(firstPendingText).not.toMatch(/[•●·]/u)
+
+  const previous = model({
     mode: "high",
-    threads: [thread({ id: "a", title: "Alpha" })],
+    threads: [thread({ id: "a", title: "Alpha" }), thread({ id: "b", title: "Beta" })],
     threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
-    threadPreview: loading,
+    threadPreview: ready({
+      threadId: "a",
+      turns: [{ prompt: "previous preview", events: [] }],
+    }),
   })
+  const pendingModel = update(
+    { ...previous, threadSwitcher: { ...previous.threadSwitcher, selected: 1 } },
+    { _tag: "ThreadPreviewRequested" },
+  )
   const pendingRows = previewBoxRows(pendingModel, width, height)
-  const pending = Array.from({ length: height }, (_, row) =>
-    (pendingRows.get(row) ?? [])
-      .map((chunk) => chunk.text)
-      .join(""),
-  )
-  expect(pending.join("\n")).not.toContain("Loading preview")
-  const glyphs = pending.flatMap((line, row) =>
-    [...line].flatMap((glyph, column) => ("•●·".includes(glyph) ? [{ row, column }] : [])),
-  )
-  expect(glyphs.length).toBeGreaterThan(0)
-  const minRow = Math.min(...glyphs.map(({ row }) => row))
-  const maxRow = Math.max(...glyphs.map(({ row }) => row))
-  const minColumn = Math.min(...glyphs.map(({ column }) => column))
-  const maxColumn = Math.max(...glyphs.map(({ column }) => column))
-  expect(Math.abs((minRow + maxRow) / 2 - (height - 1) / 2)).toBeLessThanOrEqual(1)
-  expect(Math.abs((minColumn + maxColumn) / 2 - (width - 1) / 2)).toBeLessThanOrEqual(1)
+  const pendingText = [...pendingRows.values()].flatMap((row) => row.map((chunk) => chunk.text)).join("")
+  expect(pendingText).toContain("previous preview")
+  expect(pendingText).not.toMatch(/[•●·]/u)
 
   const loadedRows = previewBoxRows(
-    {
-      ...pendingModel,
-      threadPreview: ready({
-        threadId: "a",
-        turns: [
-          {
-            prompt: "inspect the workspace",
-            events: [
-              {
-                cursor: "answer",
-                sequence: 1,
-                type: "model.output.completed",
-                createdAt: 1,
-                text: "transcript tail loaded",
-              },
-            ],
-          },
-        ],
-      }),
-    },
+    update(pendingModel, {
+      _tag: "ThreadPreviewLoaded",
+      threadId: "b",
+      turns: [
+        {
+          prompt: "next preview",
+          events: [
+            {
+              cursor: "answer",
+              sequence: 1,
+              type: "model.output.completed",
+              createdAt: 1,
+              text: "transcript tail loaded",
+            },
+          ],
+        },
+      ],
+    }),
     width,
     height,
   )
-  expect([...loadedRows.values()].flatMap((row) => row.map((chunk) => chunk.text)).join(""))
-    .toContain("transcript tail loaded")
+  const loadedText = [...loadedRows.values()].flatMap((row) => row.map((chunk) => chunk.text)).join("")
+  expect(loadedText).toContain("transcript tail loaded")
+  expect(loadedText).not.toContain("previous preview")
 })
 
 test("renders changed files as an indented path tree", () => {
@@ -542,6 +561,59 @@ describe("Surface", () => {
     expect(older.entries.at(-1)?.text).toBe("answer 399")
   })
 
+  test("keeps a subagent parent mounted when its child window exceeds the transcript limit", () => {
+    const parent = {
+      _tag: "ToolCall" as const,
+      id: "agent",
+      name: "oracle",
+      input: "{}",
+      status: "running" as const,
+      presentation: {
+        family: "agent" as const,
+        action: "oracle",
+        activeLabel: "Oracle exploring",
+        completeLabel: "Oracle has spoken",
+      },
+      detail: "Review the code",
+      files: [],
+    }
+    const children = Array.from({ length: 205 }, (_, index) => ({
+      _tag: "ToolCall" as const,
+      id: `child-${index}`,
+      name: "read_file",
+      input: `{"path":"src/${index}.ts"}`,
+      status: "complete" as const,
+      presentation: {
+        family: "explore" as const,
+        action: "read",
+        activeLabel: "Exploring",
+        completeLabel: "Explored",
+        counter: "file" as const,
+      },
+      detail: `src/${index}.ts`,
+      files: [],
+    }))
+    const state = model({
+      blocks: [parent, ...children],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
+        ...children.map((_, index) => ({
+          _tag: "Block" as const,
+          index: index + 1,
+          id: `tool:child-${index}`,
+          turnId: "child",
+          parentId: "agent",
+        })),
+      ],
+    })
+
+    const bounded = boundedTranscriptModel(state)
+
+    expect(bounded.items).toHaveLength(201)
+    expect(bounded.blocks[0]).toMatchObject({ _tag: "ToolCall", id: "agent" })
+    expect(bounded.items[0]).toMatchObject({ _tag: "Block", index: 0, id: "tool:agent" })
+  })
+
   it.effect("mounts a bounded transcript window for large histories", () =>
     Effect.gen(function* () {
       const { surface } = yield* createScoped(handlers())
@@ -656,14 +728,14 @@ describe("Surface", () => {
   test("expands grouped tools and each nested command independently", () => {
     const collapsedChild = model({
       blocks: [shell("one", "bun test", "passed"), shell("two", "bun run lint", "clean")],
-      expandedRowKeys: ["tool:one+two"],
+      expandedRowKeys: ["tool:one"],
     })
     const collapsed = buildTranscript(collapsedChild)
-    expect(collapsed.ranges.map((range) => range.unit)).toEqual(["tool:one+two", "tool-child:one", "tool-child:two"])
+    expect(collapsed.ranges.map((range) => range.unit)).toEqual(["tool:one", "tool-child:one", "tool-child:two"])
     expect(collapsed.styled.chunks.map((chunk) => chunk.text).join("")).not.toContain("passed")
     const expanded = buildTranscript({
       ...collapsedChild,
-      expandedRowKeys: ["tool:one+two", "tool-child:one"],
+      expandedRowKeys: ["tool:one", "tool-child:one"],
     })
     expect(expanded.styled.chunks.map((chunk) => chunk.text).join("")).toContain("passed")
     expect(expanded.styled.chunks.map((chunk) => chunk.text).join("")).not.toContain("clean")
@@ -1092,13 +1164,13 @@ describe("Surface", () => {
         ["ultra", "#ae77ff"],
       ]
       for (const [mode] of modeColors) {
-        surface.update(model({ mode, busy: true, reasoningEffort: defaultReasoningEffort(mode) }))
+        surface.update(model({ mode, busy: true, activity: { _tag: "Sending" } }))
         expect(surface.inputBox.title).toBe("")
         expect(modeLabelText()).toBe(` $···· ─ ${mode} `)
         expect(surface.inputBox.borderColor).toEqual(opentui.RGBA.fromIndex(7))
         expect(surface.statusLabel.content).toEqual(
           expect.objectContaining({
-            chunks: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining(" Waiting ") })]),
+            chunks: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining(" Sending ") })]),
           }),
         )
       }

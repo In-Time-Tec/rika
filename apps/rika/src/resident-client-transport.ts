@@ -14,6 +14,7 @@ import {
   FileSystem,
   Function,
   Layer,
+  Path,
   Queue,
   Ref,
   Schedule,
@@ -23,7 +24,8 @@ import {
 } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
-import { readOrCreateToken, resolve } from "./resident-endpoint"
+import { readOrCreateToken, recordedResidentProcesses, resolve } from "./resident-endpoint"
+import * as ResidentProcessStartup from "./resident-process-startup"
 import { claimStartup } from "./resident-startup"
 import {
   defaultOutboundCapacity,
@@ -31,8 +33,11 @@ import {
   json,
   makeServerMessageFrameDecoder,
   maxFrameBytes,
+  parse,
   transportError,
 } from "./resident-wire"
+
+const ignoreInteractiveEvent = (_event: Operation.InteractiveEvent) => {}
 
 const mapResidentSocketFailure = (cause: unknown, accepted: boolean): ResidentService.ResidentServiceError => {
   if (Socket.SocketError.is(cause) && cause.reason._tag === "SocketCloseError") {
@@ -80,6 +85,66 @@ const isDisconnectedOperation = (error: unknown) =>
 const isReconnectableTransport = (error: unknown) =>
   Schema.is(ResidentService.ResidentServiceError)(error) &&
   (error.reason === "resident-absent" || error.reason === "resident-draining" || error.reason === "transport-failed")
+const legacyCapabilities = ["ping", "startup-state", "transcript-pages", "interactive-ack"]
+const probeLegacyResident = Effect.fn("ResidentTransport.probeLegacyResident")(function* (options: {
+  readonly urls: ReadonlyArray<string>
+  readonly identity: string
+  readonly token: string
+  readonly clientKind: ResidentService.Handshake["clientKind"]
+}) {
+  const crypto = yield* Crypto.Crypto
+  for (const url of options.urls) {
+    const matched = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const webSocketContext = yield* Layer.build(BunSocket.layerWebSocketConstructor)
+        const webSocketConstructor = Context.get(webSocketContext, Socket.WebSocketConstructor)
+        const socket = yield* Socket.makeWebSocket(url).pipe(
+          Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor),
+        )
+        const writer = yield* socket.writer
+        const clientNonce = yield* crypto.randomUUIDv4
+        const accepted = yield* Deferred.make<boolean>()
+        const handshake = json({
+          family: "rika-resident",
+          version: { major: 1, minor: 0 },
+          identity: options.identity,
+          token: options.token,
+          clientNonce,
+          clientKind: options.clientKind,
+          clientVersion: "resident-upgrade",
+          capabilities: legacyCapabilities,
+        })
+        yield* socket
+          .runString(
+            (text) =>
+              Effect.sync(() => parse(text)).pipe(
+                Effect.flatMap((message) =>
+                  message !== null &&
+                  typeof message === "object" &&
+                  "_tag" in message &&
+                  message._tag === "accepted" &&
+                  "family" in message &&
+                  message.family === "rika-resident" &&
+                  "identity" in message &&
+                  message.identity === options.identity &&
+                  "clientNonce" in message &&
+                  message.clientNonce === clientNonce
+                    ? Deferred.succeed(accepted, true)
+                    : Effect.void,
+                ),
+              ),
+            { onOpen: writer(handshake).pipe(Effect.ignore) },
+          )
+          .pipe(Effect.ignore, Effect.forkScoped)
+        return yield* Deferred.await(accepted).pipe(
+          Effect.timeoutOrElse({ duration: "750 millis", orElse: () => Effect.succeed(false) }),
+        )
+      }),
+    )
+    if (matched) return true
+  }
+  return false
+})
 const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   readonly url: string
   readonly identity: string
@@ -232,20 +297,6 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                             if (message._tag === "interactive-feed-resync")
                               yield* Effect.logInfo("resident.feed.barrier_received")
                             yield* Queue.offer(feed.frames, message)
-                            yield* write(
-                              json({
-                                _tag: "interactive-feed-ack",
-                                connectionId: message.connectionId,
-                                requestId: message.requestId,
-                                sessionId: message.sessionId,
-                                feedGeneration: message.feedGeneration,
-                                throughSequence: message.sequence,
-                              } satisfies ResidentService.ClientMessage),
-                            )
-                            if (message.sequence % 1_024 === 0)
-                              yield* Effect.logInfo("resident.feed.ack_enqueued").pipe(
-                                Effect.annotateLogs("rika.resident.feed.sequence", message.sequence),
-                              )
                           }
                           if (
                             message._tag === "interactive-command-completed" ||
@@ -279,7 +330,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                             const feed: PhysicalFeed = {
                               sessionId: message.sessionId,
                               generation: message.feedGeneration,
-                              frames: yield* Queue.unbounded<InteractiveFeedFrame>(),
+                              frames: yield* Queue.bounded<InteractiveFeedFrame>(message.feedCapacity),
                               expectedSequence: 1,
                               replayRequestedAfter: undefined,
                               consumerAttached: false,
@@ -352,8 +403,30 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                                     while (true) {
                                       const frames = yield* Queue.takeAll(feed.frames)
                                       for (const queued of frames) {
-                                        if (queued._tag === "interactive-feed-event") dispatch(queued.event)
-                                        else for (const event of queued.events) dispatch(event)
+                                        yield* Effect.uninterruptible(
+                                          Effect.sync(() => {
+                                            if (queued._tag === "interactive-feed-event") dispatch(queued.event)
+                                            else for (const event of queued.events) dispatch(event)
+                                          }).pipe(
+                                            Effect.andThen(
+                                              write(
+                                                json({
+                                                  _tag: "interactive-feed-ack",
+                                                  connectionId: queued.connectionId,
+                                                  requestId: queued.requestId,
+                                                  sessionId: queued.sessionId,
+                                                  feedGeneration: queued.feedGeneration,
+                                                  throughSequence: queued.sequence,
+                                                } satisfies ResidentService.ClientMessage),
+                                              ),
+                                            ),
+                                            Effect.mapError((error) => unavailable(error.message)),
+                                          ),
+                                        )
+                                        if (queued.sequence % 1_024 === 0)
+                                          yield* Effect.logInfo("resident.feed.ack_consumed").pipe(
+                                            Effect.annotateLogs("rika.resident.feed.sequence", queued.sequence),
+                                          )
                                       }
                                     }
                                   }).pipe(
@@ -385,6 +458,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                               steer: (text) => invoke({ _tag: "Steer", text }),
                               interruptAndSend: (prompt) => invoke({ _tag: "InterruptAndSend", prompt }),
                               cancel: invoke({ _tag: "Cancel" }),
+                              newThread: invoke({ _tag: "NewThread" }),
                               resolvePermission: (waitId, kind, decision) =>
                                 invoke({ _tag: "ResolvePermission", waitId, kind, decision }),
                               selectThread: (threadId, selectionEpoch) =>
@@ -609,6 +683,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
           const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
           const crypto = yield* Crypto.Crypto
           const fileSystem = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
           const connectionScope = yield* Scope.make()
           yield* Effect.addFinalizer((exit) => Scope.close(connectionScope, exit))
           const attach = (role: ResidentService.Connection["role"]) =>
@@ -637,7 +712,11 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
             const deadline = startedAt + 30_000
             const first = yield* Effect.result(attach("attached"))
             if (first._tag === "Success") return first.success
-            if (first.failure.reason !== "resident-absent" && first.failure.reason !== "resident-draining")
+            if (
+              first.failure.reason !== "resident-absent" &&
+              first.failure.reason !== "resident-draining" &&
+              first.failure.reason !== "incompatible-resident"
+            )
               return yield* first.failure
             if (input.startHost === undefined) return yield* first.failure
             if (input.startHost !== undefined) {
@@ -652,9 +731,13 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                   return connected.success
                 }
                 lastFailure = connected.failure
-                if (lastFailure.reason !== "resident-absent" && lastFailure.reason !== "resident-draining")
+                if (
+                  lastFailure.reason !== "resident-absent" &&
+                  lastFailure.reason !== "resident-draining" &&
+                  lastFailure.reason !== "incompatible-resident"
+                )
                   return yield* lastFailure
-                if (lastFailure.reason === "resident-absent") {
+                if (lastFailure.reason === "resident-absent" || lastFailure.reason === "incompatible-resident") {
                   const claim = yield* claimStartup(endpoint.startupPath, endpoint.identity, deadline)
                   if (claim._tag === "Owner") {
                     const existing = yield* Effect.result(attach("attached"))
@@ -666,7 +749,56 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                       return existing.success
                     }
                     lastFailure = existing.failure
-                    if (lastFailure.reason === "resident-absent") {
+                    if (lastFailure.reason === "resident-absent" || lastFailure.reason === "incompatible-resident") {
+                      if (yield* ResidentProcessStartup.listenerIsLive(endpoint.port)) {
+                        const protocolVerified =
+                          lastFailure.reason === "incompatible-resident" ||
+                          (yield* probeLegacyResident({
+                            urls: [endpoint.url, endpoint.legacyUrl],
+                            identity: endpoint.identity,
+                            token,
+                            clientKind: input.clientKind,
+                          }))
+                        const recorded = yield* recordedResidentProcesses(endpoint).pipe(Effect.orElseSucceed(() => []))
+                        const alive = [] as Array<(typeof recorded)[number]>
+                        for (const resident of recorded)
+                          if (
+                            resident.pid !== process.pid &&
+                            (yield* ResidentProcessStartup.processIsAlive(resident.pid))
+                          )
+                            alive.push(resident)
+                        const listeners = yield* ResidentProcessStartup.listenerProcessIds(
+                          endpoint.port,
+                          alive.map((resident) => resident.pid),
+                        )
+                        const listener = alive.find((resident) => resident.pid === listeners[0])
+                        const markerOwned =
+                          listener === undefined
+                            ? false
+                            : yield* ResidentProcessStartup.processOwnsAnyFile(listener.pid, listener.markers)
+                        if (listeners.length !== 1 || (!protocolVerified && !markerOwned)) {
+                          yield* claim.release
+                          return yield* transportError(
+                            protocolVerified
+                              ? `The stale Rika resident on port ${endpoint.port} was authenticated, but its PID could not be verified. Stop it, then run rika again`
+                              : `A process is listening on Rika resident port ${endpoint.port}, but it could not be verified as this profile's resident. Stop that process, then run rika again`,
+                            "foreign-listener",
+                          )
+                        }
+                        yield* Effect.logWarning("resident.startup.superseding").pipe(
+                          Effect.annotateLogs({
+                            "rika.resident.previous.pid": listeners[0]!,
+                            "rika.resident.port": endpoint.port,
+                          }),
+                        )
+                        const superseded = yield* Effect.result(
+                          ResidentProcessStartup.supersede(listeners[0]!, endpoint.port),
+                        )
+                        if (superseded._tag === "Failure") {
+                          yield* claim.release
+                          return yield* superseded.failure
+                        }
+                      }
                       const spawned = yield* Effect.result(input.startHost())
                       if (spawned._tag === "Failure") {
                         yield* claim.release
@@ -731,6 +863,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
             Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
             Effect.provideService(Crypto.Crypto, crypto),
             Effect.provideService(FileSystem.FileSystem, fileSystem),
+            Effect.provideService(Path.Path, path),
             Effect.mapError((error) =>
               Schema.is(ResidentService.ResidentServiceError)(error) ? error : transportError(String(error)),
             ),
@@ -760,7 +893,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               { readonly _tag: "thread"; readonly threadId: string } | { readonly _tag: "latest" } | undefined
             >(undefined)
             const wireEpoch = yield* Ref.make(0)
-            let eventDispatch: (event: Operation.InteractiveEvent) => void = () => undefined
+            let eventDispatch = ignoreInteractiveEvent
             let feedAttached = false
             const nextWireEpoch = (requested?: number) =>
               Ref.modify(wireEpoch, (current) => {
@@ -860,7 +993,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                     Effect.ensuring(
                       Effect.sync(() => {
                         feedAttached = false
-                        eventDispatch = () => undefined
+                        eventDispatch = ignoreInteractiveEvent
                       }),
                     ),
                   )
@@ -874,6 +1007,10 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               steer: (text) => mutation((session) => session.steer(text)),
               interruptAndSend: (prompt) => mutation((session) => session.interruptAndSend(prompt)),
               cancel: mutation((session) => session.cancel),
+              newThread: nextWireEpoch().pipe(
+                Effect.andThen(Ref.set(selected, { _tag: "latest" as const })),
+                Effect.andThen(mutation((session) => session.newThread)),
+              ),
               resolvePermission: (waitId, kind, decision) =>
                 mutation((session) => session.resolvePermission(waitId, kind, decision)),
               selectThread: (threadId, selectionEpoch) =>

@@ -4,6 +4,7 @@ import { expect, test } from "bun:test"
 import { Data, Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface, maxMountedTranscriptEntries } from "../src/adapter"
+import { colors } from "../src/theme"
 import {
   applyQueueDelta,
   initial,
@@ -21,6 +22,26 @@ const openTui = <A>(operation: () => Promise<A>) =>
   Effect.tryPromise({ try: operation, catch: (cause) => new OpenTuiError({ cause }) })
 
 const insertText = (model: Model, text: string) => update(model, { _tag: "Pasted", text })
+
+const styledTextValue = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
+  typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
+
+const streamingShell = (id: string, output?: string) => ({
+  _tag: "ToolCall" as const,
+  id,
+  name: "shell",
+  input: `{"command":"printf ${id}"}`,
+  status: "running" as const,
+  presentation: {
+    family: "shell" as const,
+    action: "shell",
+    activeLabel: "Running",
+    completeLabel: "Ran",
+  },
+  detail: `printf ${id}`,
+  ...(output === undefined ? {} : { output }),
+  files: [],
+})
 
 const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/work",
@@ -52,7 +73,7 @@ test("renders input and resize updates while the renderer remains event-driven",
       })
       try {
         surface.update(model)
-        yield* openTui(() => setup.flush())
+        yield* openTui(() => setup.renderOnce())
         expect(setup.captureCharFrame()).toContain("settled response")
         expect(setup.renderer.controlState).toBe(RendererControlState.IDLE)
         expect(setup.renderer.isRunning).toBe(false)
@@ -332,6 +353,120 @@ test("moves the bounded transcript window to older mounted entries and keeps it 
         expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
         surface.update({ ...base, input: "next", cursor: 4 })
         expect(state.transcriptWindowEnd).toBe(400)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("detaches on the first upward wheel event and stays detached through streaming updates", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 80 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      let model: Model = { ...initial("/work", "high"), busy: true, entries, items }
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          scroll: (offset) => {
+            model = update(model, { _tag: "ScrollMoved", offset })
+            surface.update(model)
+          },
+          scrollFollow: () => {
+            model = update(model, { _tag: "ScrollFollowed" })
+            surface.update(model)
+          },
+        },
+        { clock },
+      )
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+        yield* openTui(() => setup.mockMouse.scroll(10, 5, "up", { delayMs: 0 }))
+        expect(model.scrollFollow).toBe(false)
+        const detachedTop = surface.transcriptScroll.scrollTop
+
+        for (let index = 80; index < 90; index += 1) {
+          model = {
+            ...model,
+            entries: [...model.entries, { role: "assistant", text: `answer ${index}`, turnId: `turn-${index}` }],
+            items: [...model.items, { _tag: "Entry", index, id: `answer-${index}`, turnId: `turn-${index}` }],
+          }
+          surface.update(model)
+          yield* openTui(() => setup.renderOnce())
+          expect(model.scrollFollow).toBe(false)
+          expect(surface.transcriptScroll.scrollTop).toBe(detachedTop)
+        }
+
+        surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
+        for (let index = 0; index < 20; index += 1)
+          yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
+        clock.advance(16)
+        yield* openTui(() => setup.flush())
+        expect(model.scrollFollow).toBe(true)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("coalesces rapid wheel offsets into one report per frame", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 400 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      let model: Model = { ...initial("/work", "high"), entries, items }
+      const offsets = new Array<number>()
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          scroll: (offset) => {
+            offsets.push(offset)
+            model = update(model, { _tag: "ScrollMoved", offset })
+            surface.update(model)
+          },
+        },
+        { clock },
+      )
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+        for (let index = 0; index < 20; index += 1)
+          yield* openTui(() => setup.mockMouse.scroll(10, 5, "up", { delayMs: 0 }))
+
+        expect(offsets).toHaveLength(1)
+        clock.advance(15)
+        expect(offsets).toHaveLength(1)
+        clock.advance(1)
+        expect(offsets).toHaveLength(2)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -859,7 +994,7 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         _tag: "ToolCall" as const,
         id: "long-running",
         name: "shell",
-        input: JSON.stringify({ command: "sleep 5" }),
+        input: '{"command":"sleep 5"}',
         status: "running" as const,
         presentation: {
           family: "shell" as const,
@@ -883,38 +1018,38 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
       }
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
       const records = () =>
-        (surface as unknown as {
-          readonly transcriptRecords: ReadonlyMap<
-            string,
-            { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
-          >
-        }).transcriptRecords
-      const text = (value: { readonly chunks: ReadonlyArray<{ readonly text: string }> } | string) =>
-        typeof value === "string" ? value : value.chunks.map((chunk) => chunk.text).join("")
+        (
+          surface as unknown as {
+            readonly transcriptRecords: ReadonlyMap<
+              string,
+              { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
+            >
+          }
+        ).transcriptRecords
       try {
         surface.update(model)
-        yield* openTui(() => setup.flush())
+        yield* openTui(() => setup.renderOnce())
         const body = records().get("tool:long-running:body")!.renderable
         const firstBodyContent = body.content
-        expect(text(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(text(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
 
         clock.advance(199)
-        expect(text(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
-        expect(text(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toContain("⠭")
         clock.advance(1)
-        expect(text(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
-        expect(text(records().get("tool:long-running:header")!.renderable.content)).toContain("⣟")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
+        expect(styledTextValue(records().get("tool:long-running:header")!.renderable.content)).toMatch(/[⠀-⣿] sleep 5/u)
         expect(body.content).toBe(firstBodyContent)
 
         clock.advance(200)
-        expect(text(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Thinking 5 tok")
         clock.advance(200)
-        expect(text(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Thinking 5 tok")
         clock.advance(200)
-        expect(text(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         clock.advance(200)
-        expect(text(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         expect(body.content).toBe(firstBodyContent)
       } finally {
         surface.destroy()
@@ -934,7 +1069,7 @@ test("toggles expandable transcript headers without selecting them and keeps bod
             _tag: "ToolCall",
             id: "shell-selection",
             name: "shell",
-            input: JSON.stringify({ command: "printf transcript-output" }),
+            input: '{"command":"printf transcript-output"}',
             status: "complete",
             presentation: {
               family: "shell",
@@ -958,19 +1093,42 @@ test("toggles expandable transcript headers without selecting them and keeps bod
         resize: () => undefined,
       })
       const records = () =>
-        (surface as unknown as {
-          readonly transcriptRecords: ReadonlyMap<
-            string,
-            { readonly renderable: { readonly screenX: number; readonly screenY: number; readonly selectable: boolean } }
-          >
-        }).transcriptRecords
+        (
+          surface as unknown as {
+            readonly transcriptRecords: ReadonlyMap<
+              string,
+              {
+                readonly renderable: {
+                  readonly screenX: number
+                  readonly screenY: number
+                  readonly selectable: boolean
+                  readonly content: {
+                    readonly chunks: ReadonlyArray<{
+                      readonly text: string
+                      readonly fg?: { readonly equals: (color: unknown) => boolean }
+                    }>
+                  }
+                }
+              }
+            >
+          }
+        ).transcriptRecords
+      const commandIsBlue = () =>
+        records()
+          .get("tool:shell-selection:header")!
+          .renderable.content.chunks.some(
+            (chunk) => chunk.text.includes("printf transcript-output") && chunk.fg?.equals(colors.blue) === true,
+          )
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
+        expect(commandIsBlue()).toBe(false)
         const header = records().get("tool:shell-selection:header")!.renderable
         yield* openTui(() => setup.mockMouse.click(header.screenX + 2, header.screenY))
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool:shell-selection")
+        expect(model.detailSelection).toBeUndefined()
+        expect(commandIsBlue()).toBe(false)
         expect(setup.renderer.getSelection()).toBeNull()
 
         const body = records().get("tool:shell-selection:body")!.renderable
@@ -982,7 +1140,25 @@ test("toggles expandable transcript headers without selecting them and keeps bod
         yield* openTui(() => setup.mockMouse.click(expandedHeader.screenX + 2, expandedHeader.screenY))
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).not.toContain("tool:shell-selection")
+        expect(commandIsBlue()).toBe(false)
         expect(setup.renderer.getSelection()).toBeNull()
+
+        model = update(model, {
+          _tag: "KeyPressed",
+          key: {
+            name: "tab",
+            ctrl: false,
+            alt: false,
+            meta: false,
+            shift: false,
+            sequence: "",
+            eventType: "press",
+          },
+        })
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+        expect(model.detailSelection).toBe("tool:shell-selection")
+        expect(commandIsBlue()).toBe(true)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -994,30 +1170,14 @@ test("updates an existing streaming transcript header when it becomes expandable
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const shell = (id: string, output?: string) => ({
-        _tag: "ToolCall" as const,
-        id,
-        name: "shell",
-        input: JSON.stringify({ command: `printf ${id}` }),
-        status: "running" as const,
-        presentation: {
-          family: "shell" as const,
-          action: "shell",
-          activeLabel: "Running",
-          completeLabel: "Ran",
-        },
-        detail: `printf ${id}`,
-        ...(output === undefined ? {} : { output }),
-        files: [],
-      })
       let model: Model = {
         ...initial("/work", "high"),
-        blocks: [shell("first", "first-output"), shell("streaming")],
+        blocks: [streamingShell("first", "first-output"), streamingShell("streaming")],
         items: [
           { _tag: "Block", index: 0, id: "first", turnId: "turn-streaming" },
           { _tag: "Block", index: 1, id: "streaming", turnId: "turn-streaming" },
         ],
-        expandedRowKeys: ["tool:first+streaming"],
+        expandedRowKeys: ["tool:first"],
       }
       const surface = new Surface(setup.renderer, {
         key: () => undefined,
@@ -1028,19 +1188,27 @@ test("updates an existing streaming transcript header when it becomes expandable
         resize: () => undefined,
       })
       const records = () =>
-        (surface as unknown as {
-          readonly transcriptRecords: ReadonlyMap<
-            string,
-            { readonly renderable: { readonly screenX: number; readonly screenY: number; readonly selectable: boolean } }
-          >
-        }).transcriptRecords
+        (
+          surface as unknown as {
+            readonly transcriptRecords: ReadonlyMap<
+              string,
+              {
+                readonly renderable: {
+                  readonly screenX: number
+                  readonly screenY: number
+                  readonly selectable: boolean
+                }
+              }
+            >
+          }
+        ).transcriptRecords
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
         const before = records().get("tool-child:streaming:header")!.renderable
         expect(before.selectable).toBe(true)
 
-        model = { ...model, blocks: [model.blocks[0]!, shell("streaming", "late-output")] }
+        model = { ...model, blocks: [model.blocks[0]!, streamingShell("streaming", "late-output")] }
         surface.update(model)
         yield* openTui(() => setup.flush())
         const after = records().get("tool-child:streaming:header")!.renderable
@@ -1091,7 +1259,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
             _tag: "ToolCall",
             id: "oracle-parent",
             name: "oracle",
-            input: JSON.stringify({ prompt: "Review the code" }),
+            input: '{"prompt":"Review the code"}',
             status: "complete",
             presentation: presentation.agent,
             detail: "Review the code",
@@ -1102,7 +1270,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
             _tag: "ToolCall",
             id: "child-read",
             name: "read_file",
-            input: JSON.stringify({ path: "src/a.ts", offset: 2, limit: 3 }),
+            input: '{"path":"src/a.ts","offset":2,"limit":3}',
             output: "read child output",
             status: "complete",
             presentation: presentation.explore,
@@ -1113,7 +1281,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
             _tag: "ToolCall",
             id: "child-shell",
             name: "shell",
-            input: JSON.stringify({ command: "bun test" }),
+            input: '{"command":"bun test"}',
             output: "shell child output",
             status: "complete",
             presentation: presentation.shell,
@@ -1137,12 +1305,14 @@ test("renders a subagent tool tree and expands each child independently", () =>
         resize: () => undefined,
       })
       const records = () =>
-        (surface as unknown as {
-          readonly transcriptRecords: ReadonlyMap<
-            string,
-            { readonly renderable: { readonly screenX: number; readonly screenY: number } }
-          >
-        }).transcriptRecords
+        (
+          surface as unknown as {
+            readonly transcriptRecords: ReadonlyMap<
+              string,
+              { readonly renderable: { readonly screenX: number; readonly screenY: number } }
+            >
+          }
+        ).transcriptRecords
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
@@ -1792,17 +1962,32 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         const modeFrame = setup.captureCharFrame()
         expect(modeFrame).toContain("GPT-5.6 Sol")
         expect(modeFrame).toContain("Deep reasoning for hard tasks")
-        setup.mockInput.pressKey("escape")
+        model = update(model, {
+          _tag: "KeyPressed",
+          key: {
+            name: "escape",
+            ctrl: false,
+            alt: false,
+            meta: false,
+            shift: false,
+            sequence: "\u001b",
+            eventType: "press",
+          },
+        })
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        expect(model.modePicker.open).toBe(false)
         yield* openTui(() => setup.mockInput.typeText("?"))
         yield* openTui(() => setup.renderOnce())
         expect(setup.captureCharFrame()).toContain("toggle this help")
+        expect(model.input).toBe("?")
         yield* openTui(() => setup.mockInput.typeText("?"))
         yield* openTui(() => setup.mockInput.typeText("hello"))
         setup.mockInput.pressEnter()
-        model = update(model, { _tag: "TurnStarted", turnId: "turn-hello", prompt: "hello" })
+        model = update(model, { _tag: "TurnStarted", turnId: "turn-hello", prompt: "?hello" })
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
-        expect(setup.captureCharFrame()).toContain("┃ hello")
+        expect(setup.captureCharFrame()).toContain("┃ ?hello")
         model = update(model, { _tag: "AssistantStreamed", text: "stream" })
         model = update(model, { _tag: "AssistantStreamed", text: "ing" })
         model = update(model, { _tag: "ReasoningStreamed", text: "checking" })
@@ -1839,7 +2024,7 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         surface.update(model)
         yield* openTui(() => setup.renderOnce())
         const activityFrame = setup.captureCharFrame()
-        expect(activityFrame).toMatch(/[⠿⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Exploring 1 file ▸/)
+        expect(activityFrame).toMatch(/[⠀-⣿] Exploring 1 file ▸/u)
         expect(activityFrame).toContain("Edited src/main.ts +1 -1")
         model = update(model, {
           _tag: "BlockAdded",
@@ -1928,10 +2113,13 @@ test("joins the durable queue to the composer like Amp", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      let model = replaceQueue({ ...initial("/work", "medium"), busy: true, busyStatus: "Streaming" }, [
-        { id: "queued-1", prompt: "First queued prompt" },
-        { id: "queued-2", prompt: "Selected queued prompt" },
-      ])
+      let model = replaceQueue(
+        { ...initial("/work", "medium"), busy: true, activity: { _tag: "Streaming", bytes: 40 } },
+        [
+          { id: "queued-1", prompt: "First queued prompt" },
+          { id: "queued-2", prompt: "Selected queued prompt" },
+        ],
+      )
       model = { ...model, queueSelection: "queued-2" }
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {

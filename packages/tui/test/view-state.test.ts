@@ -139,8 +139,14 @@ describe("ViewState", () => {
       model = { ...model, input: "", cursor: 0 }
       model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "?", sequence: "?" }) })
       expect(model.shortcutsOpen).toBe(true)
+      expect(model.input).toBe("?")
     }),
   )
+
+  test("leaves Opt+D unbound", () => {
+    const model = ViewState.initial("/work", "medium")
+    expect(ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "d", alt: true }) })).toEqual(model)
+  })
 
   test("preserves ordered prompt parts for bracketed paths and file URLs", () => {
     expect(ViewState.promptParts("before [shots/a.png] after file:///tmp/b%20c.webp")).toEqual([
@@ -462,8 +468,53 @@ describe("ViewState", () => {
     model = { ...model, input: "", cursor: 0 }
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
     expect(model.shortcutsOpen).toBe(true)
+    expect(model.input).toBe("?")
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
     expect(model.shortcutsOpen).toBe(false)
+  })
+
+  test("inserts the shortcut question mark, keeps help open while typing, and dismisses with its trigger", () => {
+    let model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "KeyPressed",
+      key: key({ name: "/", sequence: "?", shift: true }),
+    })
+    expect(model).toMatchObject({ input: "?", cursor: 1, shortcutsOpen: true, shortcutsTrigger: 0 })
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "a", sequence: "a" }) })
+    expect(model).toMatchObject({ input: "?a", cursor: 2, shortcutsOpen: true, shortcutsTrigger: 0 })
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
+    expect(model).toMatchObject({ input: "?a", cursor: 2, shortcutsOpen: false, shortcutsTrigger: undefined })
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
+    expect(model).toMatchObject({ input: "?a?", cursor: 3, shortcutsOpen: true, shortcutsTrigger: 2 })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
+    expect(model).toMatchObject({ input: "?a", cursor: 2, shortcutsOpen: false, shortcutsTrigger: undefined })
+  })
+
+  test("does not open shortcuts when question mark is typed in a dialog", () => {
+    let model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "KeyPressed",
+      key: key({ name: "o", ctrl: true }),
+    })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
+    expect(model).toMatchObject({ shortcutsOpen: false, palette: { open: true, query: "?" }, input: "" })
+
+    model = {
+      ...ViewState.initial("/work"),
+      blocks: [
+        {
+          _tag: "Permission",
+          id: "permission",
+          kind: "tool-approval",
+          status: "pending",
+          title: "Run command",
+          detail: "bun test",
+        },
+      ],
+    } as ViewState.Model
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
+    expect(model).toMatchObject({ shortcutsOpen: false, input: "" })
   })
 
   test("keeps an empty palette open with a valid selection and no action", () => {
@@ -720,6 +771,29 @@ describe("ViewState", () => {
     expect(model.detailSelection).toBe("block:Reasoning:0")
   })
 
+  test("keeps an expanded streamed tool group open as new children arrive", () => {
+    let model = ViewState.update(ViewState.initial("/work"), { _tag: "BlockAdded", block: readCall("1", "a") })
+    model = ViewState.update(model, { _tag: "DetailToggled", id: "tool:1" })
+    for (let index = 2; index <= 5; index += 1)
+      model = ViewState.update(model, {
+        _tag: "BlockAdded",
+        block: readCall(String(index), String.fromCharCode(96 + index)),
+      })
+
+    expect(model.expandedRowKeys).toContain("tool:1")
+    const collapsed = ViewState.update(model, { _tag: "DetailToggled", id: "tool:1" })
+    expect(collapsed.expandedRowKeys).not.toContain("tool:1")
+  })
+
+  test("click toggles do not move the Tab detail selection", () => {
+    const base = { ...ViewState.initial("/work"), blocks: [readCall("1", "a", "complete")] }
+    const clicked = ViewState.update(base, { _tag: "DetailToggled", id: "tool:1" })
+    expect(clicked).toMatchObject({ detailSelection: undefined, expandedRowKeys: ["tool:1"] })
+
+    const tabbed = ViewState.update(clicked, { _tag: "KeyPressed", key: key({ name: "tab" }) })
+    expect(tabbed.detailSelection).toBe("tool:1")
+  })
+
   test("toggles an expanded edit group's file rows independently", () => {
     const call: Extract<ViewState.TranscriptBlock, { _tag: "ToolCall" }> = {
       _tag: "ToolCall",
@@ -738,7 +812,7 @@ describe("ViewState", () => {
       { _tag: "DetailToggled", id: child },
     )
 
-    expect(model).toMatchObject({ detailSelection: child, expandedRowKeys: [parent, child] })
+    expect(model).toMatchObject({ detailSelection: undefined, expandedRowKeys: [parent, child] })
   })
 
   test("navigates threads, selects permissions, and deduplicates replay", () => {
@@ -981,7 +1055,7 @@ describe("loadable panel state machine", () => {
     expect(ViewState.readyOr(refreshed.changedFiles, []).map((file) => file.path)).toEqual(["b.ts"])
   })
 
-  it("transitions workspace files and thread previews through loading states", () => {
+  it("transitions workspace files and keeps a stale thread preview while the next one loads", () => {
     const base = ViewState.initial("/work")
     expect(base.filePicker.items).toEqual({ _tag: "Idle" })
     const loading = ViewState.update(base, { _tag: "FilesRequested" })
@@ -989,8 +1063,18 @@ describe("loadable panel state machine", () => {
     const ready = ViewState.update(loading, { _tag: "FilesReplaced", files: ["src/main.ts"] })
     expect(ViewState.readyOr(ready.filePicker.items, [])).toEqual(["src/main.ts"])
     expect(ViewState.update(ready, { _tag: "FilesRequested" }).filePicker.items._tag).toBe("Ready")
-    const previewLoading = ViewState.update(base, { _tag: "ThreadPreviewRequested" })
-    expect(previewLoading.threadPreview).toEqual({ _tag: "Loading" })
+    const firstPreviewLoading = ViewState.update(base, { _tag: "ThreadPreviewRequested" })
+    expect(firstPreviewLoading.threadPreview).toEqual({ _tag: "Loading" })
+    const previous = ViewState.update(firstPreviewLoading, {
+      _tag: "ThreadPreviewLoaded",
+      threadId: "thread-0",
+      turns: [{ prompt: "previous", events: [] }],
+    })
+    const previewLoading = ViewState.update(previous, { _tag: "ThreadPreviewRequested" })
+    expect(previewLoading.threadPreview).toEqual({
+      _tag: "Loading",
+      previous: { threadId: "thread-0", turns: [{ prompt: "previous", events: [] }] },
+    })
     const previewReady = ViewState.update(previewLoading, {
       _tag: "ThreadPreviewLoaded",
       threadId: "thread-1",

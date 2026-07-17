@@ -38,6 +38,27 @@ export interface QueueUpdate {
   readonly resync: boolean
 }
 
+export interface PaletteCommand {
+  readonly id: string
+  readonly category: string
+  readonly label: string
+  readonly action: unknown
+}
+
+export const paletteCommands = [
+  { id: "new-thread", category: "thread", label: "New thread", action: { _tag: "NewThread" as const } },
+] as const
+
+export const installPaletteCommands = (commands: Array<PaletteCommand>): void => {
+  for (const command of paletteCommands.toReversed())
+    if (!commands.some((candidate) => candidate.id === command.id)) commands.unshift(command)
+}
+
+export const paletteCommand = (action: unknown): Operation.InteractiveCommand | undefined =>
+  action !== null && typeof action === "object" && "_tag" in action && action._tag === "NewThread"
+    ? { _tag: "NewThread" }
+    : undefined
+
 const updateQueueImpl = (model: ViewState.Model, event: QueueEvent): QueueUpdate => {
   if (event._tag === "QueueUpdated") {
     if (event.change._tag === "Reset")
@@ -144,6 +165,68 @@ const childParent = (
       block._tag === "ToolCall" && block.childId !== undefined && executionKey(block.childId) === executionKey(turnId),
   )
 
+const sourceText = (event: Transcript.SourceEvent): string => {
+  if (typeof event.text === "string") return event.text
+  const delta = event.data?.delta
+  return typeof delta === "string" ? delta : ""
+}
+
+const sourceBlockId = (event: Transcript.SourceEvent, fallback: string): string => {
+  const id = event.data?.tool_call_id ?? event.data?.call_id ?? event.data?.id
+  return typeof id === "string" ? id : fallback
+}
+
+const currentTool = (
+  projection: Transcript.Projection,
+  event: Transcript.SourceEvent,
+): Extract<ViewState.TranscriptBlock, { readonly _tag: "ToolCall" }> | undefined => {
+  const id = sourceBlockId(event, "")
+  const unit = projection.units.findLast(
+    (candidate) =>
+      candidate.content._tag === "Block" &&
+      candidate.content.block._tag === "ToolCall" &&
+      (id.length === 0 || candidate.content.block.id.endsWith(`:${id}`)),
+  )
+  return unit?.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block : undefined
+}
+
+const activityAfter = (
+  activity: ViewState.Activity | undefined,
+  event: Transcript.SourceEvent,
+  projection: Transcript.Projection,
+): ViewState.Activity | undefined => {
+  if (event.type.includes("reasoning"))
+    return ViewState.streamActivity(activity, "Thinking", sourceText(event), `reasoning:${projection.modelPhase}`)
+  if (event.type === "model.output.delta")
+    return ViewState.streamActivity(activity, "Streaming", sourceText(event), `answer:${projection.modelPhase}`)
+  if (event.type === "model.toolcall.delta")
+    return ViewState.streamActivity(activity, "Streaming", sourceText(event), sourceBlockId(event, "tool"))
+  if (event.type === "tool.call.requested") {
+    const tool = currentTool(projection, event)
+    if (tool === undefined) return { _tag: "Tool", label: "Running tool" }
+    return {
+      _tag: "Tool",
+      label:
+        tool.presentation.family === "shell"
+          ? `$ ${tool.detail || tool.input}`
+          : `${tool.presentation.activeLabel}${tool.detail.length === 0 ? "" : ` ${tool.detail}`}`,
+    }
+  }
+  if (event.type === "permission.ask.requested" || event.type === "tool.approval.requested") return { _tag: "Approval" }
+  if (
+    event.type === "model.input.prepared" ||
+    event.type === "tool.result.received" ||
+    event.type === "permission.ask.resolved" ||
+    event.type === "tool.approval.resolved"
+  )
+    return undefined
+  if (event.type === "model.output.completed")
+    return activity?._tag === "Thinking" || activity?._tag === "Streaming" ? { ...activity, bytes: 0 } : activity
+  if (event.type === "execution.completed" || event.type === "execution.failed" || event.type === "execution.cancelled")
+    return undefined
+  return activity
+}
+
 const prependProjection = (
   model: ViewState.Model,
   entries: ReadonlyArray<TranscriptRepository.Entry>,
@@ -154,7 +237,7 @@ const prependProjection = (
       ...model,
       activeTurnId: undefined,
       busy: false,
-      busyStatus: undefined,
+      activity: undefined,
       costUsd: threadCostUsd,
     }),
     entries,
@@ -231,7 +314,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ...state.model,
       activeTurnId: activeTurn?.id,
       busy: activeTurn !== undefined,
-      busyStatus: activeTurn === undefined ? undefined : "Working",
+      activity: undefined,
       currentThreadId: String(event.thread.id),
       currentThreadTitle: event.thread.title,
       editingTurnId: undefined,
@@ -297,11 +380,11 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       return { state, preserveAnchor: false }
     if (event.revision <= (state.revisions.get(event.turnId) ?? -1)) return { state, preserveAnchor: false }
     const turn = state.replayTurns.get(event.turnId)
-    const parent = turn === undefined ? childParent(state.model, event.turnId) : undefined
-    if (turn === undefined && parent === undefined) return { state, preserveAnchor: false }
-    const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, turn?.prompt ?? "")
-    const next = Transcript.applyEvent(previous, event.event)
-    if (parent !== undefined) {
+    if (turn === undefined) {
+      const parent = childParent(state.model, event.turnId)
+      if (parent === undefined) return { state, preserveAnchor: false }
+      const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, "")
+      const next = Transcript.applyEvent(previous, event.event)
       return {
         state: {
           ...state,
@@ -312,10 +395,15 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         preserveAnchor: false,
       }
     }
+    const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, turn.prompt)
+    const next = Transcript.applyEvent(previous, event.event)
     const previousCost = previous.costUsd ?? 0
     const nextCost = next.costUsd ?? 0
     const threadCostUsd = state.threadCostUsd + nextCost - previousCost
-    const projectedModel = ExecutionEvents.projectUnits(state.model, next.units)
+    const projectedModel = {
+      ...ExecutionEvents.projectUnits(state.model, next.units),
+      activity: activityAfter(state.model.activity, event.event, next),
+    }
     const terminal =
       event.event.type === "execution.completed" ||
       event.event.type === "execution.failed" ||
@@ -329,7 +417,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
             ? "cancelled"
             : undefined
     const model = terminal
-      ? { ...projectedModel, activeTurnId: undefined, busy: false, busyStatus: undefined }
+      ? { ...projectedModel, activeTurnId: undefined, busy: false, activity: undefined }
       : projectedModel
     const known = new Map(state.entries.map((entry, index) => [entry.unit.key, index] as const))
     const entries = [...state.entries]

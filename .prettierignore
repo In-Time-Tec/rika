@@ -4,4 +4,5 @@ coverage
 dist
 node_modules
 repos
+artifacts
 packages/tui/test/fixtures/visual/*.styles.json

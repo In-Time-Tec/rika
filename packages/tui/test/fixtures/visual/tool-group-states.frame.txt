@@ -14,7 +14,7 @@
 
 
 
- ⠿ Exploring 1 search, 1 file ▸
+ ⠭ Exploring 1 search, 1 file ▸
 
  ✓ Edited edit_file ▸
 ╭─────────────────────────────────────────────────────────────────────── high ─╮

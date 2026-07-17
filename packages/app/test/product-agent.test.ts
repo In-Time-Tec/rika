@@ -1,6 +1,10 @@
+import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
+import { TestModel } from "@batonfx/test"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Effect, Exit, Layer } from "effect"
+import * as RelayExecutionBackend from "@rika/runtime/relay"
+import { Runtime as ToolRuntime } from "@rika/tools"
+import { Context, Effect, Exit, FileSystem, Layer, Schedule } from "effect"
 import { ProductAgent } from "../src/index"
 import { provideLayer } from "./layer"
 import { executionRoute } from "./current-state"
@@ -55,7 +59,7 @@ describe("ProductAgent", () => {
         ).toBe("direct")
         expect(yield* agents.inspectFanOut("missing")).toBeUndefined()
         expect((yield* agents.cancelFanOut("fan", 2, "stop")).state).toBe("joining")
-        expect((yield* agents.cancelChild("kid", 3)).turnId).toBe("child:kid")
+        expect((yield* agents.cancelChild("kid", 3)).turnId).toBe("kid")
         expect(
           (yield* agents.runParallel({
             parentTurnId: "p",
@@ -137,6 +141,128 @@ describe("ProductAgent", () => {
         type: "accepted",
       })
     }),
+  )
+
+  it.effect("cancels the exact inspected child execution identifier", () =>
+    Effect.gen(function* () {
+      let cancelledId: string | undefined
+      const childExecutionId = "execution:parent:child:Review:call-review"
+      const backend = ExecutionBackend.Service.of({
+        invokeChild: () => Effect.die("unused"),
+        createFanOut: () => Effect.die("unused"),
+        inspectFanOut: () => Effect.die("unused"),
+        cancelFanOut: () => Effect.die("unused"),
+        registerWorkflows: () => Effect.die("unused"),
+        startWorkflow: () => Effect.die("unused"),
+        inspectWorkflow: () => Effect.die("unused"),
+        cancelWorkflow: () => Effect.die("unused"),
+        start: () => Effect.die("unused"),
+        replay: () => Effect.die("unused"),
+        cancel: (executionId) => {
+          cancelledId = executionId
+          return Effect.succeed({ turnId: executionId, status: "cancelled", events: [] })
+        },
+        inspect: () => Effect.die("unused"),
+        steer: () => Effect.die("unused"),
+        listApprovals: () => Effect.die("unused"),
+        resolveToolApproval: () => Effect.die("unused"),
+        resolvePermission: () => Effect.die("unused"),
+      })
+      const result = yield* Effect.gen(function* () {
+        const agents = yield* ProductAgent.Service
+        return yield* agents.cancelChild(childExecutionId, 2)
+      }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
+
+      expect(cancelledId).toBe(childExecutionId)
+      expect(result.status).toBe("cancelled")
+    }),
+  )
+
+  it.live(
+    "cancels an inspected handoff child through the native backend",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const bunContext = yield* Layer.build(BunServices.layer)
+          return yield* Effect.scoped(
+            Effect.gen(function* () {
+              const fileSystem = yield* FileSystem.FileSystem
+              const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-child-cancel-" })
+              const fixture = yield* TestModel.make([
+                TestModel.toolCall("transfer_to_review", {}, { id: "call-cancel-review" }),
+                TestModel.turn([TestModel.text("Child should be cancelled.")], { delay: "30 seconds" }),
+              ])
+              const backendLayer = RelayExecutionBackend.layer({
+                filename: `${directory}/relay.db`,
+                workspace: directory,
+                registration: fixture.registration,
+                selection: fixture.selection,
+                modelVariantPolicy: "fixed-selection",
+                toolRuntimeLayer: ToolRuntime.testLayer(() => Effect.succeed({ text: "unused", truncated: false })),
+                toolNeedsApproval: () => false,
+                permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
+                compaction: { contextWindow: 1_000_000, reserveTokens: 100, keepRecentTokens: 100 },
+              })
+              const backendContext = yield* Layer.build(backendLayer)
+              const backend = Context.get(backendContext, ExecutionBackend.Service)
+              const productContext = yield* Layer.build(
+                ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend))),
+              )
+              const agents = Context.get(productContext, ProductAgent.Service)
+              const turnId = "turn-product-child-cancel"
+              yield* backend
+                .start({
+                  threadId: "thread-product-child-cancel",
+                  turnId,
+                  prompt: "Ask Review to wait.",
+                  startedAt: 1,
+                  executionRoute: executionRoute(),
+                })
+                .pipe(Effect.forkScoped({ startImmediately: true }))
+              yield* fixture.requests.pipe(
+                Effect.repeat({
+                  until: (requests) => requests.length >= 2,
+                  schedule: Schedule.both(Schedule.spaced("10 millis"), Schedule.recurs(500)),
+                }),
+                Effect.timeout("6 seconds"),
+                Effect.mapError(() =>
+                  ExecutionBackend.BackendError.make({ message: "Timed out waiting for the child model request" }),
+                ),
+              )
+              const inspection = yield* backend.inspect(turnId).pipe(
+                Effect.repeat({
+                  until: (value) => value?.children[0] !== undefined,
+                  schedule: Schedule.both(Schedule.spaced("10 millis"), Schedule.recurs(500)),
+                }),
+                Effect.timeout("6 seconds"),
+                Effect.mapError(() =>
+                  ExecutionBackend.BackendError.make({ message: "Timed out waiting for child inspection" }),
+                ),
+              )
+              const childExecutionId = inspection?.children[0]?.executionId
+              if (childExecutionId === undefined) return yield* Effect.die("Missing handoff child")
+              const cancelled = yield* agents.cancelChild(childExecutionId, 2).pipe(
+                Effect.timeout("6 seconds"),
+                Effect.mapError(() =>
+                  ExecutionBackend.BackendError.make({ message: "Timed out cancelling the child" }),
+                ),
+              )
+              const child = yield* backend.inspect(childExecutionId)
+              yield* backend.cancel(turnId, 3).pipe(Effect.timeout("6 seconds"))
+              return { childExecutionId, cancelled, child }
+            }),
+          ).pipe(Effect.provide(bunContext))
+        }),
+      ).pipe(
+        Effect.tap(({ childExecutionId, cancelled, child }) =>
+          Effect.sync(() => {
+            expect(cancelled.turnId).toBe(childExecutionId)
+            expect(cancelled.status).toBe("cancelled")
+            expect(child?.status).toBe("cancelled")
+          }),
+        ),
+      ),
+    30_000,
   )
 
   it.effect("maps backend failures for every delegated fan-out operation", () =>
