@@ -11,7 +11,7 @@
 - **Child Run:** a durable child Execution with narrowed instructions or capabilities. User-facing copy may say subagent.
 - **Workflow:** versioned Rika data compiled to Relay durable operations.
 - **Mode:** a stable behavior profile that selects model routes and reasoning behavior.
-- **Gateway:** a configured connection to a model service. Credentials come from the environment.
+- **Provider:** a configured connection to a model service. Credentials come from the environment.
 - **Resolved Context:** the guidance, mentions, skills, memory, and Thread references selected for an Execution.
 - **Thread Projection:** disposable Rika read state derived from product metadata and Relay events. It is not execution truth.
 - **Resident Rika Service:** the single execution and persistence owner for a Profile and canonical data root.

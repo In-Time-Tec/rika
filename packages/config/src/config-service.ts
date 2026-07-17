@@ -4,9 +4,7 @@ import {
   type Diagnostic,
   type EffectiveConfig,
   type Environment,
-  type ModelAlias,
-  type ModelAliasInput,
-  type ModeId,
+  type ProviderId,
   type Settings,
   type SettingsInput,
 } from "./config-contract"
@@ -17,34 +15,23 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/config/config-service/Service") {}
 
-const mergeModels = (...sources: ReadonlyArray<Readonly<Record<string, ModelAliasInput>> | undefined>) => {
-  const models: Record<string, ModelAlias> = { ...defaults.models }
-  for (const source of sources) {
-    for (const [name, input] of Object.entries(source ?? {})) {
-      const current = models[name]
-      models[name] =
-        current === undefined
-          ? (input as ModelAlias)
-          : {
-              ...current,
-              ...input,
-              limits: { ...current.limits, ...input.limits },
-              variants: { ...current.variants, ...input.variants },
-            }
+const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Settings => {
+  const provider = (id: ProviderId) => {
+    const builtIn = defaults.providers[id]!
+    const override = workspace.providers?.[id] ?? global.providers?.[id]
+    if (override === undefined) return builtIn
+    return {
+      protocol: builtIn.protocol,
+      baseUrl: override.baseUrl ?? builtIn.baseUrl,
+      ...(override.apiKeyEnv === undefined ? {} : { apiKeyEnv: override.apiKeyEnv }),
     }
   }
-  return models
-}
-
-const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Settings => {
-  const mode = (id: ModeId) => ({ ...defaults.modes[id], ...global.modes?.[id], ...workspace.modes?.[id] })
-  const modes = { low: mode("low"), medium: mode("medium"), high: mode("high"), ultra: mode("ultra") }
   return {
-    gateways: { ...defaults.gateways, ...global.gateways, ...workspace.gateways },
-    models: mergeModels(global.models, workspace.models),
-    modes,
-    agents: { ...defaults.agents, ...global.agents, ...workspace.agents },
-    compaction: { ...defaults.compaction, ...global.compaction, ...workspace.compaction },
+    providers: { openai: provider("openai"), anthropic: provider("anthropic") },
+    models: defaults.models,
+    modes: defaults.modes,
+    agents: defaults.agents,
+    compaction: defaults.compaction,
     keymap: { ...defaults.keymap, ...global.keymap, ...workspace.keymap },
     permissions: { ...defaults.permissions, ...global.permissions, ...workspace.permissions },
     extensionRoots: workspace.extensionRoots ?? global.extensionRoots ?? defaults.extensionRoots,
@@ -67,9 +54,9 @@ const diagnostics = (
   record(workspace, "workspace")
   if (environment.parallelApiKey !== undefined)
     entries.push({ path: "parallelApiKey", source: "environment", message: "environment value applied (redacted)" })
-  for (const variable of Object.keys(environment.gatewayCredentials).toSorted())
+  for (const variable of Object.keys(environment.providerCredentials).toSorted())
     entries.push({
-      path: `gatewayCredentials.${variable}`,
+      path: `providerCredentials.${variable}`,
       source: "environment",
       message: "environment value applied (redacted)",
     })
@@ -85,7 +72,7 @@ export const memoryLayer = (
 ) => {
   const global = options.global ?? {}
   const workspace = options.workspace ?? {}
-  const environment = options.environment ?? { gatewayCredentials: {} }
+  const environment = options.environment ?? { providerCredentials: {} }
   return Layer.succeed(
     Service,
     Service.of({
@@ -109,23 +96,25 @@ export const liveEnvironmentLayer = (
       const global = options.global ?? {}
       const workspace = options.workspace ?? {}
       const settings = mergeSettings(global, workspace)
-      const variables = Object.values(settings.gateways)
-        .flatMap((gateway) => (gateway.auth.type === "bearer-env" ? [gateway.auth.variable] : []))
+      const variables = Object.values(settings.providers)
+        .flatMap((providerConnection) =>
+          providerConnection.apiKeyEnv === undefined ? [] : [providerConnection.apiKeyEnv],
+        )
         .filter((variable, index, all) => all.indexOf(variable) === index)
       const values = yield* Config.all({
         parallelApiKey: Config.option(Config.redacted("PARALLEL_API_KEY")),
-        gatewayCredentials: Config.all(
+        providerCredentials: Config.all(
           Object.fromEntries(variables.map((variable) => [variable, Config.option(Config.redacted(variable))])),
         ),
       })
       const environment: Environment =
         values.parallelApiKey._tag === "Some"
-          ? { gatewayCredentials: {}, parallelApiKey: Redacted.make(Redacted.value(values.parallelApiKey.value)) }
-          : { gatewayCredentials: {} }
+          ? { providerCredentials: {}, parallelApiKey: Redacted.make(Redacted.value(values.parallelApiKey.value)) }
+          : { providerCredentials: {} }
       const completeEnvironment: Environment = {
         ...environment,
-        gatewayCredentials: Object.fromEntries(
-          Object.entries(values.gatewayCredentials).flatMap(([variable, value]) =>
+        providerCredentials: Object.fromEntries(
+          Object.entries(values.providerCredentials).flatMap(([variable, value]) =>
             value._tag === "Some" ? [[variable, Redacted.make(Redacted.value(value.value))]] : [],
           ),
         ),

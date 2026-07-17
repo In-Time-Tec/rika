@@ -28,7 +28,7 @@ test("maps TUI signals to numeric process exit codes", () => {
   expect(tuiSignalExitCode("SIGTERM")).toBe(143)
 })
 
-test("selects only the OpenAI credential for each high and ultra main and Oracle gateway", () => {
+test("selects only the OpenAI credential for each high and ultra main and Oracle provider", () => {
   const openai = Redacted.make("openai-sentinel")
   const anthropic = Redacted.make("anthropic-sentinel")
   const credentials = { OPENAI_API_KEY: openai, ANTHROPIC_API_KEY: anthropic }

@@ -1,6 +1,6 @@
 # Models and context
 
-Settings define protocol-tagged Gateways, model aliases, request variants, modes, specialist routes, and a compaction summary route. Credentials are named environment values resolved at the app boundary and never enter route identity or persisted configuration.
+Rika owns its model aliases, provider mappings, candidates, limits, request variants, modes, specialist routes, compaction summary route, and retention policy. Settings may override only the built-in OpenAI and Anthropic provider endpoints and API-key environment variable names. Protocols and literal credentials are never user-configurable.
 
 Each accepted Turn pins its non-secret route before Relay acceptance. Queue promotion, restart, titles, children, reviews, and workflows use that pin rather than current settings. Missing or invalid routes fail before execution starts. Configuration changes affect only work not yet admitted.
 

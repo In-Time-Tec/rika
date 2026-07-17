@@ -71,14 +71,14 @@ const claudeVariants = (model: CatalogModel) =>
   ) as ModelAlias["variants"]
 
 const gpt = (model: CatalogModel): ModelAlias => ({
-  gateway: "openai",
+  provider: "openai",
   candidates: [model.id],
   limits: limits(model, 32_000),
   variants: gptVariants(model),
 })
 
 const claude = (model: CatalogModel, candidates: ReadonlyArray<string>): ModelAlias => ({
-  gateway: "anthropic",
+  provider: "anthropic",
   candidates,
   limits: limits(model, 64_000),
   variants: claudeVariants(model),

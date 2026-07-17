@@ -18,7 +18,7 @@ it.effect("prints effective redacted config and keymap", () =>
     const layer = Layer.mergeAll(
       TestConsole.layer,
       ConfigService.memoryLayer({
-        environment: { gatewayCredentials: {}, parallelApiKey: Redacted.make("never-print-this") },
+        environment: { providerCredentials: {}, parallelApiKey: Redacted.make("never-print-this") },
       }),
       ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(false) }),
     )
@@ -29,9 +29,33 @@ it.effect("prints effective redacted config and keymap", () =>
     }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"parallelApiKey": "present"')
     expect(lines.join("\n")).not.toContain("never-print-this")
-    expect(lines[0]).toContain('"gatewayName": "openai"')
+    expect(lines[0]).toContain('"providerId": "openai"')
     expect(lines[0]).toContain('"apiKey": "missing"')
     expect(lines[1]).toContain('"submit": "enter"')
+  }),
+)
+
+it.effect("reports an overridden provider without an API key as not configured", () =>
+  Effect.gen(function* () {
+    const layer = Layer.mergeAll(
+      TestConsole.layer,
+      ConfigService.memoryLayer({
+        workspace: { providers: { openai: { baseUrl: "https://models.test/v1" } } },
+        environment: { providerCredentials: { OPENAI_API_KEY: Redacted.make("must-not-use-this") } },
+      }),
+      ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(false) }),
+    )
+    const lines = yield* Effect.gen(function* () {
+      yield* ConfigOperations.run({ _tag: "Config", action: "list" }, options)
+      yield* ConfigOperations.run({ _tag: "Doctor" }, options)
+      return yield* TestConsole.logLines
+    }).pipe(provideLayer(layer))
+    expect(lines[0]).toContain('"baseUrl": "https://models.test/v1"')
+    expect(lines[0]).not.toContain('"apiKeyEnv": "OPENAI_API_KEY"')
+    expect(lines[0]).toContain('"openai": "not-configured"')
+    expect(lines[0]).toContain('"apiKey": "not-configured"')
+    expect(lines[1]).toContain('"apiKey": "not-configured"')
+    expect(lines.join("\n")).not.toContain("must-not-use-this")
   }),
 )
 
@@ -66,7 +90,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
       ConfigService.memoryLayer({
         environment: {
           parallelApiKey: Redacted.make("secret"),
-          gatewayCredentials: {
+          providerCredentials: {
             OPENAI_API_KEY: Redacted.make("model-secret"),
             ANTHROPIC_API_KEY: Redacted.make("oracle-secret"),
           },

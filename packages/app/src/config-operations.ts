@@ -34,6 +34,21 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
   const adapter = yield* Adapter
   const config = yield* configService.effective
   const route = ConfigContract.resolveModelRoute(config.settings, "medium")
+  const providers = Object.fromEntries(
+    Object.entries(config.settings.providers).map(([id, provider]) => [
+      id,
+      { baseUrl: provider.baseUrl, ...(provider.apiKeyEnv === undefined ? {} : { apiKeyEnv: provider.apiKeyEnv }) },
+    ]),
+  )
+  const apiKeyStatus = (apiKeyEnv: string | undefined) =>
+    apiKeyEnv === undefined
+      ? "not-configured"
+      : config.environment.providerCredentials[apiKeyEnv] === undefined
+        ? "missing"
+        : "present"
+  const providerApiKeys = Object.fromEntries(
+    Object.entries(config.settings.providers).map(([id, provider]) => [id, apiKeyStatus(provider.apiKeyEnv)]),
+  )
   if (input._tag === "Mcp") {
     yield* json(
       Object.fromEntries(
@@ -48,15 +63,22 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
   if (input._tag === "Config") {
     if (input.action === "list") {
       yield* json({
-        settings: config.settings,
-        environment: { parallelApiKey: config.environment.parallelApiKey === undefined ? "missing" : "present" },
+        settings: {
+          providers,
+          keymap: config.settings.keymap,
+          permissions: config.settings.permissions,
+          extensionRoots: config.settings.extensionRoots,
+          mcp: config.settings.mcp,
+          notifications: config.settings.notifications,
+          logging: config.settings.logging,
+        },
+        environment: {
+          parallelApiKey: config.environment.parallelApiKey === undefined ? "missing" : "present",
+          providerApiKeys,
+        },
         model: {
-          route,
-          apiKey:
-            route.gateway.auth.type === "none" ||
-            config.environment.gatewayCredentials[route.gateway.auth.variable] !== undefined
-              ? "present"
-              : "missing",
+          route: { alias: route.alias, providerId: route.providerId, model: route.model },
+          apiKey: apiKeyStatus(route.providerConnection.apiKeyEnv),
         },
         diagnostics: config.diagnostics,
       })
@@ -84,12 +106,8 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
     },
     credentials: { parallel: config.environment.parallelApiKey === undefined ? "missing" : "present" },
     model: {
-      route,
-      apiKey:
-        route.gateway.auth.type === "none" ||
-        config.environment.gatewayCredentials[route.gateway.auth.variable] !== undefined
-          ? "present"
-          : "missing",
+      route: { alias: route.alias, providerId: route.providerId, model: route.model },
+      apiKey: apiKeyStatus(route.providerConnection.apiKeyEnv),
     },
   })
 })

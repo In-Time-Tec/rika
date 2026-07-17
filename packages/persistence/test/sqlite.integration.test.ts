@@ -141,6 +141,12 @@ const createPreBranchDatabase = (filename: string) => {
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
   const executionRoute = JSON.stringify({ version: 1, ...Turn.testExecutionRoute() })
+    .replaceAll('"providerProtocol"', '"gatewayProtocol"')
+    .replaceAll('"providerBaseUrl"', '"gatewayBaseUrl"')
+    .replaceAll(
+      '"gatewayBaseUrl":"test://model"',
+      '"gatewayBaseUrl":"test://model","gatewayAuth":"bearer-env:TEST_API_KEY","providerOptions":{"gatewayProtocol":"opaque"}',
+    )
   database.query("INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?)").run("/work/pre-branch", 1)
   database
     .query(
@@ -234,6 +240,24 @@ test("migrates a pre-branch database without losing product or queue data", () =
             "legacy-unpinned-turn",
             "queued-turn",
           ])
+          const migratedRoute = storedTurns.find((turn) => turn.id === "completed-turn")?.executionRoute
+          expect(migratedRoute).toMatchObject({
+            main: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
+            oracle: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
+            title: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
+            compactionSummary: {
+              providerProtocol: "test",
+              providerBaseUrl: "test://model",
+              providerApiKeyEnv: "TEST_API_KEY",
+            },
+            agents: {
+              task: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
+            },
+          })
+          expect(migratedRoute?.main.providerOptions).toEqual({ gatewayProtocol: "opaque" })
+          expect(migratedRoute?.main).not.toHaveProperty("gatewayProtocol")
+          expect(migratedRoute?.main).not.toHaveProperty("gatewayBaseUrl")
+          expect(migratedRoute?.main).not.toHaveProperty("gatewayAuth")
           expect(storedTurns.find((turn) => turn.id === "legacy-unpinned-turn")?.executionRoute).toBeDefined()
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             revision: 1,
@@ -266,7 +290,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 12, name: "queue_state_and_current_transcripts" })
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 13, name: "provider_execution_routes" })
           expect(yield* sql`SELECT COUNT(*) AS count FROM rika_transcript_entries`).toEqual([{ count: 1 }])
         }).pipe(provideLayer(layer)),
       )
@@ -289,7 +313,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             units: [{ content: { _tag: "Entry", text: "completed prompt" } }],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 12 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 13 }])
         }).pipe(provideLayer(reopened)),
       )
     }),
@@ -517,7 +541,7 @@ test("rejects partial and future schemas without changing them", () => {
       yield* Effect.sync(() => {
         const database = new NativeDatabase(extra)
         database.exec(`
-          INSERT INTO rika_migrations (migration_id, name) VALUES (13, 'future_schema');
+          INSERT INTO rika_migrations (migration_id, name) VALUES (14, 'future_schema');
           CREATE TABLE future_product_state (id TEXT PRIMARY KEY);
         `)
         database.close()
