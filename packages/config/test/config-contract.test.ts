@@ -55,6 +55,16 @@ describe("ConfigContract", () => {
       expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: {} })).toThrowError(/unknown key/),
   )
 
+  it.each(["contextWindow", "maxInputTokens", "maxOutputTokens", "keepRecentTokens"])(
+    "rejects user-owned model policy key %s at every provider boundary",
+    (key) => {
+      expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: 1 })).toThrowError(/unknown key/)
+      expect(() =>
+        ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { [key]: 1 } } }),
+      ).toThrowError(/unknown key/)
+    },
+  )
+
   it.each(["protocol", "auth", "apiKey", "token", "accountCredential"])(
     "rejects incompatible or credential-bearing provider key %s",
     (key) =>
