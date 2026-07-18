@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest"
 import { ConfigOperations } from "../src/index"
-import { ConfigService } from "@rika/config"
+import { ConfigContract, ConfigService } from "@rika/config"
 import { Effect, Layer, Redacted, Ref } from "effect"
 import { TestConsole } from "effect/testing"
 import { provideLayer } from "./layer"
@@ -137,5 +137,36 @@ it.effect("reports missing config and mixed doctor paths", () =>
     expect(lines[1]).toContain('"relay": "present"')
     expect(lines[1]).toContain('"global": "missing"')
     expect(lines[1]).toContain('"workspace": "present"')
+  }),
+)
+
+it.effect("fails doctor when the configured model route cannot be resolved", () =>
+  Effect.gen(function* () {
+    const settings = {
+      ...ConfigContract.defaults,
+      modes: {
+        ...ConfigContract.defaults.modes,
+        medium: {
+          ...ConfigContract.defaults.modes.medium,
+          main: { alias: "missing", effort: "medium" },
+        },
+      },
+    } as unknown as ConfigContract.Settings
+    const layer = Layer.mergeAll(
+      TestConsole.layer,
+      Layer.succeed(
+        ConfigService.Service,
+        ConfigService.Service.of({
+          effective: Effect.succeed({ settings, environment: { providerCredentials: {} }, diagnostics: [] }),
+        }),
+      ),
+      ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(true) }),
+    )
+    const [exit, lines] = yield* Effect.gen(function* () {
+      const result = yield* Effect.exit(ConfigOperations.run({ _tag: "Doctor" }, options))
+      return [result, yield* TestConsole.logLines] as const
+    }).pipe(provideLayer(layer))
+    expect(exit._tag).toBe("Failure")
+    expect(lines).toEqual([])
   }),
 )

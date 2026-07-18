@@ -15,6 +15,8 @@ const startupFd = 3
 let signalled = false
 const closeDescriptor = (descriptor: number) =>
   Effect.sync(() => process.getBuiltinModule("node:fs").closeSync(descriptor))
+const writeDescriptor = (descriptor: number, value: string) =>
+  Effect.try(() => process.getBuiltinModule("node:fs").writeFileSync(descriptor, value))
 
 export const processIsAlive = (pid: number) =>
   Effect.sync(() => {
@@ -217,11 +219,8 @@ const signal = (message: typeof StartupMessage.Type) =>
     const configured = yield* Config.option(Config.string(startupFdEnvironment))
     if (Option.isNone(configured) || signalled) return
     signalled = true
-    const fs = yield* FileSystem.FileSystem
     const descriptor = Number(configured.value)
-    yield* fs
-      .writeFileString(`/dev/fd/${descriptor}`, `${encode(message)}\n`)
-      .pipe(Effect.ensuring(closeDescriptor(descriptor)))
+    yield* writeDescriptor(descriptor, `${encode(message)}\n`).pipe(Effect.ensuring(closeDescriptor(descriptor)))
   }).pipe(Effect.mapError((cause) => error("startup-failed", `Could not report resident startup: ${String(cause)}`)))
 
 export const signalReady = signal({ _tag: "ready" })
