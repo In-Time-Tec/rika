@@ -32,6 +32,18 @@ type Action = {
   readonly files?: Readonly<Record<string, string | null>>
 }
 
+type SceneSymlink = {
+  readonly path: string
+  readonly target: string
+  readonly outside?: boolean
+}
+
+type SceneExecutable = {
+  readonly name: string
+  readonly exitCode?: number
+  readonly waitForInput?: boolean
+}
+
 interface Options {
   readonly actions: ReadonlyArray<Action>
   readonly files?: ReadonlyArray<{ readonly path: string; readonly bytes: Uint8Array; readonly executable?: boolean }>
@@ -49,6 +61,10 @@ interface Options {
   readonly editorContent?: string
   readonly mediaAnalyzer?: { readonly response: string } | { readonly error: string }
   readonly inspectPaths?: ReadonlyArray<string>
+  readonly outsideFiles?: Readonly<Record<string, string>>
+  readonly symlinks?: ReadonlyArray<SceneSymlink>
+  readonly environment?: Readonly<Record<string, string>>
+  readonly executable?: SceneExecutable
 }
 
 class SceneError extends Schema.TaggedErrorClass<SceneError>()("SceneError", {
@@ -113,8 +129,10 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-scene-" })
   const home = `${root}/home`
   const workspace = `${root}/workspace`
+  const outside = `${root}/outside`
   const state = `${root}/state`
-  yield* Effect.forEach([home, workspace, state], (directory) => fs.makeDirectory(directory))
+  const bin = `${root}/bin`
+  yield* Effect.forEach([home, workspace, outside, state, bin], (directory) => fs.makeDirectory(directory))
   if (options.globalSettings !== undefined) {
     yield* fs.makeDirectory(`${home}/.config/rika`, { recursive: true })
     const settings = yield* Schema.encodeUnknownEffect(UnknownJson)(options.globalSettings)
@@ -139,6 +157,28 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
         ),
     { discard: true },
   )
+  yield* Effect.forEach(Object.entries(options.outsideFiles ?? {}), ([name, contents]) =>
+    fs.writeFileString(`${outside}/${name}`, contents),
+  )
+  yield* Effect.forEach(options.symlinks ?? [], (link) =>
+    fs.symlink(`${link.outside === true ? outside : workspace}/${link.target}`, `${workspace}/${link.path}`),
+  )
+  const openLog = `${state}/opens.jsonl`
+  if (options.executable !== undefined) {
+    const executable = `${bin}/${options.executable.name}`
+    const source = [
+      "#!/usr/bin/env python3",
+      "import json, os, sys",
+      'with open(os.environ["RIKA_SCENE_OPEN_LOG"], "a") as stream:',
+      "    stream.write(json.dumps(sys.argv[1:]) + '\\n')",
+      ...(options.executable.waitForInput === true
+        ? ['print("EDITOR ACTIVE", flush=True)', "sys.stdin.readline()"]
+        : []),
+      `sys.exit(${options.executable.exitCode ?? 0})`,
+      "",
+    ].join("\n")
+    yield* fs.writeFileString(executable, source, { mode: 0o755 })
+  }
   const testDirectory = fileURLToPath(new URL(".", import.meta.url))
   const appDirectory = testDirectory.replace(/\/test\/$/, "")
   const helper = `${testDirectory}/fixtures/interactive-pty.py`
@@ -153,7 +193,7 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   const residentGrace = options.actions.some((action) => action.restartArguments !== undefined) ? "5000" : "100"
   const environment = yield* Schema.encodeUnknownEffect(UnknownJson)({
     HOME: home,
-    PATH: `${workspace}/bin:${path}`,
+    PATH: `${workspace}/bin:${options.executable === undefined ? "" : `${bin}:`}${path}`,
     TERM: "xterm-256color",
     RIKA_TEST_TERMINAL_COLUMNS: options.terminal?.columns,
     RIKA_TEST_TERMINAL_ROWS: options.terminal?.rows,
@@ -167,6 +207,8 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       : "response" in options.mediaAnalyzer
         ? { RIKA_TEST_MEDIA_ANALYZER_RESPONSE: options.mediaAnalyzer.response }
         : { RIKA_TEST_MEDIA_ANALYZER_ERROR: options.mediaAnalyzer.error }),
+    ...(options.executable === undefined ? {} : { RIKA_SCENE_OPEN_LOG: openLog }),
+    ...options.environment,
     ...modelEnvironment,
   })
   if (options.git === true) {
@@ -284,6 +326,16 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       ),
     ),
   )
+  const opens = yield* fs.readFileString(openLog).pipe(
+    Effect.map((contents) =>
+      contents
+        .trim()
+        .split("\n")
+        .filter((line) => line.length > 0)
+        .map((line) => Schema.decodeUnknownSync(UnknownJson)(line) as ReadonlyArray<string>),
+    ),
+    Effect.orElseSucceed(() => [] as ReadonlyArray<ReadonlyArray<string>>),
+  )
   const completed = {
     ...result,
     rawOutput,
@@ -296,6 +348,7 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       .map(([, contents]) => contents)
       .join("\n"),
     diagnostics,
+    opens,
     names,
     workspaceContents,
     workspaceFiles,
@@ -345,6 +398,9 @@ const withOptions = <A extends object>(
   ...(usage === undefined ? {} : { usage }),
 })
 
+const mouseClick = (column: number, row: number): string =>
+  `${escape}[<0;${column};${row}M${escape}[<0;${column};${row}m`
+
 export const Scene = {
   run,
   action: {
@@ -374,6 +430,18 @@ export const Scene = {
       after,
       files,
       ...(write === undefined ? {} : { write }),
+    }),
+    clickAfter: (after: string, column: number, row: number): Action => ({
+      after,
+      write: mouseClick(column, row),
+    }),
+    clickRowsAfter: (after: string, column: number, rows: ReadonlyArray<number>): Action => ({
+      after,
+      write: rows.map((row) => mouseClick(column, row)).join(""),
+    }),
+    clickGridAfter: (after: string, columns: ReadonlyArray<number>, rows: ReadonlyArray<number>): Action => ({
+      after,
+      write: rows.flatMap((row) => columns.map((column) => mouseClick(column, row))).join(""),
     }),
   },
   model: {

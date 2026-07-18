@@ -42,6 +42,22 @@ export interface ToolDetail {
   readonly target?: PathTarget
 }
 
+export const escapePathTarget = (path: string): string =>
+  [...path]
+    .map((character) => {
+      const code = character.codePointAt(0) ?? 0
+      return character === "\n"
+        ? "\\n"
+        : character === "\r"
+          ? "\\r"
+          : character === "\t"
+            ? "\\t"
+            : code < 0x20 || (code >= 0x7f && code <= 0x9f)
+              ? `\\u{${code.toString(16)}}`
+              : character
+    })
+    .join("")
+
 const inputValue = (input: string): Record<string, unknown> =>
   Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => ({}))
 
@@ -57,17 +73,28 @@ export const toolDetail: {
   const input = inputValue(call.input)
   const kind = toolKind(call.name, undefined)
   const path = call.files[0]?.path ?? stringValue(input, ["path", "file_path", "file"])
+  const offset =
+    typeof input.offset === "number" && Number.isFinite(input.offset)
+      ? Math.max(0, Math.trunc(input.offset))
+      : undefined
   const target =
     path === undefined
       ? undefined
       : {
           path,
-          ...(typeof input.offset === "number" ? { line: input.offset } : {}),
+          ...(offset === undefined ? {} : { line: offset + 1, column: 1 }),
         }
+  const displayPath = path === undefined ? undefined : escapePathTarget(path)
   if (kind === "read") {
     const verb =
       call.presentation.action === "media" ? "Viewed" : call.presentation.action === "git-status" ? "Checked" : "Read"
-    return { block, label: `${verb} ${call.detail || path || call.name}`, ...(target === undefined ? {} : { target }) }
+    const location = path === undefined ? undefined : call.detail.match(/\s+L\d+(?:-\d+)?$/)?.[0]
+    const detail = path === undefined ? call.detail : `${displayPath}${location ?? ""}`
+    return {
+      block,
+      label: `${verb} ${detail || displayPath || call.name}`,
+      ...(target === undefined ? {} : { target }),
+    }
   }
   if (kind === "search") {
     const query = stringValue(input, ["pattern", "query", "glob", "path"])
@@ -78,7 +105,11 @@ export const toolDetail: {
     }
   }
   if (kind === "edit")
-    return { block, label: `Edit ${path ?? (call.detail || call.name)}`, ...(target === undefined ? {} : { target }) }
+    return {
+      block,
+      label: `Edit ${displayPath ?? (call.detail || call.name)}`,
+      ...(target === undefined ? {} : { target }),
+    }
   if (kind === "shell") return { block, label: `$ ${call.detail || call.input}` }
   return {
     block,

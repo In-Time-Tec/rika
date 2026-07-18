@@ -61,6 +61,7 @@ import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-re
 import { renderPierreDiff } from "./pierre-diff"
 import { renderTool } from "./tool-renderer"
 import {
+  escapePathTarget,
   isExpandableUnit,
   orderedTranscriptItems,
   toolDetail,
@@ -1250,6 +1251,7 @@ interface TranscriptRenderableDescriptor {
   readonly content: StyledText
   readonly selectable?: boolean
   readonly spinnerChunk?: number
+  readonly targets?: ReadonlyArray<PathTarget>
   readonly onMouseDown?: TextRenderable["onMouseDown"]
 }
 
@@ -2148,6 +2150,32 @@ export class Surface {
       this.transcriptRecords.delete(record.key)
     }
     const desired = descriptors.map((descriptor) => {
+      const handleMouseDown = (renderable: TextRenderable, event: MouseEvent) => {
+        if (event.button === 0) {
+          const row = event.y - renderable.screenY
+          const column = event.x - renderable.screenX
+          const text = descriptor.content.chunks
+            .map((chunk) => chunk.text)
+            .join("")
+            .split("\n")[row]
+          if (text !== undefined)
+            for (const target of descriptor.targets ?? []) {
+              const label = escapePathTarget(target.path)
+              let offset = text.indexOf(label)
+              while (offset >= 0) {
+                const start = stringWidth(text.slice(0, offset))
+                const end = start + stringWidth(label)
+                if (column >= start && column < end) {
+                  event.stopPropagation()
+                  this.handlers.openPath?.(target)
+                  return
+                }
+                offset = text.indexOf(label, offset + label.length)
+              }
+            }
+        }
+        descriptor.onMouseDown?.(event)
+      }
       const existing = this.transcriptRecords.get(descriptor.key)
       if (existing !== undefined) {
         if (existing.revision !== descriptor.revision) {
@@ -2157,7 +2185,7 @@ export class Surface {
         if (descriptor.spinnerChunk === undefined) delete existing.spinnerChunk
         else existing.spinnerChunk = descriptor.spinnerChunk
         existing.renderable.selectable = descriptor.selectable ?? true
-        existing.renderable.onMouseDown = descriptor.onMouseDown
+        existing.renderable.onMouseDown = (event) => handleMouseDown(existing.renderable, event)
         return existing
       }
       const renderable = new TextRenderable(this.renderer, {
@@ -2165,7 +2193,7 @@ export class Surface {
         wrapMode: "word",
         selectable: descriptor.selectable ?? true,
       })
-      renderable.onMouseDown = descriptor.onMouseDown
+      renderable.onMouseDown = (event) => handleMouseDown(renderable, event)
       const record = {
         key: descriptor.key,
         revision: descriptor.revision,
@@ -2388,6 +2416,7 @@ export class Surface {
             revision: JSON.stringify(headerContent.chunks),
             content: headerContent,
             selectable: !range.expandable,
+            ...(range.targets === undefined ? {} : { targets: range.targets }),
             ...(spinnerChunk < 0 ? {} : { spinnerChunk }),
             ...(range.expandable
               ? {
@@ -2410,6 +2439,7 @@ export class Surface {
               key: `${range.unit}:body`,
               revision: JSON.stringify(body),
               content: new StyledText(body),
+              ...(range.targets === undefined ? {} : { targets: range.targets }),
             })
         }
         this.reconcileTranscript(descriptors)

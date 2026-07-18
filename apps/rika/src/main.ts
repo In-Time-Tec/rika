@@ -187,8 +187,18 @@ const resolveWorkspaceFileImpl = Effect.fn("Main.resolveWorkspaceFile")(function
   workspace: string,
   target: PathTarget,
 ) {
-  const root = yield* realpath(workspace)
-  const path = yield* realpath(resolveWorkspacePath(root, target))
+  if (target.path.length === 0 || isAbsolute(target.path))
+    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
+  const root = yield* realpath(workspace).pipe(
+    Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Workspace is unavailable" })),
+  )
+  const candidate = resolve(root, target.path)
+  const lexicalRelation = relativePathFrom(root, candidate)
+  if (lexicalRelation === ".." || lexicalRelation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
+    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
+  const path = yield* realpath(candidate).pipe(
+    Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path does not exist" })),
+  )
   const relation = relativePathFrom(root, path)
   if (
     relation === ".." ||
@@ -196,8 +206,10 @@ const resolveWorkspaceFileImpl = Effect.fn("Main.resolveWorkspaceFile")(function
     isAbsolute(relation)
   )
     return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
-  if ((yield* stat(path)).type !== "File")
-    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is not a file" })
+  const info = yield* stat(path).pipe(
+    Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path is unavailable" })),
+  )
+  if (info.type !== "File") return yield* WorkspaceFileError.make({ path: target.path, message: "Path is not a file" })
   return path
 })
 
@@ -221,7 +233,19 @@ export const editorArguments: {
 } = Function.dual((args) => args.length >= 2, editorArgumentsImpl)
 
 const defaultOpenArgumentsImpl = (path: string, platform: NodeJS.Platform = process.platform): Array<string> =>
-  platform === "darwin" ? ["open", path] : platform === "win32" ? ["cmd", "/c", "start", "", path] : ["xdg-open", path]
+  platform === "darwin"
+    ? ["open", path]
+    : platform === "win32"
+      ? [
+          "powershell.exe",
+          "-NoProfile",
+          "-NonInteractive",
+          "-Command",
+          "Start-Process -LiteralPath $args[0]",
+          "--",
+          path,
+        ]
+      : ["xdg-open", path]
 
 export const defaultOpenArguments: {
   (platform?: NodeJS.Platform): (path: string) => Array<string>
@@ -2326,7 +2350,10 @@ if (import.meta.main) {
             ),
             Effect.asVoid,
           )
-        const openPath = (target: PathTarget) =>
+        let openingPath = false
+        const openPath = (target: PathTarget) => {
+          if (openingPath) return
+          openingPath = true
           run(
             resolveWorkspaceFileImpl(model.workspace, target).pipe(
               Effect.matchEffect({
@@ -2347,22 +2374,35 @@ if (import.meta.main) {
                       return
                     }
                     const resumeTerminal = pauseTerminal()
-                    yield* childExit("open editor", editorArguments(editor, path, target.line, target.column), {
-                      stdin: "inherit",
-                      stdout: "inherit",
-                      stderr: "inherit",
-                    }).pipe(
+                    const exit = yield* childExit(
+                      "open editor",
+                      editorArguments(editor, path, target.line, target.column),
+                      {
+                        stdin: "inherit",
+                        stdout: "inherit",
+                        stderr: "inherit",
+                      },
+                    ).pipe(
+                      Effect.orElseSucceed(() => -1),
                       Effect.ensuring(
                         Effect.sync(() => {
                           if (resumeTerminal() && !closed) renderer?.surface.update(model)
                         }),
                       ),
                     )
+                    if (exit !== 0)
+                      renderer?.surface.showToast("Could not open the file in the configured editor", "#e06c75")
                   }),
               }),
               Effect.asVoid,
+              Effect.ensuring(
+                Effect.sync(() => {
+                  openingPath = false
+                }),
+              ),
             ),
           )
+        }
         const adapter: Session.Adapter = {
           submit,
           quit: () => close(),

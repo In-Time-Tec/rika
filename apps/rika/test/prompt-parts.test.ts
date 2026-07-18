@@ -182,10 +182,12 @@ test("opens files with the platform default application when no editor is config
       expect(defaultOpenArguments("/work/file.ts", "darwin")).toEqual(["open", "/work/file.ts"])
       expect(defaultOpenArguments("/work/file.ts", "linux")).toEqual(["xdg-open", "/work/file.ts"])
       expect(defaultOpenArguments("C:\\work\\file.ts", "win32")).toEqual([
-        "cmd",
-        "/c",
-        "start",
-        "",
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        "Start-Process -LiteralPath $args[0]",
+        "--",
         "C:\\work\\file.ts",
       ])
       yield* Effect.void
@@ -204,6 +206,21 @@ test("rejects workspace symlinks that resolve outside the workspace before openi
       yield* fileSystem.symlink(outside, path.join(root, "link.ts"))
       const resolved = yield* Effect.exit(resolveWorkspaceFile(root, { path: "link.ts" }))
       expect(resolved).toMatchObject({ _tag: "Failure" })
+    }),
+  ))
+
+test("rejects absolute, traversal, missing, and directory targets as typed workspace file failures", () =>
+  run(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* workspace("rika-path-validation-")
+      yield* fileSystem.makeDirectory(path.join(root, "directory"))
+      for (const target of ["/etc/passwd", "../outside.ts", "missing.ts", "directory", ""]) {
+        const error = yield* Effect.flip(resolveWorkspaceFile(root, { path: target }))
+        expect(error._tag).toBe("WorkspaceFileError")
+        expect(error.path).toBe(target)
+      }
     }),
   ))
 

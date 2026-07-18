@@ -1458,8 +1458,10 @@ test("renders a subagent tool tree and expands each child independently", () =>
         ],
         expandedRowKeys: ["tool:oracle-parent"],
       }
+      const opened: Array<{ readonly path: string; readonly line?: number; readonly column?: number }> = []
       const surface = new Surface(setup.renderer, {
         key: () => undefined,
+        openPath: (target) => opened.push(target),
         clickToggle: (unit) => {
           model = update(model, { _tag: "DetailToggled", id: unit })
           surface.update(model)
@@ -1496,6 +1498,10 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(model.expandedRowKeys).toContain("tool:child-read")
         expect(setup.captureCharFrame()).toContain("read child output")
         expect(setup.captureCharFrame()).not.toContain("shell child output")
+
+        yield* openTui(() => setup.mockMouse.click(read.screenX + 12, read.screenY))
+        expect(opened).toEqual([{ path: "src/a.ts", line: 3, column: 1 }])
+        expect(model.expandedRowKeys).toContain("tool:child-read")
 
         const shell = records().get("tool:child-shell:header")!.renderable
         yield* openTui(() => setup.mockMouse.click(shell.screenX + 4, shell.screenY))
