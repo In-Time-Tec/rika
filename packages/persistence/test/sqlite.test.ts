@@ -392,6 +392,30 @@ test("creates, persists, and reopens the current schema", () => {
           type: "model.usage.reported",
           createdAt: 5,
         })
+        const beforeRejectedReplacement = yield* transcript.get(storedTurn.id)
+        yield* transcript.replace(
+          storedTurn,
+          Transcript.project(storedTurn.id, storedTurn.prompt, [
+            { cursor: "cursor-a", sequence: 1, type: "execution.completed", createdAt: 4 },
+          ]),
+        )
+        expect(yield* transcript.get(storedTurn.id)).toEqual(beforeRejectedReplacement)
+        const malformed = {
+          ...Transcript.project(storedTurn.id, storedTurn.prompt, [
+            { cursor: "cursor-c", sequence: 3, type: "model.output.completed", createdAt: 6, text: "invalid" },
+          ]),
+          units: [
+            {
+              key: "invalid",
+              turnId: storedTurn.id,
+              order: { sequence: 3, part: 0 },
+              revision: 3,
+              content: { _tag: "Entry", role: "invalid", text: "invalid" },
+            },
+          ],
+        } as unknown as Transcript.Projection
+        expect((yield* Effect.result(transcript.replace(storedTurn, malformed)))._tag).toBe("Failure")
+        expect(yield* transcript.get(storedTurn.id)).toEqual(beforeRejectedReplacement)
         const sql = yield* SqlClient
         const queryPlan = yield* sql`EXPLAIN QUERY PLAN
           SELECT u.unit_json, c.revision, t.prompt

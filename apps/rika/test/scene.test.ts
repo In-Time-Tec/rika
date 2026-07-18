@@ -25,3 +25,30 @@ test("rejects when the TUI exits before every scripted action runs", () =>
       ],
     }),
   ).rejects.toThrow(/completed 1 of 2 actions/))
+
+test(
+  "keeps a failed tool result and recovery prose in one deterministic transcript",
+  () =>
+    Scene.run({
+      script: [
+        Scene.model.turn([
+          Scene.model.reasoning("Checking the failing command."),
+          Scene.model.toolCall(
+            "shell",
+            { command: "sh", args: ["-c", "printf deterministic-failure >&2; exit 7"] },
+            "fail",
+          ),
+        ]),
+        Scene.model.text("Recovered after the expected failure.", 100),
+      ],
+      actions: [
+        Scene.action.writeAfter("Welcome to Rika", "Run the deterministic failing check.\r"),
+        Scene.action.writeAfter("Recovered", "\u0003", 1_000),
+      ],
+    }).then((result) => {
+      expect(result.output).toContain("exit code: 7")
+      expect(result.output).toContain("Recovered")
+      expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
+    }),
+  45_000,
+)

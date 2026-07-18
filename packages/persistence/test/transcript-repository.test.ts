@@ -104,6 +104,23 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
     }),
   )
 
+  test.effect("keeps replacement monotonic when stale and current rebuilds race", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(8), threadId: Thread.ThreadId.make("thread-race") }
+      const stale = Transcript.project(target.id, target.prompt, [event(0)])
+      const current = Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)])
+      yield* Effect.all(
+        [repository.replace(target, stale), repository.replace(target, current), repository.replace(target, stale)],
+        { concurrency: "unbounded" },
+      )
+      expect(yield* repository.get(target.id)).toMatchObject({
+        revision: 2,
+        checkpointCursor: "cursor-2",
+      })
+    }),
+  )
+
   test.effect("pages semantic units across and within turns in chronological order", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service

@@ -506,6 +506,29 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
     }
   if (event.type.includes("diff"))
     return { _tag: "Diff", path: string(value.path, "diff"), patch: event.text ?? string(value.patch ?? value.diff) }
+  if (event.type.includes("compact"))
+    return {
+      _tag: "Compaction",
+      summary: event.text ?? string(value.summary),
+      ...(string(value.checkpoint ?? value.checkpoint_id).length === 0
+        ? {}
+        : { checkpoint: string(value.checkpoint ?? value.checkpoint_id) }),
+    }
+  if (event.type.includes("notification"))
+    return {
+      _tag: "Notification",
+      title: string(value.title ?? value.name, "Notification"),
+      detail: event.text ?? string(value.detail ?? value.message),
+    }
+  if (event.type.includes("image") && event.type.includes("attachment"))
+    return {
+      _tag: "ImageAttachment",
+      name: string(value.name ?? value.filename, "image"),
+      mediaType: string(value.media_type ?? value.mediaType, "application/octet-stream"),
+      ...(typeof value.width === "number" ? { width: value.width } : {}),
+      ...(typeof value.height === "number" ? { height: value.height } : {}),
+      ...(typeof value.bytes === "number" ? { bytes: value.bytes } : {}),
+    }
   if (event.type.includes("workflow"))
     return {
       _tag: "Workflow",
@@ -518,6 +541,14 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
           : event.type.includes("wait")
             ? "waiting"
             : "running",
+    }
+  if (event.type.includes("error") || event.type.includes("failed") || event.type === "budget.exceeded")
+    return {
+      _tag: "Error",
+      title: string(value.title, event.type === "budget.exceeded" ? "Budget exceeded" : "Error"),
+      detail: event.text ?? string(value.message ?? value.error, event.type),
+      turnId,
+      ...(string(value.recovery).length === 0 ? {} : { recovery: string(value.recovery) }),
     }
   if (event.type.includes("tool") && (event.type.includes("result") || event.type.includes("completed")))
     return {
@@ -533,6 +564,32 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
     return toolBlock(id, name, input)
   }
   return undefined
+}
+
+const genericKey = (turnId: string, event: SourceEvent, block: Block): string => {
+  const value = sourcePayload(event)
+  switch (block._tag) {
+    case "Diff":
+      return `diff:${eventId(turnId, block.path)}`
+    case "Compaction":
+      return `compaction:${turnId}`
+    case "Permission":
+      return `permission:${eventId(turnId, block.id)}`
+    case "ChildAgent":
+      return `child:${eventId(turnId, block.id)}`
+    case "Workflow":
+      return `workflow:${eventId(turnId, string(value.run_id ?? value.runId ?? value.workflow_id, block.name))}`
+    case "ImageAttachment":
+      return `image:${eventId(turnId, string(value.id, block.name))}`
+    case "Notification":
+      return `notification:${eventId(turnId, string(value.id, block.title))}`
+    case "Error":
+      return `error:${eventId(turnId, string(value.id, event.type))}`
+    default: {
+      const id = "id" in block && typeof block.id === "string" ? block.id : `${event.sequence}:${event.type}`
+      return `event:${eventId(turnId, id)}`
+    }
+  }
 }
 
 export const empty: {
@@ -686,10 +743,9 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
     return applyChild(projection, turnId, event)
   const block = genericBlock(turnId, event)
   if (block === undefined) return projection
-  const id = "id" in block && typeof block.id === "string" ? block.id : `${event.sequence}:${event.type}`
   const updated = upsertUnit(
     projection,
-    unit(`event:${eventId(turnId, id)}`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
+    unit(genericKey(turnId, event, block), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
   )
   return block._tag === "Permission" && block.status === "pending" ? advanceModelPhase(updated, turnId) : updated
 }

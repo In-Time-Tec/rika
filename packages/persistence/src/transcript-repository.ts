@@ -165,11 +165,12 @@ const makeMemory = Effect.gen(function* () {
   return Service.of({
     get,
     replace: Effect.fn("TranscriptRepository.replace")(function* (turn, projection) {
-      const current = yield* get(turn.id)
-      if (current !== undefined && current.revision > projection.revision) return current
-      const next = stored(turn, projection)
-      yield* Ref.update(state, (entries) => new Map(entries).set(turn.id, next))
-      return clone(next)
+      return yield* Ref.modify(state, (entries) => {
+        const current = entries.get(turn.id)
+        if (current !== undefined && current.revision > projection.revision) return [clone(current), entries]
+        const next = stored(turn, projection)
+        return [clone(next), new Map(entries).set(turn.id, next)]
+      })
     }),
     append: Effect.fn("TranscriptRepository.append")((turn, event) => appendAll(turn, [event])),
     appendAll,
