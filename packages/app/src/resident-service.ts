@@ -21,24 +21,27 @@ export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
 export const protocolVersion = 1
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])
+const WireIdentifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
+const Proof = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 export const Handshake = Schema.Struct({
   family: Schema.tag("rika-resident"),
-  identity: Schema.String,
-  token: Schema.String,
-  clientNonce: Schema.String,
+  identity: WireIdentifier,
+  clientNonce: WireIdentifier,
   clientKind: ClientKind,
-  protocolVersion: Schema.optionalKey(Schema.Int),
+  protocolVersion: Schema.Int,
+  clientProof: Proof,
 })
 export type Handshake = typeof Handshake.Type
 
 export const HandshakeAccepted = Schema.Struct({
   _tag: Schema.tag("accepted"),
   family: Schema.tag("rika-resident"),
-  identity: Schema.String,
-  clientNonce: Schema.String,
-  serviceNonce: Schema.String,
-  connectionId: Schema.String,
-  protocolVersion: Schema.optionalKey(Schema.Int),
+  identity: WireIdentifier,
+  clientNonce: WireIdentifier,
+  serviceNonce: WireIdentifier,
+  connectionId: WireIdentifier,
+  protocolVersion: Schema.Int,
+  serverProof: Proof,
   residentPid: Schema.optionalKey(Schema.Int),
 })
 export type HandshakeAccepted = typeof HandshakeAccepted.Type
@@ -265,6 +268,60 @@ export const canonicalServiceIdentity: {
   }),
 )
 
+const proof = (token: string, fields: ReadonlyArray<string | number>) =>
+  new Bun.CryptoHasher("sha256", token).update(JSON.stringify(fields)).digest("hex")
+
+const proofMatches = (actual: string, expected: string) => {
+  let difference = actual.length ^ expected.length
+  for (let index = 0; index < Math.max(actual.length, expected.length); index += 1)
+    difference |= (actual.charCodeAt(index) || 0) ^ (expected.charCodeAt(index) || 0)
+  return difference === 0
+}
+
+type ProofHandshake = Pick<Handshake, "identity" | "clientNonce" | "clientKind" | "protocolVersion">
+
+const clientProofImpl = (token: string, handshake: ProofHandshake) =>
+  proof(token, [
+    "rika-resident-client",
+    handshake.protocolVersion,
+    handshake.identity,
+    handshake.clientNonce,
+    handshake.clientKind,
+  ])
+export const clientProof: {
+  (handshake: ProofHandshake): (token: string) => string
+  (token: string, handshake: ProofHandshake): string
+} = Function.dual(2, clientProofImpl)
+
+const serverProofImpl = (
+  token: string,
+  handshake: ProofHandshake,
+  accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId">,
+) =>
+  proof(token, [
+    "rika-resident-server",
+    handshake.protocolVersion,
+    handshake.identity,
+    handshake.clientNonce,
+    handshake.clientKind,
+    accepted.serviceNonce,
+    accepted.connectionId,
+  ])
+export const serverProof: {
+  (
+    handshake: ProofHandshake,
+    accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId">,
+  ): (token: string) => string
+  (token: string, handshake: ProofHandshake, accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId">): string
+} = Function.dual(3, serverProofImpl)
+
+const verifyServerProofImpl = (token: string, handshake: ProofHandshake, accepted: HandshakeAccepted) =>
+  proofMatches(accepted.serverProof, serverProof(token, handshake, accepted))
+export const verifyServerProof: {
+  (handshake: ProofHandshake, accepted: HandshakeAccepted): (token: string) => boolean
+  (token: string, handshake: ProofHandshake, accepted: HandshakeAccepted): boolean
+} = Function.dual(3, verifyServerProofImpl)
+
 export type HandshakeResult =
   | { readonly _tag: "Accepted" }
   | { readonly _tag: "AuthenticationFailed" }
@@ -277,10 +334,10 @@ export const validateHandshake: {
 } = Function.dual(
   2,
   (handshake: Handshake, expected: { readonly identity: string; readonly token: string }): HandshakeResult => {
-    if (handshake.token !== expected.token) return { _tag: "AuthenticationFailed" }
     if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
-    if (handshake.protocolVersion !== undefined && handshake.protocolVersion !== protocolVersion)
-      return { _tag: "ProtocolMismatch" }
+    if (handshake.protocolVersion !== protocolVersion) return { _tag: "ProtocolMismatch" }
+    if (!proofMatches(handshake.clientProof, clientProof(expected.token, handshake)))
+      return { _tag: "AuthenticationFailed" }
     return { _tag: "Accepted" }
   },
 )

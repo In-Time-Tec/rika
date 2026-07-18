@@ -88,7 +88,11 @@ const splitServerMessage = (messageId: string, text: string) => {
   return parts.map((part, index) => chunkFrame(messageId, index, parts.length, part))
 }
 
-const serverMessageFramesImpl = (messageId: string, message: ResidentService.ServerMessage): ReadonlyArray<string> => {
+const serverMessageFramesImpl = (
+  messageId: string,
+  message: ResidentService.ServerMessage,
+  allowTargetedDegradation = true,
+): ReadonlyArray<string> => {
   const complete = json(message)
   if (encoder.encode(complete).byteLength <= maxFrameBytes) return [complete]
   try {
@@ -110,9 +114,9 @@ const serverMessageFramesImpl = (messageId: string, message: ResidentService.Ser
               }
             : { _tag: "ExecutionFailed", selectionEpoch, message: degradedReason },
       })
-      return serverMessageFramesImpl(messageId, degraded)
+      return serverMessageFramesImpl(messageId, degraded, false)
     }
-    if (message._tag === "interactive-feed-resync") {
+    if (message._tag === "interactive-feed-resync" && allowTargetedDegradation) {
       const selectionEpoch = message.events.find((event) => "selectionEpoch" in event)?.selectionEpoch ?? 0
       const threadIds = new Map<string, unknown>()
       for (const event of message.events) {
@@ -131,7 +135,18 @@ const serverMessageFramesImpl = (messageId: string, message: ResidentService.Ser
                 reason: degradedReason,
               })),
       })
-      return serverMessageFramesImpl(messageId, degraded)
+      return serverMessageFramesImpl(messageId, degraded, false)
+    }
+    if (message._tag === "interactive-feed-resync") {
+      const selectionEpoch = message.events.find((event) => "selectionEpoch" in event)?.selectionEpoch ?? 0
+      return serverMessageFramesImpl(
+        messageId,
+        decodeServer({
+          ...message,
+          events: [{ _tag: "ExecutionFailed", selectionEpoch, message: degradedReason }],
+        }),
+        false,
+      )
     }
     throw error
   }

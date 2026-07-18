@@ -3,11 +3,14 @@ import { Cause, Crypto, Deferred, Effect, Exit, Fiber, FiberSet, Layer, Ref, Sch
 import { provideLayer } from "./layer"
 import {
   canonicalServiceIdentity,
+  clientProof,
   ClientMessage,
   makeLifecycle,
   protocolVersion,
   ServerMessage,
+  serverProof,
   validateHandshake,
+  verifyServerProof,
 } from "../src/resident-service"
 
 describe("resident service protocol", () => {
@@ -27,24 +30,70 @@ describe("resident service protocol", () => {
   })
 
   it("fails closed for token and identity mismatches", () => {
-    const base = {
+    const unsigned = {
       family: "rika-resident" as const,
       identity: "identity",
-      token: "token",
       clientNonce: "nonce",
       clientKind: "run" as const,
       protocolVersion,
     }
+    const base = { ...unsigned, clientProof: clientProof("token", unsigned) }
     expect(validateHandshake(base, { identity: "identity", token: "token" })._tag).toBe("Accepted")
-    expect(validateHandshake({ ...base, token: "wrong" }, { identity: "identity", token: "token" })._tag).toBe(
-      "AuthenticationFailed",
-    )
+    expect(
+      validateHandshake(
+        { ...base, clientProof: clientProof("wrong", unsigned) },
+        { identity: "identity", token: "token" },
+      )._tag,
+    ).toBe("AuthenticationFailed")
     expect(validateHandshake({ ...base, identity: "wrong" }, { identity: "identity", token: "token" })._tag).toBe(
       "IdentityMismatch",
     )
     expect(validateHandshake({ ...base, protocolVersion: 0 }, { identity: "identity", token: "token" })._tag).toBe(
       "ProtocolMismatch",
     )
+  })
+
+  it("requires an explicit protocol version and bounded non-empty transport identities", () => {
+    const base = {
+      family: "rika-resident",
+      identity: "identity",
+      clientNonce: "nonce",
+      clientKind: "run",
+      clientProof: "0".repeat(64),
+    }
+    expect(() => Schema.decodeUnknownSync(ClientMessage)(base)).toThrow()
+    expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion, clientNonce: "" })).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion, identity: "x".repeat(1_025) }),
+    ).toThrow()
+  })
+
+  it("authenticates the resident response and binds both nonces and the connection identity", () => {
+    const handshake = {
+      identity: "identity",
+      clientNonce: "client-nonce",
+      clientKind: "run" as const,
+      protocolVersion,
+    }
+    const accepted = Schema.decodeUnknownSync(ServerMessage)({
+      _tag: "accepted",
+      family: "rika-resident",
+      identity: handshake.identity,
+      clientNonce: handshake.clientNonce,
+      serviceNonce: "service-nonce",
+      connectionId: "connection",
+      protocolVersion,
+      serverProof: serverProof("token", handshake, {
+        serviceNonce: "service-nonce",
+        connectionId: "connection",
+      }),
+    })
+    expect(accepted._tag).toBe("accepted")
+    if (accepted._tag !== "accepted") return
+    expect(verifyServerProof("token", handshake, accepted)).toBe(true)
+    expect(verifyServerProof("wrong", handshake, accepted)).toBe(false)
+    expect(verifyServerProof("token", { ...handshake, clientNonce: "reflected" }, accepted)).toBe(false)
+    expect(verifyServerProof("token", handshake, { ...accepted, connectionId: "foreign" })).toBe(false)
   })
 
   it("round-trips empty and semantic transcript pages without undefined wire fields", () => {

@@ -87,7 +87,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       )
       yield* Ref.set(graceFiber, fiber)
     })
-  const requestByInput = new WeakMap<object, string>()
+  const requestByInput = new WeakMap<object, { readonly requestId: string; readonly routeKey: string }>()
   type ResidentSession = {
     readonly session: Operation.InteractiveSession
     readonly ended: Deferred.Deferred<void>
@@ -117,13 +117,14 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     input: ResidentService.InteractiveInput,
     session: Operation.InteractiveSession,
   ) {
-    const requestId = requestByInput.get(input)
-    if (requestId === undefined)
+    const request = requestByInput.get(input)
+    if (request === undefined)
       return yield* Operation.OperationUnavailable.make({
         operation: "Interactive",
         message: "Missing interactive request",
       })
-    const route = (yield* Ref.get(routes)).get(requestId)
+    const { requestId, routeKey } = request
+    const route = (yield* Ref.get(routes)).get(routeKey)
     if (route === undefined)
       return yield* Operation.OperationUnavailable.make({
         operation: "Interactive",
@@ -496,6 +497,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     const attached = yield* Ref.make(false)
     const requests = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
     const connectionId = yield* crypto.randomUUIDv4
+    const routeKey = (requestId: string) => `${connectionId}\0${requestId}`
     const close = (code: number, reason?: string) => writer(new Socket.CloseEvent(code, reason))
     yield* Ref.update(activeConnections, (current) =>
       current.set(
@@ -548,6 +550,10 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const existing = yield* Ref.get(graceFiber)
               if (existing !== undefined) yield* Fiber.interrupt(existing)
               yield* Ref.set(graceFiber, undefined)
+              const acceptedProof = ResidentService.serverProof(options.token, message, {
+                serviceNonce,
+                connectionId,
+              })
               yield* writer(
                 json({
                   _tag: "accepted",
@@ -557,6 +563,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   serviceNonce,
                   connectionId,
                   protocolVersion: ResidentService.protocolVersion,
+                  serverProof: acceptedProof,
                   residentPid: process.pid,
                 } satisfies ResidentService.HandshakeAccepted),
               )
@@ -575,7 +582,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               if (fiber !== undefined) yield* Fiber.interrupt(fiber)
             }
             if (message._tag === "interactive-end") {
-              const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
+              const active = (yield* Ref.get(routes)).get(routeKey(message.requestId))?.sessions.get(message.sessionId)
               if (
                 message.connectionId !== connectionId ||
                 active === undefined ||
@@ -585,7 +592,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               yield* Deferred.succeed(active.ended, undefined)
             }
             if (message._tag === "cancel-interactive-command") {
-              const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
+              const active = (yield* Ref.get(routes)).get(routeKey(message.requestId))?.sessions.get(message.sessionId)
               if (
                 message.connectionId !== connectionId ||
                 active === undefined ||
@@ -596,7 +603,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               if (command !== undefined) yield* Deferred.succeed(command, undefined)
             }
             if (message._tag === "interactive-feed-ack") {
-              const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
+              const active = (yield* Ref.get(routes)).get(routeKey(message.requestId))?.sessions.get(message.sessionId)
               if (
                 message.connectionId !== connectionId ||
                 active === undefined ||
@@ -610,7 +617,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 )
             }
             if (message._tag === "interactive-feed-replay") {
-              const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
+              const active = (yield* Ref.get(routes)).get(routeKey(message.requestId))?.sessions.get(message.sessionId)
               if (
                 message.connectionId !== connectionId ||
                 active === undefined ||
@@ -620,7 +627,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               yield* active.replay(message.afterSequence)
             }
             if (message._tag === "interactive-command") {
-              const active = (yield* Ref.get(routes)).get(message.requestId)?.sessions.get(message.sessionId)
+              const active = (yield* Ref.get(routes)).get(routeKey(message.requestId))?.sessions.get(message.sessionId)
               if (
                 message.connectionId !== connectionId ||
                 active === undefined ||
@@ -736,13 +743,15 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 })
             }
             if (message._tag === "operation") {
+              if ((yield* Ref.get(requests)).has(message.requestId)) return yield* close(4400)
               yield* Effect.logInfo("resident.operation.accepted").pipe(
                 Effect.annotateLogs({
                   "rika.operation": message.input._tag,
                   "rika.resident.request.id": message.requestId,
                 }),
               )
-              requestByInput.set(message.input, message.requestId)
+              const requestRouteKey = routeKey(message.requestId)
+              requestByInput.set(message.input, { requestId: message.requestId, routeKey: requestRouteKey })
               const send = (frame: string) =>
                 writer(frame).pipe(
                   Effect.mapError((error) =>
@@ -755,7 +764,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const sendFrames = (frames: ReadonlyArray<string>) =>
                 outboundMessages.withPermits(1)(Effect.forEach(frames, send, { discard: true }))
               yield* Ref.update(routes, (current) =>
-                current.set(message.requestId, {
+                current.set(requestRouteKey, {
                   connectionId,
                   send,
                   sendFrames,
@@ -878,7 +887,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                       }),
                       Effect.ensuring(
                         Ref.update(requests, (current) => (current.delete(message.requestId), current)).pipe(
-                          Effect.andThen(Ref.update(routes, (current) => (current.delete(message.requestId), current))),
+                          Effect.andThen(Ref.update(routes, (current) => (current.delete(requestRouteKey), current))),
                           Effect.andThen(Effect.sync(() => requestByInput.delete(message.input))),
                         ),
                       ),
@@ -888,7 +897,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                 ),
               )
               if (fiber === undefined) {
-                yield* Ref.update(routes, (current) => (current.delete(message.requestId), current))
+                yield* Ref.update(routes, (current) => (current.delete(requestRouteKey), current))
                 requestByInput.delete(message.input)
                 yield* writer(drainingFailure(message.requestId, message.input._tag))
                 return
@@ -907,7 +916,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             const activeRequests = yield* Ref.get(requests)
             const activeRoutes = yield* Ref.get(routes)
             for (const requestId of activeRequests.keys()) {
-              const route = activeRoutes.get(requestId)
+              const route = activeRoutes.get(routeKey(requestId))
               if (route === undefined) continue
               for (const session of route.sessions.values()) {
                 for (const command of session.commands.values()) yield* Deferred.succeed(command, undefined)
@@ -916,7 +925,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             }
             for (const fiber of activeRequests.values()) yield* Fiber.interrupt(fiber)
             yield* Ref.update(routes, (current) => {
-              for (const requestId of activeRequests.keys()) current.delete(requestId)
+              for (const requestId of activeRequests.keys()) current.delete(routeKey(requestId))
               return current
             })
             const generation = yield* lifecycle.detach

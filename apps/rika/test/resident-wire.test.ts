@@ -45,6 +45,40 @@ describe("resident output frames", () => {
 })
 
 describe("resident server message frames", () => {
+  it("rejects malformed, oversized, and excessive-fragment frames", () => {
+    const decodeFrame = makeServerMessageFrameDecoder()
+    expect(() => decodeFrame("{")).toThrow()
+    expect(() => decodeFrame("x".repeat(maxFrameBytes + 1))).toThrow("Resident frame exceeds maximum size")
+    expect(() =>
+      decodeFrame(
+        JSON.stringify({
+          _tag: "resident-server-message-chunk",
+          messageId: "message",
+          index: 0,
+          count: 17,
+          text: "{}",
+        }),
+      ),
+    ).toThrow("maximum chunk count")
+  })
+
+  it("discards out-of-order fragments and accepts a fresh ordered replay", () => {
+    const message = Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+      _tag: "interactive-feed-event",
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "generation",
+      sequence: 1,
+      event: { _tag: "ExecutionFailed", selectionEpoch: 1, message: "x".repeat(1_100_000) },
+    })
+    const frames = serverMessageFrames("message", message)
+    const decodeFrame = makeServerMessageFrameDecoder()
+
+    expect(decodeFrame(frames.at(-1)!)).toBeUndefined()
+    expect(frames.map(decodeFrame).filter(Boolean)).toEqual([message])
+  })
+
   it("splits and reassembles an oversized interactive event", () => {
     const message = Schema.decodeUnknownSync(ResidentService.ServerMessage)({
       _tag: "interactive-feed-event",
@@ -209,5 +243,33 @@ describe("resident server message frames", () => {
         },
       },
     ])
+  })
+
+  it("terminates oversized resync degradation with a bounded decodable marker", () => {
+    const events = Array.from({ length: 18_000 }, (_, index) => ({
+      _tag: "TranscriptResyncRequired",
+      selectionEpoch: 1,
+      threadId: `thread-${index}-${"x".repeat(900)}`,
+      reason: "reload",
+    }))
+    const message = Schema.decodeUnknownSync(ResidentService.ServerMessage)({
+      _tag: "interactive-feed-resync",
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "generation",
+      sequence: 1,
+      events,
+    })
+    const frames = serverMessageFrames("oversized-resync", message)
+    const decodeFrame = makeServerMessageFrameDecoder()
+    const decoded = frames.map(decodeFrame).filter((value) => value !== undefined)
+
+    expect(frames.length).toBeLessThanOrEqual(16)
+    expect(decoded).toHaveLength(1)
+    expect(decoded[0]).toMatchObject({
+      _tag: "interactive-feed-resync",
+      events: [{ _tag: "ExecutionFailed", message: expect.stringContaining("omitted an event larger than 16 MiB") }],
+    })
   })
 })

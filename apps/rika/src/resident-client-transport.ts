@@ -241,10 +241,15 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   const handshake = json({
     family: "rika-resident",
     identity: options.identity,
-    token: options.token,
     clientNonce,
     clientKind: options.clientKind,
     protocolVersion: ResidentService.protocolVersion,
+    clientProof: ResidentService.clientProof(options.token, {
+      identity: options.identity,
+      clientNonce,
+      clientKind: options.clientKind,
+      protocolVersion: ResidentService.protocolVersion,
+    }),
   } satisfies ResidentService.Handshake)
   const decodeFrame = makeServerMessageFrameDecoder()
   yield* socket
@@ -271,9 +276,20 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                             "incompatible-resident",
                           ),
                         )
-                      : Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
-                          Effect.andThen(Deferred.succeed(accepted, message)),
-                        )
+                      : !ResidentService.verifyServerProof(
+                            options.token,
+                            {
+                              identity: options.identity,
+                              clientNonce,
+                              clientKind: options.clientKind,
+                              protocolVersion: ResidentService.protocolVersion,
+                            },
+                            message,
+                          )
+                        ? Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
+                        : Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
+                            Effect.andThen(Deferred.succeed(accepted, message)),
+                          )
                   : message._tag === "rejected"
                     ? Deferred.fail(
                         connectionFailure,
