@@ -34,6 +34,7 @@ describe("ContextCompaction", () => {
     })
     expect(value.toolOutputMaxBytes).toBe(1_024)
     expect(value.keepRecentTokens).toBe(30)
+    expect(value.shouldCompact({ contextTokens: 80, contextWindow: 100, reserveTokens: 20 })).toBe(false)
     expect(value.shouldCompact({ contextTokens: 81, contextWindow: 100, reserveTokens: 20 })).toBe(true)
   })
 
@@ -60,6 +61,18 @@ describe("ContextCompaction", () => {
       ]),
     ).toBeUndefined()
     expect(ContextCompaction.shouldPersistCheckpoint(undefined, ContextCompaction.checkpoint("1", "s", "0"))).toBe(true)
+  })
+
+  it("uses the newest valid checkpoint in replay order", () => {
+    const first = ContextCompaction.checkpoint("1", "first", "entry-1")
+    const second = ContextCompaction.checkpoint("2", "second", "entry-2")
+    expect(
+      ContextCompaction.checkpointFromReplay([
+        { cursor: "1", metadata: ContextCompaction.relayMetadata(first) },
+        { cursor: "2", metadata: ContextCompaction.relayMetadata(second) },
+        { cursor: "3", metadata: { kind: "context-compaction", checkpoint: { digest: false } } },
+      ]),
+    ).toEqual(second)
   })
 
   it.effect("returns the original prompts when compaction is not needed", () =>
@@ -110,6 +123,42 @@ describe("ContextCompaction", () => {
       ).pipe(Effect.provide(yield* Layer.build(fixture.layer)))
       expect(result.checkpoint).toMatchObject({ cursor: "7", firstKeptEntryId: "1" })
       expect(result.checkpoint?.summary).toContain("Finish runtime coverage")
+      expect(result.prompt).toEqual(Prompt.make("continue"))
+      const requests = yield* fixture.requests
+      expect(requests).toHaveLength(1)
+      expect(requests[0]?.operation).toBe("generateObject")
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(requests[0]?.prompt.content)).toContain(
+        "Summarize the conversation",
+      )
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(requests[0]?.prompt.content)).toContain("old")
+      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(requests[0]?.prompt.content)).not.toContain(
+        "recent",
+      )
+    }),
+  )
+
+  it.effect("fails without publishing a checkpoint when the summary route fails", () =>
+    Effect.gen(function* () {
+      const fixture = yield* TestModel.make([])
+      const current = ContextCompaction.checkpoint("6", "existing", "0")
+      const result = yield* Effect.exit(
+        ContextCompaction.compact(
+          { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 100 },
+          {
+            agentName: "rika",
+            sessionId: "session",
+            turn: 7,
+            history: Prompt.fromMessages([message("old"), message("recent")]),
+            prompt: Prompt.make("continue"),
+            path: [entry("0", "old"), entry("1", "recent")],
+            contextTokens: 100,
+            checkpoint: current,
+          },
+        ),
+      ).pipe(Effect.provide(yield* Layer.build(fixture.layer)))
+      expect(result._tag).toBe("Failure")
+      expect(yield* fixture.requests).toHaveLength(1)
+      expect(current).toEqual(ContextCompaction.checkpoint("6", "existing", "0"))
     }),
   )
 
@@ -118,6 +167,7 @@ describe("ContextCompaction", () => {
       const fixture = yield* TestModel.make([])
       const current = ContextCompaction.checkpoint("6", "existing", "0")
       const large = "abcdef".repeat(100)
+      let spilled: unknown
       const result = yield* ContextCompaction.compact(
         { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 12 },
         {
@@ -135,15 +185,57 @@ describe("ContextCompaction", () => {
           yield* Layer.build(
             Layer.mergeAll(
               fixture.layer,
-              ToolOutput.testLayer({ put: () => Effect.succeed(Option.some("memory:tool-output")) }),
+              ToolOutput.testLayer({
+                put: (_toolCallId, content) => {
+                  spilled = content
+                  return Effect.succeed(Option.some("memory:tool-output"))
+                },
+              }),
             ),
           ),
         ),
       )
       expect(result.checkpoint).toEqual(current)
-      expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(result.prompt.content)).toContain(
-        "memory:tool-output",
+      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(result.prompt.content)
+      expect(encoded).toContain("memory:tool-output")
+      expect(encoded).not.toContain(large)
+      expect(spilled).toEqual({ result: large, encodedResult: large })
+    }),
+  )
+
+  it.effect("fails without replacing the checkpoint when tool-output spill fails", () =>
+    Effect.gen(function* () {
+      const fixture = yield* TestModel.make([])
+      const current = ContextCompaction.checkpoint("6", "existing", "0")
+      const result = yield* Effect.exit(
+        ContextCompaction.compact(
+          { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 12 },
+          {
+            agentName: "rika",
+            sessionId: "session",
+            turn: 7,
+            history: Prompt.empty,
+            prompt: Prompt.fromMessages([toolResult("abcdef".repeat(100))]),
+            path: [],
+            contextTokens: 100,
+            checkpoint: current,
+          },
+        ),
+      ).pipe(
+        Effect.provide(
+          yield* Layer.build(
+            Layer.mergeAll(
+              fixture.layer,
+              ToolOutput.testLayer({
+                put: () => Effect.fail(ToolOutput.ToolOutputError.make({ message: "spill failed" })),
+              }),
+            ),
+          ),
+        ),
       )
+      expect(result._tag).toBe("Failure")
+      expect(current).toEqual(ContextCompaction.checkpoint("6", "existing", "0"))
+      expect(yield* fixture.requests).toHaveLength(0)
     }),
   )
 })

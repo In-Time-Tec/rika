@@ -850,8 +850,17 @@ test(
         expect(result.checkpointCount).toBe(1)
         expect(result.reopened.duplicate.events).toEqual(result.reopened.replay.events)
         expect(result.requests).toHaveLength(3)
+        expect(result.requests.map((request) => request.operation)).toEqual([
+          "streamText",
+          "generateText",
+          "streamText",
+        ])
         expect(encodeJson(result.requests[1]?.prompt)).toContain("Summarize the conversation")
+        expect(encodeJson(result.requests[1]?.prompt)).not.toContain("sensitive fixture contents")
+        expect(encodeJson(result.requests[1]?.prompt)).not.toContain("compaction complete")
         expect(encodeJson(result.requests[2]?.prompt)).toContain("Finish the compacted run")
+        expect(encodeJson(result.requests[2]?.prompt)).toContain("sensitive fixture contents")
+        expect(encodeJson(result.reopened.replay.events)).toContain("sensitive fixture contents")
       }),
     ),
   60_000,
