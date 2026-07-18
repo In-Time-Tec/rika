@@ -54,6 +54,26 @@ describe("transcript renderers", () => {
     expect(rendered.split("\n").every((line) => !line.startsWith("\u0301"))).toBe(true)
   })
 
+  test("keeps list and blockquote prefixes within the requested cell width", () => {
+    const rendered = renderMarkdown(
+      "- alpha beta gamma delta epsilon\n- [x] checked\n\n> zeta eta theta iota kappa",
+      16,
+    )
+
+    expect(rendered.split("\n").every((line) => stringWidth(line) <= 16)).toBe(true)
+    expect(rendered.replace(/\s/gu, "")).toContain("-alphabetagammadeltaepsilon")
+    expect(rendered).toContain("- [x] checked")
+    expect(rendered).not.toContain("[x] [x]")
+    expect(rendered.replace(/[\s│]/gu, "")).toContain("zetaetathetaiotakappa")
+  })
+
+  test("renders terminal control characters as inert visible text", () => {
+    const rendered = renderMarkdown("before \u001b]2;owned\u0007 middle \u001b[2J after")
+
+    expect(rendered).toBe("before �]2;owned� middle �[2J after")
+    expect(Array.from(rendered).every((character) => character === "\n" || !/\p{Cc}/u.test(character))).toBe(true)
+  })
+
   test("wraps code blocks with the code indent on every physical line", () => {
     const sourceLine = "const result = someLongIdentifier"
     const rendered = renderMarkdown(`\`\`\`ts\n${sourceLine}\n\`\`\``, 20)

@@ -20,6 +20,9 @@ type WordPart = {
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
+const terminalSafeText = (text: string): string =>
+  text.replaceAll("\r\n", "\n").replace(/\p{Cc}/gu, (character) => (character === "\n" ? character : "�"))
+
 const splitChunks = (chunks: ReadonlyArray<TextChunk>): Lines => {
   const lines: Lines = [[]]
   for (const chunk of chunks) {
@@ -317,11 +320,13 @@ const listLines = (list: Tokens.List, depth: number, plain: boolean, width: numb
     const checkbox = item.task === true ? (item.checked === true ? "[x] " : "[ ] ") : ""
     const marker = `${indent}${markerMatch?.[1] ?? "-"} ${checkbox}`
     const continuation = " ".repeat(marker.length)
+    const contentWidth = Math.max(1, width - stringWidth(marker))
     const itemLines: Lines = []
     const passthrough: Array<boolean> = []
     for (const token of item.tokens) {
+      if (token.type === "checkbox") continue
       const isList = token.type === "list"
-      for (const line of blockLines([token], depth + 1, plain, width)) {
+      for (const line of blockLines([token], depth + 1, plain, isList ? width : contentWidth)) {
         itemLines.push(line)
         passthrough.push(isList)
       }
@@ -365,8 +370,8 @@ const blockLines = (tokens: ReadonlyArray<Token>, depth: number, plain: boolean,
       case "text": {
         const text = token as Tokens.Text
         if (text.tokens !== undefined && text.tokens.length > 0)
-          lines.push(...splitChunks(inlineChunks(text.tokens, plain)))
-        else lines.push(...splitChunks([fg(colors.text)(text.text)]))
+          lines.push(...wrapChunks(inlineChunks(text.tokens, plain), width))
+        else lines.push(...wrapChunks([fg(colors.text)(text.text)], width))
         break
       }
       case "code": {
@@ -384,7 +389,7 @@ const blockLines = (tokens: ReadonlyArray<Token>, depth: number, plain: boolean,
       }
       case "blockquote": {
         const quote = token as Tokens.Blockquote
-        for (const line of blockLines(quote.tokens, depth, plain, width)) {
+        for (const line of blockLines(quote.tokens, depth, plain, Math.max(1, width - 2))) {
           lines.push([dim(fg(colors.text)("│ ")), ...line])
         }
         break
@@ -416,11 +421,12 @@ const isPlainLine = (source: string): boolean => {
 }
 
 const renderLines = (source: string, plain: boolean, width: number): Lines => {
-  if (isPlainLine(source)) return wrapChunks([fg(colors.text)(source)], width)
-  const tokens = Lexer.lex(source, { gfm: true })
+  const safeSource = terminalSafeText(source)
+  if (isPlainLine(safeSource)) return wrapChunks([fg(colors.text)(safeSource)], width)
+  const tokens = Lexer.lex(safeSource, { gfm: true })
   const lines = blockLines(tokens, 0, plain, Math.max(1, Math.floor(width)))
   while (lines.length > 0 && lines[lines.length - 1]!.length === 0) lines.pop()
-  return lines
+  return lines.map((line) => line.map((chunk) => ({ ...chunk, text: terminalSafeText(chunk.text) })))
 }
 
 export const renderMarkdown: {
