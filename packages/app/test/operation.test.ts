@@ -457,6 +457,7 @@ describe("Operation", () => {
         },
       ])
       expect(yield* Ref.get(preparations)).toBe(1)
+      expect((yield* Ref.get(starts))[0]?.executionRoute).toEqual(pinnedRoute)
       expect((yield* turns.get(Turn.TurnId.make("turn-restart")))?.status).toBe("completed")
     }),
   )

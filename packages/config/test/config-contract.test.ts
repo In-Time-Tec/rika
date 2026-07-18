@@ -127,6 +127,45 @@ describe("ConfigContract", () => {
     }
   })
 
+  it("preserves candidate order and rejects incomplete aliases through the routing error contract", () => {
+    const fable = ConfigContract.resolveModelRoute(
+      {
+        ...ConfigContract.defaults,
+        modes: {
+          ...ConfigContract.defaults.modes,
+          low: {
+            ...ConfigContract.defaults.modes.low,
+            main: { alias: "fable", effort: "low" },
+          },
+        },
+      },
+      "low",
+    )
+    expect(fable.candidates).toEqual(["claude-fable-5", "claude-opus-4-8"])
+    expect(fable.model).toBe(fable.candidates[0])
+
+    const emptyAlias: ConfigContract.Settings = {
+      ...ConfigContract.defaults,
+      models: {
+        ...ConfigContract.defaults.models,
+        empty: { ...ConfigContract.defaults.models.luna!, candidates: [] },
+      },
+      modes: {
+        ...ConfigContract.defaults.modes,
+        low: { ...ConfigContract.defaults.modes.low, main: { alias: "empty", effort: "low" } },
+      },
+    }
+    expect(() => ConfigContract.resolveModelRoute(emptyAlias, "low")).toThrowError(/empty.*no provider candidates/)
+
+    const missingProvider = {
+      ...ConfigContract.defaults,
+      providers: { anthropic: ConfigContract.defaults.providers.anthropic },
+    } as ConfigContract.Settings
+    expect(() => ConfigContract.resolveModelRoute(missingProvider, "medium")).toThrowError(
+      /terra.*missing provider openai/,
+    )
+  })
+
   it("accepts supported logging levels and rejects custom log paths", () => {
     expect(ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "debug" } })).toEqual({
       logging: { level: "debug" },

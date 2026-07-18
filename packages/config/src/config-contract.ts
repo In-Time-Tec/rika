@@ -163,7 +163,18 @@ const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): Reso
   const alias = settings.models[route.alias]
   if (alias === undefined)
     throw ModelRouteError.make({ mode: owner, message: `${owner} references missing model alias ${route.alias}` })
-  const providerConnection = settings.providers[alias.provider]!
+  const providerConnection = settings.providers[alias.provider]
+  if (providerConnection === undefined)
+    throw ModelRouteError.make({
+      mode: owner,
+      message: `${owner} model alias ${route.alias} references missing provider ${alias.provider}`,
+    })
+  const model = alias.candidates[0]
+  if (model === undefined)
+    throw ModelRouteError.make({
+      mode: owner,
+      message: `${owner} model alias ${route.alias} has no provider candidates`,
+    })
   const variant = alias.variants[route.effort]?.[route.fast === true ? "fast" : "normal"]
   if (variant === undefined)
     throw ModelRouteError.make({
@@ -177,7 +188,7 @@ const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): Reso
     providerId: alias.provider,
     providerConnection,
     candidates: alias.candidates,
-    model: alias.candidates[0]!,
+    model,
     compaction: {
       contextWindow: alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
       reserveTokens: alias.limits.maxOutputTokens,

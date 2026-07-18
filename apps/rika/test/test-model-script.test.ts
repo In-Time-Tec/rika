@@ -217,6 +217,70 @@ test("pins GPT 5.6 routes to each mode's configured effort and selected fast tie
   }
 })
 
+test("pins aliases, variants, candidates, specialists, titles, and summaries as one admission snapshot", () => {
+  const settings: ConfigContract.Settings = {
+    ...ConfigContract.defaults,
+    providers: {
+      ...ConfigContract.defaults.providers,
+      openai: {
+        ...ConfigContract.defaults.providers.openai,
+        baseUrl: "https://models.example.test/v1?tenant=admission",
+        apiKeyEnv: "ADMISSION_API_KEY",
+      },
+    },
+  }
+  const resolved = modelRoutesForExecution(settings, "high", { fastMode: true })
+  expect(resolved.map((route) => route.alias)).toEqual([
+    "sol",
+    "sol",
+    "luna",
+    "terra",
+    "sol",
+    "sol",
+    "sol",
+    "terra",
+    "terra",
+  ])
+  expect(resolved.map((route) => route.model)).toEqual(resolved.map((route) => route.candidates[0]))
+
+  const pin = executionRoutePin(settings, "high", { fastMode: true })
+  expect(executionModelRoutes(pin).map((route) => route.role)).toEqual([
+    "main",
+    "oracle",
+    "title",
+    "compaction",
+    "librarian",
+    "painter",
+    "review",
+    "readThread",
+    "task",
+  ])
+  expect(pin).toMatchObject({
+    mode: "high",
+    main: { alias: "sol", effort: "xhigh", fast: true },
+    oracle: { alias: "sol", effort: "max", fast: true },
+    title: { alias: "luna", effort: "low", fast: false },
+    compactionSummary: { alias: "terra", effort: "medium", fast: false },
+    agents: {
+      librarian: { alias: "sol", effort: "high" },
+      painter: { alias: "sol", effort: "high" },
+      review: { alias: "sol", effort: "high" },
+      readThread: { alias: "terra", effort: "medium" },
+      task: { alias: "terra", effort: "medium" },
+    },
+  })
+  for (const route of executionModelRoutes(pin)) {
+    expect(route.providerBaseUrl).toBe("https://models.example.test/v1?tenant=admission")
+    expect(route.providerApiKeyEnv).toBe("ADMISSION_API_KEY")
+    expect(route.requestVariant).toBe(route.registrationKey)
+    expect(JSON.stringify(route)).not.toContain("secret")
+  }
+  expect(pin.main.providerOptions).toMatchObject({ reasoning: { effort: "xhigh" }, service_tier: "priority" })
+  expect(pin.oracle.providerOptions).toMatchObject({ reasoning: { effort: "max" }, service_tier: "priority" })
+  expect(pin.title?.providerOptions).not.toHaveProperty("service_tier")
+  expect(pin.compactionSummary?.providerOptions).not.toHaveProperty("service_tier")
+})
+
 test("fails an unavailable tuned route through the typed error channel", () =>
   Effect.runPromise(
     Effect.gen(function* () {
@@ -782,7 +846,7 @@ test("re-registers a cloned active route when interrupt-and-send starts it", () 
     }),
   ))
 
-test("keeps a review route owner's workspace-specific models in the startup registration set", () => {
+test("restores every pinned role from a nonterminal turn into the restart registration set", () => {
   const route = executionRoutePin(ConfigContract.defaults, "high")
   const owner: Turn.Turn = {
     id: Turn.TurnId.make("review-owner"),
