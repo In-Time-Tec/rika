@@ -11,9 +11,9 @@
   │                                                                                                                 │
   │ ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮  │
   │ │                                               Thread Preview                                               │  │
-  │ │                                                                                                            │  │
-  │ │                                                                                                            │  │
-  │ │                                                                                                            │  │
+  │ │  Rika performance and reliability                                                                          │  │
+  │ │  /workspace                                                                                                │  │
+  │ │  unread · idle                                                                                             │  │
   │ │                                                                                                            │  │
   │ │                                                                                                            │  │
   │ │  ┃ Finish the thread UI parity work.                                                                       │  │

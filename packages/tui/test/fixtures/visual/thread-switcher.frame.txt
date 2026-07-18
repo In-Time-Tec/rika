@@ -4,9 +4,9 @@
                               │                                                                                                                                          │
                               │ >                                                                   ╭─────────────────────────────────────────────────────────────────╮  │
                               │                                                                     │                         Thread Preview                          │  │
-                              │   Rika performance and reliability                  +428 ~56 -59    │                                                                 │  │
-                              │   Push all local changes to main                    +558 ~68 -68    │                                                                 │  │
-                              │   TUI performance and bug audit                                     │                                                                 │  │
+                              │   Rika performance and reliability                  +428 ~56 -59    │  Rika performance and reliability                               │  │
+                              │   Push all local changes to main                    +558 ~68 -68    │  /workspace                                                     │  │
+                              │   TUI performance and bug audit                                     │  unread · idle                                                  │  │
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │
                               │                                                                     │                                                                 │  │

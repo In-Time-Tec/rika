@@ -321,6 +321,10 @@ test("draws every thread-preview row at the exact box width with a two-cell gutt
   expect(contentRow).toBeDefined()
   expect(contentRow![0]!.text).toBe("│")
   expect(stringWidth(contentRow![1]!.text)).toBe(2)
+  const text = [...rows.values()].flatMap((row) => row.map((chunk) => chunk.text)).join("")
+  expect(text).toContain("Alpha")
+  expect(text).toContain("/work")
+  expect(text).toContain("idle")
 })
 
 test("keeps the previous thread preview visible until the next preview is ready", () => {

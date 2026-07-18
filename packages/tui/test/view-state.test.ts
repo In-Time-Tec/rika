@@ -986,6 +986,37 @@ describe("ViewState", () => {
     expect(model.threadSwitcher.open).toBe(false)
   })
 
+  test("clears stale previews for missing filters and removed or archived thread summaries", () => {
+    let model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "ThreadsReplaced",
+      threads: [thread({ id: "a", title: "Alpha" }), thread({ id: "b", title: "Beta" })],
+    })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
+    model = ViewState.update(model, {
+      _tag: "ThreadPreviewLoaded",
+      threadId: "a",
+      turns: [{ prompt: "stale preview", events: [] }],
+    })
+    for (const character of "missing")
+      model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
+    expect(model.threadPreview._tag).toBe("Idle")
+
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "escape" }) })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
+    model = ViewState.update(model, {
+      _tag: "ThreadPreviewLoaded",
+      threadId: "a",
+      turns: [{ prompt: "removed preview", events: [] }],
+    })
+    model = ViewState.update(model, {
+      _tag: "ThreadsReplaced",
+      threads: [thread({ id: "b", title: "Beta" })],
+    })
+    expect(model.threadPreview._tag).toBe("Idle")
+    expect(ViewState.selectedThreadMetadata(model)?.id).toBe("b")
+    expect(model.threadSwitcher.previewScroll).toBe(0)
+  })
+
   test("switches file completion to thread completion with @@ and inserts a typed thread mention", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "ThreadsReplaced",

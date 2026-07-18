@@ -2203,7 +2203,7 @@
           "width": 1
         },
         {
-          "text": "                                                                                                            ",
+          "text": "  Rika performance and reliability                                                                          ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2417,7 +2417,7 @@
           "width": 1
         },
         {
-          "text": "                                                                                                            ",
+          "text": "  /workspace                                                                                                ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -2631,7 +2631,7 @@
           "width": 1
         },
         {
-          "text": "                                                                                                            ",
+          "text": "  unread · idle                                                                                             ",
           "fg": {
             "buffer": {
               "0": 1984,

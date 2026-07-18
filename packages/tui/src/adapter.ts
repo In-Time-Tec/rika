@@ -3110,7 +3110,17 @@ export const previewBoxRows: {
   const inner = width - 2
   const preview = selectedThreadMetadata(model)
   const contentWidth = Math.max(1, inner - 3)
-  const contentRows = Math.max(1, height - 4)
+  const details =
+    preview === undefined
+      ? []
+      : [
+          preview.title,
+          preview.workspace,
+          [preview.archived ? "archived" : "", preview.unread ? "unread" : "", preview.status]
+            .filter((value) => value.length > 0)
+            .join(" · "),
+        ].filter((value) => value.length > 0)
+  const contentRows = Math.max(1, height - 4 - details.length)
   const transcript = previewTranscriptLines(model, contentWidth, contentRows)
   rows.set(0, [fg(colors.muted)(`╭${"─".repeat(inner)}╮`)])
   const header = "Thread Preview"
@@ -3122,6 +3132,17 @@ export const previewBoxRows: {
     fg(colors.text)(" ".repeat(Math.max(0, inner - headerLeft - header.length))),
     fg(colors.muted)("│"),
   ])
+  details.forEach((line, index) => {
+    const visible = truncateToWidth(line, contentWidth)
+    rows.set(2 + index, [
+      fg(colors.muted)("│"),
+      fg(colors.text)("  "),
+      fg(colors.text)(visible),
+      fg(colors.text)(" ".repeat(Math.max(0, contentWidth - stringWidth(visible)))),
+      fg(colors.text)(" "),
+      fg(colors.muted)("│"),
+    ])
+  })
   if (transcript !== undefined) {
     const startRow = height - 1 - transcript.lines.length
     const scrollable = transcript.total > contentRows
@@ -3143,33 +3164,13 @@ export const previewBoxRows: {
   } else if (!isLoading(model.threadPreview)) {
     const status = "No preview"
     const statusLeft = Math.max(0, Math.floor((inner - status.length) / 2))
-    rows.set(2, [
+    rows.set(2 + details.length, [
       fg(colors.muted)("│"),
       fg(colors.text)(" ".repeat(statusLeft)),
       dim(fg(colors.text)(status)),
       fg(colors.text)(" ".repeat(Math.max(0, inner - statusLeft - status.length))),
       fg(colors.muted)("│"),
     ])
-    if (preview !== undefined) {
-      const details = [
-        preview.title,
-        preview.workspace,
-        [preview.archived ? "archived" : "", preview.unread ? "unread" : "", preview.status]
-          .filter((value) => value.length > 0)
-          .join(" · "),
-      ].filter((value) => value.length > 0)
-      details.forEach((line, index) => {
-        const visible = truncateToWidth(line, contentWidth)
-        rows.set(height - 1 - details.length + index, [
-          fg(colors.muted)("│"),
-          fg(colors.text)("  "),
-          fg(colors.text)(visible),
-          fg(colors.text)(" ".repeat(Math.max(0, contentWidth - stringWidth(visible)))),
-          fg(colors.text)(" "),
-          fg(colors.muted)("│"),
-        ])
-      })
-    }
   }
   for (let row = 2; row < height - 1; row += 1)
     if (!rows.has(row))

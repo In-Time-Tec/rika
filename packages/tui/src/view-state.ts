@@ -873,6 +873,7 @@ export const update: {
       return expandPastedTextAttachment(model, message.token)
     case "ThreadsReplaced": {
       const selectedId = (model.threads as ReadonlyArray<ThreadItem>)[model.threadSidebar.selected]?.id
+      const browserSelectedId = selectedThreadMetadata(model)?.id
       const selected = Math.max(
         0,
         selectedId === undefined ? 0 : message.threads.findIndex((thread) => thread.id === selectedId),
@@ -889,15 +890,26 @@ export const update: {
           scrollTop: Math.min(boundedScrollTop, boundedSelected),
         },
       }
+      const browserThreads = filteredThreads(replacedThreads)
+      const browserSelected = Math.max(
+        0,
+        browserSelectedId === undefined ? 0 : browserThreads.findIndex((thread) => thread.id === browserSelectedId),
+      )
+      const browserThread = browserThreads[browserSelected]
+      const previewThreadId =
+        model.threadPreview._tag === "Ready"
+          ? model.threadPreview.value.threadId
+          : model.threadPreview._tag === "Loading"
+            ? model.threadPreview.previous?.threadId
+            : undefined
       return {
         ...replacedThreads,
         threadSwitcher: {
           ...replacedThreads.threadSwitcher,
-          selected: Math.min(
-            replacedThreads.threadSwitcher.selected,
-            Math.max(0, filteredThreads(replacedThreads).length - 1),
-          ),
+          selected: Math.min(browserSelected, Math.max(0, browserThreads.length - 1)),
+          ...(browserThread?.id === previewThreadId ? {} : { previewScroll: 0 }),
         },
+        ...(model.threadSwitcher.open && browserThread?.id !== previewThreadId ? { threadPreview: idle } : {}),
       }
     }
     case "ThreadActivated":
@@ -1548,9 +1560,11 @@ export const update: {
               previewScroll: 0,
             },
           }
-          return model.threadSwitcher.kind === "mention"
-            ? erase(next, lastCharacterLength(model.threadSwitcher.query))
-            : next
+          const restored =
+            model.threadSwitcher.kind === "mention"
+              ? erase(next, lastCharacterLength(model.threadSwitcher.query))
+              : next
+          return filteredThreads(restored).length === 0 ? { ...restored, threadPreview: idle } : restored
         }
         const selected =
           key.name === "up"
@@ -1576,7 +1590,8 @@ export const update: {
             previewScroll: 0,
           },
         }
-        return model.threadSwitcher.kind === "mention" ? insert(next, key.sequence) : next
+        const filtered = model.threadSwitcher.kind === "mention" ? insert(next, key.sequence) : next
+        return filteredThreads(filtered).length === 0 ? { ...filtered, threadPreview: idle } : filtered
       }
       if (key.ctrl && key.name === "o") {
         const open = !model.palette.open
