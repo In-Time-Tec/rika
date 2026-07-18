@@ -33,6 +33,7 @@ type Action = {
 
 interface Options {
   readonly actions: ReadonlyArray<Action>
+  readonly files?: ReadonlyArray<{ readonly path: string; readonly bytes: Uint8Array; readonly executable?: boolean }>
   readonly script?: readonly [ModelTurn, ...ReadonlyArray<ModelTurn>]
   readonly response?: string
   readonly globalSettings?: unknown
@@ -112,6 +113,17 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   yield* Effect.forEach(Object.entries(options.workspace ?? {}), ([path, contents]) =>
     fs.writeFileString(`${workspace}/${path}`, contents),
   )
+  yield* Effect.forEach(
+    options.files ?? [],
+    (file) =>
+      fs
+        .makeDirectory(`${workspace}/${file.path.split("/").slice(0, -1).join("/")}`, { recursive: true })
+        .pipe(
+          Effect.andThen(fs.writeFile(`${workspace}/${file.path}`, file.bytes)),
+          Effect.andThen(file.executable === true ? fs.chmod(`${workspace}/${file.path}`, 0o700) : Effect.void),
+        ),
+    { discard: true },
+  )
   const testDirectory = fileURLToPath(new URL(".", import.meta.url))
   const appDirectory = testDirectory.replace(/\/test\/$/, "")
   const helper = `${testDirectory}/fixtures/interactive-pty.py`
@@ -126,7 +138,7 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   const residentGrace = options.actions.some((action) => action.restartArguments !== undefined) ? "5000" : "100"
   const environment = yield* Schema.encodeUnknownEffect(UnknownJson)({
     HOME: home,
-    PATH: path,
+    PATH: `${workspace}/bin:${path}`,
     TERM: "xterm-256color",
     RIKA_TEST_TERMINAL_COLUMNS: options.terminal?.columns,
     RIKA_TEST_TERMINAL_ROWS: options.terminal?.rows,
@@ -174,7 +186,12 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       "scene baseline",
     ])
   }
-  const encodedActions = yield* Schema.encodeUnknownEffect(PtyActions)(options.actions)
+  const encodedActions = yield* Schema.encodeUnknownEffect(PtyActions)(
+    options.actions.map((action) => ({
+      ...action,
+      ...(action.write === undefined ? {} : { write: action.write.replaceAll("{workspace}", workspace) }),
+    })),
+  )
   const handle = yield* spawner.spawn(
     ChildProcess.make(
       "python3",
@@ -280,7 +297,9 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
     execution_route_json,
     executionRoute: JSON.parse(execution_route_json) as unknown,
   }))
-  return { ...completed, persistedTurns, turns }
+  const pastedDirectory = `${workspace}/.rika/pasted`
+  const pastedFiles = (yield* fs.readDirectory(pastedDirectory).pipe(Effect.orElseSucceed(() => []))).toSorted()
+  return { ...completed, persistedTurns, turns, pastedFiles }
 })
 
 const run = (options: Options) =>

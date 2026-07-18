@@ -229,6 +229,7 @@ export const defaultOpenArguments: {
 } = Function.dual((args) => args.length >= 1, defaultOpenArgumentsImpl)
 
 export class PromptAttachmentError extends Schema.TaggedErrorClass<PromptAttachmentError>()("PromptAttachmentError", {
+  index: Schema.Int,
   path: Schema.String,
   message: Schema.String,
 }) {}
@@ -255,11 +256,12 @@ class OperationProductError extends Schema.TaggedErrorClass<OperationProductErro
 const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
   Effect.forEach(
     parts,
-    (part): Effect.Effect<Turn.PromptPart, PromptAttachmentError, FileSystem.FileSystem> => {
+    (part, index): Effect.Effect<Turn.PromptPart, PromptAttachmentError, FileSystem.FileSystem> => {
       if (part.type === "text") return Effect.succeed(part)
       const path = part.path.startsWith("/") ? part.path : `${workspace}/${part.path}`
       const failure = (cause: unknown) =>
         PromptAttachmentError.make({
+          index,
           path: part.path,
           message: `Image attachment could not be read: ${String(cause)}`,
         })
@@ -271,6 +273,7 @@ const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, 
           info.type !== "File" || bytes.byteLength === 0
             ? Effect.fail(
                 PromptAttachmentError.make({
+                  index,
                   path: part.path,
                   message: `Image attachment is missing or empty: ${part.path}`,
                 }),
@@ -280,7 +283,11 @@ const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, 
         Effect.flatMap(({ mediaType, bytes }) =>
           !mediaType.startsWith("image/")
             ? Effect.fail(
-                PromptAttachmentError.make({ path: part.path, message: `Unsupported image attachment: ${part.path}` }),
+                PromptAttachmentError.make({
+                  index,
+                  path: part.path,
+                  message: `Unsupported image attachment: ${part.path}`,
+                }),
               )
             : Effect.succeed({
                 type: "image" as const,
@@ -2142,7 +2149,6 @@ if (import.meta.main) {
           tuning?: Session.ModelTuning,
         ) => {
           const classified = ViewState.classifyPrompt(prompt)
-          const draft = { input: model.input, cursor: model.cursor, pastedText: model.pastedText }
           const effect =
             classified._tag === "Shell"
               ? session.shell(classified.command, classified.incognito)
@@ -2150,10 +2156,30 @@ if (import.meta.main) {
                   Effect.flatMap((materialized) => session.submit(classified.prompt, mode, materialized, tuning)),
                   Effect.catchTag("PromptAttachmentError", (failure) =>
                     Effect.sync(() => {
-                      model = ViewState.update(
-                        { ...model, ...draft, busy: false, activity: undefined },
-                        { _tag: "ExecutionFailed", message: failure.message },
-                      )
+                      let restored: ViewState.Model = {
+                        ...model,
+                        input: "",
+                        cursor: 0,
+                        pastedText: [],
+                        busy: false,
+                        activity: undefined,
+                      }
+                      for (const [index, part] of parts.entries()) {
+                        if (part.type === "image") {
+                          if (index !== failure.index)
+                            restored = ViewState.update(restored, { _tag: "ImageInserted", path: part.path })
+                        } else {
+                          restored = {
+                            ...restored,
+                            input:
+                              restored.input.slice(0, restored.cursor) +
+                              part.text +
+                              restored.input.slice(restored.cursor),
+                            cursor: restored.cursor + part.text.length,
+                          }
+                        }
+                      }
+                      model = ViewState.update(restored, { _tag: "ExecutionFailed", message: failure.message })
                       renderer?.surface.update(model)
                     }),
                   ),
