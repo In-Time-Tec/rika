@@ -216,7 +216,7 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       ? { RIKA_TEST_MODEL_RESPONSE: options.response ?? "completed" }
       : { RIKA_TEST_MODEL_SCRIPT: yield* Schema.encodeUnknownEffect(UnknownJson)(options.script) }
   const residentGrace = options.actions.some((action) => action.restartArguments !== undefined) ? "5000" : "100"
-  const environment = yield* Schema.encodeUnknownEffect(UnknownJson)({
+  const processEnvironment = {
     HOME: home,
     PATH: `${workspace}/bin:${options.executable === undefined ? "" : `${bin}:`}${path}`,
     TERM: "xterm-256color",
@@ -224,7 +224,6 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
     RIKA_TEST_TERMINAL_ROWS: options.terminal?.rows,
     RIKA_DATABASE: `${state}/rika.db`,
     RIKA_RELAY_DATABASE: `${state}/relay.db`,
-    RIKA_INTERNAL_RESIDENT_GRACE: residentGrace,
     RIKA_INTERNAL_RESIDENT_STARTUP_HOLD: "0",
     ...(options.editorContent === undefined ? {} : { EDITOR: editor, RIKA_TEST_EDITOR_CONTENT: options.editorContent }),
     ...(options.mediaAnalyzer === undefined
@@ -235,6 +234,41 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
     ...(options.executable === undefined ? {} : { RIKA_SCENE_OPEN_LOG: openLog }),
     ...options.environment,
     ...modelEnvironment,
+  }
+  const residentEnvironment = Object.fromEntries(
+    Object.entries(processEnvironment).flatMap(([name, value]) =>
+      value === undefined ? [] : [[name, String(value)] as const],
+    ),
+  )
+  const resident = yield* spawner.spawn(
+    ChildProcess.make(process.execPath, [`${appDirectory}/src/main.ts`], {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      env: {
+        ...residentEnvironment,
+        RIKA_INTERNAL_RESIDENT_HOST: "1",
+        RIKA_INTERNAL_RESIDENT_PROFILE: "default",
+        RIKA_INTERNAL_RESIDENT_DATA_ROOT: state,
+        RIKA_INTERNAL_RESIDENT_GRACE: "60000",
+      },
+    }),
+  )
+  yield* waitUntil(
+    fs.readDirectory(`${state}/diagnostics`).pipe(
+      Effect.orElseSucceed(() => []),
+      Effect.flatMap((names) =>
+        Effect.forEach(
+          names.filter((name) => name.startsWith("resident-") && name.endsWith(".open.jsonl")),
+          (name) => fs.readFileString(`${state}/diagnostics/${name}`),
+        ),
+      ),
+      Effect.map((logs) => logs.some((log) => log.includes('"message":"resident.listener.ready"'))),
+    ),
+  )
+  const environment = yield* Schema.encodeUnknownEffect(UnknownJson)({
+    ...processEnvironment,
+    RIKA_INTERNAL_RESIDENT_GRACE: residentGrace,
   })
   if (options.git === true) {
     const runGit = (args: ReadonlyArray<string>) =>
@@ -305,6 +339,8 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
           .pipe(Effect.ignore, Effect.andThen(Effect.die("PTY helper did not exit"))),
     }),
   )
+  yield* resident.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore)
+  yield* resident.exitCode.pipe(Effect.timeout("2 seconds"), Effect.ignore)
   if (Number(helperExitCode) !== 0) return yield* Effect.die(stderr)
   const result = yield* Schema.decodeUnknownEffect(PtyResult)(stdout.trim())
   const terminalOutput = stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8"))

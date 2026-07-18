@@ -261,7 +261,7 @@ it.effect("memory submissions queue while active and promote one in FIFO order",
     expect((yield* repository.readQueue(threadId)).turns.map((turn) => turn.id)).toEqual([third.id, second.id])
     expect(yield* repository.claimNextQueued(threadId, 3)).toBeUndefined()
     yield* repository.setStatus(first.id, "completed", undefined, 3)
-    expect((yield* repository.claimNextQueued(threadId, 4))?.id).toBe(third.id)
+    expect((yield* repository.claimNextQueued(threadId, 4))?.turn.id).toBe(third.id)
     expect(yield* repository.claimNextQueued(threadId, 4)).toBeUndefined()
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
@@ -273,6 +273,61 @@ it.effect("memory claim is empty when no turn is queued", () =>
     expect(yield* repository.findActive(threadId)).toBeUndefined()
     expect((yield* repository.readQueue(threadId)).turns).toEqual([])
     expect(yield* repository.claimNextQueued(threadId, 2)).toBeUndefined()
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
+)
+
+it.effect("memory claims stay queued and edit or dequeue invalidate preparation", () =>
+  Effect.gen(function* () {
+    const repository = yield* TurnRepository.Service
+    const threadId = Thread.ThreadId.make("claim-races")
+    const queued = yield* repository.copy(
+      {
+        id: Turn.TurnId.make("claimed"),
+        threadId,
+        prompt: "before",
+        executionRoute: Turn.testExecutionRoute(),
+        status: "queued",
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      1,
+    )
+    const before = yield* repository.readQueue(threadId)
+    const first = yield* repository.claimNextQueued(threadId, 2)
+    if (first === undefined) return yield* Effect.die("Missing claim")
+    expect(first.turn.status).toBe("queued")
+    expect(yield* repository.readQueue(threadId)).toEqual(before)
+    expect(yield* repository.claimNextQueued(threadId, 3)).toBeUndefined()
+
+    yield* repository.editQueued(queued.id, "after", 4)
+    expect(yield* repository.finishQueuedClaim(first, "running", undefined, undefined, 5)).toEqual({
+      _tag: "Unavailable",
+    })
+    const second = yield* repository.claimNextQueued(threadId, 6)
+    if (second === undefined) return yield* Effect.die("Missing replacement claim")
+    expect(second.token).not.toBe(first.token)
+    yield* repository.releaseQueuedClaim(second)
+    const released = yield* repository.claimNextQueued(threadId, 6)
+    if (released === undefined) return yield* Effect.die("Missing released claim")
+    expect(released.token).not.toBe(second.token)
+    const finished = yield* repository.finishQueuedClaim(released, "running", "cursor", undefined, 7)
+    expect(finished).toMatchObject({
+      _tag: "Transitioned",
+      turn: { status: "running", prompt: "after", lastCursor: "cursor" },
+      queue: { queuedCount: 0, change: { _tag: "Removed", turnId: queued.id } },
+    })
+    yield* repository.setStatus(queued.id, "completed", "cursor", 8)
+
+    const removed = yield* repository.copy(
+      { ...queued, id: Turn.TurnId.make("removed"), prompt: "removed", createdAt: 9, updatedAt: 9 },
+      1,
+    )
+    const third = yield* repository.claimNextQueued(threadId, 10)
+    if (third === undefined) return yield* Effect.die("Missing dequeue claim")
+    yield* repository.dequeue(removed.id)
+    expect(yield* repository.finishQueuedClaim(third, "failed", undefined, undefined, 11)).toEqual({
+      _tag: "Unavailable",
+    })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -395,8 +450,8 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
     })
     const requeued = yield* repository.requeueAccepted(accepted.id, 1, 4)
     expect(requeued).toMatchObject({ status: "queued", queue: { revision: 1, queuedCount: 1 } })
-    expect((yield* repository.claimNextQueued(acceptedThread, 5))?.id).toBe(accepted.id)
-    expect(yield* repository.readQueue(acceptedThread)).toMatchObject({ revision: 2, queuedCount: 0 })
+    expect((yield* repository.claimNextQueued(acceptedThread, 5))?.turn.id).toBe(accepted.id)
+    expect(yield* repository.readQueue(acceptedThread)).toMatchObject({ revision: 1, queuedCount: 1 })
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -447,7 +502,7 @@ it.effect("memory rejects concurrent submissions beyond queue capacity without c
     expect(replacement.queue).toMatchObject({ revision: 5, queuedCount: 3 })
     expect(yield* repository.claimNextQueued(threadId, 21)).toBeUndefined()
     yield* repository.setStatus(active.id, "completed", undefined, 22)
-    expect((yield* repository.claimNextQueued(threadId, 23))?.id).not.toBe(replacement.id)
+    expect((yield* repository.claimNextQueued(threadId, 23))?.turn.id).not.toBe(replacement.id)
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -542,7 +597,7 @@ it.effect("memory editQueued replaces content and clears stale prompt parts", ()
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
-it.effect("memory setStatus forbids moving into queued and maintains the count when moving out", () =>
+it.effect("memory setStatus forbids transitions into or out of queued", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
     const threadId = Thread.ThreadId.make("thread-guard")
@@ -551,11 +606,10 @@ it.effect("memory setStatus forbids moving into queued and maintains the count w
     expect((yield* Effect.result(repository.setStatus(active.id, "queued", undefined, 3)))._tag).toBe("Failure")
     const before = yield* repository.readQueue(threadId)
     expect(before.queuedCount).toBe(1)
-    yield* repository.setStatus(queued.id, "completed", undefined, 4)
+    expect((yield* Effect.result(repository.setStatus(queued.id, "completed", undefined, 4)))._tag).toBe("Failure")
     const after = yield* repository.readQueue(threadId)
-    expect(after.queuedCount).toBe(0)
-    expect(after.revision).toBe(before.revision + 1)
-    expect((yield* repository.get(queued.id))?.status).toBe("completed")
+    expect(after).toEqual(before)
+    expect((yield* repository.get(queued.id))?.status).toBe("queued")
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
@@ -701,19 +755,15 @@ it.effect("sql status updates bind cursor and null cursor", () =>
   ),
 )
 
-it.effect("sql setStatus decrements the queued count when a queued turn leaves the queue", () =>
+it.effect("sql setStatus refuses to move a queued turn out of the queue", () =>
   sqlTest((sql) =>
     Effect.gen(function* () {
       sql.rows(row({ status: "queued" }))
-      sql.rows(row({ status: "completed", updated_at: 5 }))
-      sql.rows(queueRow({ revision: 3, queued_count: 0 }))
       const repository = yield* TurnRepository.Service
-      yield* repository.setStatus(Turn.TurnId.make("turn-a"), "completed", undefined, 5)
-      expect(sql.statements.map((statement) => statement.sql)).toEqual([
-        "SELECT * FROM rika_turns WHERE id = ?",
-        "UPDATE rika_turns SET status = ?, last_cursor = ?, updated_at = ? WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled') RETURNING *",
-        "UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0) WHERE thread_id = ?",
-      ])
+      expect(
+        (yield* Effect.result(repository.setStatus(Turn.TurnId.make("turn-a"), "completed", undefined, 5)))._tag,
+      ).toBe("Failure")
+      expect(sql.statements.map((statement) => statement.sql)).toEqual(["SELECT * FROM rika_turns WHERE id = ?"])
     }),
   ),
 )
@@ -825,8 +875,7 @@ it.effect("sql finds active turns and lists queued turns", () =>
 it.effect("sql claims queued turns and reports empty, malformed, and failed queries", () =>
   sqlTest((sql) =>
     Effect.gen(function* () {
-      sql.rows(row({ status: "accepted", updated_at: 2 }))
-      sql.rows(queueRow({ queued_count: 0 }))
+      sql.rows({ ...row({ status: "queued" }), queue_claim_token: "TOKEN" })
       sql.rows()
       sql.rows(row({ status: "invalid" }))
       sql.error("claim unavailable")
@@ -835,7 +884,7 @@ it.effect("sql claims queued turns and reports empty, malformed, and failed quer
       sql.error("queue unavailable")
       const repository = yield* TurnRepository.Service
       const threadId = Thread.ThreadId.make("thread-a")
-      expect((yield* repository.claimNextQueued(threadId, 2))?.status).toBe("accepted")
+      expect((yield* repository.claimNextQueued(threadId, 2))?.turn.status).toBe("queued")
       expect(yield* repository.claimNextQueued(threadId, 3)).toBeUndefined()
       const malformedClaim = yield* Effect.result(repository.claimNextQueued(threadId, 4))
       const failedClaim = yield* Effect.result(repository.claimNextQueued(threadId, 5))
@@ -847,7 +896,7 @@ it.effect("sql claims queued turns and reports empty, malformed, and failed quer
       expect(malformedActive._tag).toBe("Failure")
       expect(failedActive._tag).toBe("Failure")
       expect(failedQueue._tag).toBe("Failure")
-      expect(sql.statements[0]?.parameters).toEqual([2, "thread-a", "thread-a"])
+      expect(sql.statements[0]?.parameters).toEqual(["thread-a", "thread-a", "thread-a"])
     }),
   ),
 )
@@ -873,7 +922,7 @@ it.effect("sql edits and dequeues only queued turns", () =>
       expect((yield* Effect.result(repository.dequeue(Turn.TurnId.make("active"))))._tag).toBe("Failure")
       expect(sql.statements).toEqual([
         {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ? WHERE id = ? AND status = 'queued' RETURNING *",
+          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND status = 'queued' RETURNING *",
           parameters: ["after", 3, "turn-a"],
         },
         {
@@ -881,7 +930,7 @@ it.effect("sql edits and dequeues only queued turns", () =>
           parameters: ["thread-a"],
         },
         {
-          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ? WHERE id = ? AND status = 'queued' RETURNING *",
+          sql: "UPDATE rika_turns SET prompt = ?, prompt_parts_json = NULL, updated_at = ?, queue_claim_token = NULL WHERE id = ? AND status = 'queued' RETURNING *",
           parameters: ["invalid", 4, "active"],
         },
         { sql: "DELETE FROM rika_turns WHERE id = ? AND status = 'queued' RETURNING *", parameters: ["turn-a"] },

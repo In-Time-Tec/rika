@@ -899,7 +899,7 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
             lastCursor: "terminal-cursor",
             updatedAt: 7,
           })
-        expect((yield* turns.claimNextQueued(id, 8))?.id).toBe(second.id)
+        expect((yield* turns.claimNextQueued(id, 8))?.turn.id).toBe(second.id)
         expect((yield* turns.list(id)).map((turn) => turn.id)).toEqual([active.id, second.id])
       }).pipe(provideLayer(layer))
     }),
@@ -998,7 +998,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
           status: "queued",
           queue: { revision: 1, queuedCount: 1 },
         })
-        expect((yield* turns.claimNextQueued(requeueThread, 4))?.id).toBe(accepted.id)
+        expect((yield* turns.claimNextQueued(requeueThread, 4))?.turn.id).toBe(accepted.id)
 
         const copied = yield* turns.copy(
           {
@@ -1083,8 +1083,20 @@ test("concurrent queue submissions produce contiguous revisions and one coalesce
         expect(wake).toEqual({ threadId: id, generation: 1, queueRevision: 4 })
         expect(yield* turns.requestQueueWake(id)).toEqual(wake)
         yield* turns.setStatus(active.id, "completed", undefined, 200)
-        const claimed = yield* turns.claimNextQueued(id, 201)
-        expect(claimed?.queue).toMatchObject({ revision: 5, queuedCount: 3 })
+        const claims = yield* Effect.forEach(Array.from({ length: 20 }), () => turns.claimNextQueued(id, 201), {
+          concurrency: "unbounded",
+        })
+        expect(claims.filter((claim) => claim !== undefined)).toHaveLength(1)
+        expect(yield* turns.readQueue(id)).toMatchObject({ revision: 4, queuedCount: 4 })
+        yield* turns.resetQueueClaims
+        const claimed = yield* turns.claimNextQueued(id, 202)
+        if (claimed === undefined) return yield* Effect.die("Missing claim after reset")
+        const transitioned = yield* turns.finishQueuedClaim(claimed, "running", "cursor", undefined, 203)
+        expect(transitioned).toMatchObject({
+          _tag: "Transitioned",
+          turn: { status: "running", lastCursor: "cursor" },
+          queue: { revision: 5, queuedCount: 3 },
+        })
         const sql = yield* SqlClient
         const plan = yield* sql`EXPLAIN QUERY PLAN SELECT * FROM rika_turns
           WHERE thread_id = ${id} AND status = 'queued'

@@ -891,15 +891,18 @@ describe("InteractiveSession controls", () => {
         expect((yield* turns.list(Thread.ThreadId.make("shell-thread"))).length).toBe(beforeIncognito)
         expect(yield* Ref.get(commands)).toEqual(["-lc printf persisted", "-lc printf secret"])
 
-        yield* createTurn(turns, {
-          id: Turn.TurnId.make("active-shell-blocker"),
-          threadId: Thread.ThreadId.make("shell-thread"),
-          prompt: "active",
-          now: 2,
-        })
+        yield* turns.copy(
+          {
+            ...active(Thread.ThreadId.make("shell-thread"), "active-shell-blocker"),
+            prompt: "active",
+            createdAt: 2,
+            updatedAt: 2,
+          },
+          128,
+        )
         const queuedStart = allEvents.length
         yield* session.shell("printf queued", false)
-        yield* Effect.yieldNow
+        while (!allEvents.slice(queuedStart).some((event) => event._tag === "QueueUpdated")) yield* Effect.yieldNow
         const queued = allEvents.slice(queuedStart)
         expect(queued.some((event) => event._tag === "ShellPermissionRequested")).toBe(false)
         expect(queued.findLast((event) => event._tag === "QueueUpdated")).toMatchObject({
@@ -1012,13 +1015,18 @@ describe("InteractiveSession controls", () => {
         prompt: "queued prompt",
         now: 2,
       })
-      const shell = yield* createTurn(turns, {
-        id: Turn.TurnId.make("recorded-shell"),
-        threadId: older.id,
-        prompt: "$ printf recorded\n\noutput:recorded",
-        now: 3,
-      })
-      yield* turns.setStatus(shell.id, "completed", undefined, 4)
+      const shell = yield* turns.copy(
+        {
+          id: Turn.TurnId.make("recorded-shell"),
+          threadId: older.id,
+          prompt: "$ printf recorded\n\noutput:recorded",
+          executionRoute: executionRoute(),
+          status: "completed",
+          createdAt: 3,
+          updatedAt: 4,
+        },
+        128,
+      )
       yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 5)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)

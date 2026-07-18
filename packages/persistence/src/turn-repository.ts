@@ -64,7 +64,14 @@ export interface QueueSnapshot {
 
 export type Submission = Turn & { readonly queue?: QueueItemChange }
 
-export type QueueClaim = Turn & { readonly queue: QueueItemChange }
+export interface QueueClaim {
+  readonly turn: Turn
+  readonly token: string
+}
+
+export type QueueClaimFinish =
+  | { readonly _tag: "Transitioned"; readonly turn: Turn; readonly queue: QueueItemChange }
+  | { readonly _tag: "Unavailable" }
 
 export interface QueuedTurnTake {
   readonly turn: Turn
@@ -90,6 +97,15 @@ export interface Interface {
   readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
   readonly listNonterminal: Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
   readonly claimNextQueued: (threadId: ThreadId, now: number) => Effect.Effect<QueueClaim | undefined, RepositoryError>
+  readonly finishQueuedClaim: (
+    claim: QueueClaim,
+    status: "running" | "failed",
+    lastCursor: string | undefined,
+    extensionPin: ExecutionExtensionPin | undefined,
+    now: number,
+  ) => Effect.Effect<QueueClaimFinish, RepositoryError>
+  readonly releaseQueuedClaim: (claim: QueueClaim) => Effect.Effect<void, RepositoryError>
+  readonly resetQueueClaims: Effect.Effect<void, RepositoryError>
   readonly editQueued: (
     id: TurnId,
     prompt: string,
@@ -171,6 +187,8 @@ interface MemoryQueueState {
 interface MemoryState {
   readonly turns: ReadonlyMap<TurnId, Turn>
   readonly queues: ReadonlyMap<ThreadId, MemoryQueueState>
+  readonly claims: ReadonlyMap<TurnId, string>
+  readonly nextClaimToken: number
 }
 
 type MemorySubmissionResult =
@@ -225,6 +243,9 @@ const decode = (row: unknown) =>
     }
   }).pipe(Effect.mapError(repositoryError))
 
+const encodeExtensionPin = (pin: ExecutionExtensionPin) =>
+  Schema.encodeEffect(ExtensionPinJson)(pin).pipe(Effect.mapError(repositoryError))
+
 export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
   Effect.gen(function* () {
     const initialTurns = new Map(initial.map((turn) => [turn.id, clone(turn)]))
@@ -238,7 +259,12 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         revision: current.revision + 1,
       })
     }
-    const state = yield* Ref.make<MemoryState>({ turns: initialTurns, queues: initialQueues })
+    const state = yield* Ref.make<MemoryState>({
+      turns: initialTurns,
+      queues: initialQueues,
+      claims: new Map(),
+      nextClaimToken: 1,
+    })
     const get = Effect.fn("TurnRepository.get")(function* (id: TurnId) {
       const turn = (yield* Ref.get(state)).turns.get(id)
       return turn === undefined ? undefined : clone(turn)
@@ -384,35 +410,77 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
-      claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, now) {
+      claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
         return yield* Ref.modify(state, (current) => {
           const hasActive = [...current.turns.values()].some(
             (turn) => turn.threadId === threadId && ["accepted", "running", "waiting"].includes(turn.status),
           )
           const queued = [...current.turns.values()]
-            .filter((turn) => turn.threadId === threadId && turn.status === "queued")
+            .filter((turn) => turn.threadId === threadId && turn.status === "queued" && !current.claims.has(turn.id))
             .toSorted((left, right) => left.createdAt - right.createdAt)[0]
-          if (hasActive || queued === undefined) return [undefined, current]
-          const claimed: Turn = { ...queued, status: "accepted", updatedAt: now }
-          const previousQueue = queueState(current, threadId)
-          const nextQueue = {
-            ...previousQueue,
-            revision: previousQueue.revision + 1,
-            queuedCount: Math.max(0, previousQueue.queuedCount - 1),
-          }
-          const queue: QueueItemChange = {
-            threadId,
-            revision: nextQueue.revision,
-            queuedCount: nextQueue.queuedCount,
-            becameNonempty: false,
-            change: { _tag: "Removed", turnId: claimed.id },
-          }
+          const hasClaim = [...current.claims.keys()].some((id) => current.turns.get(id)?.threadId === threadId)
+          if (hasActive || hasClaim || queued === undefined) return [undefined, current]
+          const token = String(current.nextClaimToken)
           return [
-            { ...clone(claimed), queue },
-            withQueueState({ ...current, turns: new Map(current.turns).set(claimed.id, claimed) }, threadId, nextQueue),
+            { turn: clone(queued), token },
+            {
+              ...current,
+              claims: new Map(current.claims).set(queued.id, token),
+              nextClaimToken: current.nextClaimToken + 1,
+            },
           ]
         })
       }),
+      finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(
+        function* (claim, status, lastCursor, extensionPin, now) {
+          return yield* Ref.modify(state, (current): readonly [QueueClaimFinish, MemoryState] => {
+            const existing = current.turns.get(claim.turn.id)
+            if (existing?.status !== "queued" || current.claims.get(claim.turn.id) !== claim.token)
+              return [{ _tag: "Unavailable" }, current]
+            const { lastCursor: previousCursor, ...withoutCursor } = existing
+            void previousCursor
+            const nextTurn: Turn = {
+              ...withoutCursor,
+              status,
+              ...(lastCursor === undefined ? {} : { lastCursor }),
+              ...(extensionPin === undefined ? {} : { extensionPin: structuredClone(extensionPin) }),
+              updatedAt: now,
+            }
+            const previousQueue = queueState(current, existing.threadId)
+            const nextQueue = {
+              ...previousQueue,
+              revision: previousQueue.revision + 1,
+              queuedCount: Math.max(0, previousQueue.queuedCount - 1),
+            }
+            const queue: QueueItemChange = {
+              threadId: existing.threadId,
+              revision: nextQueue.revision,
+              queuedCount: nextQueue.queuedCount,
+              becameNonempty: false,
+              change: { _tag: "Removed", turnId: existing.id },
+            }
+            const claims = new Map(current.claims)
+            claims.delete(existing.id)
+            return [
+              { _tag: "Transitioned", turn: clone(nextTurn), queue },
+              withQueueState(
+                { ...current, turns: new Map(current.turns).set(existing.id, nextTurn), claims },
+                existing.threadId,
+                nextQueue,
+              ),
+            ]
+          })
+        },
+      ),
+      releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim) {
+        yield* Ref.update(state, (current) => {
+          if (current.claims.get(claim.turn.id) !== claim.token) return current
+          const claims = new Map(current.claims)
+          claims.delete(claim.turn.id)
+          return { ...current, claims }
+        })
+      }),
+      resetQueueClaims: Ref.update(state, (current) => ({ ...current, claims: new Map() })),
       editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now) {
         const result = yield* Ref.modify(state, (current) => {
           const turn = current.turns.get(id)
@@ -420,6 +488,8 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           const { promptParts: _promptParts, ...withoutParts } = turn
           void _promptParts
           const nextTurn = { ...withoutParts, prompt, updatedAt: now }
+          const claims = new Map(current.claims)
+          claims.delete(id)
           const previousQueue = queueState(current, turn.threadId)
           const nextQueue = { ...previousQueue, revision: previousQueue.revision + 1 }
           const queue: QueueItemChange = {
@@ -431,7 +501,11 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           }
           return [
             { ...clone(nextTurn), queue },
-            withQueueState({ ...current, turns: new Map(current.turns).set(id, nextTurn) }, turn.threadId, nextQueue),
+            withQueueState(
+              { ...current, turns: new Map(current.turns).set(id, nextTurn), claims },
+              turn.threadId,
+              nextQueue,
+            ),
           ]
         })
         if (result === undefined) return yield* RepositoryError.make({ message: `Turn ${id} is not queued` })
@@ -443,6 +517,8 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           if (turn === undefined || turn.status !== "queued") return [undefined, current]
           const turns = new Map(current.turns)
           turns.delete(id)
+          const claims = new Map(current.claims)
+          claims.delete(id)
           const previousQueue = queueState(current, turn.threadId)
           const nextQueue = {
             ...previousQueue,
@@ -456,7 +532,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             becameNonempty: false,
             change: { _tag: "Removed", turnId: id },
           }
-          return [{ turn: clone(turn), queue }, withQueueState({ ...current, turns }, turn.threadId, nextQueue)]
+          return [{ turn: clone(turn), queue }, withQueueState({ ...current, turns, claims }, turn.threadId, nextQueue)]
         })
         if (result === undefined) return yield* queuedTurnUnavailable(id)
         return result
@@ -467,6 +543,8 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           if (turn === undefined || turn.status !== "queued") return [undefined, current]
           const turns = new Map(current.turns)
           turns.delete(id)
+          const claims = new Map(current.claims)
+          claims.delete(id)
           const previousQueue = queueState(current, turn.threadId)
           const nextQueue = {
             ...previousQueue,
@@ -480,7 +558,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             becameNonempty: false,
             change: { _tag: "Removed", turnId: id },
           }
-          return [queue, withQueueState({ ...current, turns }, turn.threadId, nextQueue)]
+          return [queue, withQueueState({ ...current, turns, claims }, turn.threadId, nextQueue)]
         })
         if (result === undefined) return yield* RepositoryError.make({ message: `Turn ${id} is not queued` })
         return result
@@ -581,7 +659,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           ] => {
             const current = currentState.turns.get(id)
             if (current === undefined) return [{ _tag: "Missing" }, currentState]
-            if (status === "queued") return [{ _tag: "Queued" }, currentState]
+            if (status === "queued" || current.status === "queued") return [{ _tag: "Queued" }, currentState]
             if (isTerminalStatus(current.status)) return [{ _tag: "Ok", turn: clone(current) }, currentState]
             const { lastCursor: previousCursor, ...withoutCursor } = current
             void previousCursor
@@ -595,14 +673,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
               ...currentState,
               turns: new Map(currentState.turns).set(id, next),
             }
-            if (current.status !== "queued") return [{ _tag: "Ok", turn: clone(next) }, withTurn]
-            const queue = queueState(currentState, current.threadId)
-            const nextQueue = {
-              ...queue,
-              revision: queue.revision + 1,
-              queuedCount: Math.max(0, queue.queuedCount - 1),
-            }
-            return [{ _tag: "Ok", turn: clone(next) }, withQueueState(withTurn, current.threadId, nextQueue)]
+            return [{ _tag: "Ok", turn: clone(next) }, withTurn]
           },
         )
         if (updated._tag === "Missing") return yield* missing(id)
@@ -795,42 +866,72 @@ export const layer = Layer.effect(
           )
         return yield* Effect.all(rows.map(decode))
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
-      claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, now) {
+      claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              const rows = yield* sql`UPDATE rika_turns SET status = 'accepted', updated_at = ${now}
-                WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND status = 'queued' ORDER BY created_at ASC, rowid ASC LIMIT 1)
+              const rows = yield* sql`UPDATE rika_turns SET queue_claim_token = hex(randomblob(16))
+                WHERE id = (SELECT id FROM rika_turns WHERE thread_id = ${threadId} AND status = 'queued' AND queue_claim_token IS NULL ORDER BY created_at ASC, rowid ASC LIMIT 1)
                 AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND status IN ('accepted', 'running', 'waiting'))
+                AND NOT EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${threadId} AND queue_claim_token IS NOT NULL)
                 RETURNING *`
               if (rows[0] === undefined) return undefined
               const turn = yield* decode(rows[0])
-              const queueRows = yield* sql`UPDATE rika_thread_queue_state
-                SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
-                WHERE thread_id = ${threadId}
-                RETURNING *`
-              if (queueRows[0] === undefined) return yield* repositoryError(`Queue state ${threadId} does not exist`)
-              const state = yield* decodeQueueState(queueRows[0])
-              return {
-                ...turn,
-                queue: {
-                  threadId,
-                  revision: state.revision,
-                  queuedCount: state.queued_count,
-                  becameNonempty: false,
-                  change: { _tag: "Removed" as const, turnId: turn.id },
-                },
-              }
+              return { turn, token: String((rows[0] as { queue_claim_token: unknown }).queue_claim_token) }
             }),
           )
           .pipe(Effect.mapError(repositoryError))
       }),
+      finishQueuedClaim: Effect.fn("TurnRepository.finishQueuedClaim")(
+        function* (claim, status, lastCursor, extensionPin, now) {
+          const encodedPin = extensionPin === undefined ? undefined : yield* encodeExtensionPin(extensionPin)
+          return yield* sql
+            .withTransaction(
+              Effect.gen(function* () {
+                const rows = yield* sql`UPDATE rika_turns
+            SET status = ${status}, last_cursor = ${lastCursor ?? null}, extension_pin_json = COALESCE(extension_pin_json, ${encodedPin ?? null}), updated_at = ${now}, queue_claim_token = NULL
+            WHERE id = ${claim.turn.id} AND status = 'queued' AND queue_claim_token = ${claim.token} RETURNING *`
+                if (rows[0] === undefined) return { _tag: "Unavailable" as const }
+                const turn = yield* decode(rows[0])
+                const queueRows = yield* sql`UPDATE rika_thread_queue_state
+            SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
+            WHERE thread_id = ${turn.threadId} RETURNING *`
+                if (queueRows[0] === undefined)
+                  return yield* repositoryError(`Queue state ${turn.threadId} does not exist`)
+                const state = yield* decodeQueueState(queueRows[0])
+                return {
+                  _tag: "Transitioned" as const,
+                  turn,
+                  queue: {
+                    threadId: turn.threadId,
+                    revision: state.revision,
+                    queuedCount: state.queued_count,
+                    becameNonempty: false,
+                    change: { _tag: "Removed" as const, turnId: turn.id },
+                  },
+                }
+              }),
+            )
+            .pipe(Effect.mapError(repositoryError))
+        },
+      ),
+      releaseQueuedClaim: Effect.fn("TurnRepository.releaseQueuedClaim")(function* (claim) {
+        yield* sql`UPDATE rika_turns SET queue_claim_token = NULL
+          WHERE id = ${claim.turn.id} AND status = 'queued' AND queue_claim_token = ${claim.token}`.pipe(
+          Effect.asVoid,
+          Effect.mapError(repositoryError),
+        )
+      }),
+      resetQueueClaims: sql`UPDATE rika_turns SET queue_claim_token = NULL WHERE queue_claim_token IS NOT NULL`.pipe(
+        Effect.asVoid,
+        Effect.mapError(repositoryError),
+      ),
       editQueued: Effect.fn("TurnRepository.editQueued")(function* (id, prompt, now) {
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
               const rows =
-                yield* sql`UPDATE rika_turns SET prompt = ${prompt}, prompt_parts_json = NULL, updated_at = ${now} WHERE id = ${id} AND status = 'queued' RETURNING *`
+                yield* sql`UPDATE rika_turns SET prompt = ${prompt}, prompt_parts_json = NULL, updated_at = ${now}, queue_claim_token = NULL WHERE id = ${id} AND status = 'queued' RETURNING *`
               if (rows[0] === undefined) return yield* RepositoryError.make({ message: `Turn ${id} is not queued` })
               const turn = yield* decode(rows[0])
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
@@ -1007,16 +1108,16 @@ export const layer = Layer.effect(
               const before = yield* sql`SELECT * FROM rika_turns WHERE id = ${id}`
               if (before[0] === undefined) return yield* missing(id)
               const wasQueued = String((before[0] as { status?: unknown }).status) === "queued"
+              if (wasQueued)
+                return yield* RepositoryError.make({
+                  message: `Turn ${id} cannot transition into or out of 'queued' via setStatus`,
+                })
               const rows =
                 yield* sql`UPDATE rika_turns SET status = ${status}, last_cursor = ${lastCursor ?? null}, updated_at = ${now}
                 WHERE id = ${id} AND status NOT IN ('completed', 'failed', 'cancelled')
                 RETURNING *`
               if (rows[0] === undefined) return yield* decode(before[0])
               const turn = yield* decode(rows[0])
-              if (wasQueued)
-                yield* sql`UPDATE rika_thread_queue_state
-                  SET revision = revision + 1, queued_count = MAX(queued_count - 1, 0)
-                  WHERE thread_id = ${turn.threadId}`
               return turn
             }),
           )

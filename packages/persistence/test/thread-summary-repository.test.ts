@@ -163,10 +163,11 @@ describe("memory thread summaries", () => {
       expect((yield* summaries.list())[0]?.status).toBe("queued")
       const claimed = yield* turns.claimNextQueued(threadId, 5)
       if (claimed === undefined) return yield* Effect.die("queued turn was not claimed")
+      yield* turns.finishQueuedClaim(claimed, "running", undefined, undefined, 5)
       expect((yield* summaries.list())[0]?.status).toBe("running")
-      yield* turns.setStatus(claimed.id, "waiting", undefined, 6)
+      yield* turns.setStatus(claimed.turn.id, "waiting", undefined, 6)
       expect((yield* summaries.list())[0]?.status).toBe("waiting")
-      yield* turns.setStatus(claimed.id, "completed", undefined, 7)
+      yield* turns.setStatus(claimed.turn.id, "completed", undefined, 7)
       expect((yield* summaries.list())[0]?.status).toBe("idle")
     }).pipe(provideLayer(layer)),
   )

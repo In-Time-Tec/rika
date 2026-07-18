@@ -261,6 +261,12 @@ const providerExecutionRoutes = Effect.gen(function* () {
   }
 })
 
+const durableQueueClaims = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN queue_claim_token TEXT`
+  yield* sql`CREATE UNIQUE INDEX rika_turns_queue_claim ON rika_turns (thread_id) WHERE queue_claim_token IS NOT NULL`
+})
+
 const migrationNames = [
   "product_baseline",
   "turns",
@@ -275,6 +281,7 @@ const migrationNames = [
   "semantic_transcript_projection",
   "queue_state_and_current_transcripts",
   "provider_execution_routes",
+  "durable_queue_claims",
 ] as const
 
 const migrations = SqliteMigrator.fromRecord({
@@ -291,6 +298,7 @@ const migrations = SqliteMigrator.fromRecord({
   "11_semantic_transcript_projection": semanticTranscriptProjection,
   "12_queue_state_and_current_transcripts": queueStateAndCurrentTranscripts,
   "13_provider_execution_routes": providerExecutionRoutes,
+  "14_durable_queue_claims": durableQueueClaims,
 })
 
 const migrationTableObjects = ["table:rika_migrations"]
@@ -315,7 +323,8 @@ const semanticTranscriptObjects = [
   "index:rika_transcript_units_page",
   "index:rika_transcript_units_turn",
 ]
-const currentObjects = [...semanticTranscriptObjects, "index:rika_turns_queue", "table:rika_thread_queue_state"]
+const queueObjects = [...semanticTranscriptObjects, "index:rika_turns_queue", "table:rika_thread_queue_state"]
+const currentObjects = [...queueObjects, "index:rika_turns_queue_claim"]
 const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   migrationTableObjects,
   baselineObjects,
@@ -329,7 +338,8 @@ const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   transcriptObjects,
   summaryObjects,
   semanticTranscriptObjects,
-  currentObjects,
+  queueObjects,
+  queueObjects,
   currentObjects,
 ]
 

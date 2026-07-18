@@ -516,6 +516,86 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("releases an interrupted preparation claim without terminalizing the queued turn", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("interrupted-preparation-thread")
+      const queued: Turn.Turn = {
+        id: Turn.TurnId.make("interrupted-preparation-turn"),
+        threadId: thread.id,
+        prompt: "retry after interruption",
+        executionRoute: executionRoute(),
+        status: "queued",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const turns = yield* TurnRepository.makeMemory([queued])
+      const preparationEntered = yield* Deferred.make<void>()
+      const repair = yield* Effect.forkChild(
+        Operation.reconcile(undefined, () =>
+          Deferred.succeed(preparationEntered, undefined).pipe(Effect.andThen(Effect.never)),
+        ).pipe(
+          provideLayer(
+            Layer.mergeAll(
+              reconcileDependencies(unusedExtensions),
+              ThreadRepository.memoryLayer([thread]),
+              Layer.succeed(TurnRepository.Service, turns),
+              Layer.succeed(ExecutionBackend.Service, backend),
+            ),
+          ),
+        ),
+      )
+
+      yield* Deferred.await(preparationEntered)
+      yield* Fiber.interrupt(repair)
+
+      expect(yield* turns.get(queued.id)).toMatchObject({ status: "queued" })
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ revision: 1, queuedCount: 1 })
+      expect((yield* turns.claimNextQueued(thread.id, 2))?.turn.id).toBe(queued.id)
+    }),
+  )
+
+  it.effect("keeps a durably running promoted turn running when its promoter is interrupted", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("interrupted-running-thread")
+      const queued: Turn.Turn = {
+        id: Turn.TurnId.make("interrupted-running-turn"),
+        threadId: thread.id,
+        prompt: "already durable",
+        executionRoute: executionRoute(),
+        status: "queued",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const turns = yield* TurnRepository.makeMemory([queued])
+      const backendEntered = yield* Deferred.make<void>()
+      const blockingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        start: () => Deferred.succeed(backendEntered, undefined).pipe(Effect.andThen(Effect.never)),
+      })
+      const repair = yield* Effect.forkChild(
+        Operation.reconcile(undefined, () =>
+          Effect.succeed({ prompt: queued.prompt, promptParts: undefined, extensionPin: undefined }),
+        ).pipe(
+          provideLayer(
+            Layer.mergeAll(
+              reconcileDependencies(unusedExtensions),
+              ThreadRepository.memoryLayer([thread]),
+              Layer.succeed(TurnRepository.Service, turns),
+              Layer.succeed(ExecutionBackend.Service, blockingBackend),
+            ),
+          ),
+        ),
+      )
+
+      yield* Deferred.await(backendEntered)
+      expect(yield* turns.get(queued.id)).toMatchObject({ status: "running" })
+      yield* Fiber.interrupt(repair)
+
+      expect(yield* turns.get(queued.id)).toMatchObject({ status: "running" })
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ revision: 2, queuedCount: 0, turns: [] })
+    }),
+  )
+
   it.effect("reconciles review route owners through their fan-out without executing the parent prompt", () =>
     Effect.gen(function* () {
       const owner = Turn.TurnId.make("review-owner")
@@ -2117,7 +2197,196 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("does not steer a queued prompt after promotion wins the race", () =>
+  it.effect("reprepares an edited promoted queued turn before starting it", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("edit-preparation-thread")
+      const activeId = Turn.TurnId.make("edit-preparation-active")
+      const queuedId = Turn.TurnId.make("edit-preparation-queued")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: activeId,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: queuedId,
+          threadId: thread.id,
+          prompt: "original prompt",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const events: Array<Operation.InteractiveEvent> = []
+      const preparationEntered = yield* Deferred.make<void>()
+      const releasePreparation = yield* Deferred.make<void>()
+      const preparations = yield* Ref.make(0)
+      const starts = yield* Ref.make<ReadonlyArray<{ readonly prompt: string; readonly status: string | undefined }>>(
+        [],
+      )
+      const preparedBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) =>
+          Effect.succeed(
+            turnId === activeId ? { turnId, status: "running", waits: [], pendingTools: [], children: [] } : undefined,
+          ),
+        cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
+        start: (input) =>
+          Effect.gen(function* () {
+            const persisted = yield* turns.get(Turn.TurnId.make(input.turnId)).pipe(Effect.orDie)
+            yield* Ref.update(starts, (all) => [...all, { prompt: input.prompt, status: persisted?.status }])
+            return yield* backend.start(input)
+          }),
+      })
+      const layer = Operation.productLayer({
+        repositoryLayer: ThreadRepository.memoryLayer([thread]),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, preparedBackend),
+        resolvedContextLayer: ResolvedContext.testLayer({
+          resolve: () =>
+            Effect.gen(function* () {
+              const attempt = yield* Ref.updateAndGet(preparations, (count) => count + 1)
+              if (attempt === 1) {
+                yield* Deferred.succeed(preparationEntered, undefined)
+                yield* Deferred.await(releasePreparation)
+              }
+              return { sources: [], diagnostics: [], digest: "" }
+            }),
+        }),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.die("unused"),
+        makeTurnId: Effect.die("unused"),
+        interactive: holdSession(sessions),
+      })
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, { _tag: "Interactive", prompt: [], ephemeral: false })
+        yield* collectEvents(session, events)
+        yield* session.selectThread(thread.id, 1)
+        yield* Effect.forkChild(session.cancel)
+        yield* Deferred.await(preparationEntered)
+        yield* session.editQueued(queuedId, "edited prompt")
+        yield* Deferred.succeed(releasePreparation, undefined)
+        while ((yield* turns.get(queuedId))?.status !== "completed") yield* Effect.yieldNow
+        yield* settleEvents
+      }).pipe(provideLayer(layer))
+
+      expect(yield* Ref.get(preparations)).toBe(2)
+      expect(yield* Ref.get(starts)).toEqual([{ prompt: "edited prompt", status: "running" }])
+      const queueEvents = events.filter((event) => event._tag === "QueueUpdated")
+      expect(queueEvents.map((event) => [event.revision, event.queuedCount, event.change._tag])).toEqual([
+        [2, 1, "Updated"],
+        [3, 0, "Removed"],
+      ])
+      const started = events.filter((event) => event._tag === "TurnStarted")
+      expect(started).toHaveLength(1)
+      expect(started[0]).toMatchObject({ turn: { id: queuedId, prompt: "edited prompt", status: "running" } })
+    }),
+  )
+
+  it.effect("skips a dequeued promoted head and runs the next queued turn", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("dequeue-preparation-thread")
+      const activeId = Turn.TurnId.make("dequeue-preparation-active")
+      const headId = Turn.TurnId.make("dequeue-preparation-head")
+      const nextId = Turn.TurnId.make("dequeue-preparation-next")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: activeId,
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: headId,
+          threadId: thread.id,
+          prompt: "head",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 2,
+          updatedAt: 2,
+        },
+        {
+          id: nextId,
+          threadId: thread.id,
+          prompt: "next",
+          executionRoute: executionRoute(),
+          status: "queued",
+          createdAt: 3,
+          updatedAt: 3,
+        },
+      ])
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const events: Array<Operation.InteractiveEvent> = []
+      const preparationEntered = yield* Deferred.make<void>()
+      const releasePreparation = yield* Deferred.make<void>()
+      const preparations = yield* Ref.make(0)
+      const starts = yield* Ref.make<ReadonlyArray<string>>([])
+      const preparedBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) =>
+          Effect.succeed(
+            turnId === activeId ? { turnId, status: "running", waits: [], pendingTools: [], children: [] } : undefined,
+          ),
+        cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
+        start: (input) =>
+          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
+      })
+      const layer = Operation.productLayer({
+        repositoryLayer: ThreadRepository.memoryLayer([thread]),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, preparedBackend),
+        resolvedContextLayer: ResolvedContext.testLayer({
+          resolve: () =>
+            Effect.gen(function* () {
+              const attempt = yield* Ref.updateAndGet(preparations, (count) => count + 1)
+              if (attempt === 1) {
+                yield* Deferred.succeed(preparationEntered, undefined)
+                yield* Deferred.await(releasePreparation)
+              }
+              return { sources: [], diagnostics: [], digest: "" }
+            }),
+        }),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.die("unused"),
+        makeTurnId: Effect.die("unused"),
+        interactive: holdSession(sessions),
+      })
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, { _tag: "Interactive", prompt: [], ephemeral: false })
+        yield* collectEvents(session, events)
+        yield* session.selectThread(thread.id, 1)
+        yield* Effect.forkChild(session.cancel)
+        yield* Deferred.await(preparationEntered)
+        yield* session.dequeue(headId)
+        yield* Deferred.succeed(releasePreparation, undefined)
+        while ((yield* turns.get(nextId))?.status !== "completed") yield* Effect.yieldNow
+        yield* settleEvents
+      }).pipe(provideLayer(layer))
+
+      expect(yield* Ref.get(preparations)).toBe(2)
+      expect(yield* Ref.get(starts)).toEqual([nextId])
+      expect(yield* turns.get(headId)).toBeUndefined()
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ revision: 4, queuedCount: 0, turns: [] })
+      const queueEvents = events.filter((event) => event._tag === "QueueUpdated")
+      expect(queueEvents.map((event) => [event.revision, event.queuedCount, event.change._tag])).toEqual([
+        [3, 1, "Removed"],
+        [4, 0, "Removed"],
+      ])
+      expect(events.filter((event) => event._tag === "TurnStarted").map((event) => event.turn.id)).toEqual([nextId])
+      expect(events.some((event) => event._tag === "ExecutionFailed" && event.turnId === headId)).toBe(false)
+    }),
+  )
+
+  it.effect("steers a claimed queued prompt before preparation makes it running", () =>
     Effect.gen(function* () {
       const thread = selectionThread("steer-race-thread")
       const turns = yield* TurnRepository.makeMemory([
@@ -2169,7 +2438,7 @@ describe("Operation", () => {
         const steering = yield* Effect.forkChild(session.steerQueued("steer-race-queued", "fallback"))
         yield* Deferred.await(queuedRead)
         yield* turns.setStatus(Turn.TurnId.make("steer-race-active"), "completed", undefined, 3)
-        expect((yield* turns.claimNextQueued(thread.id, 4))?.id).toBe("steer-race-queued")
+        expect((yield* turns.claimNextQueued(thread.id, 4))?.turn.id).toBe("steer-race-queued")
         yield* Deferred.succeed(releaseQueuedRead, undefined)
         yield* Fiber.join(steering)
       }).pipe(
@@ -2185,8 +2454,8 @@ describe("Operation", () => {
           }),
         ),
       )
-      expect(yield* Ref.get(steers)).toEqual([])
-      expect(yield* turns.get(Turn.TurnId.make("steer-race-queued"))).toMatchObject({ status: "accepted" })
+      expect(yield* Ref.get(steers)).toEqual(["queued prompt"])
+      expect(yield* turns.get(Turn.TurnId.make("steer-race-queued"))).toBeUndefined()
     }),
   )
 
@@ -2389,7 +2658,7 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("settles a promoted turn when a defensive observer collision is detected", () =>
+  it.effect("releases a defensive observer collision without terminalizing the queued turn", () =>
     Effect.gen(function* () {
       const thread = selectionThread("observer-collision-thread")
       const active: Turn.Turn = {
@@ -2455,8 +2724,8 @@ describe("Operation", () => {
           }),
         ),
       )
-      expect(yield* turns.get(queued.id)).toMatchObject({ status: "failed" })
-      expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 0, turns: [] })
+      expect(yield* turns.get(queued.id)).toMatchObject({ status: "queued" })
+      expect(yield* turns.readQueue(thread.id)).toMatchObject({ queuedCount: 1, turns: [{ id: queued.id }] })
     }),
   )
 

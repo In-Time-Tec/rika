@@ -14,10 +14,10 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows).toHaveLength(13)
+          expect(migrationRows).toHaveLength(14)
           expect(migrationRows.at(-1)).toEqual({
-            migration_id: 13,
-            name: "provider_execution_routes",
+            migration_id: 14,
+            name: "durable_queue_claims",
           })
           const objects = yield* sql`SELECT name FROM sqlite_schema
             WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
@@ -25,6 +25,7 @@ it.layer(BunServices.layer)("product database", (test) => {
           const names = objects.map((row) => String((row as { readonly name: unknown }).name))
           expect(names).toContain("rika_thread_queue_state")
           expect(names).toContain("rika_turns_queue")
+          expect(names).toContain("rika_turns_queue_claim")
           expect(names).toContain("rika_transcript_entries")
           const checkpointColumns = yield* sql`PRAGMA table_info(rika_transcript_checkpoints)`
           const columnNames = checkpointColumns.map((row) => String((row as { readonly name: unknown }).name))
@@ -40,6 +41,10 @@ it.layer(BunServices.layer)("product database", (test) => {
             "updated_at",
             "model_phase",
           ])
+          const turnColumns = yield* sql`PRAGMA table_info(rika_turns)`
+          expect(turnColumns.map((row) => String((row as { readonly name: unknown }).name))).toContain(
+            "queue_claim_token",
+          )
           expect(yield* sql`PRAGMA foreign_keys`).toEqual([{ foreign_keys: 1 }])
         }).pipe(Effect.provide(context))
       }),
