@@ -30,6 +30,10 @@ type Action = {
   readonly restartArguments?: ReadonlyArray<string>
   readonly resize?: { readonly width: number; readonly height: number }
   readonly files?: Readonly<Record<string, string | null>>
+  readonly queueCount?: number
+  readonly queuePrompt?: string
+  readonly queueRevision?: number
+  readonly visible?: boolean
 }
 
 type SceneSymlink = {
@@ -88,6 +92,10 @@ const PtyAction = Schema.Struct({
   restartArguments: Schema.optionalKey(Schema.Array(Schema.String)),
   resize: Schema.optionalKey(Schema.Struct({ width: Schema.Int, height: Schema.Int })),
   files: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
+  queueCount: Schema.optionalKey(Schema.Int),
+  queuePrompt: Schema.optionalKey(Schema.String),
+  queueRevision: Schema.optionalKey(Schema.Int),
+  visible: Schema.optionalKey(Schema.Boolean),
 })
 const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
 const UnknownJson = Schema.UnknownFromJsonString
@@ -414,6 +422,28 @@ export const Scene = {
       after,
       write,
       ...(delayMs === undefined ? {} : { delayMs }),
+    }),
+    writeAfterVisible: (after: string, write: string, delayMs?: number): Action => ({
+      after,
+      write,
+      visible: true,
+      ...(delayMs === undefined ? {} : { delayMs }),
+    }),
+    writeWhenQueued: (queueCount: number, write: string, delayMs?: number): Action => ({
+      write,
+      queueCount,
+      ...(delayMs === undefined ? {} : { delayMs }),
+    }),
+    writeWhenQueueRevision: (queuePrompt: string, queueRevision: number, write: string): Action => ({
+      write,
+      queuePrompt,
+      queueRevision,
+    }),
+    writeAfterVisibleWhenQueued: (after: string, queueCount: number, write: string): Action => ({
+      after,
+      write,
+      queueCount,
+      visible: true,
     }),
     checkRunningAfter: (after: string, write: string): Action => ({ after, write, checkRunning: true }),
     restartAfter: (after: string, ...restartArguments: ReadonlyArray<string>): Action => ({

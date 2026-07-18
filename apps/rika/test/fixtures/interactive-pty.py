@@ -3,8 +3,10 @@ import fcntl
 import json
 import os
 import pty
+import re
 import select
 import signal
+import sqlite3
 import struct
 import sys
 import termios
@@ -70,6 +72,26 @@ running_checks = []
 status = None
 timed_out = False
 deadline = time.monotonic() + 30
+terminal_control = re.compile(rb"\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
+
+def queued_count():
+    try:
+        with sqlite3.connect(f"file:{environment['RIKA_DATABASE']}?mode=ro", uri=True, timeout=0) as database:
+            row = database.execute("SELECT COALESCE(SUM(queued_count), 0) FROM rika_thread_queue_state").fetchone()
+            return row[0] if row else 0
+    except (KeyError, sqlite3.Error):
+        return 0
+
+def queue_revision(prompt):
+    try:
+        with sqlite3.connect(f"file:{environment['RIKA_DATABASE']}?mode=ro", uri=True, timeout=0) as database:
+            row = database.execute(
+                "SELECT queue.revision FROM rika_thread_queue_state queue JOIN rika_turns turn ON turn.thread_id = queue.thread_id WHERE turn.status = 'queued' AND turn.prompt = ?",
+                (prompt,),
+            ).fetchone()
+            return row[0] if row else None
+    except (KeyError, sqlite3.Error):
+        return None
 
 while time.monotonic() < deadline:
     ready, _, _ = select.select([master], [], [], 0.025)
@@ -86,7 +108,14 @@ while time.monotonic() < deadline:
     while action_index < len(actions):
         action = actions[action_index]
         after = action.get("after")
-        if after is not None and after.encode() not in output[action_offset:]:
+        action_output = output[action_offset:]
+        if action.get("visible", False):
+            action_output = terminal_control.sub(b"", action_output)
+        if after is not None and after.encode() not in action_output:
+            break
+        if "queueCount" in action and queued_count() != action["queueCount"]:
+            break
+        if "queueRevision" in action and queue_revision(action["queuePrompt"]) != action["queueRevision"]:
             break
         waited, current_status = os.waitpid(pid, os.WNOHANG)
         running = waited == 0

@@ -11,7 +11,7 @@ test(
       ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Show the current workspace.\r"),
-        Scene.action.writeAfter("Workspace checked.", "\u0003", 500),
+        Scene.action.writeAfter("Workspace checked.", "\u0003\u0003", 500),
       ],
     }).then((result) => {
       expect(result.output).toContain("rika-scene-")
