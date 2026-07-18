@@ -116,7 +116,7 @@ describe("ViewState", () => {
         id: "quit",
         category: "rika",
         label: "quit",
-        keybinding: "Ctrl+C Ctrl+C",
+        keybinding: "Ctrl+C",
         action: { _tag: "Quit" },
       },
     ])

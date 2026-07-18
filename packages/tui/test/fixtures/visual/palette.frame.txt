@@ -10,7 +10,7 @@
   │           thread  switch                                         Ctrl+T  │
   │             mode  change mode                                    Ctrl+S  │
   │             rika  toggle fast mode                                       │
-  │             rika  quit                                    Ctrl+C Ctrl+C  │
+  │             rika  quit                                           Ctrl+C  │
   ╰──────────────────────────────────────────────────────────────────────────╯
       •••••••••••••••••••••••••••••
         ••••••••••••••••••••••••••

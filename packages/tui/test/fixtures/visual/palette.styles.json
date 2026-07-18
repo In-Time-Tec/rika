@@ -1884,7 +1884,7 @@
           "width": 6
         },
         {
-          "text": "                                    ",
+          "text": "                                           ",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -1902,10 +1902,10 @@
             }
           },
           "attributes": 0,
-          "width": 36
+          "width": 43
         },
         {
-          "text": "Ctrl+C Ctrl+C",
+          "text": "Ctrl+C",
           "fg": {
             "buffer": {
               "0": 1024,
@@ -1923,7 +1923,7 @@
             }
           },
           "attributes": 1,
-          "width": 13
+          "width": 6
         },
         {
           "text": " ",
