@@ -162,9 +162,10 @@ describe("tool contracts", () => {
     ),
   )
 
-  it.effect("describes web search queries as a homogeneous non-empty array", () =>
+  it.effect("requires a meaningful web search objective and homogeneous non-empty queries", () =>
     Effect.gen(function* () {
       const schema = Tool.getJsonSchema(Runtime.webSearchTool)
+      expect(schema.required).toContain("objective")
       const searchQueries = (schema.properties as Record<string, unknown>).searchQueries
       expect(searchQueries).toEqual({
         type: "array",
@@ -175,6 +176,12 @@ describe("tool contracts", () => {
       expect(yield* Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)(["current docs"])).toEqual([
         "current docs",
       ])
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ParallelSearch.SearchInput)({ objective: "", searchQueries: ["docs"] }),
+      )
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ParallelSearch.SearchInput)({ objective: "   ", searchQueries: ["docs"] }),
+      )
       yield* Effect.flip(Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)([]))
       yield* Effect.flip(
         Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)({ 0: "current docs", __rest__: ["api"] }),

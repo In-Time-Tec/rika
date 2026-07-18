@@ -2,9 +2,10 @@ import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 
 export const SearchQueries = Schema.Array(Schema.String).check(Schema.isMinLength(1))
+export const Objective = Schema.String.check(Schema.isPattern(/\S/))
 
 export const SearchInput = Schema.Struct({
-  objective: Schema.String,
+  objective: Objective,
   searchQueries: SearchQueries,
 })
 export type SearchInput = typeof SearchInput.Type

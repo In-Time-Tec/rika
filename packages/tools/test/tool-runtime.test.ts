@@ -56,7 +56,12 @@ const processHandle = ({ stdout, stderr, exitCode }: ProcessResult) => {
   })
 }
 
-const testEnvironment = (git: "success" | "nonzero" | "missing" | "timeout" | "large" = "success") => {
+const testEnvironment = (
+  git: "success" | "nonzero" | "missing" | "timeout" | "large" = "success",
+  search: ParallelSearch.Interface["search"] = () =>
+    Effect.succeed([{ url: "https://example.com", title: "Example", publishDate: null, excerpts: ["result"] }]),
+  read: ReadWebPage.Interface["read"] = () => Effect.succeed("page"),
+) => {
   const files = new Map([
     ["/workspace/a.txt", "zero\nneedle\nlast"],
     ["/workspace/src/z.ts", "alpha\nalpha2"],
@@ -122,14 +127,7 @@ const testEnvironment = (git: "success" | "nonzero" | "missing" | "timeout" | "l
   const dependencies = Layer.mergeAll(fileSystem, Path.layer, spawner)
   const runtime = Runtime.layer(workspace).pipe(
     Layer.provide(dependencies),
-    Layer.provide(
-      Layer.merge(
-        ParallelSearch.testLayer(() =>
-          Effect.succeed([{ url: "https://example.com", title: "Example", publishDate: null, excerpts: ["result"] }]),
-        ),
-        ReadWebPage.testLayer(() => Effect.succeed("page")),
-      ),
-    ),
+    Layer.provide(Layer.merge(ParallelSearch.testLayer(search), ReadWebPage.testLayer(read))),
     Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
   )
   return { files, commands, runtime }
@@ -326,6 +324,29 @@ describe("Runtime", () => {
         { url: "https://example.com", title: "Example", publishDate: null, excerpts: ["result"] },
       ])
       expect(result.truncated).toBe(false)
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("bounds search serialization and extracted page text at the runtime boundary", () => {
+    const environment = testEnvironment(
+      "success",
+      () =>
+        Effect.succeed([
+          { url: "https://example.com", title: null, publishDate: null, excerpts: ["s".repeat(40_001)] },
+        ]),
+      () => Effect.succeed("p".repeat(40_001)),
+    )
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const search = yield* runtime.run({
+        _tag: "WebSearch",
+        objective: "Find bounded text",
+        searchQueries: ["bounded text"],
+      })
+      const page = yield* runtime.run({ _tag: "ReadWebPage", url: "https://example.com" })
+      expect(search).toMatchObject({ truncated: true })
+      expect(search.text).toHaveLength(40_000)
+      expect(page).toEqual({ text: "p".repeat(40_000), truncated: true })
     }).pipe(provide(environment.runtime))
   })
 

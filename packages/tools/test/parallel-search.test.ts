@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ParallelSearch } from "../src"
 import { provide } from "./test-layer"
 
@@ -18,6 +18,17 @@ const clientLayer = (run: (request: HttpClientRequest.HttpClientRequest) => Http
     HttpClient.HttpClient,
     HttpClient.make((request) => Effect.succeed(run(request))),
   )
+
+const failingClientLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description: "connection refused" }),
+      }),
+    ),
+  ),
+)
 
 describe("ParallelSearch", () => {
   it.effect("posts the documented Parallel request and normalizes results", () => {
@@ -100,5 +111,14 @@ describe("ParallelSearch", () => {
         ),
       ),
     ),
+  )
+
+  it.effect("maps network failures without leaking an untyped transport error", () =>
+    Effect.gen(function* () {
+      const search = yield* ParallelSearch.Service
+      const error = yield* Effect.flip(search.search({ objective: "Current docs", searchQueries: ["current docs"] }))
+      expect(error).toMatchObject({ _tag: "ParallelSearchError" })
+      expect(error.message).toContain("connection refused")
+    }).pipe(provide(ParallelSearch.layer({ apiKey: Redacted.make("secret") }).pipe(Layer.provide(failingClientLayer)))),
   )
 })

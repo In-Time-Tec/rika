@@ -49,7 +49,7 @@ export const ShellCommandStatus = Schema.Struct({
 export const GitStatus = Schema.Struct({ _tag: Schema.tag("GitStatus") })
 export const WebSearch = Schema.Struct({
   _tag: Schema.tag("WebSearch"),
-  objective: Schema.String,
+  objective: ParallelSearch.Objective,
   searchQueries: ParallelSearch.SearchQueries,
 })
 export const ReadWebPage = Schema.Struct({
@@ -170,7 +170,7 @@ export const webSearchTool = tool(
   "web_search",
   "Search the current web with Parallel. Provide a self-contained objective and 2-3 concise keyword queries.",
   {
-    objective: Schema.String,
+    objective: ParallelSearch.Objective,
     searchQueries: ParallelSearch.SearchQueries,
   },
 )

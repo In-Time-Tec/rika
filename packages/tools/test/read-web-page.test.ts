@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted, Schema } from "effect"
-import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ReadWebPage } from "../src"
 import { provide } from "./test-layer"
 
@@ -18,6 +18,17 @@ const clientLayer = (run: (request: HttpClientRequest.HttpClientRequest) => Http
     HttpClient.HttpClient,
     HttpClient.make((request) => Effect.succeed(run(request))),
   )
+
+const failingClientLayer = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make((request) =>
+    Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description: "socket unavailable" }),
+      }),
+    ),
+  ),
+)
 
 const apiResponse = (overrides: Record<string, unknown> = {}) => ({
   extract_id: "extract-1",
@@ -103,6 +114,34 @@ describe("ReadWebPage", () => {
     }),
   )
 
+  it.effect("combines objective selection, full content, and force refetch in one request", () =>
+    Effect.gen(function* () {
+      let body: unknown
+      const content = yield* run(
+        {
+          url: "https://example.com/docs",
+          objective: "Audit documented limits",
+          fullContent: true,
+          forceRefetch: true,
+        },
+        (request) => {
+          if (request.body._tag === "Uint8Array") body = decodeRequestBody(new TextDecoder().decode(request.body.body))
+          return response(request, apiResponse())
+        },
+      )
+      expect(body).toEqual({
+        urls: ["https://example.com/docs"],
+        objective: "Audit documented limits",
+        max_chars_total: 40_000,
+        advanced_settings: {
+          full_content: true,
+          fetch_policy: { max_age_seconds: 600, disable_cache_fallback: true },
+        },
+      })
+      expect(content).toBe("# Complete page")
+    }),
+  )
+
   it.effect("uses the default API base URL", () => {
     let captured = ""
     return Effect.gen(function* () {
@@ -144,6 +183,15 @@ describe("ReadWebPage", () => {
       )
       expect(error._tag).toBe("ReadWebPageHttpError")
     }),
+  )
+
+  it.effect("maps network failures without leaking an untyped transport error", () =>
+    Effect.gen(function* () {
+      const reader = yield* ReadWebPage.Service
+      const error = yield* Effect.flip(reader.read({ url: "https://example.com" }))
+      expect(error).toMatchObject({ _tag: "ReadWebPageHttpError" })
+      expect(error.message).toContain("socket unavailable")
+    }).pipe(provide(ReadWebPage.layer({ apiKey: Redacted.make("secret") }).pipe(Layer.provide(failingClientLayer)))),
   )
 
   it.effect("reports every per-URL extraction error without dropping details", () =>
@@ -193,12 +241,20 @@ describe("ReadWebPage", () => {
     }),
   )
 
-  it.effect.each(["not a url", "ftp://example.com", "https://user:pass@example.com"])(
-    "validates URL %s before extraction",
-    (url) =>
-      Effect.gen(function* () {
-        const error = yield* Effect.flip(run({ url }, (request) => response(request, apiResponse())))
+  it.effect.each(["not a url", "ftp://example.com", "file:///etc/passwd", "https://user:pass@example.com"])(
+    "rejects invalid, non-HTTP, and credential-bearing URL %s before extraction",
+    (url) => {
+      let requests = 0
+      return Effect.gen(function* () {
+        const error = yield* Effect.flip(
+          run({ url }, (request) => {
+            requests += 1
+            return response(request, apiResponse())
+          }),
+        )
         expect(error._tag).toBe("ReadWebPageContentError")
-      }),
+        expect(requests).toBe(0)
+      })
+    },
   )
 })
