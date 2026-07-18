@@ -49,6 +49,7 @@ import {
   type AgentProfile,
   BackendError,
   Event,
+  type ExecutionReference,
   type ExecutionRoutePin,
   type PromptPart,
   Service,
@@ -553,8 +554,8 @@ const agentId = Ids.AgentId.make("agent:rika")
 const addressId = Ids.AddressId.make("address:rika")
 const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
   Ids.AgentId.make(`agent:rika:fan-out:${String(fanOutId)}:${String(childExecutionId)}`)
-const executionId = (turnId: string) =>
-  Ids.ExecutionId.make(turnId.startsWith("child:") || turnId.startsWith("execution:") ? turnId : `execution:${turnId}`)
+const executionId = (turnId: string, reference?: ExecutionReference) =>
+  Ids.ExecutionId.make(reference === undefined ? `execution:${turnId}` : turnId)
 const awaitExecutionAvailable = (
   client: Client.Interface,
   id: Ids.ExecutionId,
@@ -852,12 +853,13 @@ const followExecution = (
   afterCursor: string | undefined,
   onEvent: ((item: Event) => void) | undefined,
   stopAtActionableWait = true,
+  reference?: ExecutionReference,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
       const startedAt = yield* Clock.currentTimeMillis
       yield* Effect.logInfo("execution.follow.started")
-      const rootExecutionId = executionId(turnId)
+      const rootExecutionId = executionId(turnId, reference)
       const events: Array<Event> = []
       const followed = new Set<string>()
       const tracedDeltas = new Set<string>()
@@ -1049,7 +1051,7 @@ const followExecution = (
       Effect.logError("execution.follow.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
     ),
     Effect.annotateLogs({
-      "rika.execution.id": String(executionId(turnId)),
+      "rika.execution.id": String(executionId(turnId, reference)),
       "rika.turn.id": turnId,
     }),
   )
@@ -1566,15 +1568,17 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           (effect) => traceWithoutResult("ExecutionBackend.start", effect),
         ),
         follow: Effect.fn(
-          function* (turnId, afterCursor, onEvent) {
-            return yield* followExecution(client, turnId, afterCursor, onEvent).pipe(Effect.mapError(error))
+          function* (turnId, afterCursor, onEvent, reference) {
+            return yield* followExecution(client, turnId, afterCursor, onEvent, true, reference).pipe(
+              Effect.mapError(error),
+            )
           },
           (effect) => traceWithoutResult("ExecutionBackend.follow", effect),
         ),
-        replay: Effect.fn("ExecutionBackend.replay")(function* (turnId, afterCursor) {
+        replay: Effect.fn("ExecutionBackend.replay")(function* (turnId, afterCursor, reference) {
           return yield* client
             .replayExecution({
-              execution_id: executionId(turnId),
+              execution_id: executionId(turnId, reference),
               ...(afterCursor === undefined ? {} : { after_cursor: afterCursor }),
             })
             .pipe(
@@ -1585,10 +1589,10 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               Effect.mapError(error),
             )
         }),
-        pageEvents: Effect.fn("ExecutionBackend.pageEvents")(function* (turnId, direction, cursor, limit) {
+        pageEvents: Effect.fn("ExecutionBackend.pageEvents")(function* (turnId, direction, cursor, limit, reference) {
           return yield* client
             .pageExecutionEvents({
-              execution_id: executionId(turnId),
+              execution_id: executionId(turnId, reference),
               direction,
               ...(cursor === undefined
                 ? {}
@@ -1607,9 +1611,9 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               Effect.mapError(error),
             )
         }),
-        cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, cancelledAt) {
+        cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, cancelledAt, reference) {
           return yield* Effect.gen(function* () {
-            const id = executionId(turnId)
+            const id = executionId(turnId, reference)
             yield* awaitExecutionAvailable(client, id, "Execution did not become available for cancellation")
             const accepted = yield* client.cancelExecution({
               execution_id: id,
@@ -1620,10 +1624,10 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             return { turnId, status: Status.make(accepted.status), events }
           }).pipe(Effect.mapError(error))
         }),
-        inspect: Effect.fn("ExecutionBackend.inspect")(function* (turnId) {
-          const existing = yield* client.getExecution(executionId(turnId))
+        inspect: Effect.fn("ExecutionBackend.inspect")(function* (turnId, reference) {
+          const existing = yield* client.getExecution(executionId(turnId, reference))
           if (existing === undefined) return undefined
-          return yield* client.inspectExecution(executionId(turnId)).pipe(
+          return yield* client.inspectExecution(executionId(turnId, reference)).pipe(
             Effect.map((value) => ({
               turnId,
               status: Status.make(value.status),
@@ -1646,19 +1650,19 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             })),
           )
         }, Effect.mapError(error)),
-        steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, createdAt) {
+        steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, createdAt, reference) {
           yield* client
             .steer({
-              execution_id: executionId(turnId),
+              execution_id: executionId(turnId, reference),
               kind: "steering",
               content: [Content.text(text)],
               created_at: createdAt,
             })
             .pipe(Effect.mapError(error))
         }),
-        listApprovals: Effect.fn("ExecutionBackend.listApprovals")(function* (turnId) {
+        listApprovals: Effect.fn("ExecutionBackend.listApprovals")(function* (turnId, reference) {
           return yield* Effect.gen(function* () {
-            const ids = yield* executionTreeIds(client, executionId(turnId))
+            const ids = yield* executionTreeIds(client, executionId(turnId, reference))
             const approvals = yield* Effect.forEach(ids, (execution) =>
               client.listPendingApprovals({ execution_id: execution }),
             )

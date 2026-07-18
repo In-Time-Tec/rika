@@ -68,6 +68,12 @@ export interface StartInput {
   readonly onEvent?: (event: Event) => void
 }
 
+export interface ExecutionReference {
+  readonly _tag: "ExecutionReference"
+}
+
+export const executionReference: ExecutionReference = { _tag: "ExecutionReference" }
+
 export interface ExecutionExtensionPin {
   readonly generation: string
   readonly sourceDigest: string
@@ -232,18 +238,39 @@ export interface Interface {
     turnId: string,
     afterCursor: string | undefined,
     onEvent?: (event: Event) => void,
+    reference?: ExecutionReference,
   ) => Effect.Effect<Result, BackendError>
-  readonly replay: (turnId: string, afterCursor?: string) => Effect.Effect<Result, BackendError>
+  readonly replay: (
+    turnId: string,
+    afterCursor?: string,
+    reference?: ExecutionReference,
+  ) => Effect.Effect<Result, BackendError>
   readonly pageEvents?: (
     turnId: string,
     direction: "forward" | "backward",
     cursor?: string,
     limit?: number,
+    reference?: ExecutionReference,
   ) => Effect.Effect<EventPage, BackendError>
-  readonly cancel: (turnId: string, cancelledAt: number) => Effect.Effect<Result, BackendError>
-  readonly inspect: (turnId: string) => Effect.Effect<Inspection | undefined, BackendError>
-  readonly steer: (turnId: string, text: string, createdAt: number) => Effect.Effect<void, BackendError>
-  readonly listApprovals: (turnId: string) => Effect.Effect<ReadonlyArray<Approval>, BackendError>
+  readonly cancel: (
+    turnId: string,
+    cancelledAt: number,
+    reference?: ExecutionReference,
+  ) => Effect.Effect<Result, BackendError>
+  readonly inspect: (
+    turnId: string,
+    reference?: ExecutionReference,
+  ) => Effect.Effect<Inspection | undefined, BackendError>
+  readonly steer: (
+    turnId: string,
+    text: string,
+    createdAt: number,
+    reference?: ExecutionReference,
+  ) => Effect.Effect<void, BackendError>
+  readonly listApprovals: (
+    turnId: string,
+    reference?: ExecutionReference,
+  ) => Effect.Effect<ReadonlyArray<Approval>, BackendError>
   readonly resolveToolApproval: (
     waitId: string,
     approved: boolean,

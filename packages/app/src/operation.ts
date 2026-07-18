@@ -468,14 +468,14 @@ const replayProjection = Effect.fn("Operation.replayProjection")(function* (
 ) {
   const turnId = normalizeChildExecutionId(executionId)
   if (backend.pageEvents === undefined) {
-    const result = yield* backend.replay(executionId)
+    const result = yield* backend.replay(executionId, undefined, ExecutionBackend.executionReference)
     return Transcript.project(turnId, "", result.events)
   }
   let projection = Transcript.empty(turnId, "")
   let after: string | undefined
   const cursors = new Set<string>()
   while (true) {
-    const page = yield* backend.pageEvents(executionId, "forward", after, 200)
+    const page = yield* backend.pageEvents(executionId, "forward", after, 200, ExecutionBackend.executionReference)
     for (const event of page.events.toSorted((left, right) => left.sequence - right.sequence))
       projection = Transcript.applyEvent(projection, event)
     if (!page.hasMore) return projection
@@ -492,13 +492,18 @@ const projectExecutionTree = Effect.fn("Operation.projectExecutionTree")(functio
   root: Transcript.Projection,
 ) {
   const nested: Array<Transcript.NestedProjection> = []
-  const pending: Array<{ readonly executionId: string; readonly projection: Transcript.Projection }> = [
-    { executionId: rootExecutionId, projection: root },
-  ]
+  const pending: Array<{
+    readonly executionId: string
+    readonly projection: Transcript.Projection
+    readonly reference: boolean
+  }> = [{ executionId: rootExecutionId, projection: root, reference: false }]
   const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
   while (pending.length > 0) {
     const current = pending.shift()!
-    const inspection = yield* backend.inspect(current.executionId)
+    const inspection = yield* backend.inspect(
+      current.executionId,
+      current.reference ? ExecutionBackend.executionReference : undefined,
+    )
     if (inspection === undefined) continue
     for (const child of inspection.children) {
       const childId = normalizeChildExecutionId(child.executionId)
@@ -508,7 +513,7 @@ const projectExecutionTree = Effect.fn("Operation.projectExecutionTree")(functio
       if (parent === undefined) continue
       const projection = yield* replayProjection(backend, child.executionId)
       nested.push({ parentId: parent.id, projection })
-      pending.push({ executionId: child.executionId, projection })
+      pending.push({ executionId: child.executionId, projection, reference: true })
     }
   }
   return nested.length === 0 ? root : Transcript.withNestedProjections(root, nested)
@@ -518,18 +523,23 @@ const activeDescendantExecutionIds = Effect.fn("Operation.activeDescendantExecut
   backend: ExecutionBackend.Interface,
   rootExecutionId: string,
 ) {
-  const pending = [rootExecutionId]
+  const pending: Array<{ readonly executionId: string; readonly reference: boolean }> = [
+    { executionId: rootExecutionId, reference: false },
+  ]
   const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
   const active: Array<string> = []
   while (pending.length > 0) {
-    const executionId = pending.shift()!
-    const inspection = yield* backend.inspect(executionId)
+    const current = pending.shift()!
+    const inspection = yield* backend.inspect(
+      current.executionId,
+      current.reference ? ExecutionBackend.executionReference : undefined,
+    )
     if (inspection === undefined) continue
     for (const child of inspection.children) {
       const normalized = normalizeChildExecutionId(child.executionId)
       if (seen.has(normalized)) continue
       seen.add(normalized)
-      pending.push(child.executionId)
+      pending.push({ executionId: child.executionId, reference: true })
       if (!isTerminalStatus(child.status)) active.push(child.executionId)
     }
   }
@@ -1455,7 +1465,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               if (event.type === "model.usage.reported") publishInteractiveActivity(sessionId, patch)
             }
             const result = yield* Effect.raceFirst(
-              follow(job.executionId, afterCursor, deliverEvent),
+              follow(job.executionId, afterCursor, deliverEvent, ExecutionBackend.executionReference),
               Deferred.await(job.selection.stopped).pipe(Effect.as(undefined)),
             )
             if (result === undefined || childFollowerSelection !== job.selection) return
@@ -2388,7 +2398,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   : yield* activeDescendantExecutionIds(backend, turn.id).pipe(Effect.orElseSucceed(() => []))
               const cancellationOrder = childIds.toReversed()
               const childOutcomes = yield* Effect.forEach(cancellationOrder, (childId) =>
-                Effect.result(backend.cancel(childId, cancelledAt)),
+                Effect.result(backend.cancel(childId, cancelledAt, ExecutionBackend.executionReference)),
               )
               for (const [index, outcome] of childOutcomes.entries()) {
                 const childId = cancellationOrder[index]!

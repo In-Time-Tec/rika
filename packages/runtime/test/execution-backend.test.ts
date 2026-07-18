@@ -541,6 +541,52 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("maps distinct top-level Turn identities to distinct deterministic Relay identities", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        streamEvents: [relayEvent("execution.completed", 1)],
+        existingStatus: "running",
+      })
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "first", startedAt: 1 })
+        yield* start(backend, {
+          threadId: "session:thread-a",
+          turnId: "execution:turn-a",
+          prompt: "second",
+          startedAt: 2,
+        })
+        yield* backend.inspect("execution:turn-a")
+        yield* backend.replay("execution:turn-a")
+        if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
+        yield* backend.pageEvents("execution:turn-a", "forward")
+        yield* backend.cancel("execution:turn-a", 3)
+      }).pipe(provideBackendWithThreadTools(fixture.implementation))
+
+      expect(yield* Ref.get(fixture.starts)).toMatchObject([
+        {
+          session_id: "session:thread-a",
+          idempotency_key: "turn-a",
+          execution_id: "execution:turn-a",
+        },
+        {
+          session_id: "session:session:thread-a",
+          idempotency_key: "execution:turn-a",
+          execution_id: "execution:execution:turn-a",
+        },
+      ])
+      expect(yield* Ref.get(fixture.lookups)).toEqual(["execution:execution:turn-a", "execution:execution:turn-a"])
+      expect((yield* Ref.get(fixture.replays)).map((input) => input.execution_id)).toEqual([
+        "execution:execution:turn-a",
+        "execution:execution:turn-a",
+      ])
+      expect((yield* Ref.get(fixture.pages)).map((input) => input.execution_id)).toEqual(["execution:execution:turn-a"])
+      expect((yield* Ref.get(fixture.cancellations)).map((input) => input.execution_id)).toEqual([
+        "execution:execution:turn-a",
+      ])
+    }),
+  )
+
   it.effect("keeps large execution results out of completed tracing spans", () =>
     Effect.gen(function* () {
       const streamEvents = [
@@ -956,16 +1002,20 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("derives terminal replay status when a late model event follows it", () =>
+  it.effect("uses the last Relay terminal event as authority despite stale late events", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({
-        replayEvents: [relayEvent("execution.cancelled", 1), relayEvent("model.output.completed", 2)],
+        replayEvents: [
+          relayEvent("execution.cancelled", 1),
+          relayEvent("model.output.completed", 2),
+          relayEvent("execution.failed", 3),
+        ],
       })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         return yield* backend.replay("turn-a")
       }).pipe(provideBackend(fixture.implementation))
-      expect(result.status).toBe("cancelled")
+      expect(result.status).toBe("failed")
     }),
   )
 
@@ -1381,7 +1431,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           createdAt: 1,
         })
         return {
-          replay: yield* backend.replay("child:already-prefixed"),
+          replay: yield* backend.replay("child:already-prefixed", undefined, ExecutionBackend.executionReference),
           inspection: yield* backend.inspect("p"),
         }
       }).pipe(provideBackend(fixture.implementation))
@@ -1410,10 +1460,10 @@ describe("ExecutionBackend Relay client adapter", () => {
         const inspection = yield* backend.inspect("parent")
         const childId = inspection?.children[0]?.executionId
         if (childId === undefined) return yield* Effect.die("Missing inspected child")
-        yield* backend.replay(childId)
+        yield* backend.replay(childId, undefined, ExecutionBackend.executionReference)
         if (backend.pageEvents === undefined) return yield* Effect.die("Missing event paging")
-        yield* backend.pageEvents(childId, "forward")
-        yield* backend.cancel(childId, 10)
+        yield* backend.pageEvents(childId, "forward", undefined, undefined, ExecutionBackend.executionReference)
+        yield* backend.cancel(childId, 10, ExecutionBackend.executionReference)
         return childId
       }).pipe(provideBackend(fixture.implementation))
 

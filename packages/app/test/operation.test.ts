@@ -403,20 +403,25 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("reconciles nonterminal turns and restarts a missing deterministic execution", () =>
+  it.effect("re-prepares an accepted Turn once and starts with its pinned route", () =>
     Effect.gen(function* () {
+      const pinnedRoute = {
+        ...executionRoute(),
+        main: { ...executionRoute().main, model: "pinned-recovery-model" },
+      }
       const turns = yield* TurnRepository.makeMemory([
         {
           id: Turn.TurnId.make("turn-restart"),
           threadId: Thread.ThreadId.make("thread-restart"),
           prompt: "resume",
-          executionRoute: executionRoute(),
-          status: "running",
+          executionRoute: pinnedRoute,
+          status: "accepted",
           createdAt: 1,
           updatedAt: 2,
         },
       ])
       const starts = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
+      const preparations = yield* Ref.make(0)
       const restartBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
@@ -424,19 +429,34 @@ describe("Operation", () => {
             Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
           ),
       })
-      yield* Operation.reconcile().pipe(
+      yield* Operation.reconcile(unusedExtensions, (turn) =>
+        Ref.update(preparations, (count) => count + 1).pipe(
+          Effect.as({
+            prompt: `${turn.prompt} with recomputed context`,
+            promptParts: undefined,
+            extensionPin: undefined,
+          }),
+        ),
+      ).pipe(
         provideLayer(
           Layer.mergeAll(
             reconcileDependencies(unusedExtensions),
-            ThreadRepository.memoryLayer(),
+            ThreadRepository.memoryLayer([selectionThread("thread-restart")]),
             Layer.succeed(TurnRepository.Service, turns),
             Layer.succeed(ExecutionBackend.Service, restartBackend),
           ),
         ),
       )
       expect(yield* Ref.get(starts)).toMatchObject([
-        { threadId: "thread-restart", turnId: "turn-restart", prompt: "resume", startedAt: 2 },
+        {
+          threadId: "thread-restart",
+          turnId: "turn-restart",
+          prompt: "resume with recomputed context",
+          startedAt: 2,
+          executionRoute: { main: { model: "pinned-recovery-model" } },
+        },
       ])
+      expect(yield* Ref.get(preparations)).toBe(1)
       expect((yield* turns.get(Turn.TurnId.make("turn-restart")))?.status).toBe("completed")
     }),
   )

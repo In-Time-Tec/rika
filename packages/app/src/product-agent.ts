@@ -85,7 +85,9 @@ export const layer = Layer.effect(
           .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       cancelChild: Effect.fn("ProductAgent.cancelChild")((id, at) =>
-        backend.cancel(id, at).pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
+        backend
+          .cancel(id, at, ExecutionBackend.executionReference)
+          .pipe(Effect.mapError((cause) => InvocationError.make({ message: cause.message }))),
       ),
       runParallel: Effect.fn("ProductAgent.runParallel")((input) =>
         backend
