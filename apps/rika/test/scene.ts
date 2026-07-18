@@ -17,6 +17,7 @@ type Action = {
   readonly write: string
   readonly checkRunning?: boolean
   readonly delayMs?: number
+  readonly restartArguments?: ReadonlyArray<string>
 }
 
 interface Options {
@@ -43,6 +44,7 @@ const PtyAction = Schema.Struct({
   write: Schema.String,
   checkRunning: Schema.optionalKey(Schema.Boolean),
   delayMs: Schema.optionalKey(Schema.Int),
+  restartArguments: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
 const UnknownJson = Schema.UnknownFromJsonString
@@ -83,13 +85,14 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
     options.script === undefined
       ? { RIKA_TEST_MODEL_RESPONSE: options.response ?? "completed" }
       : { RIKA_TEST_MODEL_SCRIPT: yield* Schema.encodeUnknownEffect(UnknownJson)(options.script) }
+  const residentGrace = options.actions.some((action) => action.restartArguments !== undefined) ? "5000" : "100"
   const environment = yield* Schema.encodeUnknownEffect(UnknownJson)({
     HOME: home,
     PATH: path,
     TERM: "xterm-256color",
     RIKA_DATABASE: `${state}/rika.db`,
     RIKA_RELAY_DATABASE: `${state}/relay.db`,
-    RIKA_INTERNAL_RESIDENT_GRACE: "100",
+    RIKA_INTERNAL_RESIDENT_GRACE: residentGrace,
     RIKA_INTERNAL_RESIDENT_STARTUP_HOLD: "0",
     ...modelEnvironment,
   })
@@ -119,14 +122,31 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   )
   if (Number(helperExitCode) !== 0) return yield* Effect.die(stderr)
   const result = yield* Schema.decodeUnknownEffect(PtyResult)(stdout.trim())
+  if (result.timedOut)
+    return yield* SceneError.make({
+      message: `Scene timed out after ${result.actionsCompleted} actions\n${stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8"))}`,
+    })
+  if (result.actionsCompleted !== options.actions.length)
+    return yield* SceneError.make({
+      message: `Scene completed ${result.actionsCompleted} of ${options.actions.length} actions\n${stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8"))}`,
+    })
+  if (result.exitCode !== 0) return yield* SceneError.make({ message: `Scene exited with code ${result.exitCode}` })
+  if (result.runningChecks.some((running) => !running))
+    return yield* SceneError.make({ message: "Scene exited before a running-process check" })
   yield* waitUntil(
     fs
       .readDirectory(`${state}/diagnostics`)
-      .pipe(Effect.map((names) => names.every((name) => !name.endsWith(".open.jsonl")))),
+      .pipe(
+        Effect.map((names) =>
+          names.every(
+            (name) => !name.endsWith(".open.jsonl") || (residentGrace !== "100" && name.startsWith("client-")),
+          ),
+        ),
+      ),
   )
   const names = yield* fs.readDirectory(`${state}/diagnostics`)
   const logs = yield* Effect.forEach(
-    names.filter((name) => name.endsWith(".jsonl")),
+    names.filter((name) => name.endsWith(".jsonl") || name.endsWith(".open.jsonl")),
     (name) =>
       fs.readFileString(`${state}/diagnostics/${name}`).pipe(Effect.map((contents) => [name, contents] as const)),
   )
@@ -141,17 +161,6 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
     diagnostics,
     names,
   }
-  if (result.timedOut)
-    return yield* SceneError.make({
-      message: `Scene timed out after ${result.actionsCompleted} actions\n${completed.output}`,
-    })
-  if (result.actionsCompleted !== options.actions.length)
-    return yield* SceneError.make({
-      message: `Scene completed ${result.actionsCompleted} of ${options.actions.length} actions`,
-    })
-  if (result.exitCode !== 0) return yield* SceneError.make({ message: `Scene exited with code ${result.exitCode}` })
-  if (result.runningChecks.some((running) => !running))
-    return yield* SceneError.make({ message: "Scene exited before a running-process check" })
   return completed
 })
 
@@ -174,6 +183,11 @@ export const Scene = {
       ...(delayMs === undefined ? {} : { delayMs }),
     }),
     checkRunningAfter: (after: string, write: string): Action => ({ after, write, checkRunning: true }),
+    restartAfter: (after: string, ...restartArguments: ReadonlyArray<string>): Action => ({
+      after,
+      write: "",
+      restartArguments,
+    }),
   },
   model: {
     text: (text: string, delayMs?: number): ModelTurn =>

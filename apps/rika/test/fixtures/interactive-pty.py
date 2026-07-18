@@ -29,6 +29,38 @@ if pid == 0:
     os.execve(executable, [executable, entrypoint], environment)
 
 os.close(slave)
+
+def restart(arguments):
+    next_master, next_slave = pty.openpty()
+    fcntl.ioctl(next_slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    child = os.fork()
+    if child == 0:
+        os.setsid()
+        os.close(next_master)
+        os.dup2(next_slave, 0)
+        os.dup2(next_slave, 1)
+        os.dup2(next_slave, 2)
+        if next_slave > 2:
+            os.close(next_slave)
+        os.chdir(cwd)
+        os.execve(executable, [executable, entrypoint, *arguments], environment)
+    os.close(next_slave)
+    return child, next_master
+
+def children(parent):
+    matches = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat") as stat:
+                fields = stat.read().split()
+            if int(fields[3]) == parent:
+                matches.append(int(entry))
+        except (FileNotFoundError, ProcessLookupError, ValueError):
+            pass
+    return matches
+
 output = bytearray()
 action_index = 0
 action_offset = 0
@@ -63,7 +95,16 @@ while time.monotonic() < deadline:
         delay_ms = action.get("delayMs", 0)
         if delay_ms > 0:
             time.sleep(delay_ms / 1000)
-        os.write(master, action["write"].encode())
+        restart_arguments = action.get("restartArguments")
+        if restart_arguments is None:
+            os.write(master, action["write"].encode())
+        else:
+            for child in children(pid):
+                os.kill(child, signal.SIGKILL)
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            os.close(master)
+            pid, master = restart(restart_arguments)
         action_index += 1
         action_offset = len(output)
     if status is not None:
