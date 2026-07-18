@@ -127,7 +127,7 @@ export interface ProductLayerOptions<
   }
   readonly defaultWorkspace: string
   readonly pendingTurnCapacity?: number
-  readonly shellPermission?: "ask" | "allow" | ((workspace: string) => Effect.Effect<"ask" | "allow">)
+  readonly shellPermission?: "ask" | "allow" | "deny" | ((workspace: string) => Effect.Effect<"ask" | "allow" | "deny">)
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
   readonly makeTurnId: Effect.Effect<Turn.TurnId>
   readonly configOperations?: {
@@ -2199,6 +2199,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           ),
           shell: (command, incognito) => {
             const dispatch = sessionDispatch
+            if (shellPermission === "deny") {
+              dispatch({ _tag: "ExecutionFailed", selectionEpoch: 0, message: "Shell command denied" })
+              return Effect.void
+            }
             const toolRuntimeLayer = options.toolRuntimeLayer?.(workspace)
             if (toolRuntimeLayer === undefined) {
               dispatch({ _tag: "ExecutionFailed", selectionEpoch: 0, message: "Shell runtime is unavailable" })
@@ -2266,6 +2270,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             }).pipe(
               Effect.scoped,
               Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
+              Effect.forkIn(sessionScope),
+              Effect.asVoid,
             )
           },
           editQueued: (id, prompt) =>
@@ -2385,6 +2391,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           cancel: safe(
             sessionDispatch,
             Effect.gen(function* () {
+              const localApprovals = [...shellApprovals.values()]
+              if (localApprovals.length > 0) {
+                yield* Effect.forEach(localApprovals, (approval) => Deferred.succeed(approval, false), {
+                  discard: true,
+                })
+                sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+                return
+              }
               const backend = yield* ExecutionBackend.Service
               const turn = yield* active().pipe(Effect.orElseSucceed(() => undefined))
               if (turn === undefined) {

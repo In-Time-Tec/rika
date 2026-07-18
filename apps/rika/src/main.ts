@@ -1222,7 +1222,7 @@ const configuredBackendLayerImpl = (
     },
     ExecutionBackend.BackendError
   >,
-  toolNeedsApproval?: (name: string) => boolean,
+  shellPermission?: ConfigContract.PermissionDecision,
 ): Layer.Layer<
   Layer.Success<ReturnType<typeof relayBackendLayer>>,
   Layer.Error<ReturnType<typeof relayBackendLayer>> | Config.ConfigError | Error | Schema.SchemaError,
@@ -1304,6 +1304,16 @@ const configuredBackendLayerImpl = (
           compactionSummarySelection:
             testScript._tag === "Some" || testResponse._tag === "Some" ? selection : compactionSummaryPlan.selection,
           modelVariantPolicy,
+          ...(shellPermission === undefined
+            ? {}
+            : {
+                permissionPolicy: {
+                  rules: [
+                    { pattern: "*", level: "allow" },
+                    { pattern: "shell", level: shellPermission },
+                  ],
+                },
+              }),
           compaction: routePlan.compaction,
           oracleCompaction: oracleRoutePlan.compaction,
           toolRuntimeLayerForWorkspace: (runtimeWorkspace) =>
@@ -1326,7 +1336,6 @@ const configuredBackendLayerImpl = (
             ),
           resolveWorkspace: (durableExecutionId) =>
             resolveExecutionWorkspace(durableExecutionId, workspace, repositoryLayer, turnRepositoryLayer),
-          ...(toolNeedsApproval === undefined ? {} : { toolNeedsApproval }),
           ...(parallelApiKey === undefined ? {} : { parallelApiKey }),
         },
         repositoryLayer,
@@ -1362,7 +1371,7 @@ export const configuredBackendLayer: {
     persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>,
     compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
     resolveLegacyRoute?: Parameters<typeof configuredBackendLayerImpl>[11],
-    toolNeedsApproval?: Parameters<typeof configuredBackendLayerImpl>[12],
+    shellPermission?: Parameters<typeof configuredBackendLayerImpl>[12],
   ): (filename: string) => ReturnType<typeof configuredBackendLayerImpl>
   (
     filename: string,
@@ -1377,7 +1386,7 @@ export const configuredBackendLayer: {
     persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>,
     compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
     resolveLegacyRoute?: Parameters<typeof configuredBackendLayerImpl>[11],
-    toolNeedsApproval?: Parameters<typeof configuredBackendLayerImpl>[12],
+    shellPermission?: Parameters<typeof configuredBackendLayerImpl>[12],
   ): ReturnType<typeof configuredBackendLayerImpl>
 } = Function.dual((args) => args.length >= 4, configuredBackendLayerImpl)
 
@@ -1919,6 +1928,7 @@ if (import.meta.main) {
             })
           } else if (event._tag === "ShellCompleted") {
             model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
+            model = ViewState.update(model, { _tag: "ExecutionCompleted" })
           } else if (event._tag === "ThreadTitled") {
             const workspaceLabel = model.workspace.replace(/^\/Users\/[^/]+/, "~")
             process.stdout.write(`]0;${event.title} - rika - ${workspaceLabel}`)
@@ -2699,7 +2709,7 @@ if (import.meta.main) {
           persistedModelRoutes,
           ConfigContract.resolveCompactionSummaryRoute(effectiveConfig.settings),
           resolveLegacyRoute,
-          (name) => name === "shell" && effectiveConfig.settings.permissions.shell !== "allow",
+          effectiveConfig.settings.permissions.shell,
         ).pipe(Layer.provide(BunServices.layer), Layer.provide(BunCrypto.layer))
         const configAdapter = Layer.effect(
           ConfigOperations.Adapter,
@@ -2776,7 +2786,7 @@ if (import.meta.main) {
               const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
               const layer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings })
               const config = yield* ConfigService.effective().pipe(provideLayerScoped(layer))
-              return config.settings.permissions.shell === "allow" ? "allow" : "ask"
+              return config.settings.permissions.shell ?? ConfigContract.defaults.permissions.shell!
             }).pipe(provideLayerScoped(BunServices.layer), Effect.orDie),
           makeThreadId: Crypto.Crypto.pipe(
             Effect.flatMap((crypto) => crypto.randomUUIDv4),

@@ -182,15 +182,17 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   )
   if (Number(helperExitCode) !== 0) return yield* Effect.die(stderr)
   const result = yield* Schema.decodeUnknownEffect(PtyResult)(stdout.trim())
+  const terminalOutput = stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8"))
   if (result.timedOut)
     return yield* SceneError.make({
-      message: `Scene timed out after ${result.actionsCompleted} actions\n${stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8"))}`,
+      message: `Scene timed out after ${result.actionsCompleted} actions\n${terminalOutput}`,
     })
   if (result.actionsCompleted !== options.actions.length)
     return yield* SceneError.make({
-      message: `Scene completed ${result.actionsCompleted} of ${options.actions.length} actions\n${stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8"))}`,
+      message: `Scene completed ${result.actionsCompleted} of ${options.actions.length} actions\n${terminalOutput}`,
     })
-  if (result.exitCode !== 0) return yield* SceneError.make({ message: `Scene exited with code ${result.exitCode}` })
+  if (result.exitCode !== 0)
+    return yield* SceneError.make({ message: `Scene exited with code ${result.exitCode}\n${terminalOutput}` })
   if (result.runningChecks.some((running) => !running))
     return yield* SceneError.make({ message: "Scene exited before a running-process check" })
   yield* waitUntil(
@@ -211,6 +213,16 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       fs.readFileString(`${state}/diagnostics/${name}`).pipe(Effect.map((contents) => [name, contents] as const)),
   )
   const diagnostics = logs.map(([name, contents]) => `${name}\n${contents}`).join("\n")
+  const workspaceNames = yield* fs.readDirectory(workspace)
+  const workspaceContents: Record<string, string> = {}
+  yield* Effect.forEach(
+    workspaceNames.filter((name) => name !== ".rika" && name !== ".git"),
+    (name) =>
+      Effect.gen(function* () {
+        const filename = `${workspace}/${name}`
+        if ((yield* fs.stat(filename)).type === "File") workspaceContents[name] = yield* fs.readFileString(filename)
+      }),
+  )
   const rawOutput = Buffer.from(result.output, "base64").toString("utf8")
   const completed = {
     ...result,
@@ -225,6 +237,7 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       .join("\n"),
     diagnostics,
     names,
+    workspaceContents,
   }
   const { Database } = yield* Effect.promise(() => import("bun:sqlite"))
   const database = new Database(`${state}/rika.db`, { readonly: true })
