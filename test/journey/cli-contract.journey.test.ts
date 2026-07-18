@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "vitest"
-import { Effect, FileSystem, Schema } from "effect"
+import { Effect, FileSystem, Path, Schema } from "effect"
 import { run, runSignaled, runTest, sandbox, type Sandbox } from "./process"
 
 const NamedItemsJson = Schema.fromJsonString(Schema.Array(Schema.Struct({ name: Schema.String })))
@@ -7,6 +7,23 @@ const NamedItemJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String 
 const ThreadJson = Schema.fromJsonString(Schema.Struct({ id: Schema.String }))
 const ExportJson = Schema.fromJsonString(Schema.Struct({ thread: Schema.Struct({ id: Schema.String }) }))
 const EventJson = Schema.fromJsonString(Schema.Struct({ type: Schema.String }))
+
+const fileTree = Effect.fn("CliContract.fileTree")(function* (root: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const entries: Array<string> = []
+  const visit = Effect.fn("CliContract.fileTree.visit")(function* (directory: string) {
+    for (const name of (yield* fileSystem.readDirectory(directory)).toSorted()) {
+      const absolute = path.join(directory, name)
+      const relative = path.relative(root, absolute)
+      const info = yield* fileSystem.stat(absolute)
+      entries.push(`${info.type}:${relative}`)
+      if (info.type === "Directory") yield* visit(absolute)
+    }
+  })
+  yield* visit(root)
+  return entries
+})
 
 let context: Sandbox
 
@@ -25,22 +42,94 @@ afterAll(() => runTest(context.dispose))
 
 describe("packaged CLI contract", () => {
   test(
-    "help, version, and parser failures have stable exit behavior",
+    "help, version, and parser failures leave every local surface untouched",
+    () =>
+      runTest(
+        Effect.gen(function* () {
+          const parsing = yield* sandbox
+          const baseline = yield* fileTree(parsing.root)
+          const successful = [
+            ["--help"],
+            ["--version"],
+            ["version"],
+            ["run", "--help"],
+            ["threads", "--help"],
+            ["threads", "continue", "--help"],
+            ["config", "--help"],
+            ["diagnostics", "--help"],
+            ["tools", "--help"],
+            ["skills", "--help"],
+            ["mcp", "--help"],
+            ["mcp", "oauth", "--help"],
+            ["extensions", "--help"],
+            ["workflows", "--help"],
+            ["review", "--help"],
+          ]
+          for (const args of successful) {
+            const result = yield* run(parsing, args)
+            expect(result.exitCode, args.join(" ")).toBe(0)
+            expect(result.stdout.length + result.stderr.length, args.join(" ")).toBeGreaterThan(0)
+            expect(yield* fileTree(parsing.root), args.join(" ")).toEqual(baseline)
+          }
+          const rejected = [
+            ["--unknown-option"],
+            ["run", "--mode", "impossible"],
+            ["run", "--stream-json-input"],
+            ["--stream-json"],
+            ["threads", "continue"],
+            ["threads", "continue", "thread-1", "--last"],
+            ["threads", "list", "--limit", "zero"],
+            ["threads", "export", "thread-1", "--format", "xml"],
+            ["mcp", "add", "server"],
+            ["mcp", "add", "server", "bun", "--url", "https://example.test"],
+            ["diagnostics", "export"],
+            ["workflows", "start", "missing", "run-1"],
+          ]
+          for (const args of rejected) {
+            const result = yield* run(parsing, args)
+            expect(result.exitCode, args.join(" ")).not.toBe(0)
+            expect(result.stderr.length + result.stdout.length, args.join(" ")).toBeGreaterThan(0)
+            expect(yield* fileTree(parsing.root), args.join(" ")).toEqual(baseline)
+          }
+          yield* parsing.dispose
+        }),
+      ),
+    30_000,
+  )
+
+  test(
+    "diagnostic commands remain local when product configuration is unusable",
     () =>
       runTest(
         Effect.gen(function* () {
           const fileSystem = yield* FileSystem.FileSystem
-          const parsing = yield* sandbox
-          const help = yield* run(parsing, ["--help"])
-          expect(help.exitCode).toBe(0)
-          expect(help.stdout).toContain("Local durable coding agent")
-          expect((yield* run(parsing, ["--version"])).stdout).toContain("0.0.0")
-          const invalid = yield* run(parsing, ["run", "--mode", "impossible"])
-          expect(invalid.exitCode).not.toBe(0)
-          expect(invalid.stderr.length + invalid.stdout.length).toBeGreaterThan(0)
-          expect(yield* fileSystem.exists(parsing.env.RIKA_DATABASE!)).toBe(false)
-          expect(yield* fileSystem.exists(parsing.env.RIKA_RELAY_DATABASE!)).toBe(false)
-          yield* parsing.dispose
+          const path = yield* Path.Path
+          const diagnosticContext = yield* sandbox
+          const diagnostic = path.join(path.dirname(diagnosticContext.env.RIKA_DATABASE!), "diagnostics")
+          const source = path.join(diagnostic, "client-finished.jsonl")
+          const settings = path.join(diagnosticContext.env.HOME!, ".rika", "settings.json")
+          const destination = path.join(diagnosticContext.root, "exported-diagnostics")
+          yield* fileSystem.makeDirectory(diagnostic, { recursive: true })
+          yield* fileSystem.makeDirectory(path.dirname(settings), { recursive: true })
+          yield* fileSystem.writeFileString(source, '{"message":"finished"}\n')
+          yield* fileSystem.chmod(source, 0o600)
+          yield* fileSystem.writeFileString(settings, "not-json")
+
+          const pathResult = yield* run(diagnosticContext, ["diagnostics", "path"])
+          expect(pathResult.exitCode).toBe(0)
+          expect(pathResult.stdout).toBe(diagnostic)
+          const status = yield* run(diagnosticContext, ["diagnostics", "status"])
+          expect(status.exitCode).toBe(0)
+          expect(status.stdout).toContain("1 log file")
+          const exported = yield* run(diagnosticContext, ["diagnostics", "export", destination])
+          expect(exported.exitCode).toBe(0)
+          expect(yield* fileSystem.readFileString(path.join(destination, "client-finished.jsonl"))).toBe(
+            '{"message":"finished"}\n',
+          )
+          expect(yield* fileSystem.exists(diagnosticContext.env.RIKA_DATABASE!)).toBe(false)
+          expect(yield* fileSystem.exists(diagnosticContext.env.RIKA_RELAY_DATABASE!)).toBe(false)
+          expect((yield* fileSystem.readDirectory(diagnostic)).toSorted()).toEqual(["client-finished.jsonl"])
+          yield* diagnosticContext.dispose
         }),
       ),
     20_000,
