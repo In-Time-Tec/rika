@@ -78,6 +78,7 @@ const testEnvironment = (
   ])
   const commands: Array<ChildProcess.StandardCommand> = []
   const fileSystem = FileSystem.layerNoop({
+    realPath: (path) => Effect.succeed(path),
     readDirectory: (path) => Effect.succeed(directories.get(path) ?? []),
     stat: (path) =>
       Effect.succeed(directories.has(path) ? info("Directory") : files.has(path) ? info("File") : info("Socket")),

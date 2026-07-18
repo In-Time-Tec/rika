@@ -305,6 +305,19 @@ export const layer = (workspace: string) =>
           },
           catch: operationError,
         })
+      const resolveCwd = (value: string) =>
+        resolve(value).pipe(
+          Effect.flatMap((target) =>
+            Effect.all([fileSystem.realPath(workspace), fileSystem.realPath(target)]).pipe(
+              Effect.mapError(operationError),
+            ),
+          ),
+          Effect.flatMap(([canonicalWorkspace, canonicalTarget]) =>
+            canonicalTarget === canonicalWorkspace || canonicalTarget.startsWith(`${canonicalWorkspace}${path.sep}`)
+              ? Effect.succeed(canonicalTarget)
+              : Effect.fail(new RuntimeOperationError({ message: `Path escapes workspace: ${value}` })),
+          ),
+        )
       const listFiles = Effect.fn("ToolRuntime.listFiles")(function* () {
         const found: Array<string> = []
         const visit = (directory: string): Effect.Effect<void, PlatformError.PlatformError> =>
@@ -449,7 +462,7 @@ export const layer = (workspace: string) =>
               case "ApplyPatch":
                 return yield* ApplyPatch.apply(workspace, request.patchText, fileSystem, path)
               case "Shell": {
-                const cwd = yield* resolve(request.cwd ?? ".")
+                const cwd = yield* resolveCwd(request.cwd ?? ".")
                 const processId = yield* processes.start(request.command, request.args, cwd)
                 const output = yield* processes.poll(
                   processId,

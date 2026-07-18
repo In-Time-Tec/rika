@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
-import { Effect, FileSystem, Layer } from "effect"
-import { MediaView, ParallelSearch, ReadWebPage, Runtime } from "../src"
+import { Effect, FileSystem, Layer, Schema } from "effect"
+import { MediaView, ParallelSearch, ProcessRegistry, ReadWebPage, Runtime } from "../src"
 import { provide } from "./test-layer"
 
 test("runs filesystem, shell, and git tools against a bounded workspace", () => {
@@ -9,10 +9,12 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-tools-" })
+      const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-tools-outside-" })
       yield* fileSystem.makeDirectory(`${workspace}/src`, { recursive: true })
       yield* fileSystem.makeDirectory(`${workspace}/node_modules/ignored`, { recursive: true })
       yield* fileSystem.writeFileString(`${workspace}/src/a.ts`, "alpha\nbeta\nalpha")
       yield* fileSystem.writeFileString(`${workspace}/node_modules/ignored/a.ts`, "hidden")
+      yield* fileSystem.symlink(outside, `${workspace}/escaped-cwd`)
       return yield* Effect.gen(function* () {
         const runtime = yield* Runtime.Service
         const found = yield* runtime.run({ _tag: "FindFiles", query: ".ts" })
@@ -29,6 +31,9 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           runtime.run({ _tag: "EditFile", path: "src/a.ts", oldText: "alpha", newText: "x" }),
         )
         const shell = yield* runtime.run({ _tag: "Shell", command: "bun", args: ["-e", "console.log('ok')"] })
+        const escapedCwd = yield* Effect.result(
+          runtime.run({ _tag: "Shell", command: "pwd", args: [], cwd: "escaped-cwd" }),
+        )
         yield* runtime.run({ _tag: "Shell", command: "git", args: ["init", "-q", "-b", "inspection"] })
         yield* runtime.run({ _tag: "Shell", command: "git", args: ["config", "user.name", "Rika Test"] })
         yield* runtime.run({ _tag: "Shell", command: "git", args: ["config", "user.email", "rika@example.test"] })
@@ -39,7 +44,7 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
         yield* runtime.run({ _tag: "Shell", command: "git", args: ["add", "staged.txt"] })
         yield* runtime.run({ _tag: "CreateFile", path: "untracked.txt", content: "untracked" })
         const git = yield* runtime.run({ _tag: "GitStatus" })
-        return { found, literal, regex, read, created, duplicate, edited, stale, ambiguous, shell, git }
+        return { found, literal, regex, read, created, duplicate, edited, stale, ambiguous, shell, escapedCwd, git }
       }).pipe(
         provide(
           Runtime.layer(workspace).pipe(
@@ -69,6 +74,9 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           expect(result.stale._tag).toBe("Failure")
           expect(result.ambiguous._tag).toBe("Failure")
           expect(result.shell.text).toBe("ok")
+          expect(result.escapedCwd._tag).toBe("Failure")
+          if (result.escapedCwd._tag === "Failure")
+            expect(String(result.escapedCwd.failure)).toContain("escapes workspace")
           expect(result.git.text).toContain("## inspection")
           expect(result.git.text).toContain(" M src/a.ts")
           expect(result.git.text).toContain("A  staged.txt")
@@ -78,6 +86,35 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
     ),
   )
 }, 30_000)
+
+test("sends SIGTERM to a live shell process when the registry scope closes", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-process-signal-" })
+        const marker = `${workspace}/terminated`
+        const encodedMarker = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)(marker)
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const registry = yield* ProcessRegistry.Service
+            const processId = yield* registry.start(
+              "bun",
+              [
+                "-e",
+                `process.on("SIGTERM",()=>{require("node:fs").writeFileSync(${encodedMarker},"terminated");process.exit(0)});console.log("ready");setInterval(()=>{},1000)`,
+              ],
+              workspace,
+            )
+            expect(yield* registry.poll(processId, 1_000, 100)).toMatchObject({ stdout: "ready\n", running: true })
+          }).pipe(provide(ProcessRegistry.layer)),
+        )
+        for (let attempt = 0; attempt < 100 && !(yield* fileSystem.exists(marker)); attempt += 1)
+          yield* Effect.sleep("10 millis")
+        expect(yield* fileSystem.readFileString(marker)).toBe("terminated")
+      }).pipe(provide(BunServices.layer)),
+    ),
+  ))
 
 test(
   "applies a validated multi-operation patch and leaves files unchanged on validation failure",

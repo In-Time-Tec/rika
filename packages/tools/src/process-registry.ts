@@ -105,9 +105,12 @@ export const layer = Layer.effect(
     yield* Effect.addFinalizer(() =>
       Ref.get(entries).pipe(
         Effect.flatMap((current) =>
-          Effect.forEach(current.values(), (entry) => entry.process.kill(), { discard: true }),
+          Effect.forEach(
+            current.values(),
+            (entry) => entry.process.kill({ killSignal: "SIGTERM" }).pipe(Effect.ignore),
+            { concurrency: "unbounded", discard: true },
+          ),
         ),
-        Effect.ignore,
       ),
     )
     return Service.of({
