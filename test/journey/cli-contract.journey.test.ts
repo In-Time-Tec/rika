@@ -230,7 +230,7 @@ describe("packaged CLI contract", () => {
     () =>
       runTest(
         Effect.gen(function* () {
-          const created = Schema.decodeUnknownSync(ThreadJson)((yield* run(context, ["threads", "new"])).stdout)
+          const created = Schema.decodeUnknownSync(ThreadJson)((yield* run(context, ["threads", "create"])).stdout)
           const continued = yield* run(context, ["threads", "continue", created.id])
           expect(continued.exitCode).toBe(0)
           const forked = Schema.decodeUnknownSync(ThreadJson)(

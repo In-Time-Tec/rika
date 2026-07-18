@@ -248,7 +248,7 @@ it.effect("dispatches interactive and execute inputs", () =>
 it.effect("dispatches every thread operation", () =>
   Effect.gen(function* () {
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Operation.Input]> = [
-      [["threads", "new"], { _tag: "Thread", action: "new" }],
+      [["threads", "create"], { _tag: "Thread", action: "new" }],
       [["threads", "continue", "--last"], { _tag: "Interactive", prompt: [], last: true, ephemeral: false }],
       [["threads", "continue", "a"], { _tag: "Interactive", prompt: [], threadId: "a", ephemeral: false }],
       [["threads", "list", "--include-archived"], { _tag: "Thread", action: "list", includeArchived: true }],
@@ -286,9 +286,19 @@ it.effect("rejects invalid thread relationships", () =>
   Effect.gen(function* () {
     yield* failsWithoutDispatch(["threads", "continue"])
     yield* failsWithoutDispatch(["threads", "continue", "--last", "a"])
+    yield* failsWithoutDispatch(["threads", "continue", "a", "b"])
     yield* failsWithoutDispatch(["threads", "search"])
     yield* failsWithoutDispatch(["threads", "label", "a"])
     yield* failsWithoutDispatch(["tools", "list", "--mode", "impossible"])
+    yield* failsWithoutDispatch(["threads", "rename"])
+    yield* failsWithoutDispatch(["threads", "pin"])
+    yield* failsWithoutDispatch(["threads", "archive"])
+    yield* failsWithoutDispatch(["threads", "unarchive"])
+    yield* failsWithoutDispatch(["threads", "delete"])
+    yield* failsWithoutDispatch(["threads", "usage"])
+    yield* failsWithoutDispatch(["threads", "fork"])
+    yield* failsWithoutDispatch(["threads", "export"])
+    yield* failsWithoutDispatch(["threads", "export", "a", "--format", "xml"])
   }),
 )
 

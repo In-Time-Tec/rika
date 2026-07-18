@@ -21,9 +21,11 @@ test(
             const cycles = Math.max(10, yield* Config.int("RIKA_STRESS_THREAD_CYCLES").pipe(Config.withDefault(50)))
             yield* configureHomeState(context)
             const alpha = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
-            const beta = yield* Schema.decodeUnknownEffect(ThreadJson)((yield* run(context, ["threads", "new"])).stdout)
+            const beta = yield* Schema.decodeUnknownEffect(ThreadJson)(
+              (yield* run(context, ["threads", "create"])).stdout,
+            )
             expect((yield* run(context, ["threads", "rename", alpha.id, "Alpha stress thread"])).exitCode).toBe(0)
             expect((yield* run(context, ["threads", "rename", beta.id, "Beta stress thread"])).exitCode).toBe(0)
             expect((yield* run(context, ["run", "--thread", alpha.id, alphaMarker])).exitCode).toBe(0)

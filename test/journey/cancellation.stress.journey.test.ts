@@ -26,7 +26,7 @@ test(
               })),
             ])
             const thread = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
             const client = yield* startResidentCommandClient(context, thread.id)
             yield* Effect.addFinalizer(() => Effect.promise(() => client.close()).pipe(Effect.ignore))

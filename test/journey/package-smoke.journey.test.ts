@@ -38,7 +38,7 @@ const program = Effect.gen(function* () {
     RIKA_DATABASE: path.join(state, "rika.db"),
     RIKA_RELAY_DATABASE: path.join(state, "relay.db"),
   }
-  for (const args of [["--help"], ["--version"], ["tools", "list"], ["threads", "new"], ["threads", "list"]]) {
+  for (const args of [["--help"], ["--version"], ["tools", "list"], ["threads", "create"], ["threads", "list"]]) {
     const exitCode = yield* run(binary, args, env)
     if (Number(exitCode) !== 0)
       return yield* failure(`Artifact command failed: ${args.join(" ")}\nexited with code ${exitCode}`)

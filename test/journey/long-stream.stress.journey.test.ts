@@ -93,7 +93,7 @@ test(
               },
             ])
             const thread = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
             const observer = yield* startPackagedPty(context, {
               arguments: ["--thread", thread.id],

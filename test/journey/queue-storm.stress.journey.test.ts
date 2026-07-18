@@ -44,7 +44,7 @@ test(
             delete context.env.RIKA_TEST_MODEL_RESPONSE
             context.env.RIKA_TEST_MODEL_SCRIPT = JSON.stringify(queueScript("QUEUE_RESPONSE"))
             const thread = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
             const client = yield* startResidentCommandClient(context, thread.id)
             yield* Effect.addFinalizer(() => Effect.promise(() => client.close()).pipe(Effect.ignore))
@@ -197,7 +197,7 @@ test.skipIf(Bun.env.RIKA_STRESS_MULTI_CLIENT !== "1")(
             delete context.env.RIKA_TEST_MODEL_RESPONSE
             context.env.RIKA_TEST_MODEL_SCRIPT = JSON.stringify(queueScript("MULTI_RESPONSE"))
             const thread = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
             const clients = yield* Effect.all(
               Array.from({ length: 4 }, () => startResidentCommandClient(context, thread.id)),

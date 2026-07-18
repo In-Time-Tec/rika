@@ -30,7 +30,7 @@ test(
             const dataRoot = yield* configureHomeState(context)
             context.env.RIKA_INTERNAL_RESIDENT_GRACE = "10000"
             const created = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
             expect((yield* run(context, ["threads", "rename", created.id, "Durable restart thread"])).exitCode).toBe(0)
 

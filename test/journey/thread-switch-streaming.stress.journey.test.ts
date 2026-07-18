@@ -66,9 +66,11 @@ test(
               },
             ])
             const alpha = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
-            const beta = yield* Schema.decodeUnknownEffect(ThreadJson)((yield* run(context, ["threads", "new"])).stdout)
+            const beta = yield* Schema.decodeUnknownEffect(ThreadJson)(
+              (yield* run(context, ["threads", "create"])).stdout,
+            )
             const clients = yield* Effect.all(
               [startResidentCommandClient(context, alpha.id), startResidentCommandClient(context, alpha.id)],
               { concurrency: 2 },

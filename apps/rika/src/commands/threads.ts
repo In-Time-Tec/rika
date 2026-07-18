@@ -95,7 +95,7 @@ const exportCommand = Command.make(
 export const command = Command.make("threads").pipe(
   Command.withDescription("Manage local durable threads"),
   Command.withSubcommands([
-    Command.make("new", {}, () => dispatch({ _tag: "Thread", action: "new" })),
+    Command.make("create", {}, () => dispatch({ _tag: "Thread", action: "new" })),
     continueCommand,
     list,
     search,

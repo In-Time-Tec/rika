@@ -40,7 +40,7 @@ test(
               { parts: [{ type: "text", text: "unused" }] },
             ])
             const created = yield* Schema.decodeUnknownEffect(ThreadJson)(
-              (yield* run(context, ["threads", "new"])).stdout,
+              (yield* run(context, ["threads", "create"])).stdout,
             )
             expect((yield* run(context, ["threads", "rename", created.id, "Stress churn"])).exitCode).toBe(0)
             expect((yield* run(context, ["run", "--thread", created.id, "seed churn feed"])).stdout).toContain(
