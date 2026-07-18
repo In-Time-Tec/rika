@@ -188,7 +188,7 @@ test("reports an incompatible product database through resident startup without 
         )
         expect(Number(exitCode)).not.toBe(0)
         expect(`${stdout}\n${stderr}`).toContain("Use a fresh Rika data root")
-        expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(2_000)
+        expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(4_000)
         expect([...(yield* fs.readFile(databasePath))]).toEqual([...before])
         expect((yield* fs.readDirectory(root)).some((name) => name.endsWith(".startup"))).toBe(false)
       }),

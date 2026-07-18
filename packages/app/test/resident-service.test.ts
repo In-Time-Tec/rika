@@ -244,6 +244,19 @@ describe("resident service lifecycle", () => {
       expect(result).toEqual({ attached: false, state: "draining" })
     }))
 
+  it("never reports ready after draining starts", () =>
+    Effect.gen(function* () {
+      const observed = yield* Ref.make<Array<string>>([])
+      const lifecycle = yield* makeLifecycle((state) => Ref.update(observed, (states) => [...states, state]))
+      yield* lifecycle.tryAttach
+      yield* lifecycle.ready
+      yield* lifecycle.beginDrain
+      yield* lifecycle.ready
+      yield* lifecycle.stopped
+      yield* lifecycle.ready
+      expect(yield* Ref.get(observed)).toEqual(["ready", "draining", "stopped"])
+    }))
+
   it("atomically rejects work once draining starts", () =>
     Effect.gen(function* () {
       const result = yield* Effect.scoped(

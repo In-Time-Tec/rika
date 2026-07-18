@@ -627,6 +627,26 @@ const program = Effect.gen(function* () {
               Effect.andThen(emit({ type: "delayed-completed" })),
               Effect.catch((error) => emit({ type: "delayed-failed", error: error.message })),
             )
+        if (command === "cancel-delayed")
+          return Effect.gen(function* () {
+            const operation = yield* Effect.forkChild(
+              connection.run({
+                _tag: "Run",
+                prompt: ["delayed"],
+                ephemeral: false,
+                streamJson: false,
+                streamJsonInput: false,
+                streamJsonThinking: false,
+              }),
+            )
+            while (!(yield* fs.exists(path.join(dataRoot, "delayed-work-starts.log")).pipe(Effect.orDie)))
+              yield* Effect.sleep("1 millis")
+            yield* Fiber.interrupt(operation)
+            while (!(yield* fs.exists(path.join(dataRoot, "delayed-work-finalizations.log")).pipe(Effect.orDie)))
+              yield* Effect.sleep("1 millis")
+            yield* connection.ping
+            yield* emit({ type: "cancelled-delayed" })
+          })
         if (command === "rejected")
           return connection.run({ _tag: "Doctor" }).pipe(
             Effect.andThen(emit({ type: "rejected-work-completed" })),

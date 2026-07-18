@@ -404,6 +404,31 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
+    "rejects an unsafe existing token without starting an owner",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const fs = yield* FileSystem.FileSystem
+            yield* fs.writeFileString(`${root}/resident.token`, `${"a".repeat(64)}\n`, { mode: 0o644 })
+            const startedAt = yield* Clock.currentTimeMillis
+            const client = yield* start(root)
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              error: "Resident credential is unsafe",
+            })
+            expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(2_000)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    10_000,
+  )
+
+  test(
     "keeps a healthy connection through a one-second client stall",
     () =>
       run(
@@ -1099,6 +1124,28 @@ describe("resident WebSocket process transport", () => {
 
             expect(yield* readText(`${root}/owner-finalizer-starts.log`)).toBe(`${first.hostPid}:0\n`)
             expect(yield* readText(`${root}/delayed-work-finalizations.log`)).toBe(`${first.hostPid}\n`)
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "cancels interrupted client work while keeping the resident connection usable",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root, 1_000, 0, true)
+            const attached = yield* attachedEffect(client)
+            yield* client.send("cancel-delayed")
+            expect(yield* client.nextEffect).toEqual({ type: "cancelled-delayed" })
+            expect(yield* readText(`${root}/delayed-work-starts.log`)).toBe(`${attached.hostPid}\n`)
+            expect(yield* readText(`${root}/delayed-work-finalizations.log`)).toBe(`${attached.hostPid}\n`)
+            yield* client.closeEffect
           } finally {
             yield* cleanRoot(root)
           }

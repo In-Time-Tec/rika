@@ -185,13 +185,13 @@ const signalProcess = (pid: number, signal: NodeJS.Signals) =>
     }
   })
 
-const awaitListenerRelease = (port: number, attempts: number) =>
+const awaitResidentRelease = (pid: number, port: number, attempts: number) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < attempts; attempt += 1) {
-      if (!(yield* listenerIsLive(port))) return true
+      if (!(yield* processIsAlive(pid)) && !(yield* listenerIsLive(port))) return true
       yield* Effect.sleep("50 millis")
     }
-    return !(yield* listenerIsLive(port))
+    return !(yield* processIsAlive(pid)) && !(yield* listenerIsLive(port))
   })
 
 export const supersede = Effect.fn("ResidentProcessStartup.supersede")(function* (pid: number, port: number) {
@@ -202,9 +202,9 @@ export const supersede = Effect.fn("ResidentProcessStartup.supersede")(function*
     })
   if (!(yield* processIsAlive(pid))) return
   yield* signalProcess(pid, "SIGTERM")
-  if (yield* awaitListenerRelease(port, 120)) return
+  if (yield* awaitResidentRelease(pid, port, 120)) return
   yield* signalProcess(pid, "SIGKILL")
-  if (yield* awaitListenerRelease(port, 40)) return
+  if (yield* awaitResidentRelease(pid, port, 40)) return
   return yield* ResidentService.ResidentServiceError.make({
     reason: "foreign-listener",
     message: `Stale Rika resident PID ${pid} kept port ${port}; stop it, then run rika again`,
