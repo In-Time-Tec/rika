@@ -493,8 +493,14 @@ const shellExitCode = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): n
 
 const exploreChildLabel = (unit: ToolUnit): string => {
   const value = toolInputValue(unit.block.input)
-  if (unit.kind === "read")
-    return `Read ${unit.block.detail || inputString(value, ["path", "file_path", "file"]) || unit.block.name}`
+  const detail =
+    unit.block.detail ||
+    inputString(value, ["path", "file_path", "file", "pattern", "query", "glob", "name"]) ||
+    "workspace"
+  if (unit.block.presentation.action === "skill") return detail
+  if (unit.block.presentation.action === "media") return `Viewed ${detail}`
+  if (unit.block.presentation.action === "git-status") return `Checked ${detail}`
+  if (unit.block.presentation.action === "read" || unit.kind === "read") return `Read ${detail}`
   const pattern = inputString(value, ["pattern", "query", "glob", "path"])
   return `${unit.block.presentation.action === "grep" ? "Grep" : "Searched"} ${unit.block.detail || pattern || ""}`.trimEnd()
 }
