@@ -149,4 +149,23 @@ describe("UsageCost", () => {
       expect(snapshot.globalCostUsd).toBe(201)
     }),
   )
+
+  it.effect("charges a separately durable title execution to its first Turn", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* UsageCost.collect(
+        reader({
+          "turn-first": { events: [usage("turn-usage", 2)] },
+          "title:turn-first": { events: [usage("title-usage", 0.25)] },
+        }),
+        [
+          { threadId: "thread-a", turnId: "turn-first" },
+          { threadId: "thread-a", turnId: "turn-first", executionId: "title:turn-first" },
+        ],
+      )
+
+      expect(snapshot.turnCostUsd.get("turn-first")).toBe(2.25)
+      expect(snapshot.threadCostUsd.get("thread-a")).toBe(2.25)
+      expect(snapshot.globalCostUsd).toBe(2.25)
+    }),
+  )
 })

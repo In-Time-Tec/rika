@@ -69,6 +69,23 @@ const behavior = (name: string, layer: Layer.Layer<ThreadRepository.Service>) =>
         expect(missing._tag).toBe("Failure")
       }).pipe(provideLayer(layer)),
     )
+
+    it.effect("renames only while the expected title still owns the thread", () =>
+      Effect.gen(function* () {
+        const repository = yield* ThreadRepository.Service
+        yield* repository.create({
+          id: id("thread-a"),
+          workspace: "/work/a",
+          title: "Temporary",
+          now: 1,
+        })
+        const renamed = yield* repository.renameIfTitle(id("thread-a"), "Temporary", "Generated", 2)
+        const stale = yield* repository.renameIfTitle(id("thread-a"), "Temporary", "Late", 3)
+        expect(renamed?.title).toBe("Generated")
+        expect(stale).toBeUndefined()
+        expect((yield* repository.get(id("thread-a")))?.title).toBe("Generated")
+      }).pipe(provideLayer(layer)),
+    )
   })
 }
 

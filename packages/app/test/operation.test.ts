@@ -2665,7 +2665,7 @@ describe("Operation", () => {
 
       expect(yield* Ref.get(starts)).toEqual([
         "high-model:turn-selected-title",
-        expect.stringMatching(/^gpt-5\.6-luna:title:thread-selected-title:/),
+        "gpt-5.6-luna:title:turn-selected-title",
       ])
       expect(yield* repository.get(Thread.ThreadId.make("thread-selected-title"))).toMatchObject({
         title: "Selected Route Title",
@@ -2714,6 +2714,79 @@ describe("Operation", () => {
       })
       expect((yield* Ref.get(events)).some((event) => event._tag === "ThreadTitled")).toBe(false)
       expect((yield* Ref.get(events)).some((event) => event._tag === "ExecutionFailed")).toBe(false)
+    }),
+  )
+
+  it.effect("finishes a durable title from replay after restart without starting it again", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("title-restart-thread")
+      const prompt = "Recover this title after restart"
+      const repository = yield* ThreadRepository.makeMemory([{ ...thread, title: prompt }])
+      const firstTurn: Turn.Turn = {
+        id: Turn.TurnId.make("title-restart-turn"),
+        threadId: thread.id,
+        prompt,
+        status: "completed",
+        executionRoute: Turn.testExecutionRoute("medium"),
+        createdAt: 1,
+        updatedAt: 2,
+      }
+      const turns = yield* TurnRepository.makeMemory([firstTurn])
+      const starts = yield* Ref.make(0)
+      const replayed = yield* Ref.make<ReadonlyArray<string>>([])
+      const restartedBackend = ExecutionBackend.Service.of({
+        ...backend,
+        start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
+        inspect: (executionId) =>
+          Effect.succeed(
+            executionId === "title:title-restart-turn"
+              ? {
+                  turnId: executionId,
+                  status: "completed" as const,
+                  waits: [],
+                  pendingTools: [],
+                  children: [],
+                }
+              : undefined,
+          ),
+        replay: (executionId) =>
+          Ref.update(replayed, (values) => [...values, executionId]).pipe(
+            Effect.as({
+              turnId: executionId,
+              status: "completed" as const,
+              events: [
+                {
+                  cursor: "restarted-title-output",
+                  sequence: 1,
+                  type: "model.output.completed" as const,
+                  createdAt: 3,
+                  text: "Recovered Durable Title",
+                },
+                { cursor: "restarted-title-done", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
+              ],
+            }),
+          ),
+      })
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
+        while ((yield* repository.get(thread.id))?.title !== "Recovered Durable Title") yield* Effect.yieldNow
+      }).pipe(
+        provideLayer(
+          Operation.productLayer({
+            repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionBackend.Service, restartedBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: () => Effect.never,
+          }),
+        ),
+      )
+
+      expect(yield* Ref.get(starts)).toBe(0)
+      expect(yield* Ref.get(replayed)).toContain("title:title-restart-turn")
     }),
   )
 

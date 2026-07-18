@@ -23,7 +23,14 @@ export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Thread, RepositoryError>
   readonly get: (id: ThreadId) => Effect.Effect<Thread | undefined, RepositoryError>
   readonly list: (input?: ListInput) => Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
+  readonly listAll: Effect.Effect<ReadonlyArray<Thread>, RepositoryError>
   readonly rename: (id: ThreadId, title: string, now: number) => Effect.Effect<Thread, RepositoryError>
+  readonly renameIfTitle: (
+    id: ThreadId,
+    expected: string,
+    title: string,
+    now: number,
+  ) => Effect.Effect<Thread | undefined, RepositoryError>
   readonly label: (id: ThreadId, labels: ReadonlyArray<string>, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setPinned: (id: ThreadId, pinned: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly setArchived: (id: ThreadId, archived: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
@@ -125,7 +132,17 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
       list: Effect.fn("ThreadRepository.list")(function* (input = {}) {
         return select([...(yield* Ref.get(state)).values()], input)
       }),
+      listAll: Ref.get(state).pipe(Effect.map((threads) => [...threads.values()].toSorted(compare).map(clone))),
       rename: (id, title, now) => update(id, now, (thread) => ({ ...thread, title })),
+      renameIfTitle: Effect.fn("ThreadRepository.renameIfTitle")(function* (id, expected, title, now) {
+        const result = yield* Ref.modify(state, (threads) => {
+          const thread = threads.get(id)
+          if (thread === undefined || thread.title !== expected) return [undefined, threads] as const
+          const next = { ...thread, title, updatedAt: now }
+          return [clone(next), new Map(threads).set(id, next)] as const
+        })
+        return result
+      }),
       label: (id, labels, now) => update(id, now, (thread) => ({ ...thread, labels: [...new Set(labels)] })),
       setPinned: (id, pinned, now) => update(id, now, (thread) => ({ ...thread, pinned })),
       setArchived: (id, archived, now) => update(id, now, (thread) => ({ ...thread, archived })),
@@ -192,7 +209,16 @@ export const layer = Layer.effect(
         const threads = yield* Effect.all(rows.map(decode))
         return select(threads, input)
       }),
+      listAll: Effect.gen(function* () {
+        const rows = yield* sql`SELECT * FROM rika_threads`.pipe(Effect.mapError(repositoryError))
+        return (yield* Effect.all(rows.map(decode))).toSorted(compare)
+      }),
       rename: (id, title, now) => update(id, now, { title }),
+      renameIfTitle: Effect.fn("ThreadRepository.renameIfTitle")(function* (id, expected, title, now) {
+        const rows = yield* sql`UPDATE rika_threads SET title = ${title}, updated_at = ${now}
+          WHERE id = ${id} AND title = ${expected} RETURNING *`.pipe(Effect.mapError(repositoryError))
+        return rows[0] === undefined ? undefined : yield* decode(rows[0])
+      }),
       label: (id, labels, now) => update(id, now, { labels: [...new Set(labels)] }),
       setPinned: (id, pinned, now) => update(id, now, { pinned }),
       setArchived: (id, archived, now) => update(id, now, { archived }),

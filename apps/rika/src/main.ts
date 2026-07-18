@@ -2005,9 +2005,14 @@ if (import.meta.main) {
           } else if (event._tag === "ShellCompleted") {
             model = ViewState.update(model, { _tag: "AssistantCompleted", text: event.text })
             model = ViewState.update(model, { _tag: "ExecutionCompleted" })
+          } else if (event._tag === "TitleCostUpdated") {
+            model = { ...model, costUsd: event.globalCostUsd }
+            if (model.currentThreadId === event.threadId) threadCostUsd = event.threadCostUsd
           } else if (event._tag === "ThreadTitled") {
-            const workspaceLabel = model.workspace.replace(/^\/Users\/[^/]+/, "~")
-            process.stdout.write(`]0;${event.title} - rika - ${workspaceLabel}`)
+            if (model.currentThreadId === event.threadId) {
+              const workspaceLabel = model.workspace.replace(/^\/Users\/[^/]+/, "~")
+              process.stdout.write(`]0;${event.title} - rika - ${workspaceLabel}`)
+            }
             model = ViewState.update(model, {
               _tag: "ThreadTitleChanged",
               threadId: event.threadId,

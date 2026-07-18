@@ -5,6 +5,7 @@ import { Effect, Function } from "effect"
 export interface RootExecution {
   readonly threadId: string
   readonly turnId: string
+  readonly executionId?: string
 }
 
 export interface ExecutionReader {
@@ -63,7 +64,7 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
     turnCostUsd: new Map(roots.map((root) => [root.turnId, 0])),
     threadCostUsd: new Map(roots.map((root) => [root.threadId, 0])),
   }
-  const pending = roots.map((root) => ({ ...root, executionId: root.turnId }))
+  const pending = roots.map((root) => ({ ...root, executionId: root.executionId ?? root.turnId }))
   const seenExecutions = new Set<string>()
   while (pending.length > 0) {
     const current = pending.shift()!

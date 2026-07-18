@@ -76,6 +76,23 @@ const interactiveEventThreadId = (event: InteractiveEvent): string | undefined =
 
 const ignoreInteractiveEvent = (_event: InteractiveEvent) => {}
 
+const temporaryThreadTitle = (prompt: string) => [...prompt].slice(0, 80).join("") || "New thread"
+
+const titleExecutionId = (turnId: Turn.TurnId) => `title:${turnId}`
+
+const sanitizeThreadTitle = (text: string) =>
+  [
+    ...(text.split(/\r?\n/, 1)[0] ?? "")
+      .replace(/\p{C}+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .replace(/^["'#\s]+/, "")
+      .replace(/["'\s]+$/, ""),
+  ]
+    .slice(0, 80)
+    .join("")
+    .trimEnd()
+
 const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): InteractiveEvent => {
   switch (event._tag) {
     case "SelectionLoaded":
@@ -727,13 +744,22 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const roots = (yield* Effect.forEach(
           yield* threads.list({ includeArchived: true, limit: UsageCost.maximumGlobalThreads }),
           (thread) =>
-            turns
-              .list(thread.id)
-              .pipe(
-                Effect.map((values) =>
-                  values.map((turn) => ({ threadId: String(thread.id), turnId: String(turn.id) })),
-                ),
-              ),
+            turns.list(thread.id).pipe(
+              Effect.map((values) => {
+                const threadRoots: Array<UsageCost.RootExecution> = values.map((turn) => ({
+                  threadId: String(thread.id),
+                  turnId: String(turn.id),
+                }))
+                const first = values[0]
+                if (first !== undefined)
+                  threadRoots.push({
+                    threadId: String(thread.id),
+                    turnId: String(first.id),
+                    executionId: titleExecutionId(first.id),
+                  })
+                return threadRoots
+              }),
+            ),
         )).flat()
         return yield* UsageCost.collect(acquiredBackend, roots)
       })
@@ -759,6 +785,83 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
       const notifyThreadSummaries = Effect.gen(function* () {
         const summaries = yield* ThreadSummaryRepository.Service
         publishInteractiveActivity(0, { _tag: "ThreadsListed", threads: yield* summaries.list() })
+      })
+      const settledTitleExecutions = new Set<string>()
+      const titleThread = Effect.fn("Operation.titleThread")(function* (
+        thread: Thread.Thread,
+        firstTurn: Turn.Turn,
+        announce: (event: InteractiveEvent) => void,
+      ) {
+        const program = Effect.gen(function* () {
+          if (firstTurn.executionRoute.title === undefined) return
+          const backend = yield* ExecutionBackend.Service
+          const threads = yield* ThreadRepository.Service
+          const current = yield* threads.get(thread.id)
+          if (current === undefined || current.title !== temporaryThreadTitle(firstTurn.prompt)) return
+          const executionId = titleExecutionId(firstTurn.id)
+          if (settledTitleExecutions.has(executionId)) return
+          yield* loadUsageCosts
+          const inspection = yield* backend.inspect(executionId)
+          if (inspection?.status === "failed" || inspection?.status === "cancelled") {
+            settledTitleExecutions.add(executionId)
+            return
+          }
+          const titleExecutionRoute = {
+            ...firstTurn.executionRoute,
+            main: { ...firstTurn.executionRoute.title, role: "main" as const },
+          }
+          const result =
+            inspection === undefined
+              ? yield* backend.start({
+                  threadId: thread.id,
+                  turnId: executionId,
+                  prompt: `Generate a concise 3-6 word title for a conversation that starts with the following user message. Reply with only the title, no quotes, no punctuation.\n\n${firstTurn.prompt.slice(0, 2000)}`,
+                  startedAt: firstTurn.updatedAt,
+                  executionRoute: titleExecutionRoute,
+                })
+              : isTerminalStatus(inspection.status)
+                ? yield* backend.replay(executionId)
+                : backend.follow === undefined
+                  ? undefined
+                  : yield* backend.follow(executionId, undefined)
+          if (result === undefined) return
+          const previousGlobalCostUsd = currentUsageCosts().globalCostUsd
+          for (const event of result.events)
+            usageSnapshot = UsageCost.observe(currentUsageCosts(), {
+              threadId: String(thread.id),
+              turnId: String(firstTurn.id),
+              event,
+            })
+          const totals = currentUsageCosts()
+          if (totals.globalCostUsd !== previousGlobalCostUsd)
+            announce({
+              _tag: "TitleCostUpdated",
+              threadId: thread.id,
+              turnId: firstTurn.id,
+              turnCostUsd: totals.turnCostUsd.get(firstTurn.id) ?? 0,
+              threadCostUsd: totals.threadCostUsd.get(thread.id) ?? 0,
+              globalCostUsd: totals.globalCostUsd,
+            })
+          if (!isTerminalStatus(result.status)) return
+          settledTitleExecutions.add(executionId)
+          if (result.status !== "completed") return
+          const text = result.events
+            .filter((event) => event.type === "model.output.completed")
+            .map((event) => event.text ?? "")
+            .join("")
+          const title = sanitizeThreadTitle(text)
+          if (title.length === 0) return
+          const renamed = yield* threads.renameIfTitle(
+            thread.id,
+            temporaryThreadTitle(firstTurn.prompt),
+            title,
+            yield* Clock.currentTimeMillis,
+          )
+          if (renamed === undefined) return
+          announce({ _tag: "ThreadTitled", threadId: String(thread.id), title })
+          yield* notifyThreadSummaries
+        })
+        yield* program.pipe(Effect.orElseSucceed(() => undefined))
       })
       const notifyTurnChanged = (_turn: Pick<Turn.Turn, "id" | "threadId">) =>
         PubSub.publish(turnChanges, undefined).pipe(Effect.asVoid)
@@ -1269,7 +1372,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               thread = yield* threads.create({
                 id: yield* options.makeThreadId,
                 workspace,
-                title: prompt.slice(0, 80) || "New thread",
+                title: temporaryThreadTitle(prompt),
                 now,
               })
               yield* Ref.set(interactiveThread, thread)
@@ -1277,6 +1380,16 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               yield* activateChildFollowers(thread.id)
             }
             if (isNewThread) dispatch({ _tag: "ThreadActivated", threadId: String(thread.id), title: thread.title })
+            const isFirstTurn = (yield* turns.list(thread.id)).length === 0
+            const firstTurnTitle = temporaryThreadTitle(prompt)
+            if (isFirstTurn && thread.title === "New thread" && firstTurnTitle !== thread.title) {
+              const renamed = yield* threads.renameIfTitle(thread.id, "New thread", firstTurnTitle, now)
+              if (renamed !== undefined) {
+                thread = renamed
+                emit(dispatch, { _tag: "ThreadTitled", threadId: String(thread.id), title: thread.title })
+                yield* notifyThreadSummaries
+              }
+            }
             const turnId = yield* options.makeTurnId
             const executionRoute = yield* resolveExecutionRoute(mode, modelTuning, thread.workspace)
             yield* Effect.uninterruptible(
@@ -1399,8 +1512,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                       yield* persistProjectionTree(updatedTurn, true)
                       if (result.status === "completed") {
                         yield* settleThread(thread, dispatch)
-                        if (isNewThread)
-                          yield* Effect.interruptible(titleThread(thread, prompt, turn.executionRoute, dispatch))
+                        if (isFirstTurn)
+                          yield* Effect.interruptible(
+                            titleThread(thread, updatedTurn, (event) => emit(dispatch, event)),
+                          )
                         return
                       }
                       if (result.status === "waiting" || result.status === "running" || result.status === "queued")
@@ -1747,8 +1862,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           yield* projectExecutionResult(turn.threadId, result)
           yield* appendProjection(updatedTurn, result.events)
           yield* persistProjectionTree(updatedTurn, true)
-          if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
-          else if (result.status !== "waiting" && result.status !== "running" && result.status !== "queued")
+          if (isTerminalStatus(result.status)) {
+            yield* settleThread(thread, dispatch)
+            if (result.status === "completed" && (yield* turns.list(thread.id))[0]?.id === updatedTurn.id)
+              yield* titleThread(thread, updatedTurn, (event) => emit(dispatch, event))
+          } else if (result.status !== "waiting" && result.status !== "running" && result.status !== "queued")
             emit(dispatch, {
               _tag: "ExecutionFailed",
               selectionEpoch: 0,
@@ -1818,46 +1936,6 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 ),
               ),
           )
-        })
-        const titleThread = Effect.fn("Operation.interactive.titleThread")(function* (
-          thread: Thread.Thread,
-          seedPrompt: string,
-          executionRoute: Turn.ExecutionRoutePin,
-          dispatch: (event: InteractiveEvent) => void,
-        ) {
-          const program = Effect.gen(function* () {
-            const backend = yield* ExecutionBackend.Service
-            const threads = yield* ThreadRepository.Service
-            const startedAt = yield* Clock.currentTimeMillis
-            const turnId = `title:${thread.id}:${startedAt}`
-            const titleExecutionRoute =
-              executionRoute.title === undefined
-                ? executionRoute
-                : { ...executionRoute, main: { ...executionRoute.title, role: "main" as const } }
-            const result = yield* backend.start({
-              threadId: thread.id,
-              turnId,
-              prompt: `Generate a concise 3-6 word title for a conversation that starts with the following user message. Reply with only the title, no quotes, no punctuation.\n\n${seedPrompt.slice(0, 2000)}`,
-              startedAt,
-              executionRoute: titleExecutionRoute,
-            })
-            const text = result.events
-              .filter((event) => event.type === "model.output.completed")
-              .map((event) => event.text ?? "")
-              .join("")
-              .trim()
-            const title =
-              text
-                .replace(/^["'#\s]+/, "")
-                .replace(/["'\s]+$/, "")
-                .split("\n")[0]
-                ?.slice(0, 80) ?? ""
-            if (title.length === 0) return
-            yield* threads.rename(thread.id, title, yield* Clock.currentTimeMillis)
-            dispatch({ _tag: "ThreadTitled", threadId: String(thread.id), title })
-            yield* notifyThreadSummaries
-          })
-          yield* program.pipe(Effect.orElseSucceed(() => undefined))
         })
         const projectExecutionPages = Effect.fn("Operation.interactive.projectExecutionPages")(function* (
           backend: ExecutionBackend.Interface,
@@ -2173,9 +2251,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             if (
               threadId === undefined ||
               threadId === selectedThreadId ||
+              event._tag === "TitleCostUpdated" ||
               (event._tag === "TranscriptPatched" && event.event.type === "model.usage.reported")
             )
-              deliver(event, { selectedThreadOnly: threadId !== undefined })
+              deliver(event, { selectedThreadOnly: threadId !== undefined && event._tag !== "TitleCostUpdated" })
           })
         const implementation: InteractiveSession = {
           events: (dispatch) =>
@@ -2691,6 +2770,22 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           ),
         ),
       )
+      const repairThreadTitles = Effect.gen(function* () {
+        const threads = yield* ThreadRepository.Service
+        const turns = yield* TurnRepository.Service
+        for (const thread of yield* threads.listAll) {
+          const firstTurn = (yield* turns.list(thread.id))[0]
+          if (firstTurn?.status === "completed")
+            yield* titleThread(thread, firstTurn, (event) => publishInteractiveActivity(0, event))
+        }
+      }).pipe(
+        Effect.provide(executionDependencies),
+        Effect.catchCause((cause) =>
+          Effect.logError("thread-title.repair.failed").pipe(
+            Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+          ),
+        ),
+      )
       type ReconcileSchedule =
         | { readonly running: false }
         | { readonly running: true; readonly rescan: boolean; readonly completed: Deferred.Deferred<void> }
@@ -2711,6 +2806,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   ),
             ),
           )
+          yield* repairThreadTitles
           const repeat = yield* Ref.modify(reconcileSchedule, (state) => {
             if (!state.running) return [false, state] as const
             return state.rescan

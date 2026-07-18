@@ -264,6 +264,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           event._tag !== "ExecutionControlled" &&
           event._tag !== "ContextDiagnostics" &&
           event._tag !== "ThreadsListed" &&
+          event._tag !== "TitleCostUpdated" &&
           event._tag !== "ThreadTitled" &&
           event._tag !== "ThreadActivated" &&
           event._tag !== "ThreadPreviewLoaded" &&

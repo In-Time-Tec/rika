@@ -295,6 +295,14 @@ export type InteractiveEvent =
       readonly messages: ReadonlyArray<string>
     }
   | {
+      readonly _tag: "TitleCostUpdated"
+      readonly threadId: Thread.ThreadId
+      readonly turnId: Turn.TurnId
+      readonly turnCostUsd: number
+      readonly threadCostUsd: number
+      readonly globalCostUsd: number
+    }
+  | {
       readonly _tag: "TranscriptPatched"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
@@ -396,6 +404,14 @@ export const InteractiveEventSchema = Schema.Union([
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,
     messages: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TitleCostUpdated"),
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    turnCostUsd: Schema.Finite,
+    threadCostUsd: Schema.Finite,
+    globalCostUsd: Schema.Finite,
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptPatched"),
