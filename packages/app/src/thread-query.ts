@@ -42,23 +42,49 @@ export class ArchivedThreadError extends Schema.TaggedErrorClass<ArchivedThreadE
 
 type Term = { readonly key: string; readonly value: string }
 const supported = new Set(["workspace", "repo", "ref", "author", "label", "file", "after", "before"])
-const parse = (query: string) => {
+const date = (value: string) => {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (parts === null) return undefined
+  const year = Number(parts[1])
+  const month = Number(parts[2])
+  const day = Number(parts[3])
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]!) return undefined
+  return Date.parse(value)
+}
+
+const parse = Effect.fn("ThreadQuery.parse")(function* (query: string) {
   const terms: Array<Term> = []
   const text: Array<string> = []
   for (const token of query.trim().split(/\s+/).filter(Boolean)) {
     const separator = token.indexOf(":")
-    const key = separator < 0 ? "" : token.slice(0, separator).toLowerCase()
-    const value = separator < 0 ? token : token.slice(separator + 1)
-    if (supported.has(key) && value.length > 0) terms.push({ key, value })
-    else text.push(token)
+    if (separator < 0) {
+      text.push(token)
+      continue
+    }
+    const key = token.slice(0, separator).toLowerCase()
+    const value = token.slice(separator + 1)
+    if (!supported.has(key) || value.length === 0)
+      return yield* QueryError.make({ message: `Invalid Thread query filter: ${token}` })
+    if ((key === "after" || key === "before") && date(value) === undefined)
+      return yield* QueryError.make({ message: `Invalid Thread query date: ${value}` })
+    terms.push({ key, value })
   }
   return { terms, text: text.join(" ") }
-}
+})
 
-const date = (value: string) => {
-  const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? undefined : parsed
-}
+const boundedInteger = Effect.fn("ThreadQuery.boundedInteger")(function* (
+  name: string,
+  value: number | undefined,
+  fallback: number,
+  maximum: number,
+) {
+  const resolved = value ?? fallback
+  if (!Number.isInteger(resolved) || resolved < 1 || resolved > maximum)
+    return yield* QueryError.make({ message: `${name} must be an integer from 1 to ${maximum}` })
+  return resolved
+})
 
 const matches = (
   thread: {
@@ -80,9 +106,9 @@ const matches = (
     )
   })
 
-const bound = (text: string, maximum: number): Result => ({
+const bound = (text: string, maximum: number, truncated = false): Result => ({
   text: text.slice(0, maximum),
-  truncated: text.length > maximum,
+  truncated: truncated || text.length > maximum,
 })
 
 export const layer = Layer.effect(
@@ -92,8 +118,8 @@ export const layer = Layer.effect(
     const turns = yield* TurnRepository.Service
     return Service.of({
       find: Effect.fn("ThreadQuery.find")(function* (input) {
-        const parsed = parse(input.query)
-        const limit = Math.min(Math.max(1, input.limit ?? 20), 100)
+        const parsed = yield* parse(input.query)
+        const limit = yield* boundedInteger("limit", input.limit, 20, 100)
         const found = yield* threads
           .list({
             includeArchived: input.includeArchived === true,
@@ -101,7 +127,8 @@ export const layer = Layer.effect(
             ...(parsed.text.length > 0 ? { query: parsed.text } : {}),
           })
           .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
-        const selected = found.filter((thread) => matches(thread, parsed.terms)).slice(0, limit)
+        const matched = found.filter((thread) => matches(thread, parsed.terms))
+        const selected = matched.slice(0, limit)
         return bound(
           selected
             .map((thread) =>
@@ -118,9 +145,14 @@ export const layer = Layer.effect(
             )
             .join("\n"),
           20_000,
+          matched.length > limit || matched.length === 100,
         )
       }),
       read: Effect.fn("ThreadQuery.read")(function* (input) {
+        if (input.threadId.trim().length === 0 || input.threadId.trim() !== input.threadId)
+          return yield* QueryError.make({ message: "threadId must be a non-empty identifier" })
+        const maxTurns = yield* boundedInteger("maxTurns", input.maxTurns, 50, 200)
+        const maxChars = yield* boundedInteger("maxChars", input.maxChars, 40_000, 40_000)
         const threadId = Thread.ThreadId.make(input.threadId)
         const thread = yield* threads
           .get(threadId)
@@ -131,14 +163,14 @@ export const layer = Layer.effect(
         const allTurns = yield* turns
           .list(threadId)
           .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
-        const selected = allTurns.slice(0, Math.min(Math.max(1, input.maxTurns ?? 50), 200))
+        const selected = allTurns.slice(0, maxTurns)
         const sections = selected.map((turn) =>
           [`## Turn ${turn.id} (${turn.status})`, `User: ${turn.prompt}`].join("\n"),
         )
         const text = [`# ${thread.title}`, `Thread: ${thread.id}`, `Workspace: ${thread.workspace}`, ...sections].join(
           "\n\n",
         )
-        return bound(text, Math.min(Math.max(1, input.maxChars ?? 40_000), 40_000))
+        return bound(text, maxChars, allTurns.length > maxTurns)
       }),
     })
   }),

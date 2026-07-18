@@ -523,6 +523,14 @@ const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
         ...Object.values(options.additionalToolkit.tools),
       )
 
+const availableTools = <AdditionalTools extends Record<string, Tool.Any>>(
+  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit">,
+  names: ReadonlyArray<string>,
+) => {
+  const available = toolkitFor(options).tools
+  return names.filter((name) => name in available)
+}
+
 export const remoteToolOptions = (parallelApiKey: Redacted.Redacted<string> | undefined) =>
   parallelApiKey === undefined ? {} : { apiKey: parallelApiKey }
 
@@ -1272,7 +1280,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                       rika_reasoning_effort: effort,
                     },
                   },
-                  tool_names: toolsAtDepth(preset.tool_names, depth),
+                  tool_names: availableTools(options, toolsAtDepth(preset.tool_names, depth)),
                   ...(policy === undefined ? {} : { compaction_policy: policy }),
                 },
                 metadata: {
@@ -1376,7 +1384,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   rika_reasoning_effort: route.effort,
                 },
               },
-              tool_names: toolsAtDepth(preset.tool_names, depth),
+              tool_names: availableTools(options, toolsAtDepth(preset.tool_names, depth)),
               permissions: preset.permissions,
               output_schema_ref: preset.output_schema_ref,
               compaction_policy: pinnedCompactionPolicy(route, routePin.compactionSummary),
@@ -1467,7 +1475,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                           rika_reasoning_effort: effort,
                         },
                       },
-                      tool_names: toolsAtDepth(preset.tool_names, childDepth),
+                      tool_names: availableTools(options, toolsAtDepth(preset.tool_names, childDepth)),
                       ...(policy === undefined ? {} : { compaction_policy: policy }),
                       metadata: {
                         ...preset.metadata,
@@ -1832,7 +1840,7 @@ export const layer = <
                         rika_reasoning_effort: selected.effort,
                       },
                     },
-                    tool_names: toolsAtDepth(preset.tool_names, childDepth),
+                    tool_names: availableTools(options, toolsAtDepth(preset.tool_names, childDepth)),
                     permissions: preset.permissions,
                     output_schema_ref: preset.output_schema_ref,
                     ...(policy === undefined ? {} : { compaction_policy: policy }),

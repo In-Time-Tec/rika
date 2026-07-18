@@ -50,6 +50,16 @@ describe("tool contracts", () => {
     expect(Catalog.get("apply_patch")?.presentation).toMatchObject({ family: "edit" })
     expect(Catalog.get("read_file")?.presentation).toMatchObject({ family: "explore", action: "read" })
     expect(Catalog.get("shell_command_status")?.presentation).toMatchObject({ family: "direct", action: "status" })
+    expect(Catalog.get("find_thread")?.presentation).toMatchObject({
+      family: "explore",
+      activeLabel: "Exploring",
+      completeLabel: "Explored",
+    })
+    expect(Catalog.get("read_thread")?.presentation).toMatchObject({
+      family: "direct",
+      activeLabel: "Reading Thread",
+      completeLabel: "Read Thread",
+    })
     expect(Catalog.get("oracle")?.presentation).toMatchObject({
       family: "agent",
       activeLabel: "Oracle exploring",

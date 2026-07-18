@@ -90,6 +90,15 @@ describe("product agent profiles", () => {
       "task",
     ])
     expect(childRunSpawnPermission).toEqual({ name: "relay.child_run.spawn", value: true })
+    expect(registered.ReadThread?.tool_names).toEqual([
+      "find_thread",
+      "read_thread",
+      "task",
+      "oracle",
+      "librarian",
+      "review",
+    ])
+    expect(registered.ReadThread?.permissions).toEqual(["thread.read"])
   })
 
   it.effect("uses the configured route for Painter and returns a typed unavailable error", () =>

@@ -1,5 +1,5 @@
 import { Agent, type ModelRegistry } from "@batonfx/core"
-import { AgentTools, Runtime as Tools } from "@rika/tools"
+import { AgentTools, Runtime as Tools, ThreadTools } from "@rika/tools"
 import { Effect, Function, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 
@@ -56,7 +56,7 @@ const definitions = {
   },
   ReadThread: {
     instructions: "Answer only from local thread transcripts and identify the threads used.",
-    tools: [],
+    tools: [ThreadTools.findThreadTool, ThreadTools.readThreadTool],
     permissions: ["thread.read"],
     schema: "rika.agent.read-thread.v1",
   },

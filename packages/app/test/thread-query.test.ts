@@ -33,6 +33,11 @@ const turn = (id: string, threadId: string, prompt: string): Turn.Turn => ({
   updatedAt: 2,
 })
 
+const queryWith = (threads: ReadonlyArray<Thread.Thread>, turns: ReadonlyArray<Turn.Turn>) =>
+  ThreadQuery.layer.pipe(
+    Layer.provide(Layer.merge(ThreadRepository.memoryLayer(threads), TurnRepository.memoryLayer(turns))),
+  )
+
 const queryLayer = ThreadQuery.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
@@ -52,7 +57,7 @@ describe("ThreadQuery", () => {
       const query = yield* ThreadQuery.Service
       const found = yield* query.find({
         query: "auth repo:acme label:bug author:alice ref:main file:src/auth.ts after:2026-01-01 before:2026-02-01",
-        limit: 999,
+        limit: 100,
       })
       expect(found.text).toContain('"id":"one"')
       expect(found.text).not.toContain('"id":"two"')
@@ -63,6 +68,8 @@ describe("ThreadQuery", () => {
   it.effect("requires explicit archived access and reports missing threads", () =>
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
+      expect((yield* query.find({ query: "Old" })).text).toBe("")
+      expect((yield* query.find({ query: "Old", includeArchived: true })).text).toContain('"id":"two"')
       expect((yield* Effect.flip(query.read({ threadId: "two" })))._tag).toBe("ArchivedThreadError")
       expect((yield* Effect.flip(query.read({ threadId: "missing" })))._tag).toBe("ThreadNotFoundError")
       expect((yield* query.read({ threadId: "two", includeArchived: true })).text).toContain("# Old work")
@@ -111,30 +118,82 @@ describe("ThreadQuery", () => {
     ),
   )
 
-  it.effect("covers invalid dates, unmatched metadata, limits, and empty text queries", () =>
+  it.effect("rejects invalid filters, dates, identifiers, and bounds", () =>
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
-      const invalid = yield* query.find({ query: "after:nope before:nope", limit: 0, includeArchived: true })
-      const unmatched = yield* query.find({ query: "label:nope", limit: -1 })
-      const empty = yield* query.find({ query: "", limit: 1 })
-      expect(invalid.text).toBe("")
-      expect(unmatched.text).toBe("")
-      expect(empty.text).toContain('"id":"one"')
-      expect((yield* query.read({ threadId: "one", maxTurns: 0, maxChars: 0 })).text).toHaveLength(1)
+      for (const input of [
+        { query: "unknown:value" },
+        { query: "label:" },
+        { query: "after:nope" },
+        { query: "before:2026-02-30" },
+        { query: "", limit: 0 },
+        { query: "", limit: 101 },
+        { query: "", limit: 1.5 },
+      ]) {
+        const failure = yield* Effect.flip(query.find(input))
+        expect(failure._tag).toBe("ThreadQueryError")
+      }
+      for (const input of [
+        { threadId: "" },
+        { threadId: "   " },
+        { threadId: "one", maxTurns: 0 },
+        { threadId: "one", maxTurns: 201 },
+        { threadId: "one", maxTurns: 1.5 },
+        { threadId: "one", maxChars: 0 },
+        { threadId: "one", maxChars: 40_001 },
+        { threadId: "one", maxChars: 1.5 },
+      ]) {
+        const failure = yield* Effect.flip(query.read(input))
+        expect(failure._tag).toBe("ThreadQueryError")
+      }
     }).pipe(provideLayer(queryLayer)),
   )
 
-  it.effect("applies workspace aliases, date boundaries, unknown terms, and turn limits", () =>
+  it.effect("applies workspace aliases and date boundaries", () =>
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
       expect((yield* query.find({ query: "workspace:ACME after:2026-01-10 before:2026-01-11" })).text).toContain(
         '"id":"one"',
       )
       expect((yield* query.find({ query: "after:2026-01-11" })).text).toBe("")
-      expect((yield* query.find({ query: "unknown:value" })).text).toBe("")
-      const limited = yield* query.read({ threadId: "one", maxTurns: 999, maxChars: 99_999 })
+      const limited = yield* query.read({ threadId: "one", maxTurns: 200, maxChars: 40_000 })
       expect(limited.truncated).toBe(false)
     }).pipe(provideLayer(queryLayer)),
+  )
+
+  it.effect("reports result and Turn truncation independently of text truncation", () =>
+    Effect.gen(function* () {
+      const query = yield* ThreadQuery.Service
+      const found = yield* query.find({ query: "", limit: 1, includeArchived: true })
+      const read = yield* query.read({ threadId: "one", maxTurns: 1, maxChars: 40_000 })
+      expect(found.text.split("\n")).toHaveLength(1)
+      expect(found.truncated).toBe(true)
+      expect(read.text).toContain("User: first")
+      expect(read.text).not.toContain("User: second")
+      expect(read.truncated).toBe(true)
+    }).pipe(
+      provideLayer(
+        queryWith(
+          [thread("one", "Ordered"), thread("two", "Second")],
+          [turn("turn-1", "one", "first"), { ...turn("turn-2", "one", "second"), createdAt: 2 }],
+        ),
+      ),
+    ),
+  )
+
+  it.effect("preserves repository source order when rendering Turns", () =>
+    Effect.gen(function* () {
+      const query = yield* ThreadQuery.Service
+      const read = yield* query.read({ threadId: "one" })
+      expect(read.text.indexOf("User: inserted first")).toBeLessThan(read.text.indexOf("User: inserted second"))
+    }).pipe(
+      provideLayer(
+        queryWith(
+          [thread("one", "Ordered")],
+          [turn("turn-z", "one", "inserted first"), turn("turn-a", "one", "inserted second")],
+        ),
+      ),
+    ),
   )
 
   it.effect("maps thread listing, lookup, and turn listing repository failures", () =>
