@@ -133,3 +133,51 @@ for (const scenario of [
     120_000,
   )
 }
+
+test(
+  "cancellation remains terminal across recovery and unknown revisions fail before dispatch",
+  () =>
+    runNative(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-workflow-cancel-" })
+          const database = path.join(directory, "relay.sqlite")
+          let host = yield* startHost(database, directory)
+          yield* host.ready
+          const pins = yield* host.request(Pins, "register")
+          const pin = pins.find((item) => item.name === "delivery")
+          if (pin === undefined) return yield* FixtureProcessError.make({ message: "missing delivery registration" })
+          const rows = fileSystem.readFileString(path.join(directory, "workflow-visible.ndjson")).pipe(
+            Effect.orElseSucceed(() => ""),
+            Effect.mapError((error) => FixtureProcessError.make({ message: String(error) })),
+          )
+          const invalid = yield* Effect.result(
+            host.request(State, "start", { name: "delivery", runId: "invalid", revision: 999 }),
+          )
+          expect(invalid._tag).toBe("Failure")
+          expect(yield* rows).toBe("")
+          yield* host
+            .request(State, "start", { name: "delivery", runId: "cancelled", revision: pin.revision })
+            .pipe(Effect.forkScoped)
+          yield* waitFor(rows, (text) => text.includes('"type":"dispatch"'))
+          expect(yield* host.request(State, "cancel", "cancelled")).toMatchObject({
+            status: "cancelled",
+            revision: pin.revision,
+            digest: pin.digest,
+          })
+          yield* host.kill
+          host = yield* startHost(database, directory)
+          yield* host.ready
+          yield* host.request(Schema.Unknown, "recover")
+          expect(yield* host.request(State, "inspect", "cancelled")).toMatchObject({
+            status: "cancelled",
+            revision: pin.revision,
+            digest: pin.digest,
+          })
+        }),
+      ),
+    ),
+  120_000,
+)

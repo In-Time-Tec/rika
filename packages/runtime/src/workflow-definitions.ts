@@ -166,7 +166,7 @@ export const compile = (input: DynamicDefinition): Workflow.RegisterDefinitionPa
         }
     }
   })
-  return {
+  return Schema.decodeUnknownSync(Workflow.RegisterDefinitionPayload)({
     id: workflowId(definition.name),
     definition: {
       version: 2,
@@ -175,7 +175,7 @@ export const compile = (input: DynamicDefinition): Workflow.RegisterDefinitionPa
       operations,
       metadata: { product: "rika", schema_version: definition.schemaVersion },
     },
-  }
+  })
 }
 
 const child = (id: string, profile: string, prompt: string) => ({ id, kind: "child" as const, profile, prompt })

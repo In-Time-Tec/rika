@@ -78,4 +78,69 @@ describe("workflow definitions", () => {
       tool_name: "git.status",
     })
   })
+
+  it.each([
+    {
+      name: "a missing entry",
+      definition: {
+        schemaVersion: 1 as const,
+        name: "invalid-entry",
+        entry: "missing",
+        operations: [{ id: "present", kind: "timer" as const, durationMs: 0 }],
+      },
+    },
+    {
+      name: "duplicate operation identifiers",
+      definition: {
+        schemaVersion: 1 as const,
+        name: "duplicate-operations",
+        entry: "same",
+        operations: [
+          { id: "same", kind: "timer" as const, durationMs: 0 },
+          { id: "same", kind: "approval" as const, prompt: "Continue?" },
+        ],
+      },
+    },
+    {
+      name: "an invalid retry limit",
+      definition: {
+        schemaVersion: 1 as const,
+        name: "invalid-retry",
+        entry: "retry",
+        operations: [
+          { id: "retry", kind: "retry" as const, operation: "work", maxAttempts: 0 },
+          { id: "work", kind: "child" as const, profile: "Task", prompt: "work" },
+        ],
+      },
+    },
+    {
+      name: "a join member outside its parallel operation",
+      definition: {
+        schemaVersion: 1 as const,
+        name: "invalid-join",
+        entry: "sequence",
+        operations: [
+          { id: "sequence", kind: "sequence" as const, operations: ["parallel", "join"] },
+          {
+            id: "parallel",
+            kind: "parallel" as const,
+            fanOutKey: "invalid-join",
+            operations: ["one"],
+            maxConcurrency: 1,
+          },
+          { id: "one", kind: "child" as const, profile: "Task", prompt: "one" },
+          { id: "two", kind: "child" as const, profile: "Task", prompt: "two" },
+          {
+            id: "join",
+            kind: "join" as const,
+            parallelOperation: "parallel",
+            members: ["two"],
+            policy: { _tag: "all" as const },
+          },
+        ],
+      },
+    },
+  ])("rejects $name before registration", ({ definition }) => {
+    expect(() => compile(definition)).toThrow()
+  })
 })

@@ -200,7 +200,7 @@ const WorkflowStart = Schema.Struct({
 })
 const WorkflowInspect = Schema.Struct({
   _tag: Schema.tag("Workflow"),
-  action: Schema.tag("inspect"),
+  action: Schema.Literals(["inspect", "cancel"]),
   runId: Schema.String,
 })
 

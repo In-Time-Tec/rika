@@ -27,7 +27,11 @@ const inspect = Command.make("inspect", { runId: Argument.string("run-id") }, ({
   dispatch({ _tag: "Workflow", action: "inspect", runId }),
 )
 
+const cancel = Command.make("cancel", { runId: Argument.string("run-id") }, ({ runId }) =>
+  dispatch({ _tag: "Workflow", action: "cancel", runId }),
+)
+
 export const command = Command.make("workflows").pipe(
-  Command.withDescription("Run and inspect built-in durable workflows"),
-  Command.withSubcommands([start, inspect]),
+  Command.withDescription("Run, inspect, and cancel built-in durable workflows"),
+  Command.withSubcommands([start, inspect, cancel]),
 )

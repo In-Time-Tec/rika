@@ -641,7 +641,7 @@ describe("Operation", () => {
     }).pipe(provideLayer(Operation.unavailableLayer)),
   )
 
-  it.effect("starts, inspects, and reports missing workflow runs", () =>
+  it.effect("starts, inspects, cancels, and reports missing workflow runs", () =>
     Effect.gen(function* () {
       const calls = yield* Ref.make<ReadonlyArray<string>>([])
       const workflowBackend = ExecutionBackend.Service.of({
@@ -675,6 +675,22 @@ describe("Operation", () => {
                   },
             ),
           ),
+        cancelWorkflow: (runId) =>
+          Ref.update(calls, (values) => [...values, `cancel:${runId}`]).pipe(
+            Effect.as(
+              runId === "missing"
+                ? undefined
+                : {
+                    runId,
+                    workflow: "delivery",
+                    revision: 2,
+                    digest: "digest",
+                    status: "cancelled" as const,
+                    createdAt: 1,
+                    updatedAt: 3,
+                  },
+            ),
+          ),
       })
       const layer = Layer.merge(
         TestConsole.layer,
@@ -691,10 +707,17 @@ describe("Operation", () => {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Workflow", action: "start", name: "delivery", runId: "run", revision: 2 })
         yield* operation.run({ _tag: "Workflow", action: "inspect", runId: "run" })
+        yield* operation.run({ _tag: "Workflow", action: "cancel", runId: "run" })
         return yield* Effect.result(operation.run({ _tag: "Workflow", action: "inspect", runId: "missing" }))
       }).pipe(provideLayer(layer))
       expect(output._tag).toBe("Failure")
-      expect(yield* Ref.get(calls)).toEqual(["register", "start:delivery:run:2", "inspect:run", "inspect:missing"])
+      expect(yield* Ref.get(calls)).toEqual([
+        "register",
+        "start:delivery:run:2",
+        "inspect:run",
+        "cancel:run",
+        "inspect:missing",
+      ])
     }),
   )
 

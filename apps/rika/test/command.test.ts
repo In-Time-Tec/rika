@@ -336,6 +336,7 @@ it.effect("dispatches catalog, extension, review, and maintenance operations", (
         { _tag: "Workflow", action: "start", name: "research-synthesis", runId: "research-1", revision: 2 },
       ],
       [["workflows", "inspect", "delivery-1"], { _tag: "Workflow", action: "inspect", runId: "delivery-1" }],
+      [["workflows", "cancel", "delivery-1"], { _tag: "Workflow", action: "cancel", runId: "delivery-1" }],
     ]
     for (const [argv, expected] of cases) expect(yield* capture(argv)).toEqual([expected])
   }),

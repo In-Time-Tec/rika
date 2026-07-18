@@ -7,6 +7,15 @@ const NamedItemJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String 
 const ThreadJson = Schema.fromJsonString(Schema.Struct({ id: Schema.String }))
 const ExportJson = Schema.fromJsonString(Schema.Struct({ thread: Schema.Struct({ id: Schema.String }) }))
 const EventJson = Schema.fromJsonString(Schema.Struct({ type: Schema.String }))
+const WorkflowJson = Schema.fromJsonString(
+  Schema.Struct({
+    runId: Schema.String,
+    workflow: Schema.String,
+    revision: Schema.Int,
+    digest: Schema.String,
+    status: Schema.Literals(["running", "completed", "failed", "cancelled"]),
+  }),
+)
 
 const fileTree = Effect.fn("CliContract.fileTree")(function* (root: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -264,6 +273,60 @@ describe("packaged CLI contract", () => {
         }),
       ),
     20_000,
+  )
+
+  test(
+    "workflow runs pin revisions and remain inspectable after cancellation",
+    () =>
+      runTest(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const workflow = yield* sandbox
+            yield* Effect.addFinalizer(() => workflow.dispose)
+            workflow.env.RIKA_INTERNAL_RESIDENT_GRACE = "1000"
+            workflow.env.RIKA_TEST_MODEL_SCRIPT = JSON.stringify([
+              { parts: [{ type: "text", text: "delayed research" }], delayMs: 10_000 },
+              { parts: [{ type: "text", text: "delayed research" }], delayMs: 10_000 },
+            ])
+            delete workflow.env.RIKA_TEST_MODEL_RESPONSE
+            const missingRevision = yield* run(
+              workflow,
+              ["workflows", "start", "delivery", "missing-revision", "--revision", "999"],
+              { timeout: 20_000 },
+            )
+            expect(missingRevision.exitCode).not.toBe(0)
+            const started = yield* run(workflow, ["workflows", "start", "research-synthesis", "research-run"], {
+              timeout: 20_000,
+            })
+            expect(started.exitCode).toBe(0)
+            const pin = Schema.decodeUnknownSync(WorkflowJson)(started.stdout)
+            expect(pin).toMatchObject({
+              runId: "research-run",
+              workflow: "research-synthesis",
+              revision: 1,
+              status: "running",
+            })
+            expect(pin.digest).toMatch(/^sha256:[a-f0-9]{64}$/)
+            const cancelled = yield* run(workflow, ["workflows", "cancel", "research-run"], { timeout: 20_000 })
+            expect(cancelled.exitCode).toBe(0)
+            expect(Schema.decodeUnknownSync(WorkflowJson)(cancelled.stdout)).toMatchObject({
+              runId: pin.runId,
+              revision: pin.revision,
+              digest: pin.digest,
+              status: "cancelled",
+            })
+            const inspected = yield* run(workflow, ["workflows", "inspect", "research-run"], { timeout: 20_000 })
+            expect(inspected.exitCode).toBe(0)
+            expect(Schema.decodeUnknownSync(WorkflowJson)(inspected.stdout)).toMatchObject({
+              runId: pin.runId,
+              revision: pin.revision,
+              digest: pin.digest,
+              status: "cancelled",
+            })
+          }),
+        ),
+      ),
+    60_000,
   )
 
   test("SIGINT tears down an interactive terminal process", () =>

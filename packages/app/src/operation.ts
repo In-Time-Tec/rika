@@ -3077,7 +3077,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 yield* Console.log(encodeJson(yield* backend.startWorkflow(input.name, input.runId, input.revision)))
                 return
               }
-              const inspection = yield* backend.inspectWorkflow(input.runId)
+              const inspection =
+                input.action === "inspect"
+                  ? yield* backend.inspectWorkflow(input.runId)
+                  : yield* backend.cancelWorkflow(input.runId)
               if (inspection === undefined) return yield* operationError(`Workflow run ${input.runId} does not exist`)
               yield* Console.log(encodeJson(inspection))
             })

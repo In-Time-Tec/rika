@@ -28,6 +28,7 @@ const Message = Schema.Union([
     value: Schema.Struct({ name: Schema.String, runId: Schema.String, revision: Schema.Finite }),
   }),
   Schema.Struct({ id: Schema.String, type: Schema.Literal("inspect"), value: Schema.String }),
+  Schema.Struct({ id: Schema.String, type: Schema.Literal("cancel"), value: Schema.String }),
 ])
 
 const decodeMessage = Schema.decodeEffect(Schema.fromJsonString(Message))
@@ -123,6 +124,7 @@ const main = Effect.gen(function* () {
       if (message.type === "register") return yield* backend.registerWorkflows()
       if (message.type === "start")
         return yield* backend.startWorkflow(message.value.name, message.value.runId, message.value.revision)
+      if (message.type === "cancel") return yield* backend.cancelWorkflow(message.value)
       return yield* backend.inspectWorkflow(message.value)
     }).pipe(Effect.provide(services), Effect.mapError(fixtureError))
     yield* send({ id: message.id, ok: true, value })
