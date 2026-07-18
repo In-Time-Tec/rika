@@ -44,6 +44,8 @@ it.effect("validates every MCP configuration shape and composition conflict", ()
         '{"servers":{"x":{"command":"c","cwd":1}}}',
         '{"servers":{"x":{"url":"https://example.test","headers":{"A":1}}}}',
         '{"servers":{"x":{"url":"not a url"}}}',
+        '{"servers":{"x":{"command":"cmd","url":"https://example.test"}}}',
+        '{"servers":{"x":{"command":""}}}',
         '{"servers":{"x":{}}}',
       ].map((document) => Effect.flip(compose(document))),
       { concurrency: "unbounded" },

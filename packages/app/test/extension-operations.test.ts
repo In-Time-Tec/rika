@@ -1,10 +1,12 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, FileSystem, Layer, Schema } from "effect"
 import { TestConsole } from "effect/testing"
 import { McpOAuth, SkillRegistry } from "@rika/extensions"
 import { ExtensionOperations } from "../src"
 import { provideLayer } from "./layer"
+
+const decodeJson = Schema.decodeSync(Schema.UnknownFromJsonString)
 
 describe("ExtensionOperations", () => {
   const oauthLayer = McpOAuth.testLayer({
@@ -153,7 +155,97 @@ describe("ExtensionOperations", () => {
     ),
   )
 
-  it.effect("handles non-object MCP state and existing extension generations", () =>
+  it.effect("rejects invalid lifecycle mutations without corrupting MCP state", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-app-mcp-validation-" })
+        const options = {
+          globalRoot: `${root}/global`,
+          workspaceRoot: `${root}/skills`,
+          configPath: `${root}/mcp.json`,
+          trustPath: `${root}/trust.json`,
+          generationsPath: `${root}/generations.json`,
+        }
+        const run = (input: Parameters<typeof ExtensionOperations.run>[0]) => ExtensionOperations.run(input)
+        const program = Effect.gen(function* () {
+          yield* run({ _tag: "Mcp", action: "add", name: "local", command: ["runner"] })
+          expect(
+            (yield* Effect.flip(run({ _tag: "Mcp", action: "add", name: "local", url: "https://example.test" })))
+              .message,
+          ).toContain("Duplicate server")
+          for (const action of ["remove", "enable", "disable", "approve"] as const) {
+            expect((yield* Effect.flip(run({ _tag: "Mcp", action, name: "missing" }))).message).toContain("not found")
+          }
+          expect(yield* fs.readFileString(options.configPath)).toContain('"command": "runner"')
+
+          yield* fs.writeFileString(options.configPath, '{"direct":{"command":"runner"},"disabled":{"command":"echo"}}')
+          yield* run({ _tag: "Mcp", action: "disable", name: "direct" })
+          yield* run({ _tag: "Mcp", action: "enable", name: "direct" })
+          yield* run({ _tag: "Mcp", action: "remove", name: "direct" })
+          yield* run({ _tag: "Mcp", action: "remove", name: "disabled" })
+          yield* run({ _tag: "Mcp", action: "add", name: "__proto__", command: ["runner"] })
+          const specialName = decodeJson(yield* fs.readFileString(options.configPath)) as {
+            readonly servers: Readonly<Record<string, unknown>>
+          }
+          expect(Object.hasOwn(specialName.servers, "__proto__")).toBe(true)
+          yield* run({ _tag: "Mcp", action: "remove", name: "__proto__" })
+
+          yield* fs.writeFileString(options.configPath, '{"servers":{"local":{"command":"runner"}},"disabled":"local"}')
+          expect((yield* Effect.flip(run({ _tag: "Mcp", action: "doctor" }))).message).toContain("disabled")
+          expect((yield* Effect.flip(run({ _tag: "Mcp", action: "disable", name: "local" }))).message).toContain(
+            "disabled",
+          )
+          yield* fs.writeFileString(options.configPath, '{"servers":{"local":{"command":"runner"}}}')
+          yield* fs.writeFileString(options.trustPath, '{"approved":"secret"}')
+          expect((yield* Effect.flip(run({ _tag: "Mcp", action: "approve", name: "local" }))).message).toContain(
+            "approved",
+          )
+        }).pipe(provideLayer(Layer.merge(ExtensionOperations.layer(options), oauthLayer)))
+        yield* program
+      }).pipe(
+        provideLayer(
+          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
+        ),
+      ),
+    ),
+  )
+
+  it.effect("serializes concurrent MCP definition updates", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-app-mcp-concurrency-" })
+        const options = {
+          globalRoot: `${root}/global`,
+          workspaceRoot: `${root}/skills`,
+          configPath: `${root}/mcp.json`,
+          trustPath: `${root}/trust.json`,
+          generationsPath: `${root}/generations.json`,
+        }
+        const names = Array.from({ length: 24 }, (_, index) => `server-${index}`)
+        const extensionLayer = Layer.merge(ExtensionOperations.layer(options), oauthLayer)
+        yield* Effect.forEach(
+          names,
+          (name) =>
+            ExtensionOperations.run({ _tag: "Mcp", action: "add", name, command: ["runner", name] }).pipe(
+              provideLayer(extensionLayer),
+            ),
+          { concurrency: "unbounded", discard: true },
+        )
+        const document = decodeJson(yield* fs.readFileString(options.configPath)) as {
+          readonly servers: Readonly<Record<string, unknown>>
+        }
+        expect(Object.keys(document.servers).toSorted()).toEqual(names.toSorted())
+      }).pipe(
+        provideLayer(
+          Layer.merge(BunServices.layer, SkillRegistry.fileSystemLayer.pipe(Layer.provide(BunServices.layer))),
+        ),
+      ),
+    ),
+  )
+
+  it.effect("rejects non-object MCP state and handles existing extension generations", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -169,9 +261,12 @@ describe("ExtensionOperations", () => {
         yield* fs.writeFileString(options.generationsPath, '{"extensions":{"plug":{"enabled":true,"generation":3}}}')
         const run = (input: Parameters<typeof ExtensionOperations.run>[0]) =>
           ExtensionOperations.run(input).pipe(provideLayer(Layer.merge(ExtensionOperations.layer(options), oauthLayer)))
-        yield* run({ _tag: "Mcp", action: "add", name: "remote", url: "https://example.test" })
+        expect(
+          (yield* Effect.flip(run({ _tag: "Mcp", action: "add", name: "remote", url: "https://example.test" })))
+            .message,
+        ).toContain("Invalid servers")
         yield* run({ _tag: "Extension", action: "rollback", name: "plug" })
-        expect(yield* fs.readFileString(options.configPath)).toContain('"remote"')
+        expect(yield* fs.readFileString(options.configPath)).toBe('{"servers":"invalid","disabled":["remote"]}')
         expect(yield* fs.readFileString(options.generationsPath)).toContain('"generation": 2')
       }).pipe(
         provideLayer(

@@ -1,5 +1,5 @@
 import { McpConfig, McpOAuth, SkillRegistry } from "@rika/extensions"
-import { Console, Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
+import { Console, Context, Effect, FileSystem, Layer, Path, Schema, Semaphore } from "effect"
 import type * as Operation from "./operation"
 
 export interface Options {
@@ -16,11 +16,15 @@ export class Error extends Schema.TaggedErrorClass<Error>()("@rika/app/Extension
 
 export interface Interface {
   readonly options: Options
+  readonly admission: Semaphore.Semaphore
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/app/extension-operations/Service") {}
 
-export const layer = (options: Options) => Layer.succeed(Service, Service.of({ options }))
+export const layer = (options: Options) => {
+  const admission = Semaphore.makeUnsafe(1)
+  return Layer.succeed(Service, Service.of({ options, admission }))
+}
 
 const Json = Schema.UnknownFromJsonString
 const JsonObject = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
@@ -54,6 +58,36 @@ const writeDocument = (fileSystem: FileSystem.FileSystem, path: Path.Path, filen
     Effect.andThen(fileSystem.writeFileString(filename, `${encodePrettyJson(value)}\n`)),
     Effect.mapError((cause) => Error.make({ message: String(cause) })),
   )
+
+const stringArray = (value: unknown, field: string) => {
+  if (value === undefined) return Effect.succeed<ReadonlyArray<string>>([])
+  if (Array.isArray(value) && value.every((item) => typeof item === "string")) return Effect.succeed(value)
+  return Effect.fail(Error.make({ message: `Invalid ${field}: expected an array of strings` }))
+}
+
+const readMcpConfiguration = Effect.fn("ExtensionOperations.readMcpConfiguration")(function* (
+  fileSystem: FileSystem.FileSystem,
+  filename: string,
+) {
+  const document = yield* readDocument(fileSystem, filename)
+  if (
+    Object.hasOwn(document, "servers") &&
+    (typeof document.servers !== "object" || document.servers === null || Array.isArray(document.servers))
+  )
+    return yield* Error.make({ message: "Invalid servers: expected an object" })
+  const wrapped = Object.hasOwn(document, "servers")
+  const servers = { ...((wrapped ? document.servers : document) as Record<string, unknown>) }
+  const configured = yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
+    Effect.mapError((cause) => Error.make({ message: cause.message })),
+  )
+  const disabledValues = yield* stringArray(wrapped ? document.disabled : undefined, "disabled")
+  const disabled = new Set(disabledValues)
+  const names = new Set(configured.map((server) => server.name))
+  const unknownDisabled = disabledValues.find((name) => !names.has(name))
+  if (unknownDisabled !== undefined)
+    return yield* Error.make({ message: `Disabled MCP server not found: ${unknownDisabled}` })
+  return { document, wrapped, servers, configured, disabled, names }
+})
 
 export const run = Effect.fn("ExtensionOperations.run")(function* (
   input: Extract<Operation.Input, { readonly _tag: "Skill" | "Mcp" | "Extension" }>,
@@ -106,22 +140,21 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
     return
   }
   if (input._tag === "Mcp") {
-    const document = yield* readDocument(fileSystem, options.configPath)
-    const servers =
-      typeof document.servers === "object" && document.servers !== null
-        ? { ...(document.servers as Record<string, unknown>) }
-        : {}
     if (input.action === "oauth-login" || input.action === "oauth-logout" || input.action === "oauth-status") {
-      const oauth = yield* McpOAuth.Service
-      const configured = yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
-        Effect.mapError((cause) => Error.make({ message: cause.message })),
+      const selected = yield* service.admission.withPermit(
+        readMcpConfiguration(fileSystem, options.configPath).pipe(
+          Effect.map(({ configured }) => {
+            const remote = configured.filter((server) => server.kind === "remote")
+            return input.action === "oauth-status" && input.name === undefined
+              ? remote
+              : remote.filter((server) => server.name === input.name)
+          }),
+        ),
       )
-      const remote = configured.filter((server) => server.kind === "remote")
       const name = input.name
-      const selected =
-        input.action === "oauth-status" && name === undefined ? remote : remote.filter((server) => server.name === name)
       if (selected.length === 0 && name !== undefined)
         return yield* Error.make({ message: `Remote MCP server not found: ${name}` })
+      const oauth = yield* McpOAuth.Service
       if (input.action === "oauth-login")
         yield* oauth
           .login(input.name, selected[0]!.url)
@@ -138,43 +171,57 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
       }
       return
     }
-    if (input.action === "list" || input.action === "doctor") {
-      const composed = yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
-        Effect.mapError((cause) => Error.make({ message: cause.message })),
-      )
-      yield* Console.log(
-        encodeJson(
-          composed.map((server) => ({
-            name: server.name,
-            kind: server.kind,
-            source: server.source,
-            enabled: !((document.disabled as Array<string> | undefined) ?? []).includes(server.name),
-          })),
-        ),
-      )
-      return
-    }
-    if (input.action === "approve") {
-      const approved = new Set(
-        ((yield* readDocument(fileSystem, options.trustPath)).approved as Array<string> | undefined) ?? [],
-      )
-      approved.add(`${input.workspace ?? options.workspaceRoot}:${input.name}`)
-      yield* writeDocument(fileSystem, path, options.trustPath, { approved: [...approved].toSorted() })
-      return
-    }
-    if (input.action === "add")
-      servers[input.name] =
-        "url" in input ? { url: input.url } : { command: input.command[0], args: input.command.slice(1) }
-    if (input.action === "remove") delete servers[input.name]
-    const disabled = new Set((document.disabled as Array<string> | undefined) ?? [])
-    if (input.action === "enable") disabled.delete(input.name)
-    if (input.action === "disable") disabled.add(input.name)
-    yield* writeDocument(fileSystem, path, options.configPath, {
-      ...document,
-      servers,
-      disabled: [...disabled].toSorted(),
-    })
-    return
+    return yield* service.admission.withPermit(
+      Effect.gen(function* () {
+        const configuration = yield* readMcpConfiguration(fileSystem, options.configPath)
+        const { document, wrapped, configured, disabled, names } = configuration
+        let { servers } = configuration
+        if (input.action === "list" || input.action === "doctor") {
+          yield* Console.log(
+            encodeJson(
+              configured.map((server) => ({
+                name: server.name,
+                kind: server.kind,
+                source: server.source,
+                enabled: !disabled.has(server.name),
+              })),
+            ),
+          )
+          return
+        }
+        if (input.action === "add" && names.has(input.name))
+          return yield* Error.make({ message: `Duplicate server: ${input.name}` })
+        if ("name" in input && input.action !== "add" && !names.has(input.name))
+          return yield* Error.make({ message: `MCP server not found: ${input.name}` })
+        if (input.action === "approve") {
+          const trust = yield* readDocument(fileSystem, options.trustPath)
+          const approved = new Set(yield* stringArray(trust.approved, "approved"))
+          approved.add(`${input.workspace ?? options.workspaceRoot}:${input.name}`)
+          yield* writeDocument(fileSystem, path, options.trustPath, { ...trust, approved: [...approved].toSorted() })
+          return
+        }
+        if (input.action === "add") {
+          const definition =
+            "url" in input ? { url: input.url } : { command: input.command[0], args: input.command.slice(1) }
+          servers = { ...servers, [input.name]: definition }
+        }
+        if (input.action === "remove") {
+          delete servers[input.name]
+          disabled.delete(input.name)
+        }
+        if (input.action === "enable") disabled.delete(input.name)
+        if (input.action === "disable") disabled.add(input.name)
+        yield* McpConfig.compose({ workspace: encodeJson({ servers }) }).pipe(
+          Effect.mapError((cause) => Error.make({ message: cause.message })),
+        )
+        yield* writeDocument(fileSystem, path, options.configPath, {
+          ...(wrapped ? document : {}),
+          servers,
+          disabled: [...disabled].toSorted(),
+        })
+        return
+      }),
+    )
   }
   const state = yield* readDocument(fileSystem, options.generationsPath)
   const extensions = {

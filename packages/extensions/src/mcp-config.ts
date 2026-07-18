@@ -59,7 +59,10 @@ const parse = (content: string, source: Source, digest: string): Effect.Effect<R
           for (const [name, raw] of Object.entries(servers)) {
             if (typeof raw !== "object" || raw === null || Array.isArray(raw))
               throw new Error(`Invalid server: ${name}`)
-            if ("command" in raw && typeof raw.command === "string") {
+            const hasCommand = "command" in raw
+            const hasUrl = "url" in raw
+            if (hasCommand === hasUrl) throw new Error(`Server requires exactly one of command or url: ${name}`)
+            if (hasCommand && typeof raw.command === "string" && raw.command.length > 0) {
               const args = "args" in raw ? raw.args : []
               const environment = "env" in raw ? record(raw.env) : {}
               if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string") || environment === undefined)
@@ -78,7 +81,7 @@ const parse = (content: string, source: Source, digest: string): Effect.Effect<R
               })
               continue
             }
-            if ("url" in raw && typeof raw.url === "string") {
+            if (hasUrl && typeof raw.url === "string") {
               const headers = "headers" in raw ? record(raw.headers) : {}
               if (headers === undefined) throw new Error(`Invalid headers: ${name}`)
               const url = new URL(raw.url).toString()
