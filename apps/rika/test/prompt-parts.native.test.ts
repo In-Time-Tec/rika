@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { afterEach, expect, test } from "bun:test"
+import { afterEach, expect, test } from "vitest"
 import { Config, Data, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner"
@@ -333,7 +333,7 @@ test("persists terminal image paste bytes with their media type", () =>
       expect(relative).toBe(".rika/pasted/paste-42-00000000-0000-0000-0000-000000000001.webp")
       if (relative === undefined) return yield* new TestFailure({ operation: "create WebP path", cause: relative })
       expect(yield* persistPastedImage(root, relative, bytes)).toBe(true)
-      expect(yield* fileSystem.readFile(path.join(root, relative))).toEqual(bytes)
+      expect(Array.from(yield* fileSystem.readFile(path.join(root, relative)))).toEqual(Array.from(bytes))
     }),
   ))
 

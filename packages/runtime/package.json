@@ -12,7 +12,6 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@effect/*' --external '@relayfx/*' --external '@batonfx/*'",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/runtime/src packages/runtime/test",
-    "test": "bun --bun vitest --root ../.. run packages/runtime/test && bun test test/execution-backend.native.test.ts && bun test test/standard-tool-transcripts.native.test.ts && bun test test/multi-agent.native.test.ts && bun test test/workflow.native.test.ts && bun test test/subagent-spawn.native.test.ts",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {

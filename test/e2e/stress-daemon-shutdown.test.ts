@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Config, Effect } from "effect"
 import { assertAndRemoveExpectedOpenLogs, assertNoResidueFiles } from "./lease-files"
 import { startPackagedPty } from "./packaged-pty"

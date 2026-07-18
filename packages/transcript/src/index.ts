@@ -32,6 +32,8 @@ const outputText = (output: unknown): string => {
 
 const eventId = (turnId: string, id: string): string => (turnId.length === 0 ? id : `${turnId}:${id}`)
 
+const executionKey = (value: string): string => value.replace(/^execution:/, "")
+
 const rawToolId = (event: SourceEvent): string => {
   const value = event.type === "tool.result.received" ? resultPayload(event) : callPayload(event)
   return string(value.tool_call_id ?? value.call_id ?? value.callId ?? value.id, event.cursor)
@@ -188,6 +190,17 @@ const inputString = (input: Record<string, unknown>, keys: ReadonlyArray<string>
   return undefined
 }
 
+const inputContentText = (input: Record<string, unknown>): string | undefined => {
+  if (!Array.isArray(input.input)) return undefined
+  const text = input.input
+    .flatMap((part) => {
+      const value = record(part)
+      return value.type === "text" && typeof value.text === "string" ? [value.text] : []
+    })
+    .join("\n")
+  return text.length === 0 ? undefined : text
+}
+
 const detailFor = (name: string, inputText: string): string => {
   const normalizedName = name.toLowerCase()
   const input = inputRecord(inputText)
@@ -215,7 +228,7 @@ const detailFor = (name: string, inputText: string): string => {
   if (normalizedName === "read_thread") return inputString(input, ["threadId", "thread_id", "id"]) ?? ""
   if (normalizedName === "apply_patch") return ""
   if (path !== undefined) return path
-  return inputString(input, ["description", "prompt", "task", "query", "objective"]) ?? ""
+  return inputString(input, ["description", "prompt", "task", "query", "objective"]) ?? inputContentText(input) ?? ""
 }
 
 const inputFiles = (id: string, name: string, inputText: string): ReadonlyArray<ToolFile> => {
@@ -276,6 +289,22 @@ const toolAt = (projection: Projection, id: string): Extract<Block, { _tag: "Too
   const index = toolIndex(projection, id)
   const content = index < 0 ? undefined : projection.units[index]?.content
   return content?._tag === "Block" && content.block._tag === "ToolCall" ? content.block : undefined
+}
+
+const childToolAt = (projection: Projection, childId: string): Extract<Block, { _tag: "ToolCall" }> | undefined =>
+  projection.units
+    .map((candidate) => (candidate.content._tag === "Block" ? candidate.content.block : undefined))
+    .find(
+      (block): block is Extract<Block, { readonly _tag: "ToolCall" }> =>
+        block?._tag === "ToolCall" &&
+        block.childId !== undefined &&
+        executionKey(block.childId) === executionKey(childId),
+    )
+
+const childToolCallId = (childId: string): string | undefined => {
+  const marker = ":child:"
+  const index = childId.lastIndexOf(marker)
+  return index < 0 ? undefined : childId.slice(index + marker.length)
 }
 
 const updateTool = (
@@ -398,22 +427,43 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
     event.cursor,
   )
   const correlatedToolId = string(value.tool_call_id ?? value.parent_tool_call_id)
-  if (correlatedToolId.length > 0) {
-    const id = eventId(turnId, correlatedToolId)
+  const encodedToolId = childToolCallId(childId)
+  const linkedTool =
+    correlatedToolId.length > 0
+      ? toolAt(projection, eventId(turnId, correlatedToolId))
+      : (childToolAt(projection, childId) ??
+        (encodedToolId === undefined ? undefined : toolAt(projection, eventId(turnId, encodedToolId))))
+  if (linkedTool !== undefined) {
+    const id = linkedTool.id
+    const status = childStatus(event, value)
+    const profile = string(value.profile ?? value.preset_name ?? value.name).toLowerCase()
+    const presentation =
+      profile.length === 0
+        ? linkedTool.presentation
+        : Catalog.resolvePresentation(
+            profile === "task" || profile === "child" || profile === "subagent"
+              ? "task"
+              : profile === "oracle" || profile === "librarian"
+                ? profile
+                : `transfer_to_${profile}`,
+          )
     const updated = updateTool(projection, id, event.sequence, (tool) => ({
       ...tool,
       childId,
-      status:
-        childStatus(event, value) === "failed"
-          ? "failed"
-          : childStatus(event, value) === "running"
-            ? "running"
-            : "complete",
+      status,
+      presentation,
       ...(string(value.summary ?? value.output ?? value.error).length === 0
         ? {}
         : { output: string(value.summary ?? value.output ?? value.error) }),
     }))
-    if (updated !== projection) return updated
+    if (updated !== projection)
+      return {
+        ...updated,
+        units: updated.units.filter((candidate) => {
+          const block = candidate.content._tag === "Block" ? candidate.content.block : undefined
+          return block?._tag !== "ChildAgent" || executionKey(block.id) !== executionKey(childId)
+        }),
+      }
   }
   const key = `child:${eventId(turnId, childId)}`
   const current = projection.units.find((candidate) => candidate.key === key)
@@ -550,11 +600,13 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
     typeof value.error === "string" ||
     record(output)._tag === "ToolError" ||
     (process?.exitCode !== undefined && process.exitCode !== 0)
+  const errorText = string(value.error, string(record(output).message))
+  const resultText = failed && errorText.length > 0 ? errorText : outputText(output)
   const diff = string(record(output).diff)
   const updated = updateTool(projection, id, event.sequence, (tool) => ({
     ...tool,
     status: failed ? "failed" : process?.running === true ? "running" : "complete",
-    output: outputText(output),
+    output: resultText,
     ...(process === undefined ? {} : { process: { ...tool.process, ...process } }),
     files:
       diff.length > 0
@@ -562,7 +614,7 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
         : tool.files.map((file) => ({ ...file, preview: false, status: failed ? "failed" : "complete" })),
   }))
   if (updated !== projection) return updated
-  const result: Block = { _tag: "ToolResult", id, output: outputText(output), failed }
+  const result: Block = { _tag: "ToolResult", id, output: resultText, failed }
   return upsertUnit(
     projection,
     unit(`tool-result:${id}`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block: result }),
@@ -665,4 +717,29 @@ export const project: {
   for (const event of events.toSorted((left, right) => left.sequence - right.sequence))
     projection = applyEvent(projection, event)
   return projection
+})
+
+export interface NestedProjection {
+  readonly parentId: string
+  readonly projection: Projection
+}
+
+const attachParent = (candidate: Unit, parentId: string): Unit => ({ ...candidate, parentId })
+const assignOrder = (candidate: Unit, sequence: number): Unit => ({
+  ...candidate,
+  order: { sequence, part: 0 },
+})
+
+export const withNestedProjections: {
+  (root: Projection, nested: ReadonlyArray<NestedProjection>): Projection
+  (nested: ReadonlyArray<NestedProjection>): (root: Projection) => Projection
+} = Function.dual(2, (root: Projection, nested: ReadonlyArray<NestedProjection>): Projection => {
+  const rootTurnId = root.units.find((candidate) => candidate.parentId === undefined)?.turnId ?? root.units[0]?.turnId
+  const units = [
+    ...root.units.filter((candidate) => candidate.parentId === undefined && candidate.turnId === rootTurnId),
+    ...nested.flatMap(({ parentId, projection }) =>
+      projection.units.map((candidate) => attachParent(candidate, parentId)),
+    ),
+  ].map(assignOrder)
+  return { ...root, units }
 })

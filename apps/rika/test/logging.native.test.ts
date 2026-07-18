@@ -1,5 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
+import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Layer } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
@@ -21,7 +22,7 @@ test("renames the open diagnostics log on a process.exit that bypasses the scope
         const dataRoot = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-hardexit-" })
         const handle = yield* spawner.spawn(
           ChildProcess.make("bun", ["test/fixtures/logging-hardexit.ts"], {
-            cwd: import.meta.dir.replace(/\/test$/, ""),
+            cwd: fileURLToPath(new URL("..", import.meta.url)),
             stdin: "ignore",
             stdout: "ignore",
             stderr: "ignore",
@@ -48,7 +49,7 @@ test("renames the open diagnostics log before another beforeExit listener tears 
         const dataRoot = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-beforeexit-" })
         const handle = yield* spawner.spawn(
           ChildProcess.make("bun", ["test/fixtures/logging-beforeexit.ts"], {
-            cwd: import.meta.dir.replace(/\/test$/, ""),
+            cwd: fileURLToPath(new URL("..", import.meta.url)),
             stdin: "ignore",
             stdout: "ignore",
             stderr: "ignore",

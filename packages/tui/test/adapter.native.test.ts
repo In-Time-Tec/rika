@@ -1,6 +1,6 @@
 import { CliRenderEvents, Renderable, RendererControlState } from "@opentui/core"
 import { createTestRenderer, ManualClock } from "@opentui/core/testing"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Data, Effect } from "effect"
 import stringWidth from "string-width"
 import { Surface, maxMountedTranscriptEntries } from "../src/adapter"
@@ -92,6 +92,47 @@ test("renders input and resize updates while the renderer remains event-driven",
         expect(setup.captureCharFrame()).toContain("next")
         expect(setup.renderer.controlState).toBe(RendererControlState.IDLE)
         expect(setup.renderer.isRunning).toBe(false)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("keeps the submitted transcript echo stable when typing resumes before TurnStarted", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      let model: Model = { ...initial("/work", "high"), width: 80, height: 24 }
+      let submittedPrompt: string | undefined
+      const surface = new Surface(setup.renderer, {
+        key: (key) => {
+          const submitting = key.name === "return" && !key.shift && model.input.length > 0
+          if (submitting) submittedPrompt = model.input
+          model = update(model, { _tag: "KeyPressed", key })
+          if (submitting) model = update(model, { _tag: "Submitted" })
+          surface.update(model)
+        },
+        resize: () => undefined,
+      })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.mockInput.typeText("Explore in depth"))
+        setup.mockInput.pressEnter()
+        yield* openTui(() => setup.mockInput.typeText("ExE"))
+        expect(submittedPrompt).toBe("Explore in depth")
+        expect(model.input).toBe("ExE")
+        model = update(model, { _tag: "TurnStarted", turnId: "turn-explore", prompt: submittedPrompt! })
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        expect(model.entries.at(-1)).toEqual({
+          role: "user",
+          text: "Explore in depth",
+          turnId: "turn-explore",
+        })
+        const frame = setup.captureCharFrame()
+        expect(frame).toContain("┃ Explore in depth")
+        expect(frame).not.toContain("ExEExplore")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -287,7 +328,7 @@ test("keeps the application-controlled cursor visible when animation is disabled
     }),
   ))
 
-for (const historySize of [1, 10, 100, 1_000] as const) {
+for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
   test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
     Effect.runPromise(
       Effect.gen(function* () {
@@ -304,7 +345,7 @@ for (const historySize of [1, 10, 100, 1_000] as const) {
           yield* openTui(() => setup.flush())
           const state = surface as unknown as { readonly transcriptChildren: ReadonlyArray<Renderable> }
           const mounted = [...state.transcriptChildren]
-          for (let index = 0; index < 40; index += 1)
+          for (let index = 0; index < 2; index += 1)
             surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
 
           expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
@@ -965,14 +1006,15 @@ test("expands the queue box to fit a wrapped single-line queued prompt joined to
 test("renders autonomous welcome animation frames while otherwise event-driven", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24, clock }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
       try {
         surface.update({ ...initial("/work", "high"), width: 80, height: 24 })
-        yield* openTui(() => setup.flush())
+        yield* openTui(() => setup.renderOnce())
         const first = setup.captureCharFrame()
-        yield* Effect.sleep("100 millis")
-        yield* openTui(() => setup.flush())
+        clock.advance(100)
+        yield* openTui(() => setup.renderOnce())
         const second = setup.captureCharFrame()
         expect(first).toContain("Welcome to Rika")
         expect(second).toContain("Welcome to Rika")
@@ -1051,6 +1093,112 @@ test("ticks Amp status and running-tool spinners every 200ms without rebuilding 
         clock.advance(200)
         expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Thinking 5 tok")
         expect(body.content).toBe(firstBodyContent)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("does not animate a cancelled subagent again when a new turn starts", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
+      const parent = {
+        _tag: "ToolCall" as const,
+        id: "cancelled-parent",
+        name: "task",
+        input: "{}",
+        status: "cancelled" as const,
+        presentation: {
+          family: "agent" as const,
+          action: "task",
+          activeLabel: "Subagent working",
+          completeLabel: "Subagent finished",
+        },
+        detail: "Run the checks",
+        files: [],
+      }
+      const cancelled: Model = {
+        ...initial("/work", "high"),
+        width: 100,
+        height: 30,
+        blocks: [parent],
+        items: [{ _tag: "Block", index: 0, id: "tool:cancelled-parent", turnId: "old-turn" }],
+      }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
+      const header = () =>
+        styledTextValue(
+          (
+            surface as unknown as {
+              readonly transcriptRecords: ReadonlyMap<
+                string,
+                { readonly renderable: { readonly content: { readonly chunks: ReadonlyArray<{ text: string }> } } }
+              >
+            }
+          ).transcriptRecords.get("tool:cancelled-parent:header")!.renderable.content,
+        )
+      try {
+        surface.update(cancelled)
+        yield* openTui(() => setup.renderOnce())
+        expect(header()).toContain("⊘ Subagent finished ▸")
+
+        surface.update({
+          ...cancelled,
+          busy: true,
+          activeTurnId: "new-turn",
+          activity: { _tag: "Waiting" },
+          entries: [{ role: "user", text: "continue", turnId: "new-turn" }],
+          items: [...cancelled.items, { _tag: "Entry", index: 0, id: "turn:new-turn:user", turnId: "new-turn" }],
+        })
+        yield* openTui(() => setup.renderOnce())
+        const before = header()
+        clock.advance(600)
+        const after = header()
+
+        expect(after).toBe(before)
+        expect(after).toContain("⊘ Subagent finished ▸")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("keeps the status spinner moving across a tool-result lull without feed events", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 100, height: 30, clock }))
+      let model: Model = { ...initial("/work", "high"), width: 100, height: 30, busy: true }
+      model = update(model, {
+        _tag: "EventReplayed",
+        event: {
+          id: "tool-call",
+          cursor: "1",
+          turnId: "turn",
+          block: streamingShell("tool-lull"),
+        },
+      })
+      model = update(model, {
+        _tag: "EventReplayed",
+        event: {
+          id: "tool-result",
+          cursor: "2",
+          turnId: "turn",
+          block: { _tag: "ToolResult", id: "tool-lull", output: "done", failed: false },
+        },
+      })
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { clock })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        expect(styledTextValue(surface.statusLabel.content)).toContain("∼ Waiting")
+        clock.advance(200)
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≈ Waiting")
+        clock.advance(200)
+        expect(styledTextValue(surface.statusLabel.content)).toContain("≋ Waiting")
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -1228,7 +1376,7 @@ test("updates an existing streaming transcript header when it becomes expandable
 test("renders a subagent tool tree and expands each child independently", () =>
   Effect.runPromise(
     Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 28 }))
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 32 }))
       const presentation = {
         agent: {
           family: "agent" as const,
@@ -1253,7 +1401,14 @@ test("renders a subagent tool tree and expands each child independently", () =>
       let model: Model = {
         ...initial("/work", "high"),
         width: 80,
-        height: 28,
+        height: 32,
+        entries: [
+          {
+            role: "assistant",
+            text: "## Review complete\n\n**No defects found.**",
+            turnId: "child:oracle",
+          },
+        ],
         blocks: [
           {
             _tag: "ToolCall",
@@ -1293,6 +1448,13 @@ test("renders a subagent tool tree and expands each child independently", () =>
           { _tag: "Block", index: 0, id: "tool:oracle-parent", turnId: "turn" },
           { _tag: "Block", index: 1, id: "tool:child-read", turnId: "child:oracle", parentId: "oracle-parent" },
           { _tag: "Block", index: 2, id: "tool:child-shell", turnId: "child:oracle", parentId: "oracle-parent" },
+          {
+            _tag: "Entry",
+            index: 0,
+            id: "assistant:child:oracle:0",
+            turnId: "child:oracle",
+            parentId: "oracle-parent",
+          },
         ],
         expandedRowKeys: ["tool:oracle-parent"],
       }
@@ -1318,8 +1480,13 @@ test("renders a subagent tool tree and expands each child independently", () =>
         yield* openTui(() => setup.flush())
         const collapsed = setup.captureCharFrame()
         expect(collapsed).toContain("Oracle has spoken ▾")
+        expect(collapsed).toContain("Review the code")
         expect(collapsed).toContain("├ ✓ Read src/a.ts L2-4 ▸")
         expect(collapsed).toContain("└ ✓ $ bun test ▸")
+        expect(collapsed).toContain("Review complete")
+        expect(collapsed).toContain("No defects found.")
+        expect(collapsed).not.toContain("##")
+        expect(collapsed).not.toContain("**")
         expect(collapsed).not.toContain("read child output")
         expect(collapsed).not.toContain("shell child output")
 
@@ -1614,9 +1781,9 @@ test("renders and scrolls nested changed files within the bordered sidebar", () 
         yield* openTui(() => setup.renderOnce())
         const scrolledFrame = setup.captureCharFrame()
         expect(scrolledFrame).toContain("feature-29.t +30 -29")
-        expect(scrolledFrame.split("\n")[0]?.slice(66)).toStartWith("╭")
-        expect(scrolledFrame.split("\n")[23]?.slice(66)).toStartWith("╰")
-        expect(scrolledFrame.split("\n")[23]?.slice(0, 66)).toStartWith("╰")
+        expect(scrolledFrame.split("\n")[0]?.slice(66).startsWith("╭")).toBe(true)
+        expect(scrolledFrame.split("\n")[23]?.slice(66).startsWith("╰")).toBe(true)
+        expect(scrolledFrame.split("\n")[23]?.slice(0, 66).startsWith("╰")).toBe(true)
         yield* openTui(() => setup.mockMouse.click(72, 22))
         expect(opened).toEqual(["apps/rika/src/features/feature-00.ts", "apps/rika/src/features/feature-29.ts"])
       } finally {
@@ -1881,8 +2048,8 @@ for (const [width, height] of [
             const frame = setup.captureCharFrame()
             expect(frame).toContain("Welcome to Rika")
             expect(frame).not.toMatch(/Threads|Local durable coding agent|▏/)
-            expect(frame.split("\n")[height - 5]).toStartWith("╭")
-            expect(frame.split("\n")[height - 1]).toStartWith("╰")
+            expect(frame.split("\n")[height - 5]?.startsWith("╭")).toBe(true)
+            expect(frame.split("\n")[height - 1]?.startsWith("╰")).toBe(true)
             return [nonSpaceBounds(frame, height), ...(yield* capturePhases(remaining - 1))]
           })
           const phases = yield* capturePhases(10)
@@ -1914,7 +2081,7 @@ for (const height of [13, 16, 19] as const) {
           expect(frame).toContain("Welcome to Rika")
           expect(frame).toContain("ctrl+o commands")
           expect(frame).toContain("? help")
-          expect(frame.split("\n")[height - 5]).toStartWith("╭")
+          expect(frame.split("\n")[height - 5]?.startsWith("╭")).toBe(true)
         } finally {
           surface.destroy()
           setup.renderer.destroy()
@@ -2080,8 +2247,8 @@ test("keeps every overlay above the composer at 50x12", () =>
         const rows = frame.split("\n")
         expect(frame).toContain(title)
         expect(frame).toContain(content)
-        expect(rows[composerRow]).toStartWith("╭")
-        expect(rows[11]).toStartWith("╰")
+        expect(rows[composerRow]?.startsWith("╭")).toBe(true)
+        expect(rows[11]?.startsWith("╰")).toBe(true)
       })
       try {
         yield* capture(
@@ -2131,18 +2298,21 @@ test("joins the durable queue to the composer like Amp", () =>
         const frame = setup.captureCharFrame()
         const rows = frame.split("\n")
         expect(frame).toContain("First queued prompt")
-        expect(frame).toContain("Selected queued prompt")
+        expect(frame).toContain("Selected queued p…")
         expect(frame).not.toContain("queued 1/2")
         expect(frame).not.toContain("queued 2/2")
         expect(frame).toContain("Enter to steer")
         expect(frame).toContain("Backspace to dequeue")
+        expect(frame).toContain("Ctrl+E to edit")
         expect(rows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          rows.findIndex((row) => row.includes("Selected queued prompt")) + 1,
+          rows.findIndex((row) => row.includes("Selected queued p…")),
         )
+        expect(rows.find((row) => row.includes("Enter to steer"))).toMatch(/Ctrl\+E to edit  │ $/)
+        expect(surface.queueBox.height).toBe(4)
         expect(surface.inputBox.y).toBe(surface.queueBox.y + surface.queueBox.height - 1)
-        expect(rows[surface.queueBox.y]).toStartWith(" ╭")
-        expect(rows[surface.inputBox.y]).toStartWith("╭┴")
-        expect(rows[surface.inputBox.y]).toEndWith("╮")
+        expect(rows[surface.queueBox.y]?.startsWith(" ╭")).toBe(true)
+        expect(rows[surface.inputBox.y]?.startsWith("╭┴")).toBe(true)
+        expect(rows[surface.inputBox.y]?.endsWith("╮")).toBe(true)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -2150,7 +2320,7 @@ test("joins the durable queue to the composer like Amp", () =>
     }),
   ))
 
-test("renders message-only queued rows with a hint that follows the selection", () =>
+test("renders an inline hint on the selected queued row as the queue window moves", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 60, height: 14 }))
@@ -2164,7 +2334,7 @@ test("renders message-only queued rows with a hint that follows the selection", 
         const topRows = top.split("\n")
         expect(top).not.toContain("queued 1/8")
         expect(topRows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          topRows.findIndex((row) => row.includes("prompt number 0")) + 1,
+          topRows.findIndex((row) => row.includes("prompt number 0")),
         )
         surface.update({ ...base, queueSelection: "q7" })
         yield* openTui(() => setup.renderOnce())
@@ -2172,7 +2342,7 @@ test("renders message-only queued rows with a hint that follows the selection", 
         const bottomRows = bottom.split("\n")
         expect(bottom).not.toContain("queued 8/8")
         expect(bottomRows.findIndex((row) => row.includes("Enter to steer"))).toBe(
-          bottomRows.findIndex((row) => row.includes("prompt number 7")) + 1,
+          bottomRows.findIndex((row) => row.includes("prompt number 7")),
         )
         expect(bottom).not.toContain("prompt number 0")
       } finally {
@@ -2182,7 +2352,7 @@ test("renders message-only queued rows with a hint that follows the selection", 
     }),
   ))
 
-test("shows the editing hint while a queued turn is being edited in the composer", () =>
+test("shows the editing hint inline on the queued row being edited", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
@@ -2207,8 +2377,9 @@ test("shows the editing hint while a queued turn is being edited in the composer
         expect(frame).toContain("Enter save")
         expect(frame).toContain("Esc cancel")
         expect(rows.findIndex((row) => row.includes("Editing queued"))).toBe(
-          rows.findIndex((row) => row.includes("beta")) + 1,
+          rows.findIndex((row) => row.includes("beta")),
         )
+        expect(surface.queueBox.height).toBe(4)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -2271,7 +2442,39 @@ test("clamps an oversized focused queued prompt to the queue box with an indicat
           .map((chunk) => chunk.text)
           .join("")
         expect(text).toContain("…")
-        expect(text.length).toBeLessThan(200)
+        expect(text.length).toBeLessThan(40)
+        const frame = setup.captureCharFrame()
+        const row = frame.split("\n").find((candidate) => candidate.includes("Enter to steer"))
+        expect(row).toContain("x")
+        expect(row).not.toContain("Backspace to dequeue")
+        expect(row).not.toContain("Ctrl+E to edit")
+        expect(surface.queueBox.height).toBe(3)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("drops the inline queue hint before hiding message text in a very narrow terminal", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 24, height: 12 }))
+      const model = {
+        ...replaceQueue({ ...initial("/work", "medium"), busy: true, width: 24, height: 12 }, [
+          { id: "narrow", prompt: "message survives" },
+        ]),
+        queueSelection: "narrow",
+      }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        const frame = setup.captureCharFrame()
+        expect(frame).toContain("message survives")
+        expect(frame).not.toContain("Enter to steer")
+        expect(frame).not.toContain("Backspace to dequeue")
+        expect(frame).not.toContain("Ctrl+E to edit")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

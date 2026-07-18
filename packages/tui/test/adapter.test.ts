@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest"
 import { it } from "@effect/vitest"
+import * as Transcript from "@rika/transcript"
 import { Effect } from "effect"
 
 const shell = (id: string, command: string, output: string) => ({
@@ -263,9 +264,12 @@ import {
   renderTranscript,
   renderTranscriptStyled,
 } from "../src/adapter"
+import { ExecutionEvents } from "../src"
 import { initial, ready, update, type Mode, type Model, type ThreadItem } from "../src/view-state"
+import { colors } from "../src/theme"
 
 const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
+const nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
 
@@ -863,6 +867,495 @@ describe("Surface", () => {
     expect(text).not.toContain("Subagent finished Fix packaging integration tests")
   })
 
+  test("matches Amp cancelled subagent and shell treatment", () => {
+    const state = model({
+      blocks: [
+        {
+          _tag: "ToolCall",
+          id: "parent",
+          name: "task",
+          input: "{}",
+          status: "cancelled",
+          presentation: {
+            family: "agent",
+            action: "task",
+            activeLabel: "Subagent working",
+            completeLabel: "Subagent finished",
+          },
+          detail: "Wait then run the checks",
+          childId: "child",
+          files: [],
+        },
+        {
+          _tag: "ToolCall",
+          id: "child-shell",
+          name: "shell",
+          input: JSON.stringify({ command: "sleep 60" }),
+          status: "cancelled",
+          presentation: {
+            family: "shell",
+            action: "command",
+            activeLabel: "Running",
+            completeLabel: "Ran",
+          },
+          detail: "sleep 60",
+          files: [],
+        },
+      ],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:parent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child-shell", turnId: "child", parentId: "parent" },
+      ],
+      expandedRowKeys: ["tool:parent"],
+    })
+
+    const built = buildTranscript(state)
+    const text = built.styled.chunks.map((chunk) => chunk.text).join("")
+    const marker = built.styled.chunks.find((chunk) => chunk.text === "⊘")
+
+    expect(text).toContain("⊘ Subagent finished ▾")
+    expect(text).toContain("$ sleep 60 (cancelled)")
+    expect(
+      text
+        .split("\n")
+        .find((line) => line.includes("$ sleep 60"))
+        ?.trimEnd()
+        .endsWith("(cancelled)"),
+    ).toBe(true)
+    expect(marker?.fg).toBe(colors.amber)
+    expect(built.ranges.find((range) => range.unit === "tool:parent")?.animated).toBe(false)
+    expect(built.ranges.find((range) => range.unit === "tool:child-shell")?.animated).toBe(false)
+  })
+
+  test("grows an Edited diff on every tool-call delta tick and finishes with the unified diff", () => {
+    let projection = Transcript.empty("turn", "update the file")
+    let state = ExecutionEvents.projectUnits(initial("/workspace", "medium"), projection.units)
+    const fragments = [
+      '{"patchText":"*** Begin Patch\\n*** Update File: src/a.ts\\n@@\\n-old',
+      "\\n+new",
+      '\\n+newer\\n*** End Patch"}',
+    ]
+    const frames: Array<string> = []
+    for (const [index, delta] of fragments.entries()) {
+      projection = Transcript.applyEvent(projection, {
+        cursor: `delta-${index}`,
+        sequence: index,
+        type: "model.toolcall.delta",
+        createdAt: index,
+        data: { tool_call_id: "patch", tool_name: "apply_patch", delta },
+      })
+      state = ExecutionEvents.projectUnits(state, projection.units)
+      frames.push(
+        renderTranscriptStyled(state)
+          .chunks.map((chunk) => chunk.text)
+          .join(""),
+      )
+    }
+
+    projection = Transcript.applyEvent(projection, {
+      cursor: "requested",
+      sequence: 3,
+      type: "tool.call.requested",
+      createdAt: 3,
+      data: {
+        tool_call_id: "patch",
+        tool_name: "apply_patch",
+        input: {
+          patchText: "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-old\n+new\n+newer\n*** End Patch",
+        },
+      },
+    })
+    projection = Transcript.applyEvent(projection, {
+      cursor: "result",
+      sequence: 4,
+      type: "tool.result.received",
+      createdAt: 4,
+      data: {
+        tool_call_id: "patch",
+        output: {
+          text: "applied",
+          diff: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1,2 @@\n-old\n+new\n+newer",
+        },
+      },
+    })
+    state = ExecutionEvents.projectUnits(state, projection.units)
+    const finalFrame = renderTranscriptStyled({ ...state, expandedRowKeys: ["tool:turn:patch"] })
+      .chunks.map((chunk) => chunk.text)
+      .join("")
+
+    expect(frames[0]).toContain("- old")
+    expect(frames[0]).not.toContain("+ new")
+    expect(frames[1]).toContain("+ new")
+    expect(frames[1]).not.toContain("+ newer")
+    expect(frames[2]).toContain("+ newer")
+    expect(frames[1]!.length).toBeGreaterThan(frames[0]!.length)
+    expect(frames[2]!.length).toBeGreaterThan(frames[1]!.length)
+    expect(finalFrame).toContain("1 - old")
+    expect(finalFrame).toContain("1 + new")
+    expect(finalFrame).toContain("2 + newer")
+  })
+
+  const editToolBlock = {
+    _tag: "ToolCall",
+    id: "patch",
+    name: "apply_patch",
+    input: "{}",
+    status: "complete",
+    presentation: {
+      family: "edit",
+      action: "patch",
+      activeLabel: "Editing",
+      completeLabel: "Edited",
+    },
+    detail: "",
+    files: [
+      {
+        key: "patch:0",
+        path: "src/a.ts",
+        kind: "update",
+        patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+        additions: 1,
+        deletions: 1,
+        preview: false,
+        status: "complete",
+      },
+    ],
+  } as const
+  const subagentToolBlock = {
+    _tag: "ToolCall",
+    id: "agent",
+    name: "task",
+    input: "{}",
+    status: "complete",
+    presentation: {
+      family: "agent",
+      action: "task",
+      activeLabel: "Subagent working",
+      completeLabel: "Subagent finished",
+    },
+    detail: "Inspect\nthe projection",
+    files: [],
+  } as const
+  const renderedText = (changes: Partial<Model>) =>
+    buildTranscript(model(changes))
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+
+  test("keeps collapsed tool, Edited, and subagent rows free of the left gutter", () => {
+    const collapsed = renderedText({
+      blocks: [editToolBlock, subagentToolBlock, shell("run", "bun test", "passed")],
+      expandedRowKeys: [],
+    })
+    const lines = nonEmptyLines(collapsed)
+    expect(lines.some((line) => line.includes("Edited"))).toBe(true)
+    expect(lines.some((line) => line.includes("Subagent finished"))).toBe(true)
+    expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("renders an expanded subagent body without any added left rail", () => {
+    const lines = nonEmptyLines(renderedText({ blocks: [subagentToolBlock], expandedRowKeys: ["tool:agent"] }))
+    expect(lines[0]).toContain("Subagent finished")
+    expect(lines.length).toBeGreaterThan(1)
+    expect(lines.some((line) => line.includes("Inspect"))).toBe(true)
+    expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("renders an expanded Edited diff without any added left rail", () => {
+    const lines = nonEmptyLines(renderedText({ blocks: [editToolBlock], expandedRowKeys: ["tool:patch"] }))
+    expect(lines[0]).toContain("Edited")
+    expect(lines.length).toBeGreaterThan(1)
+    expect(lines.slice(1).some((line) => line.includes("old") || line.includes("new"))).toBe(true)
+    expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("renders an expanded Diff block without any added left rail", () => {
+    const block = {
+      _tag: "Diff",
+      path: "src/a.ts",
+      patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+    } as const
+    const collapsed = nonEmptyLines(renderedText({ blocks: [block], expandedRowKeys: [] }))
+    expect(collapsed[0]).toContain("Edited")
+    expect(collapsed.every((line) => !line.startsWith("│"))).toBe(true)
+    const expanded = nonEmptyLines(renderedText({ blocks: [block], expandedRowKeys: ["block:Diff:0"] }))
+    expect(expanded.length).toBeGreaterThan(1)
+    expect(expanded.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("keeps the nested connector tree as the only vertical treatment in an expanded subagent", () => {
+    const state = model({
+      blocks: [
+        { ...subagentToolBlock, detail: "Inspect the projection" },
+        shell("child-a", "bun test", "passed"),
+        shell("child-b", "bun run check", "clean"),
+      ],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Block", index: 2, id: "tool:child-b", turnId: "child:agent", parentId: "agent" },
+      ],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const lines = nonEmptyLines(
+      buildTranscript(state)
+        .styled.chunks.map((chunk) => chunk.text)
+        .join(""),
+    )
+    expect(lines.some((line) => line.trimStart().startsWith("├"))).toBe(true)
+    expect(lines.some((line) => line.trimStart().startsWith("└"))).toBe(true)
+    expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("labels a new-file patch Create and an existing-file patch Edit", () => {
+    const createBlock = {
+      ...editToolBlock,
+      id: "create",
+      files: [
+        {
+          key: "create:0",
+          path: "tmp-agent-test.txt",
+          kind: "add",
+          patch: "--- /dev/null\n+++ b/tmp-agent-test.txt\n@@ -0,0 +1 @@\n+hello",
+          additions: 1,
+          deletions: 0,
+          preview: false,
+          status: "complete",
+        },
+      ],
+    } as const
+    const created = renderedText({ blocks: [createBlock], expandedRowKeys: [] })
+    expect(created).toContain("Created tmp-agent-test.txt +1")
+    expect(created).not.toContain("-0")
+    const edited = renderedText({ blocks: [editToolBlock], expandedRowKeys: [] })
+    expect(edited).toContain("Edited src/a.ts +1 -1")
+    const runningCreate = renderedText({
+      blocks: [{ ...createBlock, status: "running" }],
+      expandedRowKeys: [],
+    })
+    expect(runningCreate).toContain("Creating tmp-agent-test.txt +1")
+  })
+
+  test("keeps Edited for a mixed group and labels each child row by its file kind", () => {
+    const mixedBlock = {
+      ...editToolBlock,
+      id: "mixed",
+      files: [
+        {
+          key: "mixed:0",
+          path: "tmp-agent-test.txt",
+          kind: "add",
+          patch: "--- /dev/null\n+++ b/tmp-agent-test.txt\n@@ -0,0 +1 @@\n+hello",
+          additions: 1,
+          deletions: 0,
+          preview: false,
+          status: "complete",
+        },
+        {
+          key: "mixed:1",
+          path: "src/a.ts",
+          kind: "update",
+          patch: "--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old\n+new",
+          additions: 1,
+          deletions: 1,
+          preview: false,
+          status: "complete",
+        },
+      ],
+    } as const
+    const collapsed = renderedText({ blocks: [mixedBlock], expandedRowKeys: [] })
+    expect(collapsed).toContain("Edited 2 files")
+    const expanded = renderedText({ blocks: [mixedBlock], expandedRowKeys: ["tool:mixed"] })
+    expect(expanded).toContain("Create tmp-agent-test.txt +1")
+    expect(expanded).toContain("Edit src/a.ts +1 -1")
+  })
+
+  test("labels a new-file Diff block Created", () => {
+    const created = renderedText({
+      blocks: [
+        {
+          _tag: "Diff",
+          path: "tmp-agent-test.txt",
+          patch: "--- /dev/null\n+++ b/tmp-agent-test.txt\n@@ -0,0 +1 @@\n+hello",
+        },
+      ],
+      expandedRowKeys: [],
+    })
+    expect(created).toContain("Created tmp-agent-test.txt")
+  })
+
+  test("continues the timeline rail through the subagent response after one blank row", () => {
+    const state = model({
+      entries: [
+        {
+          role: "assistant",
+          text: "Architectural overview\n\nThe projection stays pure.",
+          turnId: "child:agent",
+        },
+      ],
+      blocks: [{ ...subagentToolBlock, detail: "Inspect the projection" }, shell("child-a", "bun test", "passed")],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Entry", index: 0, id: "assistant:child:agent:0", turnId: "child:agent", parentId: "agent" },
+      ],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const lines = buildTranscript(state)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+      .split("\n")
+    const childRow = lines.findIndex((line) => line.includes("bun test"))
+    const responseRow = lines.findIndex((line) => line.includes("Architectural overview"))
+    expect(childRow).toBeGreaterThan(-1)
+    expect(responseRow).toBe(childRow + 2)
+    expect(lines[childRow + 1]).toBe("  │")
+    const lastResponseRow = lines.findIndex((line) => line.includes("stays pure"))
+    expect(lastResponseRow).toBeGreaterThan(responseRow)
+    for (const [offset, row] of lines.slice(childRow + 1, lastResponseRow).entries())
+      expect([offset, row.startsWith("  │")]).toEqual([offset, true])
+    expect(lines[lastResponseRow]!.startsWith("  ╰ ")).toBe(true)
+    expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("keeps wrapped response continuations inside the rail and curls the final row", () => {
+    const state = model({
+      width: 60,
+      entries: [
+        {
+          role: "assistant",
+          text: "1. Splitting the resident endpoint into separate host and client transports removes the restart complexity.",
+          turnId: "child:agent",
+        },
+      ],
+      blocks: [{ ...subagentToolBlock, detail: "Inspect the projection" }, shell("child-a", "bun test", "passed")],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Entry", index: 0, id: "assistant:child:agent:0", turnId: "child:agent", parentId: "agent" },
+      ],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const lines = buildTranscript(state)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+      .split("\n")
+    const first = lines.findIndex((line) => line.includes("Splitting"))
+    const continuation = lines.findIndex((line) => line.includes("complexity"))
+    expect(first).toBeGreaterThan(-1)
+    expect(continuation).toBeGreaterThan(first)
+    const responseRows = lines.slice(first, continuation + 1)
+    expect(responseRows.length).toBeGreaterThan(1)
+    for (const row of responseRows.slice(0, -1)) expect(row.startsWith("  │ ")).toBe(true)
+    expect(responseRows[responseRows.length - 1]!.startsWith("  ╰ ")).toBe(true)
+    for (const row of responseRows) expect(row.length).toBeLessThanOrEqual(60)
+  })
+
+  test("expands a failed subagent to its prompt and stored error text", () => {
+    const lines = nonEmptyLines(
+      renderedText({
+        blocks: [
+          {
+            ...subagentToolBlock,
+            status: "failed",
+            detail: "Inspect the projection",
+            output: "AgentToolError: Model gpt-5.6-luna is not available",
+          },
+        ],
+        expandedRowKeys: ["tool:agent"],
+      }),
+    )
+    expect(lines.some((line) => line.includes("Inspect the projection"))).toBe(true)
+    expect(lines.some((line) => line.includes("AgentToolError: Model gpt-5.6-luna is not available"))).toBe(true)
+  })
+
+  test("renders a finished subagent response as markdown inside the expanded unit", () => {
+    const state = model({
+      entries: [{ role: "assistant", text: "**Child result**\n\n**Checks passed.**", turnId: "child" }],
+      blocks: [
+        {
+          _tag: "ToolCall",
+          id: "oracle",
+          name: "oracle",
+          input: JSON.stringify({ prompt: "Review the code" }),
+          status: "complete",
+          presentation: {
+            family: "agent",
+            action: "oracle",
+            activeLabel: "Oracle exploring",
+            completeLabel: "Oracle has spoken",
+          },
+          detail: "Review the code",
+          files: [],
+        },
+      ],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:oracle", turnId: "turn" },
+        { _tag: "Entry", index: 0, id: "assistant:child:0", turnId: "child", parentId: "oracle" },
+      ],
+      expandedRowKeys: ["tool:oracle"],
+    })
+
+    const text = buildTranscript(state)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+
+    expect(text).toContain("Oracle has spoken ▾")
+    expect(text).toContain("Review the code")
+    expect(text).toContain("Child result")
+    expect(text).toContain("Checks passed.")
+    expect(text).not.toContain("**")
+  })
+
+  test("never renders a serialized child result as subagent output", () => {
+    const serialized =
+      '{"status":"completed","output":[{"type":"text","text":"## Child result\\n\\n**Checks passed.**"}]}'
+    const state = model({
+      blocks: [
+        {
+          _tag: "ToolCall",
+          id: "task",
+          name: "task",
+          input: "{}",
+          output: serialized,
+          status: "complete",
+          presentation: {
+            family: "agent",
+            action: "task",
+            activeLabel: "Subagent working",
+            completeLabel: "Subagent finished",
+          },
+          detail: "",
+          files: [],
+        },
+      ],
+      expandedRowKeys: ["tool:task"],
+    })
+    const text = buildTranscript(state)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+
+    expect(text).toContain("Subagent finished")
+    expect(text).not.toContain("\\n")
+    expect(text).not.toContain('"}]}')
+    expect(text).not.toContain(serialized)
+  })
+
+  test("uses the child profile activity label with a Subagent fallback", () => {
+    const rendered = buildTranscript(
+      model({
+        blocks: [
+          { _tag: "ChildAgent", id: "oracle", name: "oracle", summary: "", status: "running", activity: [] },
+          { _tag: "ChildAgent", id: "task", name: "task", summary: "", status: "running", activity: [] },
+        ],
+      }),
+    )
+    const text = rendered.styled.chunks.map((chunk) => chunk.text).join("")
+
+    expect(text).toContain("Oracle exploring")
+    expect(text).toContain("Subagent working")
+    expect(text).not.toContain("Task working")
+  })
+
   it.effect("constructs the render tree and forwards key and resize events", () =>
     Effect.gen(function* () {
       const callbacks = handlers()
@@ -1180,6 +1673,9 @@ describe("Surface", () => {
       expect(modeLabelText()).toBe(" $5.44 ─ medium ")
       surface.update(model({ mode: "medium", busy: false, costUsd: 5.4449, fastMode: true }))
       expect(modeLabelText()).toBe(" $5.44 ─ ↯medium ")
+      const globalTotalUsd = 12.34
+      surface.update(model({ mode: "medium", busy: false, costUsd: globalTotalUsd }))
+      expect(modeLabelText()).toBe(" $12.34 ─ medium ")
 
       surface.update(
         model({

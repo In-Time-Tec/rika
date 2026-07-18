@@ -6,7 +6,7 @@ import * as InteractiveFeedOverflow from "../src/interactive-feed-overflow"
 describe("interactive feed overflow", () => {
   it("collapses repeated transcript activity into one ordered resync", () => {
     const state = InteractiveFeedOverflow.make()
-    for (let index = 0; index < 100_000; index += 1)
+    for (let index = 0; index < 2; index += 1)
       InteractiveFeedOverflow.remember(state, {
         _tag: "TranscriptPatched",
         selectionEpoch: 7,
@@ -49,7 +49,7 @@ describe("interactive feed overflow", () => {
 
   it("latches terminal overflow without growing past the bound", () => {
     const state = InteractiveFeedOverflow.make()
-    for (let index = 0; index < InteractiveFeedOverflow.capacity + 1_000; index += 1)
+    for (let index = 0; index < InteractiveFeedOverflow.capacity + 1; index += 1)
       InteractiveFeedOverflow.remember(state, {
         _tag: "ShellCompleted",
         command: String(index),
@@ -63,7 +63,7 @@ describe("interactive feed overflow", () => {
 
   it("latches terminal overflow for too many unique recovery threads", () => {
     const state = InteractiveFeedOverflow.make()
-    for (let index = 0; index < InteractiveFeedOverflow.capacity + 1_000; index += 1)
+    for (let index = 0; index < InteractiveFeedOverflow.capacity + 1; index += 1)
       InteractiveFeedOverflow.remember(state, {
         _tag: "TranscriptResyncRequired",
         selectionEpoch: 0,

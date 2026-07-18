@@ -64,11 +64,14 @@ const busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
 })
 
 describe("ViewState", () => {
-  test("tracks typed activity counters without exposing a Waiting state", () => {
+  test("tracks only the five turn activity states", () => {
     let model = { ...ViewState.initial("/work", "medium"), input: "run it", cursor: 6 }
     model = ViewState.update(model, { _tag: "Submitted" })
     expect(model.activity).toEqual({ _tag: "Sending" })
     expect(ViewState.formatActivity(model.activity)).toBe("Sending")
+
+    model = ViewState.update(model, { _tag: "TurnStarted", turnId: "turn", prompt: "run it" })
+    expect(ViewState.formatActivity(model.activity)).toBe("Waiting")
 
     model = ViewState.update(model, { _tag: "ReasoningStreamed", text: "12345678🙂" })
     expect(ViewState.formatActivity(model.activity)).toBe("Thinking 3 tok")
@@ -76,13 +79,15 @@ describe("ViewState", () => {
     expect(ViewState.formatActivity(model.activity)).toBe("Thinking 4 tok")
     model = ViewState.update(model, { _tag: "AssistantStreamed", text: "abcdefgh", turnId: "turn" })
     expect(ViewState.formatActivity(model.activity)).toBe("Streaming 2 tok")
+    model = ViewState.update(model, { _tag: "AssistantCompleted", text: "abcdefgh", turnId: "turn" })
+    expect(ViewState.formatActivity(model.activity)).toBe("Waiting")
 
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
-    expect(ViewState.formatActivity(model.activity)).toBe("Cancelling")
-    expect(JSON.stringify(model)).not.toContain("Waiting")
+    expect(ViewState.formatActivity(model.activity)).toBe("Waiting")
   })
 
   test("formats Amp activity counters with the singular tok unit", () => {
+    expect(ViewState.formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking 0 tok")
     expect(ViewState.formatActivityCounter(1)).toBe("1 tok")
     expect(ViewState.formatActivityCounter(999)).toBe("999 tok")
     expect(ViewState.formatActivityCounter(1_234)).toBe("1.23k tok")
@@ -386,6 +391,93 @@ describe("ViewState", () => {
     expect(model.entries).toEqual([{ role: "assistant", text: "standalone" }])
   })
 
+  test("cancels every running transcript unit once and leaves no global notice", () => {
+    const parent = {
+      _tag: "ToolCall" as const,
+      id: "parent",
+      name: "task",
+      input: "{}",
+      status: "running" as const,
+      presentation: {
+        family: "agent" as const,
+        action: "task",
+        activeLabel: "Subagent working",
+        completeLabel: "Subagent finished",
+      },
+      detail: "Run the checks",
+      files: [],
+    }
+    const child = readCall("child", "src/a.ts")
+    const running: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn",
+      blocks: [parent, child],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:parent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child", turnId: "turn:child", parentId: "parent" },
+      ],
+    }
+
+    const cancelled = ViewState.update(running, { _tag: "ExecutionCancelled", turnId: "turn" })
+    const repeated = ViewState.update(cancelled, { _tag: "ExecutionCancelled", turnId: "turn" })
+
+    expect(cancelled.blocks).toEqual([
+      expect.objectContaining({ id: "parent", status: "cancelled" }),
+      expect.objectContaining({ id: "child", status: "cancelled" }),
+    ])
+    expect(cancelled.entries.filter((entry) => entry.role === "notice")).toEqual([])
+    expect(repeated).toBe(cancelled)
+  })
+
+  test("keeps one keyed cancellation marker when no transcript unit can carry it", () => {
+    const running: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn",
+    }
+
+    const cancelled = ViewState.update(running, { _tag: "ExecutionCancelled", turnId: "turn" })
+    const repeated = ViewState.update(cancelled, { _tag: "ExecutionCancelled", turnId: "turn" })
+
+    expect(cancelled.entries).toEqual([{ role: "notice", text: "cancelled", turnId: "turn" }])
+    expect(cancelled.items).toEqual([{ _tag: "Entry", index: 0, id: "execution:turn:cancelled", turnId: "turn" }])
+    expect(repeated).toBe(cancelled)
+  })
+
+  test("does not add a fallback marker when the parent cancellation event arrived first", () => {
+    const parent = {
+      _tag: "ToolCall" as const,
+      id: "parent",
+      name: "task",
+      input: "{}",
+      status: "cancelled" as const,
+      presentation: {
+        family: "agent" as const,
+        action: "task",
+        activeLabel: "Subagent working",
+        completeLabel: "Subagent finished",
+      },
+      detail: "Run the checks",
+      files: [],
+    }
+    const child = readCall("child", "src/a.ts")
+    const running: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn",
+      blocks: [parent, child],
+    }
+
+    const cancelled = ViewState.update(running, { _tag: "ExecutionCancelled", turnId: "turn" })
+
+    expect(cancelled.blocks).toEqual([
+      expect.objectContaining({ id: "parent", status: "cancelled" }),
+      expect.objectContaining({ id: "child", status: "cancelled" }),
+    ])
+    expect(cancelled.entries.filter((entry) => entry.role === "notice")).toEqual([])
+  })
+
   test("models structured transcript blocks without backend types", () => {
     let model = ViewState.initial("/work")
     model = ViewState.update(model, { _tag: "ReasoningStreamed", text: "checking " })
@@ -473,7 +565,19 @@ describe("ViewState", () => {
     expect(model.shortcutsOpen).toBe(false)
   })
 
-  test("inserts the shortcut question mark, keeps help open while typing, and dismisses with its trigger", () => {
+  test("opens shortcuts only for the first question mark in an empty composer", () => {
+    let sentence = { ...ViewState.initial("/work"), input: "how was your day", cursor: 16 }
+    sentence = ViewState.update(sentence, {
+      _tag: "KeyPressed",
+      key: key({ name: "/", sequence: "?", shift: true }),
+    })
+    expect(sentence).toMatchObject({
+      input: "how was your day?",
+      cursor: 17,
+      shortcutsOpen: false,
+      shortcutsTrigger: undefined,
+    })
+
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "KeyPressed",
       key: key({ name: "/", sequence: "?", shift: true }),
@@ -487,9 +591,14 @@ describe("ViewState", () => {
     expect(model).toMatchObject({ input: "?a", cursor: 2, shortcutsOpen: false, shortcutsTrigger: undefined })
 
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "/", sequence: "?", shift: true }) })
-    expect(model).toMatchObject({ input: "?a?", cursor: 3, shortcutsOpen: true, shortcutsTrigger: 2 })
+    expect(model).toMatchObject({ input: "?a?", cursor: 3, shortcutsOpen: false, shortcutsTrigger: undefined })
+
+    model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "KeyPressed",
+      key: key({ name: "/", sequence: "?", shift: true }),
+    })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
-    expect(model).toMatchObject({ input: "?a", cursor: 2, shortcutsOpen: false, shortcutsTrigger: undefined })
+    expect(model).toMatchObject({ input: "", cursor: 0, shortcutsOpen: false, shortcutsTrigger: undefined })
   })
 
   test("does not open shortcuts when question mark is typed in a dialog", () => {
@@ -628,15 +737,15 @@ describe("ViewState", () => {
     expect(model.pendingAction).toBeUndefined()
   })
 
-  test("auto-selects the newest queued turn on reset and on Added", () => {
+  test("keeps queue navigation inactive on reset and Added", () => {
     let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [
       { id: "a", prompt: "a" },
       { id: "b", prompt: "b" },
     ])
-    expect(model.queueSelection).toBe("b")
+    expect(model.queueSelection).toBeUndefined()
     const added = ViewState.applyQueueDelta(model, "t", 2, { _tag: "Added", item: { id: "c", prompt: "c" } })
     expect(added.resync).toBe(false)
-    expect(added.model.queueSelection).toBe("c")
+    expect(added.model.queueSelection).toBeUndefined()
   })
 
   test("keeps a still-valid selection across reset and Updated", () => {
@@ -678,6 +787,8 @@ describe("ViewState", () => {
       { id: "a", prompt: "alpha" },
       { id: "b", prompt: "beta" },
     ])
+    expect(model.queueSelection).toBeUndefined()
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
     expect(model.queueSelection).toBe("b")
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
     expect(model.editingTurnId).toBe("b")
@@ -697,6 +808,7 @@ describe("ViewState", () => {
 
   test("Enter on a selected queued row without edit mode still steers", () => {
     let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
     expect(model.pendingAction).toEqual({ _tag: "SteerQueued", id: "a", prompt: "alpha" })
     expect(model.editingTurnId).toBeUndefined()
@@ -712,6 +824,7 @@ describe("ViewState", () => {
       { id: "a", prompt: "alpha" },
       { id: "b", prompt: "beta" },
     ])
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
     expect(model.editingTurnId).toBe("b")
     expect(model.input).toBe("beta")
@@ -723,6 +836,7 @@ describe("ViewState", () => {
 
   test("blocks image attachment while editing a queued turn", () => {
     let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
     expect(model.editingTurnId).toBe("a")
     const after = ViewState.update(model, { _tag: "ImageInserted", path: "/tmp/x.png" })
@@ -732,6 +846,7 @@ describe("ViewState", () => {
 
   test("ignores queue dequeue and edit re-entry keys while editing with a cleared composer", () => {
     let model = ViewState.resetQueue(busyQueueModel(ViewState.initial("/work")), "t", 1, [{ id: "a", prompt: "alpha" }])
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "up" }) })
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
     model = { ...model, input: "", cursor: 0 }
     const backspaced = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "backspace" }) })

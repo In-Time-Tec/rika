@@ -191,7 +191,7 @@ describe("specialty durable transcripts", () => {
       const unavailable = yield* Effect.exit(AgentProfiles.resolvePainter(model, false))
       expect(unavailable._tag).toBe("Failure")
       const painter = yield* AgentProfiles.resolvePainter(model, true)
-      expect(painter.preset.tool_names).toEqual(["view_media"])
+      expect(painter.preset.tool_names).toEqual(["view_media", "task", "oracle", "librarian", "review"])
       const decoded = Schema.decodeUnknownExit(painter.outputSchema)(
         cases.find(({ tool }) => tool === "painter")!.output,
       )

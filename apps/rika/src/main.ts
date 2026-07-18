@@ -80,6 +80,30 @@ const relativePathFrom = pathService.relative
 const resolve = pathService.resolve
 const ignoreSelectionResync = (_threadId: string, _selectionEpoch: number) => {}
 
+const tuiTraceEventTypes = new Set([
+  "model.reasoning.delta",
+  "model.output.delta",
+  "model.toolcall.delta",
+  "tool.call.requested",
+  "tool.result.received",
+])
+
+const traceTuiModelEvent = (seenDeltas: Set<string>, event: Operation.InteractiveEvent) => {
+  if (event._tag !== "TranscriptPatched" || !tuiTraceEventTypes.has(event.event.type)) return Effect.void
+  const delta = event.event.type.endsWith(".delta")
+  const key = `${event.turnId}:${event.event.type}`
+  if (delta && seenDeltas.has(key)) return Effect.void
+  if (delta) seenDeltas.add(key)
+  return Effect.logInfo("tui.model.event_applied").pipe(
+    Effect.annotateLogs({
+      "rika.event.cursor": event.event.cursor,
+      "rika.event.type": event.event.type,
+      "rika.thread.id": String(event.threadId),
+      "rika.turn.id": String(event.turnId),
+    }),
+  )
+}
+
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -1726,6 +1750,7 @@ if (import.meta.main) {
         let projectionRevisions = new Map<string, number>()
         let transcriptProjections = new Map<string, Transcript.Projection>()
         let threadCostUsd = 0
+        const appliedDeltas = new Set<string>()
         let activeSelectionEpoch = 0
         const fibers = new Set<Fiber.Fiber<void, never>>()
         let selectionFiber: Fiber.Fiber<void, never> | undefined
@@ -1782,6 +1807,7 @@ if (import.meta.main) {
             projectionRevisions = new Map(controlled.state.revisions)
             transcriptProjections = new Map(controlled.state.projections)
             threadCostUsd = controlled.state.threadCostUsd
+            if (event._tag === "TranscriptPatched") fork(traceTuiModelEvent(appliedDeltas, event))
             if (event._tag === "TranscriptResyncRequired" && model.currentThreadId !== undefined)
               requestSelectionResync(model.currentThreadId, event.selectionEpoch)
             if (controlled.preserveAnchor) {
@@ -2264,7 +2290,7 @@ if (import.meta.main) {
               },
               key: (key) => {
                 if (key.ctrl && key.name === "c" && !model.busy) {
-                  close(130)
+                  close()
                   return
                 }
                 if (key.ctrl && key.name === "g") {
@@ -2788,7 +2814,9 @@ if (import.meta.main) {
             }),
           ),
           Effect.tapCause((cause) =>
-            Effect.logError("process.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logError("process.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
           ),
           Effect.ensuring(Effect.logInfo("process.stopped")),
           Effect.annotateLogs({

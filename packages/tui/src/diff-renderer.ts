@@ -51,5 +51,25 @@ export const renderDiffStyled: {
   })
   return new StyledText(chunks)
 })
+
+export const renderPartialDiffStyled: {
+  (width: number): (patch: string) => StyledText | undefined
+  (patch: string, width: number): StyledText | undefined
+} = Function.dual(2, (patch: string, width: number): StyledText | undefined => {
+  const lines = patch
+    .split("\n")
+    .filter(
+      (line): line is `${"+" | "-"}${string}` =>
+        (line.startsWith("+") && !line.startsWith("+++")) || (line.startsWith("-") && !line.startsWith("---")),
+    )
+  if (lines.length === 0) return undefined
+  const chunks: Array<TextChunk> = []
+  lines.forEach((line, index) => {
+    const marker = line[0]!
+    chunks.push(fg(marker === "+" ? colors.green : colors.red)(clip(`${marker} ${line.slice(1)}`, width)))
+    if (index < lines.length - 1) chunks.push(fg(colors.text)("\n"))
+  })
+  return new StyledText(chunks)
+})
 import { StyledText, bold, fg, type TextChunk } from "@opentui/core"
 import { colors } from "./theme"

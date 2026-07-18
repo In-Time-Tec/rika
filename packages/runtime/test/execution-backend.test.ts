@@ -7,6 +7,7 @@ import { Client, Content, Execution, Ids } from "@relayfx/sdk"
 import type { ChildFanOutRuntime, WorkflowDefinitionRuntime } from "@relayfx/sdk/sqlite"
 import { ThreadTools } from "@rika/tools"
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, Schema, Stream, Tracer } from "effect"
+import { TestClock } from "effect/testing"
 import { Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
@@ -214,6 +215,7 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
   readonly pageEvents?: ReadonlyArray<Execution.ExecutionEvent>
   readonly openWaitIds?: ReadonlyArray<string>
   readonly cancelStatus?: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled"
+  readonly unavailableLookups?: number
   readonly fail?: "register" | "start" | "lookup" | "replay" | "cancel"
 }) {
   const registrations = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["registerAgent"]>[0]>>([])
@@ -275,11 +277,12 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
     steer: unused,
     getExecution: (input) =>
       Ref.update(lookups, (values) => [...values, input]).pipe(
-        Effect.andThen(
+        Effect.andThen(Ref.get(lookups)),
+        Effect.flatMap((values) =>
           options?.fail === "lookup"
             ? Effect.fail(clientFailure("lookup failed"))
             : Effect.succeed(
-                options?.existingStatus === undefined
+                options?.existingStatus === undefined || values.length <= (options.unavailableLookups ?? 0)
                   ? undefined
                   : {
                       id: Ids.ExecutionId.make("execution:turn-a"),
@@ -427,6 +430,42 @@ const provideBackendWithThreadTools = (implementation: Client.Interface) => {
 }
 
 describe("ExecutionBackend Relay client adapter", () => {
+  it("keeps preset inheritance separate from explicit child-run overrides", () => {
+    const base = {
+      child_execution_id: Ids.ChildExecutionId.make("child:one"),
+      address_id: Ids.AddressId.make("address:rika"),
+      input: [Content.text("Explore the runtime")],
+    }
+    const inherited = RelayExecutionBackend.buildChildRunInput(base, {
+      _tag: "preset",
+      presetName: "Task",
+    })
+    const explicit = RelayExecutionBackend.buildChildRunInput(base, {
+      _tag: "override",
+      definition: {
+        instructions: "Complete the task",
+        model: { provider: "test", model: "gpt-5.6-luna", registration_key: "luna-low" },
+        tool_names: ["read_file"],
+        permissions: ["workspace.read"],
+        output_schema_ref: "rika.agent.task.v1",
+        metadata: { product_profile: "Task", rika_reasoning_effort: "low" },
+      },
+    })
+
+    expect(inherited).toEqual({ ...base, preset_name: "Task" })
+    expect(Object.keys(inherited).toSorted()).toEqual(["address_id", "child_execution_id", "input", "preset_name"])
+    expect(explicit).toEqual({
+      ...base,
+      instructions: "Complete the task",
+      model: { provider: "test", model: "gpt-5.6-luna", registration_key: "luna-low" },
+      tool_names: ["read_file"],
+      permissions: ["workspace.read"],
+      output_schema_ref: "rika.agent.task.v1",
+      metadata: { product_profile: "Task", rika_reasoning_effort: "low" },
+    })
+    expect(explicit).not.toHaveProperty("preset_name")
+  })
+
   it.effect("registers the deterministic agent, starts the deterministic execution, and converts text events", () =>
     Effect.gen(function* () {
       const streamEvents = [
@@ -465,18 +504,17 @@ describe("ExecutionBackend Relay client adapter", () => {
         "web_search",
         "read_web_page",
         "view_media",
+        "task",
+        "oracle",
+        "librarian",
+        "review",
         "find_thread",
         "read_thread",
       ])
-      expect(registration.metadata?.multi_agent_enabled).toBe(true)
-      expect(registration.permissions).toContainEqual({ name: "relay.child_run.spawn", value: true })
-      expect(registration.handoff_targets).toEqual([
-        { name: "oracle", preset_name: "Oracle" },
-        { name: "librarian", preset_name: "Librarian" },
-        { name: "review", preset_name: "Review" },
-        { name: "read_thread", preset_name: "ReadThread" },
-        { name: "task", preset_name: "Task" },
-      ])
+      expect(registration.metadata).toMatchObject({ rika_agent_depth: 0 })
+      expect(registration.metadata?.multi_agent_enabled).toBeUndefined()
+      expect(registration.permissions).not.toContainEqual({ name: "relay.child_run.spawn", value: true })
+      expect(registration.handoff_targets).toBeUndefined()
       expect(starts[0]).toMatchObject({
         root_address_id: "address:rika",
         session_id: "session:thread-a",
@@ -636,12 +674,12 @@ describe("ExecutionBackend Relay client adapter", () => {
         "execution.starting",
         "execution.accepted",
         "execution.follow.started",
-        "execution.event",
-        "execution.event",
-        "execution.event",
+        "execution.event.received",
+        "execution.event.received",
+        "execution.event.received",
         "execution.follow.completed",
       ])
-      expect(records.find((record) => record.message === "execution.event")?.annotations).toMatchObject({
+      expect(records.find((record) => record.message === "execution.event.received")?.annotations).toMatchObject({
         "rika.execution.id": "execution:turn-observed",
         "rika.turn.id": "turn-observed",
         "rika.event.type": "tool.call.requested",
@@ -960,6 +998,7 @@ describe("ExecutionBackend Relay client adapter", () => {
   it.effect("cancels with deterministic payload and returns the accepted status and replayed events", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({
+        existingStatus: "running",
         cancelStatus: "queued",
         replayEvents: [relayEvent("execution.cancelled", 1)],
       })
@@ -973,9 +1012,32 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("waits for a concurrently starting execution before cancelling", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        existingStatus: "running",
+        unavailableLookups: 2,
+        cancelStatus: "cancelled",
+        replayEvents: [relayEvent("execution.cancelled", 1)],
+      })
+      const cancellation = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* backend.cancel("turn-a", 50)
+      }).pipe(provideBackend(fixture.implementation), Effect.forkChild)
+      yield* TestClock.adjust("50 millis")
+      const result = yield* Fiber.join(cancellation)
+      expect(yield* Ref.get(fixture.lookups)).toEqual(["execution:turn-a", "execution:turn-a", "execution:turn-a"])
+      expect(yield* Ref.get(fixture.cancellations)).toEqual([{ execution_id: "execution:turn-a", cancelled_at: 50 }])
+      expect(result.status).toBe("cancelled")
+    }),
+  )
+
   it.effect.each(["start", "replay", "cancel"] as const)("maps %s client failures to BackendError", (operation) =>
     Effect.gen(function* () {
-      const fixture = yield* makeClient({ fail: operation })
+      const fixture = yield* makeClient({
+        fail: operation,
+        ...(operation === "cancel" ? { existingStatus: "running" as const } : {}),
+      })
       const failure = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         if (operation === "start")
@@ -1139,7 +1201,14 @@ describe("ExecutionBackend Relay client adapter", () => {
         inspectWorkflowRun: (input: unknown) => (calls.push(["inspectWorkflow", input]), Effect.succeed(workflow)),
         cancelWorkflowRun: (input: unknown) => (calls.push(["cancelWorkflow", input]), Effect.succeed(workflow)),
         spawnChildRun: (input: unknown) => (calls.push(["child", input]), Effect.succeed({})),
-        getExecution: () => Effect.succeed({ status: "waiting" }),
+        getExecution: () =>
+          Effect.succeed({
+            status: "waiting",
+            agent_snapshot: {
+              model: { provider: "test", model: "scripted", registration_key: "fixed" },
+              metadata: { rika_execution_route: currentExecutionRoute() },
+            },
+          }),
         inspectExecution: () =>
           Effect.succeed({
             status: "waiting",
@@ -1542,12 +1611,24 @@ describe("ExecutionBackend Relay client adapter", () => {
           registration_key: "terra:low:normal",
         },
       })
-      expect(registered.child_run_presets.Oracle.model).toEqual({
-        provider: oracleSelection.provider,
-        model: oracleSelection.model,
-        registration_key: oracleSelection.registrationKey,
+      expect(registered.child_run_presets.Task).toMatchObject({
+        model: {
+          provider: selection.provider,
+          model: selection.model,
+          registration_key: "default",
+          metadata: { rika_agent_depth: 1, rika_reasoning_effort: "medium" },
+        },
+        metadata: { product_profile: "Task", rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
-      expect(registered.child_run_presets.Oracle.compaction_policy).toEqual({
+      expect(registered.child_run_presets.Oracle).toMatchObject({
+        model: {
+          provider: oracleSelection.provider,
+          model: oracleSelection.model,
+          registration_key: oracleSelection.registrationKey,
+          metadata: { rika_agent_depth: 1, rika_reasoning_effort: "medium" },
+        },
+      })
+      const oraclePolicy = {
         context_window: 1_000_000,
         reserve_tokens: 128_000,
         keep_recent_tokens: 64_000,
@@ -1556,24 +1637,19 @@ describe("ExecutionBackend Relay client adapter", () => {
           model: "summary-model",
           registration_key: "terra:low:normal",
         },
-      })
-      expect(registered.child_run_presets.Task.model).toEqual({
-        provider: taskSelection.provider,
-        model: taskSelection.model,
-        registration_key: taskSelection.registrationKey,
-      })
-      expect(fanOutInputs[0].children[0].override.model).toEqual({
+      }
+      expect(fanOutInputs[0].children[0].override.model).toMatchObject({
         provider: oracleSelection.provider,
         model: oracleSelection.model,
         registration_key: oracleSelection.registrationKey,
+        metadata: { rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
-      expect(fanOutInputs[0].children[0].override.compaction_policy).toEqual(
-        registered.child_run_presets.Oracle.compaction_policy,
-      )
-      expect(fanOutInputs[0].children[1].override.model).toEqual({
+      expect(fanOutInputs[0].children[0].override.compaction_policy).toEqual(oraclePolicy)
+      expect(fanOutInputs[0].children[1].override.model).toMatchObject({
         provider: taskSelection.provider,
         model: taskSelection.model,
         registration_key: taskSelection.registrationKey,
+        metadata: { rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
       expect(fanOutInputs[0].children[1].override.compaction_policy).toEqual(registered.compaction_policy)
       expect(fanOutInputs[0].children[0].metadata).toMatchObject({

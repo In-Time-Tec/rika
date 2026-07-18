@@ -292,6 +292,10 @@ export type InteractiveEvent =
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
       readonly turnId: Turn.TurnId
+      readonly rootTurnId?: Turn.TurnId
+      readonly rootTurnCostUsd?: number
+      readonly threadCostUsd?: number
+      readonly globalCostUsd?: number
       readonly event: ExecutionBackend.Event
       readonly revision: number
     }
@@ -344,6 +348,7 @@ export type InteractiveEvent =
       readonly entries: ReadonlyArray<TranscriptPage.Entry>
       readonly hasOlder: boolean
       readonly threadCostUsd: number
+      readonly globalCostUsd?: number
       readonly oldestCursor?: TranscriptPage.PageCursor
       readonly queueRevision: number
       readonly queuedCount?: number
@@ -357,6 +362,7 @@ export type InteractiveEvent =
       readonly entries: ReadonlyArray<TranscriptPage.Entry>
       readonly hasOlder: boolean
       readonly threadCostUsd: number
+      readonly globalCostUsd?: number
       readonly oldestCursor?: TranscriptPage.PageCursor
     }
   | { readonly _tag: "ShellPermissionRequested"; readonly id: string; readonly command: string }
@@ -382,6 +388,10 @@ export const InteractiveEventSchema = Schema.Union([
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
     turnId: Turn.TurnId,
+    rootTurnId: Schema.optionalKey(Turn.TurnId),
+    rootTurnCostUsd: Schema.optionalKey(Schema.Finite),
+    threadCostUsd: Schema.optionalKey(Schema.Finite),
+    globalCostUsd: Schema.optionalKey(Schema.Finite),
     event: ExecutionBackend.Event,
     revision: Schema.Finite,
   }),
@@ -463,6 +473,7 @@ export const InteractiveEventSchema = Schema.Union([
     entries: Schema.Array(TranscriptPage.EntrySchema),
     hasOlder: Schema.Boolean,
     threadCostUsd: Schema.Finite,
+    globalCostUsd: Schema.optionalKey(Schema.Finite),
     oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
     queueRevision: Schema.Int,
     queuedCount: Schema.optionalKey(Schema.Int),
@@ -482,6 +493,7 @@ export const InteractiveEventSchema = Schema.Union([
     entries: Schema.Array(TranscriptPage.EntrySchema),
     hasOlder: Schema.Boolean,
     threadCostUsd: Schema.Finite,
+    globalCostUsd: Schema.optionalKey(Schema.Finite),
     oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
   }),
   Schema.Struct({ _tag: Schema.tag("ShellPermissionRequested"), id: Schema.String, command: Schema.String }),

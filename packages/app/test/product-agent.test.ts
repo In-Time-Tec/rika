@@ -1,10 +1,6 @@
-import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
-import { TestModel } from "@batonfx/test"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import * as RelayExecutionBackend from "@rika/runtime/relay"
-import { Runtime as ToolRuntime } from "@rika/tools"
-import { Context, Effect, Exit, FileSystem, Layer, Schedule } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { ProductAgent } from "../src/index"
 import { provideLayer } from "./layer"
 import { executionRoute } from "./current-state"
@@ -178,91 +174,68 @@ describe("ProductAgent", () => {
     }),
   )
 
-  it.live(
-    "cancels an inspected handoff child through the native backend",
-    () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const bunContext = yield* Layer.build(BunServices.layer)
-          return yield* Effect.scoped(
-            Effect.gen(function* () {
-              const fileSystem = yield* FileSystem.FileSystem
-              const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-product-child-cancel-" })
-              const fixture = yield* TestModel.make([
-                TestModel.toolCall("transfer_to_review", {}, { id: "call-cancel-review" }),
-                TestModel.turn([TestModel.text("Child should be cancelled.")], { delay: "30 seconds" }),
-              ])
-              const backendLayer = RelayExecutionBackend.layer({
-                filename: `${directory}/relay.db`,
-                workspace: directory,
-                registration: fixture.registration,
-                selection: fixture.selection,
-                modelVariantPolicy: "fixed-selection",
-                toolRuntimeLayer: ToolRuntime.testLayer(() => Effect.succeed({ text: "unused", truncated: false })),
-                toolNeedsApproval: () => false,
-                permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
-                compaction: { contextWindow: 1_000_000, reserveTokens: 100, keepRecentTokens: 100 },
+  it.effect("cancels the child returned by backend inspection without rewriting its identifier", () =>
+    Effect.gen(function* () {
+      const parentTurnId = "turn-product-child-cancel"
+      const childExecutionId = "execution:turn-product-child-cancel:child:Review:call-cancel-review"
+      let childStatus: ExecutionBackend.Status = "running"
+      const backend = ExecutionBackend.Service.of({
+        invokeChild: () => Effect.die("unused"),
+        createFanOut: () => Effect.die("unused"),
+        inspectFanOut: () => Effect.die("unused"),
+        cancelFanOut: () => Effect.die("unused"),
+        registerWorkflows: () => Effect.die("unused"),
+        startWorkflow: () => Effect.die("unused"),
+        inspectWorkflow: () => Effect.die("unused"),
+        cancelWorkflow: () => Effect.die("unused"),
+        start: () => Effect.die("unused"),
+        replay: () => Effect.die("unused"),
+        cancel: (executionId) =>
+          executionId === childExecutionId
+            ? Effect.sync(() => {
+                childStatus = "cancelled"
+                return { turnId: executionId, status: childStatus, events: [] }
               })
-              const backendContext = yield* Layer.build(backendLayer)
-              const backend = Context.get(backendContext, ExecutionBackend.Service)
-              const productContext = yield* Layer.build(
-                ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend))),
-              )
-              const agents = Context.get(productContext, ProductAgent.Service)
-              const turnId = "turn-product-child-cancel"
-              yield* backend
-                .start({
-                  threadId: "thread-product-child-cancel",
-                  turnId,
-                  prompt: "Ask Review to wait.",
-                  startedAt: 1,
-                  executionRoute: executionRoute(),
-                })
-                .pipe(Effect.forkScoped({ startImmediately: true }))
-              yield* fixture.requests.pipe(
-                Effect.repeat({
-                  until: (requests) => requests.length >= 2,
-                  schedule: Schedule.both(Schedule.spaced("10 millis"), Schedule.recurs(500)),
-                }),
-                Effect.timeout("6 seconds"),
-                Effect.mapError(() =>
-                  ExecutionBackend.BackendError.make({ message: "Timed out waiting for the child model request" }),
-                ),
-              )
-              const inspection = yield* backend.inspect(turnId).pipe(
-                Effect.repeat({
-                  until: (value) => value?.children[0] !== undefined,
-                  schedule: Schedule.both(Schedule.spaced("10 millis"), Schedule.recurs(500)),
-                }),
-                Effect.timeout("6 seconds"),
-                Effect.mapError(() =>
-                  ExecutionBackend.BackendError.make({ message: "Timed out waiting for child inspection" }),
-                ),
-              )
-              const childExecutionId = inspection?.children[0]?.executionId
-              if (childExecutionId === undefined) return yield* Effect.die("Missing handoff child")
-              const cancelled = yield* agents.cancelChild(childExecutionId, 2).pipe(
-                Effect.timeout("6 seconds"),
-                Effect.mapError(() =>
-                  ExecutionBackend.BackendError.make({ message: "Timed out cancelling the child" }),
-                ),
-              )
-              const child = yield* backend.inspect(childExecutionId)
-              yield* backend.cancel(turnId, 3).pipe(Effect.timeout("6 seconds"))
-              return { childExecutionId, cancelled, child }
-            }),
-          ).pipe(Effect.provide(bunContext))
-        }),
-      ).pipe(
-        Effect.tap(({ childExecutionId, cancelled, child }) =>
+            : Effect.die(`Unexpected execution identifier: ${executionId}`),
+        inspect: (executionId) =>
           Effect.sync(() => {
-            expect(cancelled.turnId).toBe(childExecutionId)
-            expect(cancelled.status).toBe("cancelled")
-            expect(child?.status).toBe("cancelled")
+            if (executionId === parentTurnId)
+              return {
+                turnId: parentTurnId,
+                status: "running" as const,
+                waits: [],
+                pendingTools: [],
+                children: [{ executionId: childExecutionId, status: childStatus }],
+              }
+            if (executionId === childExecutionId)
+              return {
+                turnId: childExecutionId,
+                status: childStatus,
+                waits: [],
+                pendingTools: [],
+                children: [],
+              }
+            return undefined
           }),
-        ),
-      ),
-    30_000,
+        steer: () => Effect.die("unused"),
+        listApprovals: () => Effect.die("unused"),
+        resolveToolApproval: () => Effect.die("unused"),
+        resolvePermission: () => Effect.die("unused"),
+      })
+      const result = yield* Effect.gen(function* () {
+        const agents = yield* ProductAgent.Service
+        const parent = yield* backend.inspect(parentTurnId)
+        const inspectedChildId = parent?.children[0]?.executionId
+        if (inspectedChildId === undefined) return yield* Effect.die("Missing handoff child")
+        const cancelled = yield* agents.cancelChild(inspectedChildId, 2)
+        const child = yield* backend.inspect(inspectedChildId)
+        return { inspectedChildId, cancelled, child }
+      }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
+
+      expect(result.inspectedChildId).toBe(childExecutionId)
+      expect(result.cancelled).toMatchObject({ turnId: childExecutionId, status: "cancelled" })
+      expect(result.child).toMatchObject({ turnId: childExecutionId, status: "cancelled" })
+    }),
   )
 
   it.effect("maps backend failures for every delegated fan-out operation", () =>
@@ -368,7 +341,7 @@ describe("ProductAgent", () => {
           fanOutId: "fan",
           executionRoute: executionRoute(),
           tasks: [
-            { id: "a", prompt: "research APIs" },
+            { id: "a", prompt: "research APIs", model: "gpt-5.6-luna" },
             { id: "b", prompt: "implement it" },
           ],
           maxConcurrency: 1,
@@ -379,6 +352,7 @@ describe("ProductAgent", () => {
       }).pipe(provideLayer(ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))))
       expect(captured?.maxConcurrency).toBe(1)
       expect(captured?.children.map((child) => child.profile)).toEqual(["Librarian", "Task"])
+      expect(captured?.children.map((child) => child.model)).toEqual(["gpt-5.6-luna", undefined])
       expect(result.projected).toEqual([
         { parentTurnId: "parent", fanOutId: "fan", childId: "a", ordinal: 0, state: "completed", output: "ok" },
         { parentTurnId: "parent", fanOutId: "fan", childId: "b", ordinal: 1, state: "failed", error: "check failed" },

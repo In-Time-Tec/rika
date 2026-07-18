@@ -34,6 +34,7 @@ import * as ConfigOperations from "./config-operations"
 import * as ResolvedContext from "./resolved-context"
 import * as ThreadActivity from "./thread-activity"
 import * as InteractiveFeedOverflow from "./interactive-feed-overflow"
+import * as UsageCost from "./usage-cost"
 import {
   Input,
   InteractiveEventSchema,
@@ -418,6 +419,135 @@ const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): Intera
 
 const normalizeChildExecutionId = (executionId: string): string => executionId.replace(/^execution:/, "")
 
+const sourceProjection = (projection: TranscriptRepository.Projection): Transcript.Projection => ({
+  units: projection.units,
+  revision: projection.revision,
+  modelPhase: projection.modelPhase,
+  ...(projection.oldestCursor === undefined ? {} : { oldestCursor: projection.oldestCursor }),
+  ...(projection.checkpointCursor === undefined ? {} : { checkpointCursor: projection.checkpointCursor }),
+  ...(projection.costUsd === undefined ? {} : { costUsd: projection.costUsd }),
+})
+
+const toolForChild = (projection: Transcript.Projection, childExecutionId: string) => {
+  const normalizedChildId = normalizeChildExecutionId(childExecutionId)
+  const marker = ":child:"
+  const markerIndex = normalizedChildId.lastIndexOf(marker)
+  const encodedCallId = markerIndex < 0 ? undefined : normalizedChildId.slice(markerIndex + marker.length)
+  return projection.units
+    .flatMap((unit) =>
+      unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
+        ? [{ tool: unit.content.block, turnId: unit.turnId }]
+        : [],
+    )
+    .find(({ tool, turnId }) => {
+      if (tool.childId !== undefined) return normalizeChildExecutionId(tool.childId) === normalizedChildId
+      if (encodedCallId !== undefined && tool.id.endsWith(`:${encodedCallId}`)) return true
+      const prefix = `${turnId}:`
+      const toolCallId = tool.id.startsWith(prefix) ? tool.id.slice(prefix.length) : tool.id
+      return normalizedChildId.endsWith(`:${toolCallId}`)
+    })?.tool
+}
+
+const hasMissingNestedProjection = (projection: Transcript.Projection): boolean =>
+  projection.units.some((unit) => {
+    if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall") return false
+    const childId = unit.content.block.childId
+    if (childId === undefined) return false
+    const parentId = unit.content.block.id
+    return !projection.units.some(
+      (candidate) =>
+        candidate.parentId === parentId &&
+        normalizeChildExecutionId(candidate.turnId) === normalizeChildExecutionId(childId) &&
+        candidate.revision >= 0,
+    )
+  })
+
+const replayProjection = Effect.fn("Operation.replayProjection")(function* (
+  backend: ExecutionBackend.Interface,
+  executionId: string,
+) {
+  const turnId = normalizeChildExecutionId(executionId)
+  if (backend.pageEvents === undefined) {
+    const result = yield* backend.replay(executionId)
+    return Transcript.project(turnId, "", result.events)
+  }
+  let projection = Transcript.empty(turnId, "")
+  let after: string | undefined
+  const cursors = new Set<string>()
+  while (true) {
+    const page = yield* backend.pageEvents(executionId, "forward", after, 200)
+    for (const event of page.events.toSorted((left, right) => left.sequence - right.sequence))
+      projection = Transcript.applyEvent(projection, event)
+    if (!page.hasMore) return projection
+    const next = page.newestCursor
+    if (next === undefined || cursors.has(next)) return projection
+    cursors.add(next)
+    after = next
+  }
+})
+
+const projectExecutionTree = Effect.fn("Operation.projectExecutionTree")(function* (
+  backend: ExecutionBackend.Interface,
+  rootExecutionId: string,
+  root: Transcript.Projection,
+) {
+  const nested: Array<Transcript.NestedProjection> = []
+  const pending: Array<{ readonly executionId: string; readonly projection: Transcript.Projection }> = [
+    { executionId: rootExecutionId, projection: root },
+  ]
+  const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
+  while (pending.length > 0) {
+    const current = pending.shift()!
+    const inspection = yield* backend.inspect(current.executionId)
+    if (inspection === undefined) continue
+    for (const child of inspection.children) {
+      const childId = normalizeChildExecutionId(child.executionId)
+      if (seen.has(childId)) continue
+      seen.add(childId)
+      const parent = toolForChild(current.projection, child.executionId)
+      if (parent === undefined) continue
+      const projection = yield* replayProjection(backend, child.executionId)
+      nested.push({ parentId: parent.id, projection })
+      pending.push({ executionId: child.executionId, projection })
+    }
+  }
+  return nested.length === 0 ? root : Transcript.withNestedProjections(root, nested)
+})
+
+const activeDescendantExecutionIds = Effect.fn("Operation.activeDescendantExecutionIds")(function* (
+  backend: ExecutionBackend.Interface,
+  rootExecutionId: string,
+) {
+  const pending = [rootExecutionId]
+  const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
+  const active: Array<string> = []
+  while (pending.length > 0) {
+    const executionId = pending.shift()!
+    const inspection = yield* backend.inspect(executionId)
+    if (inspection === undefined) continue
+    for (const child of inspection.children) {
+      const normalized = normalizeChildExecutionId(child.executionId)
+      if (seen.has(normalized)) continue
+      seen.add(normalized)
+      pending.push(child.executionId)
+      if (!isTerminalStatus(child.status)) active.push(child.executionId)
+    }
+  }
+  return active
+})
+
+const persistExecutionTree = Effect.fn("Operation.persistExecutionTree")(function* (turn: Turn.Turn, force: boolean) {
+  const transcripts = yield* TranscriptRepository.Service
+  const current = yield* transcripts.get(turn.id)
+  if (current === undefined) return
+  const root = sourceProjection(current)
+  if (!force && !hasMissingNestedProjection(root)) return
+  const backend = yield* ExecutionBackend.Service
+  const tree = yield* projectExecutionTree(backend, turn.id, root)
+  if (tree === root) return
+  yield* transcripts.replace(turn, tree)
+})
+
 const childExecutionId = (event: ExecutionBackend.Event): string | undefined => {
   if (event.type !== "child_run.spawned") return undefined
   const member = event.data?.member
@@ -430,12 +560,14 @@ const childExecutionId = (event: ExecutionBackend.Event): string | undefined => 
 const childTranscriptPatch = (
   threadId: Thread.ThreadId,
   executionId: string,
+  rootTurnId: Turn.TurnId,
   event: ExecutionBackend.Event,
 ): InteractiveEvent => ({
   _tag: "TranscriptPatched",
   selectionEpoch: 0,
   threadId,
   turnId: Turn.TurnId.make(executionId),
+  ...(event.type === "model.usage.reported" || event.type === "child_run.spawned" ? { rootTurnId } : {}),
   event,
   revision: event.sequence,
 })
@@ -576,6 +708,37 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
       const executionDependencies = Context.merge(
         dependencyContext,
         Context.make(ExecutionBackend.Service, acquiredBackend),
+      )
+      const readUsageCosts = Effect.fn("Operation.readUsageCosts")(function* () {
+        const threads = yield* ThreadRepository.Service
+        const turns = yield* TurnRepository.Service
+        const roots = (yield* Effect.forEach(yield* threads.list({ includeArchived: true, limit: 100 }), (thread) =>
+          turns
+            .list(thread.id)
+            .pipe(
+              Effect.map((values) => values.map((turn) => ({ threadId: String(thread.id), turnId: String(turn.id) }))),
+            ),
+        )).flat()
+        return yield* UsageCost.collect(acquiredBackend, roots)
+      })
+      const usageCostAdmission = yield* Semaphore.make(1)
+      let usageSnapshot: UsageCost.Snapshot | undefined
+      const currentUsageCosts = (): UsageCost.Snapshot => usageSnapshot ?? UsageCost.empty
+      const loadUsageCosts = usageCostAdmission.withPermits(1)(
+        Effect.suspend(() => {
+          if (usageSnapshot !== undefined) return Effect.void
+          return readUsageCosts().pipe(
+            Effect.provide(executionDependencies),
+            Effect.catchCause((cause) =>
+              Effect.logWarning("usage-cost.read.failed").pipe(
+                Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+                Effect.as(UsageCost.empty),
+              ),
+            ),
+            Effect.tap((snapshot) => Effect.sync(() => (usageSnapshot = snapshot))),
+            Effect.asVoid,
+          )
+        }),
       )
       const notifyThreadSummaries = Effect.gen(function* () {
         const summaries = yield* ThreadSummaryRepository.Service
@@ -786,6 +949,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         } = {},
       ) {
         const registerPromoter = settings.registerPromoter ?? false
+        yield* loadUsageCosts
         const sessionId = (interactiveSessionSequence += 1)
         let selectedThreadId = settings.initialThreadId
         let currentSelectionEpoch = 0
@@ -836,11 +1000,31 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           return true
         }
         let observeChildSpawn = ignoreInteractiveEvent
+        const withUsageCosts = (event: InteractiveEvent): InteractiveEvent => {
+          if (event._tag !== "TranscriptPatched" || event.event.type !== "model.usage.reported") return event
+          const rootTurnId = event.rootTurnId ?? event.turnId
+          usageSnapshot = UsageCost.observe(currentUsageCosts(), {
+            threadId: String(event.threadId),
+            turnId: String(rootTurnId),
+            event: event.event,
+          })
+          const totals = currentUsageCosts()
+          return {
+            ...event,
+            rootTurnId,
+            rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId) ?? 0,
+            threadCostUsd: totals.threadCostUsd.get(event.threadId) ?? 0,
+            globalCostUsd: totals.globalCostUsd,
+          }
+        }
         const deliver = (
           event: InteractiveEvent,
           deliveryOptions?: { readonly selectionRequest?: number; readonly selectedThreadOnly?: boolean },
         ) => {
-          const selectedEvent = withSelectionEpoch(event, deliveryOptions?.selectionRequest ?? currentSelectionEpoch)
+          const selectedEvent = withSelectionEpoch(
+            withUsageCosts(event),
+            deliveryOptions?.selectionRequest ?? currentSelectionEpoch,
+          )
           const envelope: SessionEnvelope = {
             event: selectedEvent,
             ...(deliveryOptions?.selectionRequest === undefined
@@ -934,6 +1118,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const transcriptHasUnprojectedTurns = yield* Ref.make(false)
         const transcriptHasOlder = yield* Ref.make(false)
         const projectionAdmission = yield* Semaphore.make(1)
+        const persistProjectionTree = (turn: Turn.Turn, force: boolean) =>
+          projectionAdmission.withPermits(1)(persistExecutionTree(turn, force))
         const appendProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
           projectionAdmission.withPermits(1)(
             Effect.gen(function* () {
@@ -955,6 +1141,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         type ChildFollowerJob = {
           readonly executionId: string
           readonly threadId: Thread.ThreadId
+          readonly rootTurnId: Turn.TurnId
           readonly selection: ChildFollowerSelection
         }
         const childFollowerJobs = yield* Queue.bounded<ChildFollowerJob>(512)
@@ -977,18 +1164,26 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           yield* Deferred.succeed(previous.stopped, undefined)
           yield* Queue.clear(childFollowerJobs)
         })
-        const enqueueChildFollower = (threadId: Thread.ThreadId, executionId: string) => {
+        const enqueueChildFollower = (threadId: Thread.ThreadId, executionId: string, rootTurnId: Turn.TurnId) => {
           const normalizedExecutionId = normalizeChildExecutionId(executionId)
           const selection = childFollowerSelection
           if (selection.threadId !== String(threadId) || selection.executions.has(normalizedExecutionId)) return
           selection.executions.add(normalizedExecutionId)
-          if (!Queue.offerUnsafe(childFollowerJobs, { executionId: normalizedExecutionId, threadId, selection }))
+          if (
+            !Queue.offerUnsafe(childFollowerJobs, {
+              executionId: normalizedExecutionId,
+              threadId,
+              rootTurnId,
+              selection,
+            })
+          )
             selection.executions.delete(normalizedExecutionId)
         }
         observeChildSpawn = (event) => {
           if (event._tag !== "TranscriptPatched") return
           const executionId = childExecutionId(event.event)
-          if (executionId !== undefined) enqueueChildFollower(event.threadId, executionId)
+          if (executionId !== undefined)
+            enqueueChildFollower(event.threadId, executionId, event.rootTurnId ?? event.turnId)
         }
         let lifecycle: "open" | "closed" = "open"
         let feedAttached = false
@@ -1166,6 +1361,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                       )
                       yield* projectExecutionResult(thread.id, result)
                       yield* appendProjection(updatedTurn, result.events)
+                      yield* persistProjectionTree(updatedTurn, true)
                       if (result.status === "completed") {
                         yield* settleThread(thread, dispatch)
                         if (isNewThread)
@@ -1254,7 +1450,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             const deliverEvent = (event: ExecutionBackend.Event) => {
               if (childFollowerSelection !== job.selection || deliveredCursors.has(event.cursor)) return
               deliveredCursors.add(event.cursor)
-              sessionDispatch(childTranscriptPatch(job.threadId, job.executionId, event))
+              const patch = childTranscriptPatch(job.threadId, job.executionId, job.rootTurnId, event)
+              sessionDispatch(patch)
+              if (event.type === "model.usage.reported") publishInteractiveActivity(sessionId, patch)
             }
             const result = yield* Effect.raceFirst(
               follow(job.executionId, afterCursor, deliverEvent),
@@ -1375,6 +1573,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             )
             yield* projectExecutionResult(thread.id, result)
             yield* appendProjection(updatedTurn, result.events)
+            yield* persistProjectionTree(updatedTurn, true)
             return isTerminalStatus(result.status)
           })
           const runNext = Effect.fn("Operation.interactive.runNextQueued")(function* () {
@@ -1504,6 +1703,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           )
           yield* projectExecutionResult(turn.threadId, result)
           yield* appendProjection(updatedTurn, result.events)
+          yield* persistProjectionTree(updatedTurn, true)
           if (isTerminalStatus(result.status)) yield* settleThread(thread, dispatch)
           else if (result.status !== "waiting" && result.status !== "running" && result.status !== "queued")
             emit(dispatch, {
@@ -1660,8 +1860,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   projected !== undefined &&
                   isTerminalStatus(turn.status) &&
                   projected.checkpointCursor === turn.lastCursor
-                )
+                ) {
+                  yield* persistProjectionTree(turn, false)
                   return
+                }
                 if (turn.status === "queued") {
                   return
                 }
@@ -1673,6 +1875,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   return
                 }
                 yield* projectExecutionPages(backend, turn, execution.status)
+                yield* persistProjectionTree({ ...turn, status: execution.status }, true)
               }),
             { concurrency: 4, discard: true },
           )
@@ -1724,12 +1927,21 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               oldestCursor = older.oldestCursor
               storedHasOlder = older.hasOlder
             }
-          const entries = olderPages.length === 0 ? page.entries : olderPages.toReversed().flat().concat(page.entries)
+          const storedEntries =
+            olderPages.length === 0 ? page.entries : olderPages.toReversed().flat().concat(page.entries)
+          const usageCosts = currentUsageCosts()
+          const entries = storedEntries.map((entry) => {
+            const costUsd = usageCosts.turnCostUsd.get(entry.turn.id)
+            return costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
+              ? entry
+              : Object.assign({}, entry, { projectionCostUsd: costUsd })
+          })
           const hasOlder = storedHasOlder || (yield* Ref.get(transcriptHasUnprojectedTurns))
           const completedAt = yield* Clock.currentTimeMillis
           if ((yield* Ref.get(selectionRequest)) !== request) return
           yield* Ref.set(transcriptCursor, oldestCursor)
           yield* Ref.set(transcriptHasOlder, hasOlder)
+          const threadCostUsd = usageCosts.threadCostUsd.get(thread.id) ?? page.threadCostUsd
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const activeTurn = yield* turns.findActive(thread.id)
@@ -1749,7 +1961,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   thread,
                   entries,
                   hasOlder,
-                  threadCostUsd: page.threadCostUsd,
+                  threadCostUsd,
+                  globalCostUsd: usageCosts.globalCostUsd,
                   ...(oldestCursor === undefined ? {} : { oldestCursor }),
                   queueRevision: queue.revision,
                   queuedCount: queue.queuedCount,
@@ -1760,7 +1973,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             )
             if (activeTurn !== undefined) {
               const inspection = yield* backend.inspect(activeTurn.id)
-              for (const child of inspection?.children ?? []) enqueueChildFollower(thread.id, child.executionId)
+              for (const child of inspection?.children ?? [])
+                enqueueChildFollower(thread.id, child.executionId, activeTurn.id)
             }
           } else
             dispatch({
@@ -1769,7 +1983,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               threadId: thread.id,
               entries,
               hasOlder,
-              threadCostUsd: page.threadCostUsd,
+              threadCostUsd,
+              globalCostUsd: usageCosts.globalCostUsd,
               ...(oldestCursor === undefined ? {} : { oldestCursor }),
             })
           yield* Effect.logInfo("transcript.page.loaded").pipe(
@@ -1828,6 +2043,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             entries: [],
             hasOlder: false,
             threadCostUsd: 0,
+            globalCostUsd: currentUsageCosts().globalCostUsd,
             queueRevision: queue.revision,
             queuedCount: queue.queuedCount,
             queue: queue.turns.map(queueItem),
@@ -1885,7 +2101,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           interactiveSinks.set(sessionId, (_origin, event) => {
             const threadId = interactiveEventThreadId(event)
             if (threadId !== undefined && bufferSelectionEvent(event)) return
-            if (threadId === undefined || threadId === selectedThreadId)
+            if (
+              threadId === undefined ||
+              threadId === selectedThreadId ||
+              (event._tag === "TranscriptPatched" && event.event.type === "model.usage.reported")
+            )
               deliver(event, { selectedThreadOnly: threadId !== undefined })
           })
         const implementation: InteractiveSession = {
@@ -2120,7 +2340,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 }
                 if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
                 if (pending.queue !== undefined) emit(sessionDispatch, queueMutationEvent(pending.queue))
-                yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
+                if (turn.status !== "accepted") yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
                 yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
                 yield* drainQueued(thread, sessionDispatch)
               }),
@@ -2135,7 +2355,32 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 return
               }
               const thread = yield* threadForTurn(turn)
-              const result = yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
+              const cancelledAt = yield* Clock.currentTimeMillis
+              const childIds =
+                turn.status === "accepted"
+                  ? []
+                  : yield* activeDescendantExecutionIds(backend, turn.id).pipe(Effect.orElseSucceed(() => []))
+              const cancellationOrder = childIds.toReversed()
+              const childOutcomes = yield* Effect.forEach(cancellationOrder, (childId) =>
+                Effect.result(backend.cancel(childId, cancelledAt)),
+              )
+              for (const [index, outcome] of childOutcomes.entries()) {
+                const childId = cancellationOrder[index]!
+                if (outcome._tag === "Success") {
+                  for (const event of outcome.success.events)
+                    sessionDispatch(childTranscriptPatch(thread.id, childId, turn.id, event))
+                } else
+                  yield* Effect.logError("child-execution.cancel.failed").pipe(
+                    Effect.annotateLogs({
+                      "rika.execution.id": childId,
+                      "rika.failure.kind": String(outcome.failure),
+                    }),
+                  )
+              }
+              const result =
+                turn.status === "accepted"
+                  ? { turnId: turn.id, status: "cancelled" as const, events: [] }
+                  : yield* backend.cancel(turn.id, cancelledAt)
               yield* setTurnStatus(
                 turn.id,
                 result.status,
@@ -2554,6 +2799,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   )
                   yield* projectExecutionResult(thread.id, result)
                   yield* (yield* TranscriptRepository.Service).appendAll(updated, result.events)
+                  yield* persistExecutionTree(updated, true)
                 }
                 return result
               })

@@ -39,6 +39,30 @@ import {
 
 const ignoreInteractiveEvent = (_event: Operation.InteractiveEvent) => {}
 
+const tracedEventTypes = new Set([
+  "model.reasoning.delta",
+  "model.output.delta",
+  "model.toolcall.delta",
+  "tool.call.requested",
+  "tool.result.received",
+])
+
+const traceInteractiveEvent = (name: string, seenDeltas: Set<string>, event: Operation.InteractiveEvent) => {
+  if (event._tag !== "TranscriptPatched" || !tracedEventTypes.has(event.event.type)) return Effect.void
+  const delta = event.event.type.endsWith(".delta")
+  const key = `${event.turnId}:${event.event.type}`
+  if (delta && seenDeltas.has(key)) return Effect.void
+  if (delta) seenDeltas.add(key)
+  return Effect.logInfo(name).pipe(
+    Effect.annotateLogs({
+      "rika.event.cursor": event.event.cursor,
+      "rika.event.type": event.event.type,
+      "rika.thread.id": String(event.threadId),
+      "rika.turn.id": String(event.turnId),
+    }),
+  )
+}
+
 const mapResidentSocketFailure = (cause: unknown, accepted: boolean): ResidentService.ResidentServiceError => {
   if (Socket.SocketError.is(cause) && cause.reason._tag === "SocketCloseError") {
     if (cause.reason.code === 4409 || cause.reason.code === 1001)
@@ -190,6 +214,8 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
     writer(frame).pipe(Effect.tapError((error) => Deferred.fail(connectionFailure, error)))
   const pongs = yield* Ref.make(new Map<string, Deferred.Deferred<void, ResidentService.ResidentServiceError>>())
   const inbound = yield* Semaphore.make(1)
+  const receivedDeltas = new Set<string>()
+  const dispatchedDeltas = new Set<string>()
   const requests = yield* Ref.make(
     new Map<
       string,
@@ -296,6 +322,8 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                             feed.replayRequestedAfter = undefined
                             if (message._tag === "interactive-feed-resync")
                               yield* Effect.logInfo("resident.feed.barrier_received")
+                            if (message._tag === "interactive-feed-event")
+                              yield* traceInteractiveEvent("client.feed.event_received", receivedDeltas, message.event)
                             yield* Queue.offer(feed.frames, message)
                           }
                           if (
@@ -408,6 +436,15 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                                             if (queued._tag === "interactive-feed-event") dispatch(queued.event)
                                             else for (const event of queued.events) dispatch(event)
                                           }).pipe(
+                                            Effect.andThen(
+                                              queued._tag === "interactive-feed-event"
+                                                ? traceInteractiveEvent(
+                                                    "client.feed.event_dispatched",
+                                                    dispatchedDeltas,
+                                                    queued.event,
+                                                  )
+                                                : Effect.void,
+                                            ),
                                             Effect.andThen(
                                               write(
                                                 json({

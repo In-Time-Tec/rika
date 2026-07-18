@@ -89,6 +89,7 @@ export interface FanOutInput {
     readonly childId: string
     readonly profile?: AgentProfile
     readonly prompt: string
+    readonly model?: string
   }>
   readonly maxConcurrency: number
   readonly join: JoinPolicy

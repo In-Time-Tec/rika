@@ -24,7 +24,9 @@ Rika is a local coding-agent CLI and OpenTUI app written in Effect TypeScript. R
 ## Scripts and verification
 
 - Root everyday scripts are `build`, `check`, `dev`, `format`, `test`, and `typecheck`. Plain package, migration, release, and install workflows are allowed.
+- Keep one simple supported command per workflow and each `package.json` script to one command. Let Bun, Vitest, Turborepo, and their configuration own discovery, setup, concurrency, and task order instead of custom orchestration or one-off file lists.
 - Do not add colon-named aliases, dispatchers that hide old aliases, or wrappers for Git, Docker, status, logs, watch, coverage, vendor, or upstream commands.
 - Use `bun run package -- --target <target>` for target packaging.
-- Use `@effect/vitest` for Effect behavior. Use `bun:test` only for Bun-native or packaged-process integration.
+- `bun run test` owns fast deterministic checks. Use `@effect/vitest` and `TestClock` for Effect behavior and time; use `bun:test` only for Bun-native or packaged-process integration.
+- `bun run stress` owns packaged CLI load, endurance, and live-process timing. Do not put stress cycles or real-time waits in `bun run test`.
 - Run focused tests while working, then `bun run check` when the risk and time budget permit. Report what ran and what did not.

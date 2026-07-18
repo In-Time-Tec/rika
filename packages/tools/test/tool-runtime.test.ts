@@ -128,7 +128,7 @@ describe("Runtime", () => {
   it.effect("drains large streams while retaining only bounded text and complete UTF-8 characters", () => {
     const encoded = new TextEncoder().encode("🙂")
     const stream = Stream.concat(
-      Stream.fromIterable(Array.from({ length: 10_000 }, () => new Uint8Array(1_000).fill(120))),
+      Stream.make(new Uint8Array(40_005).fill(120)),
       Stream.make(encoded.slice(0, 2), encoded.slice(2)),
     )
     return Effect.gen(function* () {

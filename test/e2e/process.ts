@@ -73,6 +73,7 @@ export const sandbox: Effect.Effect<Sandbox, ProcessTestError, BunServices.BunSe
       HOME: home,
       RIKA_DATABASE: path.join(state, "rika.db"),
       RIKA_RELAY_DATABASE: path.join(state, "relay.db"),
+      RIKA_INTERNAL_RESIDENT_GRACE: "0",
       RIKA_TEST_MODEL_RESPONSE: "deterministic response",
     },
     dispose: fileSystem.remove(root, { recursive: true }).pipe(Effect.ignore),

@@ -54,10 +54,10 @@ const gptVariants = (model: CatalogModel) =>
     model.efforts.map((effort) => [
       effort,
       {
-        normal: { options: { reasoning: { effort } } },
+        normal: { options: { reasoning: { effort, summary: "auto" } } },
         fast: {
           options: {
-            reasoning: { effort },
+            reasoning: { effort, summary: "auto" },
             service_tier: "priority",
           },
         },

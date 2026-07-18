@@ -1,5 +1,6 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 import { Operation } from "@rika/app"
@@ -10,11 +11,14 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
+import { ViewState } from "@rika/tui"
+import { Surface } from "@rika/tui/adapter"
 import {
   buildTestModelScript,
   canonicalDatabaseRoot,
   configuredBackendLayer,
   distinctModelRoutes,
+  executionModelRoutes,
   executionRoutePin,
   modelRoutesForExecution,
   modelRoutePlan,
@@ -303,8 +307,17 @@ test("constructs GPT 5.6 provider registrations for every configured effort and 
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const modes = ["low", "medium", "high", "ultra"] as const
+        const modes = Object.keys(ConfigContract.defaults.modes) as Array<ConfigContract.ModeId>
         const efforts = ["low", "medium", "high", "xhigh", "max"] as const
+        const defaultRoutes = modes.flatMap((mode) =>
+          executionModelRoutes(executionRoutePin(ConfigContract.defaults, mode)),
+        )
+        expect(defaultRoutes).toHaveLength(modes.length * (4 + Object.keys(ConfigContract.defaults.agents).length))
+        expect(
+          defaultRoutes
+            .filter(({ provider, model }) => provider !== "openai" || !model.startsWith("gpt-5.6-"))
+            .map(({ role, provider, model }) => ({ role, provider, model })),
+        ).toEqual([])
         const variants = modes.flatMap((mode) =>
           efforts.flatMap((effort) => {
             const configured = ConfigContract.defaults.modes[mode]
@@ -341,7 +354,47 @@ test("constructs GPT 5.6 provider registrations for every configured effort and 
     ),
   ))
 
-test("prepares each mode request with its configured fixed reasoning effort", () => {
+const modelRouteDisplayLabel = (route: ConfigContract.ResolvedModelRoute) => {
+  const [provider, version, ...name] = route.model.split("-")
+  const modelName = name.map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`).join(" ")
+  return `${provider?.toUpperCase()}-${version} ${modelName} ${route.effort}`
+}
+
+test("renders every default mode route in the mode picker", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const modes = Object.keys(ConfigContract.defaults.modes) as Array<ConfigContract.ModeId>
+        const setup = yield* Effect.acquireRelease(
+          Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+          (value) => Effect.sync(() => value.renderer.destroy()),
+        )
+        const surface = yield* Effect.acquireRelease(
+          Effect.sync(
+            () => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false }),
+          ),
+          (value) => Effect.sync(() => value.destroy()),
+        )
+        for (const mode of modes) {
+          surface.update({
+            ...ViewState.initial("/workspace", mode),
+            modePicker: { open: true, selected: modes.indexOf(mode) },
+          })
+          yield* Effect.tryPromise(() => setup.flush())
+          yield* Effect.tryPromise(() => setup.renderOnce())
+          const frame = setup.captureCharFrame()
+          expect(frame).toContain(
+            `Oracle: ${modelRouteDisplayLabel(ConfigContract.resolveModelRoute(ConfigContract.defaults, mode, "oracle"))}`,
+          )
+          expect(frame).toContain(
+            `Agent:  ${modelRouteDisplayLabel(ConfigContract.resolveModelRoute(ConfigContract.defaults, mode, "main"))}`,
+          )
+        }
+      }),
+    ),
+  ))
+
+test("prepares each mode request with its configured reasoning effort and streaming summary", () => {
   const requests: Array<Record<string, unknown>> = []
   const server = Bun.serve({
     port: 0,
@@ -383,9 +436,12 @@ test("prepares each mode request with its configured fixed reasoning effort", ()
             }),
           { discard: true },
         )
-        expect(
-          requests.map((request) => (request.reasoning as { readonly effort?: string } | undefined)?.effort),
-        ).toEqual(["low", "medium", "xhigh", "max"])
+        expect(requests.map((request) => request.reasoning)).toEqual([
+          { effort: "low", summary: "auto" },
+          { effort: "medium", summary: "auto" },
+          { effort: "xhigh", summary: "auto" },
+          { effort: "max", summary: "auto" },
+        ])
       }),
     ).pipe(
       Effect.ensuring(

@@ -215,6 +215,227 @@ describe("Transcript projection", () => {
     })
   })
 
+  it("merges a correlated spawn and child lifecycle into one named tool unit", () => {
+    const childId = "execution:turn-a:child:oracle"
+    const projection = project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: {
+          tool_call_id: "agent",
+          tool_name: "spawn_child_run",
+          input: { profile: "oracle", prompt: "Find the projection defect" },
+        },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { tool_call_id: "agent", child_execution_id: childId },
+      },
+      {
+        cursor: "started",
+        sequence: 3,
+        type: "child_run.started",
+        createdAt: 3,
+        data: { child_execution_id: childId, profile: "oracle" },
+      },
+      {
+        cursor: "completed",
+        sequence: 4,
+        type: "child_run.completed",
+        createdAt: 4,
+        data: { child_execution_id: childId, profile: "oracle" },
+      },
+    ])
+
+    expect(projection.units).toHaveLength(2)
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:agent",
+      revision: 4,
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          childId,
+          status: "complete",
+          detail: "Find the projection defect",
+          presentation: { activeLabel: "Oracle exploring", completeLabel: "Oracle has spoken" },
+        },
+      },
+    })
+  })
+
+  it("keeps a new-file result marked as a create when the events replay", () => {
+    const events: ReadonlyArray<SourceEvent> = [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: {
+          tool_call_id: "patch",
+          tool_name: "apply_patch",
+          input: { patchText: "*** Begin Patch\n*** Add File: tmp-agent-test.txt\n+hello\n*** End Patch" },
+        },
+      },
+      {
+        cursor: "result",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: {
+          tool_call_id: "patch",
+          output: {
+            text: "applied",
+            diff: "diff --git a/tmp-agent-test.txt b/tmp-agent-test.txt\nnew file mode 100644\n--- /dev/null\n+++ b/tmp-agent-test.txt\n@@ -0,0 +1 @@\n+hello",
+          },
+        },
+      },
+    ]
+    const live = project("turn-a", "create the file", events)
+    const replayed = events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "create the file"))
+    for (const projection of [live, replayed])
+      expect(projection.units[1]).toMatchObject({
+        key: "tool:turn-a:patch",
+        content: {
+          _tag: "Block",
+          block: {
+            _tag: "ToolCall",
+            status: "complete",
+            files: [{ path: "tmp-agent-test.txt", kind: "add", preview: false }],
+          },
+        },
+      })
+  })
+
+  it("labels a spawn call Subagent working before any child metadata arrives", () => {
+    const projection = project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "agent", tool_name: "transfer_to_task", input: { prompt: "Inspect the projection" } },
+      },
+    ])
+    const block =
+      projection.units[1]?.content._tag === "Block" && projection.units[1].content.block._tag === "ToolCall"
+        ? projection.units[1].content.block
+        : undefined
+    expect(block?.presentation).toMatchObject({
+      family: "agent",
+      activeLabel: "Subagent working",
+      completeLabel: "Subagent finished",
+    })
+    expect(block?.presentation.activeLabel).not.toContain("(task)")
+  })
+
+  it("stores the tool error text on a failed subagent call for live and replayed projections", () => {
+    const events: ReadonlyArray<SourceEvent> = [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: {
+          tool_call_id: "agent",
+          tool_name: "spawn_child_run",
+          input: { profile: "task", prompt: "Inspect the projection" },
+        },
+      },
+      {
+        cursor: "result",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: { tool_call_id: "agent", error: "AgentToolError: Model gpt-5.6-luna is not available" },
+      },
+    ]
+    const live = project("turn-a", "delegate", events)
+    const replayed = events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "delegate"))
+    for (const projection of [live, replayed])
+      expect(projection.units[1]).toMatchObject({
+        key: "tool:turn-a:agent",
+        content: {
+          _tag: "Block",
+          block: {
+            _tag: "ToolCall",
+            status: "failed",
+            detail: "Inspect the projection",
+            output: "AgentToolError: Model gpt-5.6-luna is not available",
+          },
+        },
+      })
+  })
+
+  it("keeps the ToolError message as the output of a failed tool result", () => {
+    const projection = project("turn-a", "prompt", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "call", tool_name: "read", input: "a" },
+      },
+      {
+        cursor: "result",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: { tool_call_id: "call", output: { _tag: "ToolError", tool: "read", message: "file missing" } },
+      },
+    ])
+    expect(projection.units[1]).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "failed", output: "file missing" } },
+    })
+  })
+
+  it("links a Relay handoff spawn to its encoded tool call and keeps the supplied prompt", () => {
+    const callId = "rika:execution%3Aparent:spawn-oracle"
+    const childId = `execution:parent:child:${callId}`
+    const projection = project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: {
+          tool_call_id: callId,
+          tool_name: "transfer_to_oracle",
+          input: {
+            input: [{ type: "text", text: "Inspect AGENTS.md and report the evidence." }],
+          },
+        },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { child_execution_id: childId, preset_name: "Oracle" },
+      },
+    ])
+
+    expect(projection.units).toHaveLength(2)
+    expect(projection.units[1]).toMatchObject({
+      key: `tool:turn-a:${callId}`,
+      revision: 2,
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          childId,
+          detail: "Inspect AGENTS.md and report the evidence.",
+          presentation: { activeLabel: "Oracle exploring", completeLabel: "Oracle has spoken" },
+        },
+      },
+    })
+  })
+
   it("keeps a process wait as its own row and names it from the parent command", () => {
     const projection = project("turn-a", "run tests", [
       {

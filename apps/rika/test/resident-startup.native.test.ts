@@ -1,6 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
+import { fileURLToPath } from "node:url"
 import { Clock, Effect, FileSystem, Layer, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { claimStartup } from "../src/resident-startup"
@@ -157,7 +158,7 @@ test("reports an incompatible product database through resident startup without 
         const startedAt = yield* Clock.currentTimeMillis
         const handle = yield* spawner.spawn(
           ChildProcess.make("bun", ["src/client-main.ts", "doctor"], {
-            cwd: import.meta.dir.replace(/\/test$/, ""),
+            cwd: fileURLToPath(new URL("..", import.meta.url)),
             stdin: "ignore",
             stdout: "pipe",
             stderr: "pipe",

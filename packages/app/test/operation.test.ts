@@ -2459,6 +2459,7 @@ describe("Operation", () => {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const starts = yield* Ref.make(0)
+      const cancellations = yield* Ref.make(0)
       const preparationEntered = yield* Deferred.make<void>()
       const releasePreparation = yield* Deferred.make<void>()
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
@@ -2467,11 +2468,13 @@ describe("Operation", () => {
         start: (input) => Ref.update(starts, (count) => count + 1).pipe(Effect.andThen(backend.start(input))),
         inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
         cancel: (turnId, now) =>
-          Effect.succeed({
-            turnId,
-            status: "cancelled",
-            events: [{ cursor: "cancelled", sequence: 1, type: "execution.cancelled", createdAt: now }],
-          }),
+          Ref.update(cancellations, (count) => count + 1).pipe(
+            Effect.as({
+              turnId,
+              status: "cancelled" as const,
+              events: [{ cursor: "cancelled", sequence: 1, type: "execution.cancelled", createdAt: now }],
+            }),
+          ),
       })
       const layer = Operation.productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
@@ -2506,6 +2509,7 @@ describe("Operation", () => {
         yield* settleEvents
       }).pipe(provideLayer(layer))
       expect(yield* Ref.get(starts)).toBe(0)
+      expect(yield* Ref.get(cancellations)).toBe(0)
       expect((yield* Ref.get(events)).some((event) => event._tag === "TurnStarted")).toBe(false)
       expect(yield* turns.get(Turn.TurnId.make("cancel-preparation-turn"))).toMatchObject({ status: "cancelled" })
     }),

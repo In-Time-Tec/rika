@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
 import { Catalog, Runtime, ThreadTools } from "@rika/tools"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"

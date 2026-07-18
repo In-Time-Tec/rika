@@ -437,8 +437,6 @@ describe("Operation review dispatcher", () => {
       expect((yield* turns.get(Turn.TurnId.make("review-turn")))?.status).toBe("running")
       yield* Ref.set(fanOutState, "satisfied")
       yield* TestClock.adjust("50 millis")
-      while ((yield* turns.get(Turn.TurnId.make("review-turn")))?.status !== "completed")
-        yield* Effect.sleep("10 millis")
       expect((yield* turns.get(Turn.TurnId.make("review-turn")))?.status).toBe("completed")
     }).pipe(Effect.scoped),
   )

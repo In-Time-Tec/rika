@@ -96,7 +96,7 @@ describe("product agent profiles", () => {
     Effect.gen(function* () {
       const painter = yield* resolvePainter(model, true)
       expect(painter.preset.model).toEqual(relayModel(model))
-      expect(painter.preset.tool_names).toEqual(["view_media"])
+      expect(painter.preset.tool_names).toEqual(["view_media", "task", "oracle", "librarian", "review"])
       const unavailable = yield* Effect.flip(resolvePainter(model, false))
       expect(unavailable._tag).toBe("PainterUnavailableError")
       expect(unavailable).toMatchObject(model)

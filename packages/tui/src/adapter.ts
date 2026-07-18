@@ -14,6 +14,7 @@ import {
   dim,
   fg,
   italic,
+  strikethrough,
   underline,
   RGBA,
   SystemClock,
@@ -55,8 +56,8 @@ import type { ThreadItem, TranscriptBlock } from "./view-state"
 import { projectUnits, type Event } from "./execution-events"
 import { filter, type Command } from "./palette"
 import { colors, spacing } from "./theme"
-import { renderMarkdown, renderMarkdownStyled } from "./markdown-renderer"
-import { renderDiff, renderDiffStyled } from "./diff-renderer"
+import { renderMarkdown, renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
+import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
 import { renderTool } from "./tool-renderer"
 import {
@@ -128,6 +129,39 @@ const markdownWidthForColumn = (width: number): number => Math.max(8, width - sp
 const queueItemLabel = (item: QueueItem): string =>
   `${item.prompt}${item.attachments?.map((path) => `\n  ▧ ${path}`).join("") ?? ""}`
 
+interface QueueHintSegment {
+  readonly accent: string
+  readonly suffix: string
+}
+
+const queueNavigationHint: ReadonlyArray<QueueHintSegment> = [
+  { accent: "Enter", suffix: " to steer" },
+  { accent: "Backspace", suffix: " to dequeue" },
+  { accent: "Ctrl+E", suffix: " to edit" },
+]
+
+const queueEditingHint: ReadonlyArray<QueueHintSegment> = [
+  { accent: "Editing queued", suffix: "" },
+  { accent: "Enter", suffix: " save" },
+  { accent: "Esc", suffix: " cancel" },
+]
+
+const minimumInlineQueueMessageWidth = 12
+
+const queueHintWidth = (segments: ReadonlyArray<QueueHintSegment>): number =>
+  stringWidth(` ${segments.map((segment) => `${segment.accent}${segment.suffix}`).join(" · ")} `)
+
+const fittingQueueHint = (
+  segments: ReadonlyArray<QueueHintSegment>,
+  width: number,
+): ReadonlyArray<QueueHintSegment> => {
+  for (let length = segments.length; length > 0; length -= 1) {
+    const candidate = segments.slice(0, length)
+    if (width - queueHintWidth(candidate) >= minimumInlineQueueMessageWidth) return candidate
+  }
+  return []
+}
+
 export class AdapterError extends Schema.TaggedErrorClass<AdapterError>()("TuiAdapterError", {
   message: Schema.String,
 }) {}
@@ -169,7 +203,14 @@ export const renderBlock: {
       case "Permission":
         return `? ${block.title} [${block.status}]\n  ${block.detail}`
       case "ChildAgent": {
-        const icon = block.status === "running" ? "⠿" : block.status === "complete" ? "✓" : "✗"
+        const icon =
+          block.status === "running"
+            ? "⠿"
+            : block.status === "complete"
+              ? "✓"
+              : block.status === "cancelled"
+                ? "⊘"
+                : "✗"
         return `${icon} Subagent ${block.status === "running" ? "working" : "finished"} ▸\n  ${block.name} · ${block.summary}`
       }
       case "Workflow":
@@ -460,8 +501,8 @@ const exploreChildLabel = (unit: ToolUnit): string => {
 
 const plural = (count: number, singular: string): string => `${count} ${singular}${count === 1 ? "" : "s"}`
 
-const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame): string =>
-  running ? frame : failed ? "✕" : "✓"
+const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string =>
+  running ? frame : cancelled ? "⊘" : failed ? "✕" : "✓"
 
 const markerText = (expanded: boolean): string => (expanded ? " ▾" : " ▸")
 
@@ -470,6 +511,7 @@ export interface UnitLineRange {
   readonly end: number
   readonly unit: string
   readonly expandable: boolean
+  readonly animated?: boolean
   readonly gapBefore?: boolean
   readonly targets?: ReadonlyArray<PathTarget>
 }
@@ -503,7 +545,7 @@ export const boundedTranscriptModel: {
     const ancestors: Array<{ readonly item: TranscriptItem; readonly position: number }> = []
     for (let cursor = 0; cursor < source.length + ancestors.length; cursor += 1) {
       const item = cursor < source.length ? source[cursor] : ancestors[cursor - source.length]?.item
-      if (item?._tag !== "Block" || item.parentId === undefined) continue
+      if (item?.parentId === undefined) continue
       const parent = parentItems.get(item.parentId)
       if (parent === undefined || included.has(parent.item)) continue
       included.add(parent.item)
@@ -563,13 +605,34 @@ export const buildTranscript: {
     const appendAll = (styled: StyledText) => {
       for (const chunk of styled.chunks) append(chunk)
     }
+    const addExpandedBodyGutter = (from: number) => {
+      const body = chunks.splice(from)
+      const bordered: Array<TextChunk> = []
+      for (const chunk of body) {
+        const parts = chunk.text.split("\n")
+        for (const [index, part] of parts.entries()) {
+          if (index > 0) {
+            bordered.push(fg(colors.text)("\n"))
+            bordered.push(dim(fg(colors.subtle)("│ ")))
+          }
+          if (part.length > 0) bordered.push({ ...chunk, text: part })
+        }
+      }
+      chunks.push(...bordered)
+    }
     let renderedUnits = 0
     const newBlockGap = () => {
       if (renderedUnits > 0) append(fg(colors.text)("\n\n"))
       renderedUnits += 1
     }
-    const statusIcon = (failed: boolean, running: boolean): TextChunk =>
-      running ? fg(colors.blue)(spinnerFrame) : failed ? fg(colors.red)("✕") : fg(colors.green)("✓")
+    const statusIcon = (failed: boolean, running: boolean, cancelled = false): TextChunk =>
+      running
+        ? fg(colors.blue)(spinnerFrame)
+        : cancelled
+          ? fg(colors.amber)("⊘")
+          : failed
+            ? fg(colors.red)("✕")
+            : fg(colors.green)("✓")
     const marker = (expanded: boolean): TextChunk => fg(colors.subtle)(expanded ? " ▾" : " ▸")
     const rowExpanded = (id: string): boolean => model.expandedRowKeys.includes(id)
     const highlight = (text: string) => append(bold(fg(colors.blue)(text)))
@@ -581,7 +644,7 @@ export const buildTranscript: {
         return
       }
       if (entry.role === "notice") {
-        if (entry.text === "cancelled") append(fg(colors.muted)("cancelled"))
+        if (entry.text === "cancelled") append(fg(colors.amber)("⊘"))
         else append(fg(colors.amber)(`! ${entry.text}`))
         return
       }
@@ -605,9 +668,38 @@ export const buildTranscript: {
         append(italic(fg(colors.green)(current)))
       })
     }
+    const renderAgentResponse = (index: number, prefix: string, gap = false): UnitLineRange | undefined => {
+      const entry = model.entries[index]
+      if (entry?.role !== "assistant" || entry.text.trim().length === 0) return
+      const item = orderedTranscriptItems(model).find(
+        (candidate) => candidate._tag === "Entry" && candidate.index === index,
+      )
+      const rows = renderMarkdownLines(
+        entry.text.trimEnd(),
+        Math.max(1, markdownWidthForColumn(model.width) - stringWidth(prefix)),
+      )
+      const curl = gap ? `${prefix.slice(0, -2)}╰ ` : prefix
+      if (gap) {
+        append(fg(colors.text)("\n"))
+        append(dim(fg(colors.subtle)(prefix.trimEnd())))
+      }
+      const start = line + 1
+      rows.forEach((row, rowIndex) => {
+        append(fg(colors.text)("\n"))
+        append(dim(fg(colors.subtle)(rowIndex === rows.length - 1 ? curl : prefix)))
+        for (const chunk of row) append(chunk)
+      })
+      return {
+        start,
+        end: line,
+        unit: `entry:${item?.id ?? `${entry.turnId ?? "child"}:assistant:${index}`}`,
+        expandable: false,
+      }
+    }
     const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
       const failed = units.some((unit) => unit.block.status === "failed")
       const running = units.some((unit) => unit.block.status === "running")
+      const cancelled = units.some((unit) => unit.block.status === "cancelled")
       const counters = new Map<string, number>()
       for (const unit of units) {
         const counter = unit.block.presentation.counter ?? (unit.kind === "read" ? "file" : "search")
@@ -620,10 +712,10 @@ export const buildTranscript: {
         .join(", ")
       if (selected)
         highlight(
-          `${iconChar(failed, running, spinnerFrame)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
+          `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
         )
       else {
-        append(statusIcon(failed, running))
+        append(statusIcon(failed, running, cancelled))
         append(fg(colors.text)(running ? " Exploring" : " Explored"))
         append(dim(fg(colors.text)(` ${counts.length > 0 ? counts : "workspace"}`)))
         append(marker(expanded))
@@ -632,7 +724,13 @@ export const buildTranscript: {
         for (const unit of units) {
           append(fg(colors.text)("\n "))
           const start = line
-          append(statusIcon(unit.block.status === "failed", unit.block.status === "running"))
+          append(
+            statusIcon(
+              unit.block.status === "failed",
+              unit.block.status === "running",
+              unit.block.status === "cancelled",
+            ),
+          )
           const label = exploreChildLabel(unit)
           const childId = `tool-child:${unit.block.id}`
           const verbEnd = label.indexOf(" ")
@@ -652,6 +750,7 @@ export const buildTranscript: {
             end: line,
             unit: childId,
             expandable: false,
+            animated: unit.block.status === "running",
             ...(detail?.target === undefined ? {} : { targets: [detail.target] }),
           })
         }
@@ -664,6 +763,7 @@ export const buildTranscript: {
     ) => {
       const failed = units.some((unit) => unit.block.status === "failed")
       const running = units.some((unit) => unit.block.status === "running")
+      const cancelled = units.some((unit) => unit.block.status === "cancelled")
       const paths = [
         ...new Set(
           units.flatMap((unit) =>
@@ -673,9 +773,10 @@ export const buildTranscript: {
           ),
         ),
       ]
+      const allFiles = units.flatMap((unit) => unit.block.files)
       let added = 0
       let removed = 0
-      for (const file of units.flatMap((unit) => unit.block.files)) {
+      for (const file of allFiles) {
         added += file.additions
         removed += file.deletions
       }
@@ -685,35 +786,43 @@ export const buildTranscript: {
         added += a
         removed += r
       }
+      const creates = diffs.length === 0 && allFiles.length > 0 && allFiles.every((file) => file.kind === "add")
       const label = paths.length === 1 ? paths[0] : plural(paths.length, "file")
-      const verb =
-        paths.length === 1 && units.length === 1
+      const verb = creates
+        ? running
+          ? "Creating"
+          : "Created"
+        : paths.length === 1 && units.length === 1
           ? running
             ? units[0]!.block.presentation.activeLabel
             : units[0]!.block.presentation.completeLabel
           : running
             ? "Editing"
             : "Edited"
-      const counts = added > 0 || removed > 0 ? ` +${added} -${removed}` : ""
+      const counts = `${added > 0 ? ` +${added}` : ""}${removed > 0 ? ` -${removed}` : ""}`
       if (selected)
-        highlight(`${iconChar(failed, running, spinnerFrame)} ${verb} ${label}${counts}${markerText(expanded)}`)
+        highlight(
+          `${iconChar(failed, running, spinnerFrame, cancelled)} ${verb} ${label}${counts}${markerText(expanded)}`,
+        )
       else {
-        append(statusIcon(failed, running))
+        append(statusIcon(failed, running, cancelled))
         append(fg(colors.text)(` ${verb}`))
         append(dim(fg(colors.text)(` ${label}`)))
-        if (added > 0 || removed > 0) {
-          append(fg(colors.green)(` +${added}`))
-          append(fg(colors.red)(` -${removed}`))
-        }
+        if (added > 0) append(fg(colors.green)(` +${added}`))
+        if (removed > 0) append(fg(colors.red)(` -${removed}`))
         append(marker(expanded))
       }
       if (expanded) {
-        const files = units.flatMap((unit) => unit.block.files)
+        const files = allFiles
         if (files.length === 1) {
           const file = files[0]!
           if (file.patch.length > 0) {
             append(fg(colors.text)("\n"))
-            appendAll(renderPierreDiff(file.patch, model.width) ?? renderDiffStyled(file.patch, model.width))
+            appendAll(
+              renderPierreDiff(file.patch, model.width) ??
+                (file.preview ? renderPartialDiffStyled(file.patch, model.width) : undefined) ??
+                renderDiffStyled(file.patch, model.width),
+            )
           }
         } else {
           for (const file of files) {
@@ -721,16 +830,28 @@ export const buildTranscript: {
             const start = line
             const childId = `file:${file.key}`
             const childExpanded = rowExpanded(childId) || running
-            append(statusIcon(file.status === "failed", file.status === "running"))
-            append(fg(colors.text)(` Edit ${file.path}`))
+            const fileRunning = running && file.status === "running"
+            append(statusIcon(file.status === "failed", fileRunning, cancelled && file.status === "running"))
+            append(fg(colors.text)(` ${file.kind === "add" ? "Create" : "Edit"} ${file.path}`))
             if (file.additions > 0) append(fg(colors.green)(` +${file.additions}`))
             if (file.deletions > 0) append(fg(colors.red)(` -${file.deletions}`))
             append(marker(childExpanded))
             if (childExpanded && file.patch.length > 0) {
               append(fg(colors.text)("\n"))
-              appendAll(renderPierreDiff(file.patch, model.width) ?? renderDiffStyled(file.patch, model.width))
+              appendAll(
+                renderPierreDiff(file.patch, model.width) ??
+                  (file.preview ? renderPartialDiffStyled(file.patch, model.width) : undefined) ??
+                  renderDiffStyled(file.patch, model.width),
+              )
             }
-            nestedRanges.push({ start, end: line, unit: childId, expandable: true, targets: [{ path: file.path }] })
+            nestedRanges.push({
+              start,
+              end: line,
+              unit: childId,
+              expandable: true,
+              animated: fileRunning,
+              targets: [{ path: file.path }],
+            })
           }
         }
         for (const diffIndex of diffs) {
@@ -752,13 +873,15 @@ export const buildTranscript: {
       const command = shellCommandText(unit.block)
       const failed = unit.block.status === "failed"
       const running = unit.block.status === "running"
+      const cancelled = unit.block.status === "cancelled"
       const lines = command.split("\n")
       const expandable = unit.block.output !== undefined && unit.block.output.length > 0
       const exitCode = shellExitCode(unit.block)
       if (selected) {
         const exit = failed ? ` (exit code: ${exitCode ?? 1})` : ""
+        const cancellation = cancelled ? " (cancelled)" : ""
         highlight(
-          `${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${expandable ? markerText(expanded) : ""}`,
+          `${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${cancellation}${expandable ? markerText(expanded) : ""}`,
         )
       } else {
         lines.forEach((current, lineIndex) => {
@@ -766,11 +889,14 @@ export const buildTranscript: {
             if (running) {
               append(statusIcon(false, true))
               append(fg(colors.text)(" "))
-            } else append(dim(fg(colors.text)("$ ")))
-            append(fg(colors.text)(current))
-          } else append(fg(colors.text)(`\n    ${current}`))
+            } else if (cancelled) append(bold(fg(colors.amber)("$ ")))
+            else append(dim(fg(colors.text)("$ ")))
+            append(cancelled ? strikethrough(fg(colors.text)(current)) : fg(colors.text)(current))
+          } else
+            append(cancelled ? strikethrough(fg(colors.text)(`\n    ${current}`)) : fg(colors.text)(`\n    ${current}`))
         })
         if (failed) append(fg(colors.red)(` (exit code: ${exitCode ?? 1})`))
+        if (cancelled) append(italic(fg(colors.amber)(" (cancelled)")))
         if (expandable) append(marker(expanded))
       }
       if (expanded && unit.block.output !== undefined) {
@@ -784,16 +910,18 @@ export const buildTranscript: {
         return
       }
       const failedCount = units.filter((unit) => unit.block.status === "failed").length
+      const cancelledCount = units.filter((unit) => unit.block.status === "cancelled").length
       const running = units.some((unit) => unit.block.status === "running")
       if (selected)
         highlight(
-          `${iconChar(failedCount > 0, running)} ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${markerText(expanded)}`,
+          `${iconChar(failedCount > 0, running, spinnerFrame, cancelledCount > 0)} ${running ? "Running" : "Ran"} ${plural(units.length, "command")}${failedCount > 0 ? `, ${failedCount} failed` : ""}${cancelledCount > 0 ? `, ${cancelledCount} cancelled` : ""}${markerText(expanded)}`,
         )
       else {
-        append(statusIcon(failedCount > 0, running))
+        append(statusIcon(failedCount > 0, running, cancelledCount > 0))
         append(fg(colors.text)(running ? " Running" : " Ran"))
         append(fg(colors.text)(` ${plural(units.length, "command")}`))
         if (failedCount > 0) append(fg(colors.muted)(`, ${failedCount} failed`))
+        if (cancelledCount > 0) append(fg(colors.muted)(`, ${cancelledCount} cancelled`))
         append(marker(expanded))
       }
       if (expanded)
@@ -803,7 +931,12 @@ export const buildTranscript: {
           const childId = `tool-child:${unit.block.id}`
           const childExpanded = rowExpanded(childId)
           const expandable = unit.block.output !== undefined && unit.block.output.length > 0
-          append(fg(colors.text)(`$ ${shellCommandText(unit.block).split("\n")[0]}`))
+          const cancelled = unit.block.status === "cancelled"
+          if (cancelled) {
+            append(bold(fg(colors.amber)("$ ")))
+            append(strikethrough(fg(colors.text)(shellCommandText(unit.block).split("\n")[0]!)))
+            append(italic(fg(colors.amber)(" (cancelled)")))
+          } else append(fg(colors.text)(`$ ${shellCommandText(unit.block).split("\n")[0]}`))
           if (unit.block.status === "failed") append(fg(colors.red)(` (exit code: ${shellExitCode(unit.block) ?? 1})`))
           if (expandable) append(marker(childExpanded))
           if (expandable && childExpanded) {
@@ -816,26 +949,34 @@ export const buildTranscript: {
     const renderOtherToolBody = (unit: ToolUnit, selected: boolean, expanded: boolean, hasChildren = false) => {
       const failed = unit.block.status === "failed"
       const running = unit.block.status === "running"
+      const cancelled = unit.block.status === "cancelled"
       const label = running ? unit.block.presentation.activeLabel : unit.block.presentation.completeLabel
       const detail = unit.block.detail.length === 0 ? "" : ` ${unit.block.detail}`
       const agent = unit.block.presentation.family === "agent"
+      const output = agent ? visibleAgentOutput(unit.block.output) : unit.block.output
       const expandable =
         hasChildren ||
-        (agent ? unit.block.detail.length > 0 : unit.block.output !== undefined && unit.block.output.length > 0)
+        (agent
+          ? unit.block.detail.length > 0 || (failed && output !== undefined && output.length > 0)
+          : unit.block.output !== undefined && unit.block.output.length > 0)
       if (selected)
         highlight(
-          `${iconChar(failed, running, spinnerFrame)} ${label}${agent ? "" : detail}${expandable ? markerText(expanded) : ""}`,
+          `${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${expandable ? markerText(expanded) : ""}`,
         )
       else {
-        append(statusIcon(failed, running))
+        append(statusIcon(failed, running, cancelled))
         append(fg(colors.text)(` ${label}`))
         if (!agent && detail.length > 0) append(dim(fg(colors.text)(detail)))
         if (expandable) append(marker(expanded))
       }
-      if (expanded && agent && unit.block.detail.length > 0) append(dim(fg(colors.text)(`\n  ${unit.block.detail}`)))
-      else if (expanded && unit.block.output !== undefined) {
+      if (expanded && agent && unit.block.detail.length > 0) {
+        append(dim(fg(colors.text)(`\n  ${unit.block.detail}`)))
+        if (failed && output !== undefined && output.length > 0)
+          append(fg(colors.red)(`\n  ${output.split("\n").slice(0, 12).join("\n  ")}`))
+      } else if (expanded && output !== undefined) {
         append(fg(colors.text)("\n"))
-        append(dim(fg(colors.text)(unit.block.output.split("\n").slice(0, 12).join("\n"))))
+        const body = output.split("\n").slice(0, 12).join("\n")
+        append(failed && agent ? fg(colors.red)(body) : dim(fg(colors.text)(body)))
       }
     }
     const renderNestedTool = (unit: ToolTranscriptUnit, prefix: string, last: boolean) => {
@@ -845,20 +986,35 @@ export const buildTranscript: {
       const expanded = rowExpanded(id)
       const running = block.status === "running"
       const failed = block.status === "failed"
+      const cancelled = block.status === "cancelled"
       const detail = toolDetail(index, block)
       const children = unit.children ?? []
+      const output = block.presentation.family === "agent" ? visibleAgentOutput(block.output) : block.output
+      const expandable =
+        children.length > 0 ||
+        unit.response !== undefined ||
+        (block.presentation.family === "agent" && block.detail.length > 0) ||
+        (output !== undefined && output.length > 0)
       append(fg(colors.text)("\n"))
       append(dim(fg(colors.subtle)(`${prefix}${last ? "└" : "├"} `)))
       const start = line
-      append(statusIcon(failed, running))
-      append(fg(colors.text)(` ${detail.label}`))
-      append(marker(expanded))
+      if (cancelled && block.presentation.family === "shell") {
+        const command = detail.label.startsWith("$ ") ? detail.label.slice(2) : detail.label
+        append(bold(fg(colors.amber)("$ ")))
+        append(strikethrough(fg(colors.text)(command)))
+        append(italic(fg(colors.amber)(" (cancelled)")))
+      } else {
+        append(statusIcon(failed, running, cancelled))
+        append(fg(colors.text)(` ${detail.label}`))
+      }
+      if (expandable) append(marker(expanded))
       const rangeIndex = nestedRanges.length
       nestedRanges.push({
         start,
         end: start,
         unit: id,
-        expandable: true,
+        expandable,
+        animated: running,
         ...(detail.target === undefined ? {} : { targets: [detail.target] }),
       })
       const bodyPrefix = `${prefix}${last ? "  " : "│ "}`
@@ -866,35 +1022,44 @@ export const buildTranscript: {
         append(fg(colors.text)("\n"))
         append(dim(fg(colors.subtle)(`${bodyPrefix}  `)))
         append(dim(fg(colors.text)(block.detail)))
-      } else if (expanded && block.output !== undefined && block.output.length > 0) {
-        const output = block.output.split("\n").slice(0, 12).join(`\n${bodyPrefix}  `)
+      } else if (expanded && output !== undefined && output.length > 0) {
+        const renderedOutput = output.split("\n").slice(0, 12).join(`\n${bodyPrefix}  `)
         append(fg(colors.text)("\n"))
         append(dim(fg(colors.subtle)(`${bodyPrefix}  `)))
-        append(dim(fg(colors.text)(output)))
+        append(dim(fg(colors.text)(renderedOutput)))
       }
       if (expanded)
         for (const [childIndex, child] of children.entries())
           renderNestedTool(child, bodyPrefix, childIndex === children.length - 1)
+      if (expanded && unit.response !== undefined) {
+        const timeline = children.length > 0
+        const response = renderAgentResponse(unit.response, timeline ? `${bodyPrefix}│ ` : `${bodyPrefix}  `, timeline)
+        if (response !== undefined) nestedRanges.push(response)
+      }
       nestedRanges[rangeIndex] = {
         ...nestedRanges[rangeIndex]!,
-        end: children.length === 0 ? line : start,
+        end: children.length === 0 ? line : (nestedRanges[rangeIndex + 1]?.start ?? start + 1) - 1,
       }
     }
     const renderChildAgentBody = (block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded: boolean) => {
       const running = block.status === "running"
       const name = block.name.replace(/^rika-/, "")
-      const display = name.charAt(0).toUpperCase() + name.slice(1)
+      const normalized = name.toLowerCase()
+      const display =
+        normalized.length === 0 || normalized === "child" || normalized === "task" || normalized === "subagent"
+          ? "Subagent"
+          : name.charAt(0).toUpperCase() + name.slice(1)
       const phrase =
         display === "Oracle"
           ? running
-            ? "Oracle is thinking"
+            ? "Oracle exploring"
             : "Oracle has spoken"
           : display === "Librarian"
             ? running
               ? "Librarian is researching"
               : "Librarian researched"
             : `${display} ${running ? "working" : block.status === "failed" ? "failed" : "finished"}`
-      append(statusIcon(block.status === "failed", running))
+      append(statusIcon(block.status === "failed", running, block.status === "cancelled"))
       append(fg(colors.text)(` ${phrase}`))
       append(marker(expanded))
       if (expanded) {
@@ -910,10 +1075,11 @@ export const buildTranscript: {
         return
       }
       const [added, removed] = diffCounts(block.patch)
-      if (selected) highlight(`✓ Edited ${block.path} +${added} -${removed} ▸`)
+      const verb = /^--- \/dev\/null$/m.test(block.patch) || /^new file mode /m.test(block.patch) ? "Created" : "Edited"
+      if (selected) highlight(`✓ ${verb} ${block.path} +${added} -${removed} ▸`)
       else {
         append(fg(colors.green)("✓"))
-        append(fg(colors.text)(` Edited ${block.path}`))
+        append(fg(colors.text)(` ${verb} ${block.path}`))
         append(fg(colors.green)(` +${added}`))
         append(fg(colors.red)(` -${removed}`))
         append(marker(false))
@@ -951,6 +1117,7 @@ export const buildTranscript: {
       if (unit.kind === "reasoning" && !expanded) continue
       newBlockGap()
       const start = line
+      const chunkStart = chunks.length
       nestedRanges = []
       if (unit.kind === "entry") renderEntryBody(unit.entry)
       else if (unit.kind === "reasoning") renderReasoningBody(unit.block, selected)
@@ -958,20 +1125,40 @@ export const buildTranscript: {
         renderChildAgentBody(model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded)
       else if (unit.kind === "diff") renderDiffBody(unit.block, selected, expanded)
       else if (unit.kind === "block") renderPlainBlock(unit.block)
-      else if (unit.children !== undefined) {
+      else if (unit.children !== undefined || unit.response !== undefined) {
         renderOtherToolBody(toolUnitsFor(model, unit.blocks)[0]!, selected, expanded, true)
         if (expanded)
-          for (const [childIndex, child] of unit.children.entries())
-            renderNestedTool(child, "  ", childIndex === unit.children.length - 1)
+          for (const [childIndex, child] of (unit.children ?? []).entries())
+            renderNestedTool(child, "  ", childIndex === (unit.children?.length ?? 0) - 1)
+        if (expanded && unit.response !== undefined) {
+          const timeline = (unit.children?.length ?? 0) > 0
+          const response = renderAgentResponse(unit.response, timeline ? "  │ " : "  ", timeline)
+          if (response !== undefined) nestedRanges.push(response)
+        }
       } else if (unit.group === "explore") renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
       else if (unit.group === "edit") renderEditBody(toolUnitsFor(model, unit.blocks), unit.diffs, selected, expanded)
       else if (unit.group === "shell") renderShellBody(toolUnitsFor(model, unit.blocks), selected, expanded)
       else for (const toolUnit of toolUnitsFor(model, unit.blocks)) renderOtherToolBody(toolUnit, selected, expanded)
+      const cancelledAgent =
+        unit.kind === "tool" &&
+        unit.blocks.some((index) => {
+          const block = model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>
+          return block.status === "cancelled" && block.presentation.family === "agent"
+        })
+      if (expanded && cancelledAgent) addExpandedBodyGutter(chunkStart)
       ranges.push({
         start,
-        end: nestedRanges.length === 0 ? line : start,
+        end: nestedRanges.length === 0 ? line : nestedRanges[0]!.start - 1,
         unit: id,
         expandable,
+        animated:
+          unit.kind === "tool"
+            ? unit.blocks.some(
+                (index) => (model.blocks[index] as Extract<TranscriptBlock, { _tag: "ToolCall" }>).status === "running",
+              )
+            : unit.kind === "childAgent"
+              ? (model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>).status === "running"
+              : false,
         gapBefore: renderedUnits > 1,
         ...(unit.kind === "tool"
           ? {
@@ -1054,6 +1241,18 @@ interface TranscriptRenderInput {
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
 const typingCursorStyle = { style: "block", blinking: false } as const
+
+const visibleAgentOutput = (output: string | undefined): string | undefined => {
+  if (output === undefined) return undefined
+  const value = output.trim()
+  if (!(value.startsWith("{") || value.startsWith("["))) return output
+  try {
+    const decoded: unknown = JSON.parse(value)
+    return typeof decoded === "object" && decoded !== null ? undefined : output
+  } catch {
+    return output
+  }
+}
 
 const cutoutBackground = (renderer: CliRenderer): RGBA => {
   const background: unknown = Reflect.get(renderer, "backgroundColor")
@@ -2135,7 +2334,8 @@ export class Surface {
               content: new StyledText([fg(colors.text)(" ")]),
             })
           const headerContent = new StyledText(styledLines[range.start] ?? [])
-          const spinnerChunk = headerContent.chunks.findIndex((chunk) => chunk.text === toolSpinnerGlyph)
+          const spinnerChunk =
+            range.animated === true ? headerContent.chunks.findIndex((chunk) => chunk.text === toolSpinnerGlyph) : -1
           descriptors.push({
             key: `${range.unit}:header`,
             revision: JSON.stringify(headerContent.chunks),
@@ -2189,12 +2389,23 @@ export class Surface {
     this.queueBox.visible = queue.length > 0
     const queueTextWidth = queueContentWidth(model)
     const queueLength = queue.length
-    const heights = queue.map((item) => wrappedRowCount(queueItemLabel(item), queueTextWidth))
     const selectedIndex = queue.findIndex((item) => item.id === model.queueSelection)
     const editIndex = queue.findIndex((item) => item.id === model.editingTurnId)
     const hintIndex = editIndex >= 0 ? editIndex : selectedIndex
-    const hintRows = hintIndex >= 0 ? 1 : 0
-    const queueRows = heights.reduce((sum, rows) => sum + rows, hintRows)
+    const editing = model.editingTurnId !== undefined && editIndex >= 0
+    const hintSegments =
+      hintIndex < 0 ? [] : fittingQueueHint(editing ? queueEditingHint : queueNavigationHint, queueTextWidth)
+    const hintWidth = queueHintWidth(hintSegments)
+    const labels = queue.map((item, index) => {
+      const label = queueItemLabel(item)
+      if (index !== hintIndex || hintSegments.length === 0) return label
+      const [first = "", ...remaining] = label.split("\n")
+      const width = queueTextWidth - hintWidth
+      const inline = stringWidth(first) <= width ? first : `${truncateToWidth(first, Math.max(1, width - 1))}…`
+      return [inline, ...remaining].join("\n")
+    })
+    const heights = labels.map((label) => wrappedRowCount(label, queueTextWidth))
+    const queueRows = heights.reduce((sum, rows) => sum + rows, 0)
     const queueBoxHeight = Math.min(Math.max(3, model.height - renderedInputHeight - 2), Math.max(3, queueRows + 2))
     this.queueBox.height = queueBoxHeight
     const availableRows = Math.max(1, queueBoxHeight - 2)
@@ -2203,10 +2414,9 @@ export class Surface {
         ? text
         : `${truncateToWidth(text.replace(/\n/g, " "), Math.max(1, rows * queueTextWidth - 1))}…`
     const focusIndex = hintIndex < 0 ? queueLength - 1 : hintIndex
-    const focusRows = Math.max(1, availableRows - hintRows)
     let start = focusIndex
     let end = focusIndex + 1
-    let used = Math.min(focusRows, heights[focusIndex] ?? 0) + hintRows
+    let used = Math.min(availableRows, heights[focusIndex] ?? 0)
     while (end < queueLength && used + heights[end]! <= availableRows) used += heights[end++]!
     while (start > 0 && used + heights[start - 1]! <= availableRows) used += heights[--start]!
     const queueChunks: Array<TextChunk> = []
@@ -2214,30 +2424,24 @@ export class Surface {
     let renderedRows = 0
     for (const [offset, item] of queue.slice(start, end).entries()) {
       const index = start + offset
-      const label = clampToRows(queueItemLabel(item), index === focusIndex ? focusRows : availableRows)
+      const label = clampToRows(labels[index]!, availableRows)
       const labelRows = wrappedRowCount(label, queueTextWidth)
+      if (index === hintIndex && hintSegments.length > 0) hintTop = renderedRows
       queueChunks.push(item.id === model.queueSelection ? bold(fg(colors.text)(label)) : fg(colors.subtle)(label))
       renderedRows += labelRows
-      if (index === hintIndex) {
-        hintTop = renderedRows
-        queueChunks.push(fg(colors.text)("\n"))
-        renderedRows += 1
-      }
       if (index < end - 1) queueChunks.push(fg(colors.text)("\n"))
     }
     this.queueText.content = new StyledText(queueChunks)
     this.queueHint.top = hintTop
-    this.queueHint.content =
-      model.editingTurnId !== undefined && editIndex >= 0
-        ? new StyledText([
-            fg(colors[model.mode])(" Editing queued"),
-            dim(fg(colors.text)(" · Enter save · Esc cancel ")),
-          ])
-        : new StyledText([
-            fg(colors[model.mode])(" Enter"),
-            dim(fg(colors.text)(" to steer · Backspace to dequeue · Ctrl+E to edit ")),
-          ])
-    this.queueHint.visible = hintIndex >= 0
+    const hintChunks: Array<TextChunk> = []
+    for (const [index, segment] of hintSegments.entries()) {
+      hintChunks.push(dim(fg(colors.text)(index === 0 ? " " : " · ")))
+      hintChunks.push(fg(colors[model.mode])(segment.accent))
+      if (segment.suffix.length > 0) hintChunks.push(dim(fg(colors.text)(segment.suffix)))
+    }
+    if (hintSegments.length > 0) hintChunks.push(dim(fg(colors.text)(" ")))
+    this.queueHint.content = new StyledText(hintChunks)
+    this.queueHint.visible = hintSegments.length > 0
     this.queueLeftJoint.visible = queue.length > 0
     this.queueRightJoint.visible = queue.length > 0
     this.inputBox.borderColor = colors.text
@@ -2648,16 +2852,16 @@ const paletteContent = (
 
 const modeGaugeFill = { low: 2, medium: 19, high: 36, ultra: 54 } as const
 const modeAgentLabel = {
-  low: "GPT-5.6 Terra low",
-  medium: "GPT-5.6 Luna medium",
-  high: "GPT-5.6 Sol high",
-  ultra: "Fable 5 high",
+  low: "GPT-5.6 Luna low",
+  medium: "GPT-5.6 Terra medium",
+  high: "GPT-5.6 Sol xhigh",
+  ultra: "GPT-5.6 Sol max",
 } as const
 const modeOracleLabel = {
   low: "GPT-5.6 Sol high",
   medium: "GPT-5.6 Sol high",
-  high: "Fable 5 high",
-  ultra: "Fable 5 high",
+  high: "GPT-5.6 Sol max",
+  ultra: "GPT-5.6 Sol max",
 } as const
 const modeDescription = {
   low: "Fast, low-cost mode for small, well-defined tasks",

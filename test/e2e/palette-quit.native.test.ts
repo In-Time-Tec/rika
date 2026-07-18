@@ -1,5 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
+import { fileURLToPath } from "node:url"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
@@ -17,7 +18,8 @@ const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const root = path.resolve(import.meta.dir, "../..")
+  const directory = fileURLToPath(new URL(".", import.meta.url))
+  const root = path.resolve(directory, "../..")
   const kernel = (yield* spawner.string(ChildProcess.make("uname", ["-s"]))).trim().toLowerCase()
   const machine = (yield* spawner.string(ChildProcess.make("uname", ["-m"]))).trim()
   const architecture = machine === "x86_64" ? "x64" : "arm64"
@@ -33,7 +35,7 @@ const program = Effect.gen(function* () {
   const extracted = yield* spawner.exitCode(ChildProcess.make("tar", ["-xzf", archive, "-C", temporary]))
   expect(Number(extracted)).toBe(0)
   const binary = path.join(temporary, `rika-${kernel}-${architecture}`, "bin", "rika")
-  const helper = path.join(import.meta.dir, "native-pty.py")
+  const helper = path.join(directory, "native-pty.py")
   const environment = {
     HOME: home,
     PATH: "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin",

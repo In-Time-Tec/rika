@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, test } from "vitest"
 import { dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { isManagedPackagingEntry, targets } from "../../scripts/package"
 
 const sourceImports = (source: string) => {
@@ -20,7 +21,7 @@ const resolveSource = async (path: string) => {
 }
 
 const clientSourceGraph = async () => {
-  const root = resolve(import.meta.dir, "../..")
+  const root = resolve(fileURLToPath(new URL(".", import.meta.url)), "../..")
   const packages = new Map<string, { readonly root: string; readonly exports: Record<string, string> }>()
   for await (const manifestPath of new Bun.Glob("packages/*/package.json").scan({ cwd: root, absolute: true })) {
     const manifest = (await Bun.file(manifestPath).json()) as {

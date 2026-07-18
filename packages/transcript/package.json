@@ -11,7 +11,6 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*'",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/transcript/src packages/transcript/test",
-    "test": "bun --cwd ../.. --bun vitest run packages/transcript/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {

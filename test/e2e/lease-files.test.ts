@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Effect, FileSystem, Path } from "effect"
 import { assertAndRemoveExpectedOpenLogs, findResidueFiles } from "./lease-files"
 import { runTest } from "./process"

@@ -1,4 +1,5 @@
 .DS_Store
+.claude/worktrees
 .env
 .env.*
 !.env.example
@@ -11,3 +12,6 @@ bun.lockb
 *.log
 .logs
 .rika
+/artifacts/
+__pycache__/
+*.py[cod]

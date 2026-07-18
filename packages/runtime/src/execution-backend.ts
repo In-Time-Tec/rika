@@ -1,5 +1,12 @@
 import { Agent, type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
-import { Catalog as ToolCatalog, ParallelSearch, ReadWebPage, Runtime as RikaToolRuntime } from "@rika/tools"
+import {
+  AgentTools,
+  Catalog as ToolCatalog,
+  MediaView,
+  ParallelSearch,
+  ReadWebPage,
+  Runtime as RikaToolRuntime,
+} from "@rika/tools"
 import {
   Client,
   Content,
@@ -18,6 +25,8 @@ import {
   Cause,
   Clock,
   Context,
+  Crypto,
+  Deferred,
   Duration,
   Effect,
   Fiber,
@@ -25,6 +34,7 @@ import {
   Layer,
   LayerMap,
   Option,
+  PlatformError,
   Queue,
   Redacted,
   Schedule,
@@ -33,7 +43,7 @@ import {
   Scope,
   Stream,
 } from "effect"
-import { LanguageModel, Prompt, Response, Tool, Toolkit } from "effect/unstable/ai"
+import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import {
   type AgentProfile,
@@ -44,22 +54,31 @@ import {
   Service,
   Status,
 } from "./execution-contract"
-import {
-  childRunSpawnPermission,
-  outputSchemaRegistrations,
-  parentPermissions,
-  presets,
-  resolve,
-  subagentHandoffTargets,
-} from "./agent-profiles"
+import { outputSchemaRegistrations, parentPermissions, presets, resolve } from "./agent-profiles"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
+import { durableResponsePart, isExecutionNamespace, providerPrompt } from "./tool-call-identifiers"
 import { definitions, idFor } from "./workflow-definitions"
+import {
+  childExecutionDepth,
+  childExecutionId as encodeChildExecutionId,
+  delegationAvailableAtDepth,
+  toolsAtDepth,
+} from "./agent-depth"
+import { resolveSpawnModel } from "./agent-model"
 
 export type ModelVariantPolicy = "registration-key" | "fixed-selection"
 
+const maxParallelDelegations = 4
+
 type ToolRuntimeRequirements =
   ReturnType<typeof RikaToolRuntime.layer> extends Layer.Layer<infer _A, infer _E, infer R> ? R : never
+type SuppliedToolRuntimeRequirements =
+  | MediaView.MediaAnalyzer
+  | ModelRegistry.Service
+  | ParallelSearch.Service
+  | ReadWebPage.Service
+type ExternalToolRuntimeRequirements<R> = Exclude<ToolRuntimeRequirements | R, SuppliedToolRuntimeRequirements>
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)
@@ -161,7 +180,12 @@ export const routedToolRuntimeLayer: {
               const context = yield* runtimes.contextEffect(workspace)
               const runtime = Context.get(context, RikaToolRuntime.Service)
               const startedAt = yield* Clock.currentTimeMillis
-              yield* Effect.logInfo("tool.started")
+              yield* Effect.logInfo("tool.started").pipe(
+                Effect.annotateLogs({
+                  "rika.execution.id": String(call.executionId),
+                  "rika.tool.call.id": String(call.call.id),
+                }),
+              )
               return yield* runtime.run(request).pipe(
                 Effect.tap(() =>
                   Clock.currentTimeMillis.pipe(
@@ -217,8 +241,9 @@ const withResilience = (
 
 const executionNamespaceFromSessionEntry = (value: string) => /^.+:entry:(.+):\d+:complete:\d+:\d+$/.exec(value)?.[1]
 
-const currentExecutionNamespace = (fallback: string) =>
-  Effect.serviceOption(RelaySession.SessionStore).pipe(
+const currentExecutionNamespace = (fallback: string) => {
+  if (isExecutionNamespace(fallback)) return Effect.succeed(fallback)
+  return Effect.serviceOption(RelaySession.SessionStore).pipe(
     Effect.flatMap(
       Option.match({
         onNone: () => Effect.succeed(fallback),
@@ -230,15 +255,34 @@ const currentExecutionNamespace = (fallback: string) =>
       }),
     ),
   )
-
-const toolCallPrefix = (namespace: string) => `rika:${encodeURIComponent(namespace)}:`
-const namespaceToolCallId = (namespace: string, id: string) => {
-  const prefix = toolCallPrefix(namespace)
-  return id.startsWith(prefix) ? id : `${prefix}${id}`
 }
-const providerToolCallId = (namespace: string, id: string) => {
-  const prefix = toolCallPrefix(namespace)
-  return id.startsWith(prefix) ? id.slice(prefix.length) : id
+
+const samePromptMessage = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+
+const mergeSessionPrompt = (history: ReturnType<typeof RelaySession.buildContext>, current: Prompt.Prompt) => {
+  const system = current.content.filter((message) => message.role === "system")
+  const previous = history.content.filter((message) => message.role !== "system")
+  const active = current.content.filter((message) => message.role !== "system")
+  let overlap = Math.min(previous.length, active.length)
+  while (overlap > 0 && !previous.slice(-overlap).every((message, index) => samePromptMessage(message, active[index])))
+    overlap -= 1
+  return Prompt.fromMessages([...system, ...previous, ...active.slice(overlap)])
+}
+
+const promptWithSession = (input: Prompt.RawInput) => {
+  const prompt = Prompt.make(input)
+  return Effect.serviceOption(RelaySession.SessionStore).pipe(
+    Effect.flatMap(
+      Option.match({
+        onNone: () => Effect.succeed(prompt),
+        onSome: (session) =>
+          session.path().pipe(
+            Effect.map((path) => mergeSessionPrompt(RelaySession.buildContext(path), prompt)),
+            Effect.orElseSucceed(() => prompt),
+          ),
+      }),
+    ),
+  )
 }
 
 const childExecutionIdFromEvent = (item: Execution.ExecutionEvent) => {
@@ -246,69 +290,108 @@ const childExecutionIdFromEvent = (item: Execution.ExecutionEvent) => {
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
-const mapPromptPart = (namespace: string, part: Prompt.Part): Prompt.Part => {
-  if (part.type === "tool-call" || part.type === "tool-result")
-    return { ...part, id: providerToolCallId(namespace, part.id) }
-  if (part.type === "tool-approval-request")
-    return { ...part, toolCallId: providerToolCallId(namespace, part.toolCallId) }
-  return part
-}
+const modelFacingTools = (tools: ReadonlyArray<Tool.Any> | undefined) =>
+  tools?.map((tool) => (AgentTools.modelToolkit.tools as Readonly<Record<string, Tool.Any>>)[tool.name] ?? tool)
 
-const providerPrompt = (namespace: string, input: Prompt.RawInput) => {
-  const prompt = Prompt.make(input)
-  return Prompt.fromMessages(
-    prompt.content.map((message) =>
-      typeof message.content === "string"
-        ? message
-        : (Object.assign({}, message, {
-            content: message.content.map((part) => mapPromptPart(namespace, part)),
-          }) as Prompt.Message),
-    ),
+const isToolCallPart = <Part extends { readonly type: string }>(
+  part: Part,
+): part is Part & {
+  readonly type: "tool-call"
+  readonly id: string
+  readonly name: string
+  readonly params: unknown
+} => part.type === "tool-call" && "id" in part && "name" in part && "params" in part
+
+const taskBatchParts = <Part extends { readonly type: string }>(namespace: string, parts: ReadonlyArray<Part>) => {
+  const calls = parts.filter(
+    (
+      part,
+    ): part is Part & {
+      readonly type: "tool-call"
+      readonly id: string
+      readonly name: string
+      readonly params: unknown
+    } => isToolCallPart(part) && part.name === AgentTools.taskTool.name,
+  )
+  if (calls.length === 0) return [...parts]
+  const batchCalls = calls.map((call) => {
+    const params = call.params as { readonly prompt?: unknown; readonly model?: unknown }
+    return {
+      callId: call.id,
+      prompt: typeof params.prompt === "string" ? params.prompt : "",
+      ...(typeof params.model === "string" ? { model: params.model as AgentTools.Model } : {}),
+    }
+  })
+  const batch = {
+    fanOutId: `fan-out:${encodeURIComponent(namespace)}:${encodeURIComponent(calls[0]!.id)}`,
+    calls: batchCalls,
+  }
+  return parts.map((part) =>
+    isToolCallPart(part) && part.name === AgentTools.taskTool.name
+      ? ({ ...part, params: { ...(part.params as object), _batch: batch } } as Part)
+      : part,
   )
 }
 
-const mapResponsePart = <A extends Response.AnyPart>(namespace: string, part: A): A => {
-  if (
-    part.type === "tool-params-start" ||
-    part.type === "tool-params-delta" ||
-    part.type === "tool-params-end" ||
-    part.type === "tool-call" ||
-    part.type === "tool-result"
-  )
-    return { ...part, id: namespaceToolCallId(namespace, part.id) } as A
-  if (part.type === "tool-approval-request")
-    return { ...part, toolCallId: namespaceToolCallId(namespace, part.toolCallId) } as A
-  return part
-}
+const batchTaskStream = <Part extends { readonly type: string }>(
+  namespace: string,
+  stream: Stream.Stream<Part, any, any>,
+) =>
+  Stream.suspend(() => {
+    let pending: Array<Part> = []
+    const flush = () => {
+      const output = taskBatchParts(namespace, pending)
+      pending = []
+      return output
+    }
+    return stream.pipe(
+      Stream.map((part) => {
+        if (pending.length === 0 && !(isToolCallPart(part) && part.name === "task")) return [part]
+        pending.push(part)
+        return part.type === "finish" || part.type === "error" ? flush() : []
+      }),
+      Stream.flatMap((parts) => Stream.fromIterable(parts)),
+      Stream.concat(Stream.suspend(() => Stream.fromIterable(flush()))),
+    )
+  })
 
 const namespaceLanguageModel = (model: LanguageModel.Service, fallback: string): LanguageModel.Service => ({
   ...model,
   generateText: ((options: any) =>
-    currentExecutionNamespace(fallback).pipe(
-      Effect.flatMap((namespace) =>
+    Effect.all([currentExecutionNamespace(fallback), promptWithSession(options.prompt)]).pipe(
+      Effect.flatMap(([namespace, prompt]) =>
         model
-          .generateText({ ...options, prompt: providerPrompt(namespace, options.prompt) })
+          .generateText({
+            ...options,
+            prompt: providerPrompt(namespace, prompt),
+            tools: modelFacingTools(options.tools),
+          })
           .pipe(
             Effect.map(
               (result) =>
-                new LanguageModel.GenerateTextResponse(result.content.map((part) => mapResponsePart(namespace, part))),
+                new LanguageModel.GenerateTextResponse(
+                  taskBatchParts(
+                    namespace,
+                    result.content.map((part) => durableResponsePart(namespace, part)),
+                  ),
+                ),
             ),
           ),
       ),
     )) as LanguageModel.Service["generateText"],
   generateObject: ((options: any) =>
-    currentExecutionNamespace(fallback).pipe(
-      Effect.flatMap((namespace) =>
+    Effect.all([currentExecutionNamespace(fallback), promptWithSession(options.prompt)]).pipe(
+      Effect.flatMap(([namespace, prompt]) =>
         (
           model.generateObject as (
             options: any,
           ) => Effect.Effect<LanguageModel.GenerateObjectResponse<Record<string, Tool.Any>, unknown>, never, never>
-        )({ ...options, prompt: providerPrompt(namespace, options.prompt) }).pipe(
+        )({ ...options, prompt: providerPrompt(namespace, prompt), tools: modelFacingTools(options.tools) }).pipe(
           Effect.map(
             (result) =>
               new LanguageModel.GenerateObjectResponse(
                 result.value,
-                result.content.map((part) => mapResponsePart(namespace, part)),
+                result.content.map((part) => durableResponsePart(namespace, part)),
               ),
           ),
         ),
@@ -316,11 +399,18 @@ const namespaceLanguageModel = (model: LanguageModel.Service, fallback: string):
     )) as LanguageModel.Service["generateObject"],
   streamText: ((options: any) =>
     Stream.unwrap(
-      currentExecutionNamespace(fallback).pipe(
-        Effect.map((namespace) =>
-          model
-            .streamText({ ...options, prompt: providerPrompt(namespace, options.prompt) })
-            .pipe(Stream.map((part) => mapResponsePart(namespace, part))),
+      Effect.all([currentExecutionNamespace(fallback), promptWithSession(options.prompt)]).pipe(
+        Effect.map(([namespace, prompt]) =>
+          batchTaskStream(
+            namespace,
+            model
+              .streamText({
+                ...options,
+                prompt: providerPrompt(namespace, prompt),
+                tools: modelFacingTools(options.tools),
+              })
+              .pipe(Stream.map((part) => durableResponsePart(namespace, part))),
+          ),
         ),
       ),
     )) as LanguageModel.Service["streamText"],
@@ -350,8 +440,8 @@ const registrationsFor = <AdditionalTools extends Record<string, Tool.Any>, R>(
 ]
 
 function closeRelayClientRequirements<A, E, R>(
-  layer: Layer.Layer<A, E, R | Client.RuntimeRequirements>,
-): Layer.Layer<A, E, R>
+  layer: Layer.Layer<A, E, R>,
+): Layer.Layer<A, E, Exclude<R, Client.RuntimeRequirements>>
 function closeRelayClientRequirements<A, E, R>(layer: Layer.Layer<A, E, R>) {
   return layer
 }
@@ -361,6 +451,34 @@ const relayModelSelection = (selection: ModelRegistry.ModelSelection) => ({
   model: selection.model,
   ...(selection.registrationKey === undefined ? {} : { registration_key: selection.registrationKey }),
 })
+
+type ChildRunInputBase = Pick<Execution.SpawnChildRunInput, "child_execution_id" | "address_id" | "input">
+
+type ChildRunOverride = Pick<
+  Execution.SpawnChildRunInput,
+  | "instructions"
+  | "model"
+  | "compaction_policy"
+  | "tool_names"
+  | "permissions"
+  | "workspace_policy"
+  | "output_schema_ref"
+  | "metadata"
+>
+
+type ChildRunDefinition =
+  | { readonly _tag: "preset"; readonly presetName: AgentProfile }
+  | { readonly _tag: "override"; readonly definition: ChildRunOverride }
+
+const buildChildRunInputImpl = (base: ChildRunInputBase, definition: ChildRunDefinition) =>
+  definition._tag === "preset" ? { ...base, preset_name: definition.presetName } : { ...base, ...definition.definition }
+
+type ChildRunInput = ReturnType<typeof buildChildRunInputImpl>
+
+export const buildChildRunInput: {
+  (definition: ChildRunDefinition): (base: ChildRunInputBase) => ChildRunInput
+  (base: ChildRunInputBase, definition: ChildRunDefinition): ChildRunInput
+} = Function.dual(2, buildChildRunInputImpl)
 
 const compactionPolicy = (
   compaction: Compaction.DefaultOptions | undefined,
@@ -398,8 +516,12 @@ const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
   options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit">,
 ) =>
   options.additionalToolkit === undefined
-    ? RikaToolRuntime.toolkit
-    : Toolkit.make(...Object.values(RikaToolRuntime.toolkit.tools), ...Object.values(options.additionalToolkit.tools))
+    ? Toolkit.make(...Object.values(RikaToolRuntime.toolkit.tools), ...Object.values(AgentTools.runtimeToolkit.tools))
+    : Toolkit.make(
+        ...Object.values(RikaToolRuntime.toolkit.tools),
+        ...Object.values(AgentTools.runtimeToolkit.tools),
+        ...Object.values(options.additionalToolkit.tools),
+      )
 
 export const remoteToolOptions = (parallelApiKey: Redacted.Redacted<string> | undefined) =>
   parallelApiKey === undefined ? {} : { apiKey: parallelApiKey }
@@ -425,8 +547,113 @@ const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
   Ids.AgentId.make(`agent:rika:fan-out:${String(fanOutId)}:${String(childExecutionId)}`)
 const executionId = (turnId: string) =>
   Ids.ExecutionId.make(turnId.startsWith("child:") || turnId.startsWith("execution:") ? turnId : `execution:${turnId}`)
+const awaitExecutionAvailable = (
+  client: Client.Interface,
+  id: Ids.ExecutionId,
+  timeoutMessage: string,
+): Effect.Effect<void, Client.ClientError> => {
+  const poll: Effect.Effect<void, Client.ClientError> = Effect.suspend(() =>
+    client
+      .getExecution(id)
+      .pipe(
+        Effect.flatMap((existing) =>
+          existing === undefined ? Effect.sleep("25 millis").pipe(Effect.andThen(poll)) : Effect.void,
+        ),
+      ),
+  )
+  return poll.pipe(
+    Effect.timeoutOrElse({
+      duration: "15 seconds",
+      orElse: () => Effect.fail(Client.ClientError.make({ message: timeoutMessage })),
+    }),
+  )
+}
 const makeChildExecutionId = (parentTurnId: string, childId: string) =>
-  Ids.ChildExecutionId.make(`child:${encodeURIComponent(parentTurnId)}:${childId}`)
+  Ids.ChildExecutionId.make(encodeChildExecutionId(parentTurnId, childId))
+const modelSelection = (model: {
+  readonly provider: string
+  readonly model: string
+  readonly registration_key?: string
+}): ModelRegistry.ModelSelection => ({
+  provider: model.provider,
+  model: model.model,
+  ...(model.registration_key === undefined ? {} : { registrationKey: model.registration_key }),
+})
+const executionRouteFromMetadata = (metadata: Readonly<Record<string, unknown>> | undefined) => {
+  const route = metadata?.rika_execution_route
+  if (route === null || typeof route !== "object" || !("main" in route) || !("oracle" in route)) return undefined
+  return route as unknown as ExecutionRoutePin
+}
+const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.Execution) =>
+  Effect.gen(function* () {
+    let current: Execution.Execution | undefined = execution
+    for (let depth = 0; depth < 3 && current !== undefined; depth += 1) {
+      const route =
+        executionRouteFromMetadata(current.metadata) ??
+        executionRouteFromMetadata(current.agent_snapshot?.metadata) ??
+        executionRouteFromMetadata(current.agent_snapshot?.model.metadata)
+      if (route !== undefined) return route
+      const parentId: unknown = current.metadata?.parent_execution_id
+      current = typeof parentId === "string" ? yield* client.getExecution(Ids.ExecutionId.make(parentId)) : undefined
+    }
+    return undefined
+  })
+const routeForProfile = (pin: ExecutionRoutePin, profile: AgentProfile) => {
+  if (profile === "Oracle") return pin.oracle
+  if (pin.agents === undefined) return pin.main
+  if (profile === "Librarian") return pin.agents.librarian
+  if (profile === "Painter") return pin.agents.painter
+  if (profile === "Review") return pin.agents.review
+  if (profile === "ReadThread") return pin.agents.readThread
+  return pin.agents.task
+}
+const executionRoutes = (pin: ExecutionRoutePin) => [
+  pin.main,
+  pin.oracle,
+  ...(pin.title === undefined ? [] : [pin.title]),
+  ...(pin.compactionSummary === undefined ? [] : [pin.compactionSummary]),
+  ...(pin.agents === undefined
+    ? []
+    : [pin.agents.librarian, pin.agents.painter, pin.agents.review, pin.agents.readThread, pin.agents.task]),
+]
+const routeForSelection = (pin: ExecutionRoutePin, selection: ModelRegistry.ModelSelection) =>
+  executionRoutes(pin).find(
+    (route) =>
+      route.provider === selection.provider &&
+      route.model === selection.model &&
+      route.registrationKey === selection.registrationKey,
+  )
+const awaitChildResult = (client: Client.Interface, childId: string) => {
+  const childExecutionId = Ids.ExecutionId.make(childId)
+  return client.streamExecution({ execution_id: childExecutionId }).pipe(
+    Stream.takeUntil(
+      (item) =>
+        item.type === "execution.completed" || item.type === "execution.failed" || item.type === "execution.cancelled",
+    ),
+    Stream.runCollect,
+    Effect.map((events) => {
+      const terminal = events.findLast(
+        (executionEvent) =>
+          executionEvent.type === "execution.completed" ||
+          executionEvent.type === "execution.failed" ||
+          executionEvent.type === "execution.cancelled",
+      )
+      const modelOutput = events.findLast((executionEvent) => executionEvent.type === "model.output.completed")
+      return {
+        status:
+          terminal?.type === "execution.completed"
+            ? ("completed" as const)
+            : terminal?.type === "execution.cancelled"
+              ? ("cancelled" as const)
+              : ("failed" as const),
+        output:
+          terminal?.content === undefined || terminal.content.length === 0
+            ? (modelOutput?.content ?? [])
+            : terminal.content,
+      }
+    }),
+  )
+}
 const workflowExecutionId = (runId: string, ownerTurnId?: string) =>
   Ids.ExecutionId.make(
     ownerTurnId === undefined
@@ -625,6 +852,7 @@ const followExecution = (
       const rootExecutionId = executionId(turnId)
       const events: Array<Event> = []
       const followed = new Set<string>()
+      const tracedDeltas = new Set<string>()
       const updates = yield* Queue.unbounded<
         | {
             readonly _tag: "event"
@@ -768,24 +996,27 @@ const followExecution = (
         }
         events.push(update.event)
         onEvent?.(update.event)
+        const traceDelta =
+          update.event.type === "model.reasoning.delta" ||
+          update.event.type === "model.output.delta" ||
+          update.event.type === "model.toolcall.delta"
+        if (!traceDelta || !tracedDeltas.has(update.event.type)) {
+          if (traceDelta) tracedDeltas.add(update.event.type)
+          if (traceDelta || observableEventTypes.has(update.event.type))
+            yield* Effect.logInfo("execution.event.received").pipe(
+              Effect.annotateLogs({
+                "rika.event.cursor": update.event.cursor,
+                "rika.event.sequence": update.event.sequence,
+                "rika.event.type": update.event.type,
+              }),
+            )
+        }
         if (update.actionable) {
           stoppedAtActionableWait = true
           stoppedStatus = "waiting"
         } else if (update.terminal !== undefined) stoppedStatus = update.terminal
       }
       const status = stoppedStatus ?? statusFromEvents(events)
-      yield* Effect.forEach(
-        events.filter((item) => observableEventTypes.has(item.type)),
-        (item) =>
-          Effect.logInfo("execution.event").pipe(
-            Effect.annotateLogs({
-              "rika.event.cursor": item.cursor,
-              "rika.event.sequence": item.sequence,
-              "rika.event.type": item.type,
-            }),
-          ),
-        { discard: true },
-      )
       const completedAt = yield* Clock.currentTimeMillis
       yield* Effect.logInfo("execution.follow.completed").pipe(
         Effect.annotateLogs({
@@ -829,12 +1060,14 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     | "modelVariantPolicy"
   > & {
     readonly registerModels?: (registrations: ReadonlyArray<ModelRegistry.Registration>) => Effect.Effect<void>
+    readonly onClientReady?: (client: Client.Interface) => Effect.Effect<void>
   },
 ) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
       const client = yield* Client.Service
+      if (options.onClientReady !== undefined) yield* options.onClientReady(client)
       const registry =
         Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
       const hostInstances = new Map<string, Entity.Instance>()
@@ -996,50 +1229,66 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             const routePin = input.executionRoute
             const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin)
             const summaryModel = routePin?.compactionSummary
-            const routeForProfile = (profile: AgentProfile) => {
-              if (options.modelVariantPolicy === "fixed-selection") return undefined
-              if (profile === "Oracle") return routePin.oracle
-              if (routePin.agents === undefined) return routePin.main
-              if (profile === "Librarian") return routePin.agents.librarian
-              if (profile === "Painter") return routePin.agents.painter
-              if (profile === "Review") return routePin.agents.review
-              if (profile === "ReadThread") return routePin.agents.readThread
-              return routePin.agents.task
-            }
+            const parentExecutionId = executionId(input.parentTurnId)
+            const depth = childExecutionDepth(String(parentExecutionId)) + 1
+            const children = yield* Effect.forEach(input.children, (child) => {
+              const profile = child.profile ?? "Task"
+              const profileRoute =
+                options.modelVariantPolicy === "fixed-selection" ? undefined : routeForProfile(routePin, profile)
+              const inherited =
+                options.modelVariantPolicy === "fixed-selection" ? options.selection : pinnedSelection(routePin.main)
+              const requested =
+                child.model === undefined ? undefined : resolveSpawnModel(routePin, inherited, child.model)
+              if (child.model !== undefined && requested === undefined)
+                return Effect.fail(BackendError.make({ message: `Model ${child.model} is not available` }))
+              const selected =
+                requested?.selection ??
+                (profileRoute === undefined
+                  ? profile === "Oracle"
+                    ? (options.oracleSelection ?? options.selection)
+                    : options.selection
+                  : pinnedSelection(profileRoute))
+              const selectedRoute = requested === undefined ? profileRoute : routeForSelection(routePin, selected)
+              const preset = resolve(profile, selected).preset
+              const policy =
+                selectedRoute === undefined
+                  ? compactionPolicy(
+                      profile === "Oracle" ? (options.oracleCompaction ?? options.compaction) : options.compaction,
+                      options.compactionSummarySelection,
+                    )
+                  : pinnedCompactionPolicy(selectedRoute, summaryModel)
+              const effort = requested?.effort ?? selectedRoute?.effort ?? routePin.main.effort
+              return Effect.succeed({
+                child_execution_id: makeChildExecutionId(input.parentTurnId, child.childId),
+                address_id: addressId,
+                input: [Content.text(child.prompt)],
+                override: {
+                  ...preset,
+                  model: {
+                    ...preset.model,
+                    metadata: {
+                      rika_execution_route: durableRoute,
+                      rika_agent_depth: depth,
+                      rika_reasoning_effort: effort,
+                    },
+                  },
+                  tool_names: toolsAtDepth(preset.tool_names, depth),
+                  ...(policy === undefined ? {} : { compaction_policy: policy }),
+                },
+                metadata: {
+                  product_profile: profile,
+                  steering_enabled: true,
+                  rika_agent_depth: depth,
+                  rika_reasoning_effort: effort,
+                  ...(input.workspace === undefined ? {} : { rika_workspace: input.workspace }),
+                  rika_execution_route: durableRoute,
+                },
+              })
+            })
             const state = yield* client.createChildFanOut({
               fan_out_id: Ids.ChildFanOutId.make(input.fanOutId),
-              parent_execution_id: executionId(input.parentTurnId),
-              children: input.children.map((child) => {
-                const profile = child.profile ?? "Task"
-                const profileRoute = routeForProfile(profile)
-                const preset = resolve(
-                  profile,
-                  profileRoute === undefined
-                    ? profile === "Oracle"
-                      ? (options.oracleSelection ?? options.selection)
-                      : options.selection
-                    : pinnedSelection(profileRoute),
-                ).preset
-                const policy =
-                  profileRoute === undefined
-                    ? compactionPolicy(
-                        profile === "Oracle" ? (options.oracleCompaction ?? options.compaction) : options.compaction,
-                        options.compactionSummarySelection,
-                      )
-                    : pinnedCompactionPolicy(profileRoute, summaryModel)
-                return {
-                  child_execution_id: makeChildExecutionId(input.parentTurnId, child.childId),
-                  address_id: addressId,
-                  input: [Content.text(child.prompt)],
-                  override: { ...preset, ...(policy === undefined ? {} : { compaction_policy: policy }) },
-                  metadata: {
-                    product_profile: profile,
-                    steering_enabled: true,
-                    ...(input.workspace === undefined ? {} : { rika_workspace: input.workspace }),
-                    rika_execution_route: durableRoute,
-                  },
-                }
-              }),
+              parent_execution_id: parentExecutionId,
+              children,
               max_concurrency: input.maxConcurrency,
               join:
                 input.join === "quorum"
@@ -1103,13 +1352,41 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           return result === undefined ? undefined : workflow(result)
         }),
         invokeChild: Effect.fn("ExecutionBackend.invokeChild")(function* (input) {
+          const parentExecutionId = executionId(input.parentTurnId)
+          const parent = yield* client.getExecution(parentExecutionId).pipe(Effect.mapError(error))
+          const routePin = executionRouteFromMetadata(parent?.agent_snapshot?.metadata)
+          if (parent?.agent_snapshot === undefined || routePin === undefined)
+            return yield* BackendError.make({ message: `Execution ${input.parentTurnId} has no pinned model route` })
+          const route = routeForProfile(routePin, input.profile)
+          const preset = resolve(input.profile, pinnedSelection(route)).preset
+          const depth = childExecutionDepth(String(parentExecutionId)) + 1
+          const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
           yield* client
             .spawnChildRun({
-              execution_id: executionId(input.parentTurnId),
+              execution_id: parentExecutionId,
               child_execution_id: makeChildExecutionId(input.parentTurnId, input.childId),
               address_id: addressId,
-              preset_name: input.profile,
               input: [Content.text(input.prompt)],
+              instructions: preset.instructions,
+              model: {
+                ...preset.model,
+                metadata: {
+                  rika_execution_route: durableRoute,
+                  rika_agent_depth: depth,
+                  rika_reasoning_effort: route.effort,
+                },
+              },
+              tool_names: toolsAtDepth(preset.tool_names, depth),
+              permissions: preset.permissions,
+              output_schema_ref: preset.output_schema_ref,
+              compaction_policy: pinnedCompactionPolicy(route, routePin.compactionSummary),
+              metadata: {
+                product_profile: input.profile,
+                steering_enabled: true,
+                rika_agent_depth: depth,
+                rika_reasoning_effort: route.effort,
+                rika_execution_route: durableRoute,
+              },
               wait: false,
             })
             .pipe(Effect.mapError(error))
@@ -1124,7 +1401,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           function* (input) {
             return yield* Effect.gen(function* () {
               const startedAt = yield* Clock.currentTimeMillis
-              const metadata = { steering_enabled: true, multi_agent_enabled: true }
+              const id = executionId(input.turnId)
+              const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(input.executionRoute)
+              const metadata = {
+                steering_enabled: true,
+                rika_execution_id: String(id),
+                rika_agent_depth: 0,
+                rika_reasoning_effort: input.reasoningEffort ?? input.executionRoute.main.effort,
+                rika_execution_route: durableRoute,
+              }
               const rootCompaction =
                 options.modelVariantPolicy === "fixed-selection"
                   ? compactionPolicy(options.compaction, options.compactionSummarySelection)
@@ -1142,10 +1427,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 options.modelVariantPolicy === "fixed-selection"
                   ? options.oracleSelection
                   : pinnedSelection(input.executionRoute.oracle)
-              const oracleCompaction =
-                options.modelVariantPolicy === "fixed-selection"
-                  ? compactionPolicy(options.oracleCompaction ?? options.compaction, options.compactionSummarySelection)
-                  : pinnedCompactionPolicy(input.executionRoute.oracle, input.executionRoute.compactionSummary)
               const agentRoutes =
                 options.modelVariantPolicy === "fixed-selection" ? undefined : input.executionRoute.agents
               const agentModels =
@@ -1156,8 +1437,49 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                       Painter: pinnedSelection(agentRoutes.painter),
                       Review: pinnedSelection(agentRoutes.review),
                       ReadThread: pinnedSelection(agentRoutes.readThread),
-                      Task: pinnedSelection(agentRoutes.task),
                     }
+              const childDepth = 1
+              const childRunPresets = Object.fromEntries(
+                Object.entries(presets(selection, oracleSelection, agentModels)).map(([name, preset]) => {
+                  const profile = name as AgentProfile
+                  const profileRoute =
+                    profile === "Task" ? input.executionRoute.main : routeForProfile(input.executionRoute, profile)
+                  const effort =
+                    profile === "Task"
+                      ? (input.reasoningEffort ?? input.executionRoute.main.effort)
+                      : profileRoute.effort
+                  const policy =
+                    options.modelVariantPolicy === "fixed-selection"
+                      ? compactionPolicy(
+                          profile === "Oracle" ? (options.oracleCompaction ?? options.compaction) : options.compaction,
+                          options.compactionSummarySelection,
+                        )
+                      : pinnedCompactionPolicy(profileRoute, input.executionRoute.compactionSummary)
+                  return [
+                    name,
+                    {
+                      ...preset,
+                      model: {
+                        ...preset.model,
+                        metadata: {
+                          rika_execution_route: durableRoute,
+                          rika_agent_depth: childDepth,
+                          rika_reasoning_effort: effort,
+                        },
+                      },
+                      tool_names: toolsAtDepth(preset.tool_names, childDepth),
+                      ...(policy === undefined ? {} : { compaction_policy: policy }),
+                      metadata: {
+                        ...preset.metadata,
+                        steering_enabled: true,
+                        rika_agent_depth: childDepth,
+                        rika_reasoning_effort: effort,
+                        rika_execution_route: durableRoute,
+                      },
+                    },
+                  ]
+                }),
+              )
               yield* Effect.logInfo("execution.starting").pipe(
                 Effect.annotateLogs({
                   "rika.model.name": selection.model,
@@ -1171,36 +1493,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   model: selection,
                   toolkit: toolkitFor(options),
                 }),
-                permissions: [...parentPermissions, childRunSpawnPermission],
+                permissions: parentPermissions,
                 ...(options.permissionPolicy === undefined ? {} : { permission_rules: options.permissionPolicy }),
                 metadata,
                 ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
-                handoff_targets: subagentHandoffTargets,
-                child_run_presets: Object.fromEntries(
-                  Object.entries(presets(selection, oracleSelection, agentModels)).map(([name, preset]) => {
-                    const agentRoute =
-                      name === "Librarian"
-                        ? agentRoutes?.librarian
-                        : name === "Painter"
-                          ? agentRoutes?.painter
-                          : name === "Review"
-                            ? agentRoutes?.review
-                            : name === "ReadThread"
-                              ? agentRoutes?.readThread
-                              : name === "Task"
-                                ? agentRoutes?.task
-                                : undefined
-                    const policy =
-                      name === "Oracle"
-                        ? oracleCompaction
-                        : agentRoute === undefined
-                          ? rootCompaction
-                          : pinnedCompactionPolicy(agentRoute, input.executionRoute.compactionSummary)
-                    return [name, { ...preset, ...(policy === undefined ? {} : { compaction_policy: policy }) }]
-                  }),
-                ),
+                child_run_presets: childRunPresets,
               })
-              const id = executionId(input.turnId)
               const start = client
                 .startExecutionByAgentDefinition({
                   root_address_id: addressId,
@@ -1226,25 +1524,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 )
               const starter = yield* Effect.forkChild(start)
               yield* Effect.yieldNow
-              const awaitAccepted: Effect.Effect<void, Client.ClientError> = Effect.suspend(() =>
-                client
-                  .getExecution(id)
-                  .pipe(
-                    Effect.flatMap((existing) =>
-                      existing === undefined
-                        ? Effect.sleep("25 millis").pipe(Effect.andThen(awaitAccepted))
-                        : Effect.void,
-                    ),
-                  ),
-              )
               const started = starter.pollUnsafe()
               if (started !== undefined) yield* Fiber.join(starter)
               else
-                yield* Effect.raceFirst(awaitAccepted, Fiber.join(starter)).pipe(
-                  Effect.timeoutOrElse({
-                    duration: "15 seconds",
-                    orElse: () => Effect.fail(Client.ClientError.make({ message: "Execution acceptance timed out" })),
-                  }),
+                yield* Effect.raceFirst(
+                  awaitExecutionAvailable(client, id, "Execution acceptance timed out"),
+                  Fiber.join(starter),
                 )
               yield* Clock.currentTimeMillis.pipe(
                 Effect.flatMap((acceptedAt) =>
@@ -1316,11 +1601,13 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         }),
         cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, cancelledAt) {
           return yield* Effect.gen(function* () {
+            const id = executionId(turnId)
+            yield* awaitExecutionAvailable(client, id, "Execution did not become available for cancellation")
             const accepted = yield* client.cancelExecution({
-              execution_id: executionId(turnId),
+              execution_id: id,
               cancelled_at: cancelledAt,
             })
-            const replay = yield* client.replayExecution({ execution_id: executionId(turnId) })
+            const replay = yield* client.replayExecution({ execution_id: id })
             const events = replay.events.map(event)
             return { turnId, status: Status.make(accepted.status), events }
           }).pipe(Effect.mapError(error))
@@ -1412,7 +1699,11 @@ export const layer = <
   RuntimeRequirements extends ToolRuntimeRequirements = never,
 >(
   options: LayerOptions<AdditionalTools, RuntimeRequirements>,
-) =>
+): Layer.Layer<
+  Service,
+  BackendError | PlatformError.PlatformError | Runtime.AcquisitionError,
+  Crypto.Crypto | ExternalToolRuntimeRequirements<RuntimeRequirements>
+> =>
   Layer.unwrap(
     Effect.gen(function* () {
       const sqliteModule = yield* Effect.tryPromise({
@@ -1421,6 +1712,7 @@ export const layer = <
       })
       const promoterRegistry = yield* ThreadHost.makeRegistry
       const promoterRegistryLayer = Layer.succeed(ThreadHost.Registry, promoterRegistry)
+      const relayClient = yield* Deferred.make<Client.Interface>()
       {
         const {
           ChildFanOutRuntime,
@@ -1433,11 +1725,181 @@ export const layer = <
         {
           const toolkit = toolkitFor(options)
           const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
-          const handlerLayer = Layer.merge(
+          const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
+            toolName: AgentTools.DelegationToolName,
+            profile: AgentProfile,
+            input: AgentTools.RuntimeTaskInput | { readonly prompt: string },
+          ) {
+            const call = yield* RelayToolRuntime.ToolCallInfo
+            const parentDepth = childExecutionDepth(String(call.executionId))
+            if (!delegationAvailableAtDepth(parentDepth)) {
+              return yield* AgentTools.AgentToolError.make({
+                tool: toolName,
+                message: `Agent delegation is unavailable at depth ${parentDepth}`,
+              })
+            }
+            const client = yield* Deferred.await(relayClient)
+            const parent = yield* client
+              .getExecution(call.executionId)
+              .pipe(
+                Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+              )
+            const snapshot = parent?.agent_snapshot
+            const routePin =
+              parent === undefined
+                ? undefined
+                : yield* pinnedRouteForExecution(client, parent).pipe(
+                    Effect.mapError((cause) =>
+                      AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) }),
+                    ),
+                  )
+            if (snapshot === undefined) {
+              return yield* AgentTools.AgentToolError.make({
+                tool: toolName,
+                message: `Execution ${call.executionId} does not have an agent snapshot`,
+              })
+            }
+            if (routePin === undefined) {
+              return yield* AgentTools.AgentToolError.make({
+                tool: toolName,
+                message: "The parent execution does not have a pinned model route",
+              })
+            }
+            const parentSelection = modelSelection(snapshot.model)
+            const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
+              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+            )
+            const batch = "_batch" in input ? input._batch : undefined
+            const calls = batch?.calls ?? [
+              {
+                callId: String(call.call.id),
+                prompt: input.prompt,
+                ...(profile === "Task" && "model" in input && input.model !== undefined ? { model: input.model } : {}),
+              },
+            ]
+            const children = yield* Effect.forEach(calls, (childCall) => {
+              const base = {
+                child_execution_id: makeChildExecutionId(String(call.executionId), childCall.callId),
+                address_id: addressId,
+                input: [Content.text(childCall.prompt)],
+              }
+              if (childCall.model === undefined && snapshot.child_run_presets?.[profile] !== undefined) {
+                return Effect.succeed(
+                  buildChildRunInput(base, {
+                    _tag: "preset",
+                    presetName: profile,
+                  }),
+                )
+              }
+              const selected =
+                profile === "Task"
+                  ? resolveSpawnModel(routePin, parentSelection, childCall.model)
+                  : options.modelVariantPolicy === "fixed-selection"
+                    ? {
+                        selection:
+                          profile === "Oracle" ? (options.oracleSelection ?? options.selection) : options.selection,
+                        effort: routeForProfile(routePin, profile).effort,
+                      }
+                    : {
+                        selection: pinnedSelection(routeForProfile(routePin, profile)),
+                        effort: routeForProfile(routePin, profile).effort,
+                      }
+              if (selected === undefined) {
+                return Effect.fail(
+                  AgentTools.AgentToolError.make({
+                    tool: toolName,
+                    message: `Model ${childCall.model} is not available in this execution's registered routes`,
+                  }),
+                )
+              }
+              const childDepth = parentDepth + 1
+              const preset = resolve(profile, selected.selection).preset
+              const selectedRoute = routeForSelection(routePin, selected.selection)
+              const policy =
+                selectedRoute === undefined
+                  ? snapshot.compaction_policy
+                  : pinnedCompactionPolicy(selectedRoute, routePin.compactionSummary)
+              return Effect.succeed(
+                buildChildRunInput(base, {
+                  _tag: "override",
+                  definition: {
+                    instructions: preset.instructions,
+                    model: {
+                      ...relayModelSelection(selected.selection),
+                      metadata: {
+                        rika_execution_route: durableRoute,
+                        rika_agent_depth: childDepth,
+                        rika_reasoning_effort: selected.effort,
+                      },
+                    },
+                    tool_names: toolsAtDepth(preset.tool_names, childDepth),
+                    permissions: preset.permissions,
+                    output_schema_ref: preset.output_schema_ref,
+                    ...(policy === undefined ? {} : { compaction_policy: policy }),
+                    metadata: {
+                      product_profile: profile,
+                      steering_enabled: true,
+                      rika_agent_depth: childDepth,
+                      rika_reasoning_effort: selected.effort,
+                      rika_execution_route: durableRoute,
+                    },
+                  },
+                }),
+              )
+            })
+            yield* Effect.forEach(
+              children,
+              (child) =>
+                client.spawnChildRun({
+                  execution_id: call.executionId,
+                  ...child,
+                  wait: false,
+                }),
+              { concurrency: Math.min(maxParallelDelegations, children.length), discard: true },
+            ).pipe(
+              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+            )
+            const currentCall = calls.find((childCall) => childCall.callId === String(call.call.id))
+            const current =
+              currentCall === undefined
+                ? undefined
+                : children.find(
+                    (child) =>
+                      child.child_execution_id === makeChildExecutionId(String(call.executionId), currentCall.callId),
+                  )
+            if (current === undefined) {
+              return yield* AgentTools.AgentToolError.make({
+                tool: toolName,
+                message: `The child for tool call ${call.call.id} is not in its fan-out batch`,
+              })
+            }
+            const result = yield* awaitChildResult(client, String(current.child_execution_id)).pipe(
+              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+            )
+            return {
+              childExecutionId: String(current.child_execution_id),
+              status: result.status,
+              output: [...result.output],
+            }
+          })
+          const runDelegation = delegation as unknown as (
+            toolName: AgentTools.DelegationToolName,
+            profile: AgentProfile,
+            input: AgentTools.RuntimeTaskInput | { readonly prompt: string },
+          ) => Effect.Effect<AgentTools.Result, AgentTools.AgentToolError>
+          const delegationHandlerLayer: Layer.Layer<Tool.HandlersFor<typeof AgentTools.runtimeToolkit.tools>> =
+            AgentTools.runtimeToolkit.toLayer({
+              task: (input) => runDelegation("task", "Task", input),
+              oracle: (input) => runDelegation("oracle", "Oracle", input),
+              librarian: (input) => runDelegation("librarian", "Librarian", input),
+              review: (input) => runDelegation("review", "Review", input),
+            })
+          const handlerLayer = Layer.mergeAll(
             options.additionalHandlerLayer === undefined
               ? RikaToolRuntime.handlerLayer
               : Layer.merge(RikaToolRuntime.handlerLayer, options.additionalHandlerLayer),
             ThreadHost.handlerLayer(promoterRegistry),
+            delegationHandlerLayer,
           )
           const languageModelLayer = LanguageModelService.layerFromRegistrationEffects([
             ...registrationsFor(options).map((registration) => Effect.succeed(registration)),
@@ -1461,7 +1923,15 @@ export const layer = <
                       ),
                     ),
                   provideForAgent: (agent, effect) =>
-                    languageModelService.provideForAgent(agent, withNamespacedLanguageModel(agent.name, effect)),
+                    languageModelService.provideForAgent(
+                      agent,
+                      withNamespacedLanguageModel(
+                        typeof agent.metadata?.rika_execution_id === "string"
+                          ? agent.metadata.rika_execution_id
+                          : agent.name,
+                        effect,
+                      ),
+                    ),
                 })
           const sharedLanguageModelLayer =
             namespacedLanguageModelService === undefined
@@ -1488,7 +1958,7 @@ export const layer = <
                 : (options.toolNeedsApproval?.(tool.name) ?? ToolCatalog.get(tool.name)?.permission === "ask"),
           })).pipe(
             Layer.provide(handlerLayer),
-            Layer.provideMerge(
+            Layer.provide(
               rikaToolRuntimeLayer.pipe(
                 Layer.provide(MediaAnalyzer.layer(options.selection)),
                 Layer.provide(sharedModelRegistryLayer),
@@ -1559,6 +2029,7 @@ export const layer = <
                         steering_enabled: true,
                         ...override.metadata,
                         ...child.metadata,
+                        rika_execution_id: String(child.child_execution_id),
                       }
                       const childSelection =
                         override.model === undefined
@@ -1677,7 +2148,11 @@ export const layer = <
                       permissions: preset.permissions.map((name) => ({ name, value: true })),
                       ...(options.permissionPolicy === undefined ? {} : { permission_rules: options.permissionPolicy }),
                       output_schema_ref: preset.output_schema_ref,
-                      metadata: { ...preset.metadata, steering_enabled: true },
+                      metadata: {
+                        ...preset.metadata,
+                        steering_enabled: true,
+                        rika_execution_id: String(childId),
+                      },
                       ...(policy === undefined ? {} : { compaction_policy: policy }),
                     })
                     yield* client
@@ -1752,6 +2227,7 @@ export const layer = <
           )
           return layerFromClient({
             ...options,
+            onClientReady: (client) => Deferred.complete(relayClient, Effect.succeed(client)).pipe(Effect.asVoid),
             registerModels: (registrations) =>
               Effect.forEach(
                 registrations,

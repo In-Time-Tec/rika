@@ -3,7 +3,21 @@ import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Operation from "@rika/app/operation-contract"
 import * as ResidentService from "@rika/app/resident-service"
-import { Cause, Config, Console, Context, Crypto, Effect, FileSystem, Layer, Path, Schema, Stdio } from "effect"
+import {
+  Cause,
+  Config,
+  Console,
+  Context,
+  Crypto,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Path,
+  Runtime,
+  Schema,
+  Stdio,
+} from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "./command"
@@ -46,6 +60,8 @@ const operationFailure = (input: Operation.Input, error: unknown) =>
     ? error
     : Operation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
 
+export const cleanInteractiveRuntimeExit = (exitCode: number): boolean => exitCode === 0 || exitCode === 130
+
 const privateRuntime = Effect.fn("ClientMain.privateRuntime")(function* () {
   const path = yield* Path.Path
   return import.meta.path.startsWith("/$bunfs/")
@@ -87,7 +103,7 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                       env: { RIKA_INTERNAL_CLIENT_RUNTIME: "1" },
                     }),
                   )
-                  if (Number(exitCode) !== 0)
+                  if (!cleanInteractiveRuntimeExit(Number(exitCode)))
                     return yield* Operation.OperationUnavailable.make({
                       operation: "Interactive",
                       message: `Rika interactive runtime exited with code ${exitCode}`,
@@ -144,9 +160,11 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
         Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
     }),
     Effect.tapCause((cause) =>
-      Effect.logError("process.failed").pipe(
-        Effect.annotateLogs("rika.failure.kind", Cause.squash(cause) instanceof Error ? "Error" : typeof cause),
-      ),
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.void
+        : Effect.logError("process.failed").pipe(
+            Effect.annotateLogs("rika.failure.kind", Cause.squash(cause) instanceof Error ? "Error" : typeof cause),
+          ),
     ),
     Effect.annotateLogs({
       "rika.process.role": "client",
@@ -157,4 +175,28 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
   return yield* program.pipe(provideLayerScoped(dispatcherLayer(argv).pipe(Layer.provide(residentLayer))))
 })
 
-if (import.meta.main) BunRuntime.runMain(run().pipe(provideLayerScoped(BunServices.layer)))
+export const clientProcessExitCode = <E, A>(input: {
+  readonly exit: Exit.Exit<E, A>
+  readonly interruptedBySigint: boolean
+}): number => {
+  if (input.interruptedBySigint && Exit.isFailure(input.exit) && Cause.hasInterruptsOnly(input.exit.cause)) return 0
+  let code = 1
+  Runtime.defaultTeardown(input.exit, (value) => {
+    code = value
+  })
+  return code
+}
+
+if (import.meta.main) {
+  let interruptedBySigint = false
+  const markSigint = () => {
+    interruptedBySigint = true
+  }
+  process.once("SIGINT", markSigint)
+  BunRuntime.runMain(run().pipe(provideLayerScoped(BunServices.layer)), {
+    teardown: (exit, onExit) => {
+      process.off("SIGINT", markSigint)
+      onExit(clientProcessExitCode({ exit, interruptedBySigint }))
+    },
+  })
+}

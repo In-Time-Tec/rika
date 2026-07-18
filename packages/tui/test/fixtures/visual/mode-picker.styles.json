@@ -1955,7 +1955,7 @@
           "width": 6
         },
         {
-          "text": "  GPT-5.6 Sol high",
+          "text": "  GPT-5.6 Sol xhigh",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -1973,10 +1973,10 @@
             }
           },
           "attributes": 0,
-          "width": 18
+          "width": 19
         },
         {
-          "text": "                               ",
+          "text": "                              ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -1994,7 +1994,7 @@
             }
           },
           "attributes": 0,
-          "width": 31
+          "width": 30
         },
         {
           "text": "│",
@@ -2148,7 +2148,7 @@
           "width": 7
         },
         {
-          "text": " Fable 5 high",
+          "text": " GPT-5.6 Sol max",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -2166,10 +2166,10 @@
             }
           },
           "attributes": 0,
-          "width": 13
+          "width": 16
         },
         {
-          "text": "                                   ",
+          "text": "                                ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -2187,7 +2187,7 @@
             }
           },
           "attributes": 0,
-          "width": 35
+          "width": 32
         },
         {
           "text": "│",

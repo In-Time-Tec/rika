@@ -23,8 +23,16 @@ export const renderTool: {
   (width: number): (tool: Tool) => string
   (tool: Tool, width: number): string
 } = Function.dual(2, (tool: Tool, width: number): string => {
-  const icon = tool.status === "running" ? "⠿" : tool.status === "complete" ? "✓" : "✗"
-  const status = tool.status === "running" ? "running" : tool.status === "complete" ? "succeeded" : "failed"
+  const icon =
+    tool.status === "running" ? "⠿" : tool.status === "complete" ? "✓" : tool.status === "cancelled" ? "⊘" : "✗"
+  const status =
+    tool.status === "running"
+      ? "running"
+      : tool.status === "complete"
+        ? "succeeded"
+        : tool.status === "cancelled"
+          ? "cancelled"
+          : "failed"
   const detail =
     tool.output === undefined ? tool.input : `${tool.input}\n  ${bounded(tool.output, Math.max(1, width - 2))}`
   return tool.expanded === true

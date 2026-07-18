@@ -11,12 +11,10 @@ export type Mode = typeof Mode.Type
 
 export const Activity = Schema.Union([
   Schema.TaggedStruct("Sending", {}),
+  Schema.TaggedStruct("Waiting", {}),
   Schema.TaggedStruct("Thinking", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
   Schema.TaggedStruct("Streaming", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
-  Schema.TaggedStruct("Tool", { label: Schema.String }),
-  Schema.TaggedStruct("Approval", {}),
-  Schema.TaggedStruct("Cancelling", {}),
-  Schema.TaggedStruct("Error", {}),
+  Schema.TaggedStruct("RunningTools", {}),
 ])
 export type Activity = typeof Activity.Type
 
@@ -40,11 +38,10 @@ export const formatActivityCounter = (tokens: number): string =>
 
 export const formatActivity = (activity: Activity | undefined): string | undefined => {
   if (activity === undefined) return undefined
-  if (activity._tag === "Tool") return activity.label
-  if (activity._tag === "Approval") return "Waiting for Approval"
+  if (activity._tag === "RunningTools") return "Running tools"
   if (activity._tag === "Thinking" || activity._tag === "Streaming") {
     const tokens = Math.floor(activity.bytes / 4)
-    return `${activity._tag}${tokens === 0 ? "" : ` ${formatActivityCounter(tokens)}`}`
+    return `${activity._tag} ${formatActivityCounter(tokens)}`
   }
   return activity._tag
 }
@@ -126,7 +123,13 @@ export type UiEvent = {
   readonly block: TranscriptBlock
 }
 export type TranscriptItem =
-  | { readonly _tag: "Entry"; readonly index: number; readonly id?: string; readonly turnId?: string }
+  | {
+      readonly _tag: "Entry"
+      readonly index: number
+      readonly id?: string
+      readonly turnId?: string
+      readonly parentId?: string
+    }
   | {
       readonly _tag: "Block"
       readonly index: number
@@ -380,8 +383,8 @@ export const replaceQueue: {
   }
 })
 
-const defaultQueueSelection = (current: string | undefined, queue: ReadonlyArray<QueueItem>): string | undefined =>
-  current !== undefined && queue.some((item) => item.id === current) ? current : queue.at(-1)?.id
+const validQueueSelection = (current: string | undefined, queue: ReadonlyArray<QueueItem>): string | undefined =>
+  current !== undefined && queue.some((item) => item.id === current) ? current : undefined
 
 const exitEditWhenRemoved = (model: Model, queue: ReadonlyArray<QueueItem>): Partial<Model> => {
   if (model.editingTurnId === undefined || queue.some((item) => item.id === model.editingTurnId)) return {}
@@ -405,7 +408,7 @@ export const resetQueue: {
     queue: [...queue],
     queueThreadId: threadId,
     queueRevision: revision,
-    queueSelection: defaultQueueSelection(model.queueSelection, queue),
+    queueSelection: validQueueSelection(model.queueSelection, queue),
     ...exitEditWhenRemoved(model, queue),
   }),
 )
@@ -448,7 +451,6 @@ export const applyQueueDelta: {
     if (change._tag === "Added") {
       if (queue.some((item) => item.id === change.item.id)) return { model, resync: true }
       queue.push(change.item)
-      selection = change.item.id
     } else if (change._tag === "Updated") {
       const index = queue.findIndex((item) => item.id === change.item.id)
       if (index < 0) return { model, resync: true }
@@ -464,7 +466,7 @@ export const applyQueueDelta: {
         ...model,
         queue,
         queueRevision: revision,
-        queueSelection: defaultQueueSelection(selection, queue),
+        queueSelection: validQueueSelection(selection, queue),
         ...exitEditWhenRemoved(model, queue),
       },
       resync: queuedCount !== undefined && queuedCount !== queue.length,
@@ -1026,20 +1028,12 @@ export const update: {
             ? {
                 activity:
                   incoming._tag === "ToolCall"
-                    ? {
-                        _tag: "Tool" as const,
-                        label:
-                          incoming.presentation.family === "shell"
-                            ? `$ ${incoming.detail || incoming.input}`
-                            : `${incoming.presentation.activeLabel}${incoming.detail.length === 0 ? "" : ` ${incoming.detail}`}`,
-                      }
-                    : incoming._tag === "ToolResult"
-                      ? undefined
+                    ? { _tag: "RunningTools" as const }
+                    : incoming._tag === "ToolResult" || incoming._tag === "Permission"
+                      ? { _tag: "Waiting" as const }
                       : incoming._tag === "Reasoning"
                         ? streamActivity(model.activity, "Thinking", incoming.text, undefined)
-                        : incoming._tag === "Permission" && incoming.status === "pending"
-                          ? { _tag: "Approval" as const }
-                          : model.activity,
+                        : (model.activity ?? { _tag: "Waiting" as const }),
               }
             : {}),
         }
@@ -1086,7 +1080,7 @@ export const update: {
           }
     case "TurnStarted":
       if (model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId))
-        return { ...model, activeTurnId: message.turnId, busy: true, activity: undefined }
+        return { ...model, activeTurnId: message.turnId, busy: true, activity: { _tag: "Waiting" } }
       return {
         ...model,
         entries: [...model.entries, { role: "user", text: message.prompt, turnId: message.turnId }],
@@ -1096,13 +1090,23 @@ export const update: {
         ],
         activeTurnId: message.turnId,
         busy: true,
-        activity: undefined,
+        activity: { _tag: "Waiting" },
       }
     case "BlockAdded":
       return {
         ...model,
         blocks: [...model.blocks, message.block],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
+        ...(model.busy
+          ? {
+              activity:
+                message.block._tag === "ToolCall"
+                  ? ({ _tag: "RunningTools" } as const)
+                  : message.block._tag === "ToolResult" || message.block._tag === "Permission"
+                    ? ({ _tag: "Waiting" } as const)
+                    : (model.activity ?? ({ _tag: "Waiting" } as const)),
+            }
+          : {}),
       }
     case "ReasoningStreamed": {
       const blocks = [...model.blocks] as Array<TranscriptBlock>
@@ -1209,7 +1213,7 @@ export const update: {
                 },
               ],
         busy: model.busy,
-        activity: undefined,
+        activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Waiting" } : undefined,
       }
     }
     case "ExecutionCompleted":
@@ -1231,19 +1235,53 @@ export const update: {
         ],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
         busy: false,
-        activity: { _tag: "Error" },
+        activity: undefined,
         activeTurnId: undefined,
       }
     case "ExecutionCancelled":
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       if (!model.busy) return model
-      return {
-        ...model,
-        entries: [...model.entries, { role: "notice", text: "cancelled" }],
-        items: [...model.items, { _tag: "Entry", index: model.entries.length }],
-        busy: false,
-        activity: undefined,
-        activeTurnId: undefined,
+      {
+        const turnId = message.turnId ?? model.activeTurnId
+        const hasMarkerUnit = model.blocks.some((candidate) => {
+          const block = candidate as TranscriptBlock
+          if (block._tag === "ChildAgent") return block.status === "running" || block.status === "cancelled"
+          return (
+            block._tag === "ToolCall" &&
+            (block.status === "running" || block.status === "cancelled") &&
+            block.presentation.family === "agent"
+          )
+        })
+        const entries = hasMarkerUnit
+          ? model.entries
+          : [
+              ...model.entries,
+              { role: "notice" as const, text: "cancelled", ...(turnId === undefined ? {} : { turnId }) },
+            ]
+        const items = hasMarkerUnit
+          ? model.items
+          : [
+              ...model.items,
+              {
+                _tag: "Entry" as const,
+                index: model.entries.length,
+                ...(turnId === undefined ? {} : { id: `execution:${turnId}:cancelled`, turnId }),
+              },
+            ]
+        return {
+          ...model,
+          entries,
+          items,
+          blocks: model.blocks.map((candidate) => {
+            const block = candidate as TranscriptBlock
+            return (block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running"
+              ? { ...block, status: "cancelled" as const }
+              : candidate
+          }),
+          busy: false,
+          activity: undefined,
+          activeTurnId: undefined,
+        }
       }
     case "UsageReported":
       return message.costUsd === undefined ? model : { ...model, costUsd: (model.costUsd ?? 0) + message.costUsd }
@@ -1542,7 +1580,7 @@ export const update: {
         }
       }
       if (key.ctrl && key.name === "c" && model.busy)
-        return { ...model, activity: { _tag: "Cancelling" }, pendingAction: { _tag: "Cancel" } }
+        return { ...model, activity: { _tag: "Waiting" }, pendingAction: { _tag: "Cancel" } }
       if (key.ctrl && key.name === "s" && model.busy && model.input.length > 0)
         return { ...model, pendingAction: { _tag: "Steer", prompt: model.input }, input: "", cursor: 0 }
       if (key.ctrl && key.name === "return" && model.busy && model.input.length > 0)
@@ -1698,7 +1736,7 @@ export const update: {
         if (key.name === "return") return update(model, { _tag: "PermissionDecisionSelected", id: permission.id })
         if (questionKey(key)) return model
       }
-      if (questionKey(key)) {
+      if (questionKey(key) && model.input.length === 0) {
         const trigger = model.cursor
         const next = insert(model, "?")
         return {

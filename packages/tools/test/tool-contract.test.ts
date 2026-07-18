@@ -1,10 +1,36 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Ref, Schema, Stream } from "effect"
 import { Tool } from "effect/unstable/ai"
-import { Catalog, ParallelSearch, ProcessRegistry, Runtime } from "../src"
+import { AgentTools, Catalog, ParallelSearch, ProcessRegistry, Runtime } from "../src"
 import { provide } from "./test-layer"
 
 describe("tool contracts", () => {
+  it.effect("defines the model-facing Task spawn contract and rejects unknown model variants", () =>
+    Effect.gen(function* () {
+      const schema = Tool.getJsonSchema(AgentTools.taskTool)
+      expect(AgentTools.taskTool.description).toContain(
+        "Independent explorations SHOULD be parallel spawn calls in one turn.",
+      )
+      expect(AgentTools.taskTool.description).toContain("Omit model to inherit the parent model and effort.")
+      expect(AgentTools.taskTool.description).toContain(AgentTools.modelGuidance)
+      expect(schema).toMatchObject({
+        properties: {
+          prompt: { type: "string" },
+          model: { enum: ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] },
+        },
+        required: ["prompt"],
+      })
+      expect(schema.properties).not.toHaveProperty("_batch")
+      expect(
+        yield* Schema.decodeUnknownEffect(AgentTools.TaskInput)({ prompt: "List files", model: "gpt-5.6-luna" }),
+      ).toEqual({ prompt: "List files", model: "gpt-5.6-luna" })
+      const invalid = yield* Effect.flip(
+        Schema.decodeUnknownEffect(AgentTools.TaskInput)({ prompt: "List files", model: "gpt-5.6-unknown" }),
+      )
+      expect(String(invalid)).toContain("gpt-5.6-unknown")
+    }),
+  )
+
   it("defines permission and output policies for every initial tool", () => {
     expect(Catalog.definitions.length).toBeGreaterThanOrEqual(9)
     expect(Catalog.get("read_file")?.permission).toBe("allow")
@@ -79,6 +105,17 @@ describe("tool contracts", () => {
       ["slack_read", "Slack"],
       ["slack_write", "Slack"],
     ])
+  })
+
+  it("labels handoff spawns without a parenthesized profile from the first resolution", () => {
+    const task = Catalog.resolvePresentation("transfer_to_task")
+    expect(task.activeLabel).toBe("Subagent working")
+    expect(task.completeLabel).toBe("Subagent finished")
+    const planner = Catalog.resolvePresentation("transfer_to_planner")
+    expect(planner.activeLabel).toBe("Planner working")
+    expect(planner.completeLabel).toBe("Planner finished")
+    for (const label of [task.activeLabel, task.completeLabel, planner.activeLabel, planner.completeLabel])
+      expect(label).not.toContain("(")
   })
 
   it.effect("substitutes the runtime through its test layer", () =>

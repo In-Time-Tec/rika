@@ -1,12 +1,26 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { Operation } from "@rika/app"
-import { ConfigProvider, Effect, FileSystem, Layer, Path, Ref, Stream } from "effect"
+import { ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
-import { run as runClient } from "../src/client-main"
+import { cleanInteractiveRuntimeExit, clientProcessExitCode, run as runClient } from "../src/client-main"
 import { parseJsonLines, readStreamInput, run } from "../src/command"
 
 const workspace = process.cwd()
+
+it("maps pure client interruption to success without masking failures", () => {
+  expect(clientProcessExitCode({ exit: Exit.interrupt(1), interruptedBySigint: true })).toBe(0)
+  expect(clientProcessExitCode({ exit: Exit.interrupt(1), interruptedBySigint: false })).toBe(130)
+  expect(clientProcessExitCode({ exit: Exit.succeed(undefined), interruptedBySigint: false })).toBe(0)
+  expect(clientProcessExitCode({ exit: Exit.fail("real failure"), interruptedBySigint: true })).toBe(1)
+})
+
+it("accepts only successful and SIGINT-convention interactive runtime exits", () => {
+  expect(cleanInteractiveRuntimeExit(0)).toBe(true)
+  expect(cleanInteractiveRuntimeExit(130)).toBe(true)
+  expect(cleanInteractiveRuntimeExit(1)).toBe(false)
+  expect(cleanInteractiveRuntimeExit(143)).toBe(false)
+})
 
 const execute = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>) =>
   Effect.scoped(

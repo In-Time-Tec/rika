@@ -57,6 +57,118 @@ const interactiveLayer = (
   })
 
 describe("interactive session extensions", () => {
+  it.effect("loads one thread with its child cost and the data-root global total", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const first = thread("first")
+        const second = thread("second")
+        const repository = yield* ThreadRepository.makeMemory([first, second])
+        const turns = yield* TurnRepository.makeMemory([
+          {
+            id: Turn.TurnId.make("turn-first"),
+            threadId: first.id,
+            prompt: "first",
+            executionRoute: Turn.testExecutionRoute(),
+            status: "completed",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+          {
+            id: Turn.TurnId.make("turn-second"),
+            threadId: second.id,
+            prompt: "second",
+            executionRoute: Turn.testExecutionRoute(),
+            status: "completed",
+            createdAt: 2,
+            updatedAt: 2,
+          },
+        ])
+        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const executionEvents = new Map<string, ReadonlyArray<ExecutionBackend.Event>>([
+          [
+            "turn-first",
+            [
+              {
+                cursor: "first-usage",
+                sequence: 0,
+                type: "model.usage.reported",
+                createdAt: 1,
+                data: { cost_usd: 1 },
+              },
+            ],
+          ],
+          [
+            "turn-first-child",
+            [
+              {
+                cursor: "first-child-usage",
+                sequence: 0,
+                type: "model.usage.reported",
+                createdAt: 1,
+                data: { cost_usd: 2 },
+              },
+            ],
+          ],
+          [
+            "turn-second",
+            [
+              {
+                cursor: "second-usage",
+                sequence: 0,
+                type: "model.usage.reported",
+                createdAt: 2,
+                data: { cost_usd: 4 },
+              },
+            ],
+          ],
+        ])
+        const backend = ExecutionBackend.Service.of({
+          ...baseBackend,
+          inspect: (executionId) =>
+            Effect.succeed(
+              executionEvents.has(executionId)
+                ? {
+                    turnId: executionId,
+                    status: "completed" as const,
+                    waits: [],
+                    pendingTools: [],
+                    children:
+                      executionId === "turn-first"
+                        ? [{ executionId: "turn-first-child", status: "completed" as const }]
+                        : [],
+                  }
+                : undefined,
+            ),
+          replay: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "completed" as const,
+              events: executionEvents.get(executionId) ?? [],
+            }),
+        })
+        const context = yield* Layer.build(interactiveLayer(repository, turns, backend, registration))
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+        )
+        const session = yield* Deferred.await(registration)
+        const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+        const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
+
+        yield* session.selectThread(first.id, 1)
+        let loaded = yield* Queue.take(events)
+        while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
+
+        expect(loaded.threadCostUsd).toBe(3)
+        expect(loaded.globalCostUsd).toBe(7)
+        expect(new Set(loaded.entries.map((entry) => entry.projectionCostUsd))).toEqual(new Set([3]))
+
+        yield* Fiber.interrupt(feed)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
+  )
+
   it.effect("creates and adopts a fresh selected thread before the next submission", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -137,8 +249,9 @@ describe("interactive session extensions", () => {
         const turns = yield* TurnRepository.makeMemory()
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
         const followed = yield* Ref.make<ReadonlyArray<string>>([])
-        const childId = "parent-turn:child:oracle"
-        const nestedId = "parent-turn:child:oracle:child:worker"
+        const childCallId = "rika:execution%3Aparent-turn:agent"
+        const childId = `child:execution%3Aparent-turn:${childCallId}`
+        const nestedId = `${childId}:child:worker`
         const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
           {
             cursor: "child-tool",
@@ -148,13 +261,34 @@ describe("interactive session extensions", () => {
             data: { tool_call_id: "read", tool_name: "read_file", input: { path: "src/a.ts" } },
           },
           {
-            cursor: "nested-spawn",
+            cursor: "child-delegate",
             sequence: 1,
+            type: "tool.call.requested",
+            createdAt: 4,
+            data: { tool_call_id: "delegate", tool_name: "task", input: { prompt: "run checks" } },
+          },
+          {
+            cursor: "nested-spawn",
+            sequence: 2,
             type: "child_run.spawned",
             createdAt: 4,
             data: { tool_call_id: "delegate", child_execution_id: `execution:${nestedId}` },
           },
-          { cursor: "child-done", sequence: 2, type: "execution.completed", createdAt: 5 },
+          {
+            cursor: "child-usage",
+            sequence: 3,
+            type: "model.usage.reported",
+            createdAt: 5,
+            data: { cost_usd: 2 },
+          },
+          {
+            cursor: "child-response",
+            sequence: 4,
+            type: "model.output.completed",
+            createdAt: 5,
+            text: "## Child complete\n\n**Projection preserved.**",
+          },
+          { cursor: "child-done", sequence: 5, type: "execution.completed", createdAt: 5 },
         ]
         const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
           {
@@ -164,7 +298,21 @@ describe("interactive session extensions", () => {
             createdAt: 6,
             data: { tool_call_id: "shell", tool_name: "shell", input: { command: "bun test" } },
           },
-          { cursor: "nested-done", sequence: 1, type: "execution.completed", createdAt: 7 },
+          {
+            cursor: "nested-response",
+            sequence: 1,
+            type: "model.output.completed",
+            createdAt: 7,
+            text: "Nested checks passed.",
+          },
+          {
+            cursor: "nested-usage",
+            sequence: 2,
+            type: "model.usage.reported",
+            createdAt: 7,
+            data: { cost_usd: 4 },
+          },
+          { cursor: "nested-done", sequence: 3, type: "execution.completed", createdAt: 7 },
         ]
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
@@ -175,16 +323,23 @@ describe("interactive session extensions", () => {
                 sequence: 0,
                 type: "tool.call.requested",
                 createdAt: 1,
-                data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "inspect" } },
+                data: { tool_call_id: childCallId, tool_name: "oracle", input: { prompt: "inspect" } },
               },
               {
                 cursor: "child-spawn",
                 sequence: 1,
                 type: "child_run.spawned",
                 createdAt: 2,
-                data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
+                data: { child_execution_id: childId },
               },
-              { cursor: "parent-done", sequence: 2, type: "execution.completed", createdAt: 8 },
+              {
+                cursor: "parent-usage",
+                sequence: 2,
+                type: "model.usage.reported",
+                createdAt: 8,
+                data: { cost_usd: 1 },
+              },
+              { cursor: "parent-done", sequence: 3, type: "execution.completed", createdAt: 8 },
             ]
             return Effect.sync(() => {
               for (const event of parentEvents) input.onEvent?.(event)
@@ -192,7 +347,7 @@ describe("interactive session extensions", () => {
             })
           },
           follow: (executionId, _afterCursor, onEvent) => {
-            if (!executionId.includes(":child:"))
+            if (executionId === "parent-turn")
               return Effect.succeed({ turnId: executionId, status: "running" as const, events: [] })
             const events = executionId === childId ? childEvents : nestedEvents
             return Ref.update(followed, (values) => [...values, executionId]).pipe(
@@ -200,6 +355,25 @@ describe("interactive session extensions", () => {
               Effect.as({ turnId: executionId, status: "completed" as const, events }),
             )
           },
+          replay: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "completed" as const,
+              events: executionId === childId ? childEvents : executionId === nestedId ? nestedEvents : [],
+            }),
+          inspect: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "completed" as const,
+              waits: [],
+              pendingTools: [],
+              children:
+                executionId === "parent-turn"
+                  ? [{ executionId: childId, status: "completed" as const }]
+                  : executionId === childId
+                    ? [{ executionId: nestedId, status: "completed" as const }]
+                    : [],
+            }),
         })
         const layer = interactiveLayer(
           repository,
@@ -233,13 +407,61 @@ describe("interactive session extensions", () => {
         expect(patches.map((event) => [event.turnId, event.event.cursor])).toEqual([
           ["parent-turn", "parent-tool"],
           ["parent-turn", "child-spawn"],
+          ["parent-turn", "parent-usage"],
           ["parent-turn", "parent-done"],
           [childId, "child-tool"],
+          [childId, "child-delegate"],
           [childId, "nested-spawn"],
+          [childId, "child-usage"],
+          [childId, "child-response"],
           [childId, "child-done"],
           [nestedId, "nested-tool"],
+          [nestedId, "nested-response"],
+          [nestedId, "nested-usage"],
           [nestedId, "nested-done"],
         ])
+        expect(patches.find((event) => event.event.cursor === "parent-usage")).toMatchObject({
+          rootTurnId: "parent-turn",
+          rootTurnCostUsd: 1,
+          threadCostUsd: 1,
+          globalCostUsd: 1,
+        })
+        expect(patches.find((event) => event.event.cursor === "child-usage")).toMatchObject({
+          rootTurnId: "parent-turn",
+          rootTurnCostUsd: 3,
+          threadCostUsd: 3,
+          globalCostUsd: 3,
+        })
+        expect(patches.find((event) => event.event.cursor === "nested-usage")).toMatchObject({
+          rootTurnId: "parent-turn",
+          rootTurnCostUsd: 7,
+          threadCostUsd: 7,
+          globalCostUsd: 7,
+        })
+        events.length = 0
+        yield* session.selectThread(Thread.ThreadId.make("thread"), 1)
+        while (!events.some((event) => event._tag === "SelectionLoaded")) yield* Effect.yieldNow
+        const loaded = events.find((event) => event._tag === "SelectionLoaded")
+        const loadedEntries = loaded?._tag === "SelectionLoaded" ? loaded.entries : []
+        expect(
+          loadedEntries.some(
+            (entry) => entry.unit.turnId === childId && entry.unit.parentId === `parent-turn:${childCallId}`,
+          ),
+        ).toBe(true)
+        expect(
+          loadedEntries.some(
+            (entry) => entry.unit.turnId === nestedId && entry.unit.parentId === `${childId}:delegate`,
+          ),
+        ).toBe(true)
+        expect(
+          loadedEntries.some(
+            (entry) =>
+              entry.unit.parentId === `parent-turn:${childCallId}` &&
+              entry.unit.content._tag === "Entry" &&
+              entry.unit.content.role === "assistant" &&
+              entry.unit.content.text === "## Child complete\n\n**Projection preserved.**",
+          ),
+        ).toBe(true)
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)
@@ -257,6 +479,7 @@ describe("interactive session extensions", () => {
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
         const followed = yield* Queue.unbounded<string>()
         const stopped = yield* Queue.unbounded<string>()
+        const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
         const turnSequence = yield* Ref.make(0)
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
@@ -284,8 +507,20 @@ describe("interactive session extensions", () => {
                   Effect.ensuring(Queue.offer(stopped, executionId)),
                 )
               : Effect.succeed({ turnId: executionId, status: "running" as const, events: [] }),
-          inspect: () => Effect.void.pipe(Effect.as(undefined)),
-          cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled" as const, events: [] }),
+          inspect: (turnId) =>
+            Effect.succeed({
+              turnId,
+              status: "running" as const,
+              waits: [],
+              pendingTools: [],
+              children: turnId.includes(":child:")
+                ? []
+                : [{ executionId: `${turnId}:child:worker`, status: "running" as const }],
+            }),
+          cancel: (turnId) =>
+            Ref.update(cancelled, (values) => [...values, turnId]).pipe(
+              Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+            ),
         })
         const layer = interactiveLayer(
           repository,
@@ -310,6 +545,7 @@ describe("interactive session extensions", () => {
         expect(yield* Queue.take(followed)).toBe("turn-1:child:worker")
         yield* session.cancel
         expect(yield* Queue.take(stopped)).toBe("turn-1:child:worker")
+        expect(yield* Ref.get(cancelled)).toEqual(["turn-1:child:worker", "turn-1"])
 
         yield* session.submit("selected away")
         expect(yield* Queue.take(followed)).toBe("turn-2:child:worker")

@@ -1,6 +1,0 @@
-[
-  { "turns": 10, "requests": 11, "lastPromptBytes": 5239, "retainedPromptBytes": 29854 },
-  { "turns": 20, "requests": 21, "lastPromptBytes": 10329, "retainedPromptBytes": 110239 },
-  { "turns": 40, "requests": 41, "lastPromptBytes": 20509, "retainedPromptBytes": 423709 },
-  { "turns": 80, "requests": 81, "lastPromptBytes": 40869, "retainedPromptBytes": 1661449 }
-]

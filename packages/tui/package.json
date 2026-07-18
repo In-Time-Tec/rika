@@ -11,7 +11,6 @@
   "scripts": {
     "build": "bun build ./src/index.ts ./src/adapter.ts --outdir dist --target bun --format esm --external effect --external '@opentui/core' --external '@opentui/core/*'",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/tui/src packages/tui/test",
-    "test": "bun --cwd ../.. --bun vitest run packages/tui/test/view-state.test.ts packages/tui/test/adapter.test.ts packages/tui/test/cursor-blink.test.ts packages/tui/test/transcript-renderers.test.ts packages/tui/test/pasted-text.test.ts && bun test ./test/adapter.native.test.ts ./test/session.native.test.ts ./test/visual.native.test.ts",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {

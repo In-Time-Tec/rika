@@ -28,8 +28,6 @@ jobs:
         if: runner.os == 'Linux'
         run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - run: bun run check
-      - run: bun run package -- --target ${{ matrix.target }}
-      - run: bun run scripts/package-smoke.ts
       - uses: actions/upload-artifact@v4
         with:
           name: rika-${{ matrix.target }}

@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test"
+import { afterAll, beforeAll, describe, expect, test } from "vitest"
 import { Effect, FileSystem, Path } from "effect"
 import { run, runTest, sandbox, type Sandbox } from "./process"
 

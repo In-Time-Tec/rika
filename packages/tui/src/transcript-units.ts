@@ -11,6 +11,7 @@ export type ToolTranscriptUnit = {
   readonly blocks: ReadonlyArray<number>
   readonly diffs: ReadonlyArray<number>
   readonly children?: ReadonlyArray<ToolTranscriptUnit>
+  readonly response?: number
 }
 
 export type TranscriptUnit =
@@ -136,16 +137,25 @@ export const orderedTranscriptItems = (model: Model): ReadonlyArray<TranscriptIt
 
 export const transcriptUnits = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const units: Array<TranscriptUnit> = []
-  const childItems = new Map<string, Array<Extract<TranscriptItem, { readonly _tag: "Block" }>>>()
+  const childItems = new Map<string, Array<TranscriptItem>>()
   for (const item of orderedTranscriptItems(model)) {
-    if (item._tag !== "Block" || item.parentId === undefined) continue
+    if (item.parentId === undefined) continue
     childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
   }
+  const childResponse = (parentId: string): number | undefined =>
+    childItems
+      .get(parentId)
+      ?.findLast(
+        (item): item is Extract<TranscriptItem, { readonly _tag: "Entry" }> =>
+          item._tag === "Entry" && model.entries[item.index]?.role === "assistant",
+      )?.index
   const nestedTools = (parentId: string): ReadonlyArray<ToolTranscriptUnit> =>
     (childItems.get(parentId) ?? []).flatMap((item) => {
+      if (item._tag !== "Block") return []
       const block = model.blocks[item.index] as TranscriptBlock
       if (block._tag !== "ToolCall") return []
       const children = nestedTools(block.id)
+      const response = childResponse(block.id)
       return [
         {
           kind: "tool" as const,
@@ -153,6 +163,7 @@ export const transcriptUnits = (model: Model): ReadonlyArray<TranscriptUnit> => 
           blocks: [item.index],
           diffs: [],
           ...(children.length === 0 ? {} : { children }),
+          ...(response === undefined ? {} : { response }),
         },
       ]
     })
@@ -181,7 +192,7 @@ export const transcriptUnits = (model: Model): ReadonlyArray<TranscriptUnit> => 
     toolRun = []
   }
   for (const item of orderedTranscriptItems(model)) {
-    if (item._tag === "Block" && item.parentId !== undefined) continue
+    if (item.parentId !== undefined) continue
     if (item._tag === "Entry") {
       flush()
       units.push({ kind: "entry", entry: item.index })
@@ -190,14 +201,16 @@ export const transcriptUnits = (model: Model): ReadonlyArray<TranscriptUnit> => 
     const block = model.blocks[item.index] as TranscriptBlock
     if (block._tag === "ToolCall") {
       const children = nestedTools(block.id)
-      if (children.length > 0) {
+      const response = childResponse(block.id)
+      if (children.length > 0 || response !== undefined) {
         flush()
         units.push({
           kind: "tool",
           group: groupOf(toolKind(block.name, block.presentation.family)),
           blocks: [item.index],
           diffs: [],
-          children,
+          ...(children.length === 0 ? {} : { children }),
+          ...(response === undefined ? {} : { response }),
         })
         continue
       }

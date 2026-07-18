@@ -1,2 +1,0 @@
-  PID  PPID  %CPU    RSS      TIME ELAPSED COMMAND
-94895 94893   0.0  40576   0:00.20   00:10 bun -e import * as BunRuntime from "@effect/platform-bun/BunRuntime"; import { Effect } from "effect"; BunRuntime.runMain(Effect.never)

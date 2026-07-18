@@ -14,7 +14,6 @@
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/app/src packages/app/test",
-    "test": "bun --cwd ../.. --bun vitest run packages/app/test --passWithNoTests",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {

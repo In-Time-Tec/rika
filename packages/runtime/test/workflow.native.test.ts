@@ -1,5 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { FixtureProcessError, spawnFixtureProcess } from "./process-protocol"
 

@@ -434,6 +434,21 @@ export const renderMarkdown: {
       .join("\n"),
 )
 
+export const renderMarkdownLines: {
+  (source: string, width?: number): ReadonlyArray<ReadonlyArray<TextChunk>>
+  (width?: number): (source: string) => ReadonlyArray<ReadonlyArray<TextChunk>>
+} = Function.dual(
+  (args) => typeof args[0] === "string",
+  (source: string, width = 80): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+    const bounded = Math.max(1, Math.floor(width))
+    return renderLines(source, false, bounded).flatMap((line) => {
+      if (line.length === 0) return [[]]
+      const lineWidth = line.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
+      return lineWidth <= bounded ? [line] : wrapChunkLine(line, bounded)
+    })
+  },
+)
+
 export const renderMarkdownStyled: {
   (source: string, width?: number): StyledText
   (width?: number): (source: string) => StyledText

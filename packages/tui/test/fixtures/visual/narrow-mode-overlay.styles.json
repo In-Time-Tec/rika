@@ -617,7 +617,7 @@
           "width": 6
         },
         {
-          "text": "  GPT-5.6 Luna medium",
+          "text": "  GPT-5.6 Terra medium",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -635,10 +635,10 @@
             }
           },
           "attributes": 0,
-          "width": 21
+          "width": 22
         },
         {
-          "text": "  ",
+          "text": " ",
           "fg": {
             "buffer": {
               "0": 255,
@@ -656,7 +656,7 @@
             }
           },
           "attributes": 0,
-          "width": 2
+          "width": 1
         },
         {
           "text": "│",

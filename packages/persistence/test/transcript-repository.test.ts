@@ -136,6 +136,81 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
     }),
   )
 
+  test.effect("round-trips a completed subagent tree through the durable page shape", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(32), threadId: Thread.ThreadId.make("thread-subagent") }
+      const childId = "turn-32:child:agent"
+      const parent = Transcript.project(target.id, target.prompt, [
+        {
+          cursor: "agent",
+          sequence: 0,
+          type: "tool.call.requested",
+          createdAt: 0,
+          data: {
+            tool_call_id: "agent",
+            tool_name: "transfer_to_oracle",
+            input: { input: [{ type: "text", text: "Review the projection" }] },
+          },
+        },
+        {
+          cursor: "spawned",
+          sequence: 1,
+          type: "child_run.spawned",
+          createdAt: 1,
+          data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
+        },
+        {
+          cursor: "result",
+          sequence: 2,
+          type: "tool.result.received",
+          createdAt: 2,
+          data: {
+            tool_call_id: "agent",
+            output:
+              '{"status":"completed","output":[{"type":"text","text":"## Review complete\\n\\n**No defects found.**"}]}',
+          },
+        },
+        { cursor: "done", sequence: 3, type: "execution.completed", createdAt: 3 },
+      ])
+      const child = Transcript.project(childId, "", [
+        {
+          cursor: "read",
+          sequence: 0,
+          type: "tool.call.requested",
+          createdAt: 0,
+          data: { tool_call_id: "read", tool_name: "read_file", input: { path: "src/projection.ts" } },
+        },
+        {
+          cursor: "answer",
+          sequence: 1,
+          type: "model.output.completed",
+          createdAt: 1,
+          text: "## Review complete\n\n**No defects found.**",
+        },
+        { cursor: "child-done", sequence: 2, type: "execution.completed", createdAt: 2 },
+      ])
+      const live = Transcript.withNestedProjections(parent, [{ parentId: `${target.id}:agent`, projection: child }])
+
+      yield* repository.replace(target, live)
+      const page = yield* repository.page(target.threadId, { limit: 200 })
+
+      expect(page.entries.map((entry) => entry.unit)).toEqual(live.units)
+      expect(page.entries.filter((entry) => entry.unit.parentId === `${target.id}:agent`)).toHaveLength(
+        child.units.length,
+      )
+      expect(
+        page.entries.some(
+          (entry) =>
+            entry.unit.parentId === `${target.id}:agent` &&
+            entry.unit.content._tag === "Entry" &&
+            entry.unit.content.role === "assistant" &&
+            entry.unit.content.text === "## Review complete\n\n**No defects found.**",
+        ),
+      ).toBe(true)
+    }),
+  )
+
   test.effect("returns one page-independent thread cost and restores projection fold state", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service

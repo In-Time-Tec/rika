@@ -1,4 +1,5 @@
 import * as ExecutionBackend from "@rika/runtime/contract"
+import type { AgentTools } from "@rika/tools"
 import { Context, Effect, Layer, Schema } from "effect"
 
 export const Profile = Schema.Literals(["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"])
@@ -22,6 +23,7 @@ export interface TaskInput {
   readonly id: string
   readonly prompt: string
   readonly profile?: Profile
+  readonly model?: AgentTools.Model
 }
 
 export interface ParallelInput {
@@ -96,6 +98,7 @@ export const layer = Layer.effect(
               childId: task.id,
               profile: task.profile ?? selectProfile(task.prompt),
               prompt: task.prompt,
+              ...(task.model === undefined ? {} : { model: task.model }),
             })),
             maxConcurrency: input.maxConcurrency,
             join: input.join ?? "all",

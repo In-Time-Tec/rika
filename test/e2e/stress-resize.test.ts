@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Effect } from "effect"
 import { assertNoResidueFiles, findResidueFiles } from "./lease-files"
 import { startPackagedPty, type PackagedPtyAction } from "./packaged-pty"

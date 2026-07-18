@@ -286,7 +286,10 @@ export const resolvePresentation = (rawName: string): Presentation => {
     const profile = name.slice("transfer_to_".length)
     if (profile === "oracle") return agentPresentation("oracle", "Oracle exploring", "Oracle has spoken")
     if (profile === "librarian") return agentPresentation("librarian", "Librarian researching", "Librarian researched")
-    return agentPresentation(profile, `Subagent (${profile}) working`, `Subagent (${profile}) finished`)
+    if (profile.length === 0 || profile === "task" || profile === "child" || profile === "subagent")
+      return agentPresentation("task", "Subagent working", "Subagent finished")
+    const display = profile.charAt(0).toUpperCase() + profile.slice(1)
+    return agentPresentation(profile, `${display} working`, `${display} finished`)
   }
   if (name === "spawn_child_run") return agentPresentation("task", "Subagent working", "Subagent finished")
   if (name === "skill")

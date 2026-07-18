@@ -175,6 +175,32 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
       24,
     ],
     [
+      "edit-streaming",
+      block({
+        _tag: "ToolCall",
+        id: "streaming-patch",
+        name: "apply_patch",
+        input: '{"patchText":"*** Begin Patch\\n*** Update File: src/main.ts\\n@@\\n-old\\n+new"',
+        status: "running",
+        presentation: { family: "edit", action: "patch", activeLabel: "Editing", completeLabel: "Edited" },
+        detail: "src/main.ts",
+        files: [
+          {
+            key: "streaming-patch:0",
+            path: "src/main.ts",
+            kind: "update",
+            patch: "--- a/src/main.ts\n+++ b/src/main.ts\n@@\n-old\n+new",
+            additions: 1,
+            deletions: 1,
+            preview: true,
+            status: "running",
+          },
+        ],
+      }),
+      80,
+      24,
+    ],
+    [
       "tool-group-states",
       {
         ...base(),
@@ -240,7 +266,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
     [
       "queued-turn",
       {
-        ...replaceQueue({ ...base(), busy: true, activity: { _tag: "Tool", label: "Running Tools" } }, [
+        ...replaceQueue({ ...base(), busy: true, activity: { _tag: "RunningTools" } }, [
           { id: "queued-turn", prompt: "Run verification next" },
         ]),
         queueSelection: "queued-turn",
@@ -256,6 +282,52 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
           { _tag: "ChildAgent", name: "review", summary: "Checking tests", status: "running" },
           { _tag: "Workflow", name: "release", step: "verify", status: "waiting" },
         ],
+      },
+      80,
+      24,
+    ],
+    [
+      "cancelled-subagent",
+      {
+        ...base(),
+        blocks: [
+          {
+            _tag: "ToolCall",
+            id: "parent",
+            name: "task",
+            input: "{}",
+            status: "cancelled",
+            presentation: {
+              family: "agent",
+              action: "task",
+              activeLabel: "Subagent working",
+              completeLabel: "Subagent finished",
+            },
+            detail: "Wait then run the checks",
+            childId: "child",
+            files: [],
+          },
+          {
+            _tag: "ToolCall",
+            id: "child-shell",
+            name: "shell",
+            input: JSON.stringify({ command: "sleep 60" }),
+            status: "cancelled",
+            presentation: {
+              family: "shell",
+              action: "command",
+              activeLabel: "Running",
+              completeLabel: "Ran",
+            },
+            detail: "sleep 60",
+            files: [],
+          },
+        ],
+        items: [
+          { _tag: "Block", index: 0, id: "tool:parent", turnId: "turn" },
+          { _tag: "Block", index: 1, id: "tool:child-shell", turnId: "child", parentId: "parent" },
+        ],
+        expandedRowKeys: ["tool:parent"],
       },
       80,
       24,

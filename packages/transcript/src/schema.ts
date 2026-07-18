@@ -150,6 +150,7 @@ export type Content = typeof Content.Type
 export const Unit = Schema.Struct({
   key: Schema.String,
   turnId: Schema.String,
+  parentId: Schema.optionalKey(Schema.String),
   order: Schema.Struct({ sequence: Schema.Finite, part: Schema.Finite }),
   revision: Schema.Finite,
   content: Content,

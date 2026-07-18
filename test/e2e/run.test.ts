@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Effect, Schema } from "effect"
 import { run, runTest, sandbox } from "./process"
 

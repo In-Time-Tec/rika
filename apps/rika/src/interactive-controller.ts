@@ -122,12 +122,16 @@ const cleared = (model: ViewState.Model): ViewState.Model => ({
   eventCursor: undefined,
 })
 
-const project = (model: ViewState.Model, entries: ReadonlyArray<TranscriptRepository.Entry>, threadCostUsd: number) => {
+const project = (
+  model: ViewState.Model,
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  displayCostUsd: number,
+) => {
   const next = ExecutionEvents.projectUnits(
     model,
     entries.map((entry) => entry.unit),
   )
-  return { ...next, costUsd: threadCostUsd }
+  return { ...next, costUsd: displayCostUsd }
 }
 
 const projections = (
@@ -159,11 +163,44 @@ const executionKey = (value: string): string => value.replace(/^execution:/, "")
 const childParent = (
   model: ViewState.Model,
   turnId: string,
-): Extract<ViewState.TranscriptBlock, { readonly _tag: "ToolCall" }> | undefined =>
-  (model.blocks as ReadonlyArray<ViewState.TranscriptBlock>).find(
-    (block): block is Extract<ViewState.TranscriptBlock, { readonly _tag: "ToolCall" }> =>
-      block._tag === "ToolCall" && block.childId !== undefined && executionKey(block.childId) === executionKey(turnId),
-  )
+): Extract<ViewState.TranscriptBlock, { readonly _tag: "ToolCall" }> | undefined => {
+  const childKey = executionKey(turnId)
+  const blocks = model.blocks as ReadonlyArray<ViewState.TranscriptBlock>
+  for (const item of model.items as ReadonlyArray<ViewState.TranscriptItem>) {
+    if (item._tag !== "Block") continue
+    const block = blocks[item.index]
+    if ((block as { readonly _tag?: unknown } | undefined)?._tag !== "ToolCall") continue
+    const tool = block as Extract<ViewState.TranscriptBlock, { readonly _tag: "ToolCall" }>
+    if (tool.childId !== undefined && executionKey(tool.childId) === childKey) return tool
+    if (tool.presentation.family !== "agent") continue
+    const prefix = `${item.turnId}:`
+    const toolCallId = tool.id.startsWith(prefix) ? tool.id.slice(prefix.length) : tool.id
+    if (childKey.endsWith(`:${toolCallId}`)) return tool
+  }
+  return undefined
+}
+
+const projectChildProjections = (
+  model: ViewState.Model,
+  replayTurns: ReadonlyMap<string, Turn.Turn>,
+  availableProjections: ReadonlyMap<string, Transcript.Projection>,
+): ViewState.Model => {
+  let next = model
+  const attached = new Set<string>()
+  let advanced = true
+  while (advanced) {
+    advanced = false
+    for (const [turnId, projection] of availableProjections) {
+      if (replayTurns.has(turnId) || attached.has(turnId)) continue
+      const parent = childParent(next, turnId)
+      if (parent === undefined) continue
+      next = ExecutionEvents.projectChildUnits(next, parent.id, projection.units)
+      attached.add(turnId)
+      advanced = true
+    }
+  }
+  return next
+}
 
 const sourceText = (event: Transcript.SourceEvent): string => {
   if (typeof event.text === "string") return event.text
@@ -176,19 +213,13 @@ const sourceBlockId = (event: Transcript.SourceEvent, fallback: string): string 
   return typeof id === "string" ? id : fallback
 }
 
-const currentTool = (
-  projection: Transcript.Projection,
-  event: Transcript.SourceEvent,
-): Extract<ViewState.TranscriptBlock, { readonly _tag: "ToolCall" }> | undefined => {
-  const id = sourceBlockId(event, "")
-  const unit = projection.units.findLast(
-    (candidate) =>
-      candidate.content._tag === "Block" &&
-      candidate.content.block._tag === "ToolCall" &&
-      (id.length === 0 || candidate.content.block.id.endsWith(`:${id}`)),
+const hasRunningTools = (projection: Transcript.Projection) =>
+  projection.units.some(
+    (unit) =>
+      unit.content._tag === "Block" &&
+      unit.content.block._tag === "ToolCall" &&
+      unit.content.block.status === "running",
   )
-  return unit?.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? unit.content.block : undefined
-}
 
 const activityAfter = (
   activity: ViewState.Activity | undefined,
@@ -201,27 +232,21 @@ const activityAfter = (
     return ViewState.streamActivity(activity, "Streaming", sourceText(event), `answer:${projection.modelPhase}`)
   if (event.type === "model.toolcall.delta")
     return ViewState.streamActivity(activity, "Streaming", sourceText(event), sourceBlockId(event, "tool"))
-  if (event.type === "tool.call.requested") {
-    const tool = currentTool(projection, event)
-    if (tool === undefined) return { _tag: "Tool", label: "Running tool" }
-    return {
-      _tag: "Tool",
-      label:
-        tool.presentation.family === "shell"
-          ? `$ ${tool.detail || tool.input}`
-          : `${tool.presentation.activeLabel}${tool.detail.length === 0 ? "" : ` ${tool.detail}`}`,
-    }
-  }
-  if (event.type === "permission.ask.requested" || event.type === "tool.approval.requested") return { _tag: "Approval" }
+  if (event.type === "tool.call.requested" || event.type === "tool.call.executing" || event.type === "tool.started")
+    return { _tag: "RunningTools" }
+  if (event.type === "tool.result.received")
+    return hasRunningTools(projection) ? { _tag: "RunningTools" } : { _tag: "Waiting" }
   if (
+    event.type === "execution.accepted" ||
+    event.type === "execution.started" ||
     event.type === "model.input.prepared" ||
-    event.type === "tool.result.received" ||
+    event.type === "model.output.completed" ||
+    event.type === "permission.ask.requested" ||
     event.type === "permission.ask.resolved" ||
+    event.type === "tool.approval.requested" ||
     event.type === "tool.approval.resolved"
   )
-    return undefined
-  if (event.type === "model.output.completed")
-    return activity?._tag === "Thinking" || activity?._tag === "Streaming" ? { ...activity, bytes: 0 } : activity
+    return { _tag: "Waiting" }
   if (event.type === "execution.completed" || event.type === "execution.failed" || event.type === "execution.cancelled")
     return undefined
   return activity
@@ -230,7 +255,7 @@ const activityAfter = (
 const prependProjection = (
   model: ViewState.Model,
   entries: ReadonlyArray<TranscriptRepository.Entry>,
-  threadCostUsd: number,
+  displayCostUsd: number,
 ): ViewState.Model => {
   const older = project(
     cleared({
@@ -238,10 +263,10 @@ const prependProjection = (
       activeTurnId: undefined,
       busy: false,
       activity: undefined,
-      costUsd: threadCostUsd,
+      costUsd: displayCostUsd,
     }),
     entries,
-    threadCostUsd,
+    displayCostUsd,
   )
   const mergedEntries = [...older.entries]
   const mergedBlocks = [...older.blocks] as Array<ViewState.TranscriptBlock>
@@ -290,7 +315,7 @@ const prependProjection = (
     entries: mergedEntries,
     blocks: mergedBlocks,
     items: mergedItems,
-    costUsd: threadCostUsd,
+    costUsd: displayCostUsd,
   }
 }
 
@@ -314,7 +339,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ...state.model,
       activeTurnId: activeTurn?.id,
       busy: activeTurn !== undefined,
-      activity: undefined,
+      activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },
       currentThreadId: String(event.thread.id),
       currentThreadTitle: event.thread.title,
       editingTurnId: undefined,
@@ -339,7 +364,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         selectionEpoch: event.selectionEpoch,
-        model: project(model, event.entries, event.threadCostUsd),
+        model: project(model, event.entries, event.globalCostUsd ?? event.threadCostUsd),
         replayTurns: new Map([
           ...event.entries.map((entry) => [entry.turn.id, entry.turn] as const),
           ...(event.activeTurn === undefined ? [] : [[event.activeTurn.id, event.activeTurn] as const]),
@@ -364,7 +389,11 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         ...state,
-        model: prependProjection(state.model, prepended, event.threadCostUsd),
+        model: prependProjection(
+          state.model,
+          prepended,
+          event.globalCostUsd ?? state.model.costUsd ?? event.threadCostUsd,
+        ),
         replayTurns: new Map([...prepended.map((entry) => [entry.turn.id, entry.turn] as const), ...state.replayTurns]),
         entries,
         revisions,
@@ -377,31 +406,59 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "TranscriptPatched") {
     if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
     if (state.model.currentThreadId !== undefined && state.model.currentThreadId !== event.threadId)
-      return { state, preserveAnchor: false }
+      return {
+        state:
+          event.globalCostUsd === undefined
+            ? state
+            : { ...state, model: { ...state.model, costUsd: event.globalCostUsd } },
+        preserveAnchor: false,
+      }
     if (event.revision <= (state.revisions.get(event.turnId) ?? -1)) return { state, preserveAnchor: false }
     const turn = state.replayTurns.get(event.turnId)
     if (turn === undefined) {
-      const parent = childParent(state.model, event.turnId)
-      if (parent === undefined) return { state, preserveAnchor: false }
       const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, "")
       const next = Transcript.applyEvent(previous, event.event)
+      const childProjections = new Map([...state.projections, [event.turnId, next]] as const)
+      const rootTurnId = event.rootTurnId
+      const rootProjection = rootTurnId === undefined ? undefined : childProjections.get(rootTurnId)
+      if (rootTurnId !== undefined && rootProjection !== undefined && event.rootTurnCostUsd !== undefined)
+        childProjections.set(rootTurnId, { ...rootProjection, costUsd: event.rootTurnCostUsd })
+      const previousCost = previous.costUsd ?? 0
+      const nextCost = next.costUsd ?? 0
+      const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd + nextCost - previousCost
+      const globalCostUsd =
+        event.globalCostUsd ?? (state.model.costUsd ?? state.threadCostUsd) + nextCost - previousCost
       return {
         state: {
           ...state,
-          model: ExecutionEvents.projectChildUnits(state.model, parent.id, next.units),
+          model: {
+            ...projectChildProjections(state.model, state.replayTurns, childProjections),
+            costUsd: globalCostUsd,
+          },
           revisions: new Map([...state.revisions, [event.turnId, event.revision]]),
-          projections: new Map([...state.projections, [event.turnId, next]]),
+          projections: childProjections,
+          threadCostUsd,
         },
         preserveAnchor: false,
       }
     }
     const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, turn.prompt)
-    const next = Transcript.applyEvent(previous, event.event)
+    const projected = Transcript.applyEvent(previous, event.event)
+    const next =
+      event.rootTurnId === event.turnId && event.rootTurnCostUsd !== undefined
+        ? { ...projected, costUsd: event.rootTurnCostUsd }
+        : projected
+    const nextProjections = new Map([...state.projections, [event.turnId, next]] as const)
     const previousCost = previous.costUsd ?? 0
     const nextCost = next.costUsd ?? 0
-    const threadCostUsd = state.threadCostUsd + nextCost - previousCost
+    const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd + nextCost - previousCost
+    const globalCostUsd = event.globalCostUsd ?? (state.model.costUsd ?? state.threadCostUsd) + nextCost - previousCost
     const projectedModel = {
-      ...ExecutionEvents.projectUnits(state.model, next.units),
+      ...projectChildProjections(
+        ExecutionEvents.projectUnits(state.model, next.units),
+        state.replayTurns,
+        nextProjections,
+      ),
       activity: activityAfter(state.model.activity, event.event, next),
     }
     const terminal =
@@ -438,14 +495,14 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         ...state,
-        model: { ...model, costUsd: threadCostUsd },
+        model: { ...model, costUsd: globalCostUsd },
         replayTurns:
           terminalStatus === undefined
             ? state.replayTurns
             : new Map([...state.replayTurns, [event.turnId, { ...turn, status: terminalStatus }]]),
         entries,
         revisions: new Map([...state.revisions, [event.turnId, event.revision]]),
-        projections: new Map([...state.projections, [event.turnId, next]]),
+        projections: nextProjections,
         threadCostUsd,
       },
       preserveAnchor: false,

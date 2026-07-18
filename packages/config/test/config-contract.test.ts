@@ -92,6 +92,34 @@ describe("ConfigContract", () => {
       ).toThrowError(/uppercase environment variable/),
   )
 
+  it("resolves every default route to a gpt-5.6 model with streaming reasoning summaries", () => {
+    const modes = ["low", "medium", "high", "ultra"] as const
+    const roles = ["main", "oracle"] as const
+    const routes = [
+      ...modes.flatMap((mode) =>
+        roles.map((role) => ConfigContract.resolveModelRoute(ConfigContract.defaults, mode, role)),
+      ),
+      ...(
+        Object.keys(ConfigContract.defaults.agents) as ReadonlyArray<keyof typeof ConfigContract.defaults.agents>
+      ).map((agent) => ConfigContract.resolveAgentRoute(ConfigContract.defaults, agent)),
+      ConfigContract.resolveThreadTitleRoute(ConfigContract.defaults),
+      ConfigContract.resolveCompactionSummaryRoute(ConfigContract.defaults),
+    ]
+    for (const route of routes) {
+      expect(route.model).toMatch(/^gpt-5\.6-/)
+      expect(route.providerId).toBe("openai")
+      expect(route.options).toMatchObject({ reasoning: { summary: "auto" } })
+    }
+    for (const [alias, entry] of Object.entries(ConfigContract.defaults.models)) {
+      if (entry.provider !== "openai") continue
+      for (const [effort, variant] of Object.entries(entry.variants)) {
+        expect(variant.normal.options, `${alias}/${effort}`).toMatchObject({
+          reasoning: { effort, summary: "auto" },
+        })
+      }
+    }
+  })
+
   it("accepts supported logging levels and rejects custom log paths", () => {
     expect(ConfigContract.decodeSettingsInput("settings.json", { logging: { level: "debug" } })).toEqual({
       logging: { level: "debug" },

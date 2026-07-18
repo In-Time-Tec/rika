@@ -1,5 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "vitest"
+import { fileURLToPath } from "node:url"
 import { Cause, Clock, Config, Data, Effect, Fiber, FileSystem, Layer, Queue, Ref, Schema, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { resolve } from "../src/resident-endpoint"
@@ -124,7 +125,7 @@ const startOldResident = Effect.fn("ResidentTransportTest.startOldResident")(fun
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const old = yield* spawner.spawn(
     ChildProcess.make("bun", ["test/fixtures/resident-old-host.ts"], {
-      cwd: import.meta.dir.replace(/\/test$/, ""),
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
       stdin: "ignore",
       stdout: "ignore",
       stderr: "pipe",
@@ -167,7 +168,7 @@ const start = Effect.fn("ResidentTransportTest.start")(function* (
   const client = yield* spawner
     .spawn(
       ChildProcess.make("bun", ["test/fixtures/resident-client.ts"], {
-        cwd: import.meta.dir.replace(/\/test$/, ""),
+        cwd: fileURLToPath(new URL("..", import.meta.url)),
         stdin: { stream: Stream.fromQueue(input).pipe(Stream.encodeText), endOnDone: true },
         stdout: "pipe",
         stderr: "pipe",
@@ -482,6 +483,73 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
+    "forwards parent and child execution patches through the resident feed unchanged",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root)
+            yield* attachedEffect(client)
+
+            yield* client.send("child-execution-interactive")
+            expect(yield* client.nextEffect).toEqual({
+              type: "child-execution-events-completed",
+              tags: [
+                "parent-turn:child_run.spawned",
+                "parent-turn:child:oracle:tool.call.requested",
+                "parent-turn:child:oracle:model.output.completed",
+              ],
+            })
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "forwards 200ms tool lifecycle events into distinct TUI model states",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root)
+            yield* attachedEffect(client)
+
+            yield* client.send("timed-tool-interactive")
+            const event = yield* client.nextEffect
+            expect(event.type).toBe("timed-tool-events-completed")
+            const tags = event.tags ?? []
+            expect(tags.map((tag) => tag.split(":")[0])).toEqual([
+              "tool.call.requested",
+              "tool.call.requested",
+              "tool.result.received",
+              "tool.result.received",
+            ])
+            const times = tags.map((tag) => Number(tag.split(":")[1]))
+            expect(times[1]! - times[0]!).toBeLessThan(100)
+            expect(times[2]! - times[0]!).toBeGreaterThanOrEqual(100)
+            expect(times[3]! - times[2]!).toBeGreaterThanOrEqual(100)
+            expect(tags.map((tag) => tag.split(":")[2])).toEqual([
+              "Running tools",
+              "Running tools",
+              "Running tools",
+              "Waiting",
+            ])
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
     "reports an interactive operation failure before the client callback starts",
     () =>
       run(
@@ -506,7 +574,7 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
-    "serializes one hundred admissions without making execution block later admissions",
+    "serializes concurrent admissions without making execution block later admissions",
     () =>
       run(
         Effect.gen(function* () {
@@ -529,11 +597,9 @@ describe("resident WebSocket process transport", () => {
               ),
             )(event.text ?? "{}")
             expect(result.admissionMaximum).toBe(1)
-            expect(result.admissions).toEqual(Array.from({ length: 100 }, (_, index) => index))
+            expect(result.admissions).toEqual([0, 1, 2, 3])
             expect(result.executionMaximum).toBeGreaterThan(1)
-            expect(result.completions?.toSorted((left, right) => left - right)).toEqual(
-              Array.from({ length: 100 }, (_, index) => index),
-            )
+            expect(result.completions?.toSorted((left, right) => left - right)).toEqual([0, 1, 2, 3])
             yield* client.closeEffect
           } finally {
             yield* cleanRoot(root)

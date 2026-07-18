@@ -11,7 +11,7 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { MediaView, ParallelSearch, ReadWebPage, Runtime as ToolRuntime } from "@rika/tools"
 import { ViewState } from "@rika/tui"
 import { Surface } from "@rika/tui/adapter"
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Clock, Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Queue, Redacted } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 import {

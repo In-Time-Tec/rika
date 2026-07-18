@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test"
+import { expect, test } from "vitest"
 import { Effect, Schema } from "effect"
 import { assertNoResidueFiles } from "./lease-files"
 import { run, runTest, sandbox } from "./process"

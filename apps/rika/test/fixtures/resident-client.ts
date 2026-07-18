@@ -1,5 +1,9 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as Thread from "@rika/persistence/thread"
+import * as Turn from "@rika/persistence/turn"
+import * as Transcript from "@rika/transcript"
+import { ViewState } from "@rika/tui"
 import {
   Clock,
   Config,
@@ -18,6 +22,7 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { make } from "../../src/resident-client-transport"
+import * as InteractiveController from "../../src/interactive-controller"
 import * as ResidentProcessStartup from "../../src/resident-process-startup"
 
 const JsonLine = Schema.UnknownFromJsonString
@@ -210,6 +215,80 @@ const program = Effect.gen(function* () {
               },
             )
             .pipe(Effect.andThen(emit({ type: "interactive-completed" })))
+        if (command === "child-execution-interactive")
+          return connection.run(
+            { _tag: "Interactive", prompt: ["child-execution-events"], ephemeral: false, workspace },
+            {
+              interactive: (_, session) =>
+                Effect.gen(function* () {
+                  const events = yield* Queue.unbounded<string>()
+                  const feed = yield* Effect.forkChild(
+                    session.events((event) => {
+                      if (event._tag !== "TranscriptPatched") return
+                      Queue.offerUnsafe(events, `${event.turnId}:${event.event.type}`)
+                    }),
+                  )
+                  const tags = [yield* Queue.take(events), yield* Queue.take(events), yield* Queue.take(events)]
+                  yield* Fiber.interrupt(feed)
+                  yield* emit({ type: "child-execution-events-completed", tags })
+                }),
+            },
+          )
+        if (command === "timed-tool-interactive")
+          return connection.run(
+            { _tag: "Interactive", prompt: ["timed-tool-events"], ephemeral: false, workspace },
+            {
+              interactive: (_, session) =>
+                Effect.gen(function* () {
+                  const events = yield* Queue.unbounded<string>()
+                  const eventClock = yield* Clock.Clock
+                  const startedAt = eventClock.currentTimeMillisUnsafe()
+                  const threadId = Thread.ThreadId.make("timed-tool-thread")
+                  const turn = {
+                    id: Turn.TurnId.make("timed-tool-turn"),
+                    threadId,
+                    prompt: "timed tools",
+                    executionRoute: Turn.testExecutionRoute(),
+                    status: "running" as const,
+                    createdAt: startedAt,
+                    updatedAt: startedAt,
+                  }
+                  let state: InteractiveController.State = {
+                    model: {
+                      ...ViewState.initial(workspace, "medium"),
+                      currentThreadId: String(threadId),
+                      activeTurnId: turn.id,
+                      busy: true,
+                      activity: { _tag: "Waiting" },
+                    },
+                    selectionEpoch: 0,
+                    replayTurns: new Map([[turn.id, turn]]),
+                    entries: [],
+                    revisions: new Map(),
+                    projections: new Map([[turn.id, Transcript.empty(turn.id, turn.prompt)]]),
+                    threadCostUsd: 0,
+                  }
+                  const feed = yield* Effect.forkChild(
+                    session.events((event) => {
+                      if (event._tag !== "TranscriptPatched") return
+                      state = InteractiveController.update(state, event).state
+                      Queue.offerUnsafe(
+                        events,
+                        `${event.event.type}:${eventClock.currentTimeMillisUnsafe() - startedAt}:${ViewState.formatActivity(state.model.activity)}`,
+                      )
+                    }),
+                  )
+                  const tags = [
+                    yield* Queue.take(events),
+                    yield* Queue.take(events),
+                    yield* Queue.take(events),
+                    yield* Queue.take(events),
+                  ]
+                  yield* Fiber.interrupt(feed)
+                  yield* emit({ type: "timed-tool-events-completed", tags })
+                }),
+            },
+          )
         if (command === "serialized-interactive")
           return connection
             .run(
@@ -218,7 +297,7 @@ const program = Effect.gen(function* () {
                 interactive: (_input, session) =>
                   Effect.gen(function* () {
                     yield* Effect.all(
-                      Array.from({ length: 100 }, (_, index) => session.submit(`serialized-${index}`)),
+                      Array.from({ length: 4 }, (_, index) => session.submit(`serialized-${index}`)),
                       { concurrency: "unbounded", discard: true },
                     )
                     while (

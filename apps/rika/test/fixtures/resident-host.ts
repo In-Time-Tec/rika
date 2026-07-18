@@ -126,9 +126,100 @@ const program = Effect.gen(function* () {
                           )
                           return yield* Effect.never
                         })
+                      if (kind === "timed-tool-events")
+                        return Effect.gen(function* () {
+                          const threadId = Thread.ThreadId.make("timed-tool-thread")
+                          const turnId = Turn.TurnId.make("timed-tool-turn")
+                          const patch = (
+                            sequence: number,
+                            type: "tool.call.requested" | "tool.result.received",
+                            callId: string,
+                          ) =>
+                            Effect.sync(() =>
+                              dispatch({
+                                _tag: "TranscriptPatched",
+                                selectionEpoch: 0,
+                                threadId,
+                                turnId,
+                                event: {
+                                  cursor: `timed-tool-${sequence}`,
+                                  sequence,
+                                  type,
+                                  createdAt: sequence * 200,
+                                  data:
+                                    type === "tool.call.requested"
+                                      ? {
+                                          tool_call_id: callId,
+                                          tool_name: "read_file",
+                                          input: { path: `${callId}.ts` },
+                                        }
+                                      : { tool_call_id: callId, output: callId },
+                                },
+                                revision: sequence,
+                              }),
+                            )
+                          yield* patch(0, "tool.call.requested", "first")
+                          yield* patch(1, "tool.call.requested", "second")
+                          yield* Effect.sleep("200 millis")
+                          yield* patch(2, "tool.result.received", "first")
+                          yield* Effect.sleep("200 millis")
+                          yield* patch(3, "tool.result.received", "second")
+                          return yield* Effect.never
+                        })
                       return Effect.sync(() => {
                         if (kind === "feed-takeover") {
                           dispatch({ _tag: "ThreadsListed", threads: [] })
+                          return true
+                        }
+                        if (kind === "child-execution-events") {
+                          const threadId = Thread.ThreadId.make("child-feed-thread")
+                          const parentTurnId = Turn.TurnId.make("parent-turn")
+                          const childTurnId = Turn.TurnId.make("parent-turn:child:oracle")
+                          dispatch({
+                            _tag: "TranscriptPatched",
+                            selectionEpoch: 0,
+                            threadId,
+                            turnId: parentTurnId,
+                            event: {
+                              cursor: "child-spawned",
+                              sequence: 1,
+                              type: "child_run.spawned",
+                              createdAt: 1,
+                              data: {
+                                tool_call_id: "oracle",
+                                child_execution_id: "execution:parent-turn:child:oracle",
+                              },
+                            },
+                            revision: 1,
+                          })
+                          dispatch({
+                            _tag: "TranscriptPatched",
+                            selectionEpoch: 0,
+                            threadId,
+                            turnId: childTurnId,
+                            event: {
+                              cursor: "child-tool",
+                              sequence: 0,
+                              type: "tool.call.requested",
+                              createdAt: 2,
+                              data: { tool_call_id: "read", tool_name: "read_file", input: { path: "src/a.ts" } },
+                            },
+                            revision: 0,
+                          })
+                          dispatch({
+                            _tag: "TranscriptPatched",
+                            selectionEpoch: 0,
+                            threadId,
+                            turnId: childTurnId,
+                            event: {
+                              cursor: "child-response",
+                              sequence: 1,
+                              type: "model.output.completed",
+                              createdAt: 3,
+                              text: "## Review complete",
+                            },
+                            revision: 1,
+                          })
                           return true
                         }
                         const count =
@@ -237,7 +328,7 @@ const program = Effect.gen(function* () {
                                   ...values,
                                   index,
                                 ])
-                                if (completions.length === 100) {
+                                if (completions.length === 4) {
                                   const admissionMaximum = yield* Ref.get(interactiveAdmissionMaximum)
                                   const admissions = yield* Ref.get(interactiveAdmissions)
                                   const executionMaximum = yield* Ref.get(interactiveMaximum)
