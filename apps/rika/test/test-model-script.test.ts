@@ -489,6 +489,22 @@ test("constructs the retained Anthropic provider registration", () =>
     ),
   ))
 
+test("fails before provider registration when a configured credential is missing", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+      const exit = yield* Effect.exit(registrationsForRoutes([route], {}))
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") {
+        const failure = exit.cause.reasons.find(Cause.isFailReason)
+        expect(failure?._tag === "Fail" ? failure.error : undefined).toMatchObject({
+          _tag: "ModelConfigurationError",
+          message: "Missing environment variable OPENAI_API_KEY for provider openai",
+        })
+      }
+    }),
+  ))
+
 test("keeps registrations distinct by the exact Baton registry tuple", () => {
   const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "high", "oracle")
   const second = { ...route, fast: true }

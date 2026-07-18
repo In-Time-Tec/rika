@@ -60,6 +60,36 @@ describe("ConfigService", () => {
     ),
   )
 
+  it.effect("falls back to built-in fields rather than the other scope when a workspace provider replaces global", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      expect(config.settings.providers).toEqual({
+        openai: {
+          protocol: "openai",
+          baseUrl: ConfigContract.defaults.providers.openai.baseUrl,
+          apiKeyEnv: "WORKSPACE_OPENAI_KEY",
+        },
+        anthropic: {
+          protocol: "anthropic",
+          baseUrl: "https://global.anthropic.test",
+          apiKeyEnv: "GLOBAL_ANTHROPIC_KEY",
+        },
+      })
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            providers: {
+              openai: { baseUrl: "https://global.openai.test/v1", apiKeyEnv: "GLOBAL_OPENAI_KEY" },
+              anthropic: { baseUrl: "https://global.anthropic.test", apiKeyEnv: "GLOBAL_ANTHROPIC_KEY" },
+            },
+          },
+          workspace: { providers: { openai: { apiKeyEnv: "WORKSPACE_OPENAI_KEY" } } },
+        }),
+      ),
+    ),
+  )
+
   it.effect("does not send the built-in provider credential to an overridden endpoint", () =>
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()

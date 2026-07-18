@@ -63,7 +63,14 @@ describe("ConfigContract", () => {
       ).toThrowError(/unknown key/),
   )
 
-  it.each(["not a url", "/v1", "ftp://models.test/v1"])("rejects invalid provider URL %s", (baseUrl) => {
+  it.each([
+    "not a url",
+    "/v1",
+    "ftp://models.test/v1",
+    "https:models.test/v1",
+    "http:models.test/v1",
+    "https://models.test\t/v1",
+  ])("rejects invalid provider URL %s", (baseUrl) => {
     expect(() =>
       ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { baseUrl } } }),
     ).toThrowError(/absolute HTTP or HTTPS URL/)
@@ -84,7 +91,7 @@ describe("ConfigContract", () => {
     ).toThrowError(/cannot contain credentials/)
   })
 
-  it.each(["openai_api_key", "1OPENAI_API_KEY", "OPENAI-API-KEY", ""])(
+  it.each(["openai_api_key", "OpenAI_API_KEY", "1OPENAI_API_KEY", "OPENAI-API-KEY", "OPENAI API KEY", ""])(
     "rejects invalid API key environment reference %s",
     (apiKeyEnv) =>
       expect(() =>

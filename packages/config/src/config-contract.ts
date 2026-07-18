@@ -222,6 +222,8 @@ export const decodeSettingsInput: {
     if (providerConnection.baseUrl !== undefined && typeof providerConnection.baseUrl !== "string")
       throw ConfigFileError.make({ path, message: `Provider ${name} baseUrl must be a string` })
     if (providerConnection.baseUrl === undefined) continue
+    if (!/^https?:\/\/[^\s\\]+$/i.test(providerConnection.baseUrl))
+      throw ConfigFileError.make({ path, message: `Provider ${name} baseUrl must be an absolute HTTP or HTTPS URL` })
     let providerUrl: URL
     try {
       providerUrl = new URL(providerConnection.baseUrl)
