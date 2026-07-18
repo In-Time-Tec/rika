@@ -245,6 +245,10 @@ it.effect("dispatches interactive and execute inputs", () =>
   }),
 )
 
+it.effect("rejects an invalid interactive workspace before dispatch", () =>
+  failsWithoutDispatch(["--workspace", `${workspace}/missing-interactive-workspace`]),
+)
+
 it.effect("dispatches every thread operation", () =>
   Effect.gen(function* () {
     const cases: ReadonlyArray<readonly [ReadonlyArray<string>, Operation.Input]> = [

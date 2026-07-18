@@ -1,5 +1,5 @@
 import * as Operation from "@rika/app/operation-contract"
-import { Console, Effect, Option, Schema, Stdio, Stream } from "effect"
+import { Console, Effect, FileSystem, Option, Schema, Stdio, Stream } from "effect"
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { command as ConfigCommand } from "./commands/config"
 import { command as DiagnosticsCommand } from "./commands/diagnostics"
@@ -185,7 +185,13 @@ export const command = Command.make(
     ...streamFlags,
     prompt,
   },
-  (values) => {
+  (
+    values,
+  ): Effect.Effect<
+    void,
+    Operation.InvalidInput | Operation.OperationUnavailable,
+    FileSystem.FileSystem | Operation.Service | Stdio.Stdio
+  > => {
     if (values.execute)
       return validateRunInput(runInput(values)).pipe(Effect.flatMap(readStreamInput), Effect.flatMap(dispatch))
     if (values.streamJson || values.streamJsonInput || values.streamJsonThinking) {
@@ -194,14 +200,23 @@ export const command = Command.make(
     const selectedMode = optionalValue(values.mode)
     const selectedWorkspace = optionalValue(values.workspace)
     const selectedThread = optionalValue(values.thread)
-    return dispatch({
+    const input: Operation.Input = {
       _tag: "Interactive",
       prompt: values.prompt,
       ...(selectedMode === undefined ? {} : { mode: selectedMode }),
       ...(selectedWorkspace === undefined ? {} : { workspace: selectedWorkspace }),
       ...(selectedThread === undefined ? {} : { threadId: selectedThread }),
       ephemeral: values.ephemeral,
-    })
+    }
+    if (selectedWorkspace === undefined) return dispatch(input)
+    return FileSystem.FileSystem.pipe(
+      Effect.flatMap((fileSystem) => Effect.result(fileSystem.stat(selectedWorkspace))),
+      Effect.filterOrFail(
+        (result) => result._tag === "Success" && result.success.type === "Directory",
+        () => Operation.InvalidInput.make({ message: `Workspace is not a directory: ${selectedWorkspace}` }),
+      ),
+      Effect.flatMap(() => dispatch(input)),
+    )
   },
 ).pipe(
   Command.withDescription("Local durable coding agent"),

@@ -11,7 +11,7 @@ import termios
 import time
 
 executable, cwd, environment_json, actions_json, *arguments = sys.argv[1:]
-entrypoint = arguments[0] if arguments else "src/client-main.ts"
+entrypoint, *entrypoint_arguments = arguments if arguments else ["src/client-main.ts"]
 environment = {key: value for key, value in json.loads(environment_json).items() if value is not None}
 actions = json.loads(actions_json)
 master, slave = pty.openpty()
@@ -28,7 +28,7 @@ if pid == 0:
     if slave > 2:
         os.close(slave)
     os.chdir(cwd)
-    os.execve(executable, [executable, entrypoint], environment)
+    os.execve(executable, [executable, entrypoint, *entrypoint_arguments], environment)
 
 os.close(slave)
 

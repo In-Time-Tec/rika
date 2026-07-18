@@ -34,6 +34,7 @@ type Action = {
 interface Options {
   readonly actions: ReadonlyArray<Action>
   readonly files?: ReadonlyArray<{ readonly path: string; readonly bytes: Uint8Array; readonly executable?: boolean }>
+  readonly arguments?: ReadonlyArray<string>
   readonly script?: readonly [ModelTurn, ...ReadonlyArray<ModelTurn>]
   readonly response?: string
   readonly globalSettings?: unknown
@@ -195,7 +196,15 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   const handle = yield* spawner.spawn(
     ChildProcess.make(
       "python3",
-      [helper, process.execPath, workspace, environment, encodedActions, `${appDirectory}/src/client-main.ts`],
+      [
+        helper,
+        process.execPath,
+        workspace,
+        environment,
+        encodedActions,
+        `${appDirectory}/src/client-main.ts`,
+        ...(options.arguments ?? []),
+      ],
       { stdin: "ignore", stdout: "pipe", stderr: "pipe" },
     ),
   )

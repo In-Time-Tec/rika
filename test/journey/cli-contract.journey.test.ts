@@ -82,6 +82,8 @@ describe("packaged CLI contract", () => {
           }
           const rejected = [
             ["--unknown-option"],
+            ["--mode", "impossible"],
+            ["--workspace", `${parsing.root}/missing`],
             ["run", "--mode", "impossible"],
             ["run", "--stream-json-input"],
             ["--stream-json"],
@@ -157,6 +159,19 @@ describe("packaged CLI contract", () => {
           expect(shown.exitCode).toBe(0)
           expect(Schema.decodeUnknownSync(NamedItemJson)(shown.stdout).name).toBe("read_file")
           expect((yield* run(context, ["tools", "show", "missing-tool"])).exitCode).not.toBe(0)
+        }),
+      ),
+    20_000,
+  )
+
+  test(
+    "rejects an unknown initial interactive thread",
+    () =>
+      runTest(
+        Effect.gen(function* () {
+          const invalid = yield* run(context, ["--thread", "missing-interactive-thread"])
+          expect(invalid.exitCode).not.toBe(0)
+          expect(`${invalid.stderr}${invalid.stdout}`).toContain("Thread missing-interactive-thread does not exist")
         }),
       ),
     20_000,

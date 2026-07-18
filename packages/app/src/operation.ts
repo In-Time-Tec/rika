@@ -2724,6 +2724,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             yield* repairSummariesOnce
           }
           if (input._tag === "Interactive" && options.interactive !== undefined) {
+            if (input.threadId !== undefined) {
+              const thread = yield* Context.get(dependencyContext, ThreadRepository.Service)
+                .get(Thread.ThreadId.make(input.threadId))
+                .pipe(Effect.mapError((error) => unavailable(input, String(error))))
+              if (thread === undefined) return yield* unavailable(input, `Thread ${input.threadId} does not exist`)
+            }
             const made = yield* makeInteractiveSession(
               input.workspace ?? options.defaultWorkspace,
               input.threadId === undefined ? {} : { initialThreadId: input.threadId },

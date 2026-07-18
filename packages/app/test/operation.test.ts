@@ -3037,6 +3037,34 @@ describe("Operation", () => {
     ),
   )
 
+  it.effect("rejects a missing initial interactive thread before opening the session", () =>
+    Effect.gen(function* () {
+      const operation = yield* Operation.Service
+      const error = yield* Effect.flip(
+        operation.run({
+          _tag: "Interactive",
+          prompt: [],
+          threadId: "missing",
+          ephemeral: false,
+        }),
+      )
+      expect(error).toMatchObject({ _tag: "OperationUnavailable", operation: "Interactive" })
+      expect(error.message).toContain("Thread missing does not exist")
+    }).pipe(
+      provideLayer(
+        Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: TurnRepository.memoryLayer(),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-a")),
+          makeTurnId: Effect.succeed(Turn.TurnId.make("turn-a")),
+          interactive: () => Effect.die("Missing thread must not open an interactive session"),
+        }),
+      ),
+    ),
+  )
+
   it.effect("does not start queued submissions", () =>
     Effect.gen(function* () {
       const thread: Thread.Thread = {
