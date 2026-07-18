@@ -7,20 +7,22 @@ import { Service as ReadWebPageService } from "./read-web-page"
 import * as ApplyPatch from "./apply-patch"
 import * as ProcessRegistry from "./process-registry"
 import * as MediaView from "./media-view"
+import * as Catalog from "./tool-catalog"
 import { unifiedDiff } from "./unified-diff"
 
-const diffLimit = 100_000
+const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 
 const boundedDiff = (patch: string | undefined): { readonly diff?: string } =>
-  patch === undefined || patch.length > diffLimit ? {} : { diff: patch }
+  patch === undefined ? {} : { diff: patch }
 
 export const FindFiles = Schema.Struct({ _tag: Schema.tag("FindFiles"), query: Schema.String })
 export const Grep = Schema.Struct({ _tag: Schema.tag("Grep"), pattern: Schema.String, regex: Schema.Boolean })
 export const ReadFile = Schema.Struct({
   _tag: Schema.tag("ReadFile"),
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.Finite),
-  limit: Schema.optionalKey(Schema.Finite),
+  offset: Schema.optionalKey(NonNegativeInt),
+  limit: Schema.optionalKey(PositiveInt),
 })
 export const CreateFile = Schema.Struct({
   _tag: Schema.tag("CreateFile"),
@@ -39,12 +41,12 @@ export const Shell = Schema.Struct({
   command: Schema.String,
   args: Schema.Array(Schema.String),
   cwd: Schema.optionalKey(Schema.String),
-  waitMillis: Schema.optionalKey(Schema.Finite),
+  waitMillis: Schema.optionalKey(NonNegativeInt),
 })
 export const ShellCommandStatus = Schema.Struct({
   _tag: Schema.tag("ShellCommandStatus"),
   processId: Schema.String,
-  waitMillis: Schema.optionalKey(Schema.Finite),
+  waitMillis: Schema.optionalKey(NonNegativeInt),
 })
 export const GitStatus = Schema.Struct({ _tag: Schema.tag("GitStatus") })
 export const WebSearch = Schema.Struct({
@@ -92,12 +94,16 @@ export type Result = typeof Result.Type
 export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError", {
   tool: Schema.String,
   message: Schema.String,
+  kind: Schema.Literals(["operation", "timeout"]),
+  outcome: Schema.Literals(["known", "unknown"]),
 }) {}
 
 const ToolFailure = Schema.Struct({
   _tag: Schema.tag("ToolError"),
   tool: Schema.String,
   message: Schema.String,
+  kind: Schema.Literals(["operation", "timeout"]),
+  outcome: Schema.Literals(["known", "unknown"]),
 })
 
 const tool = <const Name extends string, Parameters extends Schema.Struct.Fields>(
@@ -122,8 +128,8 @@ export const grepTool = tool("grep", "Search UTF-8 workspace files for text or a
 })
 export const readFileTool = tool("read_file", "Read a bounded UTF-8 file range with stable line numbers", {
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-  limit: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  offset: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
+  limit: Schema.optionalKey(Schema.NullOr(PositiveInt)),
 })
 export const createFileTool = tool("create_file", "Create a new UTF-8 file without overwriting an existing path", {
   path: Schema.String,
@@ -152,7 +158,7 @@ export const shellTool = tool(
     command: Schema.String,
     args: Schema.Array(Schema.String),
     cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+    waitMillis: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
   },
 )
 export const shellCommandStatusTool = tool(
@@ -160,7 +166,7 @@ export const shellCommandStatusTool = tool(
   "Return only new output from a running command without restarting it",
   {
     processId: Schema.String,
-    waitMillis: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+    waitMillis: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
   },
 )
 export const gitStatusTool = tool("git_status", "Inspect concise Git working-tree status", {
@@ -251,9 +257,64 @@ export const handlerLayer = toolkit.toLayer(
 )
 
 const maxOutput = 40_000
-const bounded = (text: string): Result => ({ text: text.slice(0, maxOutput), truncated: text.length > maxOutput })
+const boundedPrefix = (text: string, limit: number) => {
+  const prefix = text.slice(0, limit)
+  const final = prefix.charCodeAt(prefix.length - 1)
+  return final >= 0xd800 && final <= 0xdbff ? prefix.slice(0, -1) : prefix
+}
+const bounded = (text: string, limit = maxOutput): Result => ({
+  text: boundedPrefix(text, limit),
+  truncated: text.length > limit,
+})
 const gitStatusOutputLimit = 20_000
-const toolError = (request: Request, cause: unknown) => ToolError.make({ tool: request._tag, message: String(cause) })
+
+const toolName = (request: Request) =>
+  request._tag
+    .replace(/Request$/, "")
+    .replaceAll(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase()
+
+const contract = (request: Request) => Catalog.get(toolName(request))!
+
+const boundResult = (request: Request, result: Result): Result => {
+  const limit = contract(request).outputLimit
+  let remaining = limit
+  const trim = (value: string | undefined) => {
+    if (value === undefined) return undefined
+    const trimmed = boundedPrefix(value, remaining)
+    remaining -= trimmed.length
+    return trimmed
+  }
+  const text = trim(result.text)!
+  const stdout = trim(result.stdout)
+  const stderr = trim(result.stderr)
+  const diff = trim(result.diff)
+  return {
+    ...result,
+    text,
+    ...(stdout === undefined ? {} : { stdout }),
+    ...(stderr === undefined ? {} : { stderr }),
+    ...(diff === undefined ? {} : { diff }),
+    truncated:
+      result.truncated ||
+      text.length < result.text.length ||
+      (stdout !== undefined && stdout.length < result.stdout!.length) ||
+      (stderr !== undefined && stderr.length < result.stderr!.length) ||
+      (diff !== undefined && diff.length < result.diff!.length),
+  }
+}
+
+const toolError = (request: Request, cause: unknown, kind: "operation" | "timeout") =>
+  ToolError.make(
+    kind === "timeout" && contract(request).idempotency === "unsafe"
+      ? {
+          tool: request._tag,
+          message: "Tool call timed out; its outcome is unknown and the call must not be repeated",
+          kind,
+          outcome: "unknown",
+        }
+      : { tool: request._tag, message: String(cause), kind, outcome: "known" },
+  )
 
 class RuntimeOperationError extends Data.TaggedError("RuntimeOperationError")<{ readonly message: string }> {}
 
@@ -367,7 +428,7 @@ export const layer = (workspace: string) =>
       })
       return Service.of({
         run: Effect.fn("ToolRuntime.run")(function* (request) {
-          return yield* Effect.gen(function* () {
+          const operation = Effect.gen(function* () {
             switch (request._tag) {
               case "FindFiles":
                 if (Option.isNone(finder))
@@ -464,11 +525,9 @@ export const layer = (workspace: string) =>
               case "Shell": {
                 const cwd = yield* resolveCwd(request.cwd ?? ".")
                 const processId = yield* processes.start(request.command, request.args, cwd)
-                const output = yield* processes.poll(
-                  processId,
-                  Math.min(Math.max(0, request.waitMillis ?? 500), 120_000),
-                  maxOutput,
-                )
+                const output = yield* processes
+                  .poll(processId, Math.min(Math.max(0, request.waitMillis ?? 500), 120_000), maxOutput)
+                  .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
                 return {
                   ...output,
                   text: `${output.stdout}${output.stderr}${output.exitCode === undefined || output.exitCode === 0 ? "" : `\nexit ${output.exitCode}`}`.trim(),
@@ -505,7 +564,16 @@ export const layer = (workspace: string) =>
                 return { text: viewed.text, artifact: viewed.artifact, truncated: viewed.truncated }
               }
             }
-          }).pipe(Effect.mapError((cause) => toolError(request, cause)))
+          }).pipe(
+            Effect.map(boundResult.bind(undefined, request)),
+            Effect.mapError((cause) => toolError(request, cause, "operation")),
+          )
+          return yield* Effect.scoped(operation).pipe(
+            Effect.timeoutOrElse({
+              duration: `${contract(request).timeoutMillis} millis`,
+              orElse: () => Effect.fail(toolError(request, "Tool call timed out", "timeout")),
+            }),
+          )
         }),
       })
     }),

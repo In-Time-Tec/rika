@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber, FileSystem, Layer, Option, Path, PlatformError, Schema, Sink, Stream } from "effect"
+import { Effect, Fiber, FileSystem, Layer, Option, Path, PlatformError, Ref, Schema, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { MediaView, ParallelSearch, ProcessRegistry, ReadWebPage, Runtime } from "../src"
@@ -39,13 +39,13 @@ interface ProcessResult {
   readonly exitCode: number
 }
 
-const processHandle = ({ stdout, stderr, exitCode }: ProcessResult) => {
+const processHandle = ({ stdout, stderr, exitCode }: ProcessResult, onKill: () => void = () => undefined) => {
   const encoder = new TextEncoder()
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
     isRunning: Effect.succeed(false),
-    kill: () => Effect.void,
+    kill: () => Effect.sync(onKill),
     stdin: Sink.drain,
     stdout: Stream.make(encoder.encode(stdout)),
     stderr: Stream.make(encoder.encode(stderr)),
@@ -77,6 +77,7 @@ const testEnvironment = (
     ["/workspace/src/deep", ["b.ts"]],
   ])
   const commands: Array<ChildProcess.StandardCommand> = []
+  const killed: Array<string> = []
   const fileSystem = FileSystem.layerNoop({
     realPath: (path) => Effect.succeed(path),
     readDirectory: (path) => Effect.succeed(directories.get(path) ?? []),
@@ -96,13 +97,16 @@ const testEnvironment = (
     ChildProcessSpawner.make((command) => {
       if (command._tag === "PipedCommand") return Effect.fail(platformError("spawn", "pipeline"))
       commands.push(command)
+      if (command.command === "never-spawn") return Effect.never
       if (command.command === "fail-spawn") return Effect.fail(platformError("spawn", command.command))
       if (command.command === "large")
         return Effect.succeed(processHandle({ stdout: "x".repeat(40_001), stderr: "", exitCode: 0 }))
       if (command.command === "unicode-boundary")
         return Effect.succeed(processHandle({ stdout: `${"x".repeat(39_999)}🙂`, stderr: "", exitCode: 0 }))
       if (command.command === "running") {
-        const handle = processHandle({ stdout: "x".repeat(40_001), stderr: "error", exitCode: 0 })
+        const handle = processHandle({ stdout: "x".repeat(40_001), stderr: "error", exitCode: 0 }, () =>
+          killed.push(command.command),
+        )
         return Effect.succeed({ ...handle, exitCode: Effect.never })
       }
       if (command.command === "stream-failure") {
@@ -131,7 +135,7 @@ const testEnvironment = (
     Layer.provide(Layer.merge(ParallelSearch.testLayer(search), ReadWebPage.testLayer(read))),
     Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
   )
-  return { files, commands, runtime }
+  return { files, commands, killed, runtime }
 }
 
 describe("Runtime", () => {
@@ -214,6 +218,16 @@ describe("Runtime", () => {
       expect(existing.message).toContain("already exists")
       expect(stale.message).toContain("stale anchor")
       expect(ambiguous.message).toContain("ambiguous anchor")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("enforces each tool output bound across text and diff fields", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const result = yield* runtime.run({ _tag: "CreateFile", path: "large.txt", content: "x".repeat(110_000) })
+      expect(result.text.length + (result.diff?.length ?? 0)).toBe(4_000)
+      expect(result.truncated).toBe(true)
     }).pipe(provide(environment.runtime))
   })
 
@@ -306,9 +320,62 @@ describe("Runtime", () => {
       const shell = yield* Effect.flip(runtime.run({ _tag: "Shell", command: "fail-spawn", args: [] }))
 
       expect(read).toMatchObject({ _tag: "ToolError", tool: "ReadFile" })
+      expect(read).toMatchObject({ kind: "operation", outcome: "known" })
       expect(read.message).toContain("foreign failure")
       expect(shell).toMatchObject({ _tag: "ToolError", tool: "Shell" })
       expect(shell.message).toContain("foreign failure")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("times out unsafe process calls with an unknown outcome", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const call = yield* Effect.forkChild(
+        runtime.run({ _tag: "Shell", command: "never-spawn", args: [], waitMillis: 120_000 }),
+      )
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("120 seconds")
+      const failure = yield* Effect.flip(Fiber.join(call))
+      expect(failure).toMatchObject({
+        _tag: "ToolError",
+        tool: "Shell",
+        kind: "timeout",
+        outcome: "unknown",
+      })
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("interrupts cancelled calls and releases call-scoped resources", () =>
+    Effect.gen(function* () {
+      const released = yield* Ref.make(false)
+      const environment = testEnvironment("success", () =>
+        Effect.scoped(
+          Effect.acquireRelease(Effect.void, () => Ref.set(released, true)).pipe(Effect.andThen(Effect.never)),
+        ),
+      )
+      yield* Effect.gen(function* () {
+        const runtime = yield* Runtime.Service
+        const call = yield* Effect.forkChild(
+          runtime.run({ _tag: "WebSearch", objective: "wait", searchQueries: ["wait"] }),
+        )
+        yield* Effect.yieldNow
+        yield* Fiber.interrupt(call)
+        expect(yield* Ref.get(released)).toBe(true)
+      }).pipe(provide(environment.runtime))
+    }),
+  )
+
+  it.effect("kills a process whose initial shell call is cancelled before returning its id", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const call = yield* Effect.forkChild(
+        runtime.run({ _tag: "Shell", command: "running", args: [], waitMillis: 10_000 }),
+      )
+      yield* Effect.yieldNow
+      yield* Fiber.interrupt(call)
+      expect(environment.killed).toEqual(["running"])
     }).pipe(provide(environment.runtime))
   })
 

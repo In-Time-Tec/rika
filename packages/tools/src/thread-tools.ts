@@ -1,6 +1,8 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
+
 export const Result = Schema.Struct({
   text: Schema.String,
   truncated: Schema.Boolean,
@@ -18,14 +20,23 @@ const ToolFailure = Schema.Struct({
   message: Schema.String,
 })
 
+export const FindThreadInput = Schema.Struct({
+  query: Schema.String,
+  includeArchived: Schema.optionalKey(Schema.Boolean),
+  limit: Schema.optionalKey(PositiveInt),
+})
+
+export const ReadThreadInput = Schema.Struct({
+  threadId: Schema.String,
+  includeArchived: Schema.optionalKey(Schema.Boolean),
+  maxTurns: Schema.optionalKey(PositiveInt),
+  maxChars: Schema.optionalKey(PositiveInt),
+})
+
 export const findThreadTool = Tool.make("find_thread", {
   description:
     "Find local Rika threads by bounded metadata query terms. Supports plain text and workspace:, repo:, ref:, author:, label:, file:, after:, and before: terms.",
-  parameters: Schema.Struct({
-    query: Schema.String,
-    includeArchived: Schema.optionalKey(Schema.Boolean),
-    limit: Schema.optionalKey(Schema.Finite),
-  }),
+  parameters: FindThreadInput,
   success: Result,
   failure: ToolFailure,
   failureMode: "return",
@@ -33,12 +44,7 @@ export const findThreadTool = Tool.make("find_thread", {
 
 export const readThreadTool = Tool.make("read_thread", {
   description: "Read a bounded deterministic transcript for one local Rika thread by id",
-  parameters: Schema.Struct({
-    threadId: Schema.String,
-    includeArchived: Schema.optionalKey(Schema.Boolean),
-    maxTurns: Schema.optionalKey(Schema.Finite),
-    maxChars: Schema.optionalKey(Schema.Finite),
-  }),
+  parameters: ReadThreadInput,
   success: Result,
   failure: ToolFailure,
   failureMode: "return",

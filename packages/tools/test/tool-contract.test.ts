@@ -44,6 +44,17 @@ describe("tool contracts", () => {
     expect(Catalog.definitions.every((definition) => definition.timeoutMillis > 0 && definition.outputLimit > 0)).toBe(
       true,
     )
+    expect(Catalog.definitions.filter(({ idempotency }) => idempotency === "unsafe").map(({ name }) => name)).toEqual([
+      "create_file",
+      "edit_file",
+      "apply_patch",
+      "shell",
+      "oracle",
+      "librarian",
+      "review",
+      "painter",
+      "task",
+    ])
   })
 
   it("keeps the static catalog aligned with every registered built-in runtime tool", () => {
@@ -56,6 +67,35 @@ describe("tool contracts", () => {
     expect(new Set(catalogNames).size).toBe(catalogNames.length)
     expect(catalogNames).toEqual(expect.arrayContaining(runtimeNames))
   })
+
+  it.effect("rejects invalid bounds and model-facing ranges at schema boundaries", () =>
+    Effect.gen(function* () {
+      const definition = Catalog.get("read_file")!
+      yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, timeoutMillis: 0 }))
+      yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, outputLimit: 1.5 }))
+      yield* Effect.flip(Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "ReadFile", path: "a", offset: -1 }))
+      yield* Effect.flip(Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "ReadFile", path: "a", limit: 0 }))
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Shell", command: "echo", args: [], waitMillis: 0.5 }),
+      )
+      yield* Effect.flip(Schema.decodeUnknownEffect(ThreadTools.FindThreadInput)({ query: "all", limit: 0 }))
+    }),
+  )
+
+  it.effect("round-trips canonical typed failures and rejects incomplete failure results", () =>
+    Effect.gen(function* () {
+      const failure = Runtime.ToolError.make({
+        tool: "ReadFile",
+        message: "missing",
+        kind: "operation",
+        outcome: "known",
+      })
+      expect(yield* Schema.decodeUnknownEffect(Runtime.ToolError)(failure)).toEqual(failure)
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(Runtime.ToolError)({ _tag: "ToolError", tool: "ReadFile", message: "missing" }),
+      )
+    }),
+  )
 
   it("defines an Amp presentation for every built-in tool", () => {
     expect(Catalog.definitions.every((definition) => definition.presentation !== undefined)).toBe(true)
@@ -157,6 +197,7 @@ describe("tool contracts", () => {
         ProcessRegistry.testLayer({
           start: () => Effect.succeed("fixture"),
           poll: () => Effect.die("unused"),
+          cancel: () => Effect.die("unused"),
         }),
       ),
     ),

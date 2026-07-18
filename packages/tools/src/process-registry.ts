@@ -91,6 +91,7 @@ export interface Interface {
     cwd: string,
   ) => Effect.Effect<string, PlatformError.PlatformError>
   readonly poll: (processId: string, waitMillis: number, outputLimit: number) => Effect.Effect<Output, ProcessNotFound>
+  readonly cancel: (processId: string) => Effect.Effect<void, ProcessNotFound | PlatformError.PlatformError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/tools/process-registry/Service") {}
@@ -180,6 +181,16 @@ export const layer = Layer.effect(
             return next
           })
         return result
+      }),
+      cancel: Effect.fn("ProcessRegistry.cancel")(function* (processId) {
+        const entry = (yield* Ref.get(entries)).get(processId)
+        if (entry === undefined) return yield* new ProcessNotFound({ message: `Unknown process id: ${processId}` })
+        yield* entry.process.kill()
+        yield* Ref.update(entries, (current) => {
+          const next = new Map(current)
+          next.delete(processId)
+          return next
+        })
       }),
     })
   }),

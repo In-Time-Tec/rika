@@ -173,6 +173,6 @@ export const apply = Effect.fn("ApplyPatch.apply")(function* (
   return {
     text: `applied ${operations.length} operation${operations.length === 1 ? "" : "s"}`,
     truncated: false,
-    ...(diff.length === 0 || diff.length > 100_000 ? {} : { diff }),
+    ...(diff.length === 0 ? {} : { diff }),
   }
 })

@@ -3,6 +3,11 @@ import { Schema } from "effect"
 export const Permission = Schema.Literals(["allow", "ask"])
 export type Permission = typeof Permission.Type
 
+export const Idempotency = Schema.Literals(["safe", "unsafe"])
+export type Idempotency = typeof Idempotency.Type
+
+const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
+
 export const Presentation = Schema.Struct({
   family: Schema.Literals(["explore", "shell", "edit", "agent", "direct", "generic"]),
   action: Schema.String,
@@ -30,8 +35,9 @@ export const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   permission: Permission,
-  timeoutMillis: Schema.Finite,
-  outputLimit: Schema.Finite,
+  idempotency: Idempotency,
+  timeoutMillis: PositiveInt,
+  outputLimit: PositiveInt,
   presentation: Presentation,
 })
 export type Definition = typeof Definition.Type
@@ -41,6 +47,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "find_files",
     description: "List workspace files whose paths contain a query",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 20_000,
     presentation: {
@@ -55,6 +62,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "grep",
     description: "Search UTF-8 workspace files for text or a regular expression",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 40_000,
     presentation: {
@@ -69,6 +77,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "read_file",
     description: "Read a bounded UTF-8 file range",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 40_000,
     presentation: {
@@ -83,6 +92,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "create_file",
     description: "Create a new UTF-8 file without overwriting an existing path",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 10_000,
     outputLimit: 4_000,
     presentation: { family: "edit", action: "create", activeLabel: "Creating", completeLabel: "Created" },
@@ -91,6 +101,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "edit_file",
     description: "Replace one exact anchored text occurrence and reject stale or ambiguous anchors",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 10_000,
     outputLimit: 4_000,
     presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
@@ -99,6 +110,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "apply_patch",
     description: "Apply a validated Codex patch atomically with strict context matching",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 10_000,
     outputLimit: 4_000,
     presentation: { family: "edit", action: "patch", activeLabel: "Editing", completeLabel: "Edited" },
@@ -107,6 +119,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "shell",
     description: "Run one command in the workspace, returning a process id when it remains running",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 120_000,
     outputLimit: 40_000,
     presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
@@ -115,6 +128,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "shell_command_status",
     description: "Poll a running shell command for new bounded output and completion status",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 40_000,
     presentation: { family: "direct", action: "status", activeLabel: "Waiting for", completeLabel: "Waited for" },
@@ -123,6 +137,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "git_status",
     description: "Inspect concise Git working-tree status",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 20_000,
     presentation: {
@@ -136,6 +151,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "web_search",
     description: "Search the current web with Parallel and return ranked source excerpts",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 30_000,
     outputLimit: 40_000,
     presentation: {
@@ -150,6 +166,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "read_web_page",
     description: "Read a public HTTP(S) page as bounded readable Markdown",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 30_000,
     outputLimit: 40_000,
     presentation: {
@@ -164,6 +181,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "view_media",
     description: "Inspect a workspace image or analyze a PDF, audio, or video file",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 30_000,
     outputLimit: 40_000,
     presentation: {
@@ -178,6 +196,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "find_thread",
     description: "Find local threads using bounded product metadata queries",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 20_000,
     presentation: {
@@ -192,6 +211,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "read_thread",
     description: "Read a bounded local thread transcript",
     permission: "allow",
+    idempotency: "safe",
     timeoutMillis: 10_000,
     outputLimit: 40_000,
     presentation: {
@@ -205,6 +225,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "oracle",
     description: "Delegate a focused technical investigation to the read-only Oracle product agent",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 120_000,
     outputLimit: 40_000,
     presentation: {
@@ -218,6 +239,7 @@ export const definitions: ReadonlyArray<Definition> = [
     name: "librarian",
     description: "Delegate authoritative documentation research to the network-read-only Librarian product agent",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 120_000,
     outputLimit: 40_000,
     presentation: {
@@ -228,17 +250,10 @@ export const definitions: ReadonlyArray<Definition> = [
     },
   },
   {
-    name: "painter",
-    description: "Delegate visual work to the configured media-capable Painter product agent",
-    permission: "allow",
-    timeoutMillis: 120_000,
-    outputLimit: 20_000,
-    presentation: { family: "direct", action: "painter", activeLabel: "Painter", completeLabel: "Painter" },
-  },
-  {
     name: "review",
     description: "Delegate a focused correctness and regression review to the read-only Review product agent",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 120_000,
     outputLimit: 40_000,
     presentation: {
@@ -250,9 +265,19 @@ export const definitions: ReadonlyArray<Definition> = [
     },
   },
   {
+    name: "painter",
+    description: "Delegate visual work to the configured media-capable Painter product agent",
+    permission: "allow",
+    idempotency: "unsafe",
+    timeoutMillis: 120_000,
+    outputLimit: 20_000,
+    presentation: { family: "direct", action: "painter", activeLabel: "Painter", completeLabel: "Painter" },
+  },
+  {
     name: "task",
     description: "Start a durable Task child execution with narrowed workspace permissions",
     permission: "allow",
+    idempotency: "unsafe",
     timeoutMillis: 120_000,
     outputLimit: 40_000,
     presentation: {

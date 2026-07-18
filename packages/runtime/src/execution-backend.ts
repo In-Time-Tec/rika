@@ -220,7 +220,12 @@ export const routedToolRuntimeLayer: {
             Effect.mapError((cause) =>
               Schema.is(RikaToolRuntime.ToolError)(cause)
                 ? cause
-                : RikaToolRuntime.ToolError.make({ tool: request._tag, message: String(cause) }),
+                : RikaToolRuntime.ToolError.make({
+                    tool: request._tag,
+                    message: String(cause),
+                    kind: "operation",
+                    outcome: "known",
+                  }),
             ),
           )) as RikaToolRuntime.Interface["run"]
         return Layer.succeed(RikaToolRuntime.Service, RikaToolRuntime.Service.of({ run }))
