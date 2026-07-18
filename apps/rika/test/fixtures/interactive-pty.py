@@ -113,6 +113,11 @@ while time.monotonic() < deadline:
         if resize is not None:
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", resize["height"], resize["width"], 0, 0))
             os.kill(pid, signal.SIGWINCH)
+        click = action.get("click")
+        if click is not None:
+            row = click["row"]
+            column = click["column"]
+            os.write(master, f"\x1b[<0;{column};{row}M\x1b[<0;{column};{row}m".encode())
         restart_arguments = action.get("restartArguments")
         if restart_arguments is None:
             write = action.get("write")

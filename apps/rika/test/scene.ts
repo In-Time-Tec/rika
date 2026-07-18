@@ -29,6 +29,7 @@ type Action = {
   readonly delayMs?: number
   readonly restartArguments?: ReadonlyArray<string>
   readonly resize?: { readonly width: number; readonly height: number }
+  readonly click?: { readonly row: number; readonly column: number }
   readonly files?: Readonly<Record<string, string | null>>
 }
 
@@ -87,6 +88,7 @@ const PtyAction = Schema.Struct({
   delayMs: Schema.optionalKey(Schema.Int),
   restartArguments: Schema.optionalKey(Schema.Array(Schema.String)),
   resize: Schema.optionalKey(Schema.Struct({ width: Schema.Int, height: Schema.Int })),
+  click: Schema.optionalKey(Schema.Struct({ row: Schema.Int, column: Schema.Int })),
   files: Schema.optionalKey(Schema.Record(Schema.String, Schema.NullOr(Schema.String))),
 })
 const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
@@ -425,6 +427,11 @@ export const Scene = {
       resize: { width, height },
       delayMs,
       ...(write === undefined ? {} : { write }),
+    }),
+    clickAfter: (after: string, column: number, row: number, delayMs?: number): Action => ({
+      after,
+      click: { row, column },
+      ...(delayMs === undefined ? {} : { delayMs }),
     }),
     filesAfter: (after: string, files: Readonly<Record<string, string | null>>, write?: string): Action => ({
       after,
