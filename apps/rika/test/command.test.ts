@@ -136,6 +136,49 @@ it.effect("renders client help without creating the configured data root", () =>
   ),
 )
 
+it.effect("inspects and exports malformed crash evidence without dispatching an operation", () =>
+  Effect.gen(function* () {
+    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    yield* execute(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-diagnostics-command-" })
+          const dataRoot = path.join(root, "state")
+          const diagnostics = path.join(dataRoot, "diagnostics")
+          const destination = path.join(root, "export")
+          yield* fileSystem.makeDirectory(diagnostics, { recursive: true, mode: 0o700 })
+          yield* fileSystem.writeFileString(path.join(diagnostics, "resident-crash.open.jsonl"), '{"partial":', {
+            mode: 0o600,
+          })
+          const provider = ConfigProvider.fromEnv({
+            env: {
+              HOME: path.join(root, "home"),
+              RIKA_DATABASE: path.join(dataRoot, "rika.db"),
+              RIKA_RELAY_DATABASE: path.join(dataRoot, "relay.db"),
+            },
+          })
+          yield* run(["diagnostics", "path"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+          yield* run(["diagnostics", "status"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
+          yield* run(["diagnostics", "export", destination]).pipe(
+            Effect.provideService(ConfigProvider.ConfigProvider, provider),
+          )
+          const output = yield* TestConsole.logLines
+          expect(output).toContain(diagnostics)
+          expect(output).toContain("1 log file, 11 bytes")
+          expect(yield* fileSystem.readFileString(path.join(destination, "resident-crash.open.jsonl"))).toBe(
+            '{"partial":',
+          )
+        }),
+      ),
+      layer,
+    )
+    expect(yield* Ref.get(calls)).toEqual([])
+  }),
+)
+
 it.effect("dispatches a parsed doctor operation", () =>
   Effect.gen(function* () {
     expect(yield* capture(["doctor"])).toEqual([{ _tag: "Doctor" }])

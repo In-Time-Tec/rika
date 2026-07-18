@@ -53,6 +53,49 @@ describe("Logging", () => {
       }),
     )
 
+    test.effect("records only bounded diagnostic fields", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-private-" })
+        const secrets = [
+          "prompt-secret-72d8",
+          "model-body-secret-13a4",
+          "tool-output-secret-99bc",
+          "shell-secret-02ef",
+          "authorization-secret-5d31",
+          "credential-secret-f741",
+          "arbitrary-error-secret-38ab",
+        ]
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.logError(secrets[0], secrets[1]).pipe(
+                Effect.annotateLogs({
+                  prompt: secrets[0],
+                  "model.body": secrets[1],
+                  "tool.output": secrets[2],
+                  shell: secrets[3],
+                  authorization: secrets[4],
+                  credential: secrets[5],
+                  error: secrets[6],
+                  "rika.failure.kind": "InvalidInput",
+                }),
+                Effect.provide(logging),
+              ),
+          ),
+        )
+        const diagnostics = yield* Logging.directory(root)
+        const [name] = yield* fs.readDirectory(diagnostics)
+        const content = yield* fs.readFileString(path.join(diagnostics, name!))
+        for (const secret of secrets) assert.notInclude(content, secret)
+        const record = yield* decodeRecord(content.trim())
+        assert.strictEqual(record.message, "diagnostic.unstructured")
+        assert.deepStrictEqual(record.annotations, { "rika.failure.kind": "InvalidInput" })
+      }),
+    )
+
     test.effect("writes ordered batches after one second", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem
@@ -77,8 +120,8 @@ describe("Logging", () => {
           ),
         )
         yield* Effect.gen(function* () {
-          yield* Effect.logInfo("first")
-          yield* Effect.logInfo("second")
+          yield* Effect.logInfo("test.first")
+          yield* Effect.logInfo("test.second")
           yield* TestClock.adjust(Duration.millis(999))
           assert.strictEqual(yield* Ref.get(writes), 0)
           yield* TestClock.adjust(Duration.millis(1))
@@ -89,7 +132,7 @@ describe("Logging", () => {
           )
           assert.deepStrictEqual(
             records.map((record) => record.message),
-            ["first", "second"],
+            ["test.first", "test.second"],
           )
         }).pipe(Effect.provide(logging), Effect.provideService(FileSystem.FileSystem, observedFileSystem))
       }),
@@ -124,12 +167,43 @@ describe("Logging", () => {
         const diagnostics = yield* Logging.directory(root)
         yield* fs.makeDirectory(diagnostics, { mode: 0o700 })
         yield* fs.writeFileString(path.join(diagnostics, "client.jsonl"), "{}\n", { mode: 0o600 })
+        yield* fs.writeFileString(path.join(diagnostics, "crash.open.jsonl"), '{"truncated":', { mode: 0o600 })
+        yield* fs.writeFileString(path.join(diagnostics, "public.jsonl"), "secret", { mode: 0o644 })
         yield* fs.writeFileString(path.join(diagnostics, "resident.token"), "secret", { mode: 0o600 })
         yield* fs.symlink(path.join(diagnostics, "resident.token"), path.join(diagnostics, "leak.jsonl"))
         const output = path.join(outputRoot, "export")
         assert.strictEqual(yield* Logging.exportLogs(root, output), output)
-        assert.deepStrictEqual(yield* fs.readDirectory(output), ["client.jsonl"])
+        assert.deepStrictEqual((yield* fs.readDirectory(output)).toSorted(), ["client.jsonl", "crash.open.jsonl"])
         assert.strictEqual((yield* fs.stat(output)).mode & 0o777, 0o700)
+        assert.strictEqual((yield* fs.stat(path.join(output, "client.jsonl"))).mode & 0o777, 0o600)
+        assert.strictEqual((yield* fs.stat(path.join(output, "crash.open.jsonl"))).mode & 0o777, 0o600)
+        assert.deepStrictEqual(yield* Logging.status(root), {
+          directory: diagnostics,
+          files: 2,
+          bytes:
+            (yield* fs.stat(path.join(diagnostics, "client.jsonl"))).size +
+            (yield* fs.stat(path.join(diagnostics, "crash.open.jsonl"))).size,
+        })
+      }),
+    )
+
+    test.effect("rotates expired closed logs without deleting open crash evidence", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-retention-" })
+        const diagnostics = yield* Logging.directory(root)
+        yield* fs.makeDirectory(diagnostics, { mode: 0o700 })
+        const expired = path.join(diagnostics, "client-expired.jsonl")
+        const crash = path.join(diagnostics, "resident-expired.open.jsonl")
+        yield* fs.writeFileString(expired, "{}\n", { mode: 0o600 })
+        yield* fs.writeFileString(crash, '{"partial":', { mode: 0o600 })
+        yield* fs.utimes(expired, 0, 0)
+        yield* fs.utimes(crash, 0, 0)
+        yield* TestClock.setTime(1_784_023_200_000)
+        yield* Effect.scoped(Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })))
+        assert.isFalse(yield* fs.exists(expired))
+        assert.isTrue(yield* fs.exists(crash))
       }),
     )
 
@@ -158,14 +232,16 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "resident", version: "1", level: "error", pid: 7 })),
             (logging) =>
-              Effect.all([Effect.logInfo("hidden"), Effect.logError("visible")]).pipe(Effect.provide(logging)),
+              Effect.all([Effect.logInfo("level.hidden"), Effect.logError("level.visible")]).pipe(
+                Effect.provide(logging),
+              ),
           ),
         )
         const diagnostics = yield* Logging.directory(root)
         const [name] = yield* fs.readDirectory(diagnostics)
         const content = yield* fs.readFileString(path.join(diagnostics, name!))
-        assert.notInclude(content, "hidden")
-        assert.include(content, "visible")
+        assert.notInclude(content, "level.hidden")
+        assert.include(content, "level.visible")
       }),
     )
   })

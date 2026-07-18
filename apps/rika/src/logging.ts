@@ -11,6 +11,72 @@ export interface Status {
 
 const activeSettlers = new Set<() => void>()
 
+const diagnosticAnnotations = new Set([
+  "rika.duration.ms",
+  "rika.event.cursor",
+  "rika.event.type",
+  "rika.failure.kind",
+  "rika.failure.reason",
+  "rika.model.alias",
+  "rika.model.backend.kind",
+  "rika.model.name",
+  "rika.model.provider",
+  "rika.model.registration_key",
+  "rika.operation",
+  "rika.process.instance",
+  "rika.process.pid",
+  "rika.process.role",
+  "rika.resident.client.kind",
+  "rika.resident.command.sequence",
+  "rika.resident.command.tag",
+  "rika.resident.connection.duration.ms",
+  "rika.resident.connection.failures",
+  "rika.resident.connection.id",
+  "rika.resident.connection.retry",
+  "rika.resident.connection.retry_delay.ms",
+  "rika.resident.connection.role",
+  "rika.resident.feed.fragments",
+  "rika.resident.feed.overflowed",
+  "rika.resident.feed.queued",
+  "rika.resident.feed.sent",
+  "rika.resident.feed.sequence",
+  "rika.resident.generation",
+  "rika.resident.port",
+  "rika.resident.previous.pid",
+  "rika.resident.rejection.reason",
+  "rika.resident.request.id",
+  "rika.resident.session.id",
+  "rika.resident.shutdown.reason",
+  "rika.resident.startup.pid",
+  "rika.resident.startup.role",
+  "rika.thread.id",
+  "rika.turn.id",
+  "rika.version",
+])
+
+const structuredLogger = Logger.make(({ date, fiber, logLevel, message }) => {
+  const [candidate] = Array.isArray(message) ? message : [message]
+  const operation =
+    typeof candidate === "string" && /^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/.test(candidate) && candidate.length <= 100
+      ? candidate
+      : "diagnostic.unstructured"
+  const current = fiber.getRef(References.CurrentLogAnnotations)
+  const annotations: Record<string, string | number | boolean> = {}
+  for (const [key, value] of Object.entries(current)) {
+    if (
+      diagnosticAnnotations.has(key) &&
+      (typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    )
+      annotations[key] = value
+  }
+  return JSON.stringify({
+    message: operation,
+    level: logLevel.toUpperCase(),
+    timestamp: date.toISOString(),
+    annotations,
+  })
+})
+
 export const settleActiveLogs = () => {
   for (const settle of activeSettlers) settle()
 }
@@ -96,12 +162,19 @@ const prepareDirectory = Effect.fn("Logging.prepareDirectory")(function* (dataRo
 const availableLogFiles = Effect.fn("Logging.availableLogFiles")(function* (diagnostics: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const expectedUid = typeof process.getuid === "function" ? process.getuid() : undefined
   const files: Array<{ readonly name: string; readonly size: bigint }> = []
   for (const name of (yield* fs.readDirectory(diagnostics)).filter(isLogFile)) {
     const filename = path.join(diagnostics, name)
     if ((yield* Effect.result(fs.readLink(filename)))._tag === "Success") continue
     const info = yield* Effect.result(fs.stat(filename))
-    if (info._tag === "Success" && info.success.type === "File") files.push({ name, size: info.success.size })
+    if (
+      info._tag === "Success" &&
+      info.success.type === "File" &&
+      (info.success.mode & 0o077) === 0 &&
+      (expectedUid === undefined || Option.getOrUndefined(info.success.uid) === expectedUid)
+    )
+      files.push({ name, size: info.success.size })
   }
   return files
 })
@@ -142,7 +215,7 @@ export const layer = (options: {
         ),
       ),
     )
-    return yield* Logger.formatJson.pipe(
+    return yield* structuredLogger.pipe(
       Logger.toFile(open, { flag: "ax", mode: 0o600, batchWindow: Duration.seconds(1) }),
     )
   })
