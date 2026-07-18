@@ -115,7 +115,9 @@ while time.monotonic() < deadline:
         if restart_arguments is None:
             write = action.get("write")
             if write is not None:
-                os.write(master, write.encode())
+                for fragment in write.split("\0"):
+                    os.write(master, fragment.encode())
+                    time.sleep(0.01)
         else:
             for child in children(pid):
                 os.kill(child, signal.SIGKILL)

@@ -59,6 +59,7 @@ const UnknownJson = Schema.UnknownFromJsonString
 
 const escape = String.fromCharCode(27)
 const bell = String.fromCharCode(7)
+const osc52Pattern = new RegExp(`${escape}\\]52;[^;]*;([^${bell}${escape}]*)?(?:${bell}|${escape}\\\\)`, "g")
 const stripTerminalControl = (text: string) =>
   text
     .replaceAll(new RegExp(`${escape}\\][^${bell}]*(?:${bell}|${escape}\\\\)`, "g"), "")
@@ -204,9 +205,14 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       fs.readFileString(`${state}/diagnostics/${name}`).pipe(Effect.map((contents) => [name, contents] as const)),
   )
   const diagnostics = logs.map(([name, contents]) => `${name}\n${contents}`).join("\n")
+  const rawOutput = Buffer.from(result.output, "base64").toString("utf8")
   const completed = {
     ...result,
-    output: stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8")),
+    rawOutput,
+    output: stripTerminalControl(rawOutput),
+    clipboard: Array.from(rawOutput.matchAll(osc52Pattern), (match) =>
+      Buffer.from(match[1] ?? "", "base64").toString("utf8"),
+    ),
     clientLogs: logs
       .filter(([name]) => name.startsWith("client-"))
       .map(([, contents]) => contents)
