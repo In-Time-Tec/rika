@@ -168,7 +168,7 @@ export const runSignaled = Effect.fn("E2eProcess.runSignaled")(function* (
         }),
       )
       yield* Effect.sleep(delay)
-      return yield* handle.kill({ killSignal: signal }).pipe(
+      yield* handle.kill({ killSignal: signal }).pipe(
         Effect.timeoutOrElse({
           duration: timeout,
           orElse: () =>
@@ -184,6 +184,7 @@ export const runSignaled = Effect.fn("E2eProcess.runSignaled")(function* (
               ),
         }),
       )
+      return yield* handle.exitCode
     }),
   ).pipe(
     Effect.mapError((cause) =>

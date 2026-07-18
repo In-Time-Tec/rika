@@ -48,10 +48,10 @@ const failsWithoutDispatch = (argv: ReadonlyArray<string>) =>
     expect(yield* Ref.get(calls)).toEqual([])
   })
 
-it("parses JSONL prompt input and identifies malformed lines", () => {
-  expect(parseJsonLines('"one"\n{"prompt":"two"}\n')).toEqual(["one", "two"])
-  expect(() => parseJsonLines('"one"\nnot-json\n')).toThrow("Invalid JSON on stdin line 2")
-  expect(() => parseJsonLines("42")).toThrow("must be a string or prompt object")
+it("parses JSONL prompt input and reports malformed physical source lines", () => {
+  expect(parseJsonLines('\n"one"\n  \n{"prompt":"two"}\n')).toEqual(["one", "two"])
+  expect(() => parseJsonLines('\n"one"\n  \nnot-json\n')).toThrow("Invalid JSON on stdin line 4")
+  expect(() => parseJsonLines("\n\n42")).toThrow("JSON on stdin line 3 must be a string or prompt object")
 })
 
 const streamInput = (prompt: ReadonlyArray<string> = []) => ({

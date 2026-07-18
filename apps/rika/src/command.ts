@@ -65,22 +65,20 @@ const validateRunInput = (input: RunOperation) => {
 }
 
 export const parseJsonLines = (input: string): ReadonlyArray<string> =>
-  input
-    .split("\n")
-    .filter((line) => line.trim().length > 0)
-    .map((line, index) => {
-      const decoded = Schema.decodeUnknownOption(JsonLine)(line)
-      if (Option.isNone(decoded)) {
-        throw Operation.InvalidInput.make({ message: `Invalid JSON on stdin line ${index + 1}` })
-      }
-      const value = decoded.value
-      if (typeof value === "string") return value
-      if (typeof value === "object" && value !== null && "prompt" in value && typeof value.prompt === "string")
-        return value.prompt
-      throw Operation.InvalidInput.make({
-        message: `JSON on stdin line ${index + 1} must be a string or prompt object`,
-      })
+  input.split("\n").flatMap((line, index) => {
+    if (line.trim().length === 0) return []
+    const decoded = Schema.decodeUnknownOption(JsonLine)(line)
+    if (Option.isNone(decoded)) {
+      throw Operation.InvalidInput.make({ message: `Invalid JSON on stdin line ${index + 1}` })
+    }
+    const value = decoded.value
+    if (typeof value === "string") return [value]
+    if (typeof value === "object" && value !== null && "prompt" in value && typeof value.prompt === "string")
+      return [value.prompt]
+    throw Operation.InvalidInput.make({
+      message: `JSON on stdin line ${index + 1} must be a string or prompt object`,
     })
+  })
 
 export function readStreamInput(
   stdin: AsyncIterable<unknown>,
