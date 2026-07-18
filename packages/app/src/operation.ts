@@ -2895,14 +2895,19 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             const program = Effect.gen(function* () {
               const tools = yield* ToolRuntime.Service
               const agents = yield* ProductAgent.Service
+              if (input.staged && input.base !== undefined)
+                return yield* operationError("Review cannot combine --staged with --base")
+              if (input.base !== undefined && (input.base.length === 0 || input.base.startsWith("-")))
+                return yield* operationError("Review --base must name a Git revision")
               const args = ["diff", "--no-ext-diff", "--no-color"]
               if (input.staged) args.push("--cached")
-              else if (input.base !== undefined) args.push(`${input.base}...HEAD`)
+              else if (input.base !== undefined) args.push("--end-of-options", `${input.base}...HEAD`)
               if (input.paths.length > 0) args.push("--", ...input.paths)
               const diffResult = yield* tools.run({ _tag: "Shell", command: "git", args, waitMillis: 120_000 })
               if (diffResult.exitCode === undefined)
                 return yield* operationError("Git diff did not finish before the review timeout")
               if (diffResult.exitCode !== 0) return yield* operationError(diffResult.text || "Git diff failed")
+              if (diffResult.truncated) return yield* operationError("Git diff exceeded the review output limit")
               const diff = diffResult.text.trim()
               if (diff.length === 0) {
                 yield* Console.log(

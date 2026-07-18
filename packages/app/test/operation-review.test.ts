@@ -111,7 +111,7 @@ describe("Operation review dispatcher", () => {
       }).pipe(provideLayer(layer(tool)))
       expect(yield* Ref.get(requests)).toMatchObject([
         { command: "git", args: ["diff", "--no-ext-diff", "--no-color", "--cached", "--", "src"] },
-        { command: "git", args: ["diff", "--no-ext-diff", "--no-color", "main...HEAD"] },
+        { command: "git", args: ["diff", "--no-ext-diff", "--no-color", "--end-of-options", "main...HEAD"] },
       ])
       expect(output).toEqual(["No changes to review.", '{"status":"no-changes","findings":[]}'])
     }),
@@ -148,6 +148,7 @@ describe("Operation review dispatcher", () => {
         { text: "", truncated: false },
         { text: "fatal diff", truncated: false, exitCode: 2 },
         { text: "", truncated: false, exitCode: 1 },
+        { text: "partial diff", truncated: true, exitCode: 0 },
       ]) {
         const tool = ToolRuntime.Service.of({ run: () => Effect.succeed(result) })
         const error = yield* Effect.gen(function* () {
@@ -156,6 +157,27 @@ describe("Operation review dispatcher", () => {
         }).pipe(provideLayer(layer(tool)))
         expect(error.operation).toBe("Review")
       }
+    }),
+  )
+
+  it.effect("rejects conflicting and option-shaped selectors before running Git", () =>
+    Effect.gen(function* () {
+      const requests = yield* Ref.make<ReadonlyArray<ToolRuntime.Request>>([])
+      const tool = ToolRuntime.Service.of({
+        run: (request) =>
+          Ref.update(requests, (all) => [...all, request]).pipe(Effect.as({ text: "", truncated: false, exitCode: 0 })),
+      })
+      const errors = yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        return yield* Effect.forEach(
+          [input({ staged: true, base: "main" }), input({ base: "--output=/tmp/review" })],
+          (review) => Effect.flip(operation.run(review)),
+        )
+      }).pipe(provideLayer(layer(tool)))
+      expect(errors[0]?.message).toContain("--staged")
+      expect(errors[0]?.message).toContain("--base")
+      expect(errors[1]?.message).toContain("Git revision")
+      expect(yield* Ref.get(requests)).toEqual([])
     }),
   )
 

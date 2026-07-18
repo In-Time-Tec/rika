@@ -244,7 +244,7 @@ describe("Runtime", () => {
       expect(environment.commands.map(({ command, args, options }) => ({ command, args, cwd: options.cwd }))).toEqual([
         { command: "ok", args: ["one"], cwd: workspace },
         { command: "bad", args: [], cwd: workspace },
-        { command: "git", args: ["status", "--short", "--branch"], cwd: workspace },
+        { command: "git", args: ["--no-optional-locks", "status", "--short", "--branch"], cwd: workspace },
         { command: "large", args: [], cwd: workspace },
         { command: "running", args: [], cwd: workspace },
         { command: "stream-failure", args: [], cwd: workspace },

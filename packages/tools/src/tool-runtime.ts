@@ -337,7 +337,7 @@ export const layer = (workspace: string) =>
         return yield* Effect.scoped(
           Effect.gen(function* () {
             const handle = yield* spawner.spawn(
-              ChildProcess.make("git", ["status", "--short", "--branch"], { cwd: workspace }),
+              ChildProcess.make("git", ["--no-optional-locks", "status", "--short", "--branch"], { cwd: workspace }),
             )
             const [stdout, stderr, exitCode] = yield* Effect.all(
               [

@@ -78,7 +78,10 @@ const definitions = {
 
 const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   const definition = definitions[name]
-  const toolkit = Toolkit.make(...definition.tools, ...Object.values(AgentTools.runtimeToolkit.tools))
+  const toolkit = Toolkit.make(
+    ...definition.tools,
+    ...(name === "Review" ? [] : Object.values(AgentTools.runtimeToolkit.tools)),
+  )
   const relayModel = {
     provider: model.provider,
     model: model.model,

@@ -38,6 +38,8 @@ describe("product agent profiles", () => {
       }
     }
     expect(registered.Task?.tool_names).toContain("edit_file")
+    expect(registered.Review?.tool_names).toEqual(["grep", "read_file", "git_status"])
+    expect(registered.Review?.permissions).toEqual(["workspace.read"])
   })
 
   it("supports data-first and data-last preset model overrides", () => {
