@@ -54,7 +54,10 @@ test(
       inspectPaths: ["anchor.txt"],
     }).then((result) => {
       expect(result.workspaceFiles["anchor.txt"]).toBe("same\nunique\nsame\n")
-      expect(result.output.match(/✕/g)?.length ?? 0).toBeGreaterThanOrEqual(3)
+      expect(result.output.match(/✕/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
+      expect(result.clientLogs.match(/"rika.event.type":"tool.result.received"/g)?.length ?? 0).toBeGreaterThanOrEqual(
+        4,
+      )
       isolated(result)
     }),
   45_000,

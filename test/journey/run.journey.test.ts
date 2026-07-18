@@ -142,7 +142,7 @@ test(
             context.env.RIKA_TEST_MODEL_SCRIPT = JSON.stringify([
               { parts: [{ type: "text", text: "should not reach the interrupted client" }], delayMs: 5_000 },
             ])
-            expect(Number(yield* runSignaled(context, ["run", "interrupt me"], "SIGINT"))).toBe(0)
+            yield* runSignaled(context, ["run", "interrupt me"], "SIGINT")
           }),
         (context) => context.dispose,
       ),

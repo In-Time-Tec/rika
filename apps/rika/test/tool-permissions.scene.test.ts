@@ -156,7 +156,7 @@ test("read-only specialists cannot acquire shell by asking or by naming it direc
     ],
     actions: [
       Scene.action.writeAfter("Welcome to Rika", "Ask Oracle to try shell.\r"),
-      Scene.action.writeAfter("Oracle has spoken", "\u0003", 500),
+      Scene.action.writeWhenTurnStatus("Ask Oracle to try shell.", "completed", "\u0003", 500),
     ],
   }).then((result) => {
     expect(result.workspaceContents).not.toHaveProperty("specialist-bypass.txt")

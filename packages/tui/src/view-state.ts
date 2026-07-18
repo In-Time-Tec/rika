@@ -1693,6 +1693,7 @@ export const update: {
         return continueShortcutsAfterEdit(model, next)
       }
       if (model.modePicker.open) {
+        if (key.name === "escape") return { ...model, modePicker: { ...model.modePicker, open: false } }
         const selected =
           key.name === "left" || key.name === "up"
             ? (model.modePicker.selected + 3) % 4

@@ -8,7 +8,7 @@ test(
       script: [Scene.model.text("RECOVERED_AFTER_RESTART", 1_000)],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "RECOVERY_PROMPT\r"),
-        Scene.action.restartAfter("RECOVERY_PROMPT", "threads", "continue", "--last"),
+        Scene.action.restartWhenTurn("RECOVERY_PROMPT", "running", "threads", "continue", "--last"),
         Scene.action.writeAfter("RECOVERED_AFTER_RESTART", "\u0003", 100),
       ],
     }).then((result) => {

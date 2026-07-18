@@ -403,7 +403,7 @@ describe("interactive session extensions", () => {
         )
           yield* Effect.yieldNow
 
-        expect(yield* Ref.get(followed)).toEqual([childId, nestedId])
+        expect(yield* Ref.get(followed)).toEqual([childId, `execution:${nestedId}`])
         const patches = events.filter((event) => event._tag === "TranscriptPatched")
         expect(patches.map((event) => [event.turnId, event.event.cursor])).toEqual([
           ["parent-turn", "parent-tool"],
@@ -516,7 +516,7 @@ describe("interactive session extensions", () => {
               pendingTools: [],
               children: turnId.includes(":child:")
                 ? []
-                : [{ executionId: `${turnId}:child:worker`, status: "running" as const }],
+                : [{ executionId: `execution:${turnId}:child:worker`, status: "running" as const }],
             }),
           cancel: (turnId) =>
             Ref.update(cancelled, (values) => [...values, turnId]).pipe(
@@ -543,20 +543,20 @@ describe("interactive session extensions", () => {
         yield* session.selectThread(first.id, 1)
 
         yield* session.submit("cancelled")
-        expect(yield* Queue.take(followed)).toBe("turn-1:child:worker")
+        expect(yield* Queue.take(followed)).toBe("execution:turn-1:child:worker")
         yield* session.cancel
-        expect(yield* Queue.take(stopped)).toBe("turn-1:child:worker")
-        expect(new Set(yield* Ref.get(cancelled))).toEqual(new Set(["turn-1:child:worker", "turn-1"]))
+        expect(yield* Queue.take(stopped)).toBe("execution:turn-1:child:worker")
+        expect(new Set(yield* Ref.get(cancelled))).toEqual(new Set(["turn-1", "execution:turn-1:child:worker"]))
 
         yield* session.submit("selected away")
-        expect(yield* Queue.take(followed)).toBe("turn-2:child:worker")
+        expect(yield* Queue.take(followed)).toBe("execution:turn-2:child:worker")
         yield* session.selectThread(second.id, 2)
-        expect(yield* Queue.take(stopped)).toBe("turn-2:child:worker")
+        expect(yield* Queue.take(stopped)).toBe("execution:turn-2:child:worker")
 
         yield* session.submit("closed")
-        expect(yield* Queue.take(followed)).toBe("turn-3:child:worker")
+        expect(yield* Queue.take(followed)).toBe("execution:turn-3:child:worker")
         yield* Fiber.interrupt(operationFiber)
-        expect(yield* Queue.take(stopped)).toBe("turn-3:child:worker")
+        expect(yield* Queue.take(stopped)).toBe("execution:turn-3:child:worker")
         yield* Fiber.interrupt(feed)
       }),
     ),

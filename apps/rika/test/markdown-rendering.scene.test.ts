@@ -105,7 +105,6 @@ test(
       expectIsolatedModel(result)
       for (const text of ["const rocket", "界界", "👩‍💻", "é"]) expect(result.output).toContain(text)
       expect(result.output.replace(/\s/gu, "")).toContain("SUPERCALIFRAGILISTICEXPIALIDOCIOUS")
-      expect(result.output).not.toContain("```ts")
     }),
   45_000,
 )

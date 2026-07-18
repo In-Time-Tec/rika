@@ -14,7 +14,7 @@ test(
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Check the configured shell permission.\r"),
         Scene.action.writeAfter("shell [pending]", "\r"),
-        Scene.action.writeAfter("Configured shell completed.", "\u0003\u0003", 100),
+        Scene.action.writeWhenTurnStatus("Check the configured shell permission.", "completed", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("shell [pending]")

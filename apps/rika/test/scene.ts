@@ -36,6 +36,8 @@ type Action = {
   readonly queueCount?: number
   readonly queuePrompt?: string
   readonly queueRevision?: number
+  readonly turnPrompt?: string
+  readonly turnStatus?: string
   readonly visible?: boolean
 }
 
@@ -71,7 +73,7 @@ interface Options {
   readonly inspectPaths?: ReadonlyArray<string>
   readonly outsideFiles?: Readonly<Record<string, string>>
   readonly symlinks?: ReadonlyArray<SceneSymlink>
-  readonly environment?: Readonly<Record<string, string>>
+  readonly environment?: Readonly<Record<string, string | null>>
   readonly executable?: SceneExecutable
 }
 
@@ -111,6 +113,8 @@ const PtyAction = Schema.Struct({
   queueCount: Schema.optionalKey(Schema.Int),
   queuePrompt: Schema.optionalKey(Schema.String),
   queueRevision: Schema.optionalKey(Schema.Int),
+  turnPrompt: Schema.optionalKey(Schema.String),
+  turnStatus: Schema.optionalKey(Schema.String),
   visible: Schema.optionalKey(Schema.Boolean),
 })
 const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
@@ -226,7 +230,9 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
     RIKA_DATABASE: `${state}/rika.db`,
     RIKA_RELAY_DATABASE: `${state}/relay.db`,
     RIKA_INTERNAL_RESIDENT_STARTUP_HOLD: "0",
-    ...(options.editorContent === undefined ? {} : { EDITOR: editor, RIKA_TEST_EDITOR_CONTENT: options.editorContent }),
+    ...(options.editorContent === undefined
+      ? {}
+      : { EDITOR: editor, VISUAL: editor, RIKA_TEST_EDITOR_CONTENT: options.editorContent }),
     ...(options.mediaAnalyzer === undefined
       ? {}
       : "response" in options.mediaAnalyzer
@@ -239,7 +245,7 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
   }
   const residentEnvironment = Object.fromEntries(
     Object.entries(processEnvironment).flatMap(([name, value]) =>
-      value === undefined ? [] : [[name, String(value)] as const],
+      value === undefined || value === null ? [] : [[name, String(value)] as const],
     ),
   )
   const resident = yield* spawner.spawn(
@@ -512,6 +518,12 @@ export const Scene = {
       queuePrompt,
       queueRevision,
     }),
+    writeWhenTurnStatus: (turnPrompt: string, turnStatus: string, write: string, delayMs?: number): Action => ({
+      turnPrompt,
+      turnStatus,
+      write,
+      ...(delayMs === undefined ? {} : { delayMs }),
+    }),
     writeAfterVisibleWhenQueued: (after: string, queueCount: number, write: string): Action => ({
       after,
       write,
@@ -528,6 +540,11 @@ export const Scene = {
     restartAfter: (after: string, ...restartArguments: ReadonlyArray<string>): Action => ({
       after,
       write: "",
+      restartArguments,
+    }),
+    restartWhenTurn: (turnPrompt: string, turnStatus: string, ...restartArguments: ReadonlyArray<string>): Action => ({
+      turnPrompt,
+      turnStatus,
       restartArguments,
     }),
     reconnectAfter: (after: string, write = ""): Action => ({

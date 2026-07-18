@@ -385,22 +385,40 @@ const validateKnown = (state: Effect.Success<ReturnType<typeof inspectDatabase>>
 
 const inspectExisting = (filename: string) =>
   Effect.gen(function* () {
-    const outcome = yield* Effect.exit(
-      Effect.scoped(
+    const inspect = (candidate: string) =>
+      Effect.exit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const context = yield* Layer.build(
+              SqliteClient.layer({
+                filename: candidate,
+                readonly: true,
+                readwrite: false,
+                create: false,
+                disableWAL: true,
+              }),
+            )
+            return yield* inspectDatabase().pipe(Effect.provide(context))
+          }),
+        ),
+      )
+    const initial = yield* inspect(filename)
+    const outcome = yield* Exit.match(initial, {
+      onSuccess: (value) => Effect.succeed(Exit.succeed(value)),
+      onFailure: () =>
         Effect.gen(function* () {
-          const context = yield* Layer.build(
-            SqliteClient.layer({
-              filename,
-              readonly: true,
-              readwrite: false,
-              create: false,
-              disableWAL: true,
-            }),
-          )
-          return yield* inspectDatabase().pipe(Effect.provide(context))
+          const fileSystem = yield* FileSystem.FileSystem
+          if (yield* fileSystem.exists(`${filename}-wal`)) return initial
+          const path = yield* Path.Path
+          const fileUrl = yield* path
+            .toFileUrl(filename)
+            .pipe(
+              Effect.mapError((error) => fail(`Could not resolve the Rika product database path: ${String(error)}`)),
+            )
+          fileUrl.searchParams.set("immutable", "1")
+          return yield* inspect(fileUrl.href)
         }),
-      ),
-    )
+    })
     if (Exit.isFailure(outcome))
       return yield* fail(
         `Could not open the Rika product database without changing it: ${Cause.pretty(outcome.cause)}. Use a fresh Rika data root.`,

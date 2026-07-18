@@ -19,7 +19,11 @@ test(
   "wraps the mode picker, applies its choice, separates fast mode, and preserves current and queued route pins across restart",
   () =>
     Scene.run({
-      script: [Scene.model.text("CURRENT_ROUTE_COMPLETE", 3_000), Scene.model.text("QUEUED_ROUTE_COMPLETE")],
+      script: [
+        Scene.model.text("CURRENT_ROUTE_COMPLETE", 3_000),
+        Scene.model.text("Current route title"),
+        Scene.model.text("QUEUED_ROUTE_COMPLETE"),
+      ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "\u0013"),
         Scene.action.writeAfter("Balanced intelligence", "\u001b[D"),
@@ -30,8 +34,8 @@ test(
         Scene.action.writeAfter("CURRENT_HIGH_NORMAL", "\u000f", 100),
         Scene.action.writeAfter("Command Palette", "fast"),
         Scene.action.writeAfter("toggle fast mode", "\rQUEUED_HIGH_FAST\r", 100),
-        Scene.action.restartAfter("QUEUED_HIGH_FAST", "threads", "continue", "--last"),
-        Scene.action.writeAfter("CURRENT_ROUTE_COMPLETE", "\u0003", 5_000),
+        Scene.action.restartWhenTurn("QUEUED_HIGH_FAST", "queued", "threads", "continue", "--last"),
+        Scene.action.writeWhenTurnStatus("QUEUED_HIGH_FAST", "completed", "\u0003", 500),
       ],
     }).then((result) => {
       expect(result.output).toContain("The most capable mode for hard")
@@ -70,11 +74,11 @@ test(
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "\u0013"),
         Scene.action.writeAfter("Balanced intelligence", "\u001b[D"),
-        Scene.action.writeAfter("Fast, low-cost", "\u000f"),
+        Scene.action.writeAfterDelay("\u001b\0\u000f", 300),
         Scene.action.writeAfter("Command Palette", "fast"),
-        Scene.action.writeAfter("toggle fast mode", "\r\u000f"),
-        Scene.action.writeAfter("Command Palette", "fast"),
-        Scene.action.writeAfter("toggle fast mode", "\rESCAPED_PICKER_SUBMISSION\r"),
+        Scene.action.writeAfter("toggle fast mode", "\r\0\u000f"),
+        Scene.action.writeAfterDelay("fast", 300),
+        Scene.action.writeAfterDelay("\rESCAPED_PICKER_SUBMISSION\r", 300),
         Scene.action.writeAfter("ESCAPED_PICKER_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {

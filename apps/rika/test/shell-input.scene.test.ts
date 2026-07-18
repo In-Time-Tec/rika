@@ -12,7 +12,6 @@ test(
         Scene.action.writeAfter("$   ", "\u0015$   printf whitespace-$((20+1))\r"),
         Scene.action.writeAfter("whitespace-21", "\u001b[A"),
         Scene.action.writeAfter("$   printf whitespace-$((20+1))", "\u0003"),
-        Scene.action.writeAfter("⊘", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("whitespace-21")
@@ -29,7 +28,6 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "$ printf recorded-$((20+2))\r"),
         Scene.action.writeAfter("recorded-22", "\u001b[A"),
         Scene.action.writeAfter("$ printf recorded-$((20+2))", "\u0003"),
-        Scene.action.writeAfter("⊘", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("recorded-22")
@@ -46,7 +44,6 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "$$   printf incognito-$((20+3))\r"),
         Scene.action.writeAfter("incognito-23", "\u001b[A"),
         Scene.action.writeAfter("$$   printf incognito-$((20+3))", "\u0003"),
-        Scene.action.writeAfter("⊘", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("incognito-23")
@@ -64,10 +61,9 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "$ printf allowed-$((20+1))\r"),
         Scene.action.writeAfter("Run shell command", "\r"),
         Scene.action.writeAfter("allowed-21", "$ printf always-$((20+2))\r"),
-        Scene.action.writeAfter("Run shell command", "\u001b[C\r"),
+        Scene.action.writeAfter("Run shell command", "\u001b[C\r", 300),
         Scene.action.writeAfter("always-22", "$ printf remembered-$((20+3))\r"),
         Scene.action.writeAfter("remembered-23", "\u0003"),
-        Scene.action.writeAfter("⊘", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("Allow once")

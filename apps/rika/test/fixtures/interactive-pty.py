@@ -53,29 +53,35 @@ def restart(arguments):
     return child, next_master
 
 def children(parent):
-    matches = []
-    processes = subprocess.run(
+    process_table = subprocess.run(
         ["ps", "-axo", "pid=,ppid="],
-        capture_output=True,
         check=True,
+        capture_output=True,
         text=True,
-    )
-    for entry in processes.stdout.splitlines():
-        fields = entry.split()
+    ).stdout.splitlines()
+    children_by_parent = {}
+    for row in process_table:
+        fields = row.split()
         if len(fields) != 2:
             continue
         try:
-            child, child_parent = map(int, fields)
-            if child_parent == parent:
-                matches.append(child)
+            child, direct_parent = map(int, fields)
         except ValueError:
-            pass
-    return matches
+            continue
+        children_by_parent.setdefault(direct_parent, []).append(child)
+    descendants = []
+    pending = list(children_by_parent.get(parent, []))
+    while pending:
+        child = pending.pop()
+        descendants.append(child)
+        pending.extend(children_by_parent.get(child, []))
+    return descendants
 
 output = bytearray()
 action_index = 0
 action_offset = 0
 running_checks = []
+replaced_descendants = []
 status = None
 timed_out = False
 deadline = time.monotonic() + 30
@@ -94,6 +100,17 @@ def queue_revision(prompt):
         with sqlite3.connect(f"file:{environment['RIKA_DATABASE']}?mode=ro", uri=True, timeout=0) as database:
             row = database.execute(
                 "SELECT queue.revision FROM rika_thread_queue_state queue JOIN rika_turns turn ON turn.thread_id = queue.thread_id WHERE turn.status = 'queued' AND turn.prompt = ?",
+                (prompt,),
+            ).fetchone()
+            return row[0] if row else None
+    except (KeyError, sqlite3.Error):
+        return None
+
+def turn_status(prompt):
+    try:
+        with sqlite3.connect(f"file:{environment['RIKA_DATABASE']}?mode=ro", uri=True, timeout=0) as database:
+            row = database.execute(
+                "SELECT status FROM rika_turns WHERE prompt = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 (prompt,),
             ).fetchone()
             return row[0] if row else None
@@ -123,6 +140,8 @@ while time.monotonic() < deadline:
         if "queueCount" in action and queued_count() != action["queueCount"]:
             break
         if "queueRevision" in action and queue_revision(action["queuePrompt"]) != action["queueRevision"]:
+            break
+        if "turnStatus" in action and turn_status(action["turnPrompt"]) != action["turnStatus"]:
             break
         child_status = action.get("childStatus")
         if child_status is not None:
@@ -175,8 +194,7 @@ while time.monotonic() < deadline:
                     os.write(master, fragment.encode())
                     time.sleep(0.01)
         else:
-            for child in children(pid):
-                os.kill(child, signal.SIGKILL)
+            replaced_descendants.extend(children(pid))
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
             os.close(master)
@@ -209,6 +227,12 @@ if status is None:
     except ProcessLookupError:
         pass
     _, status = os.waitpid(pid, 0)
+
+for child in replaced_descendants:
+    try:
+        os.kill(child, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
 
 while True:
     ready, _, _ = select.select([master], [], [], 0)

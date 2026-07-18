@@ -84,6 +84,7 @@ const program = Effect.gen(function* () {
     "index:rika_transcript_units_page",
     "index:rika_transcript_units_turn",
     "index:rika_turns_queue",
+    "index:rika_turns_queue_claim",
     "index:rika_turns_thread",
     "table:rika_migrations",
     "table:rika_thread_queue_state",

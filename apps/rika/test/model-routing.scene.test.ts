@@ -8,7 +8,7 @@ test(
       script: [Scene.model.text("Routing scene completed.", 1_000), Scene.model.text("Routing Restart Proof")],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Prove the admitted model routes.\r"),
-        Scene.action.restartAfter("Prove the admitted model routes.", "threads", "continue", "--last"),
+        Scene.action.restartWhenTurn("Prove the admitted model routes.", "running", "threads", "continue", "--last"),
         Scene.action.writeAfter("Routing scene completed.", "\u0003", 100),
       ],
     }).then((result) => {

@@ -12,7 +12,7 @@ test(
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "\u000f"),
         Scene.action.writeAfter("New thread", "\r"),
-        Scene.action.writeAfter("Loading Thread", "Build automatic thread titles.\r"),
+        Scene.action.writeAfterDelay("Build automatic thread titles.\r", 500),
         Scene.action.writeAfter("FIRST_TURN_DONE", "\u0014", 500),
         Scene.action.writeAfter("Focused Thread Titles", "\u0003"),
       ],
@@ -32,7 +32,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "Investigate concurrent title delivery.\r"),
         Scene.action.writeAfter("SWITCH_READY", "\u000f"),
         Scene.action.writeAfter("New thread", "\r"),
-        Scene.action.writeAfter("Loading Thread", "\u0014", 1_000),
+        Scene.action.writeAfterDelay("\u0014", 1_000),
         Scene.action.writeAfter("Concurrent Sanitized Title", "\u0003", 500),
       ],
     }).then((result) => {

@@ -140,6 +140,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly compaction?: Compaction.DefaultOptions
   readonly oracleCompaction?: Compaction.DefaultOptions
   readonly permissionPolicy?: Permissions.Ruleset
+  readonly permissionPolicyForExecution?: (executionId: string) => Effect.Effect<Permissions.Ruleset, BackendError>
   readonly additionalToolkit?: Toolkit.Toolkit<AdditionalTools>
   readonly additionalHandlerLayer?: Layer.Layer<Tool.HandlersFor<AdditionalTools>, BackendError, never>
   readonly toolRuntimeLayer?: Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
@@ -887,6 +888,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     | "compaction"
     | "oracleCompaction"
     | "permissionPolicy"
+    | "permissionPolicyForExecution"
     | "defaultReasoningEffort"
     | "modelVariantPolicy"
   > & {
@@ -899,6 +901,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     Effect.gen(function* () {
       const client = yield* Client.Service
       if (options.onClientReady !== undefined) yield* options.onClientReady(client)
+      const permissionPolicyFor = (execution: string) =>
+        options.permissionPolicyForExecution === undefined
+          ? Effect.succeed(options.permissionPolicy)
+          : options
+              .permissionPolicyForExecution(execution)
+              .pipe(Effect.map((policy) => policy as Permissions.Ruleset | undefined))
       const registry =
         Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
       const hostInstances = new Map<string, Entity.Instance>()
@@ -1234,6 +1242,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             return yield* Effect.gen(function* () {
               const startedAt = yield* Clock.currentTimeMillis
               const id = executionId(input.turnId)
+              const permissionPolicy = yield* permissionPolicyFor(String(id))
               const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(input.executionRoute)
               const metadata = {
                 steering_enabled: true,
@@ -1328,7 +1337,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   toolExecution: { concurrency: 4 },
                 }),
                 permissions: parentPermissions,
-                ...(options.permissionPolicy === undefined ? {} : { permission_rules: options.permissionPolicy }),
+                ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
                 metadata,
                 ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
                 child_run_presets: childRunPresets,

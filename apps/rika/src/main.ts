@@ -1018,6 +1018,7 @@ export interface ConfiguredBackendOptions {
     ExecutionBackend.BackendError
   >
   readonly shellPermission?: ConfigContract.PermissionDecision
+  readonly globalSettings?: ConfigContract.SettingsInput
 }
 
 export const configuredBackendLayer = ({
@@ -1030,6 +1031,7 @@ export const configuredBackendLayer = ({
   parallelApiKey,
   resolveLegacyRoute,
   shellPermission,
+  globalSettings = {},
 }: ConfiguredBackendOptions) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -1208,6 +1210,30 @@ export const configuredBackendLayer = ({
             ),
           resolveWorkspace: (durableExecutionId) =>
             resolveExecutionWorkspace(durableExecutionId, workspace, repositoryLayer, turnRepositoryLayer),
+          permissionPolicyForExecution: (durableExecutionId) =>
+            Effect.gen(function* () {
+              const executionWorkspace = yield* resolveExecutionWorkspace(
+                durableExecutionId,
+                workspace,
+                repositoryLayer,
+                turnRepositoryLayer,
+              )
+              const settings = yield* loadSettingsFile(`${executionWorkspace}/.rika/settings.json`)
+              const layer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings })
+              const config = yield* ConfigService.effective().pipe(provideLayerScoped(layer))
+              return {
+                rules: [
+                  { pattern: "*", level: "allow" as const },
+                  {
+                    pattern: "shell",
+                    level: config.settings.permissions.shell ?? ConfigContract.defaults.permissions.shell!,
+                  },
+                ],
+              }
+            }).pipe(
+              provideLayerScoped(BunServices.layer),
+              Effect.mapError((error) => ExecutionBackend.BackendError.make({ message: String(error) })),
+            ),
           ...(testApprovalTools._tag === "Some" && (testScript._tag === "Some" || testResponse._tag === "Some")
             ? { toolNeedsApproval: (name: string) => testApprovalTools.value.split(",").includes(name) }
             : {}),
@@ -2103,6 +2129,7 @@ if (import.meta.main) {
                   stdin: "inherit",
                   stdout: "inherit",
                   stderr: "inherit",
+                  detached: false,
                 }).pipe(Effect.ensuring(Effect.sync(resumeTerminal)))
                 const edited = yield* fileSystem.readFileString(file)
                 yield* rm(file, { force: true })
@@ -2143,6 +2170,7 @@ if (import.meta.main) {
                         stdin: "inherit",
                         stdout: "inherit",
                         stderr: "inherit",
+                        detached: false,
                       },
                     ).pipe(
                       Effect.orElseSucceed(() => -1),
@@ -2597,6 +2625,7 @@ if (import.meta.main) {
           ...(effectiveConfig.settings.permissions.shell === undefined
             ? {}
             : { shellPermission: effectiveConfig.settings.permissions.shell }),
+          globalSettings,
         }).pipe(
           Layer.provide(Layer.succeedContext(providerRuntimeContext)),
           Layer.provide(BunServices.layer),

@@ -128,7 +128,7 @@ describe("packaged CLI contract", () => {
 
           const pathResult = yield* run(diagnosticContext, ["diagnostics", "path"])
           expect(pathResult.exitCode).toBe(0)
-          expect(pathResult.stdout).toBe(diagnostic)
+          expect(yield* fileSystem.realPath(pathResult.stdout)).toBe(yield* fileSystem.realPath(diagnostic))
           const status = yield* run(diagnosticContext, ["diagnostics", "status"])
           expect(status.exitCode).toBe(0)
           expect(status.stdout).toContain("1 log file")
@@ -239,9 +239,10 @@ describe("packaged CLI contract", () => {
           yield* fileSystem.writeFileString(`${workspaceDirectory}/settings.json`, "{}")
           expect((yield* run(isolated, ["config", "edit"])).exitCode).toBe(0)
           expect((yield* run(isolated, ["config", "edit", "--workspace"])).exitCode).toBe(0)
+          const workspaceSettings = yield* fileSystem.realPath(`${workspaceDirectory}/settings.json`)
           expect((yield* fileSystem.readFileString(capturePath)).trim().split("\n")).toEqual([
             `${globalDirectory}/settings.json`,
-            `${workspaceDirectory}/settings.json`,
+            workspaceSettings,
           ])
           yield* isolated.dispose
         }),

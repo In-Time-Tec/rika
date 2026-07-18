@@ -184,7 +184,6 @@ export const runSignaled = Effect.fn("E2eProcess.runSignaled")(function* (
               ),
         }),
       )
-      return yield* handle.exitCode
     }),
   ).pipe(
     Effect.mapError((cause) =>

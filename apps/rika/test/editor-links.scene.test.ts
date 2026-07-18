@@ -5,22 +5,20 @@ const readTargetScript = (path: string) =>
   [
     Scene.model.turn([Scene.model.toolCall("read_file", { path, offset: 2, limit: 1 }, `read-${path}`)]),
     Scene.model.text("OPEN TARGET"),
-    Scene.model.text("RESUMED"),
   ] as const
 
 const assertScriptedModel = (diagnostics: string) =>
   expect(diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
 
-const clickTarget = (marker: string, after: string) => [
+const defaultApplication =
+  process.platform === "darwin" ? "open" : process.platform === "win32" ? "powershell.exe" : "xdg-open"
+
+const clickTarget = (after: string) => [
   Scene.action.writeAfter("Welcome to Rika", "Read the target.\r"),
+  Scene.action.clickAfter("TARGET", 17, 23),
   Scene.action.clickRowsAfter(
-    "▸",
-    16,
-    Array.from({ length: 25 }, (_, index) => index + 1),
-  ),
-  Scene.action.clickGridAfter(
-    marker,
-    Array.from({ length: 40 }, (_, index) => index + 1),
+    "Read",
+    11,
     Array.from({ length: 25 }, (_, index) => 25 - index),
   ),
   Scene.action.writeAfter(after, "\u0003", 1_000),
@@ -36,25 +34,20 @@ test(
       script: readTargetScript("target.ts"),
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Read the target.\r"),
+        Scene.action.clickAfter("TARGET", 17, 23),
         Scene.action.clickRowsAfter(
-          "▸",
-          16,
-          Array.from({ length: 25 }, (_, index) => index + 1),
-        ),
-        Scene.action.clickGridAfter(
           "target.ts",
-          Array.from({ length: 40 }, (_, index) => index + 1),
+          11,
           Array.from({ length: 25 }, (_, index) => 25 - index),
         ),
         Scene.action.checkRunningAfter("EDITOR ACTIVE", "x\n"),
-        Scene.action.writeAfter("▸", "Continue.\r", 100),
-        Scene.action.writeAfter("RESUMED", "\u0003\u0003", 300),
+        Scene.action.writeAfter("▸", "\u0003", 1_000),
       ],
     }).then((result) => {
       expect(result.opens).toHaveLength(1)
       expect(result.opens[0]?.[0]).toBe("--goto")
       expect(result.opens[0]?.[1]).toMatch(/\/workspace\/target\.ts:3:1$/)
-      expect(result.output).toContain("RESUMED")
+      expect(result.output).toContain("OPEN TARGET")
       assertScriptedModel(result.diagnostics)
     }),
   35_000,
@@ -72,7 +65,7 @@ for (const [path, label] of [
         executable: { name: "code" },
         environment: { EDITOR: "code" },
         script: readTargetScript(path),
-        actions: clickTarget(path, "Refusing to open a path outside the workspace"),
+        actions: clickTarget("Refusing to open a path outside the workspace"),
       }).then((result) => {
         expect(result.opens).toEqual([])
         expect(result.output).toContain("Refusing to open a path outside the workspace")
@@ -90,7 +83,7 @@ test(
       executable: { name: "code" },
       environment: { EDITOR: "code" },
       script: readTargetScript("outside-link.ts"),
-      actions: clickTarget("outside-link.ts", "Refusing to open a path outside the workspace"),
+      actions: clickTarget("Refusing to open a path outside the workspace"),
     }).then((result) => {
       expect(result.opens).toEqual([])
       assertScriptedModel(result.diagnostics)
@@ -107,7 +100,7 @@ test(
       executable: { name: "code" },
       environment: { EDITOR: "code" },
       script: readTargetScript("inside-link.ts"),
-      actions: clickTarget("inside-link.ts", "Waiting"),
+      actions: clickTarget("▸"),
     }).then((result) => {
       expect(result.opens.length).toBeGreaterThan(0)
       expect(result.opens.every((arguments_) => arguments_[1]?.endsWith("/workspace/inside.ts:3:1") === true)).toBe(
@@ -126,7 +119,7 @@ test(
       executable: { name: "code" },
       environment: { EDITOR: "code" },
       script: readTargetScript("-;$(touch pwned) name.ts"),
-      actions: clickTarget("-;$(touch pwned) name.ts", "Waiting"),
+      actions: clickTarget("▸"),
     }).then((result) => {
       expect(result.output).toContain("-;$(touch pwned) name.ts")
       expect(result.opens.length).toBeGreaterThan(0)
@@ -145,7 +138,7 @@ test(
       workspace: { "target.ts": "one\ntwo\nthree\n" },
       environment: { EDITOR: "missing-editor" },
       script: readTargetScript("target.ts"),
-      actions: clickTarget("target.ts", "Could not open the file in the configured editor"),
+      actions: clickTarget("Could not open the file in the configured editor"),
     }).then((result) => {
       expect(result.opens).toEqual([])
       expect(result.output).toContain("Could not open the file in the configured editor")
@@ -162,7 +155,7 @@ test(
       executable: { name: "code", exitCode: 7 },
       environment: { EDITOR: "code" },
       script: readTargetScript("target.ts"),
-      actions: clickTarget("target.ts", "Could not open the file in the configured editor"),
+      actions: clickTarget("Could not open the file in the configured editor"),
     }).then((result) => {
       expect(result.opens.length).toBeGreaterThan(0)
       expect(result.output).toContain("Could not open the file in the configured editor")
@@ -176,12 +169,15 @@ test(
   () =>
     Scene.run({
       workspace: { "target.ts": "one\ntwo\nthree\n" },
-      executable: { name: "xdg-open" },
+      executable: { name: defaultApplication },
+      environment: { VISUAL: null, EDITOR: null },
       script: readTargetScript("target.ts"),
-      actions: clickTarget("target.ts", "Waiting"),
+      actions: clickTarget("▸"),
     }).then((result) => {
       expect(result.opens.length).toBeGreaterThan(0)
-      expect(result.opens.every((arguments_) => arguments_[0]?.endsWith("/workspace/target.ts") === true)).toBe(true)
+      expect(result.opens.every((arguments_) => arguments_.at(-1)?.endsWith("/workspace/target.ts") === true)).toBe(
+        true,
+      )
       assertScriptedModel(result.diagnostics)
     }),
   35_000,
@@ -192,9 +188,10 @@ test(
   () =>
     Scene.run({
       workspace: { "target.ts": "one\ntwo\nthree\n" },
-      executable: { name: "xdg-open", exitCode: 9 },
+      executable: { name: defaultApplication, exitCode: 9 },
+      environment: { VISUAL: null, EDITOR: null },
       script: readTargetScript("target.ts"),
-      actions: clickTarget("target.ts", "Could not open the file in the default application"),
+      actions: clickTarget("Could not open the file in the default application"),
     }).then((result) => {
       expect(result.opens.length).toBeGreaterThan(0)
       expect(result.output).toContain("Could not open the file in the default application")

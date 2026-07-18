@@ -143,9 +143,9 @@ test("reaches multiline input, help toggle, transcript navigation, and selected-
       Scene.action.writeAfter("KEYS_ACCEPTED", "?"),
       Scene.action.writeAfter("toggle this help", "?"),
       Scene.action.writeAfter("KEYS_ACCEPTED", "\u001c"),
-      Scene.action.writeAfter("KEYS_ACCEPTED", "\u001c"),
-      Scene.action.writeAfter("KEYS_ACCEPTED", "\r"),
-      Scene.action.writeAfter("Loading Thread", "\u0003", 100),
+      Scene.action.writeAfterDelay("\u001c", 300),
+      Scene.action.writeAfterDelay("\r", 300),
+      Scene.action.writeAfterDelay("\u0003", 500),
     ],
   }).then((result) => {
     expect(result.output).toContain("first")

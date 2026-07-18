@@ -22,7 +22,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "Edit file.\r"),
         Scene.action.writeAfter("DONE", "\u000f", 500),
         Scene.action.writeAfter("Command Palette", "new thread\r"),
-        Scene.action.writeAfter("Loading Thread", "\u001c", 500),
+        Scene.action.writeAfterDelay("\u001c", 500),
         Scene.action.writeAfterDelay("\u0014", 500),
         Scene.action.writeAfter("Switch Thread", "\u001b[B\r"),
         Scene.action.writeAfter("DONE", "\u0014"),

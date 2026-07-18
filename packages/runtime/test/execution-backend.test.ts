@@ -912,6 +912,26 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("resolves permission policy from the durable execution", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      const permissionPolicy = { rules: [{ pattern: "shell", level: "deny" as const }] }
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+      }).pipe(
+        provideConfiguredBackend(fixture.implementation, {
+          selection,
+          permissionPolicyForExecution: (executionId) =>
+            executionId === "execution:turn-a"
+              ? Effect.succeed(permissionPolicy)
+              : Effect.fail(ExecutionBackend.BackendError.make({ message: "Unexpected execution" })),
+        }),
+      )
+      expect((yield* Ref.get(fixture.registrations))[0]).toMatchObject({ permission_rules: permissionPolicy })
+    }),
+  )
+
   it.effect.each([
     ["execution.completed", "completed"],
     ["execution.failed", "failed"],
