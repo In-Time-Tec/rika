@@ -61,25 +61,27 @@ const testEnvironment = (
   search: ParallelSearch.Interface["search"] = () =>
     Effect.succeed([{ url: "https://example.com", title: "Example", publishDate: null, excerpts: ["result"] }]),
   read: ReadWebPage.Interface["read"] = () => Effect.succeed("page"),
+  realPaths: ReadonlyMap<string, string> = new Map(),
 ) => {
   const files = new Map([
     ["/workspace/a.txt", "zero\nneedle\nlast"],
     ["/workspace/src/z.ts", "alpha\nalpha2"],
     ["/workspace/src/deep/b.ts", "beta\nneedle"],
     ["/workspace/src/unreadable.ts", "secret"],
+    ["/workspace/.hidden.txt", "hidden needle"],
     ["/workspace/.git/config", "ignored"],
     ["/workspace/node_modules/pkg/index.ts", "ignored"],
     ["/workspace/ambiguous.txt", "same same"],
   ])
   const directories = new Map<string, Array<string>>([
-    ["/workspace", ["src", "a.txt", ".git", "node_modules", "socket", "ambiguous.txt"]],
+    ["/workspace", ["src", "a.txt", ".hidden.txt", ".git", "node_modules", "socket", "ambiguous.txt"]],
     ["/workspace/src", ["z.ts", "deep", "unreadable.ts"]],
     ["/workspace/src/deep", ["b.ts"]],
   ])
   const commands: Array<ChildProcess.StandardCommand> = []
   const killed: Array<string> = []
   const fileSystem = FileSystem.layerNoop({
-    realPath: (path) => Effect.succeed(path),
+    realPath: (path) => Effect.succeed(realPaths.get(path) ?? path),
     readDirectory: (path) => Effect.succeed(directories.get(path) ?? []),
     stat: (path) =>
       Effect.succeed(directories.has(path) ? info("Directory") : files.has(path) ? info("File") : info("Socket")),
@@ -135,7 +137,7 @@ const testEnvironment = (
     Layer.provide(Layer.merge(ParallelSearch.testLayer(search), ReadWebPage.testLayer(read))),
     Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
   )
-  return { files, commands, killed, runtime }
+  return { files, directories, commands, killed, runtime }
 }
 
 describe("Runtime", () => {
@@ -170,24 +172,75 @@ describe("Runtime", () => {
       const literal = yield* runtime.run({ _tag: "Grep", pattern: "needle", regex: false })
       const regex = yield* runtime.run({ _tag: "Grep", pattern: "^alpha", regex: true })
 
-      expect(all.text).toBe("a.txt\nambiguous.txt\nsrc/deep/b.ts\nsrc/unreadable.ts\nsrc/z.ts")
+      expect(all.text).toBe(".hidden.txt\na.txt\nambiguous.txt\nsrc/deep/b.ts\nsrc/unreadable.ts\nsrc/z.ts")
       expect(filtered.text).toBe("src/deep/b.ts\nsrc/unreadable.ts\nsrc/z.ts")
-      expect(literal.text).toBe("a.txt:2:needle\nsrc/deep/b.ts:2:needle")
+      expect(literal.text).toBe(".hidden.txt:1:hidden needle\na.txt:2:needle\nsrc/deep/b.ts:2:needle")
       expect(regex.text).toBe("src/z.ts:1:alpha\nsrc/z.ts:2:alpha2")
     }).pipe(provide(environment.runtime))
   })
 
-  it.effect("reads with default and clamped ranges", () => {
+  it.effect("reads with default and maximum-clamped ranges while rejecting invalid values", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const defaults = yield* runtime.run({ _tag: "ReadFile", path: "a.txt" })
-      const low = yield* runtime.run({ _tag: "ReadFile", path: "a.txt", offset: -4, limit: 0 })
+      const negative = yield* Effect.flip(runtime.run({ _tag: "ReadFile", path: "a.txt", offset: -4 }))
+      const zero = yield* Effect.flip(runtime.run({ _tag: "ReadFile", path: "a.txt", limit: 0 }))
+      const fractional = yield* Effect.flip(runtime.run({ _tag: "ReadFile", path: "a.txt", offset: 0.5 }))
       const high = yield* runtime.run({ _tag: "ReadFile", path: "a.txt", offset: 1, limit: 5_000 })
 
       expect(defaults.text).toBe("1: zero\n2: needle\n3: last")
-      expect(low.text).toBe("1: zero")
+      expect(negative).toMatchObject({ _tag: "ToolError", tool: "ReadFile" })
+      expect(zero).toMatchObject({ _tag: "ToolError", tool: "ReadFile" })
+      expect(fractional).toMatchObject({ _tag: "ToolError", tool: "ReadFile" })
       expect(high.text).toBe("2: needle\n3: last")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("rejects invalid regular expressions", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const error = yield* Effect.flip(runtime.run({ _tag: "Grep", pattern: "[", regex: true }))
+      expect(error).toMatchObject({ _tag: "ToolError", tool: "Grep" })
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("bounds fallback discovery and grep to one thousand results", () => {
+    const environment = testEnvironment()
+    for (let index = 0; index < 1_005; index += 1) {
+      const name = `file-${index.toString().padStart(4, "0")}.txt`
+      environment.directories.get("/workspace")?.push(name)
+      environment.files.set(`/workspace/${name}`, "match")
+    }
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const found = yield* runtime.run({ _tag: "FindFiles", query: "file-" })
+      const grep = yield* runtime.run({ _tag: "Grep", pattern: "match", regex: false })
+      expect(found.text.split("\n")).toHaveLength(1_000)
+      expect(grep.text.split("\n")).toHaveLength(1_000)
+      expect(found.text).not.toContain("file-1000.txt")
+      expect(grep.text).not.toContain("file-1000.txt")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("does not follow directory aliases into cycles or ignored directories", () => {
+    const environment = testEnvironment(
+      "success",
+      undefined,
+      undefined,
+      new Map([
+        ["/workspace/loop", "/workspace"],
+        ["/workspace/dependency-alias", "/workspace/node_modules"],
+      ]),
+    )
+    environment.directories.get("/workspace")?.push("loop", "dependency-alias")
+    environment.directories.set("/workspace/node_modules", ["leaked.txt"])
+    environment.files.set("/workspace/node_modules/leaked.txt", "leaked")
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const found = yield* runtime.run({ _tag: "FindFiles", query: "leaked" })
+      expect(found.text).toBe("")
     }).pipe(provide(environment.runtime))
   })
 

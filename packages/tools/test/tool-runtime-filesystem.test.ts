@@ -11,8 +11,10 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-tools-" })
       const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-tools-outside-" })
       yield* fileSystem.makeDirectory(`${workspace}/src`, { recursive: true })
+      yield* fileSystem.makeDirectory(`${workspace}/.hidden`, { recursive: true })
       yield* fileSystem.makeDirectory(`${workspace}/node_modules/ignored`, { recursive: true })
       yield* fileSystem.writeFileString(`${workspace}/src/a.ts`, "alpha\nbeta\nalpha")
+      yield* fileSystem.writeFileString(`${workspace}/.hidden/a.ts`, "hidden alpha")
       yield* fileSystem.writeFileString(`${workspace}/node_modules/ignored/a.ts`, "hidden")
       yield* fileSystem.symlink(outside, `${workspace}/escaped-cwd`)
       yield* fileSystem.writeFileString(`${outside}/target.txt`, "outside")
@@ -21,8 +23,11 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
         const runtime = yield* Runtime.Service
         const found = yield* runtime.run({ _tag: "FindFiles", query: ".ts" })
         const literal = yield* runtime.run({ _tag: "Grep", pattern: "beta", regex: false })
-        const regex = yield* runtime.run({ _tag: "Grep", pattern: "^alpha$", regex: true })
+        const regex = yield* runtime.run({ _tag: "Grep", pattern: "(?<=b)eta", regex: true })
         const read = yield* runtime.run({ _tag: "ReadFile", path: "src/a.ts", offset: 1, limit: 1 })
+        const escapedRead = yield* Effect.result(runtime.run({ _tag: "ReadFile", path: "link/target.txt" }))
+        const escapedFind = yield* runtime.run({ _tag: "FindFiles", query: "link" })
+        const escapedGrep = yield* runtime.run({ _tag: "Grep", pattern: "outside", regex: false })
         const created = yield* runtime.run({ _tag: "CreateFile", path: "new/file.txt", content: "old" })
         const duplicate = yield* Effect.result(runtime.run({ _tag: "CreateFile", path: "new/file.txt", content: "x" }))
         const edited = yield* runtime.run({ _tag: "EditFile", path: "new/file.txt", oldText: "old", newText: "new" })
@@ -57,6 +62,9 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           literal,
           regex,
           read,
+          escapedRead,
+          escapedFind,
+          escapedGrep,
           created,
           duplicate,
           edited,
@@ -88,10 +96,13 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
     Effect.scoped(provide(program, BunServices.layer)).pipe(
       Effect.tap((result) =>
         Effect.sync(() => {
-          expect(result.found.text).toBe("src/a.ts")
+          expect(result.found.text).toBe(".hidden/a.ts\nsrc/a.ts")
           expect(result.literal.text).toContain("src/a.ts:2:beta")
-          expect(result.regex.text.split("\n")).toHaveLength(2)
+          expect(result.regex.text).toContain("src/a.ts:2:beta")
           expect(result.read.text).toBe("2: beta")
+          expect(result.escapedRead._tag).toBe("Failure")
+          expect(result.escapedFind.text).toBe("")
+          expect(result.escapedGrep.text).toBe("")
           expect(result.created.text).toBe("created new/file.txt")
           expect(result.edited.text).toBe("edited new/file.txt")
           expect(result.duplicate._tag).toBe("Failure")
@@ -139,6 +150,36 @@ test("sends SIGTERM to a live shell process when the registry scope closes", () 
         for (let attempt = 0; attempt < 100 && !(yield* fileSystem.exists(marker)); attempt += 1)
           yield* Effect.sleep("10 millis")
         expect(yield* fileSystem.readFileString(marker)).toBe("terminated")
+      }).pipe(provide(BunServices.layer)),
+    ),
+  ))
+
+test("bounds grep results to one thousand matches", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-tools-grep-bound-" })
+        const content = "needle\n".repeat(600)
+        yield* fileSystem.writeFileString(`${workspace}/one.txt`, content)
+        yield* fileSystem.writeFileString(`${workspace}/two.txt`, content)
+        const result = yield* Effect.gen(function* () {
+          const runtime = yield* Runtime.Service
+          return yield* runtime.run({ _tag: "Grep", pattern: "needle", regex: false })
+        }).pipe(
+          provide(
+            Runtime.layer(workspace).pipe(
+              Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
+              Layer.provide(
+                Layer.merge(
+                  ParallelSearch.testLayer(() => Effect.succeed([])),
+                  ReadWebPage.testLayer(() => Effect.succeed("page")),
+                ),
+              ),
+            ),
+          ),
+        )
+        expect(result.text.split("\n")).toHaveLength(1_000)
       }).pipe(provide(BunServices.layer)),
     ),
   ))

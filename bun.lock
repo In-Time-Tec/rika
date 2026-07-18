@@ -156,7 +156,6 @@
       "name": "@rika/tools",
       "version": "0.0.0",
       "dependencies": {
-        "@ff-labs/fff-node": "^0.9.6",
         "effect": "catalog:",
       },
       "devDependencies": {

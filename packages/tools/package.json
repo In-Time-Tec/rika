@@ -13,7 +13,6 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@ff-labs/fff-node": "^0.9.6",
     "effect": "catalog:"
   },
   "devDependencies": {

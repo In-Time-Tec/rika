@@ -70,13 +70,17 @@ describe("tool contracts", () => {
     expect(catalogNames).toEqual(expect.arrayContaining(runtimeNames))
   })
 
-  it.effect("rejects invalid bounds and model-facing ranges at schema boundaries", () =>
+  it.effect("rejects invalid bounds while preserving file ranges for typed runtime failures", () =>
     Effect.gen(function* () {
       const definition = Catalog.get("read_file")!
       yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, timeoutMillis: 0 }))
       yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, outputLimit: 1.5 }))
-      yield* Effect.flip(Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "ReadFile", path: "a", offset: -1 }))
-      yield* Effect.flip(Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "ReadFile", path: "a", limit: 0 }))
+      expect(
+        yield* Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "ReadFile", path: "a", offset: -1, limit: 0 }),
+      ).toEqual({ _tag: "ReadFile", path: "a", offset: -1, limit: 0 })
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "ReadFile", path: "a", offset: Number.POSITIVE_INFINITY }),
+      )
       yield* Effect.flip(
         Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Shell", command: "echo", args: [], waitMillis: 0.5 }),
       )

@@ -1,4 +1,3 @@
-import { FileFinder } from "@ff-labs/fff-node"
 import { Context, Data, Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -11,7 +10,6 @@ import * as Catalog from "./tool-catalog"
 import { unifiedDiff } from "./unified-diff"
 
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
-const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 
 const boundedDiff = (patch: string | undefined): { readonly diff?: string } =>
   patch === undefined ? {} : { diff: patch }
@@ -21,8 +19,8 @@ export const Grep = Schema.Struct({ _tag: Schema.tag("Grep"), pattern: Schema.St
 export const ReadFile = Schema.Struct({
   _tag: Schema.tag("ReadFile"),
   path: Schema.String,
-  offset: Schema.optionalKey(NonNegativeInt),
-  limit: Schema.optionalKey(PositiveInt),
+  offset: Schema.optionalKey(Schema.Finite),
+  limit: Schema.optionalKey(Schema.Finite),
 })
 export const CreateFile = Schema.Struct({
   _tag: Schema.tag("CreateFile"),
@@ -128,8 +126,8 @@ export const grepTool = tool("grep", "Search UTF-8 workspace files for text or a
 })
 export const readFileTool = tool("read_file", "Read a bounded UTF-8 file range with stable line numbers", {
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
-  limit: Schema.optionalKey(Schema.NullOr(PositiveInt)),
+  offset: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  limit: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
 })
 export const createFileTool = tool("create_file", "Create a new UTF-8 file without overwriting an existing path", {
   path: Schema.String,
@@ -331,31 +329,7 @@ export const layer = (workspace: string) =>
       const readWebPage = yield* ReadWebPageService
       const processes = yield* ProcessRegistry.Service
       const mediaView = yield* MediaView.Service
-      const finder = yield* Effect.acquireRelease(
-        Effect.sync(() => {
-          try {
-            const created = FileFinder.create({ basePath: workspace, aiMode: true })
-            return created.ok ? Option.some(created.value) : Option.none()
-          } catch {
-            return Option.none()
-          }
-        }).pipe(
-          Effect.flatMap((created) =>
-            Option.isNone(created)
-              ? Effect.succeed(Option.none())
-              : Effect.tryPromise({
-                  try: () => created.value.waitForScan(10_000),
-                  catch: operationError,
-                }).pipe(
-                  Effect.as(created),
-                  Effect.catch(() =>
-                    Effect.sync(() => created.value.destroy()).pipe(Effect.as(Option.none<FileFinder>())),
-                  ),
-                ),
-          ),
-        ),
-        (created) => (Option.isNone(created) ? Effect.void : Effect.sync(() => created.value.destroy())),
-      )
+      const canonicalWorkspace = yield* fileSystem.realPath(workspace).pipe(Effect.orDie)
       const resolve = (value: string) =>
         Effect.try({
           try: () => {
@@ -373,24 +347,46 @@ export const layer = (workspace: string) =>
               Effect.mapError(operationError),
             ),
           ),
-          Effect.flatMap(([canonicalWorkspace, canonicalTarget]) =>
-            canonicalTarget === canonicalWorkspace || canonicalTarget.startsWith(`${canonicalWorkspace}${path.sep}`)
+          Effect.flatMap(([canonicalRoot, canonicalTarget]) =>
+            canonicalTarget === canonicalRoot || canonicalTarget.startsWith(`${canonicalRoot}${path.sep}`)
               ? Effect.succeed(canonicalTarget)
               : Effect.fail(new RuntimeOperationError({ message: `Path escapes workspace: ${value}` })),
           ),
         )
       const resolveEdit = (value: string) =>
         ApplyPatch.resolveContained(workspace, value, fileSystem, path, true).pipe(Effect.mapError(operationError))
+      const isContained = (target: string) =>
+        target === canonicalWorkspace || target.startsWith(`${canonicalWorkspace}${path.sep}`)
+      const resolveContained = (value: string) =>
+        resolve(value).pipe(
+          Effect.flatMap((target) => fileSystem.realPath(target)),
+          Effect.flatMap((target) =>
+            isContained(target)
+              ? Effect.succeed(target)
+              : Effect.fail(new RuntimeOperationError({ message: `Path escapes workspace: ${value}` })),
+          ),
+        )
       const listFiles = Effect.fn("ToolRuntime.listFiles")(function* () {
         const found: Array<string> = []
+        const visited = new Set([canonicalWorkspace])
+        const ignored = (target: string) =>
+          path
+            .relative(canonicalWorkspace, target)
+            .split(path.sep)
+            .some((segment) => segment === ".git" || segment === "node_modules")
         const visit = (directory: string): Effect.Effect<void, PlatformError.PlatformError> =>
           Effect.gen(function* () {
             for (const entry of yield* fileSystem.readDirectory(directory)) {
               if (entry === ".git" || entry === "node_modules") continue
               const absolute = path.join(directory, entry)
-              const info = yield* fileSystem.stat(absolute)
-              if (info.type === "Directory") yield* visit(absolute)
-              else if (info.type === "File") found.push(path.relative(workspace, absolute))
+              const canonical = yield* fileSystem.realPath(absolute).pipe(Effect.option)
+              if (Option.isNone(canonical) || !isContained(canonical.value) || ignored(canonical.value)) continue
+              const info = yield* fileSystem.stat(canonical.value)
+              if (info.type === "Directory") {
+                if (visited.has(canonical.value)) continue
+                visited.add(canonical.value)
+                yield* visit(canonical.value)
+              } else if (info.type === "File") found.push(path.relative(workspace, absolute))
             }
           })
         yield* visit(workspace)
@@ -433,63 +429,43 @@ export const layer = (workspace: string) =>
           const operation = Effect.gen(function* () {
             switch (request._tag) {
               case "FindFiles":
-                if (Option.isNone(finder))
-                  return bounded((yield* listFiles()).filter((file) => file.includes(request.query)).join("\n"))
                 return bounded(
-                  yield* Effect.try({
-                    try: () => {
-                      const result = finder.value.fileSearch(request.query, { pageSize: 1_000 })
-                      if (!result.ok) throw new RuntimeOperationError({ message: result.error })
-                      return result.value.items.map((item) => item.relativePath).join("\n")
-                    },
-                    catch: operationError,
-                  }),
+                  (yield* listFiles())
+                    .filter((file) => file.includes(request.query))
+                    .slice(0, 1_000)
+                    .join("\n"),
                 )
               case "Grep": {
-                if (Option.isNone(finder)) {
-                  const expression = request.regex ? new RegExp(request.pattern) : undefined
-                  const matches: Array<string> = []
-                  for (const file of yield* listFiles()) {
-                    const content = yield* resolve(file).pipe(
-                      Effect.flatMap((target) => fileSystem.readFileString(target)),
-                      Effect.option,
-                    )
-                    if (content._tag === "None") continue
-                    const lines = content.value.split("\n")
-                    for (let index = 0; index < lines.length; index += 1) {
-                      const line = lines[index] ?? ""
-                      if (
-                        expression?.test(line) === true ||
-                        (expression === undefined && line.includes(request.pattern))
-                      )
-                        matches.push(`${file}:${index + 1}:${line}`)
-                    }
+                if (request.regex) yield* Effect.try({ try: () => new RegExp(request.pattern), catch: operationError })
+                const expression = request.regex ? new RegExp(request.pattern) : undefined
+                const matches: Array<string> = []
+                for (const file of yield* listFiles()) {
+                  const content = yield* resolveContained(file).pipe(
+                    Effect.flatMap((target) => fileSystem.readFileString(target)),
+                    Effect.option,
+                  )
+                  if (content._tag === "None") continue
+                  const lines = content.value.split("\n")
+                  for (let index = 0; index < lines.length; index += 1) {
+                    const line = lines[index] ?? ""
+                    if (expression?.test(line) === true || (expression === undefined && line.includes(request.pattern)))
+                      matches.push(`${file}:${index + 1}:${line}`)
+                    if (matches.length === 1_000) break
                   }
-                  return bounded(matches.join("\n"))
+                  if (matches.length === 1_000) break
                 }
-                return bounded(
-                  yield* Effect.try({
-                    try: () => {
-                      const result = finder.value.grep(request.pattern, {
-                        mode: request.regex ? "regex" : "plain",
-                        pageSize: 1_000,
-                        maxMatchesPerFile: 1_000,
-                        classifyDefinitions: true,
-                      })
-                      if (!result.ok) throw new RuntimeOperationError({ message: result.error })
-                      return result.value.items
-                        .map((match) => `${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
-                        .join("\n")
-                    },
-                    catch: operationError,
-                  }),
-                )
+                return bounded(matches.join("\n"))
               }
               case "ReadFile": {
-                const target = yield* resolve(request.path)
+                if (
+                  (request.offset !== undefined && (!Number.isInteger(request.offset) || request.offset < 0)) ||
+                  (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1))
+                )
+                  return yield* new RuntimeOperationError({ message: "Invalid file range" })
+                const target = yield* resolveContained(request.path)
                 const lines = (yield* fileSystem.readFileString(target)).split("\n")
-                const offset = Math.max(0, request.offset ?? 0)
-                const limit = Math.min(Math.max(1, request.limit ?? 500), 2_000)
+                const offset = request.offset ?? 0
+                const limit = Math.min(request.limit ?? 500, 2_000)
                 return bounded(
                   lines
                     .slice(offset, offset + limit)
