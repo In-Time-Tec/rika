@@ -160,6 +160,7 @@ const start = Effect.fn("ResidentTransportTest.start")(function* (
   startupHold: number = 0,
   uninterruptibleOwner: boolean = false,
   ownerDrainMilliseconds?: number,
+  ownerStartupDelay: number = 0,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const input = yield* Queue.bounded<string, Cause.Done>(32)
@@ -180,6 +181,7 @@ const start = Effect.fn("ResidentTransportTest.start")(function* (
           RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY: String(outboundCapacity),
           RIKA_TEST_RESIDENT_STARTUP_HOLD: String(startupHold),
           RIKA_TEST_RESIDENT_UNINTERRUPTIBLE_OWNER: uninterruptibleOwner ? "1" : "0",
+          RIKA_TEST_RESIDENT_OWNER_STARTUP_DELAY: String(ownerStartupDelay),
           ...(ownerDrainMilliseconds === undefined
             ? {}
             : { RIKA_INTERNAL_RESIDENT_OWNER_DRAIN: String(ownerDrainMilliseconds) }),
@@ -327,20 +329,22 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
-    "supersedes a recorded resident that rejects both handshake schemas",
+    "does not replace a recorded listener that rejects both authenticated handshake schemas",
     () =>
       run(
         Effect.gen(function* () {
           const root = yield* makeRoot
+          const old = yield* startOldResident(root, true, "schema-reject")
           try {
-            const old = yield* startOldResident(root, true, "schema-reject")
             const client = yield* start(root, 1_000)
-            expect(yield* client.nextEffect).toEqual({ type: "resident-status", callbacks: 1 })
-            const attached = yield* attachedEffect(client)
-            expect(attached.hostPid).not.toBe(Number(old.pid))
-            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${attached.hostPid}\n`)
-            yield* client.closeEffect
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              error: expect.stringContaining("could not be verified"),
+            })
+            expect(alive(Number(old.pid))).toBe(true)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
           } finally {
+            yield* old.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
             yield* cleanRoot(root)
           }
         }),
@@ -913,6 +917,32 @@ describe("resident WebSocket process transport", () => {
 
             yield* waitUntil(fileExists(`${root}/owner-finalizations.log`), 4_000)
             expect(yield* readText(`${root}/owner-finalizations.log`)).toBe(`${aEvent.hostPid}\n`)
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "attaches concurrent clients to the listener while its one owner is still starting",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const [a, b] = yield* Effect.all(
+              [
+                start(root, 350, 0, false, 1_024, 0, false, undefined, 1_000),
+                Effect.sleep(100).pipe(Effect.andThen(start(root))),
+              ],
+              { concurrency: 2 },
+            )
+            const [aEvent, bEvent] = yield* Effect.all([attachedEffect(a), attachedEffect(b)], { concurrency: 2 })
+            expect(aEvent.hostPid).toBe(bEvent.hostPid)
+            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${aEvent.hostPid}\n`)
+            yield* Effect.all([a.closeEffect, b.closeEffect], { concurrency: 2 })
           } finally {
             yield* cleanRoot(root)
           }

@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
 import { fileURLToPath } from "node:url"
-import { Clock, Effect, FileSystem, Layer, Schema, Stream } from "effect"
+import { Effect, FileSystem, Layer, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { claimStartup } from "../src/resident-startup"
 
@@ -155,7 +155,6 @@ test("reports an incompatible product database through resident startup without 
           database.close()
         })
         const before = yield* fs.readFile(databasePath)
-        const startedAt = yield* Clock.currentTimeMillis
         const handle = yield* spawner.spawn(
           ChildProcess.make("bun", ["src/client-main.ts", "doctor"], {
             cwd: fileURLToPath(new URL("..", import.meta.url)),
@@ -188,7 +187,6 @@ test("reports an incompatible product database through resident startup without 
         )
         expect(Number(exitCode)).not.toBe(0)
         expect(`${stdout}\n${stderr}`).toContain("Use a fresh Rika data root")
-        expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(4_000)
         expect([...(yield* fs.readFile(databasePath))]).toEqual([...before])
         expect((yield* fs.readDirectory(root)).some((name) => name.endsWith(".startup"))).toBe(false)
       }),

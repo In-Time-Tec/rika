@@ -21,6 +21,28 @@ test(
 )
 
 test(
+  "keeps the real TUI thin while the resident owns model and runtime execution",
+  () =>
+    Scene.run({
+      script: [Scene.model.text("RESIDENT_OWNED_EXECUTION_COMPLETE")],
+      actions: [
+        Scene.action.writeAfter("Welcome to Rika", "Prove which process owns this turn.\r"),
+        Scene.action.writeAfter("RESIDENT_OWNED_EXECUTION_COMPLETE", "\u0003", 100),
+      ],
+    }).then((result) => {
+      expect(result.output).toContain("RESIDENT_OWNED_EXECUTION_COMPLETE")
+      expect(result.names.filter((name) => name.startsWith("resident-"))).toHaveLength(1)
+      expect(result.residentLogs).toContain('"message":"model.backend.configured"')
+      expect(result.residentLogs).toContain('"rika.model.backend.kind":"test-script"')
+      expect(result.residentLogs).toContain('"message":"resident.listener.ready"')
+      expect(result.clientLogs).not.toContain('"message":"model.backend.configured"')
+      expect(result.clientLogs).not.toContain('"rika.model.backend.kind"')
+      expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
+    }),
+  30_000,
+)
+
+test(
   "rejects when the TUI exits before every scripted action runs",
   () =>
     expect(

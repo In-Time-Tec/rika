@@ -110,6 +110,26 @@ const isReconnectableTransport = (error: unknown) =>
   Schema.is(ResidentService.ResidentServiceError)(error) &&
   (error.reason === "resident-absent" || error.reason === "resident-draining" || error.reason === "transport-failed")
 const legacyCapabilities = ["ping", "startup-state", "transcript-pages", "interactive-ack"]
+const probeWebSocket = (url: string, handshake: string, matches: (text: string) => boolean) =>
+  Effect.callback<boolean>((resume) => {
+    const socket = new WebSocket(url)
+    let settled = false
+    const finish = (matched: boolean) => {
+      if (settled) return
+      settled = true
+      socket.close()
+      resume(Effect.succeed(matched))
+    }
+    socket.addEventListener("open", () => socket.send(handshake))
+    socket.addEventListener("message", (event) => finish(matches(String(event.data))))
+    socket.addEventListener("close", () => finish(false))
+    socket.addEventListener("error", () => finish(false))
+    return Effect.sync(() => {
+      settled = true
+      socket.close()
+    })
+  }).pipe(Effect.timeoutOrElse({ duration: "750 millis", orElse: () => Effect.succeed(false) }))
+
 const probeLegacyResident = Effect.fn("ResidentTransport.probeLegacyResident")(function* (options: {
   readonly urls: ReadonlyArray<string>
   readonly identity: string
@@ -118,52 +138,34 @@ const probeLegacyResident = Effect.fn("ResidentTransport.probeLegacyResident")(f
 }) {
   const crypto = yield* Crypto.Crypto
   for (const url of options.urls) {
-    const matched = yield* Effect.scoped(
-      Effect.gen(function* () {
-        const webSocketContext = yield* Layer.build(BunSocket.layerWebSocketConstructor)
-        const webSocketConstructor = Context.get(webSocketContext, Socket.WebSocketConstructor)
-        const socket = yield* Socket.makeWebSocket(url).pipe(
-          Effect.provideService(Socket.WebSocketConstructor, webSocketConstructor),
-        )
-        const writer = yield* socket.writer
-        const clientNonce = yield* crypto.randomUUIDv4
-        const accepted = yield* Deferred.make<boolean>()
-        const handshake = json({
-          family: "rika-resident",
-          version: { major: 1, minor: 0 },
-          identity: options.identity,
-          token: options.token,
-          clientNonce,
-          clientKind: options.clientKind,
-          clientVersion: "resident-upgrade",
-          capabilities: legacyCapabilities,
-        })
-        yield* socket
-          .runString(
-            (text) =>
-              Effect.sync(() => parse(text)).pipe(
-                Effect.flatMap((message) =>
-                  message !== null &&
-                  typeof message === "object" &&
-                  "_tag" in message &&
-                  message._tag === "accepted" &&
-                  "family" in message &&
-                  message.family === "rika-resident" &&
-                  "identity" in message &&
-                  message.identity === options.identity &&
-                  "clientNonce" in message &&
-                  message.clientNonce === clientNonce
-                    ? Deferred.succeed(accepted, true)
-                    : Effect.void,
-                ),
-              ),
-            { onOpen: writer(handshake).pipe(Effect.ignore) },
-          )
-          .pipe(Effect.ignore, Effect.forkScoped)
-        return yield* Deferred.await(accepted).pipe(
-          Effect.timeoutOrElse({ duration: "750 millis", orElse: () => Effect.succeed(false) }),
-        )
+    const clientNonce = yield* crypto.randomUUIDv4
+    const matched = yield* probeWebSocket(
+      url,
+      json({
+        family: "rika-resident",
+        version: { major: 1, minor: 0 },
+        identity: options.identity,
+        token: options.token,
+        clientNonce,
+        clientKind: options.clientKind,
+        clientVersion: "resident-upgrade",
+        capabilities: legacyCapabilities,
       }),
+      (text) => {
+        const message = parse(text)
+        return (
+          message !== null &&
+          typeof message === "object" &&
+          "_tag" in message &&
+          message._tag === "accepted" &&
+          "family" in message &&
+          message.family === "rika-resident" &&
+          "identity" in message &&
+          message.identity === options.identity &&
+          "clientNonce" in message &&
+          message.clientNonce === clientNonce
+        )
+      },
     )
     if (matched) return true
   }
@@ -824,12 +826,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                           endpoint.port,
                           alive.map((resident) => resident.pid),
                         )
-                        const listener = alive.find((resident) => resident.pid === listeners[0])
-                        const markerOwned =
-                          listener === undefined
-                            ? false
-                            : yield* ResidentProcessStartup.processOwnsAnyFile(listener.pid, listener.markers)
-                        if (listeners.length !== 1 || (!protocolVerified && !markerOwned)) {
+                        if (listeners.length !== 1 || !protocolVerified) {
                           yield* claim.release
                           return yield* transportError(
                             protocolVerified

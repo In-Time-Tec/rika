@@ -77,49 +77,6 @@ const listenerCommand = Effect.fn("ResidentProcessStartup.listenerCommand")(func
   return { output, exitCode: yield* handle.exitCode }
 })
 
-export const processOwnsAnyFile = Effect.fn("ResidentProcessStartup.processOwnsAnyFile")(function* (
-  pid: number,
-  filenames: ReadonlyArray<string>,
-) {
-  if (filenames.length === 0) return false
-  const expected = new Set(filenames)
-  if (process.platform === "linux") {
-    const fs = yield* FileSystem.FileSystem
-    const descriptors = yield* fs.readDirectory(`/proc/${pid}/fd`).pipe(Effect.option)
-    if (Option.isNone(descriptors)) return false
-    for (const descriptor of descriptors.value) {
-      const target = yield* fs.readLink(`/proc/${pid}/fd/${descriptor}`).pipe(Effect.option)
-      if (Option.isSome(target) && expected.has(target.value)) return true
-    }
-    return false
-  }
-  if (process.platform === "win32") {
-    const fs = yield* FileSystem.FileSystem
-    const inspected = yield* Effect.result(
-      listenerCommand("powershell.exe", [
-        "-NoProfile",
-        "-NonInteractive",
-        "-Command",
-        `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString('o')`,
-      ]),
-    )
-    if (inspected._tag === "Failure" || inspected.success.exitCode !== 0) return false
-    const startedAt = Date.parse(inspected.success.output.trim())
-    if (!Number.isFinite(startedAt)) return false
-    for (const filename of filenames) {
-      const info = yield* fs.stat(filename).pipe(Effect.option)
-      if (Option.isSome(info)) {
-        const modifiedAt = Option.getOrUndefined(info.value.mtime)?.getTime()
-        if (modifiedAt !== undefined && modifiedAt >= startedAt) return true
-      }
-    }
-    return false
-  }
-  const inspected = yield* Effect.result(listenerCommand("lsof", ["-a", "-p", String(pid), "-Fn", "--", ...filenames]))
-  if (inspected._tag === "Failure" || inspected.success.exitCode !== 0) return false
-  return inspected.success.output.split("\n").some((line) => line.startsWith("n") && expected.has(line.slice(1)))
-})
-
 export const listenerProcessIds = Effect.fn("ResidentProcessStartup.listenerProcessIds")(function* (
   port: number,
   candidates: ReadonlyArray<number>,

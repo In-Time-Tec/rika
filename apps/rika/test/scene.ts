@@ -349,6 +349,10 @@ const scenario = Effect.fn("Scene.run")(function* (options: Options) {
       .filter(([name]) => name.startsWith("client-"))
       .map(([, contents]) => contents)
       .join("\n"),
+    residentLogs: logs
+      .filter(([name]) => name.startsWith("resident-"))
+      .map(([, contents]) => contents)
+      .join("\n"),
     diagnostics,
     opens,
     names,

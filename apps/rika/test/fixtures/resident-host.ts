@@ -17,6 +17,9 @@ const program = Effect.gen(function* () {
   const finalizerDelay = Number(
     yield* Config.string("RIKA_TEST_RESIDENT_FINALIZER_DELAY").pipe(Config.withDefault("0")),
   )
+  const ownerStartupDelay = Number(
+    yield* Config.string("RIKA_TEST_RESIDENT_OWNER_STARTUP_DELAY").pipe(Config.withDefault("0")),
+  )
   const delayedWork = (yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))) === "1"
   const uninterruptibleOwner =
     (yield* Config.string("RIKA_TEST_RESIDENT_UNINTERRUPTIBLE_OWNER").pipe(Config.withDefault("0"))) === "1"
@@ -42,6 +45,7 @@ const program = Effect.gen(function* () {
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)
+        yield* Effect.sleep(ownerStartupDelay)
         yield* Effect.addFinalizer(() =>
           append("owner-finalizer-starts.log", `${process.pid}:${activeWork}\n`).pipe(
             Effect.andThen(
