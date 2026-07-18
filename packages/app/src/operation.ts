@@ -1896,6 +1896,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const backend = yield* ExecutionBackend.Service
           if (before === undefined) {
             if (!(yield* projectTurnPage(thread, request))) return
+            while (yield* Ref.get(transcriptHasUnprojectedTurns)) {
+              const available = yield* transcripts.page(thread.id, { limit: 200 })
+              if (available.entries.length >= 200) break
+              const turnBefore = yield* Ref.get(projectedTurnCursor)
+              if (turnBefore === undefined || !(yield* projectTurnPage(thread, request, turnBefore))) return
+            }
           } else {
             const available = yield* transcripts.page(thread.id, { before, limit: 50 })
             if (!available.hasOlder && (yield* Ref.get(transcriptHasUnprojectedTurns))) {
@@ -1907,15 +1913,21 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const page = yield* transcripts.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
           const olderPages: Array<typeof page.entries> = []
           let entryCount = page.entries.length
-          let oldestEntry = page.entries[0]
           let oldestCursor = page.oldestCursor
           let storedHasOlder = page.hasOlder
-          if (before === undefined)
-            while (
-              storedHasOlder &&
-              oldestCursor !== undefined &&
-              (entryCount < 200 || oldestEntry?.unit.key !== `turn:${oldestEntry?.turn.id}:user`)
-            ) {
+          let initialBoundary = -1
+          if (before === undefined) {
+            const locateInitialBoundary = () => {
+              const loaded = olderPages.toReversed().flat().concat(page.entries)
+              const latestAllowed = loaded.length - 200
+              return latestAllowed < 0
+                ? -1
+                : loaded.findLastIndex(
+                    (entry, index) => index <= latestAllowed && entry.unit.key === `turn:${entry.turn.id}:user`,
+                  )
+            }
+            initialBoundary = locateInitialBoundary()
+            while (storedHasOlder && oldestCursor !== undefined && initialBoundary < 0) {
               const older = yield* transcripts.page(thread.id, {
                 before: oldestCursor,
                 limit: entryCount < 200 ? Math.min(50, 200 - entryCount) : 50,
@@ -1923,12 +1935,26 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               if (older.entries.length === 0) break
               olderPages.push(older.entries)
               entryCount += older.entries.length
-              oldestEntry = older.entries[0] ?? oldestEntry
               oldestCursor = older.oldestCursor
               storedHasOlder = older.hasOlder
+              initialBoundary = locateInitialBoundary()
             }
-          const storedEntries =
+          }
+          const loadedEntries =
             olderPages.length === 0 ? page.entries : olderPages.toReversed().flat().concat(page.entries)
+          const storedEntries = initialBoundary <= 0 ? loadedEntries : loadedEntries.slice(initialBoundary)
+          if (initialBoundary > 0) {
+            const oldest = storedEntries[0]
+            if (oldest !== undefined)
+              oldestCursor = {
+                createdAt: oldest.turn.createdAt,
+                turnId: oldest.turn.id,
+                sequence: oldest.unit.order.sequence,
+                part: oldest.unit.order.part,
+                key: oldest.unit.key,
+              }
+            storedHasOlder = true
+          }
           const usageCosts = currentUsageCosts()
           const entries = storedEntries.map((entry) => {
             const costUsd = usageCosts.turnCostUsd.get(entry.turn.id)

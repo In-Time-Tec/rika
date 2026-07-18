@@ -319,6 +319,25 @@ const prependProjection = (
   }
 }
 
+const normalizeEntries = (
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+): ReadonlyArray<TranscriptRepository.Entry> => {
+  const unique = new Map<string, TranscriptRepository.Entry>()
+  for (const entry of entries) {
+    const current = unique.get(entry.unit.key)
+    if (current === undefined || entry.projectionRevision >= current.projectionRevision)
+      unique.set(entry.unit.key, entry)
+  }
+  return [...unique.values()].toSorted(
+    (left, right) =>
+      left.turn.createdAt - right.turn.createdAt ||
+      left.turn.id.localeCompare(right.turn.id) ||
+      left.unit.order.sequence - right.unit.order.sequence ||
+      left.unit.order.part - right.unit.order.part ||
+      left.unit.key.localeCompare(right.unit.key),
+  )
+}
+
 const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "SelectionLoaded") {
     if (event.selectionEpoch < state.selectionEpoch) return { state, preserveAnchor: false }
@@ -335,6 +354,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       (state.model.queueRevision ?? -1) > event.queueRevision
     const queue = keepNewerQueue ? state.model.queue : event.queue
     const queueRevision = keepNewerQueue ? state.model.queueRevision : event.queueRevision
+    const entries = normalizeEntries(event.entries)
     const model = cleared({
       ...state.model,
       activeTurnId: activeTurn?.id,
@@ -364,14 +384,14 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         selectionEpoch: event.selectionEpoch,
-        model: project(model, event.entries, event.globalCostUsd ?? event.threadCostUsd),
+        model: project(model, entries, event.globalCostUsd ?? event.threadCostUsd),
         replayTurns: new Map([
-          ...event.entries.map((entry) => [entry.turn.id, entry.turn] as const),
+          ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
           ...(event.activeTurn === undefined ? [] : [[event.activeTurn.id, event.activeTurn] as const]),
         ]),
-        entries: event.entries,
-        revisions: new Map(event.entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        projections: projections(event.entries),
+        entries,
+        revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
+        projections: projections(entries),
         threadCostUsd: event.threadCostUsd,
       },
       preserveAnchor: false,
@@ -381,7 +401,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
     if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false }
     const known = new Set(state.entries.map((entry) => entry.unit.key))
-    const prepended = event.entries.filter((entry) => !known.has(entry.unit.key))
+    const prepended = normalizeEntries(event.entries).filter((entry) => !known.has(entry.unit.key))
     const entries = [...prepended, ...state.entries]
     const revisions = new Map(state.revisions)
     for (const entry of prepended)

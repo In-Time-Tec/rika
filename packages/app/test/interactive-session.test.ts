@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
+import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Runtime as ToolRuntime } from "@rika/tools"
+import * as Transcript from "@rika/transcript"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { Operation } from "../src/index"
@@ -54,6 +56,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
   const permissionResolved = yield* Deferred.make<void>()
   const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
+  const transcripts = Context.get(yield* Layer.build(TranscriptRepository.memoryLayer), TranscriptRepository.Service)
   const record = (...call: ReadonlyArray<unknown>) => Ref.update(controls, (calls) => [...calls, call])
   const backend = ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -176,6 +179,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   const layer = Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
     turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+    transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
@@ -190,7 +194,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   yield* Ref.set(controls, [])
   const session = (yield* Ref.get(sessions))[0]
   if (session === undefined) return yield* Effect.die("Missing interactive session")
-  return { session, repositories, turns, controls, hiddenExecutions, older, latest }
+  return { session, repositories, turns, transcripts, controls, hiddenExecutions, older, latest }
 })
 
 describe("InteractiveSession controls", () => {
@@ -1027,13 +1031,13 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
-  it.effect("loads only the newest fifty turns and prepends older pages on demand", () =>
+  it.effect("loads at least two hundred units to a Turn boundary and prepends older pages on demand", () =>
     Effect.gen(function* () {
       const { session, turns, older } = yield* makeHarness()
       yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
-      for (let index = 0; index < 60; index += 1) {
+      for (let index = 0; index < 240; index += 1) {
         const created = yield* createTurn(turns, {
-          id: Turn.TurnId.make(`history-${index.toString().padStart(2, "0")}`),
+          id: Turn.TurnId.make(`history-${index.toString().padStart(3, "0")}`),
           threadId: older.id,
           prompt: `history ${index}`,
           now: index + 10,
@@ -1048,18 +1052,77 @@ describe("InteractiveSession controls", () => {
       yield* session.loadOlder
       yield* Effect.yieldNow
       expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
-      expect(initial?._tag === "SelectionLoaded" ? initial.entries : []).toHaveLength(50)
+      expect(initial?._tag === "SelectionLoaded" ? initial.entries : []).toHaveLength(200)
+      expect(initial?._tag === "SelectionLoaded" ? initial.entries[0]?.unit.key : undefined).toBe(
+        "turn:history-040:user",
+      )
       expect(
         initial?._tag === "SelectionLoaded" ? initial.entries.map((entry) => entry.turn.id).at(-1) : undefined,
-      ).toBe(Turn.TurnId.make("history-59"))
+      ).toBe(Turn.TurnId.make("history-239"))
       const prepended = events.find((event) => event._tag === "TranscriptPagePrepended")
       expect(prepended?._tag === "TranscriptPagePrepended" ? prepended.hasOlder : true).toBe(false)
       expect(
         prepended?._tag === "TranscriptPagePrepended" ? prepended.entries.map((entry) => entry.turn.id) : [],
       ).toEqual([
         Turn.TurnId.make("active"),
-        ...Array.from({ length: 10 }, (_, index) => Turn.TurnId.make(`history-${index.toString().padStart(2, "0")}`)),
+        ...Array.from({ length: 40 }, (_, index) => Turn.TurnId.make(`history-${index.toString().padStart(3, "0")}`)),
       ])
+    }),
+  )
+
+  it.effect("stops the initial semantic page at the nearest Turn boundary", () =>
+    Effect.gen(function* () {
+      const { session, turns, transcripts, older } = yield* makeHarness()
+      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      for (let turnIndex = 0; turnIndex < 5; turnIndex += 1) {
+        const created = yield* createTurn(turns, {
+          id: Turn.TurnId.make(`boundary-${turnIndex}`),
+          threadId: older.id,
+          prompt: `boundary ${turnIndex}`,
+          now: turnIndex + 10,
+        })
+        const completed = yield* turns.setStatus(created.id, "completed", undefined, turnIndex + 10)
+        const units: Array<Transcript.Unit> = [
+          {
+            key: `turn:${created.id}:user`,
+            turnId: created.id,
+            order: { sequence: 0, part: 0 },
+            revision: 0,
+            content: { _tag: "Entry", role: "user", text: created.prompt },
+          },
+          ...Array.from(
+            { length: 72 },
+            (_, index): Transcript.Unit => ({
+              key: `${created.id}:assistant:${index.toString().padStart(2, "0")}`,
+              turnId: created.id,
+              order: { sequence: index + 1, part: 0 },
+              revision: index + 1,
+              content: { _tag: "Entry", role: "assistant", text: `${created.id} ${index}` },
+            }),
+          ),
+        ]
+        yield* transcripts.replace(completed, { ...Transcript.empty(created.id, created.prompt), units, revision: 72 })
+      }
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(older.id, 1)
+      yield* Effect.yieldNow
+
+      const initial = events.find((event) => event._tag === "SelectionLoaded")
+      const loaded = initial?._tag === "SelectionLoaded" ? initial.entries : []
+      expect(loaded).toHaveLength(219)
+      expect(loaded[0]?.unit.key).toBe("turn:boundary-2:user")
+      expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
+
+      yield* session.loadOlder
+      yield* Effect.yieldNow
+      const prepended = events.find((event) => event._tag === "TranscriptPagePrepended")
+      const olderEntries = prepended?._tag === "TranscriptPagePrepended" ? prepended.entries : []
+      expect(olderEntries).toHaveLength(50)
+      expect(olderEntries.at(-1)?.unit.key).not.toBe(loaded[0]?.unit.key)
+      expect(new Set([...olderEntries, ...loaded].map((entry) => entry.unit.key)).size).toBe(
+        olderEntries.length + loaded.length,
+      )
     }),
   )
 

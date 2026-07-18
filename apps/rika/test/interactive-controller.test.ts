@@ -417,6 +417,43 @@ it("owns transcript page, prepend, and patch reduction", () => {
   expect(patched.state.model.entries.at(-1)).toMatchObject({ role: "assistant", text: "answer" })
 })
 
+it("normalizes malformed page order and duplicate units across selection and prepend", () => {
+  const oldEntries = entries("old", 1, [
+    { cursor: "old-answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "old answer" },
+  ])
+  const newEntries = entries("new", 2, [
+    { cursor: "new-answer", sequence: 1, type: "model.output.completed", createdAt: 2, text: "new answer" },
+  ])
+  const selected = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: [...newEntries.toReversed(), ...oldEntries.toReversed(), ...newEntries],
+    hasOlder: true,
+    threadCostUsd: 0,
+  })
+  const prepended = InteractiveController.update(selected.state, {
+    _tag: "TranscriptPagePrepended",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    entries: [...oldEntries, ...oldEntries],
+    hasOlder: false,
+    threadCostUsd: 0,
+  })
+
+  expect(selected.state.entries.map((entry) => entry.unit.key)).toEqual([
+    "turn:old:user",
+    "assistant:old:0",
+    "turn:new:user",
+    "assistant:new:0",
+  ])
+  expect(prepended.state.entries).toEqual(selected.state.entries)
+  expect(prepended.state.model.entries.map((entry) => entry.text)).toEqual(["old", "old answer", "new", "new answer"])
+})
+
 it("updates one typed apply-patch row while its diff is streaming", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
