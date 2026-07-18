@@ -105,18 +105,35 @@ describe("packaged extension and operation contract", () => {
   )
 
   test(
-    "MCP OAuth status and logout run from the artifact without exposing credentials",
+    "MCP OAuth status, protected storage, malformed storage, and logout run from the artifact",
     () =>
       runTest(
         Effect.gen(function* () {
-          expect(
-            (yield* run(context, ["mcp", "add", "oauth-fixture", "--url", "https://example.test/mcp"])).exitCode,
-          ).toBe(0)
+          const fileSystem = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const tokenFile = path.join(context.root, "home", ".config", "rika", "mcp-oauth.json")
+          const serverUrl = "https://example.test/mcp"
+          expect((yield* run(context, ["mcp", "add", "oauth-fixture", "--url", serverUrl])).exitCode).toBe(0)
           const status = yield* run(context, ["mcp", "oauth", "status", "oauth-fixture"])
           expect(status.exitCode).toBe(0)
           expect(status.stdout).toContain("unauthenticated")
           expect(status.stdout).not.toContain("access_token")
+          yield* fileSystem.makeDirectory(path.dirname(tokenFile), { recursive: true })
+          yield* fileSystem.writeFileString(tokenFile, JSON.stringify({ [serverUrl]: "journey-token-secret" }), {
+            mode: 0o644,
+          })
+          const authenticated = yield* run(context, ["mcp", "oauth", "status", "oauth-fixture"])
+          expect(authenticated.exitCode).toBe(0)
+          expect(authenticated.stdout).toContain("authenticated")
+          expect(authenticated.stdout).not.toContain("journey-token-secret")
+          expect((yield* fileSystem.stat(tokenFile)).mode & 0o777).toBe(0o600)
           expect((yield* run(context, ["mcp", "oauth", "logout", "oauth-fixture"])).exitCode).toBe(0)
+          expect(yield* fileSystem.readFileString(tokenFile)).not.toContain("journey-token-secret")
+          yield* fileSystem.writeFileString(tokenFile, '{"access_token":"malformed-secret"', { mode: 0o644 })
+          const malformed = yield* run(context, ["mcp", "oauth", "status", "oauth-fixture"])
+          expect(malformed.exitCode).not.toBe(0)
+          expect(`${malformed.stdout}\n${malformed.stderr}`).not.toContain("malformed-secret")
+          expect((yield* fileSystem.stat(tokenFile)).mode & 0o777).toBe(0o600)
         }),
       ),
     20_000,
