@@ -1601,13 +1601,22 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(collapsed).toContain("Review the code")
         expect(collapsed).toContain("├ ✓ Read src/a.ts L2-4 ▸")
         expect(collapsed).toContain("├ ✓ Subagent finished Read-only explore")
-        expect(collapsed).toContain("└ ✓ $ bun test ▸")
+        expect(collapsed).toContain("├ ✓ $ bun test ▸")
         expect(collapsed).toContain("Review complete")
         expect(collapsed).toContain("No defects found.")
         expect(collapsed).not.toContain("##")
         expect(collapsed).not.toContain("**")
         expect(collapsed).not.toContain("read child output")
         expect(collapsed).not.toContain("shell child output")
+        const collapsedLines = collapsed.split("\n")
+        const shellRow = collapsedLines.findIndex((line) => line.includes("$ bun test"))
+        const responseRow = collapsedLines.findIndex((line) => line.includes("Review complete"))
+        expect(responseRow).toBe(shellRow + 3)
+        expect(collapsedLines[shellRow + 1]!.trim()).toBe("│")
+        expect(collapsedLines[shellRow + 2]!.trim()).toBe("│")
+        expect(collapsedLines[responseRow]!.indexOf("Review complete")).toBe(
+          collapsedLines[shellRow]!.indexOf("$ bun test"),
+        )
 
         const agent = records().get("tool:child-agent:header")!.renderable
         const agentLines = styledTextValue(agent.content).split("\n")

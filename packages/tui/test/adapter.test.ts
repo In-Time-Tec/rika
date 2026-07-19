@@ -1252,7 +1252,7 @@ describe("Surface", () => {
     expect(created).toContain("Created tmp-agent-test.txt")
   })
 
-  test("continues the timeline rail through the subagent response after one blank row", () => {
+  test("connects and aligns the subagent response after two blank timeline rows", () => {
     const state = model({
       entries: [
         {
@@ -1276,8 +1276,11 @@ describe("Surface", () => {
     const childRow = lines.findIndex((line) => line.includes("bun test"))
     const responseRow = lines.findIndex((line) => line.includes("Architectural overview"))
     expect(childRow).toBeGreaterThan(-1)
-    expect(responseRow).toBe(childRow + 2)
+    expect(lines[childRow]!.startsWith("  ├ ✓ $ bun test")).toBe(true)
+    expect(responseRow).toBe(childRow + 3)
     expect(lines[childRow + 1]).toBe("  │")
+    expect(lines[childRow + 2]).toBe("  │")
+    expect(lines[responseRow]!.indexOf("Architectural overview")).toBe(lines[childRow]!.indexOf("$ bun test"))
     const lastResponseRow = lines.findIndex((line) => line.includes("stays pure"))
     expect(lastResponseRow).toBeGreaterThan(responseRow)
     for (const [offset, row] of lines.slice(childRow + 1, lastResponseRow).entries())
@@ -1314,8 +1317,8 @@ describe("Surface", () => {
     expect(continuation).toBeGreaterThan(first)
     const responseRows = lines.slice(first, continuation + 1)
     expect(responseRows.length).toBeGreaterThan(1)
-    for (const row of responseRows.slice(0, -1)) expect(row.startsWith("  │ ")).toBe(true)
-    expect(responseRows[responseRows.length - 1]!.startsWith("  ╰ ")).toBe(true)
+    for (const row of responseRows.slice(0, -1)) expect(row.startsWith("  │   ")).toBe(true)
+    expect(responseRows[responseRows.length - 1]!.startsWith("  ╰   ")).toBe(true)
     for (const row of responseRows) expect(row.length).toBeLessThanOrEqual(60)
   })
 

@@ -726,12 +726,15 @@ export const buildTranscript: {
         entry.text.trimEnd(),
         Math.max(1, markdownWidthForColumn(model.width) - stringWidth(prefix)),
       )
-      const curl = gap ? `${prefix.slice(0, -2)}╰ ` : prefix
-      if (gap) {
-        append(fg(colors.text)("\n"))
-        append(dim(fg(colors.subtle)(prefix.trimEnd())))
-      }
+      const connector = prefix.lastIndexOf("│")
+      const curl = gap && connector >= 0 ? `${prefix.slice(0, connector)}╰${prefix.slice(connector + 1)}` : prefix
       const start = line + 1
+      if (gap) {
+        for (let spacer = 0; spacer < 2; spacer += 1) {
+          append(fg(colors.text)("\n"))
+          append(dim(fg(colors.subtle)(prefix.trimEnd())))
+        }
+      }
       rows.forEach((row, rowIndex) => {
         append(fg(colors.text)("\n"))
         append(dim(fg(colors.subtle)(rowIndex === rows.length - 1 ? curl : prefix)))
@@ -1114,10 +1117,14 @@ export const buildTranscript: {
       }
       if (expanded)
         for (const [childIndex, child] of children.entries())
-          renderNestedTool(child, bodyPrefix, childIndex === children.length - 1)
+          renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.response === undefined)
       if (expanded && unit.response !== undefined) {
         const timeline = children.length > 0
-        const response = renderAgentResponse(unit.response, timeline ? `${bodyPrefix}│ ` : `${bodyPrefix}  `, timeline)
+        const response = renderAgentResponse(
+          unit.response,
+          timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `,
+          timeline,
+        )
         if (response !== undefined) nestedRanges.push(response)
       }
       nestedRanges[rangeIndex] = {
@@ -1221,10 +1228,14 @@ export const buildTranscript: {
         )
         if (expanded)
           for (const [childIndex, child] of (unit.children ?? []).entries())
-            renderNestedTool(child, "  ", childIndex === (unit.children?.length ?? 0) - 1)
+            renderNestedTool(
+              child,
+              "  ",
+              childIndex === (unit.children?.length ?? 0) - 1 && unit.response === undefined,
+            )
         if (expanded && unit.response !== undefined) {
           const timeline = (unit.children?.length ?? 0) > 0
-          const response = renderAgentResponse(unit.response, timeline ? "  │ " : "  ", timeline)
+          const response = renderAgentResponse(unit.response, timeline ? "  │   " : "  ", timeline)
           if (response !== undefined) nestedRanges.push(response)
         }
       } else if (unit.group === "explore") renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
