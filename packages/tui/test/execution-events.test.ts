@@ -311,7 +311,7 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(rendered).toContain("Child completed the boundary.")
   })
 
-  it("keeps a failed subagent tool failed when its child lifecycle completes later", () => {
+  it("presents a subagent as finished when its durable child lifecycle completes after a tool error", () => {
     const childId = "execution:child:turn:task"
     const projection = Transcript.project("turn", "prompt", [
       event("agent", 0, "tool.call.requested", {
@@ -337,10 +337,14 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(model.blocks).toEqual([
       expect.objectContaining({
         _tag: "ToolCall",
-        status: "failed",
-        output: "AgentToolError: Model gpt-5.6-luna is not available",
+        status: "complete",
       }),
     ])
+    expect(
+      renderTranscriptStyled(model)
+        .chunks.map((chunk) => chunk.text)
+        .join(""),
+    ).toContain("Subagent finished")
   })
 
   it("merges Relay child ids that encode the uncorrelated tool call", () => {

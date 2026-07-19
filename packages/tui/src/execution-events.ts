@@ -142,12 +142,7 @@ const mergeChildAgent = (tool: Unit, child: Unit): Unit => {
     child.content.block._tag !== "ChildAgent"
   )
     return tool
-  const status =
-    tool.content.block.status === "failed" ||
-    tool.content.block.status === "cancelled" ||
-    child.revision < tool.revision
-      ? tool.content.block.status
-      : child.content.block.status
+  const status = child.revision < tool.revision ? tool.content.block.status : child.content.block.status
   return {
     ...tool,
     revision: Math.max(tool.revision, child.revision),

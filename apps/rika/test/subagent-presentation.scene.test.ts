@@ -100,7 +100,11 @@ test(
   () =>
     Scene.run({
       script: [
-        Scene.model.turn([Scene.model.toolCall("task", { prompt: "Inspect one child file." }, "file-inspector")]),
+        Scene.model.turn([
+          Scene.model.toolCall("read_file", { path: "missing-parent-file.ts", offset: 0, limit: 20 }, "parent-read"),
+          Scene.model.toolCall("grep", { pattern: "owner", regex: false }, "parent-grep"),
+          Scene.model.toolCall("task", { prompt: "Inspect one child file." }, "file-inspector"),
+        ]),
         Scene.model.turn([
           Scene.model.toolCall("read_file", { path: "missing-child-file.ts", offset: 0, limit: 20 }, "child-read"),
         ]),
@@ -110,14 +114,18 @@ test(
       ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Inspect a child file.\r"),
-        Scene.action.writeAfter("CHILD_TOOL_TURN_COMPLETE", "\t", 100),
-        Scene.action.writeAfter("Subagent finished ▸", "\r"),
+        Scene.action.writeAfter("CHILD_TOOL_TURN_COMPLETE", "\t\t\r", 100),
         Scene.action.writeAfter("Child inspection", "\u0003", 500),
       ],
     }).then((result) => {
       expect(result.output).toContain("Inspect one child file.")
       expect(result.output).toContain("missing-child-file.ts")
       expect(result.output).toContain("Child inspection")
+      expect(result.output).toContain("✓ Subagent finished")
+      expect(result.output).toContain("✓ Explored 1 file, 1 search")
+      expect(result.output).toContain("✕ Read missing-child-file.ts")
+      expect(result.childExecutions).toHaveLength(1)
+      expect(result.childExecutions[0]?.status).toBe("completed")
       expectScriptedModel(result)
     }),
   45_000,

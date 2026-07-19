@@ -334,7 +334,7 @@ describe("Transcript projection", () => {
     expect(block?.presentation.activeLabel).not.toContain("(task)")
   })
 
-  it("stores the tool error text on a failed subagent call for live and replayed projections", () => {
+  it("uses a later durable child completion instead of an earlier subagent tool error", () => {
     const events: ReadonlyArray<SourceEvent> = [
       {
         cursor: "call",
@@ -354,6 +354,18 @@ describe("Transcript projection", () => {
         createdAt: 2,
         data: { tool_call_id: "agent", error: "AgentToolError: Model gpt-5.6-luna is not available" },
       },
+      {
+        cursor: "completed",
+        sequence: 3,
+        type: "child_run.completed",
+        createdAt: 3,
+        data: {
+          tool_call_id: "agent",
+          child_execution_id: "child:agent",
+          profile: "task",
+          summary: "The child recovered and returned an answer.",
+        },
+      },
     ]
     const live = project("turn-a", "delegate", events)
     const replayed = events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "delegate"))
@@ -364,9 +376,9 @@ describe("Transcript projection", () => {
           _tag: "Block",
           block: {
             _tag: "ToolCall",
-            status: "failed",
+            status: "complete",
             detail: "Inspect the projection",
-            output: "AgentToolError: Model gpt-5.6-luna is not available",
+            output: "The child recovered and returned an answer.",
           },
         },
       })

@@ -715,7 +715,6 @@ export const buildTranscript: {
       }
     }
     const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
-      const failed = units.some((unit) => unit.block.status === "failed")
       const running = units.some((unit) => unit.block.status === "running")
       const cancelled = units.some((unit) => unit.block.status === "cancelled")
       const counters = new Map<string, number>()
@@ -730,10 +729,10 @@ export const buildTranscript: {
         .join(", ")
       if (selected)
         highlight(
-          `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
+          `${iconChar(false, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
         )
       else {
-        append(statusIcon(failed, running, cancelled))
+        append(statusIcon(false, running, cancelled))
         append(fg(colors.text)(running ? " Exploring" : " Explored"))
         append(dim(fg(colors.text)(` ${counts.length > 0 ? counts : "workspace"}`)))
         append(marker(expanded))

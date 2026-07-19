@@ -436,7 +436,6 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
   if (linkedTool !== undefined) {
     const id = linkedTool.id
     const childState = childStatus(event, value)
-    const status = linkedTool.status === "failed" || linkedTool.status === "cancelled" ? linkedTool.status : childState
     const profile = string(value.profile ?? value.preset_name ?? value.name).toLowerCase()
     const presentation =
       profile.length === 0
@@ -451,7 +450,7 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
     const updated = updateTool(projection, id, event.sequence, (tool) => ({
       ...tool,
       childId,
-      status,
+      status: childState,
       presentation,
       ...(string(value.summary ?? value.output ?? value.error).length === 0
         ? {}

@@ -47,6 +47,22 @@ const explore = (
 })
 
 describe("tool presentation", () => {
+  test("keeps a completed Explore group successful while showing its failed tool", () => {
+    const blocks = [
+      call("read", "read_file", { path: "missing.ts" }, explore("read", "file"), {
+        detail: "missing.ts",
+        status: "failed",
+        output: "File not found",
+      }),
+      call("search", "grep", { pattern: "owner" }, explore("grep", "search"), { detail: "owner" }),
+    ]
+
+    const rendered = text(model(blocks, ["tool:read"]))
+
+    expect(rendered).toContain("✓ Explored 1 file, 1 search")
+    expect(rendered).toContain("✕ Read missing.ts File not found")
+  })
+
   test("uses user-facing expanded labels for every exploration action", () => {
     const blocks = [
       call("read", "get_diagnostics", { path: "src/a.ts" }, explore("read", "file"), { detail: "src/a.ts" }),
