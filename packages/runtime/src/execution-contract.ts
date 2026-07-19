@@ -28,6 +28,7 @@ export interface ExecutionModelRoute {
   readonly providerProtocol: "openai" | "anthropic" | "test"
   readonly providerBaseUrl: string
   readonly providerApiKeyEnv?: string
+  readonly openAiAccountFingerprint?: string
   readonly effort: string
   readonly fast: boolean
   readonly requestVariant: string

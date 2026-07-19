@@ -36,6 +36,7 @@ export const ExecutionModelRoute = Schema.Struct({
   providerProtocol: Schema.Literals(["openai", "anthropic", "test"]),
   providerBaseUrl: Schema.String,
   providerApiKeyEnv: Schema.optionalKey(Schema.String),
+  openAiAccountFingerprint: Schema.optionalKey(Schema.String),
   effort: Schema.String,
   fast: Schema.Boolean,
   requestVariant: Schema.String,

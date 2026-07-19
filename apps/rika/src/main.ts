@@ -5,13 +5,20 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { AiError, Compaction, ModelRegistry, Response as AiResponse } from "@batonfx/core"
 import type { TestModel as TestModelTypes } from "@batonfx/test"
 import { anthropic, anthropicClientLayerConfig } from "@batonfx/providers/anthropic"
-import { openAi, openAiClientLayerConfig } from "@batonfx/providers/openai"
+import {
+  OpenAiAccountCredentialError,
+  openAi,
+  openAiAccount,
+  openAiClientLayerConfig,
+  type OpenAiAccountCredentials,
+} from "@batonfx/providers/openai"
 import { FileFinder } from "@ff-labs/fff-node"
 import {
   ConfigOperations,
   ContextFileSystem,
   ExtensionOperations,
   Operation,
+  OpenAiAuth,
   ResidentService,
   ResolvedContext,
   ThreadQuery,
@@ -730,7 +737,13 @@ const normalizedBaseUrl = (value: string) => {
   return url.toString().replace(/\/(?=\?|$)/, "")
 }
 
-export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
+const isNativeOpenAiRoute = (route: ConfigContract.ResolvedModelRoute) =>
+  route.providerId === "openai" &&
+  route.providerConnection.protocol === "openai" &&
+  normalizedBaseUrl(route.providerConnection.baseUrl) ===
+    normalizedBaseUrl(ConfigContract.defaults.providers.openai!.baseUrl)
+
+const modelRoutePlanImpl = (route: ConfigContract.ResolvedModelRoute, openAiAccountFingerprint?: string) => {
   const apiKeyEnv = route.providerConnection.apiKeyEnv
   const registrationKey = `sha256:${createHash("sha256")
     .update(
@@ -738,6 +751,7 @@ export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
         protocol: route.providerConnection.protocol,
         baseUrl: normalizedBaseUrl(route.providerConnection.baseUrl),
         apiKeyEnv,
+        ...(openAiAccountFingerprint === undefined || !isNativeOpenAiRoute(route) ? {} : { openAiAccountFingerprint }),
         model: route.model,
         effort: route.effort,
         fast: route.fast,
@@ -751,6 +765,13 @@ export const modelRoutePlan = (route: ConfigContract.ResolvedModelRoute) => {
     compaction: productionCompaction(route),
   }
 }
+
+export const modelRoutePlan: {
+  (
+    openAiAccountFingerprint?: string,
+  ): (route: ConfigContract.ResolvedModelRoute) => ReturnType<typeof modelRoutePlanImpl>
+  (route: ConfigContract.ResolvedModelRoute, openAiAccountFingerprint?: string): ReturnType<typeof modelRoutePlanImpl>
+} = Function.dual((args) => typeof args[0] === "object", modelRoutePlanImpl)
 
 const modeIds = ["low", "medium", "high", "ultra"] as const
 const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
@@ -810,10 +831,11 @@ const executionRoutePinImpl = (
   settings: ConfigContract.Settings,
   mode: ConfigContract.ModeId,
   tuning?: { readonly fastMode?: boolean },
+  openAiAccountFingerprint?: string,
 ): Turn.ExecutionRoutePin => {
   const resolveRole = (role: ConfigContract.Role) => {
     const route = resolveTunedModeRoute(settings, mode, role, tuning)
-    const plan = modelRoutePlan(route)
+    const plan = modelRoutePlan(route, openAiAccountFingerprint)
     return {
       role,
       alias: route.alias,
@@ -825,6 +847,7 @@ const executionRoutePinImpl = (
       ...(route.providerConnection.apiKeyEnv === undefined
         ? {}
         : { providerApiKeyEnv: route.providerConnection.apiKeyEnv }),
+      ...(openAiAccountFingerprint === undefined || !isNativeOpenAiRoute(route) ? {} : { openAiAccountFingerprint }),
       effort: route.effort,
       fast: route.fast,
       requestVariant: plan.registrationKey,
@@ -834,7 +857,7 @@ const executionRoutePinImpl = (
   }
   const resolveAgent = (agent: ConfigContract.AgentId) => {
     const route = ConfigContract.resolveAgentRoute(settings, agent)
-    const plan = modelRoutePlan(route)
+    const plan = modelRoutePlan(route, openAiAccountFingerprint)
     return {
       role: agent,
       alias: route.alias,
@@ -846,6 +869,7 @@ const executionRoutePinImpl = (
       ...(route.providerConnection.apiKeyEnv === undefined
         ? {}
         : { providerApiKeyEnv: route.providerConnection.apiKeyEnv }),
+      ...(openAiAccountFingerprint === undefined || !isNativeOpenAiRoute(route) ? {} : { openAiAccountFingerprint }),
       effort: route.effort,
       fast: route.fast,
       requestVariant: plan.registrationKey,
@@ -854,9 +878,9 @@ const executionRoutePinImpl = (
     }
   }
   const titleRoute = ConfigContract.resolveThreadTitleRoute(settings)
-  const titlePlan = modelRoutePlan(titleRoute)
+  const titlePlan = modelRoutePlan(titleRoute, openAiAccountFingerprint)
   const summaryRoute = ConfigContract.resolveCompactionSummaryRoute(settings)
-  const summaryPlan = modelRoutePlan(summaryRoute)
+  const summaryPlan = modelRoutePlan(summaryRoute, openAiAccountFingerprint)
   return {
     mode,
     title: {
@@ -870,6 +894,9 @@ const executionRoutePinImpl = (
       ...(titleRoute.providerConnection.apiKeyEnv === undefined
         ? {}
         : { providerApiKeyEnv: titleRoute.providerConnection.apiKeyEnv }),
+      ...(openAiAccountFingerprint === undefined || !isNativeOpenAiRoute(titleRoute)
+        ? {}
+        : { openAiAccountFingerprint }),
       effort: titleRoute.effort,
       fast: titleRoute.fast,
       requestVariant: titlePlan.registrationKey,
@@ -887,6 +914,9 @@ const executionRoutePinImpl = (
       ...(summaryRoute.providerConnection.apiKeyEnv === undefined
         ? {}
         : { providerApiKeyEnv: summaryRoute.providerConnection.apiKeyEnv }),
+      ...(openAiAccountFingerprint === undefined || !isNativeOpenAiRoute(summaryRoute)
+        ? {}
+        : { openAiAccountFingerprint }),
       effort: summaryRoute.effort,
       fast: summaryRoute.fast,
       requestVariant: summaryPlan.registrationKey,
@@ -914,6 +944,7 @@ export const executionRoutePin: {
     settings: ConfigContract.Settings,
     mode: ConfigContract.ModeId,
     tuning?: { readonly fastMode?: boolean },
+    openAiAccountFingerprint?: string,
   ): Turn.ExecutionRoutePin
 } = Function.dual((args) => typeof args[0] === "object", executionRoutePinImpl)
 
@@ -950,42 +981,150 @@ export const credentialForRoute: {
   ): Redacted.Redacted<string> | undefined
 } = Function.dual(2, credentialForRouteImpl)
 
+export interface OpenAiAccountRegistrationOptions {
+  readonly fingerprint: string
+  readonly auth: OpenAiAuth.ServiceInterface
+}
+
+const openAiAccountRegistration = (auth: OpenAiAuth.ServiceInterface) =>
+  auth.status.pipe(
+    Effect.flatMap(
+      (status): Effect.Effect<OpenAiAccountRegistrationOptions | undefined, ModelConfigurationError> =>
+        status._tag === "Present" || status._tag === "RefreshRequired"
+          ? Effect.succeed({ fingerprint: status.fingerprint, auth })
+          : status._tag === "Unauthenticated"
+            ? Effect.sync((): undefined => undefined)
+            : Effect.fail(
+                ModelConfigurationError.make({
+                  message: "OpenAI account credentials are corrupt; run rika auth logout openai, then log in again",
+                }),
+              ),
+    ),
+    Effect.mapError((error) =>
+      Schema.is(ModelConfigurationError)(error)
+        ? error
+        : ModelConfigurationError.make({ message: "OpenAI account credentials could not be read" }),
+    ),
+  )
+
+const openAiAccountRegistrationForRoutesImpl = (
+  routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+  auth: OpenAiAuth.ServiceInterface,
+) =>
+  routes.some(isNativeOpenAiRoute)
+    ? openAiAccountRegistration(auth)
+    : Effect.sync((): OpenAiAccountRegistrationOptions | undefined => undefined)
+
+export const openAiAccountRegistrationForRoutes: {
+  (
+    auth: OpenAiAuth.ServiceInterface,
+  ): (
+    routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+  ) => ReturnType<typeof openAiAccountRegistrationForRoutesImpl>
+  (
+    routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
+    auth: OpenAiAuth.ServiceInterface,
+  ): ReturnType<typeof openAiAccountRegistrationForRoutesImpl>
+} = Function.dual(2, openAiAccountRegistrationForRoutesImpl)
+
+const batonAccountCredentials = (
+  auth: OpenAiAuth.ServiceInterface,
+  expectedFingerprint: string,
+): OpenAiAccountCredentials => {
+  const adapt = (
+    operation: "acquire" | "refreshRejected",
+    effect: Effect.Effect<OpenAiAuth.Credential, OpenAiAuth.Error>,
+  ) =>
+    effect.pipe(
+      Effect.filterOrFail(
+        (credential) => credential.fingerprint === expectedFingerprint,
+        () => OpenAiAccountCredentialError.make({ operation }),
+      ),
+      Effect.map((credential) => ({
+        accessToken: credential.accessToken,
+        accountId: Redacted.value(credential.accountId),
+        generation: credential.generation,
+      })),
+      Effect.mapError(() => OpenAiAccountCredentialError.make({ operation })),
+    )
+  return {
+    acquire: adapt("acquire", auth.acquire),
+    refreshRejected: (generation) => adapt("refreshRejected", auth.refreshRejected(generation)),
+  }
+}
+
+export const openAiAccountConfig = (options: Readonly<Record<string, unknown>>) =>
+  ({
+    ...Object.fromEntries(Object.entries(options).filter(([name]) => name !== "max_output_tokens")),
+    store: false,
+  }) as NonNullable<Parameters<typeof openAiAccount>[0]["config"]>
+
 const registrationForRoute = (
   route: ConfigContract.ResolvedModelRoute,
   apiKeyConfig: Config.Config<Redacted.Redacted<string>>,
+  account?: OpenAiAccountRegistrationOptions,
 ) =>
-  route.providerConnection.protocol === "openai"
-    ? openAi({
+  account !== undefined && isNativeOpenAiRoute(route)
+    ? openAiAccount({
         model: route.model,
-        registrationKey: modelRoutePlan(route).registrationKey,
-        config: route.options as NonNullable<Parameters<typeof openAi>[0]["config"]>,
+        registrationKey: modelRoutePlan(route, account.fingerprint).registrationKey,
+        credentials: batonAccountCredentials(account.auth, account.fingerprint),
+        config: openAiAccountConfig(route.options),
       }).pipe(
         Effect.map((registration) => ({ ...registration, provider: route.providerId })),
-        provideLayerScoped(
-          openAiClientLayerConfig({
-            apiUrl: Config.succeed(route.providerConnection.baseUrl),
-            apiKey: route.providerConnection.apiKeyEnv === undefined ? Config.succeed(undefined) : apiKeyConfig,
-          }).pipe(Layer.provide(sanitizedFetchLayer), Layer.orDie),
-        ),
+        provideLayerScoped(sanitizedFetchLayer),
       )
-    : anthropic({
-        model: route.model,
-        registrationKey: modelRoutePlan(route).registrationKey,
-        config: route.options as NonNullable<Parameters<typeof anthropic>[0]["config"]>,
-      }).pipe(
-        Effect.map((registration) => ({ ...registration, provider: route.providerId })),
-        provideLayerScoped(
-          anthropicClientLayerConfig({
-            apiUrl: Config.succeed(route.providerConnection.baseUrl),
-            apiKey: route.providerConnection.apiKeyEnv === undefined ? Config.succeed(undefined) : apiKeyConfig,
-          }).pipe(Layer.provide(sanitizedFetchLayer), Layer.orDie),
-        ),
-      )
+    : route.providerConnection.protocol === "openai"
+      ? openAi({
+          model: route.model,
+          registrationKey: modelRoutePlan(route).registrationKey,
+          config: route.options as NonNullable<Parameters<typeof openAi>[0]["config"]>,
+        }).pipe(
+          Effect.map((registration) => ({ ...registration, provider: route.providerId })),
+          provideLayerScoped(
+            openAiClientLayerConfig({
+              apiUrl: Config.succeed(route.providerConnection.baseUrl),
+              apiKey: route.providerConnection.apiKeyEnv === undefined ? Config.succeed(undefined) : apiKeyConfig,
+            }).pipe(Layer.provide(sanitizedFetchLayer), Layer.orDie),
+          ),
+        )
+      : anthropic({
+          model: route.model,
+          registrationKey: modelRoutePlan(route).registrationKey,
+          config: route.options as NonNullable<Parameters<typeof anthropic>[0]["config"]>,
+        }).pipe(
+          Effect.map((registration) => ({ ...registration, provider: route.providerId })),
+          provideLayerScoped(
+            anthropicClientLayerConfig({
+              apiUrl: Config.succeed(route.providerConnection.baseUrl),
+              apiKey: route.providerConnection.apiKeyEnv === undefined ? Config.succeed(undefined) : apiKeyConfig,
+            }).pipe(Layer.provide(sanitizedFetchLayer), Layer.orDie),
+          ),
+        )
 
 const registrationForPinnedRoute = (
   route: Turn.ExecutionModelRoute,
   providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  openAiAuth?: OpenAiAuth.ServiceInterface,
 ): Effect.Effect<ModelRegistry.Registration, ModelConfigurationError> => {
+  if (route.openAiAccountFingerprint !== undefined) {
+    if (
+      openAiAuth === undefined ||
+      route.provider !== "openai" ||
+      route.providerProtocol !== "openai" ||
+      normalizedBaseUrl(route.providerBaseUrl) !== normalizedBaseUrl(ConfigContract.defaults.providers.openai!.baseUrl)
+    )
+      return Effect.fail(ModelConfigurationError.make({ message: "Pinned OpenAI account route is unavailable" }))
+    return openAiAccount({
+      model: route.model,
+      registrationKey: route.registrationKey,
+      credentials: batonAccountCredentials(openAiAuth, route.openAiAccountFingerprint),
+      config: openAiAccountConfig(route.providerOptions ?? {}),
+    }).pipe(
+      Effect.map((registration) => ({ ...registration, provider: route.provider })),
+      provideLayerScoped(sanitizedFetchLayer),
+    )
+  }
   const credentialVariable = route.providerApiKeyEnv
   const credential = credentialVariable === undefined ? undefined : providerCredentials[credentialVariable]
   if (credentialVariable !== undefined && credential === undefined)
@@ -1042,10 +1181,13 @@ export const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.Resolve
 const registrationsForRoutesImpl = (
   routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  account?: OpenAiAccountRegistrationOptions,
 ) =>
   Effect.forEach(distinctModelRoutes(routes), (route) => {
     if (route.providerConnection.apiKeyEnv === undefined)
-      return registrationForRoute(route, Config.succeed(Redacted.make("unused")))
+      return registrationForRoute(route, Config.succeed(Redacted.make("unused")), account)
+    if (account !== undefined && isNativeOpenAiRoute(route))
+      return registrationForRoute(route, Config.succeed(Redacted.make("unused")), account)
     const credential = credentialForRoute(route, providerCredentials)
     if (credential === undefined)
       return Effect.fail(
@@ -1053,7 +1195,7 @@ const registrationsForRoutesImpl = (
           message: `Missing environment variable ${route.providerConnection.apiKeyEnv} for provider ${route.providerId}`,
         }),
       )
-    return registrationForRoute(route, Config.succeed(credential))
+    return registrationForRoute(route, Config.succeed(credential), account)
   })
 
 export const registrationsForRoutes: {
@@ -1063,8 +1205,9 @@ export const registrationsForRoutes: {
   (
     routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
     providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+    account?: OpenAiAccountRegistrationOptions,
   ): ReturnType<typeof registrationsForRoutesImpl>
-} = Function.dual(2, registrationsForRoutesImpl)
+} = Function.dual((args) => args.length >= 2, registrationsForRoutesImpl)
 
 export const productionCompaction = (
   route?: Pick<ConfigContract.ResolvedModelRoute, "compaction">,
@@ -1104,6 +1247,7 @@ export const isLegacyUnavailableExecutionRoute = (route: Turn.ExecutionRoutePin)
 export const registrationsForPersistedRoutes = Effect.fn("Main.registrationsForPersistedRoutes")(function* (
   routes: ReadonlyArray<Turn.ExecutionModelRoute>,
   providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+  openAiAuth?: OpenAiAuth.ServiceInterface,
 ) {
   const results = yield* Effect.forEach(
     routes.filter(
@@ -1112,7 +1256,7 @@ export const registrationsForPersistedRoutes = Effect.fn("Main.registrationsForP
         all.findIndex((other) => registrationTuple(other) === registrationTuple(candidate)) === index,
     ),
     (route) =>
-      registrationForPinnedRoute(route, providerCredentials).pipe(
+      registrationForPinnedRoute(route, providerCredentials, openAiAuth).pipe(
         Effect.matchCauseEffect({
           onFailure: (cause) =>
             Cause.hasInterruptsOnly(cause)
@@ -1188,6 +1332,7 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
     }>
     readonly unavailable: ReadonlyArray<PersistedRouteRegistrationFailure>
     readonly providerCredentials: Readonly<Record<string, Redacted.Redacted<string>>>
+    readonly openAiAuth?: OpenAiAuth.ServiceInterface
     readonly resolveLegacyRoute?: (input: ExecutionBackend.StartInput) => Effect.Effect<
       {
         readonly executionRoute: Turn.ExecutionRoutePin
@@ -1236,7 +1381,7 @@ export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegist
         const registrations = yield* Effect.forEach(
           missing,
           (candidate) =>
-            registrationForPinnedRoute(candidate, options.providerCredentials).pipe(
+            registrationForPinnedRoute(candidate, options.providerCredentials, options.openAiAuth).pipe(
               Effect.matchCauseEffect({
                 onFailure: (cause) =>
                   Cause.hasInterruptsOnly(cause)
@@ -1296,6 +1441,7 @@ const configuredBackendLayerImpl = (
     ExecutionBackend.BackendError
   >,
   shellPermission?: ConfigContract.PermissionDecision,
+  openAiAuth?: OpenAiAuth.ServiceInterface,
 ): Layer.Layer<
   Layer.Success<ReturnType<typeof relayBackendLayer>>,
   Layer.Error<ReturnType<typeof relayBackendLayer>> | Config.ConfigError | Error | Schema.SchemaError,
@@ -1308,9 +1454,7 @@ const configuredBackendLayerImpl = (
       const resolvedOracleRoute = oracleRoute ?? route
       const resolvedCompactionSummaryRoute =
         compactionSummaryRoute ?? ConfigContract.resolveCompactionSummaryRoute(ConfigContract.defaults)
-      const routePlan = modelRoutePlan(route)
-      const oracleRoutePlan = modelRoutePlan(resolvedOracleRoute)
-      const compactionSummaryPlan = modelRoutePlan(resolvedCompactionSummaryRoute)
+      const configuredRoutes = allModelRoutes ?? [route, resolvedOracleRoute, resolvedCompactionSummaryRoute]
       const testResponse = yield* Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE"))
       const testScript = yield* Config.option(Config.string("RIKA_TEST_MODEL_SCRIPT"))
       const testApprovalTools = yield* Config.option(Config.string("RIKA_TEST_APPROVAL_TOOLS"))
@@ -1326,6 +1470,13 @@ const configuredBackendLayerImpl = (
           message: "RIKA_TEST_MEDIA_ANALYZER_RESPONSE and RIKA_TEST_MEDIA_ANALYZER_ERROR cannot both be set",
         })
       }
+      const account =
+        openAiAuth !== undefined && testResponse._tag === "None" && testScript._tag === "None"
+          ? yield* openAiAccountRegistrationForRoutes(configuredRoutes, openAiAuth)
+          : undefined
+      const routePlan = modelRoutePlan(route, account?.fingerprint)
+      const oracleRoutePlan = modelRoutePlan(resolvedOracleRoute, account?.fingerprint)
+      const compactionSummaryPlan = modelRoutePlan(resolvedCompactionSummaryRoute, account?.fingerprint)
       yield* Effect.logInfo("model.backend.configured").pipe(
         Effect.annotateLogs(
           "rika.model.backend.kind",
@@ -1356,14 +1507,12 @@ const configuredBackendLayerImpl = (
         selection = fixture.selection
         modelVariantPolicy = "fixed-selection"
       } else {
-        const configuredRegistrations = yield* registrationsForRoutes(
-          allModelRoutes ?? [route, resolvedOracleRoute, resolvedCompactionSummaryRoute],
-          providerCredentials,
-        )
+        const configuredRegistrations = yield* registrationsForRoutes(configuredRoutes, providerCredentials, account)
         const configuredKeys = new Set(configuredRegistrations.map(registrationTuple))
         const persistedRegistrationState = yield* registrationsForPersistedRoutes(
           persistedModelRoutes.filter((candidate) => !configuredKeys.has(registrationTuple(candidate))),
           providerCredentials,
+          openAiAuth,
         )
         const registrations = [...configuredRegistrations, ...persistedRegistrationState.registrations]
         unavailablePersistedRoutes = persistedRegistrationState.unavailable
@@ -1443,6 +1592,7 @@ const configuredBackendLayerImpl = (
               registeredRoutes: [registration, ...additionalRegistrations],
               unavailable: unavailablePersistedRoutes,
               providerCredentials,
+              ...(openAiAuth === undefined ? {} : { openAiAuth }),
               ...(resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute }),
             }),
           ),
@@ -1465,6 +1615,7 @@ export const configuredBackendLayer: {
     compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
     resolveLegacyRoute?: Parameters<typeof configuredBackendLayerImpl>[11],
     shellPermission?: Parameters<typeof configuredBackendLayerImpl>[12],
+    openAiAuth?: Parameters<typeof configuredBackendLayerImpl>[13],
   ): (filename: string) => ReturnType<typeof configuredBackendLayerImpl>
   (
     filename: string,
@@ -1480,6 +1631,7 @@ export const configuredBackendLayer: {
     compactionSummaryRoute?: ConfigContract.ResolvedModelRoute,
     resolveLegacyRoute?: Parameters<typeof configuredBackendLayerImpl>[11],
     shellPermission?: Parameters<typeof configuredBackendLayerImpl>[12],
+    openAiAuth?: Parameters<typeof configuredBackendLayerImpl>[13],
   ): ReturnType<typeof configuredBackendLayerImpl>
 } = Function.dual((args) => args.length >= 4, configuredBackendLayerImpl)
 
@@ -2778,6 +2930,7 @@ if (import.meta.main) {
           workspace: workspaceSettings,
         })
         const effectiveConfig = yield* ConfigService.effective().pipe(provideLayerScoped(applicationConfigLayer))
+        const openAiAuth = Context.get(yield* Layer.build(openAiAuthLayer), OpenAiAuth.Service)
         const testModelConfigured =
           environment.testModelResponse._tag === "Some" || environment.testModelScript._tag === "Some"
         const workspaceExecutionRoutePlan = (
@@ -2794,14 +2947,18 @@ if (import.meta.main) {
             const resolvedWorkspaceConfig = yield* ConfigService.effective().pipe(
               provideLayerScoped(workspaceConfigLayer),
             )
-            const resolvedRoute = yield* resolveExecutionRouteForSettings(
-              resolvedWorkspaceConfig.settings,
-              mode,
-              tuning,
-            )
+            const routes = modelRoutesForExecution(resolvedWorkspaceConfig.settings, mode, tuning)
+            const account = testModelConfigured
+              ? undefined
+              : yield* openAiAccountRegistrationForRoutes(routes, openAiAuth)
+            const resolvedRoute = {
+              routes,
+              executionRoute: executionRoutePin(resolvedWorkspaceConfig.settings, mode, tuning, account?.fingerprint),
+            }
             return {
               ...resolvedRoute,
               providerCredentials: resolvedWorkspaceConfig.environment.providerCredentials,
+              account,
             }
           }).pipe(provideLayerScoped(BunServices.layer))
         const resolveWorkspaceExecutionRoute = (
@@ -2815,6 +2972,7 @@ if (import.meta.main) {
               const registrations = yield* registrationsForRoutes(
                 resolvedRoute.routes,
                 resolvedRoute.providerCredentials,
+                resolvedRoute.account,
               )
               const backend = yield* ExecutionBackend.Service
               if (backend.registerModels !== undefined) yield* backend.registerModels(registrations)
@@ -2873,7 +3031,7 @@ if (import.meta.main) {
             const resolved = yield* workspaceExecutionRoutePlan("medium", undefined, thread.workspace)
             const registrations = testModelConfigured
               ? []
-              : yield* registrationsForRoutes(resolved.routes, resolved.providerCredentials)
+              : yield* registrationsForRoutes(resolved.routes, resolved.providerCredentials, resolved.account)
             return { executionRoute: resolved.executionRoute, registrations }
           }).pipe(
             provideLayerScoped(repositories),
@@ -2897,6 +3055,7 @@ if (import.meta.main) {
           ConfigContract.resolveCompactionSummaryRoute(effectiveConfig.settings),
           resolveLegacyRoute,
           effectiveConfig.settings.permissions.shell,
+          openAiAuth,
         ).pipe(Layer.provide(BunServices.layer), Layer.provide(BunCrypto.layer))
         const configAdapter = Layer.effect(
           ConfigOperations.Adapter,

@@ -3,7 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import { AiError, LanguageModel } from "effect/unstable/ai"
-import { Operation } from "@rika/app"
+import { OpenAiAuth, Operation } from "@rika/app"
 import { ConfigContract } from "@rika/config"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
@@ -22,6 +22,8 @@ import {
   executionRoutePin,
   modelRoutesForExecution,
   modelRoutePlan,
+  openAiAccountConfig,
+  openAiAccountRegistrationForRoutes,
   parseTestModelScript,
   productionCompaction,
   registrationsForRoutes,
@@ -77,6 +79,27 @@ const withBunServices = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.flatMap((context) => effect.pipe(Effect.provide(context))),
     ),
   )
+
+const accountAuth = (fingerprint: string): OpenAiAuth.ServiceInterface => {
+  const credential: OpenAiAuth.Credential = {
+    accessToken: Redacted.make("account-access-token"),
+    idToken: Redacted.make("account-id-token"),
+    refreshToken: Redacted.make("account-refresh-token"),
+    accountId: Redacted.make("account-id"),
+    fingerprint,
+    generation: `${fingerprint}.generation`,
+    expiresAt: Number.MAX_SAFE_INTEGER,
+    refreshedAt: 1,
+  }
+  return {
+    loginBrowser: () => Effect.succeed(credential),
+    loginDevice: Effect.succeed(credential),
+    status: Effect.succeed({ _tag: "Present", fingerprint }),
+    logout: Effect.succeed({ removed: true, revocationSupported: false }),
+    acquire: Effect.succeed(credential),
+    refreshRejected: () => Effect.succeed(credential),
+  }
+}
 
 test("uses one canonical directory for both resident databases", () =>
   Effect.runPromise(
@@ -583,6 +606,114 @@ test("fails before provider registration when a configured credential is missing
         })
       }
     }),
+  ))
+
+test("registers native OpenAI with stored account auth and no API key", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+        const auth = accountAuth("account-a")
+        const registrations = yield* registrationsForRoutes([route], {}, { fingerprint: "account-a", auth })
+        expect(registrations).toHaveLength(1)
+        expect(registrations[0]?.registrationKey).toBe(modelRoutePlan(route, "account-a").registrationKey)
+      }),
+    ),
+  ))
+
+test("uses the account endpoint request constraints", () => {
+  expect(
+    openAiAccountConfig({
+      max_output_tokens: 128_000,
+      reasoning: { effort: "medium", summary: "auto" },
+    }),
+  ).toEqual({
+    reasoning: { effort: "medium", summary: "auto" },
+    store: false,
+  })
+})
+
+test("does not read account storage for custom OpenAI routes", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const settings: ConfigContract.Settings = {
+        ...ConfigContract.defaults,
+        providers: {
+          ...ConfigContract.defaults.providers,
+          openai: { ...ConfigContract.defaults.providers.openai!, baseUrl: "https://models.example.test/v1" },
+        },
+      }
+      const unreadable: OpenAiAuth.ServiceInterface = {
+        ...accountAuth("account-a"),
+        status: Effect.fail(OpenAiAuth.StoreError.make({ kind: "corrupt", message: "do not expose" })),
+      }
+      expect(
+        yield* openAiAccountRegistrationForRoutes(modelRoutesForExecution(settings, "medium"), unreadable),
+      ).toBeUndefined()
+      const nativeExit = yield* Effect.exit(
+        openAiAccountRegistrationForRoutes(modelRoutesForExecution(ConfigContract.defaults, "medium"), unreadable),
+      )
+      expect(nativeExit._tag).toBe("Failure")
+      if (nativeExit._tag === "Failure") expect(Cause.pretty(nativeExit.cause)).not.toContain("do not expose")
+    }),
+  ))
+
+test("pins OpenAI account identity separately from API-key identity", () => {
+  const account = executionRoutePin(ConfigContract.defaults, "medium", undefined, "account-a")
+  const apiKey = executionRoutePin(ConfigContract.defaults, "medium")
+  expect(account.main.openAiAccountFingerprint).toBe("account-a")
+  expect(account.main.registrationKey).not.toBe(apiKey.main.registrationKey)
+  expect(Schema.decodeUnknownSync(Turn.ExecutionRoutePin)(JSON.parse(JSON.stringify(account))).main).toMatchObject({
+    openAiAccountFingerprint: "account-a",
+    registrationKey: modelRoutePlan(
+      ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main"),
+      "account-a",
+    ).registrationKey,
+  })
+})
+
+test("never selects account auth for a custom OpenAI base URL", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const settings: ConfigContract.Settings = {
+          ...ConfigContract.defaults,
+          providers: {
+            ...ConfigContract.defaults.providers,
+            openai: { ...ConfigContract.defaults.providers.openai!, baseUrl: "https://models.example.test/v1" },
+          },
+        }
+        const route = ConfigContract.resolveModelRoute(settings, "medium", "main")
+        expect(modelRoutePlan(route, "account-a").registrationKey).toBe(modelRoutePlan(route).registrationKey)
+        expect(
+          executionRoutePin(settings, "medium", undefined, "account-a").main.openAiAccountFingerprint,
+        ).toBeUndefined()
+        const exit = yield* Effect.exit(
+          registrationsForRoutes([route], {}, { fingerprint: "account-a", auth: accountAuth("account-a") }),
+        )
+        expect(exit._tag).toBe("Failure")
+      }),
+    ),
+  ))
+
+test("fails an account request when its pinned fingerprint no longer matches", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const route = ConfigContract.resolveModelRoute(ConfigContract.defaults, "medium", "main")
+        const registration = (yield* registrationsForRoutes(
+          [route],
+          {},
+          { fingerprint: "account-a", auth: accountAuth("account-b") },
+        ))[0]!
+        const context = yield* Layer.build(registration.layer)
+        const exit = yield* Effect.exit(
+          LanguageModel.generateText({ prompt: "do not send" }).pipe(Effect.provide(context)),
+        )
+        expect(exit._tag).toBe("Failure")
+        if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toContain("account credential acquire failed")
+      }),
+    ),
   ))
 
 test("keeps registrations distinct by the exact Baton registry tuple", () => {
