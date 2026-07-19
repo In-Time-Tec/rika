@@ -619,7 +619,7 @@ describe("ExecutionEvents.projectUnits", () => {
       event("shell", 2, "tool.call.requested", {
         data: { tool_call_id: "shell", tool_name: "shell", input: { command: "sleep 60" } },
       }),
-      event("child-cancelled", 3, "execution.cancelled", { text: "parent stopped this child" }),
+      event("child-cancelled", 3, "execution.cancelled", { data: { reason: "parent stopped this child" } }),
     ])
     let live = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
     live = ExecutionEvents.projectChildUnits(live, "turn:agent", child.units)

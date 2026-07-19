@@ -746,7 +746,8 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
     })
   }
   if (event.type === "execution.cancelled") {
-    const reason = event.text ?? string(sourcePayload(event).message)
+    const payload = sourcePayload(event)
+    const reason = event.text ?? string(payload.reason, string(payload.message))
     return upsertUnit(projection, {
       ...unit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
         _tag: "Entry",
