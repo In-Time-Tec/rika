@@ -56,6 +56,13 @@ const replaceUnit = (projection: Projection, index: number, next: Unit): Project
   return { ...projection, units }
 }
 
+const applyExecutionOutcome = (projection: Projection, outcome: NonNullable<Unit["executionOutcome"]>): Projection => {
+  const index = projection.units.length - 1
+  return index < 0
+    ? projection
+    : replaceUnit(projection, index, { ...projection.units[index]!, executionOutcome: outcome })
+}
+
 const upsertUnit = (projection: Projection, incoming: Unit): Projection => {
   const index = projection.units.findIndex((candidate) => candidate.key === incoming.key)
   if (index < 0) return { ...projection, units: [...projection.units, incoming] }
@@ -709,28 +716,32 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
     const cost = usageCost(sourcePayload(event))
     return cost === undefined ? projection : { ...projection, costUsd: (projection.costUsd ?? 0) + cost }
   }
+  if (event.type === "execution.completed") return applyExecutionOutcome(projection, { status: "complete" })
   if (event.type === "execution.failed") {
+    const reason = event.text ?? string(sourcePayload(event).message, "Execution failed")
     const block: Block = {
       _tag: "Error",
       title: "Execution failed",
-      detail: event.text ?? string(sourcePayload(event).message, "Execution failed"),
+      detail: reason,
       turnId,
       recovery: "Edit your prompt and press Enter to try again.",
     }
-    return upsertUnit(
-      projection,
-      unit(`execution:${turnId}:failed`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
-    )
+    return upsertUnit(projection, {
+      ...unit(`execution:${turnId}:failed`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
+      executionOutcome: { status: "failed", reason },
+    })
   }
-  if (event.type === "execution.cancelled")
-    return upsertUnit(
-      projection,
-      unit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
+  if (event.type === "execution.cancelled") {
+    const reason = event.text ?? string(sourcePayload(event).message)
+    return upsertUnit(projection, {
+      ...unit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
         _tag: "Entry",
         role: "notice",
-        text: "cancelled",
+        text: reason.length > 0 ? reason : "cancelled",
       }),
-    )
+      executionOutcome: { status: "cancelled", ...(reason.length > 0 ? { reason } : {}) },
+    })
+  }
   if (event.type.startsWith("child_run.") || event.type.startsWith("child_fan_out.member."))
     return applyChild(projection, turnId, event)
   const block = genericBlock(turnId, event)

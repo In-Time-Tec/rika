@@ -716,7 +716,9 @@ export const buildTranscript: {
     }
     const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
       const running = units.some((unit) => unit.block.status === "running")
-      const cancelled = units.some((unit) => unit.block.status === "cancelled")
+      const complete = units.some((unit) => unit.block.status === "complete")
+      const failed = !running && !complete && units.some((unit) => unit.block.status === "failed")
+      const cancelled = !running && !complete && !failed && units.some((unit) => unit.block.status === "cancelled")
       const counters = new Map<string, number>()
       for (const unit of units) {
         const counter = unit.block.presentation.counter ?? (unit.kind === "read" ? "file" : "search")
@@ -729,10 +731,10 @@ export const buildTranscript: {
         .join(", ")
       if (selected)
         highlight(
-          `${iconChar(false, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
+          `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
         )
       else {
-        append(statusIcon(false, running, cancelled))
+        append(statusIcon(failed, running, cancelled))
         append(fg(colors.text)(running ? " Exploring" : " Explored"))
         append(dim(fg(colors.text)(` ${counts.length > 0 ? counts : "workspace"}`)))
         append(marker(expanded))

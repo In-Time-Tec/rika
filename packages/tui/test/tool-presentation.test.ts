@@ -63,6 +63,21 @@ describe("tool presentation", () => {
     expect(rendered).toContain("✕ Read missing.ts File not found")
   })
 
+  test.each([
+    ["all failed", ["failed", "failed"], "✕ Explored"],
+    ["all cancelled", ["cancelled", "cancelled"], "⊘ Explored"],
+    ["failed and cancelled", ["failed", "cancelled"], "✕ Explored"],
+  ] as const)("shows an Explore group as terminal when %s", (_, statuses, expected) => {
+    const blocks = statuses.map((status, index) =>
+      call(`read-${index}`, "read_file", { path: `${index}.ts` }, explore("read", "file"), {
+        detail: `${index}.ts`,
+        status,
+      }),
+    )
+
+    expect(text(model(blocks))).toContain(`${expected} 2 files`)
+  })
+
   test("uses user-facing expanded labels for every exploration action", () => {
     const blocks = [
       call("read", "get_diagnostics", { path: "src/a.ts" }, explore("read", "file"), { detail: "src/a.ts" }),

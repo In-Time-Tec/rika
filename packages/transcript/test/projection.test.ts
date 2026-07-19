@@ -50,6 +50,7 @@ describe("Transcript projection", () => {
     ])
 
     expect(projection.units.map((unit) => unit.content._tag)).toEqual(["Entry", "Entry", "Block", "Entry"])
+    expect(projection.units.at(-1)).toMatchObject({ executionOutcome: { status: "complete" } })
     expect(projection.units[2]).toMatchObject({
       key: "tool:turn-a:call",
       revision: 4,

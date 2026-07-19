@@ -13,6 +13,7 @@ export interface Event {
 }
 
 type ToolCall = Extract<Block, { readonly _tag: "ToolCall" }>
+type ExecutionOutcome = NonNullable<Unit["executionOutcome"]>
 
 const executionKey = (value: string): string => value.replace(/^execution:/, "")
 
@@ -97,25 +98,31 @@ const cancelParentRows = (model: Model, parentIds: ReadonlySet<string>): Model =
   return changed ? { ...model, blocks } : model
 }
 
-const applyExecutionFailure = (model: Model, parentId: string | undefined, units: ReadonlyArray<Unit>): Model => {
-  if (parentId === undefined) return model
-  const failure = units.find(
-    (unit) =>
-      unit.key.startsWith("execution:") &&
-      unit.key.endsWith(":failed") &&
-      unit.content._tag === "Block" &&
-      unit.content.block._tag === "Error",
-  )
-  if (failure?.content._tag !== "Block" || failure.content.block._tag !== "Error") return model
-  const detail = failure.content.block.detail
+const applyExecutionOutcome = (model: Model, parentId: string, outcome: ExecutionOutcome): Model => {
   const blocks = [...(model.blocks as ReadonlyArray<Block>)]
   const index = blocks.findIndex(
     (block) => block._tag === "ToolCall" && block.id === parentId && block.presentation.family === "agent",
   )
   const block = blocks[index]
   if (block?._tag !== "ToolCall") return model
-  blocks[index] = { ...block, status: "failed", output: detail }
+  const { output: _, ...withoutOutput } = block
+  blocks[index] = {
+    ...withoutOutput,
+    status: outcome.status,
+    ...(outcome.reason === undefined ? {} : { output: outcome.reason }),
+  }
   return { ...model, blocks }
+}
+
+const rememberExecutionOutcomes = (model: Model, units: ReadonlyArray<Unit>, parentId?: string): Model => {
+  const outcomes = { ...(model.childExecutionOutcomes as Readonly<Record<string, ExecutionOutcome>>) }
+  for (const candidate of units) {
+    const owner = parentId ?? candidate.parentId
+    if (owner !== undefined && candidate.executionOutcome !== undefined) outcomes[owner] = candidate.executionOutcome
+  }
+  let projected: Model = { ...model, childExecutionOutcomes: outcomes }
+  for (const [owner, outcome] of Object.entries(outcomes)) projected = applyExecutionOutcome(projected, owner, outcome)
+  return projected
 }
 
 const childLabels = (name: string, presentation: ToolCall["presentation"]): ToolCall["presentation"] => {
@@ -277,11 +284,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
   const cancellation = normalizeCancellation(parentCancelled ? units.map(cancelledUnit) : units, parentId)
   const reconciled =
     parentId === undefined ? reconcileSubagentUnits(model, cancellation.units) : { model, units: cancellation.units }
-  const projectedModel = applyExecutionFailure(
-    cancelParentRows(reconciled.model, cancellation.parentIds),
-    parentId,
-    cancellation.units,
-  )
+  const projectedModel = cancelParentRows(reconciled.model, cancellation.parentIds)
   const entries = [...projectedModel.entries]
   const blocks = [...projectedModel.blocks] as Array<Block>
   const items = [...projectedModel.items] as Array<TranscriptItem>
@@ -325,15 +328,7 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     }
     known.set(unit.key, items.length - 1)
   }
-  let projected: Model = { ...projectedModel, entries, blocks, items }
-  if (parentId === undefined)
-    for (const nestedParentId of new Set(reconciled.units.flatMap((unit) => unit.parentId ?? [])))
-      projected = applyExecutionFailure(
-        projected,
-        nestedParentId,
-        reconciled.units.filter((unit) => unit.parentId === nestedParentId),
-      )
-  return projected
+  return rememberExecutionOutcomes({ ...projectedModel, entries, blocks, items }, cancellation.units, parentId)
 }
 
 export const projectUnits: {

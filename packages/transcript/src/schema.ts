@@ -153,6 +153,12 @@ export const Unit = Schema.Struct({
   parentId: Schema.optionalKey(Schema.String),
   order: Schema.Struct({ sequence: Schema.Finite, part: Schema.Finite }),
   revision: Schema.Finite,
+  executionOutcome: Schema.optionalKey(
+    Schema.Struct({
+      status: Schema.Literals(["complete", "failed", "cancelled"]),
+      reason: Schema.optionalKey(Schema.String),
+    }),
+  ),
   content: Content,
 })
 export type Unit = typeof Unit.Type

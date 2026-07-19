@@ -518,6 +518,57 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(shape(reloadedModel)).toEqual(shape(liveModel))
   })
 
+  it.each([1, 4])(
+    "uses a completed child execution instead of parent tool result ordering at parent sequence %i",
+    (resultSequence) => {
+      const parent = Transcript.project("turn", "delegate", [
+        event("agent", 0, "tool.call.requested", {
+          data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Inspect the child" } },
+        }),
+        event("spawned", 2, "child_run.spawned", {
+          data: { tool_call_id: "agent", child_execution_id: "execution:child" },
+        }),
+        event("parent-result", resultSequence, "tool.result.received", {
+          data: { tool_call_id: "agent", error: "stale parent failure" },
+        }),
+      ])
+      const child = Transcript.project("child", "", [
+        event("inner", 0, "tool.call.requested", {
+          data: { tool_call_id: "inner", tool_name: "read_file", input: { path: "missing.ts" } },
+        }),
+        event("inner-result", 1, "tool.result.received", {
+          data: { tool_call_id: "inner", error: "File not found" },
+        }),
+        event("answer", 2, "model.output.completed", { text: "Recovered final answer" }),
+        event("child-done", 3, "execution.completed"),
+      ])
+
+      let live = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+      live = ExecutionEvents.projectChildUnits(live, "turn:agent", child.units)
+      live = ExecutionEvents.projectUnits(live, parent.units)
+      const reloaded = ExecutionEvents.projectUnits(
+        ViewState.initial("/work"),
+        Transcript.withNestedProjections(parent, [{ parentId: "turn:agent", projection: child }]).units,
+      )
+
+      for (const projected of [live, reloaded]) {
+        const model = { ...projected, expandedRowKeys: ["tool:turn:agent", "tool:child:inner"] }
+        const rendered = renderTranscriptStyled(model)
+          .chunks.map((chunk) => chunk.text)
+          .join("")
+        expect(model.blocks).toEqual([
+          expect.objectContaining({ _tag: "ToolCall", id: "turn:agent", status: "complete" }),
+          expect.objectContaining({ _tag: "ToolCall", id: "child:inner", status: "failed" }),
+        ])
+        expect(rendered).toContain("Subagent finished")
+        expect(rendered).toContain("Recovered final answer")
+        expect(rendered).toContain("missing.ts")
+        expect(rendered).toContain("File not found")
+        expect(rendered).not.toContain("stale parent failure")
+      }
+    },
+  )
+
   it("projects cancelled root and child tools as terminal without a duplicate notice", () => {
     const childId = "turn:child:task"
     const parent = Transcript.project("turn", "delegate", [
