@@ -459,12 +459,99 @@ test("detaches on the first upward wheel event and stays detached through stream
           expect(surface.transcriptScroll.scrollTop).toBe(detachedTop)
         }
 
+        surface.transcriptScroll.scrollTo(
+          surface.transcriptScroll.scrollHeight - surface.transcriptScroll.viewport.height - 2,
+        )
+        yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
+        clock.advance(16)
+        yield* openTui(() => setup.flush())
+        expect(model.scrollFollow).toBe(false)
+
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         for (let index = 0; index < 20; index += 1)
           yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
         clock.advance(16)
         yield* openTui(() => setup.flush())
         expect(model.scrollFollow).toBe(true)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
+test("does not follow the tail while a forward transcript-window anchor is pending", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const clock = new ManualClock()
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const entries = Array.from({ length: 500 }, (_, index) => ({
+        role: "assistant" as const,
+        text: `answer ${index}`,
+        turnId: `turn-${index}`,
+      }))
+      const items = entries.map((_, index) => ({
+        _tag: "Entry" as const,
+        index,
+        id: `answer-${index}`,
+        turnId: `turn-${index}`,
+      }))
+      let model: Model = { ...initial("/work", "high"), entries, items }
+      const surface = new Surface(
+        setup.renderer,
+        {
+          key: () => undefined,
+          resize: () => undefined,
+          scroll: (offset) => {
+            model = update(model, { _tag: "ScrollMoved", offset })
+            surface.update(model)
+          },
+          scrollFollow: () => {
+            model = update(model, { _tag: "ScrollFollowed" })
+            surface.update(model)
+          },
+        },
+        { clock },
+      )
+      const state = surface as unknown as {
+        readonly transcriptWindowEnd: number
+        readonly pendingTranscriptAnchor:
+          | {
+              readonly scrollBy: number
+            }
+          | undefined
+      }
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+
+        surface.transcriptScroll.scrollTo(0)
+        setup.mockInput.pressKey("\x1b[5~")
+        yield* openTui(() => setup.flush())
+        expect(state.transcriptWindowEnd).toBe(400)
+
+        surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
+        setup.renderer.requestRender()
+        yield* openTui(() => setup.flush())
+        expect(model.scrollFollow).toBe(false)
+        const firstBefore = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+
+        yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
+        clock.advance(16)
+        expect(state.transcriptWindowEnd).toBe(500)
+        expect(state.pendingTranscriptAnchor).toBeDefined()
+
+        yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
+        const queuedDown = state.pendingTranscriptAnchor?.scrollBy ?? 0
+        yield* openTui(() => setup.mockMouse.scroll(10, 5, "up", { delayMs: 0 }))
+        expect(model.scrollFollow).toBe(false)
+        expect(state.pendingTranscriptAnchor?.scrollBy).toBeLessThan(queuedDown)
+
+        yield* openTui(() => setup.flush())
+        const firstAfter = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
+        expect(model.scrollFollow).toBe(false)
+        expect(firstAfter).toBeGreaterThan(firstBefore)
+        expect(firstAfter).toBeLessThan(firstBefore + 10)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
