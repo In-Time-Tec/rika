@@ -7,7 +7,7 @@ const assertIsolatedModel = (diagnostics: string) =>
 test(
   "edits at the cursor, recalls history, searches history, and preserves an in-progress draft",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.text("EDIT_OK"),
         Scene.model.text("SECOND_OK"),
@@ -35,7 +35,7 @@ test(
 
 test("submits every multiline shortcut and keeps a wrapped draft through terminal resize", () => {
   const wrapped = `resize-${"wide".repeat(28)}-draft-end`
-  return Scene.run({
+  return Scene.runWarm({
     script: [
       Scene.model.text("SHIFT_ENTER_OK"),
       Scene.model.text("CTRL_J_OK"),
@@ -60,7 +60,7 @@ test("submits every multiline shortcut and keeps a wrapped draft through termina
 test(
   "round-trips a multiline draft through the configured external editor",
   () =>
-    Scene.run({
+    Scene.runWarm({
       editorContent: "edited first line\nedited second line\n",
       script: [Scene.model.text("EDITOR_OK")],
       actions: [
@@ -80,13 +80,13 @@ test(
 test(
   "keeps the draft usable when no external editor is configured",
   () =>
-    Scene.run({
+    Scene.runWarm({
       environment: { EDITOR: null, VISUAL: null },
       script: [Scene.model.text("NO_EDITOR_RECOVERY_OK")],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "keep this draft\u0007"),
         Scene.action.writeAfter("Set VISUAL or EDITOR", "\r"),
-        Scene.action.writeAfter("NO_EDITOR_RECOVERY_OK", "\u0003", 1_500),
+        Scene.action.writeAfter("NO_EDITOR_RECOVERY_OK", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("Set VISUAL or EDITOR")
@@ -100,13 +100,13 @@ test(
 test(
   "does not submit empty input and restores a locally rejected draft until the user recovers",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [Scene.model.text("RECOVERY_OK")],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "\r/missing-composer-scene.png\r"),
         Scene.action.writeAfter("Execution failed", "\r"),
         Scene.action.writeAfter("Execution failed", "\u0015recovered prompt\r"),
-        Scene.action.writeAfter("RECOVERY_OK", "\u0003", 1_500),
+        Scene.action.writeAfter("RECOVERY_OK", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output.match(/Execution failed/g)?.length ?? 0).toBeGreaterThanOrEqual(2)

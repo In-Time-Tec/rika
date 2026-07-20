@@ -279,6 +279,8 @@ test(
             yield* fileSystem.makeDirectory(firstWorkspace)
             yield* fileSystem.makeDirectory(secondWorkspace)
             const fixture = yield* TestModel.make([
+              TestModel.toolCall("bash", { command: "sleep 0.1; printf alive > process.txt", timeout_ms: 0 }),
+              TestModel.toolCall("shell_command_status", { processId: "1", waitMillis: 1_000 }),
               TestModel.toolCall("write", { path: "result.txt", content: "first" }),
               TestModel.text("first complete"),
               TestModel.toolCall("write", { path: "result.txt", content: "second" }),
@@ -288,13 +290,17 @@ test(
               ["execution:first-turn", firstWorkspace],
               ["execution:second-turn", secondWorkspace],
             ])
+            let runtimeBuilds = 0
             const backendLayer = RelayExecutionBackend.layer({
               filename: `${directory}/relay.db`,
               workspace: directory,
               registration: fixture.registration,
               selection: fixture.selection,
               modelVariantPolicy: "fixed-selection",
-              toolRuntimeLayerForWorkspace: RikaToolRuntime.layer,
+              toolRuntimeLayerForWorkspace: (workspace) => {
+                runtimeBuilds += 1
+                return RikaToolRuntime.layerWithProcessRegistry(workspace)
+              },
               resolveWorkspace: (executionId) => {
                 const workspace = workspaceByExecution.get(executionId)
                 return workspace === undefined
@@ -317,21 +323,23 @@ test(
               }),
               backendLayer,
             )
-            return yield* Effect.all([
+            const contents = yield* Effect.all([
               fileSystem.readFileString(`${firstWorkspace}/result.txt`),
               fileSystem.readFileString(`${secondWorkspace}/result.txt`),
+              fileSystem.readFileString(`${firstWorkspace}/process.txt`),
             ])
+            return { contents, runtimeBuilds }
           }),
         )
 
-        expect(yield* program).toEqual(["first", "second"])
+        expect(yield* program).toEqual({ contents: ["first", "second", "alive"], runtimeBuilds: 4 })
       }),
     ),
   30_000,
 )
 
 test(
-  "routes workflow child tools through the workspace of the owning turn",
+  "routes standalone workflow child tools through the client workspace",
   () =>
     runNative(
       Effect.gen(function* () {
@@ -355,22 +363,19 @@ test(
               TestModel.text("verified"),
               TestModel.object({ summary: "verified", files: [] }),
             ])
-            const workspaces = new Map([["turn-workflow", workspace]])
             const backendLayer = RelayExecutionBackend.layer({
               filename: `${directory}/relay.db`,
               workspace: directory,
               registration: fixture.registration,
               selection: fixture.selection,
               modelVariantPolicy: "fixed-selection",
-              toolRuntimeLayerForWorkspace: RikaToolRuntime.layer,
+              toolRuntimeLayerForWorkspace: RikaToolRuntime.layerWithProcessRegistry,
               resolveWorkspace: (executionId) => {
-                const turnId = RelayExecutionBackend.turnIdFromExecutionId(executionId)
-                const resolved = turnId === undefined ? undefined : workspaces.get(turnId)
+                const resolved = RelayExecutionBackend.workspaceFromExecutionId(executionId)
                 return resolved === undefined
                   ? Effect.fail(
                       ExecutionBackend.BackendError.make({
-                        message:
-                          turnId === undefined ? `Unknown execution ${executionId}` : `Turn ${turnId} does not exist`,
+                        message: `Unknown execution ${executionId}`,
                       }),
                     )
                   : Effect.succeed(resolved)
@@ -382,8 +387,8 @@ test(
               Effect.gen(function* () {
                 const backend = yield* ExecutionBackend.Service
                 yield* backend.registerWorkflows()
-                yield* backend.startWorkflow("delivery", "workspace-run", undefined, "turn-workflow")
-                const completed = yield* backend.inspectWorkflow("workspace-run", "turn-workflow").pipe(
+                yield* backend.startWorkflow("delivery", "workspace-run", undefined, undefined, workspace)
+                const completed = yield* backend.inspectWorkflow("workspace-run", undefined, workspace).pipe(
                   Effect.repeat({
                     while: (inspection) => inspection?.status === "running",
                     schedule: Schedule.spaced("20 millis"),
@@ -397,6 +402,7 @@ test(
         )
 
         expect(result.completed?.status).toBe("completed")
+        expect(result.completed?.runId).toBe("workspace-run")
         expect(encodeJson(result.requests)).toContain("workflow workspace marker")
       }),
     ),

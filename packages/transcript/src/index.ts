@@ -259,16 +259,48 @@ const childToolCallId = (childId: string): string | undefined => {
   return index < 0 ? undefined : childId.slice(index + marker.length)
 }
 
-const childParentScope = (childKey: string): string | undefined => {
+const durableToolCallPrefix = /^rika:([^:]+):/
+
+const providerCallId = (id: string): string => {
+  const match = durableToolCallPrefix.exec(id)
+  if (match === null) return id
+  try {
+    const namespace = decodeURIComponent(match[1]!)
+    return namespace.startsWith("execution:") || namespace.startsWith("child:") || namespace.startsWith("workflow:")
+      ? id.slice(match[0].length)
+      : id
+  } catch {
+    return id
+  }
+}
+
+const childScopeAndCallId = (
+  childExecutionId: string,
+): { readonly scope: string; readonly callId: string } | undefined => {
+  if (childExecutionId.startsWith("child:")) {
+    const separator = childExecutionId.indexOf(":", "child:".length)
+    if (separator < 0) return undefined
+    try {
+      return {
+        scope: executionKey(decodeURIComponent(childExecutionId.slice("child:".length, separator))),
+        callId: providerCallId(childExecutionId.slice(separator + 1)),
+      }
+    } catch {
+      return undefined
+    }
+  }
+  const key = executionKey(childExecutionId)
   const marker = ":child:"
-  const index = childKey.lastIndexOf(marker)
-  return index < 0 ? undefined : childKey.slice(0, index)
+  const index = key.lastIndexOf(marker)
+  return index < 0
+    ? undefined
+    : { scope: key.slice(0, index), callId: providerCallId(key.slice(index + marker.length)) }
 }
 
 const candidateCallId = (candidate: ChildParentCandidate): string => {
   const prefix = `${executionKey(candidate.scope)}:`
   const id = executionKey(candidate.id)
-  return id.startsWith(prefix) ? id.slice(prefix.length) : id
+  return providerCallId(id.startsWith(prefix) ? id.slice(prefix.length) : id)
 }
 
 export interface ChildParentCandidate {
@@ -286,14 +318,13 @@ export const childParentMatch = <A extends ChildParentCandidate>(
   const list = [...candidates]
   for (const candidate of list)
     if (candidate.childId !== undefined && executionKey(candidate.childId) === childKey) return candidate
-  const parentScope = childParentScope(childKey)
-  const callId = childToolCallId(childKey)
-  if (parentScope === undefined || callId === undefined) return undefined
+  const parsed = childScopeAndCallId(childExecutionId)
+  if (parsed === undefined) return undefined
   for (const candidate of list)
     if (
       candidate.family === "agent" &&
-      executionKey(candidate.scope) === parentScope &&
-      candidateCallId(candidate) === callId
+      executionKey(candidate.scope) === parsed.scope &&
+      candidateCallId(candidate) === parsed.callId
     )
       return candidate
   return undefined

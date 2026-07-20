@@ -6,7 +6,7 @@ const shellAsk = { permissions: { shell: "ask" } }
 test(
   "allows an explicit shell permission with Enter and updates only that card",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspaceSettings: shellAsk,
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "$printf '\\101\\114\\114\\117\\127\\105\\104'\r"),
@@ -26,7 +26,7 @@ test(
 test(
   "moves backward twice to always and confirms the selected permission choice",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspaceSettings: shellAsk,
       actions: [
         Scene.action.writeAfter(
@@ -47,7 +47,7 @@ test(
 test(
   "wraps left from allow to deny without executing the command",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspaceSettings: shellAsk,
       inspectPaths: ["denied.txt"],
       actions: [
@@ -66,7 +66,7 @@ test(
 test(
   "ordinary successful tool events render a tool card without permission choices",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.turn([Scene.model.toolCall("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
         Scene.model.text("ORDINARY_COMPLETE"),
@@ -86,7 +86,7 @@ test(
 test(
   "tool failures stay failed tool cards and never become permission prompts",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.turn([Scene.model.toolCall("read", { path: "missing-permission-scene.txt" }, "failed-tool")]),
         Scene.model.text("FAILURE_OBSERVED"),
@@ -210,7 +210,7 @@ test(
 test(
   "ignores a stale cancelled permission ID when a new shell request arrives",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspaceSettings: shellAsk,
       inspectPaths: ["stale.txt"],
       script: [

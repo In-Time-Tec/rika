@@ -19,7 +19,10 @@ import type { InteractiveSession, Interface as OperationInterface } from "./oper
 
 export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
-export const protocolVersion = 1
+declare const RIKA_BUILD_IDENTITY: string | undefined
+
+export const protocolVersion = 2
+export const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])
 const WireIdentifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 const Proof = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
@@ -29,6 +32,7 @@ export const Handshake = Schema.Struct({
   clientNonce: WireIdentifier,
   clientKind: ClientKind,
   protocolVersion: Schema.Int,
+  buildIdentity: WireIdentifier,
   clientProof: Proof,
 })
 export type Handshake = typeof Handshake.Type
@@ -41,6 +45,7 @@ export const HandshakeAccepted = Schema.Struct({
   serviceNonce: WireIdentifier,
   connectionId: WireIdentifier,
   protocolVersion: Schema.Int,
+  buildIdentity: WireIdentifier,
   serverProof: Proof,
   residentPid: Schema.optionalKey(Schema.Int),
 })
@@ -278,7 +283,7 @@ const proofMatches = (actual: string, expected: string) => {
   return difference === 0
 }
 
-type ProofHandshake = Pick<Handshake, "identity" | "clientNonce" | "clientKind" | "protocolVersion">
+type ProofHandshake = Pick<Handshake, "identity" | "clientNonce" | "clientKind" | "protocolVersion" | "buildIdentity">
 
 const clientProofImpl = (token: string, handshake: ProofHandshake) =>
   proof(token, [
@@ -287,6 +292,7 @@ const clientProofImpl = (token: string, handshake: ProofHandshake) =>
     handshake.identity,
     handshake.clientNonce,
     handshake.clientKind,
+    handshake.buildIdentity,
   ])
 export const clientProof: {
   (handshake: ProofHandshake): (token: string) => string
@@ -296,7 +302,7 @@ export const clientProof: {
 const serverProofImpl = (
   token: string,
   handshake: ProofHandshake,
-  accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId">,
+  accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId" | "buildIdentity">,
 ) =>
   proof(token, [
     "rika-resident-server",
@@ -304,15 +310,21 @@ const serverProofImpl = (
     handshake.identity,
     handshake.clientNonce,
     handshake.clientKind,
+    handshake.buildIdentity,
     accepted.serviceNonce,
     accepted.connectionId,
+    accepted.buildIdentity,
   ])
 export const serverProof: {
   (
     handshake: ProofHandshake,
-    accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId">,
+    accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId" | "buildIdentity">,
   ): (token: string) => string
-  (token: string, handshake: ProofHandshake, accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId">): string
+  (
+    token: string,
+    handshake: ProofHandshake,
+    accepted: Pick<HandshakeAccepted, "serviceNonce" | "connectionId" | "buildIdentity">,
+  ): string
 } = Function.dual(3, serverProofImpl)
 
 const verifyServerProofImpl = (token: string, handshake: ProofHandshake, accepted: HandshakeAccepted) =>
@@ -327,17 +339,29 @@ export type HandshakeResult =
   | { readonly _tag: "AuthenticationFailed" }
   | { readonly _tag: "IdentityMismatch" }
   | { readonly _tag: "ProtocolMismatch" }
+  | { readonly _tag: "BuildMismatch" }
 
 export const validateHandshake: {
-  (expected: { readonly identity: string; readonly token: string }): (handshake: Handshake) => HandshakeResult
-  (handshake: Handshake, expected: { readonly identity: string; readonly token: string }): HandshakeResult
+  (expected: {
+    readonly identity: string
+    readonly token: string
+    readonly buildIdentity: string
+  }): (handshake: Handshake) => HandshakeResult
+  (
+    handshake: Handshake,
+    expected: { readonly identity: string; readonly token: string; readonly buildIdentity: string },
+  ): HandshakeResult
 } = Function.dual(
   2,
-  (handshake: Handshake, expected: { readonly identity: string; readonly token: string }): HandshakeResult => {
+  (
+    handshake: Handshake,
+    expected: { readonly identity: string; readonly token: string; readonly buildIdentity: string },
+  ): HandshakeResult => {
     if (handshake.identity !== expected.identity) return { _tag: "IdentityMismatch" }
     if (handshake.protocolVersion !== protocolVersion) return { _tag: "ProtocolMismatch" }
     if (!proofMatches(handshake.clientProof, clientProof(expected.token, handshake)))
       return { _tag: "AuthenticationFailed" }
+    if (handshake.buildIdentity !== expected.buildIdentity) return { _tag: "BuildMismatch" }
     return { _tag: "Accepted" }
   },
 )

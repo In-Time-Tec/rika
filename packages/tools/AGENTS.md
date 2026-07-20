@@ -1,3 +1,3 @@
 # @rika/tools
 
-Owns typed local coding-tool contracts, permission metadata, bounded output, and Effect platform adapters. Every behavior-bearing adapter has a test layer. OpenTUI, SQL, Relay, Baton, and model providers are forbidden here.
+Owns typed coding-tool contracts, permission metadata, bounded output, and Effect adapters, including web-research providers. Web-research SDKs are allowed only when they preserve Effect interruption, retry, and resource semantics; use Effect HTTP otherwise. Language-model provider SDKs, OpenTUI, SQL, Relay, and Baton are forbidden. Every behavior-bearing adapter has a test layer.

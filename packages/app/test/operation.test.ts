@@ -728,8 +728,8 @@ describe("Operation", () => {
       const workflowBackend = ExecutionBackend.Service.of({
         ...backend,
         registerWorkflows: () => Ref.update(calls, (values) => [...values, "register"]).pipe(Effect.as([])),
-        startWorkflow: (name, runId, revision) =>
-          Ref.update(calls, (values) => [...values, `start:${name}:${runId}:${revision}`]).pipe(
+        startWorkflow: (name, runId, revision, _ownerTurnId, workspace) =>
+          Ref.update(calls, (values) => [...values, `start:${name}:${runId}:${revision}:${workspace}`]).pipe(
             Effect.as({
               runId,
               workflow: name,
@@ -740,8 +740,8 @@ describe("Operation", () => {
               updatedAt: 1,
             }),
           ),
-        inspectWorkflow: (runId) =>
-          Ref.update(calls, (values) => [...values, `inspect:${runId}`]).pipe(
+        inspectWorkflow: (runId, _ownerTurnId, workspace) =>
+          Ref.update(calls, (values) => [...values, `inspect:${runId}:${workspace}`]).pipe(
             Effect.as(
               runId === "missing"
                 ? undefined
@@ -756,8 +756,8 @@ describe("Operation", () => {
                   },
             ),
           ),
-        cancelWorkflow: (runId) =>
-          Ref.update(calls, (values) => [...values, `cancel:${runId}`]).pipe(
+        cancelWorkflow: (runId, _ownerTurnId, workspace) =>
+          Ref.update(calls, (values) => [...values, `cancel:${runId}:${workspace}`]).pipe(
             Effect.as(
               runId === "missing"
                 ? undefined
@@ -786,18 +786,27 @@ describe("Operation", () => {
       )
       const output = yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
-        yield* operation.run({ _tag: "Workflow", action: "start", name: "delivery", runId: "run", revision: 2 })
-        yield* operation.run({ _tag: "Workflow", action: "inspect", runId: "run" })
-        yield* operation.run({ _tag: "Workflow", action: "cancel", runId: "run" })
-        return yield* Effect.result(operation.run({ _tag: "Workflow", action: "inspect", runId: "missing" }))
+        yield* operation.run({
+          _tag: "Workflow",
+          action: "start",
+          name: "delivery",
+          runId: "run",
+          revision: 2,
+          clientWorkspace: "/client-work",
+        })
+        yield* operation.run({ _tag: "Workflow", action: "inspect", runId: "run", clientWorkspace: "/client-work" })
+        yield* operation.run({ _tag: "Workflow", action: "cancel", runId: "run", clientWorkspace: "/client-work" })
+        return yield* Effect.result(
+          operation.run({ _tag: "Workflow", action: "inspect", runId: "missing", clientWorkspace: "/client-work" }),
+        )
       }).pipe(provideLayer(layer))
       expect(output._tag).toBe("Failure")
       expect(yield* Ref.get(calls)).toEqual([
         "register",
-        "start:delivery:run:2",
-        "inspect:run",
-        "cancel:run",
-        "inspect:missing",
+        "start:delivery:run:2:/client-work",
+        "inspect:run:/client-work",
+        "cancel:run:/client-work",
+        "inspect:missing:/client-work",
       ])
     }),
   )

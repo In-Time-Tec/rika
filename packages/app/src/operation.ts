@@ -561,25 +561,23 @@ const rootCheckpointCursor = (turnId: string, cursor: string | undefined): strin
     ? undefined
     : cursor
 
-const toolForChild = (projection: Transcript.Projection, childExecutionId: string) => {
-  const normalizedChildId = normalizeChildExecutionId(childExecutionId)
-  const marker = ":child:"
-  const markerIndex = normalizedChildId.lastIndexOf(marker)
-  const encodedCallId = markerIndex < 0 ? undefined : normalizedChildId.slice(markerIndex + marker.length)
-  return projection.units
-    .flatMap((unit) =>
+const toolForChild = (projection: Transcript.Projection, childExecutionId: string) =>
+  Transcript.childParentMatch(
+    projection.units.flatMap((unit) =>
       unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
-        ? [{ tool: unit.content.block, turnId: unit.turnId }]
+        ? [
+            {
+              id: unit.content.block.id,
+              scope: unit.turnId,
+              childId: unit.content.block.childId,
+              family: unit.content.block.presentation.family,
+              tool: unit.content.block,
+            },
+          ]
         : [],
-    )
-    .find(({ tool, turnId }) => {
-      if (tool.childId !== undefined) return normalizeChildExecutionId(tool.childId) === normalizedChildId
-      if (encodedCallId !== undefined && tool.id.endsWith(`:${encodedCallId}`)) return true
-      const prefix = `${turnId}:`
-      const toolCallId = tool.id.startsWith(prefix) ? tool.id.slice(prefix.length) : tool.id
-      return normalizedChildId.endsWith(`:${toolCallId}`)
-    })?.tool
-}
+    ),
+    childExecutionId,
+  )?.tool
 
 const hasMissingNestedProjection = (projection: Transcript.Projection): boolean =>
   projection.units.some((unit) => {
@@ -660,8 +658,18 @@ const projectExecutionTree = Effect.fn("Operation.projectExecutionTree")(functio
       const childId = normalizeChildExecutionId(child.executionId)
       if (seen.has(childId)) continue
       seen.add(childId)
-      const parent = toolForChild(parentProjection(), child.executionId)
-      if (parent === undefined) continue
+      let parent = toolForChild(parentProjection(), child.executionId)
+      if (parent === undefined) {
+        const ensured = Transcript.ensureChildTool(parentProjection(), child.executionId, "task")
+        settleParent(ensured.projection)
+        parent = ensured.tool
+        yield* Effect.logWarning("execution.child.parent_synthesized").pipe(
+          Effect.annotateLogs({
+            "rika.execution.parent": current.executionId,
+            "rika.execution.child": child.executionId,
+          }),
+        )
+      }
       const projection = yield* replayProjection(backend, child.executionId)
       const settled = settledChildStatus(child.status)
       if (settled !== undefined)
@@ -3574,13 +3582,17 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               const backend = yield* ExecutionBackend.Service
               if (input.action === "start") {
                 yield* backend.registerWorkflows()
-                yield* Console.log(encodeJson(yield* backend.startWorkflow(input.name, input.runId, input.revision)))
+                yield* Console.log(
+                  encodeJson(
+                    yield* backend.startWorkflow(input.name, input.runId, input.revision, undefined, input.clientWorkspace),
+                  ),
+                )
                 return
               }
               const inspection =
                 input.action === "inspect"
-                  ? yield* backend.inspectWorkflow(input.runId)
-                  : yield* backend.cancelWorkflow(input.runId)
+                  ? yield* backend.inspectWorkflow(input.runId, undefined, input.clientWorkspace)
+                  : yield* backend.cancelWorkflow(input.runId, undefined, input.clientWorkspace)
               if (inspection === undefined) return yield* operationError(`Workflow run ${input.runId} does not exist`)
               yield* Console.log(encodeJson(inspection))
             })

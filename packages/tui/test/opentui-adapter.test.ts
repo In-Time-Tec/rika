@@ -468,8 +468,8 @@ test("keeps mounted renderables bounded inside one giant expanded subagent tree"
         expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
         expect(state.transcriptChildren.length).toBeGreaterThan(0)
         const frame = setup.captureCharFrame()
-        expect(frame).toContain("├ ✓ $ cmd-60")
-        expect(frame).not.toContain("cmd-59 ")
+        expect(frame).toContain("├ ✓ $ cmd-61")
+        expect(frame).not.toContain("cmd-60 ")
       } finally {
         surface.destroy()
         setup.renderer.destroy()

@@ -3,7 +3,7 @@ import type * as TranscriptRepository from "@rika/persistence/transcript-reposit
 import type * as Turn from "@rika/persistence/turn"
 import * as Transcript from "@rika/transcript"
 import { TranscriptPresenter, ViewState } from "@rika/tui"
-import { Function } from "effect"
+import { Effect, Function } from "effect"
 
 type TranscriptEvent = Extract<
   Operation.InteractiveEvent,
@@ -32,7 +32,16 @@ export interface State {
 export interface Update {
   readonly state: State
   readonly preserveAnchor: boolean
+  readonly unattached?: ReadonlyArray<string>
 }
+
+export const warnUnattached = (unattached: ReadonlyArray<string>): Effect.Effect<void> =>
+  Effect.forEach(
+    unattached,
+    (turnId) =>
+      Effect.logWarning("transcript.child.parent_missing").pipe(Effect.annotateLogs({ "rika.turn.id": turnId })),
+    { discard: true },
+  )
 
 export interface QueueUpdate {
   readonly model: ViewState.Model
@@ -419,6 +428,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
           attachedChildRevisions: attached.attachments,
         },
         preserveAnchor: false,
+        unattached: attached.unattached,
       }
     }
     const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, turn.prompt)
@@ -489,6 +499,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         attachedChildRevisions: attached.attachments,
       },
       preserveAnchor: false,
+      unattached: attached.unattached,
     }
   }
   if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)

@@ -2,6 +2,13 @@ import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Context, Effect, Function, Layer, Redacted, Schema } from "effect"
 import { ConfigContract, ConfigService } from "../src/index"
 
+const webProviders = [
+  { id: "parallel", credentialEnvironment: "PARALLEL_API_KEY" },
+  { id: "exa", credentialEnvironment: "EXA_API_KEY" },
+  { id: "firecrawl", credentialEnvironment: "FIRECRAWL_API_KEY" },
+  { id: "github", credentialEnvironment: "GITHUB_TOKEN" },
+] as const
+
 const provideLayer: {
   <RIn, E2, ROut>(
     layer: Layer.Layer<ROut, E2, RIn>,
@@ -110,6 +117,7 @@ describe("ConfigService", () => {
     }).pipe(
       provideLayer(
         ConfigService.liveEnvironmentLayer({
+          webProviders,
           workspace: { providers: { openai: { baseUrl: "https://workspace.models.test/v1" } } },
         }).pipe(
           Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { OPENAI_API_KEY: "must-not-be-read" } }))),
@@ -121,6 +129,7 @@ describe("ConfigService", () => {
   it.effect("reads only configured provider API-key environment references and keeps values redacted", () => {
     const secret = "configured-secret-must-not-leak"
     const layer = ConfigService.liveEnvironmentLayer({
+      webProviders,
       global: { providers: { openai: { apiKeyEnv: "RIKA_MODEL_API_KEY" } } },
     }).pipe(
       Layer.provide(
@@ -171,6 +180,7 @@ describe("ConfigService", () => {
 
   it.effect("uses common web search environment fallbacks without replacing explicit settings", () => {
     const layer = ConfigService.liveEnvironmentLayer({
+      webProviders,
       workspace: { webSearch: { providers: { parallel: { apiKey: "settings-parallel" } } } },
     }).pipe(
       Layer.provide(
@@ -192,9 +202,38 @@ describe("ConfigService", () => {
       expect(Redacted.value(config.environment.webSearchCredentials.parallel!)).toBe("settings-parallel")
       expect(Redacted.value(config.environment.webSearchCredentials.exa!).length).toBeGreaterThan(0)
       expect(config.environment.webSearchCredentials.github).toBeUndefined()
-      expect(config.environment.parallelApiKey).toBe(config.environment.webSearchCredentials.parallel)
     }).pipe(provideLayer(layer))
   })
+
+  it.effect("uses installed provider descriptors and rejects configured providers that are not installed", () =>
+    Effect.gen(function* () {
+      const configured = yield* ConfigService.effective().pipe(
+        provideLayer(
+          ConfigService.liveEnvironmentLayer({
+            webProviders: [{ id: "custom", credentialEnvironment: "CUSTOM_SEARCH_KEY" }],
+          }).pipe(
+            Layer.provide(
+              ConfigProvider.layer(ConfigProvider.fromEnv({ env: { CUSTOM_SEARCH_KEY: "custom-secret" } })),
+            ),
+          ),
+        ),
+      )
+      expect(Redacted.value(configured.environment.webSearchCredentials.custom!)).toBe("custom-secret")
+
+      const exit = yield* Effect.exit(
+        ConfigService.effective().pipe(
+          provideLayer(
+            ConfigService.liveEnvironmentLayer({
+              webProviders: [{ id: "installed", credentialEnvironment: "INSTALLED_KEY" }],
+              workspace: { webSearch: { providers: { missing: { apiKey: "secret" } } } },
+            }),
+          ),
+        ),
+      )
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") expect(String(exit.cause)).toContain("Unknown web search provider 'missing'")
+    }),
+  )
 
   it.effect("merges intentionally configurable product settings and reports credential presence", () =>
     Effect.gen(function* () {
@@ -206,7 +245,7 @@ describe("ConfigService", () => {
         "keymap",
         "mcp",
         "notifications",
-        "parallelApiKey",
+        "webSearchCredentials.parallel",
         "providerCredentials.RIKA_MODEL_API_KEY",
       ])
     }).pipe(
@@ -218,9 +257,8 @@ describe("ConfigService", () => {
             mcp: { docs: { transport: "remote", url: "https://example.test/mcp", headers: {}, enabled: true } },
           },
           environment: {
-            parallelApiKey: Redacted.make("parallel-secret"),
             providerCredentials: { RIKA_MODEL_API_KEY: Redacted.make("model-secret") },
-            webSearchCredentials: {},
+            webSearchCredentials: { parallel: Redacted.make("parallel-secret") },
           },
         }),
       ),

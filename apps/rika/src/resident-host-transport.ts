@@ -526,11 +526,12 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const result = ResidentService.validateHandshake(message, {
                 identity: options.identity,
                 token: options.token,
+                buildIdentity: ResidentService.buildIdentity,
               })
               if (result._tag !== "Accepted") {
-                const protocolMismatch = result._tag === "ProtocolMismatch"
-                const reason = protocolMismatch
-                  ? `Incompatible Rika resident PID ${process.pid}; close other Rika clients, stop PID ${process.pid}, then run rika again`
+                const incompatible = result._tag === "ProtocolMismatch" || result._tag === "BuildMismatch"
+                const reason = incompatible
+                  ? `Incompatible Rika resident PID ${process.pid}; Rika can replace it after other clients disconnect`
                   : `Rika resident PID ${process.pid} rejected this credential; close other Rika clients, stop PID ${process.pid}, then run rika again`
                 yield* Effect.logWarning("resident.connection.rejected").pipe(
                   Effect.annotateLogs({
@@ -538,7 +539,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     "rika.resident.rejection.reason": result._tag,
                   }),
                 )
-                return yield* close(protocolMismatch ? 4406 : 4401, reason)
+                return yield* close(incompatible ? 4406 : 4401, reason)
               }
               if (!(yield* lifecycle.tryAttach)) {
                 yield* writer(
@@ -553,6 +554,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const acceptedProof = ResidentService.serverProof(options.token, message, {
                 serviceNonce,
                 connectionId,
+                buildIdentity: ResidentService.buildIdentity,
               })
               yield* writer(
                 json({
@@ -563,6 +565,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   serviceNonce,
                   connectionId,
                   protocolVersion: ResidentService.protocolVersion,
+                  buildIdentity: ResidentService.buildIdentity,
                   serverProof: acceptedProof,
                   residentPid: process.pid,
                 } satisfies ResidentService.HandshakeAccepted),

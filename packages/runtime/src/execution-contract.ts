@@ -227,14 +227,17 @@ export interface Interface {
     runId: string,
     revision?: number,
     ownerTurnId?: string,
+    workspace?: string,
   ) => Effect.Effect<WorkflowInspection, BackendError>
   readonly inspectWorkflow: (
     runId: string,
     ownerTurnId?: string,
+    workspace?: string,
   ) => Effect.Effect<WorkflowInspection | undefined, BackendError>
   readonly cancelWorkflow: (
     runId: string,
     ownerTurnId?: string,
+    workspace?: string,
   ) => Effect.Effect<WorkflowInspection | undefined, BackendError>
   readonly wakeThreadHost?: (wake: ThreadQueueWake) => Effect.Effect<void, BackendError>
   readonly registerTurnPromoter?: (promoter: TurnPromoter) => Effect.Effect<void>

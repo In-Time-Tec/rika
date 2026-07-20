@@ -36,6 +36,12 @@ const body = (httpRequest: HttpClientRequest.HttpClientRequest) => {
 }
 
 describe("WebSearch registry", () => {
+  it("selects the read-page credential through the provider registry", () => {
+    const parallel = Redacted.make("parallel")
+    expect(WebSearch.configuredReadPageCredential({ exa: Redacted.make("exa") })).toBeUndefined()
+    expect(WebSearch.configuredReadPageCredential({ exa: Redacted.make("exa"), parallel })).toBe(parallel)
+  })
+
   it.effect("selects by priority and compares at most three providers without deduplication", () =>
     Effect.gen(function* () {
       const search = WebSearch.make([
@@ -53,23 +59,19 @@ describe("WebSearch registry", () => {
     }),
   )
 
-  it.effect("honors explicit providers for auto, reports partial failures, and fails when all fail", () =>
+  it.effect("reports partial failures and fails when every automatically selected provider fails", () =>
     Effect.gen(function* () {
       const failed = makeProvider("failed", 2, ["web"], () =>
         Effect.fail(WebSearch.ProviderFailure.make({ provider: "failed", kind: "timeout", message: "late" })),
       )
       const search = WebSearch.make([makeProvider("ok", 1), failed])
-      const partial = yield* search.search({ ...input, providers: ["failed", "ok"] })
+      const partial = yield* search.search({ ...input, strategy: "compare" })
       expect(partial.map((outcome) => outcome.provider)).toEqual(["failed", "ok"])
       expect(partial[0]?.error?.kind).toBe("timeout")
-      const all = yield* Effect.flip(search.search({ ...input, providers: ["failed"] }))
+      const all = yield* Effect.flip(WebSearch.make([failed]).search(input))
       expect(all._tag).toBe("WebSearchExecutionError")
-      const unavailable = yield* Effect.flip(search.search({ ...input, providers: ["missing"] }))
-      expect(unavailable.message).toContain("unavailable")
-      const incapable = yield* Effect.flip(search.search({ ...input, kind: "code", providers: ["ok"] }))
-      expect(incapable.message).toContain("does not support 'code'")
-      const excess = yield* Effect.flip(search.search({ ...input, providers: ["a", "b", "c", "d"] }))
-      expect(excess.message).toContain("At most 3")
+      const incapable = yield* Effect.flip(search.search({ ...input, kind: "code" }))
+      expect(incapable.message).toContain("No configured web search provider supports 'code'")
     }),
   )
 })

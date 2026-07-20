@@ -38,7 +38,6 @@ describe("tool contracts", () => {
     expect(Catalog.get("edit")?.permission).toBe("allow")
     expect(Catalog.get("oracle")?.permission).toBe("allow")
     expect(Catalog.get("librarian")?.permission).toBe("allow")
-    expect(Catalog.get("painter")?.permission).toBe("allow")
     expect(Catalog.get("review")?.permission).toBe("allow")
     expect(Catalog.get("task")?.permission).toBe("allow")
     expect(Catalog.get("missing")).toBeUndefined()
@@ -49,23 +48,45 @@ describe("tool contracts", () => {
       "write",
       "edit",
       "bash",
+      "task",
       "oracle",
       "librarian",
       "review",
-      "painter",
-      "task",
     ])
   })
 
-  it("keeps the static catalog aligned with every registered built-in runtime tool", () => {
-    const runtimeNames = [
-      ...Object.keys(Runtime.toolkit.tools),
-      ...Object.keys(AgentTools.modelToolkit.tools),
-      ...Object.keys(ThreadTools.toolkit.tools),
+  it("builds the catalog from every registered built-in tool contract", () => {
+    const tools = [
+      ...Object.values(Runtime.toolkit.tools),
+      ...Object.values(AgentTools.modelToolkit.tools),
+      ...Object.values(ThreadTools.toolkit.tools),
     ]
-    const catalogNames = Catalog.definitions.map(({ name }) => name)
-    expect(new Set(catalogNames).size).toBe(catalogNames.length)
-    expect(catalogNames).toEqual(expect.arrayContaining(runtimeNames))
+    expect(Catalog.definitions.map(({ name, description }) => ({ name, description }))).toEqual(
+      tools.map(({ name, description }) => ({ name, description })),
+    )
+  })
+
+  it("rejects duplicated tools and incomplete tool-policy registration", () => {
+    const policy = Catalog.get("read")!
+    const metadata = {
+      permission: policy.permission,
+      idempotency: policy.idempotency,
+      timeoutMillis: policy.timeoutMillis,
+      outputLimit: policy.outputLimit,
+      presentation: policy.presentation,
+    }
+    expect(() =>
+      Catalog.makeDefinitions(
+        [
+          { name: "read", description: "one" },
+          { name: "read", description: "two" },
+        ],
+        { read: metadata },
+      ),
+    ).toThrow("duplicate tools: read")
+    expect(() => Catalog.makeDefinitions([{ name: "read", description: "read" }], { write: metadata })).toThrow(
+      "tools without policy: read; policies without tool: write",
+    )
   })
 
   it.effect("rejects invalid bounds while preserving file ranges for typed runtime failures", () =>
@@ -222,6 +243,7 @@ describe("tool contracts", () => {
         allOf: [{ minItems: 1 }],
       })
       expect(searchQueries).not.toHaveProperty("prefixItems")
+      expect(schema.properties).not.toHaveProperty("providers")
       expect(yield* Schema.decodeUnknownEffect(ParallelSearch.SearchQueries)(["current docs"])).toEqual([
         "current docs",
       ])

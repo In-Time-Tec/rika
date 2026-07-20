@@ -246,11 +246,13 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
     clientNonce,
     clientKind: options.clientKind,
     protocolVersion: ResidentService.protocolVersion,
+    buildIdentity: ResidentService.buildIdentity,
     clientProof: ResidentService.clientProof(options.token, {
       identity: options.identity,
       clientNonce,
       clientKind: options.clientKind,
       protocolVersion: ResidentService.protocolVersion,
+      buildIdentity: ResidentService.buildIdentity,
     }),
   } satisfies ResidentService.Handshake)
   const decodeFrame = makeServerMessageFrameDecoder()
@@ -285,13 +287,21 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                               clientNonce,
                               clientKind: options.clientKind,
                               protocolVersion: ResidentService.protocolVersion,
+                              buildIdentity: ResidentService.buildIdentity,
                             },
                             message,
                           )
                         ? Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
-                        : Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
-                            Effect.andThen(Deferred.succeed(accepted, message)),
-                          )
+                        : message.buildIdentity !== ResidentService.buildIdentity
+                          ? Effect.fail(
+                              transportError(
+                                `A different Rika build${message.residentPid === undefined ? "" : ` (resident PID ${message.residentPid})`} is still running at ${options.url}; Rika will replace it when no clients are using it`,
+                                "incompatible-resident",
+                              ),
+                            )
+                          : Effect.sync(() => (acceptedConnectionId = message.connectionId)).pipe(
+                              Effect.andThen(Deferred.succeed(accepted, message)),
+                            )
                   : message._tag === "rejected"
                     ? Deferred.fail(
                         connectionFailure,

@@ -48,6 +48,7 @@ describe("product agent profiles", () => {
     expect(mainInstructions).toContain("Use auto for normal lookups")
     expect(mainInstructions).toContain("kind code for semantic implementation examples")
     expect(mainInstructions).toContain("kind github for exact code")
+    expect(mainInstructions).not.toContain("provider IDs")
     expect(mainInstructions).toContain("fetch authoritative pages")
     expect(mainInstructions).toContain("Delegate broad or multi-source research to Librarian")
     expect(registered.Librarian).toMatchObject({
@@ -56,6 +57,7 @@ describe("product agent profiles", () => {
     })
     expect(registered.Librarian?.instructions).toContain("one to three focused queries")
     expect(registered.Librarian?.instructions).toContain("Use compare only")
+    expect(registered.Librarian?.instructions).not.toContain("provider IDs")
     expect(registered.Librarian?.instructions).toContain("Search excerpts are leads, not final proof")
     expect(registered.Librarian?.instructions).toContain("distinguish sourced facts from your conclusions")
     expect(registered.Librarian?.instructions).toContain("Stop when the evidence is sufficient")

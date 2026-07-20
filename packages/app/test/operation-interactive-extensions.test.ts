@@ -246,6 +246,97 @@ describe("interactive session extensions", () => {
     ),
   )
 
+  it.effect("attaches an inspected child with no projected parent tool under a synthesized subagent", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const selected = thread("synth")
+        const repository = yield* ThreadRepository.makeMemory([selected])
+        const turns = yield* TurnRepository.makeMemory([
+          {
+            id: Turn.TurnId.make("turn-synth"),
+            threadId: selected.id,
+            prompt: "synth",
+            executionRoute: Turn.testExecutionRoute(),
+            status: "completed",
+            createdAt: 1,
+            updatedAt: 1,
+          },
+        ])
+        const childId = "turn-synth-child"
+        const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+          { cursor: "root-answer", sequence: 0, type: "model.output.completed", createdAt: 1, text: "Delegated." },
+        ]
+        const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+          {
+            cursor: "child-read",
+            sequence: 0,
+            type: "tool.call.requested",
+            createdAt: 2,
+            data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
+          },
+          { cursor: "child-answer", sequence: 1, type: "model.output.completed", createdAt: 3, text: "Child finished." },
+        ]
+        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const backend = ExecutionBackend.Service.of({
+          ...baseBackend,
+          inspect: (executionId) =>
+            Effect.succeed(
+              executionId === "turn-synth"
+                ? {
+                    turnId: executionId,
+                    status: "completed" as const,
+                    waits: [],
+                    pendingTools: [],
+                    children: [{ executionId: childId, status: "completed" as const }],
+                  }
+                : executionId === childId
+                  ? { turnId: executionId, status: "completed" as const, waits: [], pendingTools: [], children: [] }
+                  : undefined,
+            ),
+          replay: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "completed" as const,
+              events: executionId === "turn-synth" ? rootEvents : executionId === childId ? childEvents : [],
+            }),
+        })
+        const context = yield* Layer.build(interactiveLayer(repository, turns, backend, registration))
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+        )
+        const session = yield* Deferred.await(registration)
+        const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+        const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
+
+        yield* session.selectThread(selected.id, 1)
+        let loaded = yield* Queue.take(events)
+        while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
+
+        expect(
+          loaded.entries.some(
+            (entry) =>
+              entry.unit.content._tag === "Block" &&
+              entry.unit.content.block._tag === "ToolCall" &&
+              entry.unit.content.block.id === childId,
+          ),
+        ).toBe(true)
+        expect(
+          loaded.entries.some(
+            (entry) =>
+              entry.unit.parentId === childId &&
+              entry.unit.content._tag === "Block" &&
+              entry.unit.content.block._tag === "ToolCall" &&
+              entry.unit.content.block.id === `${childId}:read`,
+          ),
+        ).toBe(true)
+
+        yield* Fiber.interrupt(feed)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
+  )
+
   it.effect("creates and adopts a fresh selected thread before the next submission", () =>
     Effect.scoped(
       Effect.gen(function* () {

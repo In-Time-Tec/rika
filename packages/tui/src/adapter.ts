@@ -1266,11 +1266,11 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
         renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.terminal === undefined)
     if (expanded && unit.terminal !== undefined) {
       const timeline = children.length > 0
-      const prefix = timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `
+      const terminalPrefix = timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `
       const range =
         unit.terminal.kind === "answer"
-          ? renderAgentResponse(unit.terminal.entry, prefix, timeline)
-          : renderAgentError(unit.terminal, block.id, prefix, timeline)
+          ? renderAgentResponse(unit.terminal.entry, terminalPrefix, timeline)
+          : renderAgentError(unit.terminal, block.id, terminalPrefix, timeline)
       if (range !== undefined) nestedRanges.push(range)
     }
     nestedRanges[rangeIndex] = {

@@ -49,6 +49,12 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
   const providerApiKeys = Object.fromEntries(
     Object.entries(config.settings.providers).map(([id, provider]) => [id, apiKeyStatus(provider.apiKeyEnv)]),
   )
+  const webSearchCredentials = Object.fromEntries(
+    Object.keys(config.settings.webSearch.providers).map((id) => [
+      id,
+      config.environment.webSearchCredentials[id] === undefined ? "missing" : "present",
+    ]),
+  )
   const mcp = Object.fromEntries(
     Object.entries(config.settings.mcp).map(([name, definition]) => [
       name,
@@ -72,7 +78,7 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
           logging: config.settings.logging,
         },
         environment: {
-          parallelApiKey: config.environment.parallelApiKey === undefined ? "missing" : "present",
+          webSearchCredentials,
           providerApiKeys,
         },
         model: {
@@ -103,7 +109,7 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       global: (yield* adapter.exists(options.globalConfigPath)) ? "present" : "missing",
       workspace: (yield* adapter.exists(options.workspaceConfigPath)) ? "present" : "missing",
     },
-    credentials: { parallel: config.environment.parallelApiKey === undefined ? "missing" : "present" },
+    credentials: { webSearch: webSearchCredentials },
     model: {
       route: { alias: route.alias, providerId: route.providerId, model: route.model },
       apiKey: apiKeyStatus(route.providerConnection.apiKeyEnv),

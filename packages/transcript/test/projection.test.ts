@@ -1047,6 +1047,37 @@ describe("Transcript projection", () => {
     expect(childParentMatch([nonAgent], "execution:parent:child:spawn")).toBeUndefined()
   })
 
+  it("matches a scoped parent for the url-encoded child id encoding without a spawn correlation", () => {
+    const parent = { id: "parent-turn:agent", scope: "parent-turn", childId: undefined, family: "agent" as const }
+
+    expect(childParentMatch([parent], "child:execution%3Aparent-turn:agent")).toBe(parent)
+  })
+
+  it("resolves a nested fan-out child id to its correctly scoped orchestrator tool", () => {
+    const orchestratorId = "child:execution%3Aturn:rika:execution%3Aturn:call-orchestrator"
+    const nestedId = `child:${encodeURIComponent(orchestratorId)}:rika:${encodeURIComponent(orchestratorId)}:one`
+    const nestedTool = {
+      id: `${orchestratorId}:one`,
+      scope: orchestratorId,
+      childId: undefined,
+      family: "agent" as const,
+    }
+    const foreign = {
+      id: "other-turn:one",
+      scope: "other-turn",
+      childId: undefined,
+      family: "agent" as const,
+    }
+
+    expect(childParentMatch([foreign, nestedTool], nestedId)).toBe(nestedTool)
+  })
+
+  it("rejects a same-callId tool in another scope for the url-encoded encoding", () => {
+    const foreign = { id: "other-turn:agent", scope: "other-turn", childId: undefined, family: "agent" as const }
+
+    expect(childParentMatch([foreign], "child:execution%3Aparent-turn:agent")).toBeUndefined()
+  })
+
   it("ensures a scoped agent tool for a child and stays idempotent when it already exists", () => {
     const childId = "execution:parent:child:spawn"
     const created = ensureChildTool(empty("parent", "prompt"), childId, "oracle")

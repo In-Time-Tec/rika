@@ -1,295 +1,69 @@
 import { Schema } from "effect"
+import * as AgentTools from "./agent-tools"
+import * as ThreadTools from "./thread-tools"
+import * as Runtime from "./tool-runtime"
+import * as ToolPolicy from "./tool-policy"
 
-export const Permission = Schema.Literals(["allow", "ask"])
-export type Permission = typeof Permission.Type
-
-export const Idempotency = Schema.Literals(["safe", "unsafe"])
-export type Idempotency = typeof Idempotency.Type
-
-const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
-
-export const Presentation = Schema.Struct({
-  family: Schema.Literals(["explore", "shell", "edit", "agent", "direct", "generic"]),
-  action: Schema.String,
-  activeLabel: Schema.String,
-  completeLabel: Schema.String,
-  counter: Schema.optionalKey(
-    Schema.Literals([
-      "file",
-      "media file",
-      "web page",
-      "thread",
-      "skill",
-      "guidance file",
-      "search",
-      "web search",
-      "review",
-      "GitHub check",
-      "list",
-    ]),
-  ),
-})
-export type Presentation = typeof Presentation.Type
+export { Idempotency, Permission, Presentation } from "./tool-policy"
 
 export const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
-  permission: Permission,
-  idempotency: Idempotency,
-  timeoutMillis: PositiveInt,
-  outputLimit: PositiveInt,
-  presentation: Presentation,
+  permission: ToolPolicy.Permission,
+  idempotency: ToolPolicy.Idempotency,
+  timeoutMillis: Schema.Int.check(Schema.isGreaterThan(0)),
+  outputLimit: Schema.Int.check(Schema.isGreaterThan(0)),
+  presentation: ToolPolicy.Presentation,
 })
 export type Definition = typeof Definition.Type
 
-export const definitions: ReadonlyArray<Definition> = [
-  {
-    name: "find_files",
-    description: "List workspace files whose paths contain a query",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 20_000,
-    presentation: {
-      family: "explore",
-      action: "search",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "search",
-    },
-  },
-  {
-    name: "grep",
-    description: "Search UTF-8 workspace files for text or a regular expression",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "explore",
-      action: "grep",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "search",
-    },
-  },
-  {
-    name: "read",
-    description: "Read a bounded UTF-8 file with numbered lines and an optional inclusive range",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "explore",
-      action: "read",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "file",
-    },
-  },
-  {
-    name: "write",
-    description: "Create or overwrite a UTF-8 file and create missing parent directories",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 10_000,
-    outputLimit: 4_000,
-    presentation: { family: "edit", action: "create", activeLabel: "Creating", completeLabel: "Created" },
-  },
-  {
-    name: "edit",
-    description: "Replace exact text in an existing file, optionally replacing every occurrence",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 10_000,
-    outputLimit: 4_000,
-    presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
-  },
-  {
-    name: "bash",
-    description: "Run a shell command in the workspace, returning a process id when it remains running",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 120_000,
-    outputLimit: 40_000,
-    presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
-  },
-  {
-    name: "shell_command_status",
-    description: "Poll a running shell command for new bounded output and completion status",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 40_000,
-    presentation: { family: "direct", action: "status", activeLabel: "Waiting for", completeLabel: "Waited for" },
-  },
-  {
-    name: "git_status",
-    description: "Inspect concise Git working-tree status",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 20_000,
-    presentation: {
-      family: "direct",
-      action: "git-status",
-      activeLabel: "Inspecting",
-      completeLabel: "Inspected",
-    },
-  },
-  {
-    name: "web_search",
-    description: "Search the current web with Parallel and return ranked source excerpts",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 30_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "direct",
-      action: "web-search",
-      activeLabel: "Web Search",
-      completeLabel: "Web Search",
-      counter: "web search",
-    },
-  },
-  {
-    name: "read_web_page",
-    description: "Read a public HTTP(S) page as bounded readable Markdown",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 30_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "direct",
-      action: "read-web-page",
-      activeLabel: "Read",
-      completeLabel: "Read",
-      counter: "web page",
-    },
-  },
-  {
-    name: "view_media",
-    description: "Inspect a workspace image or analyze a PDF, audio, or video file",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 30_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "explore",
-      action: "media",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "media file",
-    },
-  },
-  {
-    name: "find_thread",
-    description: "Find local threads using bounded product metadata queries",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 20_000,
-    presentation: {
-      family: "explore",
-      action: "find-thread",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "thread",
-    },
-  },
-  {
-    name: "read_thread",
-    description: "Read a bounded local thread transcript",
-    permission: "allow",
-    idempotency: "safe",
-    timeoutMillis: 10_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "direct",
-      action: "read-thread",
-      activeLabel: "Reading Thread",
-      completeLabel: "Read Thread",
-    },
-  },
-  {
-    name: "oracle",
-    description: "Delegate a focused technical investigation to the read-only Oracle product agent",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 120_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "agent",
-      action: "oracle",
-      activeLabel: "Oracle exploring",
-      completeLabel: "Oracle has spoken",
-    },
-  },
-  {
-    name: "librarian",
-    description: "Delegate authoritative documentation research to the network-read-only Librarian product agent",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 120_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "agent",
-      action: "librarian",
-      activeLabel: "Librarian researching",
-      completeLabel: "Librarian researched",
-    },
-  },
-  {
-    name: "review",
-    description: "Delegate a focused correctness and regression review to the read-only Review product agent",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 120_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "agent",
-      action: "review",
-      activeLabel: "Reviewing code",
-      completeLabel: "Reviewed code",
-      counter: "review",
-    },
-  },
-  {
-    name: "painter",
-    description: "Delegate visual work to the configured media-capable Painter product agent",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 120_000,
-    outputLimit: 20_000,
-    presentation: { family: "direct", action: "painter", activeLabel: "Painter", completeLabel: "Painter" },
-  },
-  {
-    name: "task",
-    description: "Start a durable Task child execution with narrowed workspace permissions",
-    permission: "allow",
-    idempotency: "unsafe",
-    timeoutMillis: 120_000,
-    outputLimit: 40_000,
-    presentation: {
-      family: "agent",
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    },
-  },
+const tools: ReadonlyArray<{ readonly name: string; readonly description?: string | undefined }> = [
+  ...Object.values(Runtime.toolkit.tools),
+  ...Object.values(AgentTools.modelToolkit.tools),
+  ...Object.values(ThreadTools.toolkit.tools),
 ]
+export const makeDefinitions = (
+  registeredTools: ReadonlyArray<{ readonly name: string; readonly description?: string | undefined }>,
+  policies: Readonly<Record<string, ToolPolicy.Policy>>,
+): ReadonlyArray<Definition> => {
+  const names = registeredTools.map(({ name }) => name)
+  const duplicateNames = names.filter((name, index) => names.indexOf(name) !== index)
+  const missingDescriptions = registeredTools
+    .filter(({ description }) => description === undefined)
+    .map(({ name }) => name)
+  const missingPolicies = names.filter((name) => policies[name] === undefined)
+  const missingTools = Object.keys(policies).filter((name) => !names.includes(name))
+  if (
+    duplicateNames.length === 0 &&
+    missingDescriptions.length === 0 &&
+    missingPolicies.length === 0 &&
+    missingTools.length === 0
+  )
+    return registeredTools.map(({ name, description }) => ({ name, description: description!, ...policies[name]! }))
+  throw new Error(
+    [
+      duplicateNames.length === 0 ? undefined : `duplicate tools: ${[...new Set(duplicateNames)].join(", ")}`,
+      missingDescriptions.length === 0 ? undefined : `tools without description: ${missingDescriptions.join(", ")}`,
+      missingPolicies.length === 0 ? undefined : `tools without policy: ${missingPolicies.join(", ")}`,
+      missingTools.length === 0 ? undefined : `policies without tool: ${missingTools.join(", ")}`,
+    ]
+      .filter((message) => message !== undefined)
+      .join("; "),
+  )
+}
+
+export const definitions = makeDefinitions(tools, ToolPolicy.policies)
 
 export const get = (name: string) => definitions.find((definition) => definition.name === name)
 
-const agentPresentation = (action: string, activeLabel: string, completeLabel: string): Presentation => ({
+const agentPresentation = (action: string, activeLabel: string, completeLabel: string): ToolPolicy.Presentation => ({
   family: "agent",
   action,
   activeLabel,
   completeLabel,
 })
 
-export const resolvePresentation = (rawName: string): Presentation => {
+export const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
   const name = rawName.toLowerCase()
   const defined = get(name)?.presentation
   if (defined !== undefined) return defined
@@ -298,7 +72,7 @@ export const resolvePresentation = (rawName: string): Presentation => {
   if (name === "grep" || name === "glob" || name === "ripgrep")
     return {
       family: "explore",
-      action: name === "grep" || name === "ripgrep" ? "grep" : "search",
+      action: name === "glob" ? "search" : "grep",
       activeLabel: "Exploring",
       completeLabel: "Explored",
       counter: "search",
@@ -307,6 +81,8 @@ export const resolvePresentation = (rawName: string): Presentation => {
     return { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" }
   if (name === "write_file")
     return { family: "edit", action: "create", activeLabel: "Creating", completeLabel: "Created" }
+  if (name === "painter")
+    return { family: "direct", action: "painter", activeLabel: "Painter", completeLabel: "Painter" }
   if (name === "finder" || name === "search" || name.includes("codebase"))
     return agentPresentation("finder", "Searching codebase", "Searched codebase")
   if (name === "review" || name.includes("review"))
@@ -322,13 +98,7 @@ export const resolvePresentation = (rawName: string): Presentation => {
   }
   if (name === "spawn_child_run") return agentPresentation("task", "Subagent working", "Subagent finished")
   if (name === "skill")
-    return {
-      family: "explore",
-      action: "skill",
-      activeLabel: "Exploring",
-      completeLabel: "Explored",
-      counter: "skill",
-    }
+    return { family: "explore", action: "skill", activeLabel: "Exploring", completeLabel: "Explored", counter: "skill" }
   if (name === "list_agent_modes")
     return {
       family: "direct",

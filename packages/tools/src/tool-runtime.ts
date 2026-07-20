@@ -5,7 +5,7 @@ import * as WebSearchService from "./web-search"
 import { Service as ReadWebPageService } from "./read-web-page"
 import * as ProcessRegistry from "./process-registry"
 import * as MediaView from "./media-view"
-import * as Catalog from "./tool-catalog"
+import * as ToolPolicy from "./tool-policy"
 import { unifiedDiff } from "./unified-diff"
 
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
@@ -57,7 +57,6 @@ export const WebSearch = Schema.Struct({
   searchQueries: WebSearchService.SearchQueries,
   kind: Schema.optionalKey(WebSearchService.Capability),
   strategy: Schema.optionalKey(WebSearchService.Strategy),
-  providers: Schema.optionalKey(Schema.Array(Schema.String)),
   githubSearchType: Schema.optionalKey(WebSearchService.GithubSearchType),
 })
 export const ReadWebPage = Schema.Struct({
@@ -168,13 +167,12 @@ export const gitStatusTool = tool("git_status", "Inspect concise Git working-tre
 })
 export const webSearchTool = tool(
   "web_search",
-  "Search the current web across configured providers, including semantic code search and exact GitHub REST search.",
+  "Search across configured sources. Use code for semantic examples and github for exact GitHub search.",
   {
     objective: WebSearchService.Objective,
     searchQueries: WebSearchService.SearchQueries,
     kind: Schema.optionalKey(WebSearchService.Capability),
     strategy: Schema.optionalKey(WebSearchService.Strategy),
-    providers: Schema.optionalKey(Schema.Array(Schema.String)),
     githubSearchType: Schema.optionalKey(WebSearchService.GithubSearchType),
   },
 )
@@ -243,14 +241,13 @@ export const handlerLayer = toolkit.toLayer(
       shell_command_status: ({ processId, waitMillis }) =>
         runtime.run({ _tag: "ShellCommandStatus", processId, ...(waitMillis == null ? {} : { waitMillis }) }),
       git_status: () => runtime.run({ _tag: "GitStatus" }),
-      web_search: ({ objective, searchQueries, kind, strategy, providers, githubSearchType }) =>
+      web_search: ({ objective, searchQueries, kind, strategy, githubSearchType }) =>
         runtime.run({
           _tag: "WebSearch",
           objective,
           searchQueries,
           ...(kind === undefined ? {} : { kind }),
           ...(strategy === undefined ? {} : { strategy }),
-          ...(providers === undefined ? {} : { providers }),
           ...(githubSearchType === undefined ? {} : { githubSearchType }),
         }),
       read_web_page: ({ url, objective, fullContent, forceRefetch }) =>
@@ -280,7 +277,7 @@ const gitStatusOutputLimit = 20_000
 
 const toolName = (request: Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
 
-const contract = (request: Request) => Catalog.get(toolName(request))!
+const contract = (request: Request) => ToolPolicy.get(toolName(request))!
 
 const boundResult = (request: Request, result: Result): Result => {
   const limit = contract(request).outputLimit
@@ -326,7 +323,7 @@ class RuntimeOperationError extends Data.TaggedError("RuntimeOperationError")<{ 
 
 const operationError = (cause: unknown) => new RuntimeOperationError({ message: String(cause) })
 
-export const layer = (workspace: string) =>
+export const layerWithProcessRegistry = (workspace: string) =>
   Layer.effect(
     Service,
     Effect.gen(function* () {
@@ -564,7 +561,6 @@ export const layer = (workspace: string) =>
                   searchQueries: request.searchQueries,
                   ...(request.kind === undefined ? {} : { kind: request.kind }),
                   ...(request.strategy === undefined ? {} : { strategy: request.strategy }),
-                  ...(request.providers === undefined ? {} : { providers: request.providers }),
                   ...(request.githubSearchType === undefined ? {} : { githubSearchType: request.githubSearchType }),
                 })
                 return bounded(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(results))
@@ -596,6 +592,9 @@ export const layer = (workspace: string) =>
         }),
       })
     }),
-  ).pipe(Layer.provide(ProcessRegistry.layer), Layer.provide(MediaView.layer(workspace)))
+  ).pipe(Layer.provide(MediaView.layer(workspace)))
+
+export const layer = (workspace: string) =>
+  layerWithProcessRegistry(workspace).pipe(Layer.provide(ProcessRegistry.layer))
 
 export const testLayer = (run: Interface["run"]) => Layer.succeed(Service, Service.of({ run }))

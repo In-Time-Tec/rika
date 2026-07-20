@@ -152,6 +152,20 @@ const program = Effect.scoped(
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const root = yield* path.fromFileUrl(new URL("..", import.meta.url)).pipe(mapFailure("resolve project root"))
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const revision = yield* spawner
+      .string(ChildProcess.make("git", ["rev-parse", "HEAD"], { cwd: root }))
+      .pipe(mapFailure("read source revision"))
+    const changes = yield* spawner
+      .string(
+        ChildProcess.make(
+          "git",
+          ["diff", "--binary", "HEAD", "--", "apps", "packages", "scripts", "package.json", "bun.lock"],
+          { cwd: root },
+        ),
+      )
+      .pipe(mapFailure("read source changes"))
+    const buildIdentity = new Bun.CryptoHasher("sha256").update(`${revision.trim()}\0${changes}`).digest("hex")
     const rootManifest = yield* fileSystem.readFileString(path.join(root, "package.json")).pipe(
       mapFailure("read root package manifest"),
       Effect.flatMap(
@@ -230,6 +244,8 @@ const program = Effect.scoped(
               "build",
               "--compile",
               `--target=${target.bun}`,
+              "--define",
+              `RIKA_BUILD_IDENTITY=${JSON.stringify(buildIdentity)}`,
               ...platformPackages
                 .filter((packageName) => packageName !== target.opentui)
                 .flatMap((packageName) => ["--external", packageName]),

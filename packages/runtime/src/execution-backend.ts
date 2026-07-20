@@ -3,6 +3,7 @@ import {
   AgentTools,
   Catalog as ToolCatalog,
   MediaView,
+  ProcessRegistry,
   ReadWebPage,
   Runtime as RikaToolRuntime,
   WebSearch,
@@ -43,6 +44,7 @@ import {
 } from "effect"
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
+import { ChildProcessSpawner } from "effect/unstable/process"
 import {
   type AgentProfile,
   BackendError,
@@ -74,6 +76,7 @@ type ToolRuntimeRequirements =
 type SuppliedToolRuntimeRequirements =
   | MediaView.MediaAnalyzer
   | ModelRegistry.Service
+  | ProcessRegistry.Service
   | ReadWebPage.Service
   | WebSearch.Service
 type ExternalToolRuntimeRequirements<R> = Exclude<ToolRuntimeRequirements | R, SuppliedToolRuntimeRequirements>
@@ -130,7 +133,9 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly filename: string
   readonly workspace: string
   readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
-  readonly parallelApiKey?: Redacted.Redacted<string>
+  readonly webSearchCredentialsForWorkspace?: (
+    workspace: string,
+  ) => Effect.Effect<Readonly<Record<string, Redacted.Redacted<string>>>, BackendError>
   readonly registration: ModelRegistry.Registration
   readonly additionalRegistrations?: ReadonlyArray<ModelRegistry.Registration>
   readonly selection: ModelRegistry.ModelSelection
@@ -148,7 +153,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly toolRuntimeLayer?: Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
   readonly toolRuntimeLayerForWorkspace?: (
     workspace: string,
-  ) => Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
+  ) => Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements | ProcessRegistry.Service>
   readonly resolveWorkspace?: (executionId: string) => Effect.Effect<string, BackendError>
   readonly toolNeedsApproval?: (name: string) => boolean
 }
@@ -158,11 +163,19 @@ export const routedToolRuntimeLayer: {
     resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
   ): (
     layerForWorkspace: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, E, R>,
-  ) => Layer.Layer<RikaToolRuntime.Service, E, R>
+  ) => Layer.Layer<
+    RikaToolRuntime.Service,
+    E,
+    ChildProcessSpawner.ChildProcessSpawner | Exclude<R, ProcessRegistry.Service>
+  >
   <E, R>(
     layerForWorkspace: (workspace: string) => Layer.Layer<RikaToolRuntime.Service, E, R>,
     resolveWorkspace: (executionId: string) => Effect.Effect<string, BackendError>,
-  ): Layer.Layer<RikaToolRuntime.Service, E, R>
+  ): Layer.Layer<
+    RikaToolRuntime.Service,
+    E,
+    ChildProcessSpawner.ChildProcessSpawner | Exclude<R, ProcessRegistry.Service>
+  >
 } = Function.dual(
   2,
   <E, R>(
@@ -171,14 +184,21 @@ export const routedToolRuntimeLayer: {
   ) =>
     Layer.unwrap(
       Effect.gen(function* () {
-        const runtimes = yield* LayerMap.make(layerForWorkspace, { idleTimeToLive: "1 minute" })
+        const dependencies = yield* Effect.context<
+          ChildProcessSpawner.ChildProcessSpawner | Exclude<R, ProcessRegistry.Service>
+        >()
+        const processes = yield* LayerMap.make(() => ProcessRegistry.layer, { idleTimeToLive: Duration.infinity })
         const run = ((request: RikaToolRuntime.Request) =>
           Effect.scoped(
             Effect.gen(function* () {
               const call = yield* RelayToolRuntime.ToolCallInfo
               const workspace = yield* resolveWorkspace(String(call.executionId))
-              const context = yield* runtimes.contextEffect(workspace)
-              const runtime = Context.get(context, RikaToolRuntime.Service)
+              const processContext = yield* processes.contextEffect(workspace)
+              const workspaceLayer = layerForWorkspace(workspace).pipe(
+                Layer.provide(Layer.succeedContext(Context.merge(dependencies, processContext))),
+              )
+              const runtimeContext = yield* Layer.build(workspaceLayer)
+              const runtime = Context.get(runtimeContext, RikaToolRuntime.Service)
               const startedAt = yield* Clock.currentTimeMillis
               yield* Effect.logInfo("tool.started").pipe(
                 Effect.annotateLogs({
@@ -329,53 +349,28 @@ const pinnedSelection = (route: ExecutionRoutePin["main"]): ModelRegistry.ModelS
 })
 
 export const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
-  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit" | "webSearchCredentials" | "parallelApiKey">,
+  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit" | "webSearchCredentials">,
 ) =>
   Toolkit.make(
     ...Object.values(RikaToolRuntime.toolkit.tools).filter(
       (tool) =>
-        (tool.name !== "web_search" ||
-          webSearchFactories(Object.fromEntries(webSearchCredentials(options))).factories.length > 0) &&
-        (tool.name !== "read_web_page" || parallelCredential(options) !== undefined),
+        (tool.name !== "web_search" || WebSearch.providerAvailability(options.webSearchCredentials ?? {}).search) &&
+        (tool.name !== "read_web_page" || WebSearch.providerAvailability(options.webSearchCredentials ?? {}).readPage),
     ),
     ...Object.values(AgentTools.modelToolkit.tools),
     ...Object.values(options.additionalToolkit?.tools ?? {}),
   )
 
 const availableTools = <AdditionalTools extends Record<string, Tool.Any>>(
-  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit" | "webSearchCredentials" | "parallelApiKey">,
+  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit" | "webSearchCredentials">,
   names: ReadonlyArray<string>,
 ) => {
   const available = toolkitFor(options).tools
   return names.filter((name) => name in available)
 }
 
-export const remoteToolOptions = (parallelApiKey: Redacted.Redacted<string> | undefined) =>
-  parallelApiKey === undefined ? {} : { apiKey: parallelApiKey }
-
-const parallelCredential = (options: Pick<LayerOptions, "webSearchCredentials" | "parallelApiKey">) =>
-  options.webSearchCredentials?.parallel ?? options.parallelApiKey
-
-const webSearchCredentials = (options: Pick<LayerOptions, "webSearchCredentials" | "parallelApiKey">) =>
-  Object.entries({
-    ...options.webSearchCredentials,
-    ...(parallelCredential(options) === undefined ? {} : { parallel: parallelCredential(options)! }),
-  })
-
-export const webSearchFactories = (
-  credentials: Readonly<Record<string, Redacted.Redacted<string>>>,
-): { readonly factories: ReadonlyArray<WebSearch.ProviderFactory>; readonly unsupportedIds: ReadonlyArray<string> } => {
-  const factories: Array<WebSearch.ProviderFactory> = []
-  const unsupportedIds: Array<string> = []
-  for (const [id, apiKey] of Object.entries(credentials)) {
-    if (id === "parallel") factories.push(WebSearch.parallel({ apiKey }))
-    else if (id === "exa") factories.push(WebSearch.exa({ apiKey }))
-    else if (id === "firecrawl") factories.push(WebSearch.firecrawl({ apiKey }))
-    else if (id === "github") factories.push(WebSearch.github({ apiKey }))
-    else unsupportedIds.push(id)
-  }
-  return { factories, unsupportedIds }
-}
+export const webSearchFactories = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) =>
+  WebSearch.configuredProviderFactories(credentials)
 
 export const modelVariantKey: {
   (fast: boolean): (effort: string) => string
@@ -554,10 +549,12 @@ const awaitChildResult = (client: Client.Interface, childId: string) => {
     Effect.map((events) => resolveChildResult([...events])),
   )
 }
-const workflowExecutionId = (runId: string, ownerTurnId?: string) =>
+const workflowExecutionId = (runId: string, ownerTurnId?: string, workspace?: string) =>
   Ids.ExecutionId.make(
     ownerTurnId === undefined
-      ? `workflow:${runId}`
+      ? workspace === undefined
+        ? `workflow:${runId}`
+        : `workflow:workspace:${encodeURIComponent(workspace)}:run:${encodeURIComponent(runId)}`
       : `workflow:turn:${encodeURIComponent(ownerTurnId)}:run:${encodeURIComponent(runId)}`,
   )
 const attachedWorkflow = (value: string) => {
@@ -579,10 +576,14 @@ const childParentExecutionId = (value: string) => {
     return undefined
   }
 }
-const belongsToWorkflow = (value: string): boolean => {
-  if (value.startsWith("workflow:")) return true
-  const parent = childParentExecutionId(value)
-  return parent === undefined ? false : belongsToWorkflow(parent)
+const standaloneWorkflow = (value: string) => {
+  const match = /^workflow:workspace:([^:]+):run:(.+)$/.exec(value)
+  if (match === null) return undefined
+  try {
+    return { workspace: decodeURIComponent(match[1]!), runId: decodeURIComponent(match[2]!) }
+  } catch {
+    return undefined
+  }
 }
 const childIdFromExecutionId = (parentTurnId: string, value: unknown) => {
   const id = String(value)
@@ -602,6 +603,12 @@ export const turnIdFromExecutionId = (value: string): string | undefined => {
   if (parent.startsWith("workflow:") || parent.startsWith("execution:") || parent.startsWith("child:"))
     return turnIdFromExecutionId(parent)
   return parent
+}
+export const workspaceFromExecutionId = (value: string): string | undefined => {
+  const workflow = standaloneWorkflow(value)
+  if (workflow !== undefined) return workflow.workspace
+  const parent = childParentExecutionId(value)
+  return parent === undefined ? undefined : workspaceFromExecutionId(parent)
 }
 const sessionId = (threadId: string) => Ids.SessionId.make(`session:${threadId}`)
 const childSessionId = (childExecutionId: Ids.ChildExecutionId) =>
@@ -648,8 +655,9 @@ const mapFanOut = (value: any) => {
 const workflow = (value: any) => {
   const execution = String(value.execution_id)
   const attached = attachedWorkflow(execution)
+  const standalone = standaloneWorkflow(execution)
   return {
-    runId: attached?.runId ?? execution.replace(/^workflow:/, ""),
+    runId: attached?.runId ?? standalone?.runId ?? execution.replace(/^workflow:/, ""),
     ...(attached === undefined ? {} : { ownerTurnId: attached.ownerTurnId }),
     workflow: String(value.pin.workflow_definition_id)
       .replace(/^rika:/, "")
@@ -958,6 +966,10 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     | "defaultReasoningEffort"
     | "modelVariantPolicy"
   > & {
+    readonly workspace?: string
+    readonly resolveWorkspace?: LayerOptions["resolveWorkspace"]
+    readonly webSearchCredentials?: LayerOptions["webSearchCredentials"]
+    readonly webSearchCredentialsForWorkspace?: LayerOptions["webSearchCredentialsForWorkspace"]
     readonly registerModels?: (registrations: ReadonlyArray<ModelRegistry.Registration>) => Effect.Effect<void>
     readonly onClientReady?: (client: Client.Interface) => Effect.Effect<void>
   },
@@ -973,6 +985,18 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           : options
               .permissionPolicyForExecution(execution)
               .pipe(Effect.map((policy) => policy as Permissions.Ruleset | undefined))
+      const toolOptionsForExecution = (execution: string) =>
+        Effect.gen(function* () {
+          const workspace =
+            options.resolveWorkspace === undefined
+              ? (options.workspace ?? "")
+              : yield* options.resolveWorkspace(execution)
+          const credentials =
+            options.webSearchCredentialsForWorkspace === undefined
+              ? options.webSearchCredentials
+              : yield* options.webSearchCredentialsForWorkspace(workspace)
+          return { ...options, webSearchCredentials: credentials ?? {} }
+        })
       const registry =
         Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
       const hostInstances = new Map<string, Resident.Instance>()
@@ -1138,6 +1162,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             const summaryModel = routePin?.compactionSummary
             const parentExecutionId = executionId(input.parentTurnId)
             const depth = childExecutionDepth(String(parentExecutionId)) + 1
+            const executionToolOptions = yield* toolOptionsForExecution(String(parentExecutionId))
             const children = yield* Effect.forEach(input.children, (child) => {
               const profile = child.profile ?? "Task"
               const profileRoute =
@@ -1179,7 +1204,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                       rika_reasoning_effort: effort,
                     },
                   },
-                  tool_names: availableTools(options, toolsAtDepth(preset.tool_names, depth)),
+                  tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, depth)),
                   ...(policy === undefined ? {} : { compaction_policy: policy }),
                 },
                 metadata: {
@@ -1236,25 +1261,27 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             Effect.mapError(error),
           )
         }),
-        startWorkflow: Effect.fn("ExecutionBackend.startWorkflow")(function* (name, runId, revision, ownerTurnId) {
+        startWorkflow: Effect.fn("ExecutionBackend.startWorkflow")(
+          function* (name, runId, revision, ownerTurnId, workspace) {
+            const result = yield* client.workflows
+              .startRun({
+                execution_id: workflowExecutionId(runId, ownerTurnId, workspace),
+                workflow_definition_id: idFor(name),
+                ...(revision === undefined ? {} : { revision }),
+              })
+              .pipe(Effect.mapError(error))
+            return workflow(result)
+          },
+        ),
+        inspectWorkflow: Effect.fn("ExecutionBackend.inspectWorkflow")(function* (runId, ownerTurnId, workspace) {
           const result = yield* client.workflows
-            .startRun({
-              execution_id: workflowExecutionId(runId, ownerTurnId),
-              workflow_definition_id: idFor(name),
-              ...(revision === undefined ? {} : { revision }),
-            })
-            .pipe(Effect.mapError(error))
-          return workflow(result)
-        }),
-        inspectWorkflow: Effect.fn("ExecutionBackend.inspectWorkflow")(function* (runId, ownerTurnId) {
-          const result = yield* client.workflows
-            .inspectRun(workflowExecutionId(runId, ownerTurnId))
+            .inspectRun(workflowExecutionId(runId, ownerTurnId, workspace))
             .pipe(Effect.mapError(error))
           return result === undefined ? undefined : workflow(result)
         }),
-        cancelWorkflow: Effect.fn("ExecutionBackend.cancelWorkflow")(function* (runId, ownerTurnId) {
+        cancelWorkflow: Effect.fn("ExecutionBackend.cancelWorkflow")(function* (runId, ownerTurnId, workspace) {
           const result = yield* client.workflows
-            .cancelRun(workflowExecutionId(runId, ownerTurnId))
+            .cancelRun(workflowExecutionId(runId, ownerTurnId, workspace))
             .pipe(Effect.mapError(error))
           return result === undefined ? undefined : workflow(result)
         }),
@@ -1267,6 +1294,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           const route = routeForProfile(routePin, input.profile)
           const preset = resolve(input.profile, pinnedSelection(route)).preset
           const depth = childExecutionDepth(String(parentExecutionId)) + 1
+          const executionToolOptions = yield* toolOptionsForExecution(String(parentExecutionId))
           const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
           yield* client.childRuns
             .spawn({
@@ -1283,7 +1311,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   rika_reasoning_effort: route.effort,
                 },
               },
-              tool_names: availableTools(options, toolsAtDepth(preset.tool_names, depth)),
+              tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, depth)),
               permissions: preset.permissions,
               compaction_policy: pinnedCompactionPolicy(route, routePin.compactionSummary),
               metadata: {
@@ -1309,6 +1337,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               const startedAt = yield* Clock.currentTimeMillis
               const id = executionId(input.turnId)
               const permissionPolicy = yield* permissionPolicyFor(String(id))
+              const executionToolOptions = yield* toolOptionsForExecution(String(id))
               const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(input.executionRoute)
               const metadata = {
                 steering_enabled: true,
@@ -1374,7 +1403,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                           rika_reasoning_effort: effort,
                         },
                       },
-                      tool_names: availableTools(options, toolsAtDepth(preset.tool_names, childDepth)),
+                      tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, childDepth)),
                       ...(policy === undefined ? {} : { compaction_policy: policy }),
                       metadata: {
                         ...preset.metadata,
@@ -1400,7 +1429,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   name: `rika-${encodeURIComponent(input.turnId)}`,
                   instructions: mainInstructions,
                   model: selection,
-                  toolkit: toolkitFor(options),
+                  toolkit: toolkitFor(executionToolOptions),
                   policy: TurnPolicy.forever,
                   toolExecution: { concurrency: 4 },
                 }),
@@ -1629,8 +1658,27 @@ export const layer = <
       {
         const { SQLite } = sqliteModule
         {
-          const toolkit = toolkitFor(options)
+          const toolkit = toolkitFor(
+            options.webSearchCredentialsForWorkspace === undefined
+              ? options
+              : {
+                  ...options,
+                  webSearchCredentials: Object.fromEntries(
+                    WebSearch.providerRegistry.map((provider) => [provider.id, Redacted.make("")]),
+                  ),
+                },
+          )
           const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
+          const toolOptionsForExecution = (execution: string) =>
+            Effect.gen(function* () {
+              const workspace =
+                options.resolveWorkspace === undefined ? options.workspace : yield* options.resolveWorkspace(execution)
+              const credentials =
+                options.webSearchCredentialsForWorkspace === undefined
+                  ? options.webSearchCredentials
+                  : yield* options.webSearchCredentialsForWorkspace(workspace)
+              return { ...options, webSearchCredentials: credentials ?? {} }
+            })
           const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
             toolName: AgentTools.DelegationToolName,
             profile: AgentProfile,
@@ -1673,6 +1721,9 @@ export const layer = <
             }
             const parentSelection = modelSelection(snapshot.model)
             const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
+              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+            )
+            const executionToolOptions = yield* toolOptionsForExecution(String(call.executionId)).pipe(
               Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
             )
             const calls = [
@@ -1737,7 +1788,7 @@ export const layer = <
                         rika_reasoning_effort: selected.effort,
                       },
                     },
-                    tool_names: availableTools(options, toolsAtDepth(preset.tool_names, childDepth)),
+                    tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, childDepth)),
                     permissions: preset.permissions,
                     ...(policy === undefined ? {} : { compaction_policy: policy }),
                     metadata: {
@@ -1816,14 +1867,11 @@ export const layer = <
           const sharedModelRegistryLayer = Layer.succeed(ModelRegistry.Service, modelRegistry)
           const rikaToolRuntimeLayer =
             options.toolRuntimeLayerForWorkspace !== undefined && options.resolveWorkspace !== undefined
-              ? routedToolRuntimeLayer(options.toolRuntimeLayerForWorkspace, (durableExecutionId) =>
-                  turnIdFromExecutionId(durableExecutionId) === undefined && belongsToWorkflow(durableExecutionId)
-                    ? Effect.succeed(options.workspace)
-                    : options.resolveWorkspace!(durableExecutionId),
-                )
+              ? routedToolRuntimeLayer(options.toolRuntimeLayerForWorkspace, options.resolveWorkspace)
               : (options.toolRuntimeLayer ?? RikaToolRuntime.layer(options.workspace))
-          const credentials = Object.fromEntries(webSearchCredentials(options))
+          const credentials = options.webSearchCredentials ?? {}
           const search = webSearchFactories(credentials)
+          const readPageCredential = WebSearch.configuredReadPageCredential(credentials)
           if (search.unsupportedIds.length > 0)
             yield* Effect.logWarning("web_search.unsupported_provider").pipe(
               Effect.annotateLogs("rika.web_search.provider_ids", search.unsupportedIds.join(",")),
@@ -1842,7 +1890,7 @@ export const layer = <
                 Layer.provide(
                   Layer.mergeAll(
                     WebSearch.factoryLayer(search.factories),
-                    ReadWebPage.layer(remoteToolOptions(parallelCredential(options))),
+                    ReadWebPage.layer(readPageCredential === undefined ? {} : { apiKey: readPageCredential }),
                   ).pipe(Layer.provide(FetchHttpClient.layer)),
                 ),
               ),
@@ -1996,9 +2044,6 @@ export const layer = <
                     ? {}
                     : { registrationKey: preset.model.registration_key }),
                 }
-                const childToolkit = Toolkit.make(
-                  ...Object.values(toolkit.tools).filter((tool) => preset.tool_names.includes(tool.name)),
-                )
                 const childAgentId = Ids.AgentId.make(
                   `agent:rika:workflow:${encodeURIComponent(parentExecutionId)}:${String(operation.id)}`,
                 )
@@ -2010,6 +2055,12 @@ export const layer = <
                   Effect.flatMap((client) =>
                     Effect.gen(function* () {
                       const startedAt = yield* Clock.currentTimeMillis
+                      const executionToolOptions = yield* toolOptionsForExecution(parentExecutionId)
+                      const childToolkit = Toolkit.make(
+                        ...Object.values(toolkitFor(executionToolOptions).tools).filter((tool) =>
+                          preset.tool_names.includes(tool.name),
+                        ),
+                      )
                       const encodedInput = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(
                         operation.input ?? {},
                       )

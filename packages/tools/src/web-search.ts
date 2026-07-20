@@ -15,7 +15,6 @@ export const SearchInput = Schema.Struct({
   searchQueries: SearchQueries,
   kind: Schema.optionalKey(Capability),
   strategy: Schema.optionalKey(Strategy),
-  providers: Schema.optionalKey(Schema.Array(Schema.String)),
   githubSearchType: Schema.optionalKey(GithubSearchType),
 })
 export type SearchInput = typeof SearchInput.Type
@@ -78,29 +77,6 @@ export class Service extends Context.Service<Service, Interface>()("@rika/tools/
 
 const select = (providers: ReadonlyArray<SearchProvider>, input: SearchInput) => {
   const kind = input.kind ?? "web"
-  const explicit = input.providers
-  if (explicit !== undefined) {
-    if (explicit.length === 0) return Effect.fail(SelectionError.make({ message: "providers must not be empty" }))
-    if (explicit.length > 3)
-      return Effect.fail(SelectionError.make({ message: "At most 3 explicit web search providers may be selected" }))
-    const duplicates = explicit.filter((id, index) => explicit.indexOf(id) !== index)
-    if (duplicates.length > 0)
-      return Effect.fail(
-        SelectionError.make({ message: `Duplicate web search provider IDs: ${[...new Set(duplicates)].join(", ")}` }),
-      )
-    const selected: Array<SearchProvider> = []
-    for (const id of explicit) {
-      const provider = providers.find((candidate) => candidate.id === id)
-      if (provider === undefined)
-        return Effect.fail(SelectionError.make({ message: `Web search provider '${id}' is unavailable` }))
-      if (!provider.capabilities.has(kind))
-        return Effect.fail(
-          SelectionError.make({ message: `Web search provider '${id}' does not support '${kind}' searches` }),
-        )
-      selected.push(provider)
-    }
-    return Effect.succeed(selected)
-  }
   const capable = providers
     .filter((provider) => provider.capabilities.has(kind))
     .toSorted((a, b) => b.priority - a.priority)
@@ -140,5 +116,14 @@ export const factoryLayer = (factories: ReadonlyArray<ProviderFactory>) =>
   Layer.effect(Service, Effect.map(Effect.all(factories, { concurrency: 5 }), make))
 export const testLayer = (search: Interface["search"]) => Layer.succeed(Service, Service.of({ search }))
 
-export { exa, firecrawl, github, parallel } from "./web-search-providers"
-export type { ProviderOptions } from "./web-search-providers"
+export {
+  configuredProviderFactories,
+  configuredReadPageCredential,
+  exa,
+  firecrawl,
+  github,
+  parallel,
+  providerAvailability,
+  providerRegistry,
+} from "./web-search-providers"
+export type { ProviderId, ProviderOptions } from "./web-search-providers"

@@ -36,21 +36,40 @@ describe("resident service protocol", () => {
       clientNonce: "nonce",
       clientKind: "run" as const,
       protocolVersion,
+      buildIdentity: "build-a",
     }
     const base = { ...unsigned, clientProof: clientProof("token", unsigned) }
-    expect(validateHandshake(base, { identity: "identity", token: "token" })._tag).toBe("Accepted")
+    expect(validateHandshake(base, { identity: "identity", token: "token", buildIdentity: "build-a" })._tag).toBe(
+      "Accepted",
+    )
     expect(
       validateHandshake(
         { ...base, clientProof: clientProof("wrong", unsigned) },
-        { identity: "identity", token: "token" },
+        { identity: "identity", token: "token", buildIdentity: "build-a" },
       )._tag,
     ).toBe("AuthenticationFailed")
-    expect(validateHandshake({ ...base, identity: "wrong" }, { identity: "identity", token: "token" })._tag).toBe(
-      "IdentityMismatch",
-    )
-    expect(validateHandshake({ ...base, protocolVersion: 0 }, { identity: "identity", token: "token" })._tag).toBe(
-      "ProtocolMismatch",
-    )
+    expect(
+      validateHandshake(
+        { ...base, identity: "wrong" },
+        { identity: "identity", token: "token", buildIdentity: "build-a" },
+      )._tag,
+    ).toBe("IdentityMismatch")
+    expect(
+      validateHandshake(
+        { ...base, protocolVersion: 0 },
+        { identity: "identity", token: "token", buildIdentity: "build-a" },
+      )._tag,
+    ).toBe("ProtocolMismatch")
+    expect(
+      validateHandshake(
+        {
+          ...base,
+          buildIdentity: "build-b",
+          clientProof: clientProof("token", { ...unsigned, buildIdentity: "build-b" }),
+        },
+        { identity: "identity", token: "token", buildIdentity: "build-a" },
+      )._tag,
+    ).toBe("BuildMismatch")
   })
 
   it("requires an explicit protocol version and bounded non-empty transport identities", () => {
@@ -62,9 +81,20 @@ describe("resident service protocol", () => {
       clientProof: "0".repeat(64),
     }
     expect(() => Schema.decodeUnknownSync(ClientMessage)(base)).toThrow()
-    expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion, clientNonce: "" })).toThrow()
+    expect(() => Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion })).toThrow()
     expect(() =>
-      Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion, identity: "x".repeat(1_025) }),
+      Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion, buildIdentity: "build-a", clientNonce: "" }),
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)({
+        ...base,
+        protocolVersion,
+        buildIdentity: "build-a",
+        identity: "x".repeat(1_025),
+      }),
+    ).toThrow()
+    expect(() =>
+      Schema.decodeUnknownSync(ClientMessage)({ ...base, protocolVersion, buildIdentity: "x".repeat(1_025) }),
     ).toThrow()
   })
 
@@ -74,6 +104,7 @@ describe("resident service protocol", () => {
       clientNonce: "client-nonce",
       clientKind: "run" as const,
       protocolVersion,
+      buildIdentity: "build-a",
     }
     const accepted = Schema.decodeUnknownSync(ServerMessage)({
       _tag: "accepted",
@@ -83,9 +114,11 @@ describe("resident service protocol", () => {
       serviceNonce: "service-nonce",
       connectionId: "connection",
       protocolVersion,
+      buildIdentity: "build-a",
       serverProof: serverProof("token", handshake, {
         serviceNonce: "service-nonce",
         connectionId: "connection",
+        buildIdentity: "build-a",
       }),
     })
     expect(accepted._tag).toBe("accepted")
@@ -94,6 +127,7 @@ describe("resident service protocol", () => {
     expect(verifyServerProof("wrong", handshake, accepted)).toBe(false)
     expect(verifyServerProof("token", { ...handshake, clientNonce: "reflected" }, accepted)).toBe(false)
     expect(verifyServerProof("token", handshake, { ...accepted, connectionId: "foreign" })).toBe(false)
+    expect(verifyServerProof("token", handshake, { ...accepted, buildIdentity: "build-b" })).toBe(false)
   })
 
   it("round-trips empty and semantic transcript pages without undefined wire fields", () => {

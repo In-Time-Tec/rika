@@ -254,12 +254,71 @@ const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): We
     }),
 })
 
-const provider =
+const providerFactory =
   (make: (client: HttpClient.HttpClient, options: ProviderOptions) => WebSearch.SearchProvider) =>
   (options: ProviderOptions) =>
     Effect.map(HttpClient.HttpClient, (client) => make(client, options))
 
-export const parallel = provider(makeParallel)
-export const exa = provider(makeExa)
-export const firecrawl = provider(makeFirecrawl)
-export const github = provider(makeGithub)
+export const parallel = providerFactory(makeParallel)
+export const exa = providerFactory(makeExa)
+export const firecrawl = providerFactory(makeFirecrawl)
+export const github = providerFactory(makeGithub)
+
+export const providerRegistry = [
+  {
+    id: "parallel",
+    capabilities: ["web"],
+    priority: 100,
+    credentialEnvironment: "PARALLEL_API_KEY",
+    search: parallel,
+    readPage: true,
+  },
+  {
+    id: "exa",
+    capabilities: ["web", "code"],
+    priority: 90,
+    credentialEnvironment: "EXA_API_KEY",
+    search: exa,
+    readPage: false,
+  },
+  {
+    id: "firecrawl",
+    capabilities: ["web", "github"],
+    priority: 80,
+    credentialEnvironment: "FIRECRAWL_API_KEY",
+    search: firecrawl,
+    readPage: false,
+  },
+  {
+    id: "github",
+    capabilities: ["github"],
+    priority: 100,
+    credentialEnvironment: "GITHUB_TOKEN",
+    search: github,
+    readPage: false,
+  },
+] as const
+
+export type ProviderId = (typeof providerRegistry)[number]["id"]
+
+export const configuredProviderFactories = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) => {
+  const configured = Object.keys(credentials)
+  const unsupportedIds = configured.filter((id) => !providerRegistry.some((provider) => provider.id === id))
+  const factories = providerRegistry.flatMap((descriptor) => {
+    const apiKey = credentials[descriptor.id]
+    return apiKey === undefined ? [] : [descriptor.search({ apiKey, priority: descriptor.priority })]
+  })
+  return { factories, unsupportedIds }
+}
+
+export const configuredReadPageCredential = (
+  credentials: Readonly<Record<string, Redacted.Redacted<string>>>,
+) => {
+  const descriptor = providerRegistry.find((provider) => provider.readPage && credentials[provider.id] !== undefined)
+  return descriptor === undefined ? undefined : credentials[descriptor.id]
+}
+
+export const providerAvailability = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) => ({
+  search: providerRegistry.some((provider) => credentials[provider.id] !== undefined),
+  readPage: configuredReadPageCredential(credentials) !== undefined,
+})

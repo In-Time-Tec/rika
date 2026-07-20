@@ -1,6 +1,106 @@
 import { expect, test } from "vitest"
 import { Scene } from "./scene"
 
+const ESC = String.fromCharCode(27)
+const BELL = String.fromCharCode(7)
+const clamp = (value: number, limit: number) => Math.max(0, Math.min(limit - 1, value))
+
+const finalTranscriptScreen = (raw: string): ReadonlyArray<string> => {
+  const rows = 30
+  const cols = 100
+  const grid = Array.from({ length: rows }, () => Array.from({ length: cols }, () => " "))
+  let altScreenSnapshot: ReadonlyArray<string> | undefined
+  let row = 0
+  let col = 0
+  const snapshot = () => grid.map((cells) => cells.join(""))
+  const clearAll = () => {
+    for (const cells of grid) cells.fill(" ")
+  }
+  const scrollUp = () => {
+    grid.shift()
+    grid.push(Array.from({ length: cols }, () => " "))
+  }
+  let index = 0
+  while (index < raw.length) {
+    const character = raw[index]!
+    if (character === ESC) {
+      const kind = raw[index + 1]
+      if (kind === "[") {
+        let end = index + 2
+        while (end < raw.length && !/[@-~]/.test(raw[end]!)) end += 1
+        const body = raw.slice(index + 2, end)
+        const final = raw[end]
+        const parameters = body
+          .replace(/^[?>]/, "")
+          .split(";")
+          .map((part) => Number.parseInt(part, 10))
+        const first = Number.isNaN(parameters[0] ?? Number.NaN) ? undefined : parameters[0]
+        if (final === "H" || final === "f") {
+          row = clamp((first ?? 1) - 1, rows)
+          col = clamp((parameters[1] ?? 1) - 1, cols)
+        } else if (final === "A") row = clamp(row - (first ?? 1), rows)
+        else if (final === "B") row = clamp(row + (first ?? 1), rows)
+        else if (final === "C") col = clamp(col + (first ?? 1), cols)
+        else if (final === "D") col = clamp(col - (first ?? 1), cols)
+        else if (final === "G") col = clamp((first ?? 1) - 1, cols)
+        else if (final === "d") row = clamp((first ?? 1) - 1, rows)
+        else if (final === "J") {
+          if (first === undefined || first === 0)
+            for (let target = row; target < rows; target += 1) grid[target]!.fill(" ", target === row ? col : 0)
+          else if (first === 1)
+            for (let target = 0; target <= row; target += 1) grid[target]!.fill(" ", 0, target === row ? col + 1 : cols)
+          else clearAll()
+        } else if (final === "K") {
+          if (first === undefined || first === 0) grid[row]!.fill(" ", col)
+          else if (first === 1) grid[row]!.fill(" ", 0, col + 1)
+          else grid[row]!.fill(" ")
+        } else if (final === "S") for (let count = 0; count < (first ?? 1); count += 1) scrollUp()
+        else if (final === "h" || final === "l") {
+          if (body.startsWith("?1049")) {
+            if (final === "l") altScreenSnapshot = snapshot()
+            clearAll()
+            row = 0
+            col = 0
+          }
+        }
+        index = end + 1
+        continue
+      }
+      if (kind === "]") {
+        let end = index + 2
+        while (end < raw.length && raw[end] !== BELL && !(raw[end] === ESC && raw[end + 1] === "\\")) end += 1
+        index = raw[end] === BELL ? end + 1 : end + 2
+        continue
+      }
+      if (kind === "M") {
+        row = clamp(row - 1, rows)
+        index += 2
+        continue
+      }
+      index += kind === "(" || kind === ")" ? 3 : 2
+      continue
+    }
+    if (character === "\r") col = 0
+    else if (character === "\n") {
+      if (row === rows - 1) scrollUp()
+      else row += 1
+    } else if (character === "\b") col = clamp(col - 1, cols)
+    else if (character === "\t") col = clamp((col + 8) & ~7, cols)
+    else if (character >= " ") {
+      grid[row]![col] = character
+      col = clamp(col + 1, cols)
+    }
+    index += 1
+  }
+  return altScreenSnapshot ?? snapshot()
+}
+
+const finalScreenShows = (raw: string, needle: string): boolean =>
+  finalTranscriptScreen(raw).some((line) => line.includes(needle))
+
+const finalScreenCount = (raw: string, needle: string): number =>
+  finalTranscriptScreen(raw).reduce((total, line) => total + (line.includes(needle) ? 1 : 0), 0)
+
 const expectScriptedModel = (result: Awaited<ReturnType<typeof Scene.run>>) => {
   expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
 }
@@ -127,7 +227,7 @@ test(
 )
 
 test(
-  "shows a failed subagent state before the parent turn finishes",
+  "expands a failed subagent to its terminal failure reason without an answer",
   () =>
     Scene.run({
       script: [
@@ -138,11 +238,47 @@ test(
       ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Try an unavailable child model.\r"),
-        Scene.action.checkRunningAfter("Subagent working", ""),
-        Scene.action.writeAfter("FAILED_TURN_COMPLETE", "\u0003", 500),
+        Scene.action.writeAfter("Subagent failed", "\t", 100),
+        Scene.action.writeAfter("Subagent failed ▸", "\r"),
+        Scene.action.writeAfterDelay("\u0003", 800),
       ],
     }).then((result) => {
+      const screen = finalTranscriptScreen(result.rawOutput).join("\n")
       expect(result.output).toContain("✕ Subagent failed")
+      expect(finalScreenShows(result.rawOutput, "Language model not registered"), screen).toBe(true)
+      expect(finalScreenShows(result.rawOutput, "Subagent finished"), screen).toBe(false)
+      expectScriptedModel(result)
+    }),
+  45_000,
+)
+
+test(
+  "expands a depth-two subagent to its nested tool and single failure terminal",
+  () =>
+    Scene.run({
+      script: [
+        Scene.model.turn([Scene.model.toolCall("task", { prompt: "Coordinate the failing grandchild." }, "depth-one")]),
+        Scene.model.turn([Scene.model.toolCall("task", { prompt: "Run the grandchild that fails." }, "depth-two")]),
+        Scene.model.turn([
+          Scene.model.toolCall("read", { path: "missing-grandchild-file.ts", read_range: [1, 20] }, "grandchild-read"),
+        ]),
+        Scene.model.failure("grandchild boundary failure"),
+        Scene.model.text("Depth one reported the failed grandchild."),
+        Scene.model.text("Parent received the nested failure."),
+      ],
+      actions: [
+        Scene.action.writeAfter("Welcome to Rika", "Coordinate the failing grandchild.\r"),
+        Scene.action.writeAfter("Parent received the nested failure.", "\t", 150),
+        Scene.action.writeAfterDelay("\r", 150),
+        Scene.action.writeAfter("Depth one reported the failed grandchild.", "\t", 150),
+        Scene.action.writeAfterDelay("\r", 300),
+        Scene.action.writeAfter("grandchild boundary failure", "\u0003", 300),
+      ],
+    }).then((result) => {
+      const screen = finalTranscriptScreen(result.rawOutput).join("\n")
+      expect(finalScreenShows(result.rawOutput, "✕ Read missing-grandchild-file.ts"), screen).toBe(true)
+      expect(finalScreenShows(result.rawOutput, "grandchild boundary failure"), screen).toBe(true)
+      expect(finalScreenCount(result.rawOutput, "grandchild boundary failure"), screen).toBe(1)
       expectScriptedModel(result)
     }),
   45_000,

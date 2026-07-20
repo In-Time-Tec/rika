@@ -1,4 +1,4 @@
-import type { Block, Unit } from "@rika/transcript"
+import { childParentMatch, type Block, type Unit } from "@rika/transcript"
 import { Function } from "effect"
 import type { Model, TranscriptItem } from "../view-state"
 
@@ -223,31 +223,32 @@ const reconcileSubagentUnits = (
   model: Model,
   units: ReadonlyArray<Unit>,
 ): { readonly model: Model; readonly units: ReadonlyArray<Unit> } => {
-  const tools = new Map<string, Unit>()
   const toolUnits: Array<Unit> = []
   const children = new Map<string, Unit>()
   const mergedRows = new Map<string, string>()
   for (const unit of units) {
     if (unit.content._tag !== "Block") continue
     const block = unit.content.block
-    if (block._tag === "ToolCall") {
-      toolUnits.push(unit)
-      if (block.childId !== undefined) tools.set(executionKey(block.childId), unit)
-    } else if (block._tag === "ChildAgent") children.set(executionKey(block.id), unit)
+    if (block._tag === "ToolCall") toolUnits.push(unit)
+    else if (block._tag === "ChildAgent") children.set(executionKey(block.id), unit)
   }
+  const toolCandidates = toolUnits.flatMap((candidate) =>
+    candidate.content._tag === "Block" && candidate.content.block._tag === "ToolCall"
+      ? [
+          {
+            id: candidate.content.block.id,
+            scope: candidate.turnId,
+            childId: candidate.content.block.childId,
+            family: candidate.content.block.presentation.family,
+            unit: candidate,
+          },
+        ]
+      : [],
+  )
   const toolForChildResults = new Map<string, Unit | undefined>()
   const toolForChild = (childId: string): Unit | undefined => {
     if (toolForChildResults.has(childId)) return toolForChildResults.get(childId)
-    const found =
-      tools.get(executionKey(childId)) ??
-      toolUnits.find((candidate) => {
-        if (candidate.content._tag !== "Block" || candidate.content.block._tag !== "ToolCall") return false
-        const block = candidate.content.block
-        if (block.presentation.family !== "agent") return false
-        const prefix = `${candidate.turnId}:`
-        const toolCallId = block.id.startsWith(prefix) ? block.id.slice(prefix.length) : block.id
-        return executionKey(childId).endsWith(`:${toolCallId}`)
-      })
+    const found = childParentMatch(toolCandidates, childId)?.unit
     toolForChildResults.set(childId, found)
     return found
   }

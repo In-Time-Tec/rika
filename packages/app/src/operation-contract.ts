@@ -200,6 +200,7 @@ const ExtensionList = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Exte
 const Doctor = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Doctor") })
 const Update = Schema.Struct({ _tag: Schema.tag("Update") })
 const WorkflowStart = Schema.Struct({
+  ...ClientWorkspace,
   _tag: Schema.tag("Workflow"),
   action: Schema.tag("start"),
   name: Schema.Literals(["delivery", "research-synthesis"]),
@@ -207,6 +208,7 @@ const WorkflowStart = Schema.Struct({
   revision: Schema.optionalKey(Schema.Int),
 })
 const WorkflowInspect = Schema.Struct({
+  ...ClientWorkspace,
   _tag: Schema.tag("Workflow"),
   action: Schema.Literals(["inspect", "cancel"]),
   runId: Schema.String,

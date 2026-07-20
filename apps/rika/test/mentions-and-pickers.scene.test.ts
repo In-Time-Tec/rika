@@ -6,7 +6,7 @@ const isolatedModel = (diagnostics: string) => expect(diagnostics).not.toContain
 test(
   "filters and inserts a Unicode file mention without losing the surrounding draft",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: {
         "src/plain.ts": "plain",
         "src/überblick.ts": "UNICODE_CONTEXT_MARKER",
@@ -17,7 +17,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", `Keep  tail${"\u001b[D".repeat(5)}@über`),
         Scene.action.writeAfter("Keep @über tail", "\r", 300),
         Scene.action.writeAfter("src/überblick.ts  tail", "\r"),
-        Scene.action.writeAfter("UNICODE_MENTION_COMPLETE", "\u0003", 1_000),
+        Scene.action.writeAfter("UNICODE_MENTION_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("Keep @src/überblick.ts  tail")
@@ -30,7 +30,7 @@ test(
 test(
   "moves and inserts a filtered file selection",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: {
         "src/alpha.ts": "alpha",
         "src/beta.ts": "beta",
@@ -42,7 +42,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "check @.ts"),
         Scene.action.writeAfter("check @.ts", "\u001b[B\r", 300),
         Scene.action.writeAfter("src/beta.ts ", "\r"),
-        Scene.action.writeAfter("FRESH_SELECTION_COMPLETE", "\u0003", 1_000),
+        Scene.action.writeAfter("FRESH_SELECTION_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("check @src/beta.ts ")
@@ -54,7 +54,7 @@ test(
 test(
   "preserves a filtered file draft when completion is cancelled",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: { "src/actual.ts": "actual" },
       git: true,
       response: "CANCELLED_PICKER_COMPLETE",
@@ -62,7 +62,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "prefix @missing"),
         Scene.action.writeAfter("prefix @missing", "\u001b", 300),
         Scene.action.writeAfter("prefix @missing", " suffix\r", 300),
-        Scene.action.writeAfter("CANCELLED_PICKER_COMPLETE", "\u0003", 1_000),
+        Scene.action.writeAfter("CANCELLED_PICKER_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("prefix @missing suffix")
@@ -74,7 +74,7 @@ test(
 test(
   "shows the empty file state and keeps the empty selection inert",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: { "sentinel.txt": "sentinel" },
       git: true,
       response: "EMPTY_PICKER_COMPLETE",
@@ -82,7 +82,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "empty @definitely-absent"),
         Scene.action.writeAfter("empty @definitely-absent", "\r", 300),
         Scene.action.writeAfter("empty @definitely-absent", "\r"),
-        Scene.action.writeAfter("EMPTY_PICKER_COMPLETE", "\u0003", 1_000),
+        Scene.action.writeAfter("EMPTY_PICKER_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("no matches")
@@ -136,13 +136,13 @@ test(
 test(
   "shows file loading while a workspace scan is pending and preserves the draft on cancellation",
   () =>
-    Scene.run({
+    Scene.runWarm({
       response: "LOADING_PICKER_COMPLETE",
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "loading @"),
         Scene.action.writeAfter("Loading files", "\u001b", 300),
         Scene.action.writeAfter("loading @", " pending\r", 300),
-        Scene.action.writeAfter("LOADING_PICKER_COMPLETE", "\u0003", 1_000),
+        Scene.action.writeAfter("LOADING_PICKER_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain("Loading files")
@@ -155,7 +155,7 @@ test(
 test(
   "inserts a quoted file path so context resolution keeps embedded spaces",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: { "docs/read me.md": "SPACED_CONTEXT_MARKER" },
       git: true,
       response: "SPACED_CONTEXT_COMPLETE",
@@ -163,7 +163,7 @@ test(
         Scene.action.writeAfter("Welcome to Rika", "resolve @read"),
         Scene.action.writeAfter("resolve @read", "\r", 300),
         Scene.action.writeAfter('docs/read me.md" ', "\r"),
-        Scene.action.writeAfter("SPACED_CONTEXT_COMPLETE", "\u0003", 1_000),
+        Scene.action.writeAfter("SPACED_CONTEXT_COMPLETE", "\u0003", 100),
       ],
     }).then((result) => {
       expect(result.output).toContain('resolve @"docs/read me.md" ')

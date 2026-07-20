@@ -1,4 +1,4 @@
-import type { Unit } from "@rika/transcript"
+import { childParentMatch, type Unit } from "@rika/transcript"
 import type { Model, TranscriptBlock, TranscriptItem } from "../view-state"
 import { projectChildUnits } from "./projection"
 
@@ -10,30 +10,24 @@ export interface ChildProjection {
 export interface AttachmentResult {
   readonly model: Model
   readonly attachments: ReadonlyMap<string, number>
+  readonly unattached: ReadonlyArray<string>
 }
 
 export const emptyAttachments: ReadonlyMap<string, number> = new Map()
-
-const executionKey = (value: string): string => value.replace(/^execution:/, "")
 
 const childParent = (
   model: Model,
   turnId: string,
 ): Extract<TranscriptBlock, { readonly _tag: "ToolCall" }> | undefined => {
-  const childKey = executionKey(turnId)
   const blocks = model.blocks as ReadonlyArray<TranscriptBlock>
-  for (const item of model.items as ReadonlyArray<TranscriptItem>) {
-    if (item._tag !== "Block") continue
+  const candidates = (model.items as ReadonlyArray<TranscriptItem>).flatMap((item) => {
+    if (item._tag !== "Block") return []
     const block = blocks[item.index]
-    if ((block as { readonly _tag?: unknown } | undefined)?._tag !== "ToolCall") continue
+    if ((block as { readonly _tag?: unknown } | undefined)?._tag !== "ToolCall") return []
     const tool = block as Extract<TranscriptBlock, { readonly _tag: "ToolCall" }>
-    if (tool.childId !== undefined && executionKey(tool.childId) === childKey) return tool
-    if (tool.presentation.family !== "agent") continue
-    const prefix = `${item.turnId}:`
-    const toolCallId = tool.id.startsWith(prefix) ? tool.id.slice(prefix.length) : tool.id
-    if (childKey.endsWith(`:${toolCallId}`)) return tool
-  }
-  return undefined
+    return [{ id: tool.id, scope: item.turnId ?? "", childId: tool.childId, family: tool.presentation.family, tool }]
+  })
+  return childParentMatch(candidates, turnId)?.tool
 }
 
 export const attachChildProjections = (
@@ -58,5 +52,12 @@ export const attachChildProjections = (
       advanced = true
     }
   }
-  return { model: next, attachments: nextAttachments ?? attachments }
+  const settledAttachments = nextAttachments ?? attachments
+  const unattached: Array<string> = []
+  for (const [turnId, projection] of availableProjections) {
+    if (replayTurns.has(turnId)) continue
+    if (settledAttachments.get(turnId) === projection.revision) continue
+    if (childParent(next, turnId) === undefined) unattached.push(turnId)
+  }
+  return { model: next, attachments: settledAttachments, unattached }
 }

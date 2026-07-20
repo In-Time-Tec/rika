@@ -682,7 +682,7 @@ test("handoff children resolve real workspace tools through their parent Rika tu
         registration: fixture.registration,
         selection: fixture.selection,
         modelVariantPolicy: "fixed-selection",
-        toolRuntimeLayerForWorkspace: Runtime.layer,
+        toolRuntimeLayerForWorkspace: Runtime.layerWithProcessRegistry,
         resolveWorkspace: (executionId) => {
           const turnId = RelayExecutionBackend.turnIdFromExecutionId(executionId)
           const resolved = turnId === undefined ? undefined : workspaces.get(turnId)

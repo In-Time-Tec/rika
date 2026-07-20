@@ -194,10 +194,11 @@ describe("TranscriptPresenter", () => {
   })
 })
 
+const childTurnId = (child: number) => `child:turn:agent-${child}`
+
 describe("TranscriptPresenter at scale", () => {
   const childCount = 200
   const toolsPerChild = 20
-  const childTurnId = (child: number) => `child:turn:agent-${child}`
   const largeParent = Transcript.project("turn", "prompt", [
     event("assistant-0", 0, "model.output.completed", { text: "Fanning out." }),
     ...Array.from({ length: childCount }, (_, child) => [
@@ -211,7 +212,7 @@ describe("TranscriptPresenter at scale", () => {
   ])
   const childProjections = new Map(
     Array.from({ length: childCount }, (_, child) => {
-      const events = Array.from({ length: toolsPerChild }, (_, tool) => {
+      const events = Array.from({ length: toolsPerChild }, (__, tool) => {
         const requested = event(`tool-${child}-${tool}`, tool * 2, "tool.call.requested", {
           data: {
             tool_call_id: `tool-${child}-${tool}`,
@@ -358,17 +359,19 @@ const terminalOf = (opts: Parameters<typeof agentScenario>[0]) => {
   return agentTerminal(model, tool, children)
 }
 
+const childContent = ["answer", "error", "both", "neither"] as const
+
+const optsFor = (
+  status: "running" | "complete" | "failed" | "cancelled",
+  content: (typeof childContent)[number],
+): Parameters<typeof agentScenario>[0] => ({
+  status,
+  ...(content === "answer" || content === "both" ? { answer: "Final answer." } : {}),
+  ...(content === "error" || content === "both" ? { errorDetail: "explosion in the reactor" } : {}),
+})
+
 describe("agentTerminal", () => {
   const settled = ["complete", "failed", "cancelled"] as const
-  const childContent = ["answer", "error", "both", "neither"] as const
-  const optsFor = (
-    status: "running" | "complete" | "failed" | "cancelled",
-    content: (typeof childContent)[number],
-  ): Parameters<typeof agentScenario>[0] => ({
-    status,
-    ...(content === "answer" || content === "both" ? { answer: "Final answer." } : {}),
-    ...(content === "error" || content === "both" ? { errorDetail: "explosion in the reactor" } : {}),
-  })
 
   for (const content of childContent)
     it(`gives a running row no terminal (${content})`, () => {

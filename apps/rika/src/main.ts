@@ -264,6 +264,15 @@ export class ModelConfigurationError extends Schema.TaggedErrorClass<ModelConfig
   { message: Schema.String },
 ) {}
 
+export const validateWebSearchProviders = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) => {
+  const unsupportedIds = RelayExecutionBackend.webSearchFactories(credentials).unsupportedIds
+  return unsupportedIds.length === 0
+    ? Effect.void
+    : ModelConfigurationError.make({
+        message: `Unknown web search provider ${unsupportedIds.map((id) => `'${id}'`).join(", ")}`,
+      })
+}
+
 export class WorkspaceFileError extends Schema.TaggedErrorClass<WorkspaceFileError>()("WorkspaceFileError", {
   path: Schema.String,
   message: Schema.String,
@@ -676,6 +685,26 @@ export const buildTestModelScript: (
   })
 })
 
+export const makeReloadingTestModel = Effect.fn("Main.makeReloadingTestModel")(function* (path: string) {
+  const { TestModel } = yield* Effect.tryPromise({
+    try: () => import("@batonfx/test"),
+    catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
+  })
+  const load = Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const script = yield* fileSystem.readFileString(path)
+    return yield* TestModel.make(yield* buildTestModelScript(script))
+  })
+  const initial = yield* load
+  return {
+    ...initial,
+    registration: {
+      ...initial.registration,
+      layer: Layer.unwrap(load.pipe(Effect.map((fixture) => fixture.registration.layer))),
+    },
+  }
+})
+
 const modeIds = ["low", "medium", "high", "ultra"] as const
 const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
 
@@ -871,21 +900,23 @@ const unavailableRouteError = (failure: PersistedRouteRegistrationFailure) =>
 
 export const resolveExecutionWorkspace = Effect.fn("Main.resolveExecutionWorkspace")(function* (
   durableExecutionId: string,
-  defaultWorkspace: string,
+  _defaultWorkspace: string,
   repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
   turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
 ) {
   const program = Effect.gen(function* () {
     const turnId = RelayExecutionBackend.turnIdFromExecutionId(durableExecutionId)
+    const executionWorkspace = RelayExecutionBackend.workspaceFromExecutionId(durableExecutionId)
+    if (executionWorkspace !== undefined) return executionWorkspace
     if (turnId === undefined)
       return yield* ExecutionBackend.BackendError.make({
         message: `Execution ${durableExecutionId} is not attached to a Rika Turn`,
       })
-    if (turnId.startsWith("title:")) return defaultWorkspace
+    const owningTurnId = turnId.startsWith("title:") ? turnId.slice("title:".length) : turnId
     const turns = yield* TurnRepository.Service
-    const turn = yield* turns.get(Turn.TurnId.make(turnId))
+    const turn = yield* turns.get(Turn.TurnId.make(owningTurnId))
     if (turn === undefined)
-      return yield* ExecutionBackend.BackendError.make({ message: `Turn ${turnId} does not exist` })
+      return yield* ExecutionBackend.BackendError.make({ message: `Turn ${owningTurnId} does not exist` })
     const threads = yield* ThreadRepository.Service
     const thread = yield* threads.get(turn.threadId)
     if (thread === undefined)
@@ -1045,6 +1076,19 @@ export const configuredBackendLayer = ({
       const testApprovalTools = yield* Config.option(Config.string("RIKA_TEST_APPROVAL_TOOLS"))
       const testMediaAnalyzerResponse = yield* Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_RESPONSE"))
       const testMediaAnalyzerError = yield* Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_ERROR"))
+      const effectiveConfigForWorkspace = (runtimeWorkspace: string) =>
+        Effect.gen(function* () {
+          const runtimeSettings = yield* loadSettingsFile(`${runtimeWorkspace}/.rika/settings.json`)
+          return yield* ConfigService.effective().pipe(
+            provideLayerScoped(
+              ConfigService.liveEnvironmentLayer({
+                webProviders: WebSearch.providerRegistry,
+                global: globalSettings,
+                workspace: runtimeSettings,
+              }),
+            ),
+          )
+        }).pipe(provideLayerScoped(BunServices.layer))
       if (testResponse._tag === "Some" && testScript._tag === "Some") {
         return yield* ModelConfigurationError.make({
           message: "RIKA_TEST_MODEL_RESPONSE and RIKA_TEST_MODEL_SCRIPT cannot both be set",
@@ -1181,33 +1225,55 @@ export const configuredBackendLayer = ({
               }),
           compaction: providerPlans?.routePlan.compaction ?? productionCompaction(route),
           oracleCompaction: providerPlans?.oracleRoutePlan.compaction ?? productionCompaction(resolvedOracleRoute),
+          webSearchCredentialsForWorkspace: (runtimeWorkspace) =>
+            effectiveConfigForWorkspace(runtimeWorkspace).pipe(
+              Effect.flatMap((config) =>
+                validateWebSearchProviders(config.environment.webSearchCredentials).pipe(
+                  Effect.as(config.environment.webSearchCredentials),
+                ),
+              ),
+              Effect.mapError((error) => ExecutionBackend.BackendError.make({ message: String(error) })),
+            ),
           toolRuntimeLayerForWorkspace: (runtimeWorkspace) =>
-            ToolRuntime.layer(runtimeWorkspace).pipe(
-              Layer.provide(
-                testMediaAnalyzerResponse._tag === "Some"
-                  ? MediaView.analyzerTestLayer(() => Effect.succeed(testMediaAnalyzerResponse.value))
-                  : MediaView.analyzerTestLayer(() =>
-                      Effect.fail(
-                        MediaView.MediaAnalysisError.make({
-                          message:
-                            testMediaAnalyzerError._tag === "Some"
-                              ? testMediaAnalyzerError.value
-                              : "Media analysis is unavailable",
-                        }),
+            Layer.unwrap(
+              effectiveConfigForWorkspace(runtimeWorkspace).pipe(
+                Effect.flatMap((config) => {
+                  const credentials = config.environment.webSearchCredentials
+                  const readPageCredential = WebSearch.configuredReadPageCredential(credentials)
+                  return validateWebSearchProviders(credentials).pipe(
+                    Effect.as(
+                      ToolRuntime.layerWithProcessRegistry(runtimeWorkspace).pipe(
+                        Layer.provide(
+                          testMediaAnalyzerResponse._tag === "Some"
+                            ? MediaView.analyzerTestLayer(() => Effect.succeed(testMediaAnalyzerResponse.value))
+                            : MediaView.analyzerTestLayer(() =>
+                                Effect.fail(
+                                  MediaView.MediaAnalysisError.make({
+                                    message:
+                                      testMediaAnalyzerError._tag === "Some"
+                                        ? testMediaAnalyzerError.value
+                                        : "Media analysis is unavailable",
+                                  }),
+                                ),
+                              ),
+                        ),
+                        Layer.provide(
+                          Layer.merge(
+                            WebSearch.factoryLayer(RelayExecutionBackend.webSearchFactories(credentials).factories),
+                            ReadWebPage.layer(readPageCredential === undefined ? {} : { apiKey: readPageCredential }),
+                          ).pipe(Layer.provide(FetchHttpClient.layer)),
+                        ),
+                        Layer.provide(BunServices.layer),
+                        Layer.catchCause((cause) =>
+                          Layer.effectContext(
+                            Effect.fail(ExecutionBackend.BackendError.make({ message: Cause.pretty(cause) })),
+                          ),
+                        ),
                       ),
                     ),
-              ),
-              Layer.provide(
-                Layer.merge(
-                  WebSearch.factoryLayer(RelayExecutionBackend.webSearchFactories(webSearchCredentials).factories),
-                  ReadWebPage.layer(
-                    webSearchCredentials.parallel === undefined ? {} : { apiKey: webSearchCredentials.parallel },
-                  ),
-                ).pipe(Layer.provide(FetchHttpClient.layer)),
-              ),
-              Layer.provide(BunServices.layer),
-              Layer.catchCause((cause) =>
-                Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: Cause.pretty(cause) }))),
+                  )
+                }),
+                Effect.mapError((error) => ExecutionBackend.BackendError.make({ message: String(error) })),
               ),
             ),
           resolveWorkspace: (durableExecutionId) =>
@@ -1221,7 +1287,11 @@ export const configuredBackendLayer = ({
                 turnRepositoryLayer,
               )
               const workspaceSettings = yield* loadSettingsFile(`${executionWorkspace}/.rika/settings.json`)
-              const layer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: workspaceSettings })
+              const layer = ConfigService.liveEnvironmentLayer({
+                webProviders: WebSearch.providerRegistry,
+                global: globalSettings,
+                workspace: workspaceSettings,
+              })
               const config = yield* ConfigService.effective().pipe(provideLayerScoped(layer))
               return {
                 rules: [
@@ -1306,10 +1376,14 @@ const lazyBackendLayer = (
         cancelFanOut: (fanOutId, cancelledAt, reason) =>
           load.pipe(Effect.flatMap((backend) => backend.cancelFanOut(fanOutId, cancelledAt, reason))),
         registerWorkflows: () => load.pipe(Effect.flatMap((backend) => backend.registerWorkflows())),
-        startWorkflow: (name, runId, revision) =>
-          load.pipe(Effect.flatMap((backend) => backend.startWorkflow(name, runId, revision))),
-        inspectWorkflow: (runId) => load.pipe(Effect.flatMap((backend) => backend.inspectWorkflow(runId))),
-        cancelWorkflow: (runId) => load.pipe(Effect.flatMap((backend) => backend.cancelWorkflow(runId))),
+        startWorkflow: (name, runId, revision, ownerTurnId, workflowWorkspace) =>
+          load.pipe(
+            Effect.flatMap((backend) => backend.startWorkflow(name, runId, revision, ownerTurnId, workflowWorkspace)),
+          ),
+        inspectWorkflow: (runId, ownerTurnId, workflowWorkspace) =>
+          load.pipe(Effect.flatMap((backend) => backend.inspectWorkflow(runId, ownerTurnId, workflowWorkspace))),
+        cancelWorkflow: (runId, ownerTurnId, workflowWorkspace) =>
+          load.pipe(Effect.flatMap((backend) => backend.cancelWorkflow(runId, ownerTurnId, workflowWorkspace))),
         wakeThreadHost: (wake) =>
           load.pipe(
             Effect.flatMap((backend) =>
@@ -1389,7 +1463,8 @@ const withClientWorkspaceImpl = (input: Operation.Input, workspace: string): Ope
     input._tag === "Config" ||
     input._tag === "Auth" ||
     input._tag === "Doctor" ||
-    input._tag === "Thread"
+    input._tag === "Thread" ||
+    input._tag === "Workflow"
   )
     return { ...input, clientWorkspace: workspace }
   return input
@@ -1565,7 +1640,11 @@ if (import.meta.main) {
       Effect.gen(function* () {
         const globalSettings = yield* loadSettingsFile(globalConfig)
         const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
-        const workspaceConfigLayer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings })
+        const workspaceConfigLayer = ConfigService.liveEnvironmentLayer({
+          webProviders: WebSearch.providerRegistry,
+          global: globalSettings,
+          workspace: settings,
+        })
         const resolved = yield* ConfigService.effective().pipe(provideLayerScoped(workspaceConfigLayer))
         if (resolved.settings.providers.openai?.baseUrl !== ConfigContract.defaults.providers.openai?.baseUrl) {
           return yield* OperationProductError.make({
@@ -2527,6 +2606,7 @@ if (import.meta.main) {
         const globalSettings = yield* loadSettingsFile(globalConfig)
         const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
         const applicationConfigLayer = ConfigService.liveEnvironmentLayer({
+          webProviders: WebSearch.providerRegistry,
           global: globalSettings,
           workspace: workspaceSettings,
         })
@@ -2539,20 +2619,26 @@ if (import.meta.main) {
             : ModelProviderRuntime.Service.layer.pipe(Layer.provide(openAiAuthLayer)),
         )
         const modelProviders = Context.get(providerRuntimeContext, ModelProviderRuntime.Service)
+        const effectiveConfigForWorkspace = (workspace: string) =>
+          Effect.gen(function* () {
+            const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+            return yield* ConfigService.effective().pipe(
+              provideLayerScoped(
+                ConfigService.liveEnvironmentLayer({
+                  webProviders: WebSearch.providerRegistry,
+                  global: globalSettings,
+                  workspace: settings,
+                }),
+              ),
+            )
+          }).pipe(provideLayerScoped(BunServices.layer))
         const workspaceExecutionRoutePlan = (
           mode: "low" | "medium" | "high" | "ultra",
           tuning: { readonly fastMode?: boolean } | undefined,
           workspace = process.cwd(),
         ) =>
           Effect.gen(function* () {
-            const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
-            const workspaceConfigLayer = ConfigService.liveEnvironmentLayer({
-              global: globalSettings,
-              workspace: settings,
-            })
-            const resolvedWorkspaceConfig = yield* ConfigService.effective().pipe(
-              provideLayerScoped(workspaceConfigLayer),
-            )
+            const resolvedWorkspaceConfig = yield* effectiveConfigForWorkspace(workspace)
             const routes = modelRoutesForExecution(resolvedWorkspaceConfig.settings, mode, tuning)
             if (testModelConfigured)
               return {
@@ -2690,27 +2776,37 @@ if (import.meta.main) {
               ),
             ),
           toolRuntimeLayer: (workspace) =>
-            ToolRuntime.layer(workspace).pipe(
-              Layer.provide(
-                MediaView.analyzerTestLayer(() =>
-                  Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
-                ),
+            Layer.unwrap(
+              effectiveConfigForWorkspace(workspace).pipe(
+                Effect.map((config) => {
+                  const credentials = config.environment.webSearchCredentials
+                  const readPageCredential = WebSearch.configuredReadPageCredential(credentials)
+                  return ToolRuntime.layer(workspace).pipe(
+                    Layer.provide(
+                      MediaView.analyzerTestLayer(() =>
+                        Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
+                      ),
+                    ),
+                    Layer.provide(
+                      Layer.merge(
+                        WebSearch.factoryLayer(RelayExecutionBackend.webSearchFactories(credentials).factories),
+                        ReadWebPage.layer(readPageCredential === undefined ? {} : { apiKey: readPageCredential }),
+                      ).pipe(Layer.provide(FetchHttpClient.layer)),
+                    ),
+                    Layer.provide(BunServices.layer),
+                  )
+                }),
               ),
-              Layer.provide(
-                Layer.merge(
-                  WebSearch.factoryLayer(RelayExecutionBackend.webSearchFactories(webSearchCredentials).factories),
-                  ReadWebPage.layer(
-                    webSearchCredentials.parallel === undefined ? {} : { apiKey: webSearchCredentials.parallel },
-                  ),
-                ).pipe(Layer.provide(FetchHttpClient.layer)),
-              ),
-              Layer.provide(BunServices.layer),
-            ),
+            ).pipe(Layer.orDie),
           defaultWorkspace: process.cwd(),
           shellPermission: (workspace) =>
             Effect.gen(function* () {
               const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
-              const layer = ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings })
+              const layer = ConfigService.liveEnvironmentLayer({
+                webProviders: WebSearch.providerRegistry,
+                global: globalSettings,
+                workspace: settings,
+              })
               const config = yield* ConfigService.effective().pipe(provideLayerScoped(layer))
               return config.settings.permissions.shell ?? ConfigContract.defaults.permissions.shell!
             }).pipe(provideLayerScoped(BunServices.layer), Effect.orDie),
@@ -2749,7 +2845,11 @@ if (import.meta.main) {
                 return {
                   layer: Layer.merge(
                     configAdapter,
-                    ConfigService.liveEnvironmentLayer({ global: globalSettings, workspace: settings }),
+                    ConfigService.liveEnvironmentLayer({
+                      webProviders: WebSearch.providerRegistry,
+                      global: globalSettings,
+                      workspace: settings,
+                    }),
                   ).pipe(
                     Layer.provide(BunServices.layer),
                     Layer.catchCause((cause) =>

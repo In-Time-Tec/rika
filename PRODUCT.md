@@ -20,4 +20,4 @@ Rika is for a technical owner who prefers a local CLI and TUI, controls the work
 
 Rika owns local product semantics, workspace policy, configuration, projections, tools, extensions, persistence, and terminal behavior. Relay owns durable execution. Baton owns the agent loop. OpenTUI stays behind the rendering adapter.
 
-Rika is not a hosted collaboration service, public agent SDK, account or billing system, web or IDE client, remote runner, sandbox platform, or social sharing product. It does not copy another product's branding or protocol, and it does not include model-visible semantic code search or an ast-grep outline tool.
+Rika is not a hosted collaboration service, public agent SDK, account or billing system, web or IDE client, remote runner, sandbox platform, or social sharing product. It does not copy another product's branding or protocol, and it does not own a local semantic code index or an ast-grep outline subsystem.

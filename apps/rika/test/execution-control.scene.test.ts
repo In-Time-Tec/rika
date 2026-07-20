@@ -6,7 +6,7 @@ const isolated = (diagnostics: string) => expect(diagnostics).not.toContain('"ri
 test(
   "steers text into the active execution",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: { "fixture.txt": "scene fixture" },
       script: [
         Scene.model.turn([Scene.model.toolCall("read", { path: "fixture.txt" }, "active-steer-read")], 1_000),
@@ -28,7 +28,7 @@ test(
 test(
   "removes a selected queued prompt by steering it into the active execution",
   () =>
-    Scene.run({
+    Scene.runWarm({
       workspace: { "fixture.txt": "scene fixture" },
       script: [
         Scene.model.turn([Scene.model.toolCall("read", { path: "fixture.txt" }, "queued-steer-read")], 1_500),
@@ -71,7 +71,7 @@ test(
 test(
   "interrupts active work and promotes the durably admitted replacement",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.text("LATE_INTERRUPTED_RESPONSE", 5_000),
         Scene.model.text("REPLACEMENT_COMPLETE"),
@@ -95,7 +95,7 @@ test(
 test(
   "promotes queued turns in admission order after cancellation",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.text("LATE_QUEUE_HEAD", 5_000),
         Scene.model.text("FIRST_QUEUED_COMPLETE"),
@@ -169,7 +169,7 @@ test(
 test(
   "reconnects to an active execution without duplicating its completion",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.turn([
           Scene.model.toolCall("bash", { command: "printf RECONNECT_TOOL_COMPLETE" }, "reconnect-tool"),
@@ -219,7 +219,7 @@ test(
 test(
   "reports interrupt-and-send replacement failure instead of pretending success",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [Scene.model.text("LATE_FAILED_REPLACEMENT", 5_000)],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Start before failed replacement.\r"),

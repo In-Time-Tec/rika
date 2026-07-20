@@ -1,4 +1,5 @@
 export * as Catalog from "./tool-catalog"
+export * as ToolPolicy from "./tool-policy"
 export * as ParallelSearch from "./parallel-search"
 export * as WebSearch from "./web-search"
 export * as ReadWebPage from "./read-web-page"

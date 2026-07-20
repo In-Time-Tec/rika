@@ -214,6 +214,34 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toHaveLength(0)
   })
 
+  it("attaches each cross-scope child under its own turn's subagent when call ids collide", () => {
+    const alpha = Transcript.project("alpha", "a", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Explore A" } },
+      }),
+      event("alpha-started", 1, "child_run.started", {
+        data: { child_execution_id: "child:execution%3Aalpha:agent", profile: "task" },
+      }),
+    ])
+    const beta = Transcript.project("beta", "b", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Explore B" } },
+      }),
+      event("beta-started", 1, "child_run.started", {
+        data: { child_execution_id: "child:execution%3Abeta:agent", profile: "task" },
+      }),
+    ])
+    const model = ExecutionEvents.projectUnits(ViewState.initial("/work"), [...alpha.units, ...beta.units])
+    const tools = model.blocks.filter(
+      (block): block is Extract<Transcript.Block, { _tag: "ToolCall" }> =>
+        (block as ViewState.TranscriptBlock)._tag === "ToolCall",
+    )
+
+    expect(tools.find((tool) => tool.id === "alpha:agent")?.childId).toBe("child:execution%3Aalpha:agent")
+    expect(tools.find((tool) => tool.id === "beta:agent")?.childId).toBe("child:execution%3Abeta:agent")
+    expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
+  })
+
   it("merges spawn and child lifecycle events into one named subagent with its prompt and tools", () => {
     const childId = "execution:child:turn:oracle"
     const parent = Transcript.project("turn", "prompt", [
@@ -414,7 +442,7 @@ describe("ExecutionEvents.projectUnits", () => {
     })
     const agent = transcriptUnits(model).find((unit) => unit.kind === "tool")
     if (agent?.kind !== "tool") throw new Error("Expected agent tool")
-    expect(agent.children?.map((child) => transcriptUnitId(model, child))).toContain("tool:grandchild")
+    expect(agent.children?.map((row) => transcriptUnitId(model, row))).toContain("tool:grandchild")
   })
 
   it("dedupes a nested child agent into an existing matching agent tool across batches", () => {

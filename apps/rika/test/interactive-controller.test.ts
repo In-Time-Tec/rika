@@ -889,6 +889,67 @@ it("buffers live child patches until the parent subagent link arrives", () => {
   })
 })
 
+it("surfaces a child projection whose parent tool has not arrived instead of dropping it", () => {
+  const page = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("parent", 2),
+    hasOlder: false,
+    threadCostUsd: 0,
+  })
+  const child = InteractiveController.update(page.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("parent:child:agent"),
+    event: {
+      cursor: "child-read",
+      sequence: 0,
+      type: "tool.call.requested",
+      createdAt: 3,
+      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
+    },
+    revision: 0,
+  })
+  const requested = InteractiveController.update(child.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("parent"),
+    event: {
+      cursor: "agent",
+      sequence: 0,
+      type: "tool.call.requested",
+      createdAt: 4,
+      data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review" } },
+    },
+    revision: 0,
+  })
+  const spawned = InteractiveController.update(requested.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("parent"),
+    event: {
+      cursor: "spawned",
+      sequence: 1,
+      type: "child_run.spawned",
+      createdAt: 5,
+      data: { tool_call_id: "agent", child_execution_id: "execution:parent:child:agent" },
+    },
+    revision: 1,
+  })
+
+  expect(child.unattached).toContain("parent:child:agent")
+  expect(child.state.model.blocks).not.toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
+  expect(spawned.unattached ?? []).not.toContain("parent:child:agent")
+  expect(spawned.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
+})
+
 it("keeps one of five status labels from submit until the turn completes", () => {
   const turn = { ...entries("active", 2)[0]!.turn, status: "running" as const }
   const submitted = ViewState.update(

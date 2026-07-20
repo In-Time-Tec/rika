@@ -1,8 +1,8 @@
 import { expect, test } from "vitest"
-import type { ModelRegistry } from "@batonfx/core"
+import { LanguageModel, type ModelRegistry } from "@batonfx/core"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
-import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schema } from "effect"
+import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import { OpenAiAuth, Operation } from "@rika/app"
 import { ConfigContract } from "@rika/config"
 import * as Database from "@rika/persistence/database"
@@ -20,10 +20,12 @@ import {
   executionModelRoutes,
   executionRoutePin,
   modelRoutesForExecution,
+  makeReloadingTestModel,
   parseTestModelScript,
   productionCompaction,
   resolveExecutionRouteForSettings,
   resolveExecutionWorkspace,
+  validateWebSearchProviders,
   withClientWorkspace,
   persistedModelRoutesForStartup,
   persistedTitleModelRoutesForStartup,
@@ -38,6 +40,15 @@ const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.ResolvedModelR
         (candidate) => modelRoutePlan(candidate).registrationKey === modelRoutePlan(route).registrationKey,
       ) === index,
   )
+
+test("rejects web search provider IDs that are not installed", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const exit = yield* Effect.exit(validateWebSearchProviders({ custom: Redacted.make("secret") }))
+      expect(exit._tag).toBe("Failure")
+      if (exit._tag === "Failure") expect(Cause.pretty(exit.cause)).toContain("Unknown web search provider 'custom'")
+    }),
+  ))
 
 const modelRouteDisplayLabel = (route: ConfigContract.ResolvedModelRoute) => {
   const [provider, version, ...name] = route.model.split("-")
@@ -452,6 +463,18 @@ test("sends each client's workspace to the resident service", () => {
     action: "new",
     clientWorkspace: "/client-d",
   })
+  expect(
+    withClientWorkspace(
+      { _tag: "Workflow", action: "start", name: "delivery", runId: "delivery-1" },
+      "/client-workflow",
+    ),
+  ).toEqual({
+    _tag: "Workflow",
+    action: "start",
+    name: "delivery",
+    runId: "delivery-1",
+    clientWorkspace: "/client-workflow",
+  })
   expect(withClientWorkspace({ _tag: "Mcp", action: "approve", name: "server" }, "/client-e")).toEqual({
     _tag: "Mcp",
     action: "approve",
@@ -797,14 +820,38 @@ test("loads title model pins from completed turn rows for restart registration",
     ),
   ))
 
-test("uses the backend workspace for durable title executions without a Turn row", () =>
+test("uses the owning thread workspace for durable title executions", () =>
   Effect.runPromise(
-    resolveExecutionWorkspace(
-      "execution:title:title-restart-thread:123",
-      "/backend-workspace",
-      ThreadRepository.memoryLayer(),
-      TurnRepository.memoryLayer(),
-    ).pipe(Effect.tap((workspace) => Effect.sync(() => expect(workspace).toBe("/backend-workspace")))),
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repositories = Layer.merge(ThreadRepository.memoryLayer(), TurnRepository.memoryLayer())
+        const repositoryContext = yield* Layer.build(repositories)
+        const repositoryLayer = Layer.succeedContext(repositoryContext)
+        const threads = Context.get(repositoryContext, ThreadRepository.Service)
+        const turns = Context.get(repositoryContext, TurnRepository.Service)
+        const thread = yield* threads.create({
+          id: Thread.ThreadId.make("title-workspace-thread"),
+          workspace: "/thread-workspace",
+          title: "Seed",
+          now: 1,
+        })
+        yield* turns.createForSubmission({
+          id: Turn.TurnId.make("title-workspace-turn"),
+          threadId: thread.id,
+          prompt: "title me",
+          executionRoute: executionRoutePin(ConfigContract.defaults, "medium"),
+          queueCapacity: 128,
+          now: 1,
+        })
+        const workspace = yield* resolveExecutionWorkspace(
+          "execution:title:title-workspace-turn",
+          "/backend-workspace",
+          repositoryLayer,
+          repositoryLayer,
+        )
+        expect(workspace).toBe("/thread-workspace")
+      }),
+    ),
   ))
 
 test("parses and builds multi-part, object, and delayed TestModel turns", () =>
@@ -842,6 +889,28 @@ test("parses and builds multi-part, object, and delayed TestModel turns", () =>
         { _tag: "Object", value: { summary: "reviewed", findings: [] }, delay: 10 },
       ])
     }),
+  ))
+
+test("builds a fresh scripted model registration after its source file changes", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      withBunServices(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-reloading-model-" })
+          const script = `${root}/script.json`
+          yield* fs.writeFileString(script, '[{"parts":[{"type":"text","text":"first"}]}]')
+          const fixture = yield* makeReloadingTestModel(script)
+          const context = yield* Layer.build(fixture.registration.layer)
+          const first = yield* LanguageModel.generateText({ prompt: "first" }).pipe(Effect.provide(context))
+          expect(first.text).toBe("first")
+          yield* fs.writeFileString(script, '[{"parts":[{"type":"text","text":"second"}]}]')
+          const reloadedContext = yield* Layer.build(fixture.registration.layer)
+          const second = yield* LanguageModel.generateText({ prompt: "second" }).pipe(Effect.provide(reloadedContext))
+          expect(second.text).toBe("second")
+        }),
+      ),
+    ),
   ))
 
 test("rejects malformed, empty, and unsafe scripts", () =>

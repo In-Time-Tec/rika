@@ -20,8 +20,7 @@ it.effect("prints effective redacted config and keymap", () =>
       ConfigService.memoryLayer({
         environment: {
           providerCredentials: {},
-          webSearchCredentials: {},
-          parallelApiKey: Redacted.make("never-print-this"),
+          webSearchCredentials: { parallel: Redacted.make("never-print-this") },
         },
         workspace: {
           mcp: {
@@ -48,7 +47,8 @@ it.effect("prints effective redacted config and keymap", () =>
       yield* ConfigOperations.run({ _tag: "Config", action: "keymap" }, options)
       return yield* TestConsole.logLines
     }).pipe(provideLayer(layer))
-    expect(lines[0]).toContain('"parallelApiKey": "present"')
+    expect(lines[0]).toContain('"webSearchCredentials": {')
+    expect(lines[0]).toContain('"parallel": "present"')
     expect(lines.join("\n")).not.toContain("never-print-this")
     expect(lines.join("\n")).not.toContain("local-mcp-secret")
     expect(lines.join("\n")).not.toContain("remote-mcp-secret")
@@ -104,7 +104,7 @@ it.effect("edits the selected path and reports secret-safe doctor status", () =>
     }).pipe(provideLayer(layer))
     expect(yield* Ref.get(edits)).toEqual([options.globalConfigPath, options.workspaceConfigPath])
     expect(lines[0]).toContain('"product": "present"')
-    expect(lines[0]).toContain('"parallel": "missing"')
+    expect(lines[0]).toContain('"webSearch": {}')
   }),
 )
 
@@ -115,8 +115,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
       TestConsole.layer,
       ConfigService.memoryLayer({
         environment: {
-          parallelApiKey: Redacted.make("secret"),
-          webSearchCredentials: {},
+          webSearchCredentials: { parallel: Redacted.make("secret") },
           providerCredentials: {
             OPENAI_API_KEY: Redacted.make("model-secret"),
             ANTHROPIC_API_KEY: Redacted.make("oracle-secret"),
@@ -159,7 +158,7 @@ it.effect("reports missing config and mixed doctor paths", () =>
       yield* ConfigOperations.run({ _tag: "Doctor" }, options)
       return yield* TestConsole.logLines
     }).pipe(provideLayer(layer))
-    expect(lines[0]).toContain('"parallelApiKey": "missing"')
+    expect(lines[0]).toContain('"webSearchCredentials": {}')
     expect(lines[1]).toContain('"product": "missing"')
     expect(lines[1]).toContain('"relay": "present"')
     expect(lines[1]).toContain('"global": "missing"')

@@ -121,7 +121,6 @@ export interface SettingsInput {
 export interface Environment {
   readonly providerCredentials: Readonly<Record<string, Redacted.Redacted>>
   readonly webSearchCredentials: Readonly<Record<string, Redacted.Redacted>>
-  readonly parallelApiKey?: Redacted.Redacted
 }
 
 export interface Diagnostic {

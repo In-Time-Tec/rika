@@ -1663,6 +1663,9 @@ describe("ExecutionBackend Relay client adapter", () => {
           oracleSelection,
           compaction: mainCompaction,
           oracleCompaction,
+          resolveWorkspace: (execution) => Effect.succeed(execution.includes("other-turn") ? "/configured" : "/plain"),
+          webSearchCredentialsForWorkspace: (workspace) =>
+            Effect.succeed(workspace === "/configured" ? { parallel: Redacted.make("secret") } : {}),
         }),
       )
       const registered = (yield* Ref.get(fixture.registrations)).at(-1) as any
@@ -1686,6 +1689,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         },
         metadata: { product_profile: "Task", rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
+      expect(registered.child_run_presets.Task.tool_names).toContain("web_search")
       expect(registered.child_run_presets.Oracle).toMatchObject({
         model: {
           provider: oracleSelection.provider,
@@ -1711,6 +1715,8 @@ describe("ExecutionBackend Relay client adapter", () => {
         metadata: { rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
       expect(fanOutInputs[0].children[0].override.compaction_policy).toEqual(oraclePolicy)
+      expect(fanOutInputs[0].children[0].override.tool_names).not.toContain("web_search")
+      expect(fanOutInputs[0].children[0].override.tool_names).not.toContain("read_web_page")
       expect(fanOutInputs[0].children[1].override.model).toMatchObject({
         provider: taskSelection.provider,
         model: taskSelection.model,
@@ -1736,12 +1742,6 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
     }),
   )
-
-  it("builds remote tool options with and without credentials", () => {
-    const key = Redacted.make("secret")
-    expect(RelayExecutionBackend.remoteToolOptions(undefined)).toEqual({})
-    expect(RelayExecutionBackend.remoteToolOptions(key)).toEqual({ apiKey: key })
-  })
 
   it("gates web tools by configured provider credentials", () => {
     const unavailable = RelayExecutionBackend.toolkitFor({})

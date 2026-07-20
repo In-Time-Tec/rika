@@ -85,6 +85,8 @@ replaced_descendants = []
 status = None
 timed_out = False
 deadline = time.monotonic() + 30
+action_started = time.monotonic()
+blocked_action = None
 terminal_control = re.compile(rb"\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
 
 def queued_count():
@@ -118,7 +120,7 @@ def turn_status(prompt):
         return None
 
 while time.monotonic() < deadline:
-    ready, _, _ = select.select([master], [], [], 0.025)
+    ready, _, _ = select.select([master], [], [], 0.005)
     if ready:
         try:
             chunk = os.read(master, 65536)
@@ -192,7 +194,7 @@ while time.monotonic() < deadline:
                     time.sleep(0.5)
                 for fragment in write.split("\0"):
                     os.write(master, fragment.encode())
-                    time.sleep(0.01)
+                    time.sleep(0.001)
         else:
             replaced_descendants.extend(children(pid))
             os.kill(pid, signal.SIGKILL)
@@ -200,8 +202,13 @@ while time.monotonic() < deadline:
             os.close(master)
             pid, master = restart(restart_arguments)
         action_index += 1
+        action_started = time.monotonic()
         action_offset = len(output)
     if status is not None:
+        break
+    if action_index < len(actions) and time.monotonic() - action_started >= actions[action_index].get("timeoutMs", 10_000) / 1000:
+        timed_out = True
+        blocked_action = actions[action_index]
         break
     waited, current_status = os.waitpid(pid, os.WNOHANG)
     if waited == pid:
@@ -209,7 +216,7 @@ while time.monotonic() < deadline:
         break
 
 if status is None:
-    timed_out = True
+    timed_out = timed_out or time.monotonic() >= deadline
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -220,7 +227,7 @@ if status is None:
         if waited == pid:
             status = current_status
             break
-        time.sleep(0.025)
+        time.sleep(0.005)
 if status is None:
     try:
         os.kill(pid, signal.SIGKILL)
@@ -254,6 +261,7 @@ print(json.dumps({
     "actionsCompleted": action_index,
     "runningChecks": running_checks,
     "timedOut": timed_out,
+    "blockedAction": blocked_action,
     "finalWidth": final_width,
     "finalHeight": final_height,
 }))

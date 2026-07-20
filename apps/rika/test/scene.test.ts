@@ -4,7 +4,7 @@ import { Scene } from "./scene"
 test(
   "runs the real TUI and tools inside an isolated workspace",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [
         Scene.model.turn([Scene.model.toolCall("bash", { command: "pwd" }, "workspace-pwd")]),
         Scene.model.text("Workspace checked."),
@@ -16,6 +16,7 @@ test(
     }).then((result) => {
       expect(result.output).toContain("rika-scene-")
       expect(result.output).not.toContain("Projects/rika/apps/rika")
+      expect(result.turns).toHaveLength(1)
     }),
   45_000,
 )
@@ -23,7 +24,7 @@ test(
 test(
   "keeps the real TUI thin while the resident owns model and runtime execution",
   () =>
-    Scene.run({
+    Scene.runWarm({
       script: [Scene.model.text("RESIDENT_OWNED_EXECUTION_COMPLETE")],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Prove which process owns this turn.\r"),
@@ -38,6 +39,8 @@ test(
       expect(result.clientLogs).not.toContain('"message":"model.backend.configured"')
       expect(result.clientLogs).not.toContain('"rika.model.backend.kind"')
       expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
+      expect(result.turns).toHaveLength(1)
+      expect(result.turns[0]?.prompt).toBe("Prove which process owns this turn.")
     }),
   30_000,
 )
