@@ -1305,6 +1305,8 @@ test("toggles expandable transcript headers without selecting them and keeps bod
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
       let model: Model = {
         ...initial("/work", "high"),
+        input: "draft remains editable",
+        cursor: "draft remains editable".length,
         blocks: [
           {
             _tag: "ToolCall",
@@ -1363,10 +1365,12 @@ test("toggles expandable transcript headers without selecting them and keeps bod
       try {
         surface.update(model)
         yield* openTui(() => setup.flush())
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
         expect(commandIsBlue()).toBe(false)
         const header = records().get("tool:shell-selection:header")!.renderable
         yield* openTui(() => setup.mockMouse.click(header.screenX + 2, header.screenY))
         yield* openTui(() => setup.flush())
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
         expect(model.expandedRowKeys).toContain("tool:shell-selection")
         expect(model.detailSelection).toBeUndefined()
         expect(commandIsBlue()).toBe(false)
@@ -1374,12 +1378,15 @@ test("toggles expandable transcript headers without selecting them and keeps bod
 
         const body = records().get("tool:shell-selection:body")!.renderable
         yield* openTui(() => setup.mockMouse.drag(body.screenX, body.screenY, body.screenX + 20, body.screenY))
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
         expect(setup.renderer.getSelection()?.getSelectedText()).toContain("transcript-output")
         setup.renderer.clearSelection()
 
         const expandedHeader = records().get("tool:shell-selection:header")!.renderable
         yield* openTui(() => setup.mockMouse.click(expandedHeader.screenX + 2, expandedHeader.screenY))
         yield* openTui(() => setup.flush())
+        expect(setup.renderer.getCursorState()).toMatchObject({ visible: true, blinking: true })
         expect(model.expandedRowKeys).not.toContain("tool:shell-selection")
         expect(commandIsBlue()).toBe(false)
         expect(setup.renderer.getSelection()).toBeNull()

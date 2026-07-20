@@ -1496,6 +1496,7 @@ export class Surface {
   private scrollGeneration = 0
   private destroyed = false
   private focusedEditor: ProjectedEditorRenderable | undefined
+  private cursorRestoreFrame: (() => void) | undefined
 
   constructor(
     private readonly renderer: CliRenderer,
@@ -2232,6 +2233,7 @@ export class Surface {
                 if (column >= start && column < end) {
                   event.stopPropagation()
                   this.handlers.openPath?.(target)
+                  this.restoreFocusedCursor()
                   return
                 }
                 offset = text.indexOf(label, offset + label.length)
@@ -2239,6 +2241,7 @@ export class Surface {
             }
         }
         descriptor.onMouseDown?.(event)
+        this.restoreFocusedCursor()
       }
       const existing = this.transcriptRecords.get(descriptor.key)
       if (existing !== undefined) {
@@ -2841,9 +2844,25 @@ export class Surface {
     if (this.focusedEditor !== undefined) this.focusedEditor.showCursor = true
   }
 
+  private restoreFocusedCursor(): void {
+    if (this.focusedEditor === undefined || this.cursorRestoreFrame !== undefined) return
+    const restore = () => {
+      this.cursorRestoreFrame = undefined
+      if (this.destroyed || this.focusedEditor === undefined) return
+      this.focusedEditor.focus()
+      this.focusedEditor.showCursor = true
+      this.renderer.requestRender()
+    }
+    this.cursorRestoreFrame = restore
+    this.renderer.once(CliRenderEvents.FRAME, restore)
+    this.renderer.requestRender()
+  }
+
   destroy(): void {
     this.destroyed = true
     this.scrollGeneration += 1
+    if (this.cursorRestoreFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.cursorRestoreFrame)
+    this.cursorRestoreFrame = undefined
     if (this.transcriptAnchorFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.transcriptAnchorFrame)
     this.transcriptAnchorFrame = undefined
     if (this.sidebarLayoutFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.sidebarLayoutFrame)
