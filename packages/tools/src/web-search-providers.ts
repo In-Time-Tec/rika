@@ -1,11 +1,13 @@
 import { Effect, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
+import Parallel from "parallel-web"
 import * as WebSearch from "./web-search"
 
 export interface ProviderOptions {
   readonly apiKey?: Redacted.Redacted<string>
   readonly baseUrl?: string
   readonly priority?: number
+  readonly fetch?: typeof globalThis.fetch
 }
 
 const unknownJson = Schema.UnknownFromJsonString
@@ -18,6 +20,16 @@ const failure = (provider: string, kind: WebSearch.ProviderFailureKind, message:
 const mapTransport = (provider: string, cause: unknown) => {
   const message = String(cause)
   return failure(provider, /timeout|timed out/i.test(message) ? "timeout" : "transport", message)
+}
+
+const mapSdkFailure = (provider: string, cause: unknown) => {
+  const status =
+    typeof cause === "object" && cause !== null && "status" in cause && typeof cause.status === "number"
+      ? cause.status
+      : undefined
+  if (status === 401 || status === 403) return failure(provider, "authentication", `HTTP ${status}`)
+  if (status === 429) return failure(provider, "rate-limit", `HTTP ${status}`)
+  return mapTransport(provider, cause)
 }
 
 const execute = (
@@ -70,39 +82,45 @@ const urlResult = (
   }
 }
 
-const makeParallel = (client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
+const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
   id: "parallel",
   capabilities: new Set(["web"]),
   priority: options.priority ?? 100,
   search: (request) =>
     Effect.gen(function* () {
       const key = yield* credential("parallel", "PARALLEL_API_KEY", options.apiKey)
-      const body = yield* execute(
-        client,
-        "parallel",
-        HttpClientRequest.post(`${options.baseUrl ?? "https://api.parallel.ai"}/v1/search`, {
-          headers: { "x-api-key": key },
-        }).pipe(
-          HttpClientRequest.bodyJsonUnsafe({
-            objective: request.objective,
-            search_queries: request.searchQueries,
-            mode: "advanced",
-            max_chars_total: 40_000,
-          }),
-        ),
-      )
-      const root = yield* object("parallel", body)
-      if (!Array.isArray(root.results))
-        return yield* failure("parallel", "response", "Malformed response: results missing")
-      return {
-        results: root.results.flatMap((value) => {
-          if (typeof value !== "object" || value === null) return []
-          const result = urlResult(
-            value as Record<string, unknown>,
-            excerpts((value as Record<string, unknown>).excerpts),
+      const client = new Parallel({
+        apiKey: key,
+        baseURL: options.baseUrl,
+        maxRetries: 0,
+        timeout: 30_000,
+        ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
+      })
+      const response = yield* Effect.callback<Parallel.SearchResult, unknown>((resume) => {
+        const controller = new AbortController()
+        client
+          .search(
+            {
+              objective: request.objective,
+              search_queries: [...request.searchQueries],
+              mode: "advanced",
+              max_chars_total: 40_000,
+            },
+            { signal: controller.signal, maxRetries: 0 },
           )
-          return result === undefined ? [] : [result]
-        }),
+          .then(
+            (result) => resume(Effect.succeed(result)),
+            (cause) => resume(Effect.fail(cause)),
+          )
+        return Effect.sync(() => controller.abort())
+      }).pipe(Effect.mapError((cause) => mapSdkFailure("parallel", cause)))
+      return {
+        results: response.results.map((result) => ({
+          url: result.url,
+          title: result.title ?? null,
+          publishedAt: result.publish_date ?? null,
+          excerpts: result.excerpts,
+        })),
       }
     }),
 })
@@ -112,24 +130,36 @@ const combinedQuery = (request: WebSearch.SearchRequest) => [request.objective, 
 
 const makeExa = (client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
   id: "exa",
-  capabilities: new Set(["web"]),
+  capabilities: new Set(["web", "code"]),
   priority: options.priority ?? 90,
   search: (request) =>
     Effect.gen(function* () {
       const key = yield* credential("exa", "EXA_API_KEY", options.apiKey)
+      const code = request.kind === "code"
       const body = yield* execute(
         client,
         "exa",
-        HttpClientRequest.post(`${options.baseUrl ?? "https://api.exa.ai"}/search`, { headers: exaHeaders(key) }).pipe(
-          HttpClientRequest.bodyJsonUnsafe({
-            query: combinedQuery(request),
-            type: "fast",
-            numResults: Math.min(10, Math.max(1, request.searchQueries.length * 3)),
-            contents: { highlights: true },
-          }),
+        HttpClientRequest.post(`${options.baseUrl ?? "https://api.exa.ai"}/${code ? "context" : "search"}`, {
+          headers: exaHeaders(key),
+        }).pipe(
+          HttpClientRequest.bodyJsonUnsafe(
+            code
+              ? { query: combinedQuery(request), tokensNum: "dynamic" }
+              : {
+                  query: combinedQuery(request),
+                  type: "fast",
+                  numResults: Math.min(10, Math.max(1, request.searchQueries.length * 3)),
+                  contents: { highlights: true },
+                },
+          ),
         ),
       )
       const root = yield* object("exa", body)
+      if (code) {
+        const content = text(root.response) ?? text(root.context) ?? text(root.content)
+        if (content === null) return yield* failure("exa", "response", "Malformed response: formatted context missing")
+        return { content }
+      }
       if (!Array.isArray(root.results)) return yield* failure("exa", "response", "Malformed response: results missing")
       return {
         results: root.results.flatMap((value) => {
@@ -139,28 +169,6 @@ const makeExa = (client: HttpClient.HttpClient, options: ProviderOptions): WebSe
           return result === undefined ? [] : [result]
         }),
       }
-    }),
-})
-
-const makeExaCode = (client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
-  id: "exa-code",
-  capabilities: new Set(["code"]),
-  priority: options.priority ?? 100,
-  search: (request) =>
-    Effect.gen(function* () {
-      const key = yield* credential("exa-code", "EXA_API_KEY", options.apiKey)
-      const body = yield* execute(
-        client,
-        "exa-code",
-        HttpClientRequest.post(`${options.baseUrl ?? "https://api.exa.ai"}/context`, { headers: exaHeaders(key) }).pipe(
-          HttpClientRequest.bodyJsonUnsafe({ query: combinedQuery(request) }),
-        ),
-      )
-      const root = yield* object("exa-code", body)
-      const content = text(root.response) ?? text(root.context) ?? text(root.content)
-      if (content === null)
-        return yield* failure("exa-code", "response", "Malformed response: formatted context missing")
-      return { content }
     }),
 })
 
@@ -218,17 +226,20 @@ const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): We
       const key = yield* credential("github", "GITHUB_TOKEN", options.apiKey)
       const type = request.githubSearchType ?? "code"
       const endpoint = type === "repositories" ? "repositories" : type
-      const query = encodeURIComponent(combinedQuery(request))
+      const query = encodeURIComponent(request.searchQueries.join(" "))
       const body = yield* execute(
         client,
         "github",
-        HttpClientRequest.get(`${options.baseUrl ?? "https://api.github.com"}/search/${endpoint}?q=${query}`, {
-          headers: {
-            authorization: `Bearer ${key}`,
-            accept: "application/vnd.github+json, application/vnd.github.text-match+json",
-            "x-github-api-version": "2022-11-28",
+        HttpClientRequest.get(
+          `${options.baseUrl ?? "https://api.github.com"}/search/${endpoint}?q=${query}&per_page=10`,
+          {
+            headers: {
+              authorization: `Bearer ${key}`,
+              accept: "application/vnd.github+json, application/vnd.github.text-match+json",
+              "x-github-api-version": "2022-11-28",
+            },
           },
-        }),
+        ),
       )
       const root = yield* object("github", body)
       if (!Array.isArray(root.items)) return yield* failure("github", "response", "Malformed response: items missing")
@@ -250,6 +261,5 @@ const provider =
 
 export const parallel = provider(makeParallel)
 export const exa = provider(makeExa)
-export const exaCode = provider(makeExaCode)
 export const firecrawl = provider(makeFirecrawl)
 export const github = provider(makeGithub)

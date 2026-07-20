@@ -8,7 +8,7 @@ test(
       globalSettings: { permissions: { shell: "allow" } },
       workspaceSettings: { permissions: { shell: "ask" } },
       script: [
-        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf", args: ["configured-shell"] }, "bash")]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf configured-shell" }, "bash")]),
         Scene.model.text("Configured shell completed."),
       ],
       actions: [

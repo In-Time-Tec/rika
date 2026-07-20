@@ -11,7 +11,7 @@ test(
         Scene.model.turn([
           Scene.model.toolCall(
             "bash",
-            { command: "sh", args: ["-c", "mkdir -p src; echo \"export const mode = 'old'\" > src/config.ts"] },
+            { command: "mkdir -p src; echo \"export const mode = 'old'\" > src/config.ts" },
             "seed-config",
           ),
         ]),
@@ -20,8 +20,8 @@ test(
             "edit",
             {
               path: "src/config.ts",
-              oldText: "export const mode = 'old'\n",
-              newText: "export const mode = 'new'\nexport const enabled = true\n",
+              old_str: "export const mode = 'old'\n",
+              new_str: "export const mode = 'new'\nexport const enabled = true\n",
             },
             "edit-config",
           ),
@@ -79,9 +79,9 @@ test(
     Scene.run({
       script: [
         Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "printf", args: ["FIRST_OUTPUT"] }, "first-command"),
-          Scene.model.toolCall("bash", { command: "printf", args: ["SECOND_OUTPUT"] }, "second-command"),
-          Scene.model.toolCall("bash", { command: "printf", args: ["THIRD_OUTPUT"] }, "third-command"),
+          Scene.model.toolCall("bash", { command: "printf FIRST_OUTPUT" }, "first-command"),
+          Scene.model.toolCall("bash", { command: "printf SECOND_OUTPUT" }, "second-command"),
+          Scene.model.toolCall("bash", { command: "printf THIRD_OUTPUT" }, "third-command"),
         ]),
         Scene.model.text("COMMAND_GROUP_COMPLETE"),
       ],
@@ -112,8 +112,7 @@ test(
           Scene.model.toolCall(
             "bash",
             {
-              command: "sh",
-              args: ["-c", "i=1; while [ $i -le 20 ]; do echo BOUND_LINE_$i; i=$((i+1)); done; exit 7"],
+              command: "i=1; while [ $i -le 20 ]; do echo BOUND_LINE_$i; i=$((i+1)); done; exit 7",
             },
             "bounded-failure",
           ),
@@ -145,9 +144,8 @@ test(
           Scene.model.toolCall(
             "bash",
             {
-              command: "sh",
-              args: ["-c", "printf EARLY_CHUNK; sleep 0.4; printf LATE_CHUNK"],
-              waitMillis: 100,
+              command: "printf EARLY_CHUNK; sleep 0.4; printf LATE_CHUNK",
+              timeout_ms: 100,
             },
             "background-command",
           ),
@@ -163,9 +161,9 @@ test(
         ...quitAfter("LATE_CHUNK"),
       ],
     }).then((result) => {
-      expect(result.output).toContain("Waited for sh -c")
+      expect(result.output).toContain("Waited for printf EARLY_CHUNK")
       expect(result.output).toContain("LATE_CHUNK")
-      const waitFrame = result.output.slice(result.output.lastIndexOf("Waited for sh -c"))
+      const waitFrame = result.output.slice(result.output.lastIndexOf("Waited for printf EARLY_CHUNK"))
       expect(waitFrame.match(/EARLY_CHUNK/g)).toHaveLength(1)
       expect(waitFrame.match(/LATE_CHUNK/g)).toHaveLength(2)
     }),
@@ -181,9 +179,8 @@ test(
           Scene.model.toolCall(
             "bash",
             {
-              command: "sh",
-              args: ["-c", 'printf STARTED_CHUNK; sleep 5; printf FORBIDDEN_\\"LATE_CHUNK\\"'],
-              waitMillis: 0,
+              command: 'printf STARTED_CHUNK; sleep 5; printf FORBIDDEN_\\"LATE_CHUNK\\"',
+              timeout_ms: 0,
             },
             "cancel-command",
           ),
@@ -192,11 +189,11 @@ test(
       ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Start a long command.\r"),
-        Scene.action.writeAfter("sh -c printf STARTED_CHUNK", "\u0003", 100),
+        Scene.action.writeAfter("printf STARTED_CHUNK", "\u0003", 100),
         ...quitAfter("cancelled"),
       ],
     }).then((result) => {
-      expect(result.output).toContain("sh -c")
+      expect(result.output).toContain("printf STARTED_CHUNK")
       expect(result.output).toContain("(cancelled)")
       expect(result.output).not.toContain("FORBIDDEN_LATE_CHUNK")
       expect(result.output).not.toContain("FORBIDDEN_MODEL_COMPLETION")
@@ -210,8 +207,8 @@ test(
     Scene.run({
       script: [
         Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "printf", args: ["DUPLICATE_OUTPUT"] }, "duplicate-one"),
-          Scene.model.toolCall("bash", { command: "printf", args: ["DUPLICATE_OUTPUT"] }, "duplicate-two"),
+          Scene.model.toolCall("bash", { command: "printf DUPLICATE_OUTPUT" }, "duplicate-one"),
+          Scene.model.toolCall("bash", { command: "printf DUPLICATE_OUTPUT" }, "duplicate-two"),
         ]),
         Scene.model.text("DUPLICATES_COMPLETE"),
       ],
@@ -235,7 +232,7 @@ test(
         Scene.model.turn([
           Scene.model.toolCall(
             "bash",
-            { command: "printf", args: ["# PROCESS_HEADING\\n**PROCESS_BOLD**\\n- PROCESS_ITEM"] },
+            { command: "printf '# PROCESS_HEADING\\n**PROCESS_BOLD**\\n- PROCESS_ITEM'" },
             "markdown-output",
           ),
         ]),

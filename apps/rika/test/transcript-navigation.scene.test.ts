@@ -17,7 +17,7 @@ test(
       script: [
         Scene.model.turn([
           Scene.model.reasoning("REASONING_DETAIL_MARKER"),
-          Scene.model.toolCall("bash", { command: "printf", args: ["TOOL_DETAIL_MARKER"] }, "detail-shell"),
+          Scene.model.toolCall("bash", { command: "printf TOOL_DETAIL_MARKER" }, "detail-shell"),
         ]),
         Scene.model.text("NAV_DONE"),
       ],
@@ -137,9 +137,7 @@ test(
     Scene.run({
       workspace: { "click-marker.txt": "CLICK_EXPANDED_BODY_OK\n" },
       script: [
-        Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "cat", args: ["click-marker.txt"] }, "click-shell"),
-        ]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "cat click-marker.txt" }, "click-shell")]),
         Scene.model.text("CLICK_READY"),
       ],
       actions: [

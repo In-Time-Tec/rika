@@ -194,7 +194,7 @@ export const scenarios = (): ReadonlyArray<readonly [string, Model, number, numb
         _tag: "ToolCall",
         id: "streaming-edit",
         name: "edit",
-        input: JSON.stringify({ path: "src/main.ts", oldText: "old", newText: "new" }),
+        input: JSON.stringify({ path: "src/main.ts", old_str: "old", new_str: "new" }),
         status: "running",
         presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
         detail: "src/main.ts",

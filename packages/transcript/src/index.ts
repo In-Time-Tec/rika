@@ -1,7 +1,7 @@
 import { Catalog } from "@rika/tools"
 import { Function, Option, Schema } from "effect"
 import { pricingVersion, usageCostUsd } from "./model-cost"
-import type { Block, Content, Projection, SourceEvent, ToolFile, ToolProcess, Unit } from "./schema"
+import type { Block, Content, Presentation, Projection, SourceEvent, ToolFile, ToolProcess, Unit } from "./schema"
 
 export * from "./schema"
 export { pricingVersion } from "./model-cost"
@@ -157,6 +157,9 @@ const detailFor = (name: string, inputText: string): string => {
   const input = inputRecord(inputText)
   const path = inputString(input, ["path", "file_path", "file"])
   if (normalizedName === "read") {
+    const readRange = Array.isArray(input.read_range) ? input.read_range : undefined
+    if (typeof readRange?.[0] === "number" && typeof readRange[1] === "number")
+      return `${path ?? name} L${readRange[0]}-${readRange[1]}`
     const offset = typeof input.offset === "number" ? input.offset : 1
     const limit = typeof input.limit === "number" ? input.limit : undefined
     return `${path ?? name}${limit === undefined ? "" : ` L${offset}-${offset + Math.max(0, limit - 1)}`}`
@@ -191,10 +194,10 @@ const inputFiles = (id: string, name: string, inputText: string): ReadonlyArray<
           .split("\n")
           .map((line) => `+${line}`)
           .join("\n")}`
-      : `--- a/${path}\n+++ b/${path}\n${string(input.oldText)
+      : `--- a/${path}\n+++ b/${path}\n${string(input.old_str ?? input.oldText)
           .split("\n")
           .map((line) => `-${line}`)
-          .join("\n")}\n${string(input.newText)
+          .join("\n")}\n${string(input.new_str ?? input.newText)
           .split("\n")
           .map((line) => `+${line}`)
           .join("\n")}`
@@ -254,6 +257,84 @@ const childToolCallId = (childId: string): string | undefined => {
   const marker = ":child:"
   const index = childId.lastIndexOf(marker)
   return index < 0 ? undefined : childId.slice(index + marker.length)
+}
+
+const childParentScope = (childKey: string): string | undefined => {
+  const marker = ":child:"
+  const index = childKey.lastIndexOf(marker)
+  return index < 0 ? undefined : childKey.slice(0, index)
+}
+
+const candidateCallId = (candidate: ChildParentCandidate): string => {
+  const prefix = `${executionKey(candidate.scope)}:`
+  const id = executionKey(candidate.id)
+  return id.startsWith(prefix) ? id.slice(prefix.length) : id
+}
+
+export interface ChildParentCandidate {
+  readonly id: string
+  readonly scope: string
+  readonly childId: string | undefined
+  readonly family: Presentation["family"]
+}
+
+export const childParentMatch = <A extends ChildParentCandidate>(
+  candidates: Iterable<A>,
+  childExecutionId: string,
+): A | undefined => {
+  const childKey = executionKey(childExecutionId)
+  const list = [...candidates]
+  for (const candidate of list)
+    if (candidate.childId !== undefined && executionKey(candidate.childId) === childKey) return candidate
+  const parentScope = childParentScope(childKey)
+  const callId = childToolCallId(childKey)
+  if (parentScope === undefined || callId === undefined) return undefined
+  for (const candidate of list)
+    if (
+      candidate.family === "agent" &&
+      executionKey(candidate.scope) === parentScope &&
+      candidateCallId(candidate) === callId
+    )
+      return candidate
+  return undefined
+}
+
+const agentPresentationFor = (name: string): Presentation => {
+  const profile = name.toLowerCase()
+  return Catalog.resolvePresentation(
+    profile === "task" || profile === "child" || profile === "subagent"
+      ? "task"
+      : profile === "oracle" || profile === "librarian"
+        ? profile
+        : `transfer_to_${profile}`,
+  )
+}
+
+export const ensureChildTool = (
+  projection: Projection,
+  childExecutionId: string,
+  name: string,
+): { readonly projection: Projection; readonly tool: Extract<Block, { _tag: "ToolCall" }> } => {
+  const existing = childToolAt(projection, childExecutionId)
+  if (existing !== undefined) return { projection, tool: existing }
+  const id = executionKey(childExecutionId)
+  const block: Extract<Block, { _tag: "ToolCall" }> = {
+    _tag: "ToolCall",
+    id,
+    name,
+    input: "",
+    status: "running",
+    presentation: agentPresentationFor(name),
+    detail: "",
+    files: [],
+    childId: childExecutionId,
+  }
+  const turnId = projection.units[0]?.turnId ?? ""
+  const next = upsertUnit(
+    projection,
+    unit(`tool:${id}`, turnId, projection.revision, 0, projection.revision, { _tag: "Block", block }),
+  )
+  return { projection: next, tool: block }
 }
 
 const updateTool = (

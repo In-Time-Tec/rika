@@ -5,13 +5,17 @@ export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
 
 export type ToolKind = "read" | "search" | "edit" | "shell" | "other"
 
+export type AgentTerminal =
+  | { readonly kind: "answer"; readonly entry: number }
+  | { readonly kind: "error"; readonly text: string; readonly tone: "failed" | "cancelled" | "info" }
+
 export type ToolTranscriptUnit = {
   readonly kind: "tool"
   readonly group: ToolGroupKind
   readonly blocks: ReadonlyArray<number>
   readonly diffs: ReadonlyArray<number>
   readonly children?: ReadonlyArray<ToolTranscriptUnit>
-  readonly response?: number
+  readonly terminal?: AgentTerminal
 }
 
 export type TranscriptUnit =
@@ -158,6 +162,93 @@ export const toolKind: {
 
 const groupOf = (kind: ToolKind): ToolGroupKind => (kind === "read" || kind === "search" ? "explore" : kind)
 
+const agentFailureFallback = "The subagent failed without a reported reason."
+const agentEmptyFallback = "The subagent finished without a final message."
+const agentCancelledFallback = "The subagent was cancelled."
+
+export const agentOutputText = (output: string | undefined): string | undefined => {
+  if (output === undefined) return undefined
+  const value = output.trim()
+  if (value.length === 0) return undefined
+  if (!(value.startsWith("{") || value.startsWith("["))) return output
+  try {
+    const decoded: unknown = JSON.parse(value)
+    if (
+      typeof decoded === "object" &&
+      decoded !== null &&
+      "output" in decoded &&
+      Array.isArray((decoded as { readonly output: unknown }).output)
+    ) {
+      const text = (decoded as { readonly output: ReadonlyArray<unknown> }).output
+        .flatMap((part) =>
+          typeof part === "object" &&
+          part !== null &&
+          "text" in part &&
+          typeof (part as { text: unknown }).text === "string"
+            ? [(part as { readonly text: string }).text]
+            : [],
+        )
+        .join("\n")
+      if (text.trim().length > 0) return text
+    }
+    return typeof decoded === "object" && decoded !== null ? undefined : output
+  } catch {
+    return output
+  }
+}
+
+const lastAnswerEntry = (model: Model, children: ReadonlyArray<TranscriptItem>): number | undefined =>
+  children.findLast(
+    (item): item is Extract<TranscriptItem, { readonly _tag: "Entry" }> =>
+      item._tag === "Entry" &&
+      model.entries[item.index]?.role === "assistant" &&
+      (model.entries[item.index]?.text.trim().length ?? 0) > 0,
+  )?.index
+
+const childErrorDetail = (model: Model, children: ReadonlyArray<TranscriptItem>): string | undefined => {
+  const item = children.findLast(
+    (candidate): candidate is Extract<TranscriptItem, { readonly _tag: "Block" }> =>
+      candidate._tag === "Block" && (model.blocks[candidate.index] as TranscriptBlock | undefined)?._tag === "Error",
+  )
+  if (item === undefined) return undefined
+  const block = model.blocks[item.index] as Extract<TranscriptBlock, { _tag: "Error" }>
+  const detail = block.detail.trim().length > 0 ? block.detail : block.title
+  return detail.trim().length > 0 ? detail : undefined
+}
+
+const outcomeReason = (model: Model, block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): string | undefined => {
+  const outcomes = model.childExecutionOutcomes as Readonly<Record<string, { readonly reason?: string }>>
+  const reason = outcomes[block.id]?.reason
+  return reason !== undefined && reason.trim().length > 0 ? reason : undefined
+}
+
+const settledText = (
+  model: Model,
+  block: Extract<TranscriptBlock, { _tag: "ToolCall" }>,
+  children: ReadonlyArray<TranscriptItem>,
+  fallback: string,
+): string =>
+  childErrorDetail(model, children) ?? outcomeReason(model, block) ?? agentOutputText(block.output) ?? fallback
+
+export const agentTerminal = (
+  model: Model,
+  block: Extract<TranscriptBlock, { _tag: "ToolCall" }>,
+  children: ReadonlyArray<TranscriptItem>,
+): AgentTerminal | undefined => {
+  const answer = lastAnswerEntry(model, children)
+  return block.status === "running"
+    ? undefined
+    : block.status === "failed"
+      ? { kind: "error", tone: "failed", text: settledText(model, block, children, agentFailureFallback) }
+      : block.status === "complete"
+        ? answer !== undefined
+          ? { kind: "answer", entry: answer }
+          : { kind: "error", tone: "info", text: settledText(model, block, children, agentEmptyFallback) }
+        : answer !== undefined
+          ? { kind: "answer", entry: answer }
+          : { kind: "error", tone: "cancelled", text: settledText(model, block, children, agentCancelledFallback) }
+}
+
 export const orderedTranscriptItems = (model: Model): ReadonlyArray<TranscriptItem> =>
   model.items.length > 0
     ? (model.items as ReadonlyArray<TranscriptItem>)
@@ -206,20 +297,15 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     if (item.parentId === undefined) continue
     childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
   }
-  const childResponse = (parentId: string): number | undefined =>
-    childItems
-      .get(parentId)
-      ?.findLast(
-        (item): item is Extract<TranscriptItem, { readonly _tag: "Entry" }> =>
-          item._tag === "Entry" && model.entries[item.index]?.role === "assistant",
-      )?.index
+  const agentTerminalFor = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): AgentTerminal | undefined =>
+    block.presentation.family === "agent" ? agentTerminal(model, block, childItems.get(block.id) ?? []) : undefined
   const nestedTools = (parentId: string): ReadonlyArray<ToolTranscriptUnit> =>
     (childItems.get(parentId) ?? []).flatMap((item) => {
       if (item._tag !== "Block") return []
       const block = model.blocks[item.index] as TranscriptBlock
       if (block._tag !== "ToolCall") return []
       const children = nestedTools(block.id)
-      const response = childResponse(block.id)
+      const terminal = agentTerminalFor(block)
       return [
         {
           kind: "tool" as const,
@@ -227,7 +313,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
           blocks: [item.index],
           diffs: [],
           ...(children.length === 0 ? {} : { children }),
-          ...(response === undefined ? {} : { response }),
+          ...(terminal === undefined ? {} : { terminal }),
         },
       ]
     })
@@ -265,8 +351,8 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     const block = model.blocks[item.index] as TranscriptBlock
     if (block._tag === "ToolCall") {
       const children = nestedTools(block.id)
-      const response = childResponse(block.id)
-      if (children.length > 0 || response !== undefined) {
+      const terminal = agentTerminalFor(block)
+      if (children.length > 0 || terminal !== undefined) {
         flush()
         units.push({
           kind: "tool",
@@ -274,7 +360,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
           blocks: [item.index],
           diffs: [],
           ...(children.length === 0 ? {} : { children }),
-          ...(response === undefined ? {} : { response }),
+          ...(terminal === undefined ? {} : { terminal }),
         })
         continue
       }

@@ -97,12 +97,12 @@ test(
     Scene.run({
       script: [
         Scene.model.turn([
-          Scene.model.toolCall("read", { path: "missing-parent-file.ts", offset: 0, limit: 20 }, "parent-read"),
+          Scene.model.toolCall("read", { path: "missing-parent-file.ts", read_range: [1, 20] }, "parent-read"),
           Scene.model.toolCall("grep", { pattern: "owner", regex: false }, "parent-grep"),
           Scene.model.toolCall("task", { prompt: "Inspect one child file." }, "file-inspector"),
         ]),
         Scene.model.turn([
-          Scene.model.toolCall("read", { path: "missing-child-file.ts", offset: 0, limit: 20 }, "child-read"),
+          Scene.model.toolCall("read", { path: "missing-child-file.ts", read_range: [1, 20] }, "child-read"),
         ]),
         Scene.model.text("## Child inspection\n\nThe missing file result was handled."),
         Scene.model.text("CHILD_TOOL_TURN_COMPLETE"),

@@ -74,13 +74,17 @@ describe("tool contracts", () => {
       yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, timeoutMillis: 0 }))
       yield* Effect.flip(Schema.decodeUnknownEffect(Catalog.Definition)({ ...definition, outputLimit: 1.5 }))
       expect(
-        yield* Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Read", path: "a", offset: -1, limit: 0 }),
-      ).toEqual({ _tag: "Read", path: "a", offset: -1, limit: 0 })
+        yield* Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Read", path: "a", readRange: [-1, 0] }),
+      ).toEqual({ _tag: "Read", path: "a", readRange: [-1, 0] })
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Read", path: "a", offset: Number.POSITIVE_INFINITY }),
+        Schema.decodeUnknownEffect(Runtime.Request)({
+          _tag: "Read",
+          path: "a",
+          readRange: [1, Number.POSITIVE_INFINITY],
+        }),
       )
       yield* Effect.flip(
-        Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Bash", command: "echo", args: [], waitMillis: 0.5 }),
+        Schema.decodeUnknownEffect(Runtime.Request)({ _tag: "Bash", command: "echo", timeoutMillis: 0.5 }),
       )
       yield* Effect.flip(Schema.decodeUnknownEffect(ThreadTools.FindThreadInput)({ query: "all", limit: 0 }))
     }),
@@ -239,5 +243,36 @@ describe("tool contracts", () => {
     expect(
       ["read_file", "create_file", "edit_file", "shell", "apply_patch"].filter((name) => name in Runtime.toolkit.tools),
     ).toEqual([])
+  })
+
+  it("uses Amp-compatible core tool inputs under Rika's lowercase names", () => {
+    expect(Tool.getJsonSchema(Runtime.readTool)).toMatchObject({
+      properties: {
+        path: { type: "string" },
+        read_range: { type: "array", allOf: [{ minItems: 2 }, { maxItems: 2 }] },
+      },
+      required: ["path"],
+    })
+    expect(Tool.getJsonSchema(Runtime.writeTool)).toMatchObject({
+      properties: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+    })
+    expect(Tool.getJsonSchema(Runtime.editTool)).toMatchObject({
+      properties: {
+        path: { type: "string" },
+        old_str: { type: "string" },
+        new_str: { type: "string" },
+        replace_all: { type: "boolean" },
+      },
+      required: ["path", "old_str", "new_str"],
+    })
+    expect(Tool.getJsonSchema(Runtime.bashTool)).toMatchObject({
+      properties: {
+        command: { type: "string" },
+        workdir: { type: "string" },
+        timeout_ms: { type: "integer" },
+      },
+      required: ["command"],
+    })
   })
 })

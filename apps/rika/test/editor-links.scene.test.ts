@@ -3,7 +3,7 @@ import { Scene } from "./scene"
 
 const readTargetScript = (path: string) =>
   [
-    Scene.model.turn([Scene.model.toolCall("read", { path, offset: 2, limit: 1 }, `read-${path}`)]),
+    Scene.model.turn([Scene.model.toolCall("read", { path, read_range: [3, 3] }, `read-${path}`)]),
     Scene.model.text("OPEN TARGET"),
   ] as const
 

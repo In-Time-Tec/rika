@@ -6,7 +6,7 @@ test(
   () =>
     Scene.run({
       script: [
-        Scene.model.turn([Scene.model.toolCall("bash", { command: "pwd", args: [] }, "workspace-pwd")]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "pwd" }, "workspace-pwd")]),
         Scene.model.text("Workspace checked."),
       ],
       actions: [
@@ -62,11 +62,7 @@ test(
       script: [
         Scene.model.turn([
           Scene.model.reasoning("Checking the failing command."),
-          Scene.model.toolCall(
-            "bash",
-            { command: "sh", args: ["-c", "printf deterministic-failure >&2; exit 7"] },
-            "fail",
-          ),
+          Scene.model.toolCall("bash", { command: "printf deterministic-failure >&2; exit 7" }, "fail"),
         ]),
         Scene.model.text("Recovered after the expected failure.", 100),
       ],

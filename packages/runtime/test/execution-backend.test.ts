@@ -116,9 +116,9 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
       readonly max_wait_turns?: unknown
     }>
   >([])
-  const starts = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["executions"]["startByAgentDefinition"]>[0]>>(
-    [],
-  )
+  const starts = yield* Ref.make<
+    ReadonlyArray<Parameters<Client.Interface["executions"]["startByAgentDefinition"]>[0]>
+  >([])
   const lookups = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["executions"]["get"]>[0]>>([])
   const replays = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["executions"]["replay"]>[0]>>([])
   const pages = yield* Ref.make<ReadonlyArray<Parameters<Client.Interface["executions"]["pageEvents"]>[0]>>([])
@@ -156,9 +156,7 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
     listAddressBookRoutes: unused,
     startExecution: unused,
     startExecutionByAddress: unused,
-    startExecutionByAgentDefinition: (
-      input: Parameters<Client.Interface["executions"]["startByAgentDefinition"]>[0],
-    ) =>
+    startExecutionByAgentDefinition: (input: Parameters<Client.Interface["executions"]["startByAgentDefinition"]>[0]) =>
       Ref.update(starts, (values) => [...values, input]).pipe(
         Effect.andThen(
           options?.fail === "start"
@@ -1246,14 +1244,8 @@ describe("ExecutionBackend Relay client adapter", () => {
       }
       Object.assign(fixture.implementation.childRuns, {
         createFanOut: (input: unknown) => (calls.push(["createFanOut", input]), Effect.succeed(fanOut)),
-        inspectFanOut: (input: unknown) => (
-          calls.push(["inspectFanOut", input]),
-          Effect.succeed({ fan_out: fanOut })
-        ),
-        cancelFanOut: (input: unknown) => (
-          calls.push(["cancelFanOut", input]),
-          Effect.succeed({ fan_out: fanOut })
-        ),
+        inspectFanOut: (input: unknown) => (calls.push(["inspectFanOut", input]), Effect.succeed({ fan_out: fanOut })),
+        cancelFanOut: (input: unknown) => (calls.push(["cancelFanOut", input]), Effect.succeed({ fan_out: fanOut })),
         spawn: (input: unknown) => (calls.push(["child", input]), Effect.succeed({})),
       })
       Object.assign(fixture.implementation.workflows, {
@@ -1430,8 +1422,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       Object.assign(fixture.implementation.executions, {
         get: () => Effect.succeed({ status: "running" }),
-        inspect: () =>
-          Effect.succeed({ status: "running", waiting_on: [], pending_tool_calls: [], child_runs: [] }),
+        inspect: () => Effect.succeed({ status: "running", waiting_on: [], pending_tool_calls: [], child_runs: [] }),
       })
       const result = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
@@ -1750,6 +1741,39 @@ describe("ExecutionBackend Relay client adapter", () => {
     const key = Redacted.make("secret")
     expect(RelayExecutionBackend.remoteToolOptions(undefined)).toEqual({})
     expect(RelayExecutionBackend.remoteToolOptions(key)).toEqual({ apiKey: key })
+  })
+
+  it("gates web tools by configured provider credentials", () => {
+    const unavailable = RelayExecutionBackend.toolkitFor({})
+    expect(Object.keys(unavailable.tools)).not.toContain("web_search")
+    expect(Object.keys(unavailable.tools)).not.toContain("read_web_page")
+
+    const unsupported = RelayExecutionBackend.toolkitFor({
+      webSearchCredentials: { custom: Redacted.make("custom") },
+    })
+    expect(Object.keys(unsupported.tools)).not.toContain("web_search")
+
+    const exa = RelayExecutionBackend.toolkitFor({
+      webSearchCredentials: { exa: Redacted.make("exa") },
+    })
+    expect(Object.keys(exa.tools)).toContain("web_search")
+    expect(Object.keys(exa.tools)).not.toContain("read_web_page")
+
+    const parallel = RelayExecutionBackend.toolkitFor({
+      webSearchCredentials: { parallel: Redacted.make("parallel") },
+    })
+    expect(Object.keys(parallel.tools)).toContain("web_search")
+    expect(Object.keys(parallel.tools)).toContain("read_web_page")
+  })
+
+  it("composes supported provider factories and reports unknown IDs", () => {
+    const configured = RelayExecutionBackend.webSearchFactories({
+      exa: Redacted.make("exa"),
+      github: Redacted.make("github"),
+      custom: Redacted.make("custom"),
+    })
+    expect(configured.factories).toHaveLength(2)
+    expect(configured.unsupportedIds).toEqual(["custom"])
   })
 
   it.effect("ensures the thread host entity and notifies it through the durable inbox", () =>

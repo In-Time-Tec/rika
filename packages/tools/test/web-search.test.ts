@@ -75,15 +75,59 @@ describe("WebSearch registry", () => {
 })
 
 describe("WebSearch HTTP providers", () => {
+  it.effect("uses the Parallel SDK request contract and normalizes its response", () => {
+    let capturedUrl = ""
+    let capturedBody: unknown
+    const fetch: typeof globalThis.fetch = Object.assign(
+      (resource: string | URL | Request, init?: RequestInit) => {
+        capturedUrl = String(resource)
+        capturedBody = JSON.parse(String(init?.body))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              search_id: "search-1",
+              session_id: "session-1",
+              results: [{ url: "https://parallel.test/result", title: "Result", excerpts: ["excerpt"] }],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          ),
+        )
+      },
+      { preconnect: () => {} },
+    )
+    return Effect.gen(function* () {
+      const parallel = yield* WebSearch.parallel({
+        apiKey: Redacted.make("parallel"),
+        baseUrl: "https://parallel.test",
+        fetch,
+      })
+      const outcome = yield* parallel.search({ ...input, kind: "web", strategy: "auto" })
+      expect(capturedUrl).toBe("https://parallel.test/v1/search")
+      expect(capturedBody).toMatchObject({
+        objective: input.objective,
+        search_queries: input.searchQueries,
+        mode: "advanced",
+        max_chars_total: 40_000,
+      })
+      expect(outcome.results?.[0]).toMatchObject({
+        url: "https://parallel.test/result",
+        title: "Result",
+        publishedAt: null,
+        excerpts: ["excerpt"],
+      })
+    }).pipe(provide(clientLayer((request) => response(request, {}))))
+  })
+
   it.effect("builds and normalizes Exa web and code requests", () => {
     const captured: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function* () {
-      const web = yield* WebSearch.exa({ apiKey: Redacted.make("exa"), baseUrl: "https://exa.test" })
-      const code = yield* WebSearch.exaCode({ apiKey: Redacted.make("exa"), baseUrl: "https://exa.test" })
-      const webResult = yield* web.search({ ...input, kind: "web", strategy: "auto" })
-      const codeResult = yield* code.search({ ...input, kind: "code", strategy: "auto" })
+      const exa = yield* WebSearch.exa({ apiKey: Redacted.make("exa"), baseUrl: "https://exa.test" })
+      expect([...exa.capabilities]).toEqual(["web", "code"])
+      const webResult = yield* exa.search({ ...input, kind: "web", strategy: "auto" })
+      const codeResult = yield* exa.search({ ...input, kind: "code", strategy: "auto" })
       expect(captured.map(({ url }) => url)).toEqual(["https://exa.test/search", "https://exa.test/context"])
       expect(body(captured[0]!)).toMatchObject({ type: "fast", contents: { highlights: true } })
+      expect(body(captured[1]!)).toMatchObject({ tokensNum: "dynamic" })
       expect(webResult.results?.[0]).toMatchObject({ url: "https://exa.test/result", excerpts: ["highlight"] })
       expect(codeResult.content).toBe("formatted code context")
     }).pipe(

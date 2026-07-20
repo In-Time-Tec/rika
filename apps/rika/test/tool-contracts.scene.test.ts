@@ -2,7 +2,7 @@ import { expect, test } from "vitest"
 import { Scene } from "./scene"
 
 test(
-  "renders successful and typed-failure tool outcomes without a provider backend",
+  "renders successful create and overwrite tool outcomes without a provider backend",
   () =>
     Scene.run({
       script: [
@@ -20,8 +20,7 @@ test(
         Scene.action.writeAfterDelay("\u0003", 1_000),
       ],
     }).then((result) => {
-      expect(result.output).toContain("Created")
-      expect(result.output).toContain("✕ Created contract.txt +2")
+      expect(result.output).toContain("Edited contract.txt +2 -1")
       expect(result.output).toContain("TOOL_CONTRACT_COMPLETE")
       expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
     }),
@@ -33,7 +32,9 @@ test(
   () =>
     Scene.run({
       script: [
-        Scene.model.turn([Scene.model.toolCall("read", { path: "contract.txt", limit: 0 }, "invalid-contract")]),
+        Scene.model.turn([
+          Scene.model.toolCall("read", { path: "contract.txt", read_range: [2, 1] }, "invalid-contract"),
+        ]),
         Scene.model.text("INVALID_CONTRACT_REJECTED"),
       ],
       actions: [
@@ -58,12 +59,9 @@ test(
           Scene.model.toolCall(
             "bash",
             {
-              command: "bun",
-              args: [
-                "-e",
-                "setTimeout(() => console.log(Buffer.from('TEFURV9UT09MX09VVFBVVA==', 'base64').toString()), 5000)",
-              ],
-              waitMillis: 10_000,
+              command:
+                "bun -e \"setTimeout(() => console.log(Buffer.from('TEFURV9UT09MX09VVFBVVA==', 'base64').toString()), 5000)\"",
+              timeout_ms: 10_000,
             },
             "cancel-shell",
           ),
@@ -72,7 +70,7 @@ test(
       ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Cancel a process tool.\r"),
-        Scene.action.writeAfter("bun -e setTimeout", "\u0003", 100),
+        Scene.action.writeAfter("bun -e", "\u0003", 100),
         Scene.action.writeAfter("cancelled", "\u0003", 100),
         Scene.action.writeAfterDelay("\u0003", 1_000),
       ],

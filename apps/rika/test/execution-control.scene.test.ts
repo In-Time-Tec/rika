@@ -172,7 +172,7 @@ test(
     Scene.run({
       script: [
         Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "printf", args: ["RECONNECT_TOOL_COMPLETE"] }, "reconnect-tool"),
+          Scene.model.toolCall("bash", { command: "printf RECONNECT_TOOL_COMPLETE" }, "reconnect-tool"),
         ]),
         Scene.model.text("RECONNECTED_COMPLETE", 1_000),
       ],

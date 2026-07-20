@@ -1,7 +1,7 @@
 import * as Transcript from "@rika/transcript"
 import { describe, expect, it } from "vitest"
 import { ExecutionEvents, TranscriptPresenter, ViewState } from "../src"
-import { unitId as transcriptUnitId, rows as transcriptUnits } from "../src/transcript-presenter"
+import { agentTerminal, unitId as transcriptUnitId, rows as transcriptUnits } from "../src/transcript-presenter"
 
 const event = (
   cursor: string,
@@ -284,6 +284,200 @@ describe("TranscriptPresenter at scale", () => {
     const ids = TranscriptPresenter.expandableRowIds(session.model)
     expect(ids.length).toBeGreaterThanOrEqual(childCount)
     expect(TranscriptPresenter.expandableRowIds(session.model)).toEqual(ids)
+  })
+})
+
+const agentTool = (
+  status: "running" | "complete" | "failed" | "cancelled",
+  output?: string,
+): Extract<Transcript.Block, { _tag: "ToolCall" }> => ({
+  _tag: "ToolCall",
+  id: "agent",
+  name: "task",
+  input: "{}",
+  status,
+  presentation: {
+    family: "agent",
+    action: "task",
+    activeLabel: "Subagent working",
+    completeLabel: "Subagent finished",
+  },
+  detail: "Do the thing",
+  files: [],
+  ...(output === undefined ? {} : { output }),
+})
+
+const agentScenario = (opts: {
+  readonly status: "running" | "complete" | "failed" | "cancelled"
+  readonly answer?: string
+  readonly errorDetail?: string
+  readonly output?: string
+  readonly outcomeReason?: string
+}) => {
+  const tool = agentTool(opts.status, opts.output)
+  const entries: Array<ViewState.Entry> = []
+  const blocks: Array<Transcript.Block> = [tool]
+  const items: Array<ViewState.TranscriptItem> = [{ _tag: "Block", index: 0, id: "tool:agent" }]
+  const children: Array<ViewState.TranscriptItem> = []
+  if (opts.answer !== undefined) {
+    entries.push({ role: "assistant", text: opts.answer })
+    const item: ViewState.TranscriptItem = {
+      _tag: "Entry",
+      index: entries.length - 1,
+      id: `answer:${entries.length - 1}`,
+      parentId: "agent",
+    }
+    items.push(item)
+    children.push(item)
+  }
+  if (opts.errorDetail !== undefined) {
+    blocks.push({ _tag: "Error", title: "Subagent failed", detail: opts.errorDetail })
+    const item: ViewState.TranscriptItem = {
+      _tag: "Block",
+      index: blocks.length - 1,
+      id: `error:${blocks.length - 1}`,
+      parentId: "agent",
+    }
+    items.push(item)
+    children.push(item)
+  }
+  const model: ViewState.Model = {
+    ...ViewState.initial("/work"),
+    entries,
+    blocks,
+    items,
+    ...(opts.outcomeReason === undefined
+      ? {}
+      : { childExecutionOutcomes: { agent: { status: "failed", reason: opts.outcomeReason } } }),
+  }
+  return { model, tool, children }
+}
+
+const terminalOf = (opts: Parameters<typeof agentScenario>[0]) => {
+  const { model, tool, children } = agentScenario(opts)
+  return agentTerminal(model, tool, children)
+}
+
+describe("agentTerminal", () => {
+  const settled = ["complete", "failed", "cancelled"] as const
+  const childContent = ["answer", "error", "both", "neither"] as const
+  const optsFor = (
+    status: "running" | "complete" | "failed" | "cancelled",
+    content: (typeof childContent)[number],
+  ): Parameters<typeof agentScenario>[0] => ({
+    status,
+    ...(content === "answer" || content === "both" ? { answer: "Final answer." } : {}),
+    ...(content === "error" || content === "both" ? { errorDetail: "explosion in the reactor" } : {}),
+  })
+
+  for (const content of childContent)
+    it(`gives a running row no terminal (${content})`, () => {
+      expect(terminalOf(optsFor("running", content))).toBeUndefined()
+    })
+
+  for (const status of settled)
+    for (const content of childContent)
+      it(`gives a settled ${status} row exactly one non-empty terminal (${content})`, () => {
+        const terminal = terminalOf(optsFor(status, content))
+        expect(terminal).toBeDefined()
+        if (terminal?.kind === "error") expect(terminal.text.trim().length).toBeGreaterThan(0)
+        else expect(terminal?.kind).toBe("answer")
+      })
+
+  it("keeps a completed answer and ignores a stray error child when an answer exists", () => {
+    expect(terminalOf({ status: "complete", answer: "All done.", errorDetail: "ignored" })).toEqual({
+      kind: "answer",
+      entry: 0,
+    })
+    expect(terminalOf({ status: "complete", answer: "All done." })).toEqual({ kind: "answer", entry: 0 })
+  })
+
+  it("always fails a failed row even when a non-empty answer exists", () => {
+    const terminal = terminalOf({ status: "failed", answer: "partial work", errorDetail: "boom" })
+    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "boom" })
+  })
+
+  it("prefers an Error child's detail over the copied tool output on a failed row", () => {
+    const terminal = terminalOf({ status: "failed", errorDetail: "disk is full", output: "stale copied output" })
+    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "disk is full" })
+  })
+
+  it("falls back to the remembered execution reason when no Error child exists", () => {
+    const terminal = terminalOf({ status: "failed", outcomeReason: "network exploded", output: "raw" })
+    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "network exploded" })
+  })
+
+  it("extracts text from a JSON-object output instead of showing raw JSON or blank", () => {
+    const output = JSON.stringify({ output: [{ text: "the child reported this failure" }] })
+    const terminal = terminalOf({ status: "failed", output })
+    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "the child reported this failure" })
+  })
+
+  it("uses a non-blank default when the only failure data is an opaque JSON object", () => {
+    const terminal = terminalOf({ status: "failed", output: JSON.stringify({ code: 42 }) })
+    expect(terminal?.kind).toBe("error")
+    if (terminal?.kind === "error") {
+      expect(terminal.text.trim().length).toBeGreaterThan(0)
+      expect(terminal.text).not.toContain("{")
+    }
+  })
+
+  it("marks a completed row with only empty assistant text as a non-blank info terminal", () => {
+    const terminal = terminalOf({ status: "complete", answer: "   " })
+    expect(terminal?.kind).toBe("error")
+    if (terminal?.kind === "error") {
+      expect(terminal.tone).toBe("info")
+      expect(terminal.text.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it("cancels with the cancellation reason when no answer survives", () => {
+    const withReason = terminalOf({ status: "cancelled", outcomeReason: "user stopped the run" })
+    expect(withReason).toEqual({ kind: "error", tone: "cancelled", text: "user stopped the run" })
+    const bare = terminalOf({ status: "cancelled" })
+    expect(bare?.kind).toBe("error")
+    if (bare?.kind === "error") {
+      expect(bare.tone).toBe("cancelled")
+      expect(bare.text.trim().length).toBeGreaterThan(0)
+    }
+  })
+
+  it("keeps a cancelled row's answer when a non-empty one exists", () => {
+    expect(terminalOf({ status: "cancelled", answer: "got this far" })).toEqual({ kind: "answer", entry: 0 })
+  })
+})
+
+describe("nested subagent rows", () => {
+  it("emits only ToolCall children as rows while assistant and error children feed the terminal", () => {
+    const parent = agentTool("complete")
+    const nested: Extract<Transcript.Block, { _tag: "ToolCall" }> = {
+      _tag: "ToolCall",
+      id: "nested-read",
+      name: "read",
+      input: JSON.stringify({ path: "src/a.ts" }),
+      status: "complete",
+      presentation: { family: "explore", action: "read", activeLabel: "Reading", completeLabel: "Read" },
+      detail: "src/a.ts",
+      files: [],
+    }
+    const model: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      entries: [{ role: "assistant", text: "child answer" }],
+      blocks: [parent, nested, { _tag: "Error", title: "warn", detail: "a soft error" }],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent" },
+        { _tag: "Block", index: 1, id: "block:nested-read", parentId: "agent" },
+        { _tag: "Entry", index: 0, id: "answer:0", parentId: "agent" },
+        { _tag: "Block", index: 2, id: "block:error", parentId: "agent" },
+      ],
+    }
+    const units = transcriptUnits(model)
+    const parentUnit = units.find((unit) => unit.kind === "tool")
+    expect(parentUnit?.kind).toBe("tool")
+    if (parentUnit?.kind !== "tool") throw new Error("expected tool unit")
+    expect(parentUnit.children).toHaveLength(1)
+    expect(parentUnit.children?.[0]?.blocks).toEqual([1])
+    expect(parentUnit.terminal).toEqual({ kind: "answer", entry: 0 })
   })
 })
 

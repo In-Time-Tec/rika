@@ -81,6 +81,7 @@ import {
   unitId as transcriptUnitId,
   rows as transcriptUnits,
   toolDetails,
+  type AgentTerminal,
   type PathTarget,
   type ToolKind,
   type ToolTranscriptUnit,
@@ -753,7 +754,8 @@ const transcriptUnitRevision = (
     }
     for (const index of tool.diffs) ids.push(identityRevision(model.blocks[index]))
     for (const child of tool.children ?? []) walkTool(child)
-    if (tool.response !== undefined) ids.push(identityRevision(model.entries[tool.response]))
+    if (tool.terminal?.kind === "answer") ids.push(identityRevision(model.entries[tool.terminal.entry]))
+    else if (tool.terminal?.kind === "error") bits.push(`${tool.terminal.tone}:${tool.terminal.text}`)
   }
   if (unit.kind === "entry") ids.push(identityRevision(model.entries[unit.entry]))
   else if (unit.kind === "tool") walkTool(unit)
@@ -872,6 +874,33 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       unit: `entry:${item?.id ?? `${entry.turnId ?? "child"}:assistant:${index}`}`,
       expandable: false,
     }
+  }
+  const renderAgentError = (
+    terminal: Extract<AgentTerminal, { kind: "error" }>,
+    ownerId: string,
+    prefix: string,
+    gap = false,
+  ): UnitLineRange | undefined => {
+    const text = terminal.text.trim()
+    if (text.length === 0) return
+    const color = terminal.tone === "failed" ? colors.red : terminal.tone === "cancelled" ? colors.amber : colors.text
+    const paint = (value: string) => (terminal.tone === "info" ? dim(fg(color)(value)) : fg(color)(value))
+    const rows = wrapTextToWidth(text, Math.max(1, markdownWidthForColumn(model.width) - stringWidth(prefix)))
+    const connector = prefix.lastIndexOf("│")
+    const curl = gap && connector >= 0 ? `${prefix.slice(0, connector)}╰${prefix.slice(connector + 1)}` : prefix
+    const start = line + 1
+    if (gap) {
+      for (let spacer = 0; spacer < 2; spacer += 1) {
+        append(fg(colors.text)("\n"))
+        append(dim(fg(colors.subtle)(prefix.trimEnd())))
+      }
+    }
+    rows.forEach((row, rowIndex) => {
+      append(fg(colors.text)("\n"))
+      append(dim(fg(colors.subtle)(rowIndex === rows.length - 1 ? curl : prefix)))
+      append(paint(row))
+    })
+    return { start, end: line, unit: `agent-terminal:${ownerId}`, expandable: false }
   }
   const renderExploreBody = (units: ReadonlyArray<ToolUnit>, selected: boolean, expanded: boolean) => {
     const running = units.some((unit) => unit.block.status === "running")
@@ -1129,7 +1158,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     selected: boolean,
     expanded: boolean,
     hasChildren = false,
-    hasResponse = false,
+    hasTerminal = false,
   ) => {
     const failed = unit.block.status === "failed"
     const running = unit.block.status === "running"
@@ -1143,12 +1172,11 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
           : unit.block.presentation.completeLabel
     const detail = unit.block.detail.length === 0 ? "" : ` ${unit.block.detail}`
     const agent = unit.block.presentation.family === "agent"
-    const output = agent ? (hasResponse ? undefined : visibleAgentOutput(unit.block.output)) : unit.block.output
+    const output = agent ? undefined : unit.block.output
     const expandable =
       hasChildren ||
-      (agent
-        ? unit.block.detail.length > 0 || (failed && output !== undefined && output.length > 0)
-        : unit.block.output !== undefined && unit.block.output.length > 0)
+      hasTerminal ||
+      (agent ? unit.block.detail.length > 0 : unit.block.output !== undefined && unit.block.output.length > 0)
     if (selected)
       highlight(
         `${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${expandable ? markerText(expanded) : ""}`,
@@ -1161,14 +1189,10 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     }
     if (expanded && agent && unit.block.detail.length > 0) {
       append(dim(fg(colors.text)(`\n  ${unit.block.detail}`)))
-      if (output !== undefined && output.length > 0) {
-        const renderedOutput = output.split("\n").slice(0, 12).join("\n  ")
-        append(failed ? fg(colors.red)(`\n  ${renderedOutput}`) : dim(fg(colors.text)(`\n  ${renderedOutput}`)))
-      }
-    } else if (expanded && output !== undefined) {
+    } else if (expanded && !agent && output !== undefined) {
       append(fg(colors.text)("\n"))
       const body = output.split("\n").slice(0, 12).join("\n")
-      append(failed && agent ? fg(colors.red)(body) : dim(fg(colors.text)(body)))
+      append(dim(fg(colors.text)(body)))
     }
   }
   const renderNestedTool = (unit: ToolTranscriptUnit, prefix: string, last: boolean) => {
@@ -1181,16 +1205,12 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     const cancelled = block.status === "cancelled"
     const detail = toolDetail(index, block)
     const children = unit.children ?? []
-    const output =
-      block.presentation.family === "agent" && unit.response !== undefined
-        ? undefined
-        : block.presentation.family === "agent"
-          ? visibleAgentOutput(block.output)
-          : block.output
+    const agent = block.presentation.family === "agent"
+    const output = agent ? undefined : block.output
     const expandable =
       children.length > 0 ||
-      unit.response !== undefined ||
-      (block.presentation.family === "agent" && block.detail.length > 0) ||
+      unit.terminal !== undefined ||
+      (agent && block.detail.length > 0) ||
       (output !== undefined && output.length > 0)
     const rowWidth = markdownWidthForColumn(model.width)
     const visiblePrefix = truncateToWidth(prefix, Math.max(0, rowWidth - 8))
@@ -1231,7 +1251,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       ...(detail.target === undefined ? {} : { targets: [detail.target] }),
     })
     const bodyPrefix = `${visiblePrefix}${last ? "  " : "│ "}`
-    if (expanded && block.presentation.family === "agent" && block.detail.length > 0) {
+    if (expanded && agent && block.detail.length > 0) {
       append(fg(colors.text)("\n"))
       append(dim(fg(colors.subtle)(`${bodyPrefix}  `)))
       append(dim(fg(colors.text)(block.detail)))
@@ -1243,11 +1263,15 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     }
     if (expanded)
       for (const [childIndex, child] of children.entries())
-        renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.response === undefined)
-    if (expanded && unit.response !== undefined) {
+        renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.terminal === undefined)
+    if (expanded && unit.terminal !== undefined) {
       const timeline = children.length > 0
-      const response = renderAgentResponse(unit.response, timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `, timeline)
-      if (response !== undefined) nestedRanges.push(response)
+      const prefix = timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `
+      const range =
+        unit.terminal.kind === "answer"
+          ? renderAgentResponse(unit.terminal.entry, prefix, timeline)
+          : renderAgentError(unit.terminal, block.id, prefix, timeline)
+      if (range !== undefined) nestedRanges.push(range)
     }
     nestedRanges[rangeIndex] = {
       ...nestedRanges[rangeIndex]!,
@@ -1341,21 +1365,26 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       renderChildAgentBody(model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded)
     else if (unit.kind === "diff") renderDiffBody(unit.block, selected, expanded)
     else if (unit.kind === "block") renderPlainBlock(unit.block)
-    else if (unit.children !== undefined || unit.response !== undefined) {
+    else if (unit.children !== undefined || unit.terminal !== undefined) {
       renderOtherToolBody(
         toolUnitsFor(model, unit.blocks)[0]!,
         selected,
         expanded,
         unit.children !== undefined,
-        unit.response !== undefined,
+        unit.terminal !== undefined,
       )
       if (expanded)
         for (const [childIndex, child] of (unit.children ?? []).entries())
-          renderNestedTool(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.response === undefined)
-      if (expanded && unit.response !== undefined) {
+          renderNestedTool(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.terminal === undefined)
+      if (expanded && unit.terminal !== undefined) {
         const timeline = (unit.children?.length ?? 0) > 0
-        const response = renderAgentResponse(unit.response, timeline ? "  │   " : "  ", timeline)
-        if (response !== undefined) nestedRanges.push(response)
+        const prefix = timeline ? "  │   " : "  "
+        const ownerId = (model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>).id
+        const range =
+          unit.terminal.kind === "answer"
+            ? renderAgentResponse(unit.terminal.entry, prefix, timeline)
+            : renderAgentError(unit.terminal, ownerId, prefix, timeline)
+        if (range !== undefined) nestedRanges.push(range)
       }
     } else if (unit.group === "explore") renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
     else if (unit.group === "edit") renderEditBody(toolUnitsFor(model, unit.blocks), unit.diffs, selected, expanded)
@@ -1494,28 +1523,6 @@ interface TranscriptRenderInput {
 
 const mouseSequencePattern = new RegExp(`^(?:${String.fromCharCode(27)}?\\[)?<?\\d+(?:;\\d+)*[Mm]?$`)
 const typingCursorStyle = { style: "block", blinking: true } as const
-
-const visibleAgentOutput = (output: string | undefined): string | undefined => {
-  if (output === undefined) return undefined
-  const value = output.trim()
-  if (!(value.startsWith("{") || value.startsWith("["))) return output
-  try {
-    const decoded: unknown = JSON.parse(value)
-    if (typeof decoded === "object" && decoded !== null && "output" in decoded && Array.isArray(decoded.output)) {
-      const text = decoded.output
-        .flatMap((part) =>
-          typeof part === "object" && part !== null && "text" in part && typeof part.text === "string"
-            ? [part.text]
-            : [],
-        )
-        .join("\n")
-      if (text.length > 0) return text
-    }
-    return typeof decoded === "object" && decoded !== null ? undefined : output
-  } catch {
-    return output
-  }
-}
 
 const cutoutBackground = (renderer: CliRenderer): RGBA => {
   const background: unknown = Reflect.get(renderer, "backgroundColor")

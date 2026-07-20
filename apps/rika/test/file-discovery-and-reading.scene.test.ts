@@ -12,9 +12,7 @@ test(
         { path: "src/brackets.ts", bytes: new TextEncoder().encode("literal [value]") },
       ],
       script: [
-        Scene.model.turn([
-          Scene.model.toolCall("read", { path: "src/alpha.ts", offset: 1, limit: 2 }, "read-range"),
-        ]),
+        Scene.model.turn([Scene.model.toolCall("read", { path: "src/alpha.ts", read_range: [2, 3] }, "read-range")]),
         Scene.model.turn([Scene.model.toolCall("find_files", { query: ".txt" }, "find-hidden")]),
         Scene.model.turn([
           Scene.model.toolCall("grep", { pattern: "^(needle|hidden).*café?$", regex: true }, "grep-regex"),
@@ -46,9 +44,7 @@ test(
         Scene.model.turn([Scene.model.toolCall("read", { path: "escape.txt" }, "read-symlink")]),
         Scene.model.turn([Scene.model.toolCall("grep", { pattern: "[", regex: true }, "invalid-regex")]),
         Scene.model.turn([Scene.model.toolCall("read", { path: "missing.txt" }, "read-missing")]),
-        Scene.model.turn([
-          Scene.model.toolCall("read", { path: "inside.txt", offset: -1, limit: 0 }, "invalid-range"),
-        ]),
+        Scene.model.turn([Scene.model.toolCall("read", { path: "inside.txt", read_range: [-1, 0] }, "invalid-range")]),
         Scene.model.text("FILE_ERRORS_COMPLETE"),
       ],
       actions: [
@@ -76,8 +72,7 @@ test(
           Scene.model.toolCall(
             "bash",
             {
-              command: "sh",
-              args: ["-c", "mkfifo blocked.txt; (sleep 2; printf released > blocked.txt) >/dev/null 2>&1 &"],
+              command: "mkfifo blocked.txt; (sleep 2; printf released > blocked.txt) >/dev/null 2>&1 &",
             },
             "setup-fifo",
           ),

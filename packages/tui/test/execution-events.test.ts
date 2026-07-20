@@ -196,7 +196,21 @@ describe("ExecutionEvents.projectUnits", () => {
     if (orchestratorUnit?.kind !== "tool") throw new Error("Expected orchestrator tool")
     expect(orchestratorUnit.children).toHaveLength(4)
     expect(orchestratorUnit.children?.map((unit) => unit.children?.length)).toEqual([1, 1, 1, 1])
-    expect(orchestratorUnit.children?.map((unit) => unit.response)).toEqual([1, 2, 3, 4])
+    const nestedToolIds = orchestratorUnit.children?.map(
+      (unit) =>
+        (unit.kind === "tool" ? model.blocks[unit.blocks[0]!] : undefined) as ViewState.TranscriptBlock | undefined,
+    )
+    const answerParentIds = (model.items as ReadonlyArray<ViewState.TranscriptItem>)
+      .filter(
+        (item) =>
+          item._tag === "Entry" && (model.entries[item.index] as ViewState.Entry | undefined)?.role === "assistant",
+      )
+      .map((item) => item.parentId)
+    expect(
+      nestedToolIds?.map(
+        (block) => answerParentIds.filter((parentId) => parentId === (block as { id?: string })?.id).length,
+      ),
+    ).toEqual([1, 1, 1, 1])
     expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toHaveLength(0)
   })
 
@@ -242,7 +256,11 @@ describe("ExecutionEvents.projectUnits", () => {
       status: "complete",
       presentation: { activeLabel: "Oracle exploring", completeLabel: "Oracle has spoken" },
     })
-    expect(units[1]).toMatchObject({ kind: "tool", children: [{ kind: "tool" }], response: 1 })
+    expect(units[1]).toMatchObject({
+      kind: "tool",
+      children: [{ kind: "tool" }],
+      terminal: { kind: "answer", entry: 1 },
+    })
     expect(model.entries[1]).toMatchObject({ role: "assistant", text: "## Projection fixed\n\n**All checks pass.**" })
     expect(model.items).toContainEqual(
       expect.objectContaining({
@@ -319,10 +337,124 @@ describe("ExecutionEvents.projectUnits", () => {
         status: "failed",
         output: "Model route luna-low was not registered",
       })
+      expect(model.blocks).toContainEqual(
+        expect.objectContaining({ _tag: "Error", detail: "Model route luna-low was not registered" }),
+      )
+      expect(model.items).toContainEqual(
+        expect.objectContaining({
+          _tag: "Block",
+          id: "execution:child:turn:agent:failed",
+          parentId: "turn:agent",
+        }),
+      )
       expect(rendered).toContain("Subagent failed")
       expect(rendered).toContain("Model route luna-low was not registered")
       expect(rendered).not.toContain("AgentToolError: unrelated wrapper failure")
     }
+  })
+
+  it("keeps nested reasoning and non-assistant entries out of a subagent projection", () => {
+    const parent = Transcript.project("turn", "delegate", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Coordinate the work" } },
+      }),
+      event("spawned", 1, "child_run.spawned", {
+        data: { tool_call_id: "agent", child_execution_id: "child:turn:agent" },
+      }),
+    ])
+    const child = Transcript.project("child:turn:agent", "hidden prompt", [
+      event("thinking", 0, "model.reasoning.delta", { text: "internal reasoning" }),
+      event("nested", 1, "tool.call.requested", {
+        data: { tool_call_id: "nested", tool_name: "read", input: { path: "src/a.ts" } },
+      }),
+    ])
+    let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+
+    expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "Reasoning")).toBe(false)
+    expect(model.items.some((item) => (item as ViewState.TranscriptItem).id === "turn:child:turn:agent:user")).toBe(
+      false,
+    )
+    expect(model.items).toContainEqual(
+      expect.objectContaining({ _tag: "Block", id: "tool:child:turn:agent:nested", parentId: "turn:agent" }),
+    )
+  })
+
+  it("normalizes a lone nested child agent into an agent tool with a stable row key", () => {
+    const parent = Transcript.project("turn", "delegate", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Coordinate the work" } },
+      }),
+      event("spawned", 1, "child_run.spawned", {
+        data: { tool_call_id: "agent", child_execution_id: "child:turn:agent" },
+      }),
+    ])
+    const child = Transcript.project("child:turn:agent", "", [
+      event("gc-started", 0, "child_run.started", {
+        data: { child_execution_id: "grandchild", profile: "oracle" },
+      }),
+    ])
+    let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+    model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
+
+    expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
+    expect(
+      model.blocks.find(
+        (block) =>
+          (block as ViewState.TranscriptBlock)._tag === "ToolCall" &&
+          (block as { childId?: string }).childId === "grandchild",
+      ),
+    ).toMatchObject({
+      _tag: "ToolCall",
+      id: "grandchild",
+      childId: "grandchild",
+      status: "running",
+      presentation: { family: "agent" },
+    })
+    const agent = transcriptUnits(model).find((unit) => unit.kind === "tool")
+    if (agent?.kind !== "tool") throw new Error("Expected agent tool")
+    expect(agent.children?.map((child) => transcriptUnitId(model, child))).toContain("tool:grandchild")
+  })
+
+  it("dedupes a nested child agent into an existing matching agent tool across batches", () => {
+    const parent = Transcript.project("turn", "delegate", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Coordinate the work" } },
+      }),
+      event("spawned", 1, "child_run.spawned", {
+        data: { tool_call_id: "agent", child_execution_id: "child:turn:agent" },
+      }),
+    ])
+    const firstBatch = Transcript.project("child:turn:agent", "", [
+      event("gc", 0, "tool.call.requested", {
+        data: { tool_call_id: "gc", tool_name: "task", input: { prompt: "Run the nested work" } },
+      }),
+      event("gc-spawned", 1, "child_run.spawned", {
+        data: { tool_call_id: "gc", child_execution_id: "grandchild" },
+      }),
+    ])
+    const secondBatch = Transcript.project("child:turn:agent", "", [
+      event("gc-done", 0, "child_run.completed", {
+        data: { child_execution_id: "grandchild", profile: "task" },
+      }),
+    ])
+    let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", firstBatch.units)
+    const toolCount = model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ToolCall").length
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", secondBatch.units)
+
+    const grandchildTools = model.blocks.filter(
+      (block) =>
+        (block as ViewState.TranscriptBlock)._tag === "ToolCall" &&
+        (block as { childId?: string }).childId === "grandchild",
+    )
+    expect(grandchildTools).toHaveLength(1)
+    expect(grandchildTools[0]).toMatchObject({ id: "child:turn:agent:gc", status: "complete" })
+    expect(model.blocks.some((block) => (block as ViewState.TranscriptBlock)._tag === "ChildAgent")).toBe(false)
+    expect(model.blocks.filter((block) => (block as ViewState.TranscriptBlock)._tag === "ToolCall").length).toBe(
+      toolCount,
+    )
   })
 
   it("renders a completed child response from its parent result when child events are unavailable", () => {
@@ -508,9 +640,9 @@ describe("ExecutionEvents.projectUnits", () => {
               id: transcriptUnitId(model, unit),
               children: unit.children?.map((child) => transcriptUnitId(model, child)),
               response:
-                unit.response === undefined
-                  ? undefined
-                  : (model.entries[unit.response]?.text ?? "").replaceAll("\n", "\\n"),
+                unit.terminal?.kind === "answer"
+                  ? (model.entries[unit.terminal.entry]?.text ?? "").replaceAll("\n", "\\n")
+                  : undefined,
             }
           : { kind: unit.kind },
       )

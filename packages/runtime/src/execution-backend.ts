@@ -334,7 +334,8 @@ export const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
   Toolkit.make(
     ...Object.values(RikaToolRuntime.toolkit.tools).filter(
       (tool) =>
-        (tool.name !== "web_search" || webSearchCredentials(options).length > 0) &&
+        (tool.name !== "web_search" ||
+          webSearchFactories(Object.fromEntries(webSearchCredentials(options))).factories.length > 0) &&
         (tool.name !== "read_web_page" || parallelCredential(options) !== undefined),
     ),
     ...Object.values(AgentTools.modelToolkit.tools),
@@ -357,7 +358,7 @@ const parallelCredential = (options: Pick<LayerOptions, "webSearchCredentials" |
 
 const webSearchCredentials = (options: Pick<LayerOptions, "webSearchCredentials" | "parallelApiKey">) =>
   Object.entries({
-    ...(options.webSearchCredentials ?? {}),
+    ...options.webSearchCredentials,
     ...(parallelCredential(options) === undefined ? {} : { parallel: parallelCredential(options)! }),
   })
 
@@ -368,7 +369,7 @@ export const webSearchFactories = (
   const unsupportedIds: Array<string> = []
   for (const [id, apiKey] of Object.entries(credentials)) {
     if (id === "parallel") factories.push(WebSearch.parallel({ apiKey }))
-    else if (id === "exa") factories.push(WebSearch.exa({ apiKey }), WebSearch.exaCode({ apiKey }))
+    else if (id === "exa") factories.push(WebSearch.exa({ apiKey }))
     else if (id === "firecrawl") factories.push(WebSearch.firecrawl({ apiKey }))
     else if (id === "github") factories.push(WebSearch.github({ apiKey }))
     else unsupportedIds.push(id)
@@ -444,8 +445,7 @@ const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.
         executionRouteFromMetadata(current.agent_snapshot?.model.metadata)
       if (route !== undefined) return route
       const parentId: unknown = current.metadata?.parent_execution_id
-      current =
-        typeof parentId === "string" ? yield* client.executions.get(Ids.ExecutionId.make(parentId)) : undefined
+      current = typeof parentId === "string" ? yield* client.executions.get(Ids.ExecutionId.make(parentId)) : undefined
     }
     return undefined
   })
@@ -1207,14 +1207,14 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           }).pipe(Effect.mapError(error)),
         ),
         inspectFanOut: Effect.fn("ExecutionBackend.inspectFanOut")(function* (fanOutId) {
-          const result = yield* client
-            .childRuns.inspectFanOut({ fan_out_id: Ids.ChildFanOutId.make(fanOutId) })
+          const result = yield* client.childRuns
+            .inspectFanOut({ fan_out_id: Ids.ChildFanOutId.make(fanOutId) })
             .pipe(Effect.mapError(error))
           return result.fan_out === null ? undefined : mapFanOut(result.fan_out)
         }),
         cancelFanOut: Effect.fn("ExecutionBackend.cancelFanOut")(function* (fanOutId, cancelledAt, reason) {
-          const result = yield* client
-            .childRuns.cancelFanOut({
+          const result = yield* client.childRuns
+            .cancelFanOut({
               fan_out_id: Ids.ChildFanOutId.make(fanOutId),
               cancelled_at: cancelledAt,
               ...(reason === undefined ? {} : { reason }),
@@ -1237,8 +1237,8 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           )
         }),
         startWorkflow: Effect.fn("ExecutionBackend.startWorkflow")(function* (name, runId, revision, ownerTurnId) {
-          const result = yield* client
-            .workflows.startRun({
+          const result = yield* client.workflows
+            .startRun({
               execution_id: workflowExecutionId(runId, ownerTurnId),
               workflow_definition_id: idFor(name),
               ...(revision === undefined ? {} : { revision }),
@@ -1247,14 +1247,14 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           return workflow(result)
         }),
         inspectWorkflow: Effect.fn("ExecutionBackend.inspectWorkflow")(function* (runId, ownerTurnId) {
-          const result = yield* client
-            .workflows.inspectRun(workflowExecutionId(runId, ownerTurnId))
+          const result = yield* client.workflows
+            .inspectRun(workflowExecutionId(runId, ownerTurnId))
             .pipe(Effect.mapError(error))
           return result === undefined ? undefined : workflow(result)
         }),
         cancelWorkflow: Effect.fn("ExecutionBackend.cancelWorkflow")(function* (runId, ownerTurnId) {
-          const result = yield* client
-            .workflows.cancelRun(workflowExecutionId(runId, ownerTurnId))
+          const result = yield* client.workflows
+            .cancelRun(workflowExecutionId(runId, ownerTurnId))
             .pipe(Effect.mapError(error))
           return result === undefined ? undefined : workflow(result)
         }),
@@ -1268,8 +1268,8 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           const preset = resolve(input.profile, pinnedSelection(route)).preset
           const depth = childExecutionDepth(String(parentExecutionId)) + 1
           const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
-          yield* client
-            .childRuns.spawn({
+          yield* client.childRuns
+            .spawn({
               execution_id: parentExecutionId,
               child_execution_id: makeChildExecutionId(input.parentTurnId, input.childId),
               address_id: addressId,
@@ -2053,8 +2053,8 @@ export const layer = <
                         })
                         .pipe(
                           Effect.catchTag("ClientError", (startError) =>
-                            client
-                              .executions.get(Ids.ExecutionId.make(String(childId)))
+                            client.executions
+                              .get(Ids.ExecutionId.make(String(childId)))
                               .pipe(
                                 Effect.flatMap((existing) =>
                                   existing === undefined ? Effect.fail(startError) : Effect.succeed(existing),

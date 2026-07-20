@@ -72,11 +72,7 @@ test("model-invoked built-in shell cannot bypass an ask policy", () =>
     workspaceSettings: settings("ask"),
     script: [
       Scene.model.turn([
-        Scene.model.toolCall(
-          "bash",
-          { command: "sh", args: ["-lc", "printf MODEL_APPROVED > model-approved.txt"] },
-          "model-shell",
-        ),
+        Scene.model.toolCall("bash", { command: "printf MODEL_APPROVED > model-approved.txt" }, "model-shell"),
       ]),
       Scene.model.text("Model shell completed."),
     ],
@@ -95,11 +91,7 @@ test("model-invoked built-in shell cannot bypass a deny policy", () =>
     workspaceSettings: settings("deny"),
     script: [
       Scene.model.turn([
-        Scene.model.toolCall(
-          "bash",
-          { command: "sh", args: ["-lc", "printf BYPASS > model-denied.txt"] },
-          "denied-model-shell",
-        ),
+        Scene.model.toolCall("bash", { command: "printf BYPASS > model-denied.txt" }, "denied-model-shell"),
       ]),
       Scene.model.text("Denied model shell handled."),
     ],
@@ -117,13 +109,7 @@ test("restarting at a durable shell wait does not approve or duplicate the comma
   Scene.run({
     workspaceSettings: settings("ask"),
     script: [
-      Scene.model.turn([
-        Scene.model.toolCall(
-          "bash",
-          { command: "sh", args: ["-lc", "printf BYPASS > restarted.txt"] },
-          "restarted-shell",
-        ),
-      ]),
+      Scene.model.turn([Scene.model.toolCall("bash", { command: "printf BYPASS > restarted.txt" }, "restarted-shell")]),
       Scene.model.text("RESTART_REFUSED"),
     ],
     actions: [
@@ -145,11 +131,7 @@ test("read-only specialists cannot acquire shell by asking or by naming it direc
     script: [
       Scene.model.turn([Scene.model.toolCall("oracle", { prompt: "Try to run shell." }, "oracle-shell")]),
       Scene.model.turn([
-        Scene.model.toolCall(
-          "bash",
-          { command: "sh", args: ["-lc", "printf BYPASS > specialist-bypass.txt"] },
-          "specialist-shell",
-        ),
+        Scene.model.toolCall("bash", { command: "printf BYPASS > specialist-bypass.txt" }, "specialist-shell"),
       ]),
       Scene.model.text("Shell was unavailable."),
       Scene.model.text("Specialist narrowing checked."),

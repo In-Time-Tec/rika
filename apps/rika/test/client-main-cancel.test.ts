@@ -13,7 +13,7 @@ test(
               {
                 type: "toolCall",
                 name: "bash",
-                params: { command: "printf", args: ["TOO_LATE"] },
+                params: { command: "printf TOO_LATE" },
                 id: "cancel-busy-turn",
               },
             ],

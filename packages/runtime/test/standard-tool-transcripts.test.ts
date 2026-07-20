@@ -10,10 +10,10 @@ import { start } from "./current-execution-route"
 const cases = [
   ["find_files", { query: "fixture" }, "query"],
   ["grep", { pattern: "needle", regex: false }, "pattern"],
-  ["read", { path: "fixture.txt", limit: 1 }, "path"],
+  ["read", { path: "fixture.txt", read_range: [1, 1] }, "path"],
   ["write", { path: "created.txt", content: "value" }, "path"],
-  ["edit", { path: "fixture.txt", oldText: "old", newText: "new" }, "path"],
-  ["bash", { command: "printf", args: ["safe"] }, "command"],
+  ["edit", { path: "fixture.txt", old_str: "old", new_str: "new" }, "path"],
+  ["bash", { command: "printf safe" }, "command"],
   ["shell_command_status", { processId: "process-1", waitMillis: 0 }, "processId"],
   ["git_status", {}, "refresh"],
   ["web_search", { objective: "deterministic research", searchQueries: ["fixture"] }, "objective"],

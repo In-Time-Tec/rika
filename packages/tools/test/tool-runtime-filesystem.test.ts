@@ -24,37 +24,35 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
         const found = yield* runtime.run({ _tag: "FindFiles", query: ".ts" })
         const literal = yield* runtime.run({ _tag: "Grep", pattern: "beta", regex: false })
         const regex = yield* runtime.run({ _tag: "Grep", pattern: "(?<=b)eta", regex: true })
-        const read = yield* runtime.run({ _tag: "Read", path: "src/a.ts", offset: 1, limit: 1 })
+        const read = yield* runtime.run({ _tag: "Read", path: "src/a.ts", readRange: [2, 2] })
         const escapedRead = yield* Effect.result(runtime.run({ _tag: "Read", path: "link/target.txt" }))
         const escapedFind = yield* runtime.run({ _tag: "FindFiles", query: "link" })
         const escapedGrep = yield* runtime.run({ _tag: "Grep", pattern: "outside", regex: false })
         const created = yield* runtime.run({ _tag: "Write", path: "new/file.txt", content: "old" })
-        const duplicate = yield* Effect.result(runtime.run({ _tag: "Write", path: "new/file.txt", content: "x" }))
-        const edited = yield* runtime.run({ _tag: "Edit", path: "new/file.txt", oldText: "old", newText: "new" })
+        const overwritten = yield* runtime.run({ _tag: "Write", path: "new/file.txt", content: "old" })
+        const edited = yield* runtime.run({ _tag: "Edit", path: "new/file.txt", oldStr: "old", newStr: "new" })
         const stale = yield* Effect.result(
-          runtime.run({ _tag: "Edit", path: "new/file.txt", oldText: "old", newText: "x" }),
+          runtime.run({ _tag: "Edit", path: "new/file.txt", oldStr: "old", newStr: "x" }),
         )
         const ambiguous = yield* Effect.result(
-          runtime.run({ _tag: "Edit", path: "src/a.ts", oldText: "alpha", newText: "x" }),
+          runtime.run({ _tag: "Edit", path: "src/a.ts", oldStr: "alpha", newStr: "x" }),
         )
         const symlinkCreate = yield* Effect.result(
           runtime.run({ _tag: "Write", path: "link/new.txt", content: "escaped" }),
         )
         const symlinkEdit = yield* Effect.result(
-          runtime.run({ _tag: "Edit", path: "link/target.txt", oldText: "outside", newText: "escaped" }),
+          runtime.run({ _tag: "Edit", path: "link/target.txt", oldStr: "outside", newStr: "escaped" }),
         )
-        const shell = yield* runtime.run({ _tag: "Bash", command: "bun", args: ["-e", "console.log('ok')"] })
-        const escapedCwd = yield* Effect.result(
-          runtime.run({ _tag: "Bash", command: "pwd", args: [], cwd: "escaped-cwd" }),
-        )
-        yield* runtime.run({ _tag: "Bash", command: "git", args: ["init", "-q", "-b", "inspection"] })
-        yield* runtime.run({ _tag: "Bash", command: "git", args: ["config", "user.name", "Rika Test"] })
-        yield* runtime.run({ _tag: "Bash", command: "git", args: ["config", "user.email", "rika@example.test"] })
-        yield* runtime.run({ _tag: "Bash", command: "git", args: ["add", "src/a.ts"] })
-        yield* runtime.run({ _tag: "Bash", command: "git", args: ["commit", "-qm", "base"] })
-        yield* runtime.run({ _tag: "Edit", path: "src/a.ts", oldText: "beta", newText: "changed" })
+        const shell = yield* runtime.run({ _tag: "Bash", command: "bun -e \"console.log('ok')\"" })
+        const escapedCwd = yield* Effect.result(runtime.run({ _tag: "Bash", command: "pwd", workdir: "escaped-cwd" }))
+        yield* runtime.run({ _tag: "Bash", command: "git init -q -b inspection" })
+        yield* runtime.run({ _tag: "Bash", command: 'git config user.name "Rika Test"' })
+        yield* runtime.run({ _tag: "Bash", command: "git config user.email rika@example.test" })
+        yield* runtime.run({ _tag: "Bash", command: "git add src/a.ts" })
+        yield* runtime.run({ _tag: "Bash", command: "git commit -qm base" })
+        yield* runtime.run({ _tag: "Edit", path: "src/a.ts", oldStr: "beta", newStr: "changed" })
         yield* runtime.run({ _tag: "Write", path: "staged.txt", content: "staged" })
-        yield* runtime.run({ _tag: "Bash", command: "git", args: ["add", "staged.txt"] })
+        yield* runtime.run({ _tag: "Bash", command: "git add staged.txt" })
         yield* runtime.run({ _tag: "Write", path: "untracked.txt", content: "untracked" })
         const git = yield* runtime.run({ _tag: "GitStatus" })
         return {
@@ -66,7 +64,7 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           escapedFind,
           escapedGrep,
           created,
-          duplicate,
+          overwritten,
           edited,
           stale,
           ambiguous,
@@ -103,9 +101,9 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           expect(result.escapedRead._tag).toBe("Failure")
           expect(result.escapedFind.text).toBe("")
           expect(result.escapedGrep.text).toBe("")
-          expect(result.created.text).toBe("created new/file.txt")
-          expect(result.edited.text).toBe("edited new/file.txt")
-          expect(result.duplicate._tag).toBe("Failure")
+          expect(result.created.text).toBe("Successfully wrote 3 bytes to new/file.txt")
+          expect(result.edited.text).toBe("Successfully replaced text in new/file.txt")
+          expect(result.overwritten.text).toBe("Successfully wrote 3 bytes to new/file.txt")
           expect(result.stale._tag).toBe("Failure")
           expect(result.ambiguous._tag).toBe("Failure")
           expect(result.symlinkCreate._tag).toBe("Failure")

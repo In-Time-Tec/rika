@@ -7,7 +7,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { MediaView, ParallelSearch, ReadWebPage, Runtime as ToolRuntime } from "@rika/tools"
+import { MediaView, ReadWebPage, Runtime as ToolRuntime, WebSearch } from "@rika/tools"
 import { ViewState } from "@rika/tui"
 import { Surface } from "@rika/tui/adapter"
 import { expect, test } from "vitest"
@@ -184,7 +184,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
               ),
             ),
             Layer.provide(
-              Layer.merge(ParallelSearch.layer({}), ReadWebPage.layer({})).pipe(Layer.provide(FetchHttpClient.layer)),
+              Layer.merge(WebSearch.factoryLayer([]), ReadWebPage.layer({})).pipe(Layer.provide(FetchHttpClient.layer)),
             ),
             Layer.provide(BunServices.layer),
           ),

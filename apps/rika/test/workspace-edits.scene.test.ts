@@ -14,7 +14,7 @@ test(
           Scene.model.toolCall("write", { path: "notes/utf8.txt", content: "café ☕\nsecond\n" }, "create"),
         ]),
         Scene.model.turn([
-          Scene.model.toolCall("edit", { path: "notes/utf8.txt", oldText: "café ☕", newText: "你好 🌍" }, "edit"),
+          Scene.model.toolCall("edit", { path: "notes/utf8.txt", old_str: "café ☕", new_str: "你好 🌍" }, "edit"),
         ]),
         Scene.model.text("WORKSPACE_UTF8_DONE"),
       ],
@@ -33,7 +33,7 @@ test(
 )
 
 test(
-  "shows failed overwrite, stale, and ambiguous edits without changing files",
+  "shows overwritten files and failed stale or ambiguous edits",
   () =>
     Scene.run({
       script: [
@@ -42,8 +42,8 @@ test(
         ]),
         Scene.model.turn([
           Scene.model.toolCall("write", { path: "anchor.txt", content: "overwritten" }, "overwrite"),
-          Scene.model.toolCall("edit", { path: "anchor.txt", oldText: "missing", newText: "stale" }, "stale"),
-          Scene.model.toolCall("edit", { path: "anchor.txt", oldText: "same", newText: "ambiguous" }, "ambiguous"),
+          Scene.model.toolCall("edit", { path: "anchor.txt", old_str: "missing", new_str: "stale" }, "stale"),
+          Scene.model.toolCall("edit", { path: "anchor.txt", old_str: "same", new_str: "ambiguous" }, "ambiguous"),
         ]),
         Scene.model.text("WORKSPACE_REJECTIONS_DONE"),
       ],
@@ -53,7 +53,7 @@ test(
       ],
       inspectPaths: ["anchor.txt"],
     }).then((result) => {
-      expect(result.workspaceFiles["anchor.txt"]).toBe("same\nunique\nsame\n")
+      expect(result.workspaceFiles["anchor.txt"]).toBe("overwritten")
       expect(result.output.match(/✕/g)?.length ?? 0).toBeGreaterThanOrEqual(2)
       expect(result.clientLogs.match(/"rika.event.type":"tool.result.received"/g)?.length ?? 0).toBeGreaterThanOrEqual(
         4,
@@ -73,7 +73,7 @@ test(
           [
             Scene.model.toolCall(
               "edit",
-              { path: "stream.txt", oldText: "before\n", newText: "after 🌱\n" },
+              { path: "stream.txt", old_str: "before\n", new_str: "after 🌱\n" },
               "stream-edit",
             ),
           ],

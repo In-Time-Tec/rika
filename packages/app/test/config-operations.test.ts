@@ -18,7 +18,11 @@ it.effect("prints effective redacted config and keymap", () =>
     const layer = Layer.mergeAll(
       TestConsole.layer,
       ConfigService.memoryLayer({
-        environment: { providerCredentials: {}, parallelApiKey: Redacted.make("never-print-this") },
+        environment: {
+          providerCredentials: {},
+          webSearchCredentials: {},
+          parallelApiKey: Redacted.make("never-print-this"),
+        },
         workspace: {
           mcp: {
             local: {
@@ -60,7 +64,10 @@ it.effect("reports an overridden provider without an API key as not configured",
       TestConsole.layer,
       ConfigService.memoryLayer({
         workspace: { providers: { openai: { baseUrl: "https://models.test/v1" } } },
-        environment: { providerCredentials: { OPENAI_API_KEY: Redacted.make("must-not-use-this") } },
+        environment: {
+          providerCredentials: { OPENAI_API_KEY: Redacted.make("must-not-use-this") },
+          webSearchCredentials: {},
+        },
       }),
       ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(false) }),
     )
@@ -109,6 +116,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
       ConfigService.memoryLayer({
         environment: {
           parallelApiKey: Redacted.make("secret"),
+          webSearchCredentials: {},
           providerCredentials: {
             OPENAI_API_KEY: Redacted.make("model-secret"),
             ANTHROPIC_API_KEY: Redacted.make("oracle-secret"),
@@ -176,7 +184,11 @@ it.effect("fails doctor when the configured model route cannot be resolved", () 
       Layer.succeed(
         ConfigService.Service,
         ConfigService.Service.of({
-          effective: Effect.succeed({ settings, environment: { providerCredentials: {} }, diagnostics: [] }),
+          effective: Effect.succeed({
+            settings,
+            environment: { providerCredentials: {}, webSearchCredentials: {} },
+            diagnostics: [],
+          }),
         }),
       ),
       ConfigOperations.testLayer({ edit: () => Effect.void, exists: () => Effect.succeed(true) }),

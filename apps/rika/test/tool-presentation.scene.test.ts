@@ -11,17 +11,17 @@ test(
           Scene.model.toolCall("write", { path: "beta.txt", content: "beta\n" }, "create-beta"),
         ]),
         Scene.model.turn([
-          Scene.model.toolCall("read", { path: "alpha.txt", offset: 1, limit: 1 }, "read-alpha"),
+          Scene.model.toolCall("read", { path: "alpha.txt", read_range: [1, 1] }, "read-alpha"),
           Scene.model.toolCall("grep", { pattern: "alpha", regex: false }, "grep-alpha"),
           Scene.model.toolCall("find_files", { query: "beta" }, "find-beta"),
         ]),
         Scene.model.turn([
-          Scene.model.toolCall("edit", { path: "alpha.txt", oldText: "alpha", newText: "ALPHA" }, "edit-alpha"),
+          Scene.model.toolCall("edit", { path: "alpha.txt", old_str: "alpha", new_str: "ALPHA" }, "edit-alpha"),
           Scene.model.toolCall("write", { path: "gamma.txt", content: "gamma\n" }, "create-gamma"),
         ]),
         Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "printf", args: ["shell-output"] }, "shell-pass"),
-          Scene.model.toolCall("bash", { command: "sh", args: ["-c", "printf shell-failure; exit 7"] }, "shell-fail"),
+          Scene.model.toolCall("bash", { command: "printf shell-output" }, "shell-pass"),
+          Scene.model.toolCall("bash", { command: "printf shell-failure; exit 7" }, "shell-fail"),
         ]),
         Scene.model.text("DONE"),
       ],

@@ -18,8 +18,7 @@ export const Grep = Schema.Struct({ _tag: Schema.tag("Grep"), pattern: Schema.St
 export const Read = Schema.Struct({
   _tag: Schema.tag("Read"),
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.Finite),
-  limit: Schema.optionalKey(Schema.Finite),
+  readRange: Schema.optionalKey(Schema.Array(Schema.Finite).check(Schema.isLengthBetween(2, 2))),
 })
 export const Write = Schema.Struct({
   _tag: Schema.tag("Write"),
@@ -29,11 +28,18 @@ export const Write = Schema.Struct({
 export const Edit = Schema.Struct({
   _tag: Schema.tag("Edit"),
   path: Schema.String,
-  oldText: Schema.String,
-  newText: Schema.String,
+  oldStr: Schema.String,
+  newStr: Schema.String,
+  replaceAll: Schema.optionalKey(Schema.Boolean),
 })
 export const Bash = Schema.Struct({
   _tag: Schema.tag("Bash"),
+  command: Schema.String,
+  workdir: Schema.optionalKey(Schema.String),
+  timeoutMillis: Schema.optionalKey(NonNegativeInt),
+})
+export const Shell = Schema.Struct({
+  _tag: Schema.tag("Shell"),
   command: Schema.String,
   args: Schema.Array(Schema.String),
   cwd: Schema.optionalKey(Schema.String),
@@ -70,6 +76,7 @@ export const Request = Schema.Union([
   Write,
   Edit,
   Bash,
+  Shell,
   ShellCommandStatus,
   GitStatus,
   WebSearch,
@@ -125,28 +132,27 @@ export const grepTool = tool("grep", "Search UTF-8 workspace files for text or a
   pattern: Schema.String,
   regex: Schema.Boolean,
 })
-export const readTool = tool("read", "Read a bounded UTF-8 file range with stable line numbers", {
+export const readTool = tool("read", "Read a file with stable line numbers, optionally selecting an inclusive range", {
   path: Schema.String,
-  offset: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-  limit: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  read_range: Schema.optionalKey(Schema.Array(Schema.Finite).check(Schema.isLengthBetween(2, 2))),
 })
-export const writeTool = tool("write", "Create a new UTF-8 file without overwriting an existing path", {
+export const writeTool = tool("write", "Create or overwrite a UTF-8 file, creating parent directories as needed", {
   path: Schema.String,
   content: Schema.String,
 })
-export const editTool = tool("edit", "Replace one exact text occurrence and reject stale or ambiguous anchors", {
+export const editTool = tool("edit", "Replace exact text in an existing file and return a diff", {
   path: Schema.String,
-  oldText: Schema.String,
-  newText: Schema.String,
+  old_str: Schema.String,
+  new_str: Schema.String,
+  replace_all: Schema.optionalKey(Schema.Boolean),
 })
 export const bashTool = tool(
   "bash",
-  "Run one command in the workspace and return a process id if it outlives the wait",
+  "Run a shell command in the workspace and return a process id if it outlives the wait",
   {
     command: Schema.String,
-    args: Schema.Array(Schema.String),
-    cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    waitMillis: Schema.optionalKey(Schema.NullOr(NonNegativeInt)),
+    workdir: Schema.optionalKey(Schema.String),
+    timeout_ms: Schema.optionalKey(NonNegativeInt),
   },
 )
 export const shellCommandStatusTool = tool(
@@ -212,22 +218,27 @@ export const handlerLayer = toolkit.toLayer(
     return {
       find_files: ({ query }) => runtime.run({ _tag: "FindFiles", query }),
       grep: ({ pattern, regex }) => runtime.run({ _tag: "Grep", pattern, regex }),
-      read: ({ path, offset, limit }) =>
+      read: ({ path, read_range }) =>
         runtime.run({
           _tag: "Read",
           path,
-          ...(offset == null ? {} : { offset }),
-          ...(limit == null ? {} : { limit }),
+          ...(read_range === undefined ? {} : { readRange: read_range }),
         }),
       write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),
-      edit: ({ path, oldText, newText }) => runtime.run({ _tag: "Edit", path, oldText, newText }),
-      bash: ({ command, args, cwd, waitMillis }) =>
+      edit: ({ path, old_str, new_str, replace_all }) =>
+        runtime.run({
+          _tag: "Edit",
+          path,
+          oldStr: old_str,
+          newStr: new_str,
+          ...(replace_all === undefined ? {} : { replaceAll: replace_all }),
+        }),
+      bash: ({ command, workdir, timeout_ms }) =>
         runtime.run({
           _tag: "Bash",
           command,
-          args,
-          ...(cwd == null ? {} : { cwd }),
-          ...(waitMillis == null ? {} : { waitMillis }),
+          ...(workdir === undefined ? {} : { workdir }),
+          ...(timeout_ms === undefined ? {} : { timeoutMillis: timeout_ms }),
         }),
       shell_command_status: ({ processId, waitMillis }) =>
         runtime.run({ _tag: "ShellCommandStatus", processId, ...(waitMillis == null ? {} : { waitMillis }) }),
@@ -469,52 +480,68 @@ export const layer = (workspace: string) =>
                 return bounded(matches.join("\n"))
               }
               case "Read": {
-                if (
-                  (request.offset !== undefined && (!Number.isInteger(request.offset) || request.offset < 0)) ||
-                  (request.limit !== undefined && (!Number.isInteger(request.limit) || request.limit < 1))
-                )
+                const start = request.readRange?.[0] ?? 1
+                const end = request.readRange?.[1] ?? 1_000
+                if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start)
                   return yield* new RuntimeOperationError({ message: "Invalid file range" })
                 const target = yield* resolveContained(request.path)
                 const lines = (yield* fileSystem.readFileString(target)).split("\n")
-                const offset = request.offset ?? 0
-                const limit = Math.min(request.limit ?? 500, 2_000)
                 return bounded(
                   lines
-                    .slice(offset, offset + limit)
-                    .map((line, index) => `${offset + index + 1}: ${line}`)
+                    .slice(start - 1, end)
+                    .map((line, index) => `${start + index}: ${line}`)
                     .join("\n"),
                 )
               }
               case "Write": {
                 const target = yield* resolveEdit(request.path)
-                if (yield* fileSystem.exists(target))
-                  return yield* new RuntimeOperationError({ message: `${request.path} already exists` })
+                const exists = yield* fileSystem.exists(target)
+                const previous = exists ? yield* fileSystem.readFileString(target) : ""
                 yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true })
-                yield* fileSystem.writeFileString(target, request.content, { flag: "wx" })
+                yield* fileSystem.writeFileString(target, request.content)
                 return {
-                  ...bounded(`created ${request.path}`),
-                  ...boundedDiff(unifiedDiff(request.path, "", request.content, true)),
+                  ...bounded(`Successfully wrote ${request.content.length} bytes to ${request.path}`),
+                  ...boundedDiff(unifiedDiff(request.path, previous, request.content, !exists)),
                 }
               }
               case "Edit": {
                 const target = yield* resolveEdit(request.path)
                 const content = yield* fileSystem.readFileString(target)
-                const first = content.indexOf(request.oldText)
-                if (first < 0) return yield* new RuntimeOperationError({ message: "stale anchor" })
-                if (content.indexOf(request.oldText, first + request.oldText.length) >= 0)
-                  return yield* new RuntimeOperationError({ message: "ambiguous anchor" })
-                const next = content.slice(0, first) + request.newText + content.slice(first + request.oldText.length)
+                if (request.oldStr === request.newStr)
+                  return yield* new RuntimeOperationError({ message: "old_str and new_str must be different" })
+                if (request.oldStr.length === 0)
+                  return yield* new RuntimeOperationError({ message: "old_str must not be empty" })
+                const first = content.indexOf(request.oldStr)
+                if (first < 0) return yield* new RuntimeOperationError({ message: "old_str was not found" })
+                const second = content.indexOf(request.oldStr, first + request.oldStr.length)
+                if (second >= 0 && request.replaceAll !== true)
+                  return yield* new RuntimeOperationError({ message: "old_str is not unique; set replace_all to true" })
+                const next =
+                  request.replaceAll === true
+                    ? content.split(request.oldStr).join(request.newStr)
+                    : content.slice(0, first) + request.newStr + content.slice(first + request.oldStr.length)
                 yield* fileSystem.writeFileString(target, next)
                 return {
-                  ...bounded(`edited ${request.path}`),
+                  ...bounded(`Successfully replaced text in ${request.path}`),
                   ...boundedDiff(unifiedDiff(request.path, content, next)),
                 }
               }
               case "Bash": {
+                const cwd = yield* resolveCwd(request.workdir ?? ".")
+                const processId = yield* processes.start("/bin/bash", ["-lc", request.command], cwd)
+                const output = yield* processes
+                  .poll(processId, Math.min(Math.max(0, request.timeoutMillis ?? 10_000), 60_000), maxOutput)
+                  .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
+                return {
+                  ...output,
+                  text: `${output.stdout}${output.stderr}${output.exitCode === undefined || output.exitCode === 0 ? "" : `\nexit ${output.exitCode}`}`.trim(),
+                }
+              }
+              case "Shell": {
                 const cwd = yield* resolveCwd(request.cwd ?? ".")
                 const processId = yield* processes.start(request.command, request.args, cwd)
                 const output = yield* processes
-                  .poll(processId, Math.min(Math.max(0, request.waitMillis ?? 500), 120_000), maxOutput)
+                  .poll(processId, Math.min(Math.max(0, request.waitMillis ?? 10_000), 120_000), maxOutput)
                   .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
                 return {
                   ...output,

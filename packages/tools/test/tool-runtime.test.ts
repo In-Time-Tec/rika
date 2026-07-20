@@ -104,23 +104,24 @@ const testEnvironment = (
     ChildProcessSpawner.make((command) => {
       if (command._tag === "PipedCommand") return Effect.fail(platformError("spawn", "pipeline"))
       commands.push(command)
-      if (command.command === "never-spawn") return Effect.never
-      if (command.command === "fail-spawn") return Effect.fail(platformError("spawn", command.command))
-      if (command.command === "large")
+      const executed = command.command === "/bin/bash" ? command.args[1] : command.command
+      if (executed === "never-spawn") return Effect.never
+      if (executed === "fail-spawn") return Effect.fail(platformError("spawn", executed))
+      if (executed === "large")
         return Effect.succeed(processHandle({ stdout: "x".repeat(40_001), stderr: "", exitCode: 0 }))
-      if (command.command === "unicode-boundary")
+      if (executed === "unicode-boundary")
         return Effect.succeed(processHandle({ stdout: `${"x".repeat(39_999)}🙂`, stderr: "", exitCode: 0 }))
-      if (command.command === "running") {
+      if (executed === "running") {
         const handle = processHandle({ stdout: "x".repeat(40_001), stderr: "error", exitCode: 0 }, () =>
-          killed.push(command.command),
+          killed.push(executed),
         )
         return Effect.succeed({ ...handle, exitCode: Effect.never })
       }
-      if (command.command === "stream-failure") {
+      if (executed === "stream-failure") {
         const handle = processHandle({ stdout: "", stderr: "", exitCode: 0 })
-        return Effect.succeed({ ...handle, stdout: Stream.fail(platformError("stdout", command.command)) })
+        return Effect.succeed({ ...handle, stdout: Stream.fail(platformError("stdout", executed)) })
       }
-      if (command.command === "bad") return Effect.succeed(processHandle({ stdout: "out", stderr: "err", exitCode: 7 }))
+      if (executed === "bad") return Effect.succeed(processHandle({ stdout: "out", stderr: "err", exitCode: 7 }))
       if (command.command === "git") {
         if (git === "missing") return Effect.fail(platformError("spawn", command.command))
         if (git === "nonzero")
@@ -189,16 +190,16 @@ describe("Runtime", () => {
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const defaults = yield* runtime.run({ _tag: "Read", path: "a.txt" })
-      const negative = yield* Effect.flip(runtime.run({ _tag: "Read", path: "a.txt", offset: -4 }))
-      const zero = yield* Effect.flip(runtime.run({ _tag: "Read", path: "a.txt", limit: 0 }))
-      const fractional = yield* Effect.flip(runtime.run({ _tag: "Read", path: "a.txt", offset: 0.5 }))
-      const high = yield* runtime.run({ _tag: "Read", path: "a.txt", offset: 1, limit: 5_000 })
+      const negative = yield* Effect.flip(runtime.run({ _tag: "Read", path: "a.txt", readRange: [-4, 1] }))
+      const reversed = yield* Effect.flip(runtime.run({ _tag: "Read", path: "a.txt", readRange: [2, 1] }))
+      const fractional = yield* Effect.flip(runtime.run({ _tag: "Read", path: "a.txt", readRange: [1.5, 2] }))
+      const selected = yield* runtime.run({ _tag: "Read", path: "a.txt", readRange: [2, 3] })
 
       expect(defaults.text).toBe("1: zero\n2: needle\n3: last")
       expect(negative).toMatchObject({ _tag: "ToolError", tool: "read" })
-      expect(zero).toMatchObject({ _tag: "ToolError", tool: "read" })
+      expect(reversed).toMatchObject({ _tag: "ToolError", tool: "read" })
       expect(fractional).toMatchObject({ _tag: "ToolError", tool: "read" })
-      expect(high.text).toBe("2: needle\n3: last")
+      expect(selected.text).toBe("2: needle\n3: last")
     }).pipe(provide(environment.runtime))
   })
 
@@ -249,31 +250,37 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
-  it.effect("creates and edits files while rejecting existing, stale, and ambiguous changes", () => {
+  it.effect("creates, overwrites, and edits files with Amp replacement semantics", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const created = yield* runtime.run({ _tag: "Write", path: "new/file.txt", content: "old" })
-      const existing = yield* Effect.flip(runtime.run({ _tag: "Write", path: "new/file.txt", content: "duplicate" }))
-      const edited = yield* runtime.run({ _tag: "Edit", path: "new/file.txt", oldText: "old", newText: "new" })
-      const stale = yield* Effect.flip(
-        runtime.run({ _tag: "Edit", path: "new/file.txt", oldText: "old", newText: "x" }),
-      )
+      const overwritten = yield* runtime.run({ _tag: "Write", path: "new/file.txt", content: "duplicate" })
+      const edited = yield* runtime.run({ _tag: "Edit", path: "new/file.txt", oldStr: "duplicate", newStr: "new" })
+      const stale = yield* Effect.flip(runtime.run({ _tag: "Edit", path: "new/file.txt", oldStr: "old", newStr: "x" }))
       const ambiguous = yield* Effect.flip(
-        runtime.run({ _tag: "Edit", path: "ambiguous.txt", oldText: "same", newText: "x" }),
+        runtime.run({ _tag: "Edit", path: "ambiguous.txt", oldStr: "same", newStr: "x" }),
       )
+      const replacedAll = yield* runtime.run({
+        _tag: "Edit",
+        path: "ambiguous.txt",
+        oldStr: "same",
+        newStr: "changed",
+        replaceAll: true,
+      })
 
-      expect(created).toMatchObject({ text: "created new/file.txt", truncated: false })
+      expect(created).toMatchObject({ text: "Successfully wrote 3 bytes to new/file.txt", truncated: false })
       expect(created.diff).toContain("+++ b/new/file.txt")
       expect(created.diff).toContain("+old")
-      expect(edited.text).toBe("edited new/file.txt")
-      expect(edited.diff).toContain("-old")
+      expect(overwritten.diff).toContain("-old")
+      expect(overwritten.diff).toContain("+duplicate")
+      expect(edited.text).toBe("Successfully replaced text in new/file.txt")
+      expect(edited.diff).toContain("-duplicate")
       expect(edited.diff).toContain("+new")
       expect(environment.files.get("/workspace/new/file.txt")).toBe("new")
-      expect(existing).toMatchObject({ _tag: "ToolError", tool: "write" })
-      expect(existing.message).toContain("already exists")
-      expect(stale.message).toContain("stale anchor")
-      expect(ambiguous.message).toContain("ambiguous anchor")
+      expect(stale.message).toContain("old_str was not found")
+      expect(ambiguous.message).toContain("old_str is not unique")
+      expect(replacedAll.diff).toContain("+changed changed")
     }).pipe(provide(environment.runtime))
   })
 
@@ -291,16 +298,16 @@ describe("Runtime", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
-      const ok = yield* runtime.run({ _tag: "Bash", command: "ok", args: ["one"] })
-      const bad = yield* runtime.run({ _tag: "Bash", command: "bad", args: [] })
+      const ok = yield* runtime.run({ _tag: "Bash", command: "ok" })
+      const bad = yield* runtime.run({ _tag: "Bash", command: "bad" })
       const git = yield* runtime.run({ _tag: "GitStatus" })
-      const large = yield* runtime.run({ _tag: "Bash", command: "large", args: [] })
-      const running = yield* runtime.run({ _tag: "Bash", command: "running", args: [], waitMillis: 0 })
+      const large = yield* runtime.run({ _tag: "Bash", command: "large" })
+      const running = yield* runtime.run({ _tag: "Bash", command: "running", timeoutMillis: 0 })
       const completed = yield* Effect.flip(
         runtime.run({ _tag: "ShellCommandStatus", processId: ok.processId ?? "", waitMillis: 0 }),
       )
-      const failedStream = yield* runtime.run({ _tag: "Bash", command: "stream-failure", args: [] })
-      const unicodeBoundary = yield* runtime.run({ _tag: "Bash", command: "unicode-boundary", args: [] })
+      const failedStream = yield* runtime.run({ _tag: "Bash", command: "stream-failure" })
+      const unicodeBoundary = yield* runtime.run({ _tag: "Bash", command: "unicode-boundary" })
 
       expect(ok).toMatchObject({ text: "outerr", truncated: false, running: false, exitCode: 0 })
       expect(bad.text).toBe("outerr\nexit 7")
@@ -312,13 +319,13 @@ describe("Runtime", () => {
       expect(failedStream).toMatchObject({ running: false, exitCode: 0, truncated: true })
       expect(unicodeBoundary).toMatchObject({ text: "x".repeat(39_999), truncated: true })
       expect(environment.commands.map(({ command, args, options }) => ({ command, args, cwd: options.cwd }))).toEqual([
-        { command: "ok", args: ["one"], cwd: workspace },
-        { command: "bad", args: [], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "ok"], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "bad"], cwd: workspace },
         { command: "git", args: ["--no-optional-locks", "status", "--short", "--branch"], cwd: workspace },
-        { command: "large", args: [], cwd: workspace },
-        { command: "running", args: [], cwd: workspace },
-        { command: "stream-failure", args: [], cwd: workspace },
-        { command: "unicode-boundary", args: [], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "large"], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "running"], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "stream-failure"], cwd: workspace },
+        { command: "/bin/bash", args: ["-lc", "unicode-boundary"], cwd: workspace },
       ])
     }).pipe(provide(environment.runtime))
   })
@@ -373,7 +380,7 @@ describe("Runtime", () => {
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const read = yield* Effect.flip(runtime.run({ _tag: "Read", path: "missing.txt" }))
-      const shell = yield* Effect.flip(runtime.run({ _tag: "Bash", command: "fail-spawn", args: [] }))
+      const shell = yield* Effect.flip(runtime.run({ _tag: "Bash", command: "fail-spawn" }))
 
       expect(read).toMatchObject({ _tag: "ToolError", tool: "read" })
       expect(read).toMatchObject({ kind: "operation", outcome: "known" })
@@ -387,9 +394,7 @@ describe("Runtime", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
-      const call = yield* Effect.forkChild(
-        runtime.run({ _tag: "Bash", command: "never-spawn", args: [], waitMillis: 120_000 }),
-      )
+      const call = yield* Effect.forkChild(runtime.run({ _tag: "Bash", command: "never-spawn", timeoutMillis: 60_000 }))
       yield* Effect.yieldNow
       yield* TestClock.adjust("120 seconds")
       const failure = yield* Effect.flip(Fiber.join(call))
@@ -426,9 +431,7 @@ describe("Runtime", () => {
     const environment = testEnvironment()
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
-      const call = yield* Effect.forkChild(
-        runtime.run({ _tag: "Bash", command: "running", args: [], waitMillis: 10_000 }),
-      )
+      const call = yield* Effect.forkChild(runtime.run({ _tag: "Bash", command: "running", timeoutMillis: 10_000 }))
       yield* Effect.yieldNow
       yield* Fiber.interrupt(call)
       expect(environment.killed).toEqual(["running"])

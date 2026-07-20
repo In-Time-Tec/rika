@@ -31,6 +31,22 @@ const windowUnitToolCall = (id: string, family: "agent" | "explore") => ({
   files: [],
 })
 
+const agentToolBlock = (status: "running" | "complete" | "failed" | "cancelled", detail = "Investigate the crash") => ({
+  _tag: "ToolCall" as const,
+  id: "agent",
+  name: "task",
+  input: "{}",
+  status,
+  presentation: {
+    family: "agent" as const,
+    action: "task",
+    activeLabel: "Subagent working",
+    completeLabel: "Subagent finished",
+  },
+  detail,
+  files: [],
+})
+
 const opentui = vi.hoisted(() => {
   const boxChildren: Array<object> = []
   const keyHandlers = new Set<(key: object) => void>()
@@ -931,6 +947,63 @@ describe("Surface", () => {
     expect(text).not.toContain("Subagent finished Fix packaging integration tests")
   })
 
+  test("renders an expanded failed subagent's failure text in red", () => {
+    const state = model({
+      blocks: [agentToolBlock("failed")],
+      items: [{ _tag: "Block", index: 0, id: "tool:agent" }],
+      childExecutionOutcomes: { agent: { status: "failed", reason: "network exploded" } },
+      expandedRowKeys: ["tool:agent"],
+    })
+    const built = buildTranscript(state)
+    const chunk = built.styled.chunks.find((current) => current.text.includes("network exploded")) as
+      | { readonly text: string; readonly fg?: string }
+      | undefined
+    expect(chunk).toBeDefined()
+    expect(chunk?.fg).toBe(colors.red)
+  })
+
+  test("tones a cancelled subagent amber and an empty completed subagent dim", () => {
+    const cancelled = model({
+      blocks: [agentToolBlock("cancelled")],
+      items: [{ _tag: "Block", index: 0, id: "tool:agent" }],
+      childExecutionOutcomes: { agent: { status: "cancelled", reason: "user stopped the run" } },
+      expandedRowKeys: ["tool:agent"],
+    })
+    const cancelledChunk = buildTranscript(cancelled).styled.chunks.find((current) =>
+      current.text.includes("user stopped the run"),
+    ) as { readonly text: string; readonly fg?: string } | undefined
+    expect(cancelledChunk?.fg).toBe(colors.amber)
+
+    const completed = model({
+      blocks: [agentToolBlock("complete")],
+      items: [{ _tag: "Block", index: 0, id: "tool:agent" }],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const built = buildTranscript(completed)
+    const infoChunk = built.styled.chunks.find((current) =>
+      current.text.includes("finished without a final message"),
+    ) as { readonly text: string; readonly fg?: string } | undefined
+    expect(infoChunk).toBeDefined()
+    expect(infoChunk?.fg).toBe(colors.text)
+  })
+
+  test("renders a completed subagent's final answer, not a blank terminal", () => {
+    const state = model({
+      entries: [{ role: "assistant", text: "The bug was a missing await." }],
+      blocks: [agentToolBlock("complete")],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent" },
+        { _tag: "Entry", index: 0, id: "answer:0", parentId: "agent" },
+      ],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const text = buildTranscript(state)
+      .styled.chunks.map((current) => current.text)
+      .join("")
+    expect(text).toContain("The bug was a missing await.")
+    expect(text).not.toContain("finished without a final message")
+  })
+
   test("matches Amp cancelled subagent and shell treatment", () => {
     const state = model({
       blocks: [
@@ -990,7 +1063,6 @@ describe("Surface", () => {
     expect(built.ranges.find((range) => range.unit === "tool:parent")?.animated).toBe(false)
     expect(built.ranges.find((range) => range.unit === "tool:child-shell")?.animated).toBe(false)
   })
-
 
   const editToolBlock = {
     _tag: "ToolCall",
@@ -1082,7 +1154,7 @@ describe("Surface", () => {
   test("keeps the nested connector tree as the only vertical treatment in an expanded subagent", () => {
     const state = model({
       blocks: [
-        { ...subagentToolBlock, detail: "Inspect the projection" },
+        { ...subagentToolBlock, status: "running", detail: "Inspect the projection" },
         shell("child-a", "bun test", "passed"),
         shell("child-b", "bun run check", "clean"),
       ],
@@ -1100,6 +1172,33 @@ describe("Surface", () => {
     )
     expect(lines.some((line) => line.trimStart().startsWith("├"))).toBe(true)
     expect(lines.some((line) => line.trimStart().startsWith("└"))).toBe(true)
+    expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
+  })
+
+  test("closes an expanded settled subagent's nested tree with the terminal connector", () => {
+    const state = model({
+      entries: [{ role: "assistant", text: "All checks passed." }],
+      blocks: [
+        { ...subagentToolBlock, detail: "Inspect the projection" },
+        shell("child-a", "bun test", "passed"),
+        shell("child-b", "bun run check", "clean"),
+      ],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Block", index: 2, id: "tool:child-b", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Entry", index: 0, id: "answer:0", turnId: "child:agent", parentId: "agent" },
+      ],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const lines = nonEmptyLines(
+      buildTranscript(state)
+        .styled.chunks.map((chunk) => chunk.text)
+        .join(""),
+    )
+    expect(lines.some((line) => line.trimStart().startsWith("├"))).toBe(true)
+    expect(lines.some((line) => line.includes("╰"))).toBe(true)
+    expect(lines.some((line) => line.includes("All checks passed."))).toBe(true)
     expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
   })
 

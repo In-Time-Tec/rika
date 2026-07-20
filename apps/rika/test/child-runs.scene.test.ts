@@ -130,7 +130,7 @@ test(
         Scene.model.turn([Scene.model.toolCall("task", { prompt: "Coordinate nested work." }, "depth-one")]),
         Scene.model.turn([Scene.model.toolCall("task", { prompt: "Complete the nested check." }, "depth-two")]),
         Scene.model.turn([
-          Scene.model.toolCall("read", { path: "nested-evidence.ts", offset: 0, limit: 20 }, "nested-read"),
+          Scene.model.toolCall("read", { path: "nested-evidence.ts", read_range: [1, 20] }, "nested-read"),
         ]),
         Scene.model.text("Depth two verified the boundary."),
         Scene.model.text("Depth one synthesized the nested result."),

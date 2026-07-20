@@ -321,6 +321,80 @@ const reconcileSubagentUnits = (
   }
 }
 
+type ChildAgentBlock = Extract<Block, { readonly _tag: "ChildAgent" }>
+
+const agentPresentationBase: ToolCall["presentation"] = {
+  family: "agent",
+  action: "task",
+  activeLabel: "Subagent working",
+  completeLabel: "Subagent finished",
+}
+
+const childAgentToolBlock = (block: ChildAgentBlock): ToolCall => ({
+  _tag: "ToolCall",
+  id: block.id,
+  name: block.name,
+  input: "",
+  status: block.status,
+  presentation: childLabels(block.name, agentPresentationBase),
+  detail: block.summary,
+  files: [],
+  childId: block.id,
+})
+
+const mergedAgentStatus = (existing: ToolCall["status"], child: ChildAgentBlock["status"]): ToolCall["status"] =>
+  child === "running" && existing !== "running" ? existing : child
+
+const nestedChildUnit = (
+  unit: Unit,
+  batchToolChildIds: ReadonlySet<string>,
+  batchAgentToolTokens: ReadonlySet<string>,
+  existingAgentTools: ReadonlyMap<string, { readonly key: string; readonly block: ToolCall }>,
+  scopeParentId: string,
+): Unit | undefined => {
+  if (isInternalOutcome(unit)) return undefined
+  if (unit.content._tag === "Entry") return unit.content.role === "assistant" ? unit : undefined
+  const block = unit.content.block
+  switch (block._tag) {
+    case "ToolCall":
+    case "Error":
+      return unit
+    case "ChildAgent": {
+      const childKey = executionKey(block.id)
+      if (batchToolChildIds.has(childKey)) return undefined
+      for (const token of batchAgentToolTokens) if (childKey.endsWith(`:${token}`)) return undefined
+      const existing = existingAgentTools.get(`${scopeParentId} ${childKey}`)
+      if (existing !== undefined)
+        return {
+          ...unit,
+          key: existing.key,
+          content: {
+            _tag: "Block",
+            block: {
+              ...existing.block,
+              status: mergedAgentStatus(existing.block.status, block.status),
+              presentation: childLabels(block.name, existing.block.presentation),
+              childId: existing.block.childId ?? block.id,
+            },
+          },
+        }
+      return { ...unit, content: { _tag: "Block", block: childAgentToolBlock(block) } }
+    }
+    case "Reasoning":
+    case "ToolResult":
+    case "Notification":
+    case "Permission":
+    case "Diff":
+    case "ContextUsage":
+    case "Compaction":
+    case "Workflow":
+    case "ImageAttachment":
+      return undefined
+    default:
+      return Function.absurd(block)
+  }
+}
+
 const knownIndexCache = new WeakMap<ReadonlyArray<unknown>, Map<string, number>>()
 
 const knownIndexesFor = (items: ReadonlyArray<TranscriptItem>): Map<string, number> => {
@@ -381,15 +455,34 @@ const projectUnitsImpl = (model: Model, units: ReadonlyArray<Unit>, parentId?: s
     }
     ;(items as Array<TranscriptItem>)[index] = value
   }
-  for (const unit of reconciled.units) {
-    if (isInternalOutcome(unit)) continue
-    const nestedParentId = parentId ?? unit.parentId
-    if (
-      nestedParentId !== undefined &&
-      ((unit.content._tag === "Block" && unit.content.block._tag !== "ToolCall") ||
-        (unit.content._tag === "Entry" && unit.content.role !== "assistant"))
-    )
-      continue
+  const batchToolChildIds = new Set<string>()
+  const batchAgentToolTokens = new Set<string>()
+  for (const candidate of reconciled.units) {
+    if (candidate.content._tag !== "Block" || candidate.content.block._tag !== "ToolCall") continue
+    const candidateBlock = candidate.content.block
+    if (candidateBlock.childId !== undefined) batchToolChildIds.add(executionKey(candidateBlock.childId))
+    if (candidateBlock.presentation.family === "agent") {
+      const prefix = `${candidate.turnId}:`
+      batchAgentToolTokens.add(
+        candidateBlock.id.startsWith(prefix) ? candidateBlock.id.slice(prefix.length) : candidateBlock.id,
+      )
+    }
+  }
+  const existingAgentTools = new Map<string, { readonly key: string; readonly block: ToolCall }>()
+  for (const item of items) {
+    if (item._tag !== "Block" || item.id === undefined) continue
+    const block = blocks[item.index]
+    if (block?._tag !== "ToolCall" || block.presentation.family !== "agent" || block.childId === undefined) continue
+    existingAgentTools.set(`${item.parentId ?? ""} ${executionKey(block.childId)}`, { key: item.id, block })
+  }
+  for (const rawUnit of reconciled.units) {
+    if (isInternalOutcome(rawUnit)) continue
+    const nestedParentId = parentId ?? rawUnit.parentId
+    const unit =
+      nestedParentId === undefined
+        ? rawUnit
+        : nestedChildUnit(rawUnit, batchToolChildIds, batchAgentToolTokens, existingAgentTools, nestedParentId)
+    if (unit === undefined) continue
     const itemIndex = known.get(unit.key)
     const current = itemIndex === undefined ? undefined : items[itemIndex]
     if (current !== undefined) {

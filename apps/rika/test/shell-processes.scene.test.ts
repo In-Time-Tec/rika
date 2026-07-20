@@ -10,17 +10,13 @@ test(
           Scene.model.toolCall(
             "bash",
             {
-              command: "sh",
-              args: [
-                "-c",
-                "printf PROCESS_STARTED; while [ ! -f release ]; do sleep 0.01; done; printf PROCESS_FINISHED",
-              ],
-              waitMillis: 100,
+              command: "printf PROCESS_STARTED; while [ ! -f release ]; do sleep 0.01; done; printf PROCESS_FINISHED",
+              timeout_ms: 100,
             },
             "start-process",
           ),
         ]),
-        Scene.model.turn([Scene.model.toolCall("bash", { command: "touch", args: ["release"] }, "release-process")]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "touch release" }, "release-process")]),
         Scene.model.turn([
           Scene.model.toolCall("shell_command_status", { processId: "1", waitMillis: 1_000 }, "poll-process"),
         ]),
@@ -50,20 +46,17 @@ test(
     Scene.run({
       script: [
         Scene.model.turn([
-          Scene.model.toolCall(
-            "bash",
-            { command: "sh", args: ["-c", "printf ESCAPED_WORKSPACE"], cwd: ".." },
-            "escaped-cwd",
-          ),
+          Scene.model.toolCall("bash", { command: "printf ESCAPED_WORKSPACE", workdir: ".." }, "escaped-cwd"),
         ]),
         Scene.model.text("SHELL_CONTAINMENT_DONE"),
       ],
       actions: [
         Scene.action.writeAfter("Welcome to Rika", "Try an escaped shell directory.\r"),
-        Scene.action.writeAfter("SHELL_CONTAINMENT_DONE", "\u0003", 3_000),
+        Scene.action.writeWhenTurnStatus("Try an escaped shell directory.", "completed", "\u0003", 1_000),
+        Scene.action.writeAfterDelay("\u0003", 1_000),
       ],
     }).then((result) => {
-      expect(result.output).toContain("$ sh -c printf ESCAPED_WORKSPACE (exit code: 1)")
+      expect(result.output).toContain("$ printf ESCAPED_WORKSPACE (exit code: 1)")
       expect(result.clientLogs).toContain(":escaped-cwd:result")
       expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
     }),

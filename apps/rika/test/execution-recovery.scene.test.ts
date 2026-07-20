@@ -24,9 +24,7 @@ test(
   () =>
     Scene.run({
       script: [
-        Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "printf", args: ["DURABLE_TOOL_RESULT"] }, "recovery-tool"),
-        ]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf DURABLE_TOOL_RESULT" }, "recovery-tool")]),
         Scene.model.text("ANSWER_AFTER_TOOL_REPLAY", 1_000),
       ],
       actions: [
@@ -49,11 +47,7 @@ test(
     Scene.run({
       script: [
         Scene.model.turn([
-          Scene.model.toolCall(
-            "bash",
-            { command: "sh", args: ["-c", "printf FAILED_TOOL_MARKER; exit 7"] },
-            "failed-tool",
-          ),
+          Scene.model.toolCall("bash", { command: "printf FAILED_TOOL_MARKER; exit 7" }, "failed-tool"),
         ]),
         Scene.model.text("RECOVERED_FROM_FAILED_TOOL", 1_000),
       ],

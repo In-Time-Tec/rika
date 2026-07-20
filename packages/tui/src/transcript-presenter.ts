@@ -22,6 +22,8 @@ export {
   type RowWindowState,
 } from "./transcript-presenter/window"
 export {
+  agentOutputText,
+  agentTerminal,
   escapePathTarget,
   expandableRowIds,
   expandableUnits,
@@ -33,6 +35,7 @@ export {
   transcriptUnitId as unitId,
   transcriptUnits as rows,
   unitToggleTargets,
+  type AgentTerminal,
   type PathTarget,
   type ToolDetail,
   type ToolGroupKind,

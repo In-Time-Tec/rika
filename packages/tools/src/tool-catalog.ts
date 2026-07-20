@@ -75,7 +75,7 @@ export const definitions: ReadonlyArray<Definition> = [
   },
   {
     name: "read",
-    description: "Read a bounded UTF-8 file range",
+    description: "Read a bounded UTF-8 file with numbered lines and an optional inclusive range",
     permission: "allow",
     idempotency: "safe",
     timeoutMillis: 10_000,
@@ -90,7 +90,7 @@ export const definitions: ReadonlyArray<Definition> = [
   },
   {
     name: "write",
-    description: "Create a new UTF-8 file without overwriting an existing path",
+    description: "Create or overwrite a UTF-8 file and create missing parent directories",
     permission: "allow",
     idempotency: "unsafe",
     timeoutMillis: 10_000,
@@ -99,7 +99,7 @@ export const definitions: ReadonlyArray<Definition> = [
   },
   {
     name: "edit",
-    description: "Replace one exact anchored text occurrence and reject stale or ambiguous anchors",
+    description: "Replace exact text in an existing file, optionally replacing every occurrence",
     permission: "allow",
     idempotency: "unsafe",
     timeoutMillis: 10_000,
@@ -108,7 +108,7 @@ export const definitions: ReadonlyArray<Definition> = [
   },
   {
     name: "bash",
-    description: "Run one command in the workspace, returning a process id when it remains running",
+    description: "Run a shell command in the workspace, returning a process id when it remains running",
     permission: "allow",
     idempotency: "unsafe",
     timeoutMillis: 120_000,

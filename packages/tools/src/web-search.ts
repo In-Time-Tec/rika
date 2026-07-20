@@ -140,5 +140,5 @@ export const factoryLayer = (factories: ReadonlyArray<ProviderFactory>) =>
   Layer.effect(Service, Effect.map(Effect.all(factories, { concurrency: 5 }), make))
 export const testLayer = (search: Interface["search"]) => Layer.succeed(Service, Service.of({ search }))
 
-export { exa, exaCode, firecrawl, github, parallel } from "./web-search-providers"
+export { exa, firecrawl, github, parallel } from "./web-search-providers"
 export type { ProviderOptions } from "./web-search-providers"

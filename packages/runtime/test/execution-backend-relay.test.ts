@@ -231,11 +231,7 @@ test(
       Effect.gen(function* () {
         const program = withBackend(
           [
-            TestModel.toolCall(
-              "bash",
-              { command: "/bin/sleep", args: ["0.2"], waitMillis: 500 },
-              { id: "timed-tool" },
-            ),
+            TestModel.toolCall("bash", { command: "/bin/sleep 0.2", timeout_ms: 500 }, { id: "timed-tool" }),
             TestModel.turn([TestModel.text("timed tool complete")], { delay: Duration.millis(200) }),
           ],
           () =>

@@ -68,7 +68,7 @@ test(
   () =>
     Scene.run({
       script: [
-        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf", args: ["TOOL_OK"] }, "ordinary-tool")]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf TOOL_OK" }, "ordinary-tool")]),
         Scene.model.text("ORDINARY_COMPLETE"),
         Scene.model.object({ title: "Ordinary tool" }),
       ],
@@ -109,7 +109,7 @@ test(
     Scene.run({
       toolApprovals: ["bash"],
       script: [
-        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf", args: ["APPROVED_TOOL"] }, "approved")]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf APPROVED_TOOL" }, "approved")]),
         Scene.model.text("APPROVAL_COMPLETE"),
         Scene.model.object({ title: "Tool approval" }),
       ],
@@ -134,7 +134,7 @@ test(
         Scene.model.turn([
           Scene.model.toolCall(
             "bash",
-            { command: "printf", args: ["\\106\\117\\122\\102\\111\\104\\104\\105\\116\\137\\124\\117\\117\\114"] },
+            { command: "printf \\106\\117\\122\\102\\111\\104\\104\\105\\116\\137\\124\\117\\117\\114" },
             "denied",
           ),
         ]),
@@ -159,9 +159,7 @@ test(
     Scene.run({
       toolApprovals: ["bash"],
       script: [
-        Scene.model.turn([
-          Scene.model.toolCall("bash", { command: "printf", args: ["AFTER_RECONNECT"] }, "reconnect"),
-        ]),
+        Scene.model.turn([Scene.model.toolCall("bash", { command: "printf AFTER_RECONNECT" }, "reconnect")]),
         Scene.model.text("RECONNECTED_COMPLETE"),
         Scene.model.object({ title: "Reconnect approval" }),
       ],
@@ -192,7 +190,7 @@ test(
         Scene.model.turn([
           Scene.model.toolCall(
             "bash",
-            { command: "printf", args: ["\\114\\101\\124\\105\\137\\122\\105\\123\\125\\114\\124"] },
+            { command: "printf \\114\\101\\124\\105\\137\\122\\105\\123\\125\\114\\124" },
             "cancelled",
           ),
         ]),

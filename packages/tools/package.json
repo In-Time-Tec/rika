@@ -13,7 +13,8 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "effect": "catalog:"
+    "effect": "catalog:",
+    "parallel-web": "1.1.0"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",

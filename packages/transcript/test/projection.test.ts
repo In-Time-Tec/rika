@@ -2,7 +2,9 @@ import { describe, expect, it } from "@effect/vitest"
 import { providers } from "@opencode-ai/models/snapshot"
 import {
   applyEvent,
+  childParentMatch,
   empty,
+  ensureChildTool,
   hasRunningBlocks,
   project,
   settleChild,
@@ -497,7 +499,7 @@ describe("Transcript projection", () => {
         sequence: 1,
         type: "tool.call.requested",
         createdAt: 1,
-        data: { tool_call_id: "bash-1", tool_name: "bash", input: { command: "bun", args: ["test"] } },
+        data: { tool_call_id: "bash-1", tool_name: "bash", input: { command: "bun test" } },
       },
       {
         cursor: "shell-result",
@@ -1003,5 +1005,78 @@ describe("Transcript projection", () => {
     expect(hasRunningBlocks(settledOrphan)).toBe(false)
     expect(hasRunningBlocks(swept)).toBe(false)
     expect(settleChild(settledOrphan, "child-1", "failed", 120)).toEqual(settledOrphan)
+  })
+
+  it("matches a child to its scoped parent tool and rejects a same-callId tool in another scope", () => {
+    const foreign = { id: "other:spawn", scope: "other", childId: undefined, family: "agent" as const, mark: "foreign" }
+    const correct = {
+      id: "parent:spawn",
+      scope: "parent",
+      childId: undefined,
+      family: "agent" as const,
+      mark: "correct",
+    }
+    const childId = "execution:parent:child:spawn"
+
+    expect(childParentMatch([foreign, correct], childId)?.mark).toBe("correct")
+    expect(childParentMatch([foreign], childId)).toBeUndefined()
+  })
+
+  it("prefers an exact childId match over a scoped fallback candidate", () => {
+    const fallback = {
+      id: "parent:spawn",
+      scope: "parent",
+      childId: undefined,
+      family: "agent" as const,
+      mark: "fallback",
+    }
+    const exact = {
+      id: "parent:other",
+      scope: "parent",
+      childId: "execution:parent:child:spawn",
+      family: "agent" as const,
+      mark: "exact",
+    }
+
+    expect(childParentMatch([fallback, exact], "execution:parent:child:spawn")?.mark).toBe("exact")
+  })
+
+  it("ignores a non-agent tool even when its scope and call id match the child key", () => {
+    const nonAgent = { id: "parent:spawn", scope: "parent", childId: undefined, family: "shell" as const }
+
+    expect(childParentMatch([nonAgent], "execution:parent:child:spawn")).toBeUndefined()
+  })
+
+  it("ensures a scoped agent tool for a child and stays idempotent when it already exists", () => {
+    const childId = "execution:parent:child:spawn"
+    const created = ensureChildTool(empty("parent", "prompt"), childId, "oracle")
+
+    expect(created.tool).toMatchObject({ _tag: "ToolCall", id: "parent:child:spawn", childId })
+    expect(created.tool.presentation.family).toBe("agent")
+    expect(created.projection.units.find((unit) => unit.key === "tool:parent:child:spawn")).toBeDefined()
+
+    const again = ensureChildTool(created.projection, childId, "oracle")
+
+    expect(again.projection).toBe(created.projection)
+    expect(again.tool.id).toBe("parent:child:spawn")
+    expect(
+      again.projection.units.filter((unit) => unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"),
+    ).toHaveLength(1)
+  })
+
+  it("records one error unit with a failed outcome and a non-empty reason when the execution fails", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "failed", sequence: 1, type: "execution.failed", createdAt: 1, text: "internal tool failed" },
+    ])
+    const errors = projection.units.filter(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error",
+    )
+
+    expect(errors).toHaveLength(1)
+    const error = errors[0]!
+    expect(
+      error.content._tag === "Block" && error.content.block._tag === "Error" ? error.content.block.detail : "",
+    ).toBe("internal tool failed")
+    expect(error.executionOutcome).toMatchObject({ status: "failed", reason: "internal tool failed" })
   })
 })
