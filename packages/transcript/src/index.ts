@@ -364,12 +364,34 @@ const processResult = (output: unknown): ToolProcess | undefined => {
 const nonNegativeFinite = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
 
+const tokenPricing = (model: string): readonly [number, number] =>
+  model.includes("haiku") || model.includes("mini") || model.includes("flash")
+    ? [0.8, 4]
+    : model.includes("claude") || model.includes("fable") || model.includes("opus")
+      ? [5, 25]
+      : [1.25, 10]
+
 const usageCost = (value: Record<string, unknown>): number | undefined => {
   for (const key of ["cost_usd", "costUsd"]) {
     const candidate = nonNegativeFinite(value[key])
     if (candidate !== undefined) return candidate
   }
-  return undefined
+  const inputTokens = nonNegativeFinite(value.input_tokens)
+  const outputTokens = nonNegativeFinite(value.output_tokens)
+  if (inputTokens === undefined && outputTokens === undefined) return undefined
+  const [inputPrice, outputPrice] = tokenPricing(string(value.model).toLowerCase())
+  return ((inputTokens ?? 0) * inputPrice) / 1_000_000 + ((outputTokens ?? 0) * outputPrice) / 1_000_000
+}
+
+const applyUsage = (projection: Projection, event: SourceEvent): Projection => {
+  if ((projection.usageCursors ?? []).includes(event.cursor)) return projection
+  const cost = usageCost(sourcePayload(event))
+  if (cost === undefined) return projection
+  return {
+    ...projection,
+    costUsd: (projection.costUsd ?? 0) + cost,
+    usageCursors: [...(projection.usageCursors ?? []), event.cursor],
+  }
 }
 
 const assistantKey = (turnId: string, phase: number): string => `assistant:${turnId}:${Math.max(0, phase)}`
@@ -710,6 +732,91 @@ const applyReasoning = (projection: Projection, turnId: string, event: SourceEve
   )
 }
 
+const settledBlock = (block: Block, status: "failed" | "cancelled"): Block | undefined => {
+  if (block._tag === "ToolCall" && block.status === "running") return { ...block, status }
+  if (block._tag === "ChildAgent" && block.status === "running") return { ...block, status }
+  return undefined
+}
+
+const settleRunningImpl = (projection: Projection, status: "failed" | "cancelled", sequence: number): Projection => {
+  let changed = false
+  const units = projection.units.map((candidate) => {
+    if (candidate.content._tag !== "Block") return candidate
+    const settled = settledBlock(candidate.content.block, status)
+    if (settled === undefined) return candidate
+    changed = true
+    return {
+      ...candidate,
+      revision: Math.max(candidate.revision, sequence),
+      content: { _tag: "Block" as const, block: settled },
+    }
+  })
+  return changed ? { ...projection, units } : projection
+}
+
+export const settleRunning: {
+  (projection: Projection, status: "failed" | "cancelled", sequence: number): Projection
+  (status: "failed" | "cancelled", sequence: number): (projection: Projection) => Projection
+} = Function.dual(3, settleRunningImpl)
+
+const toolUnitRevision = (projection: Projection, id: string): number => {
+  const index = toolIndex(projection, id)
+  return index < 0 ? -1 : projection.units[index]!.revision
+}
+
+const settleChildImpl = (
+  projection: Projection,
+  childId: string,
+  status: "complete" | "failed" | "cancelled",
+  sequence: number,
+): Projection => {
+  const turnId = projection.units[0]?.turnId ?? ""
+  const encodedToolId = childToolCallId(childId)
+  const linkedTool =
+    childToolAt(projection, childId) ??
+    (encodedToolId === undefined ? undefined : toolAt(projection, eventId(turnId, encodedToolId)))
+  const settledTool =
+    linkedTool === undefined || linkedTool.status !== "running"
+      ? projection
+      : updateTool(
+          projection,
+          linkedTool.id,
+          Math.max(sequence, toolUnitRevision(projection, linkedTool.id)),
+          (tool) => ({ ...tool, status }),
+        )
+  let changed = settledTool !== projection
+  const units = settledTool.units.map((candidate) => {
+    if (candidate.content._tag !== "Block") return candidate
+    const block = candidate.content.block
+    if (block._tag !== "ChildAgent" || executionKey(block.id) !== executionKey(childId)) return candidate
+    if (block.status !== "running") return candidate
+    changed = true
+    return {
+      ...candidate,
+      revision: Math.max(candidate.revision, sequence),
+      content: { _tag: "Block" as const, block: { ...block, status } },
+    }
+  })
+  return changed ? { ...settledTool, units } : projection
+}
+
+export const settleChild: {
+  (projection: Projection, childId: string, status: "complete" | "failed" | "cancelled", sequence: number): Projection
+  (
+    childId: string,
+    status: "complete" | "failed" | "cancelled",
+    sequence: number,
+  ): (projection: Projection) => Projection
+} = Function.dual(4, settleChildImpl)
+
+export const hasRunningBlocks = (projection: Projection): boolean =>
+  projection.units.some(
+    (candidate) =>
+      candidate.content._tag === "Block" &&
+      (candidate.content.block._tag === "ToolCall" || candidate.content.block._tag === "ChildAgent") &&
+      candidate.content.block.status === "running",
+  )
+
 const advanceModelPhase = (projection: Projection, turnId: string): Projection => {
   const phase = Math.max(0, projection.modelPhase)
   const hasOutput = projection.units.some(
@@ -744,15 +851,14 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "tool.call.requested")
     return advanceModelPhase(applyToolRequested(projection, turnId, event), turnId)
   if (event.type === "tool.result.received") return applyToolResult(projection, turnId, event)
-  if (event.type === "model.usage.reported") {
-    const cost = usageCost(sourcePayload(event))
-    return cost === undefined ? projection : { ...projection, costUsd: (projection.costUsd ?? 0) + cost }
-  }
+  if (event.type === "model.usage.reported") return applyUsage(projection, event)
   if (event.type === "execution.completed")
     return applyExecutionOutcome(projection, turnId, event.sequence, { status: "complete" })
   if (event.type === "execution.failed") {
     if (hasUsableFinalResponse(projection, turnId))
-      return applyExecutionOutcome(projection, turnId, event.sequence, { status: "complete" })
+      return applyExecutionOutcome(settleRunningImpl(projection, "cancelled", event.sequence), turnId, event.sequence, {
+        status: "complete",
+      })
     const reason = event.text ?? string(sourcePayload(event).message, "Execution failed")
     const block: Block = {
       _tag: "Error",
@@ -761,7 +867,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
       turnId,
       recovery: "Edit your prompt and press Enter to try again.",
     }
-    return upsertUnit(projection, {
+    return upsertUnit(settleRunningImpl(projection, "failed", event.sequence), {
       ...unit(`execution:${turnId}:failed`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
       executionOutcome: { status: "failed", reason },
     })
@@ -769,7 +875,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "execution.cancelled") {
     const payload = sourcePayload(event)
     const reason = event.text ?? string(payload.reason, string(payload.message))
-    return upsertUnit(projection, {
+    return upsertUnit(settleRunningImpl(projection, "cancelled", event.sequence), {
       ...unit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
         _tag: "Entry",
         role: "notice",
@@ -793,7 +899,8 @@ export const applyEvent: {
   (projection: Projection, event: SourceEvent): Projection
   (event: SourceEvent): (projection: Projection) => Projection
 } = Function.dual(2, (projection: Projection, event: SourceEvent): Projection => {
-  if (event.sequence <= projection.revision) return projection
+  if (event.sequence <= projection.revision)
+    return event.type === "model.usage.reported" ? applyUsage(projection, event) : projection
   const turnId = projection.units[0]?.turnId ?? ""
   const next = applyKnownEvent(projection, turnId, event)
   return {

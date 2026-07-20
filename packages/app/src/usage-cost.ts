@@ -55,24 +55,32 @@ export const observe: {
   },
 )
 
+const readExecution = <A, E>(effect: Effect.Effect<A, E>, executionId: string): Effect.Effect<A | undefined> =>
+  effect.pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("usage-cost.execution.read.failed").pipe(
+        Effect.annotateLogs("rika.execution.id", executionId),
+        Effect.annotateLogs("rika.failure.cause", String(cause)),
+        Effect.as(undefined),
+      ),
+    ),
+  )
+
 export const collect = Effect.fn("UsageCost.collect")(function* (
   reader: ExecutionReader,
   roots: ReadonlyArray<RootExecution>,
 ) {
-  let snapshot: Snapshot = {
-    ...empty,
-    turnCostUsd: new Map(roots.map((root) => [root.turnId, 0])),
-    threadCostUsd: new Map(roots.map((root) => [root.threadId, 0])),
-  }
+  let snapshot: Snapshot = empty
   const pending = roots.map((root) => ({ ...root, executionId: root.executionId ?? root.turnId }))
   const seenExecutions = new Set<string>()
   while (pending.length > 0) {
     const current = pending.shift()!
     if (seenExecutions.has(current.executionId)) continue
     seenExecutions.add(current.executionId)
-    const inspection = yield* reader.inspect(current.executionId)
+    const inspection = yield* readExecution(reader.inspect(current.executionId), current.executionId)
     if (inspection === undefined) continue
-    const replay = yield* reader.replay(current.executionId)
+    const replay = yield* readExecution(reader.replay(current.executionId), current.executionId)
+    if (replay === undefined) continue
     for (const event of replay.events)
       snapshot = observe(snapshot, {
         threadId: current.threadId,

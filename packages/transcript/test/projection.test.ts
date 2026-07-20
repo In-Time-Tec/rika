@@ -1,5 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
-import { applyEvent, empty, project, withNestedProjections, type SourceEvent } from "../src"
+import {
+  applyEvent,
+  empty,
+  hasRunningBlocks,
+  project,
+  settleChild,
+  settleRunning,
+  withNestedProjections,
+  type SourceEvent,
+} from "../src"
+
+const usage = (cursor: string, sequence: number): SourceEvent => ({
+  cursor,
+  sequence,
+  type: "model.usage.reported",
+  createdAt: sequence,
+  data: { input_tokens: 1_000_000, output_tokens: 0, model: "test" },
+})
 
 describe("Transcript projection", () => {
   it("collapses a long output stream into stable semantic units", () => {
@@ -934,5 +951,126 @@ describe("Transcript projection", () => {
         executionOutcome: { status: "complete" },
       }),
     )
+  })
+
+  it("counts usage cost when the revision was poisoned by higher foreign sequences", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "foreign", sequence: 4526, type: "model.output.delta", createdAt: 0, text: "child text" },
+      {
+        cursor: "usage-9",
+        sequence: 9,
+        type: "model.usage.reported",
+        createdAt: 1,
+        data: { input_tokens: 1_000_000, output_tokens: 0, model: "test" },
+      },
+      {
+        cursor: "usage-30",
+        sequence: 30,
+        type: "model.usage.reported",
+        createdAt: 2,
+        data: { input_tokens: 1_000_000, output_tokens: 0, model: "test" },
+      },
+    ])
+
+    expect(projection.revision).toBe(4526)
+    expect(projection.checkpointCursor).toBe("foreign")
+    expect(projection.costUsd).toBeCloseTo(2.5, 10)
+    expect(projection.usageCursors).toEqual(["usage-9", "usage-30"])
+  })
+
+  it("counts duplicate and out-of-order usage events exactly once", () => {
+    const first = applyEvent(empty("turn-a", "prompt"), usage("usage-5", 5))
+    const duplicated = applyEvent(applyEvent(first, usage("usage-5", 5)), usage("usage-5", 2))
+    const reordered = applyEvent(duplicated, usage("usage-2", 2))
+
+    expect(duplicated.costUsd).toBeCloseTo(1.25, 10)
+    expect(reordered.costUsd).toBeCloseTo(2.5, 10)
+    expect(reordered.revision).toBe(5)
+    expect(reordered.checkpointCursor).toBe("usage-5")
+    expect(reordered.usageCursors).toEqual(["usage-5", "usage-2"])
+  })
+
+  it("settles running tool and child blocks when the execution fails or is cancelled", () => {
+    const base: ReadonlyArray<SourceEvent> = [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "call", tool_name: "task", input: { prompt: "work" } },
+      },
+      {
+        cursor: "spawn",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { child_execution_id: "orphan-child", preset_name: "task" },
+      },
+    ]
+    const cancelled = project("turn-a", "prompt", [
+      ...base,
+      { cursor: "cancelled", sequence: 3, type: "execution.cancelled", createdAt: 3 },
+    ])
+    const failed = project("turn-a", "prompt", [
+      ...base,
+      { cursor: "failed", sequence: 3, type: "execution.failed", createdAt: 3, data: { message: "boom" } },
+    ])
+
+    expect(cancelled.units.find((item) => item.key === "tool:turn-a:call")).toMatchObject({
+      revision: 3,
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "cancelled" } },
+    })
+    expect(cancelled.units.find((item) => item.key === "child:turn-a:orphan-child")).toMatchObject({
+      revision: 3,
+      content: { _tag: "Block", block: { _tag: "ChildAgent", status: "cancelled" } },
+    })
+    expect(failed.units.find((item) => item.key === "tool:turn-a:call")).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "failed" } },
+    })
+    expect(failed.units.find((item) => item.key === "child:turn-a:orphan-child")).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "ChildAgent", status: "failed" } },
+    })
+  })
+
+  it("settles linked tools and standalone child agents through the settlement helpers", () => {
+    const projection = project("turn-a", "prompt", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "call", tool_name: "task", input: { prompt: "work" } },
+      },
+      {
+        cursor: "spawn",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { tool_call_id: "call", child_execution_id: "child-1", preset_name: "task" },
+      },
+      {
+        cursor: "orphan",
+        sequence: 3,
+        type: "child_run.spawned",
+        createdAt: 3,
+        data: { child_execution_id: "orphan-child", preset_name: "task" },
+      },
+    ])
+    const settledLinked = settleChild(projection, "child-1", "complete", 99)
+    const settledOrphan = settleChild(settledLinked, "orphan-child", "cancelled", 99)
+    const swept = settleRunning(projection, "cancelled", 50)
+
+    expect(settledLinked.units.find((item) => item.key === "tool:turn-a:call")).toMatchObject({
+      revision: 99,
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete", childId: "child-1" } },
+    })
+    expect(settledOrphan.units.find((item) => item.key === "child:turn-a:orphan-child")).toMatchObject({
+      revision: 99,
+      content: { _tag: "Block", block: { _tag: "ChildAgent", status: "cancelled" } },
+    })
+    expect(hasRunningBlocks(projection)).toBe(true)
+    expect(hasRunningBlocks(settledOrphan)).toBe(false)
+    expect(hasRunningBlocks(swept)).toBe(false)
+    expect(settleChild(settledOrphan, "child-1", "failed", 120)).toEqual(settledOrphan)
   })
 })

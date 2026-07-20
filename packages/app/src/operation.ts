@@ -21,6 +21,7 @@ import {
   Effect,
   Exit,
   Fiber,
+  Function,
   Layer,
   PubSub,
   Queue,
@@ -536,7 +537,28 @@ const sourceProjection = (projection: TranscriptRepository.Projection): Transcri
   ...(projection.oldestCursor === undefined ? {} : { oldestCursor: projection.oldestCursor }),
   ...(projection.checkpointCursor === undefined ? {} : { checkpointCursor: projection.checkpointCursor }),
   ...(projection.costUsd === undefined ? {} : { costUsd: projection.costUsd }),
+  ...(projection.usageCursors === undefined ? {} : { usageCursors: projection.usageCursors }),
 })
+
+export const rootExecutionEvents: {
+  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event>
+  (events: ReadonlyArray<ExecutionBackend.Event>): (turnId: string) => ReadonlyArray<ExecutionBackend.Event>
+} = Function.dual(
+  2,
+  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
+    events.filter(
+      (event) =>
+        !event.cursor.startsWith("child:") &&
+        (!event.cursor.startsWith("execution:") || event.cursor.startsWith(`execution:${turnId}:`)),
+    ),
+)
+
+const rootCheckpointCursor = (turnId: string, cursor: string | undefined): string | undefined =>
+  cursor === undefined ||
+  cursor.startsWith("child:") ||
+  (cursor.startsWith("execution:") && !cursor.startsWith(`execution:${turnId}:`))
+    ? undefined
+    : cursor
 
 const toolForChild = (projection: Transcript.Projection, childExecutionId: string) => {
   const normalizedChildId = normalizeChildExecutionId(childExecutionId)
@@ -596,17 +618,29 @@ const replayProjection = Effect.fn("Operation.replayProjection")(function* (
   }
 })
 
+const settledChildStatus = (
+  status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
+): "complete" | "failed" | "cancelled" | undefined =>
+  status === "completed"
+    ? "complete"
+    : status === "failed"
+      ? "failed"
+      : status === "cancelled"
+        ? "cancelled"
+        : undefined
+
 const projectExecutionTree = Effect.fn("Operation.projectExecutionTree")(function* (
   backend: ExecutionBackend.Interface,
   rootExecutionId: string,
   root: Transcript.Projection,
 ) {
   const nested: Array<Transcript.NestedProjection> = []
+  let rootProjection = root
   const pending: Array<{
     readonly executionId: string
-    readonly projection: Transcript.Projection
+    readonly nestedIndex: number | undefined
     readonly reference: boolean
-  }> = [{ executionId: rootExecutionId, projection: root, reference: false }]
+  }> = [{ executionId: rootExecutionId, nestedIndex: undefined, reference: false }]
   const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
   while (pending.length > 0) {
     const current = pending.shift()!
@@ -615,18 +649,29 @@ const projectExecutionTree = Effect.fn("Operation.projectExecutionTree")(functio
       current.reference ? ExecutionBackend.executionReference : undefined,
     )
     if (inspection === undefined) continue
+    const parentProjection = () =>
+      current.nestedIndex === undefined ? rootProjection : nested[current.nestedIndex]!.projection
+    const settleParent = (projection: Transcript.Projection) => {
+      if (current.nestedIndex === undefined) rootProjection = projection
+      else nested[current.nestedIndex] = { ...nested[current.nestedIndex]!, projection }
+    }
     for (const child of inspection.children) {
       const childId = normalizeChildExecutionId(child.executionId)
       if (seen.has(childId)) continue
       seen.add(childId)
-      const parent = toolForChild(current.projection, child.executionId)
+      const parent = toolForChild(parentProjection(), child.executionId)
       if (parent === undefined) continue
       const projection = yield* replayProjection(backend, child.executionId)
+      const settled = settledChildStatus(child.status)
+      if (settled !== undefined)
+        settleParent(
+          Transcript.settleChild(parentProjection(), child.executionId, settled, parentProjection().revision),
+        )
       nested.push({ parentId: parent.id, projection })
-      pending.push({ executionId: child.executionId, projection, reference: true })
+      pending.push({ executionId: child.executionId, nestedIndex: nested.length - 1, reference: true })
     }
   }
-  return nested.length === 0 ? root : Transcript.withNestedProjections(root, nested)
+  return nested.length === 0 ? rootProjection : Transcript.withNestedProjections(rootProjection, nested)
 })
 
 const activeDescendantExecutionIds = Effect.fn("Operation.activeDescendantExecutionIds")(function* (
@@ -838,9 +883,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         Context.get(dependencyContext, TurnRepository.Service).resetQueueClaims,
         executionDependencies,
       )
+      let persistedGlobalCostUsd = 0
       const readUsageCosts = Effect.fn("Operation.readUsageCosts")(function* () {
         const threads = yield* ThreadRepository.Service
         const turns = yield* TurnRepository.Service
+        persistedGlobalCostUsd = yield* (yield* TranscriptRepository.Service).globalCostUsd
         const roots = (yield* Effect.forEach(
           yield* threads.list({ includeArchived: true, limit: UsageCost.maximumGlobalThreads }),
           (thread) =>
@@ -866,18 +913,19 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
       const usageCostAdmission = yield* Semaphore.make(1)
       let usageSnapshot: UsageCost.Snapshot | undefined
       const currentUsageCosts = (): UsageCost.Snapshot => usageSnapshot ?? UsageCost.empty
+      const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number =>
+        Math.max(totals.globalCostUsd, persistedGlobalCostUsd)
       const loadUsageCosts = usageCostAdmission.withPermits(1)(
         Effect.suspend(() => {
           if (usageSnapshot !== undefined) return Effect.void
           return readUsageCosts().pipe(
             Effect.provide(executionDependencies),
+            Effect.tap((snapshot) => Effect.sync(() => (usageSnapshot = snapshot))),
             Effect.catchCause((cause) =>
               Effect.logWarning("usage-cost.read.failed").pipe(
                 Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
-                Effect.as(UsageCost.empty),
               ),
             ),
-            Effect.tap((snapshot) => Effect.sync(() => (usageSnapshot = snapshot))),
             Effect.asVoid,
           )
         }),
@@ -940,7 +988,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               turnId: firstTurn.id,
               turnCostUsd: totals.turnCostUsd.get(firstTurn.id) ?? 0,
               threadCostUsd: totals.threadCostUsd.get(thread.id) ?? 0,
-              globalCostUsd: totals.globalCostUsd,
+              globalCostUsd: displayGlobalCostUsd(totals),
             })
           if (!isTerminalStatus(result.status)) return
           settledTitleExecutions.add(executionId)
@@ -1286,7 +1334,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             rootTurnId,
             rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId) ?? 0,
             threadCostUsd: totals.threadCostUsd.get(event.threadId) ?? 0,
-            globalCostUsd: totals.globalCostUsd,
+            globalCostUsd: displayGlobalCostUsd(totals),
           }
         }
         const deliver = (
@@ -1397,7 +1445,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           projectionAdmission.withPermits(1)(
             Effect.gen(function* () {
               const transcripts = yield* TranscriptRepository.Service
-              yield* transcripts.appendAll(turn, events)
+              yield* transcripts.appendAll(turn, rootExecutionEvents(turn.id, events))
             }),
           )
         const flushProjection = Effect.void
@@ -2116,13 +2164,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         ) {
           const transcripts = yield* TranscriptRepository.Service
           const current = yield* transcripts.get(turn.id)
+          const boundary = rootCheckpointCursor(turn.id, current?.checkpointCursor)
           if (backend.pageEvents === undefined) {
-            const result = yield* backend.replay(turn.id, current?.checkpointCursor)
+            const result = yield* backend.replay(turn.id, boundary)
             yield* appendProjection({ ...turn, status }, result.events)
             return
           }
           const cursors = new Set<string>()
-          let after = current?.checkpointCursor
+          let after = boundary
           while (true) {
             const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
             yield* appendProjection({ ...turn, status }, page.events)
@@ -2134,6 +2183,69 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             cursors.add(next)
             after = next
           }
+        })
+        const replayRootProjection = Effect.fn("Operation.interactive.replayRootProjection")(function* (
+          backend: ExecutionBackend.Interface,
+          turn: Turn.Turn,
+        ) {
+          let projection = Transcript.empty(turn.id, turn.prompt)
+          const apply = (events: ReadonlyArray<ExecutionBackend.Event>) => {
+            for (const event of rootExecutionEvents(turn.id, events).toSorted(
+              (left, right) => left.sequence - right.sequence,
+            ))
+              projection = Transcript.applyEvent(projection, event)
+          }
+          if (backend.pageEvents === undefined) {
+            const result = yield* backend.replay(turn.id)
+            apply(result.events)
+            return projection
+          }
+          let after: string | undefined
+          const cursors = new Set<string>()
+          while (true) {
+            const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
+            apply(page.events)
+            if (!page.hasMore) return projection
+            const next = page.newestCursor
+            if (next === undefined || cursors.has(next)) return projection
+            cursors.add(next)
+            after = next
+          }
+        })
+        const healedTurns = new Set<string>()
+        const healTerminalTurn = Effect.fn("Operation.interactive.healTerminalTurn")(function* (turn: Turn.Turn) {
+          if (!isTerminalStatus(turn.status) || healedTurns.has(String(turn.id))) return
+          healedTurns.add(String(turn.id))
+          const transcripts = yield* TranscriptRepository.Service
+          const backend = yield* ExecutionBackend.Service
+          const current = yield* transcripts.get(turn.id)
+          if (current === undefined) return
+          if (Transcript.hasRunningBlocks(sourceProjection(current))) {
+            yield* persistProjectionTree(turn, true)
+            const settled = yield* transcripts.get(turn.id)
+            if (settled !== undefined) {
+              const source = sourceProjection(settled)
+              if (Transcript.hasRunningBlocks(source)) {
+                const leftover = turn.status === "failed" ? ("failed" as const) : ("cancelled" as const)
+                yield* projectionAdmission.withPermits(1)(
+                  transcripts.replace(turn, Transcript.settleRunning(source, leftover, source.revision)),
+                )
+              }
+            }
+          }
+          if (current.costUsd !== undefined) return
+          if (!current.units.some((unit) => unit.key !== `turn:${turn.id}:user`)) return
+          const replayed = yield* replayRootProjection(backend, turn)
+          if (replayed.costUsd === undefined) return
+          const stored = yield* transcripts.get(turn.id)
+          if (stored === undefined || stored.costUsd !== undefined) return
+          yield* projectionAdmission.withPermits(1)(
+            transcripts.replace(turn, {
+              ...sourceProjection(stored),
+              costUsd: replayed.costUsd,
+              ...(replayed.usageCursors === undefined ? {} : { usageCursors: replayed.usageCursors }),
+            }),
+          )
         })
         const projectTurnPage = Effect.fn("Operation.interactive.projectTurnPage")(function* (
           thread: Thread.Thread,
@@ -2155,6 +2267,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   projected.checkpointCursor === turn.lastCursor
                 ) {
                   yield* persistProjectionTree(turn, false)
+                  yield* healTerminalTurn(turn)
                   return
                 }
                 if (turn.status === "queued") {
@@ -2169,6 +2282,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 }
                 yield* projectExecutionPages(backend, turn, execution.status)
                 yield* persistProjectionTree({ ...turn, status: execution.status }, true)
+                yield* healTerminalTurn({ ...turn, status: execution.status })
               }),
             { concurrency: 4, discard: true },
           )
@@ -2260,7 +2374,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           if ((yield* Ref.get(selectionRequest)) !== request) return
           yield* Ref.set(transcriptCursor, oldestCursor)
           yield* Ref.set(transcriptHasOlder, hasOlder)
-          const threadCostUsd = usageCosts.threadCostUsd.get(thread.id) ?? page.threadCostUsd
+          const observedThreadCostUsd = usageCosts.threadCostUsd.get(thread.id)
+          const threadCostUsd =
+            observedThreadCostUsd === undefined
+              ? page.threadCostUsd
+              : Math.max(observedThreadCostUsd, page.threadCostUsd)
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const activeTurn = yield* turns.findActive(thread.id)
@@ -2281,7 +2399,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   entries,
                   hasOlder,
                   threadCostUsd,
-                  globalCostUsd: usageCosts.globalCostUsd,
+                  globalCostUsd: displayGlobalCostUsd(usageCosts),
                   ...(oldestCursor === undefined ? {} : { oldestCursor }),
                   queueRevision: queue.revision,
                   queuedCount: queue.queuedCount,
@@ -2303,7 +2421,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               entries,
               hasOlder,
               threadCostUsd,
-              globalCostUsd: usageCosts.globalCostUsd,
+              globalCostUsd: displayGlobalCostUsd(usageCosts),
               ...(oldestCursor === undefined ? {} : { oldestCursor }),
             })
           yield* Effect.logInfo("transcript.page.loaded").pipe(
@@ -2362,7 +2480,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             entries: [],
             hasOlder: false,
             threadCostUsd: 0,
-            globalCostUsd: currentUsageCosts().globalCostUsd,
+            globalCostUsd: displayGlobalCostUsd(currentUsageCosts()),
             queueRevision: queue.revision,
             queuedCount: queue.queuedCount,
             queue: queue.turns.map(queueItem),
@@ -3167,7 +3285,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     completedAt,
                   )
                   yield* projectExecutionResult(thread.id, result)
-                  yield* (yield* TranscriptRepository.Service).appendAll(updated, result.events)
+                  yield* (yield* TranscriptRepository.Service).appendAll(
+                    updated,
+                    rootExecutionEvents(updated.id, result.events),
+                  )
                   yield* persistExecutionTree(updated, true)
                 }
                 return result

@@ -335,6 +335,33 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
       expect(page.threadCostUsd).toBe(3.75)
     }),
   )
+
+  test.effect("counts redelivered usage once across batches and sums global cost", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(51), threadId: Thread.ThreadId.make("thread-usage") }
+      const other = { ...turn(52), id: Turn.TurnId.make("turn-52"), threadId: Thread.ThreadId.make("thread-usage-b") }
+      const usage: Transcript.SourceEvent = {
+        cursor: "usage-1",
+        sequence: 5,
+        type: "model.usage.reported",
+        createdAt: 5,
+        data: { input_tokens: 1_000_000, output_tokens: 0, model: "test" },
+      }
+      const before = yield* repository.globalCostUsd
+      yield* repository.appendAll(target, [usage])
+      const redelivered = yield* repository.appendAll(target, [
+        usage,
+        { cursor: "late-usage", sequence: 2, type: "model.usage.reported", createdAt: 6, data: { cost_usd: 0.75 } },
+        { cursor: "completed", sequence: 6, type: "execution.completed", createdAt: 7 },
+      ])
+      yield* repository.replace(other, { ...Transcript.empty(other.id, other.prompt), costUsd: 0.5 })
+      const after = yield* repository.globalCostUsd
+      expect(redelivered.costUsd).toBeCloseTo(2, 10)
+      expect(redelivered.usageCursors).toEqual(["usage-1", "late-usage"])
+      expect(after - before).toBeCloseTo(2.5, 10)
+    }),
+  )
 })
 
 it.effect("persists an execution outcome appended after the initial projection", () =>
@@ -442,6 +469,71 @@ it.effect("returns a typed repository error for a malformed durable unit after r
           const failure = yield* Effect.flip(transcripts.page(threadId, { limit: 1 }))
           expect(failure).toBeInstanceOf(TranscriptRepository.RepositoryError)
           expect(failure._tag).toBe("TranscriptRepositoryError")
+        }).pipe(provideLayer(makeLayer())),
+      )
+    }),
+  ).pipe(provideLayer(BunServices.layer)),
+)
+
+it.effect("persists usage cursors across reopen so redelivered usage never double counts", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-usage-" })
+      const filename = `${directory}/rika.db`
+      const threadId = Thread.ThreadId.make("thread-usage-durable")
+      const targetId = Turn.TurnId.make("turn-usage-durable")
+      const usage: Transcript.SourceEvent = {
+        cursor: "usage-1",
+        sequence: 5,
+        type: "model.usage.reported",
+        createdAt: 5,
+        data: { input_tokens: 1_000_000, output_tokens: 0, model: "test" },
+      }
+      const makeLayer = () => {
+        const database = Database.layer(filename)
+        return Layer.mergeAll(
+          database,
+          ThreadRepository.layer.pipe(Layer.provide(database)),
+          TurnRepository.layer.pipe(Layer.provide(database)),
+          TranscriptRepository.layer.pipe(Layer.provide(database)),
+        )
+      }
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const threads = yield* ThreadRepository.Service
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          yield* threads.create({ id: threadId, workspace: "/work/usage", title: "Usage", now: 1 })
+          yield* turns.createForSubmission({
+            id: targetId,
+            threadId,
+            prompt: "count me",
+            executionRoute: Turn.testExecutionRoute(),
+            queueCapacity: 128,
+            now: 2,
+          })
+          yield* turns.setStatus(targetId, "completed", undefined, 3)
+          const target = yield* turns.get(targetId)
+          if (target === undefined) return yield* Effect.die("turn was not stored")
+          yield* transcripts.appendAll(target, [usage])
+        }).pipe(provideLayer(makeLayer())),
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          const target = yield* turns.get(targetId)
+          if (target === undefined) return yield* Effect.die("turn was not stored")
+          const redelivered = yield* transcripts.appendAll(target, [
+            usage,
+            { cursor: "completed", sequence: 6, type: "execution.completed", createdAt: 6 },
+          ])
+          expect(redelivered.costUsd).toBeCloseTo(1.25, 10)
+          expect(redelivered.usageCursors).toEqual(["usage-1"])
+          expect(yield* transcripts.globalCostUsd).toBeCloseTo(1.25, 10)
         }).pipe(provideLayer(makeLayer())),
       )
     }),

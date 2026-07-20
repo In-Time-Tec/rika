@@ -214,4 +214,37 @@ describe("ConfigService", () => {
       ),
     ),
   )
+
+  it.effect("defaults streamingOnly for chatgpt.com base URLs and honors explicit overrides", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      expect(config.settings.providers.openai.streamingOnly).toBe(true)
+      expect(config.settings.providers.anthropic.streamingOnly).toBeUndefined()
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: { providers: { openai: { baseUrl: "https://chatgpt.com/backend-api/codex" } } },
+        }),
+      ),
+    ),
+  )
+
+  it.effect("lets an explicit streamingOnly override disable base URL detection", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      expect(config.settings.providers.openai.streamingOnly).toBe(false)
+      expect(config.settings.providers.anthropic.streamingOnly).toBe(true)
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            providers: {
+              openai: { baseUrl: "https://chatgpt.com/backend-api/codex", streamingOnly: false },
+              anthropic: { streamingOnly: true },
+            },
+          },
+        }),
+      ),
+    ),
+  )
 })

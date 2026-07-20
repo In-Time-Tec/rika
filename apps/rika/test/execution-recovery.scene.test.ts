@@ -71,6 +71,35 @@ test(
 )
 
 test(
+  "settles cancelled subagent spinners durably so restart shows no working subagents",
+  () =>
+    Scene.run({
+      script: [
+        Scene.model.turn(
+          ["alpha", "beta"].map((name) =>
+            Scene.model.toolCall("task", { prompt: `Wait in ${name}.` }, `stuck-${name}`),
+          ),
+        ),
+        ...["alpha", "beta"].map((name) => Scene.model.text(`LATE_${name.toUpperCase()}`, 20_000)),
+        ...["alpha", "beta"].map((name) => Scene.model.object({ summary: `LATE_${name.toUpperCase()}`, files: [] })),
+        Scene.model.text("Parent must not publish this response."),
+      ],
+      actions: [
+        Scene.action.writeAfter("Welcome to Rika", "Start two slow checks.\r"),
+        Scene.action.writeAfterChildExecutions("running", 2, "\u0003"),
+        Scene.action.restartAfter("cancelled", "threads", "continue", "--last"),
+        Scene.action.writeAfter("Subagent cancelled", "\u0003", 100),
+      ],
+    }).then((result) => {
+      expect(result.childExecutions).toHaveLength(2)
+      expect(result.output).toContain("Subagent cancelled")
+      expect(result.output).not.toContain("Parent must not publish this response.")
+      expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
+    }),
+  60_000,
+)
+
+test(
   "keeps a completed turn terminal after restart and admits the next prompt",
   () =>
     Scene.run({

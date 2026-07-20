@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import type * as ExecutionBackend from "@rika/runtime/contract"
+import { BackendError } from "@rika/runtime/contract"
 import { Effect } from "effect"
 import * as UsageCost from "../src/usage-cost"
 
@@ -57,13 +58,11 @@ const reader = (
 })
 
 describe("UsageCost", () => {
-  it("does not invent money from reported tokens or a model name", () => {
-    expect(
-      UsageCost.eventCostUsd(reportedTokens("haiku", "claude-3-5-haiku-latest", 1_000_000, 1_000_000)),
-    ).toBeUndefined()
-    expect(UsageCost.eventCostUsd(reportedTokens("opus", "claude-opus-4-1", 1_000_000, 1_000_000))).toBeUndefined()
-    expect(UsageCost.eventCostUsd(reportedTokens("partial", "gpt-5-mini", null, 1_000_000))).toBeUndefined()
-    expect(UsageCost.eventCostUsd(reportedTokens("early-budget", "gpt-5", 500_000, 0))).toBeUndefined()
+  it("estimates cost from reported tokens when no monetary usage exists", () => {
+    expect(UsageCost.eventCostUsd(reportedTokens("haiku", "claude-3-5-haiku-latest", 1_000_000, 1_000_000))).toBe(4.8)
+    expect(UsageCost.eventCostUsd(reportedTokens("opus", "claude-opus-4-1", 1_000_000, 1_000_000))).toBe(30)
+    expect(UsageCost.eventCostUsd(reportedTokens("partial", "gpt-5-mini", null, 1_000_000))).toBe(4)
+    expect(UsageCost.eventCostUsd(reportedTokens("early-budget", "gpt-5", 500_000, 0))).toBe(0.625)
   })
 
   it("leaves missing and malformed reports unpriced", () => {
@@ -183,6 +182,52 @@ describe("UsageCost", () => {
       expect(snapshot.turnCostUsd.get("turn-first")).toBe(2.25)
       expect(snapshot.threadCostUsd.get("thread-a")).toBe(2.25)
       expect(snapshot.globalCostUsd).toBe(2.25)
+    }),
+  )
+
+  it.effect("keeps other execution costs when one execution fails to read", () =>
+    Effect.gen(function* () {
+      const healthy = reader({
+        "turn-a": { events: [usage("usage-a", 1.5)], children: ["child-a"] },
+        "child-a": { events: [usage("usage-child-a", 0.5)] },
+        "turn-b": { events: [usage("usage-b", 3)] },
+      })
+      const snapshot = yield* UsageCost.collect(
+        {
+          inspect: healthy.inspect,
+          replay: (executionId) =>
+            executionId === "child-a"
+              ? Effect.fail(BackendError.make({ message: "replay failed" }))
+              : healthy.replay(executionId),
+        },
+        [
+          { threadId: "thread-a", turnId: "turn-a" },
+          { threadId: "thread-b", turnId: "turn-b" },
+        ],
+      )
+
+      expect(snapshot.turnCostUsd.get("turn-a")).toBe(1.5)
+      expect(snapshot.threadCostUsd.get("thread-b")).toBe(3)
+      expect(snapshot.globalCostUsd).toBe(4.5)
+    }),
+  )
+
+  it.effect("only records turns and threads with observed usage", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* UsageCost.collect(
+        reader({
+          "turn-a": { events: [usage("usage-a", 2)] },
+          "turn-b": { events: [] },
+        }),
+        [
+          { threadId: "thread-a", turnId: "turn-a" },
+          { threadId: "thread-b", turnId: "turn-b" },
+        ],
+      )
+
+      expect(snapshot.turnCostUsd.has("turn-b")).toBe(false)
+      expect(snapshot.threadCostUsd.has("thread-b")).toBe(false)
+      expect(snapshot.turnCostUsd.get("turn-a")).toBe(2)
     }),
   )
 })

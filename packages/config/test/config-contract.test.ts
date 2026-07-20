@@ -202,4 +202,20 @@ describe("ConfigContract", () => {
   ])("rejects malformed %s configuration", (key, value) => {
     expect(() => ConfigContract.decodeSettingsInput("settings.json", { [key]: value })).toThrowError()
   })
+
+  it("accepts a boolean streamingOnly provider override and rejects other types", () => {
+    const input = { providers: { openai: { streamingOnly: true } } } as const
+    expect(ConfigContract.decodeSettingsInput("settings.json", input)).toBe(input)
+    expect(() =>
+      ConfigContract.decodeSettingsInput("settings.json", { providers: { openai: { streamingOnly: "yes" } } }),
+    ).toThrowError(/streamingOnly must be a boolean/)
+  })
+
+  it("marks only chatgpt.com base URLs as streaming-only", () => {
+    expect(ConfigContract.isStreamingOnlyBaseUrl("https://chatgpt.com/backend-api/codex")).toBe(true)
+    expect(ConfigContract.isStreamingOnlyBaseUrl("https://api.chatgpt.com/v1")).toBe(true)
+    expect(ConfigContract.isStreamingOnlyBaseUrl("https://api.openai.com/v1")).toBe(false)
+    expect(ConfigContract.isStreamingOnlyBaseUrl("https://evilchatgpt.com/v1")).toBe(false)
+    expect(ConfigContract.isStreamingOnlyBaseUrl("not a url")).toBe(false)
+  })
 })

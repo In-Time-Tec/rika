@@ -16,6 +16,7 @@ export interface Projection {
   readonly oldestCursor: string | undefined
   readonly checkpointCursor: string | undefined
   readonly costUsd: number | undefined
+  readonly usageCursors: ReadonlyArray<string> | undefined
 }
 
 export interface PageOptions {
@@ -43,6 +44,7 @@ export interface Interface {
     events: ReadonlyArray<Transcript.SourceEvent>,
   ) => Effect.Effect<Projection, RepositoryError>
   readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<Page, RepositoryError>
+  readonly globalCostUsd: Effect.Effect<number, RepositoryError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/persistence/transcript-repository/Service") {}
@@ -62,6 +64,7 @@ const CheckpointRow = Schema.Struct({
   oldest_cursor: Schema.NullOr(Schema.String),
   checkpoint_cursor: Schema.NullOr(Schema.String),
   cost_usd: Schema.NullOr(Schema.Finite),
+  usage_cursors_json: Schema.NullOr(Schema.String),
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
@@ -83,6 +86,7 @@ const UnitRow = Schema.Struct({
 })
 
 const UnitJson = Schema.fromJsonString(Transcript.Unit)
+const UsageCursorsJson = Schema.fromJsonString(Schema.Array(Schema.String))
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
 const ExtensionPinJson = Schema.fromJsonString(ExecutionExtensionPin)
@@ -108,6 +112,7 @@ const stored = (turn: Turn, projection: Transcript.Projection): Projection => ({
   oldestCursor: projection.oldestCursor,
   checkpointCursor: projection.checkpointCursor,
   costUsd: projection.costUsd,
+  usageCursors: projection.usageCursors === undefined ? undefined : clone(projection.usageCursors),
 })
 
 const source = (projection: Projection): Transcript.Projection => ({
@@ -117,6 +122,7 @@ const source = (projection: Projection): Transcript.Projection => ({
   ...(projection.oldestCursor === undefined ? {} : { oldestCursor: projection.oldestCursor }),
   ...(projection.checkpointCursor === undefined ? {} : { checkpointCursor: projection.checkpointCursor }),
   ...(projection.costUsd === undefined ? {} : { costUsd: projection.costUsd }),
+  ...(projection.usageCursors === undefined ? {} : { usageCursors: projection.usageCursors }),
 })
 
 const continueProjection = (
@@ -195,6 +201,11 @@ const makeMemory = Effect.gen(function* () {
         .reduce((total, projection) => total + (projection.costUsd ?? 0), 0)
       return { entries, hasOlder: descending.length > limit, oldestCursor: cursorFor(entries[0]), threadCostUsd }
     }),
+    globalCostUsd: Ref.get(state).pipe(
+      Effect.map((entries) =>
+        [...entries.values()].reduce((total, projection) => total + (projection.costUsd ?? 0), 0),
+      ),
+    ),
   })
 })
 
@@ -252,6 +263,10 @@ export const layer = Layer.effect(
           ),
         ),
       )
+      const usageCursors =
+        row.usage_cursors_json === null
+          ? undefined
+          : yield* Schema.decodeUnknownEffect(UsageCursorsJson)(row.usage_cursors_json).pipe(Effect.mapError(error))
       return {
         turn: yield* decodeTurn(row).pipe(Effect.mapError(error)),
         units,
@@ -260,6 +275,7 @@ export const layer = Layer.effect(
         oldestCursor: row.oldest_cursor ?? undefined,
         checkpointCursor: row.checkpoint_cursor ?? undefined,
         costUsd: row.cost_usd ?? undefined,
+        usageCursors,
       } satisfies Projection
     })
     const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: Transcript.Unit) {
@@ -274,11 +290,15 @@ export const layer = Layer.effect(
       turn: Turn,
       projection: Transcript.Projection,
     ) {
-      yield* sql`INSERT INTO rika_transcript_checkpoints (turn_id, thread_id, model_phase, revision, oldest_cursor, checkpoint_cursor, cost_usd, updated_at)
-          VALUES (${turn.id}, ${turn.threadId}, ${projection.modelPhase}, ${projection.revision}, ${projection.oldestCursor ?? null}, ${projection.checkpointCursor ?? null}, ${projection.costUsd ?? null}, ${turn.updatedAt})
+      const usageCursors =
+        projection.usageCursors === undefined
+          ? null
+          : yield* Schema.encodeEffect(UsageCursorsJson)(projection.usageCursors)
+      yield* sql`INSERT INTO rika_transcript_checkpoints (turn_id, thread_id, model_phase, revision, oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, updated_at)
+          VALUES (${turn.id}, ${turn.threadId}, ${projection.modelPhase}, ${projection.revision}, ${projection.oldestCursor ?? null}, ${projection.checkpointCursor ?? null}, ${projection.costUsd ?? null}, ${usageCursors}, ${turn.updatedAt})
           ON CONFLICT(turn_id) DO UPDATE SET thread_id = excluded.thread_id, model_phase = excluded.model_phase,
             revision = excluded.revision, oldest_cursor = excluded.oldest_cursor, checkpoint_cursor = excluded.checkpoint_cursor,
-            cost_usd = excluded.cost_usd, updated_at = excluded.updated_at`
+            cost_usd = excluded.cost_usd, usage_cursors_json = excluded.usage_cursors_json, updated_at = excluded.updated_at`
     }, Effect.mapError(error))
     const storedResult = Effect.fn("TranscriptRepository.storedResult")(function* (turnId: TurnId) {
       const result = yield* get(turnId)
@@ -402,6 +422,12 @@ export const layer = Layer.effect(
           threadCostUsd: total.thread_cost_usd,
         }
       }),
+      globalCostUsd: Effect.gen(function* () {
+        const totals = yield* sql`SELECT COALESCE(SUM(cost_usd), 0) AS global_cost_usd
+          FROM rika_transcript_checkpoints`
+        const total = yield* Schema.decodeUnknownEffect(Schema.Struct({ global_cost_usd: Schema.Finite }))(totals[0])
+        return total.global_cost_usd
+      }).pipe(Effect.mapError(error)),
     })
   }),
 )
