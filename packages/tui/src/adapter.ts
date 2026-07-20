@@ -71,6 +71,7 @@ import { atBottomWithin, clampScrollTop, maxScrollTop, type ViewportMetrics } fr
 import { renderMarkdown, renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
 import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
+import { highlightShellCommand } from "./syntax-highlight"
 import { renderTool } from "./tool-renderer"
 import {
   escapePathTarget,
@@ -1100,6 +1101,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
         `${running ? spinnerFrame : "$"} ${lines.join("\n    ")}${exit}${cancellation}${expandable ? markerText(expanded) : ""}`,
       )
     } else {
+      const highlighted = cancelled ? undefined : highlightShellCommand(command)
       lines.forEach((current, lineIndex) => {
         if (lineIndex === 0) {
           if (running) {
@@ -1107,9 +1109,13 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
             append(fg(colors.text)(" "))
           } else if (cancelled) append(bold(fg(colors.amber)("$ ")))
           else append(dim(fg(colors.text)("$ ")))
-          append(cancelled ? strikethrough(fg(colors.text)(current)) : fg(colors.text)(current))
-        } else
-          append(cancelled ? strikethrough(fg(colors.text)(`\n    ${current}`)) : fg(colors.text)(`\n    ${current}`))
+          if (cancelled) append(strikethrough(fg(colors.text)(current)))
+          else for (const chunk of highlighted?.[lineIndex] ?? []) append(chunk)
+        } else if (cancelled) append(strikethrough(fg(colors.text)(`\n    ${current}`)))
+        else {
+          append(fg(colors.text)("\n    "))
+          for (const chunk of highlighted?.[lineIndex] ?? []) append(chunk)
+        }
       })
       if (failed) append(fg(colors.red)(` (exit code: ${exitCode ?? 1})`))
       if (cancelled) append(italic(fg(colors.amber)(" (cancelled)")))
@@ -1153,7 +1159,10 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
           append(bold(fg(colors.amber)("$ ")))
           append(strikethrough(fg(colors.text)(shellCommandText(unit.block).split("\n")[0]!)))
           append(italic(fg(colors.amber)(" (cancelled)")))
-        } else append(fg(colors.text)(`$ ${shellCommandText(unit.block).split("\n")[0]}`))
+        } else {
+          append(dim(fg(colors.text)("$ ")))
+          for (const chunk of highlightShellCommand(shellCommandText(unit.block))[0] ?? []) append(chunk)
+        }
         if (unit.block.status === "failed") append(fg(colors.red)(` (exit code: ${shellExitCode(unit.block) ?? 1})`))
         if (expandable) append(marker(childExpanded))
         if (expandable && childExpanded) {

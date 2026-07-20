@@ -1,6 +1,8 @@
+import { TextAttributes, type TextChunk } from "@opentui/core"
 import { project } from "@rika/transcript"
 import { describe, expect, test } from "vitest"
 import { buildTranscript } from "../src/adapter"
+import { colors } from "../src/theme"
 import { expandableRowIds, toolDetail, rows as transcriptUnits } from "../src/transcript-presenter"
 import { initial, type Model, type TranscriptBlock } from "../src/view-state"
 
@@ -35,6 +37,22 @@ const text = (value: Model): string =>
   buildTranscript(value)
     .styled.chunks.map((chunk) => chunk.text)
     .join("")
+
+const chunkFor = (chunks: ReadonlyArray<TextChunk>, snippet: string): TextChunk => {
+  const chunk = chunks.find((candidate) => candidate.text.includes(snippet))
+  if (chunk === undefined) throw new Error(`Missing styled chunk for ${snippet}`)
+  return chunk
+}
+
+const hasAttribute = (chunk: TextChunk, attribute: number): boolean =>
+  ((chunk.attributes ?? TextAttributes.NONE) & attribute) === attribute
+
+const shellPresentation: ToolCall["presentation"] = {
+  family: "shell",
+  action: "command",
+  activeLabel: "Running",
+  completeLabel: "Ran",
+}
 
 const explore = (
   action: string,
@@ -176,6 +194,42 @@ describe("tool presentation", () => {
     expect(rendered).toContain("$ failing-command (exit code: 23)")
     expect(rendered).toContain("line-12")
     expect(rendered).not.toContain("line-13")
+  })
+
+  test("highlights shell command syntax in transcript rows", () => {
+    const command = 'git commit --amend -m "fix" && git push'
+    const shell = call("shell", "bash", { command }, shellPresentation, { detail: command })
+    const chunks = buildTranscript(model([shell])).styled.chunks
+    expect(hasAttribute(chunkFor(chunks, "$ "), TextAttributes.DIM)).toBe(true)
+    expect(hasAttribute(chunkFor(chunks, "git"), TextAttributes.BOLD)).toBe(true)
+    expect(chunkFor(chunks, "--amend").fg?.equals(colors.amber)).toBe(true)
+    expect(chunkFor(chunks, '"fix"').fg?.equals(colors.green)).toBe(true)
+    expect(hasAttribute(chunkFor(chunks, "&&"), TextAttributes.DIM)).toBe(true)
+  })
+
+  test("highlights each command of an expanded shell group", () => {
+    const first = call("shell-one", "bash", { command: "git fetch origin main" }, shellPresentation, {
+      detail: "git fetch origin main",
+    })
+    const second = call("shell-two", "bash", { command: "git push --force-with-lease" }, shellPresentation, {
+      detail: "git push --force-with-lease",
+    })
+    const chunks = buildTranscript(model([first, second], ["tool:shell-one"])).styled.chunks
+    const commands = chunks.filter((chunk) => chunk.text === "git")
+    expect(commands).toHaveLength(2)
+    for (const word of commands) expect(hasAttribute(word, TextAttributes.BOLD)).toBe(true)
+    expect(chunkFor(chunks, "--force-with-lease").fg?.equals(colors.amber)).toBe(true)
+  })
+
+  test("keeps a selected shell row uniformly highlighted", () => {
+    const shell = call("shell", "bash", { command: "git status --short" }, shellPresentation, {
+      detail: "git status --short",
+      output: "ok",
+    })
+    const chunks = buildTranscript({ ...model([shell]), detailSelection: "tool:shell" }).styled.chunks
+    const row = chunkFor(chunks, "$ git status --short")
+    expect(hasAttribute(row, TextAttributes.BOLD)).toBe(true)
+    expect(row.fg?.equals(colors.blue)).toBe(true)
   })
 
   test("shows web research as inline status without displaying or expanding output", () => {

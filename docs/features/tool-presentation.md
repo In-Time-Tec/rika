@@ -32,6 +32,6 @@ The transcript names tools by what the user sees, never by transport method or i
 | `slack_read`, `slack_write`          | `Slack <detail>`                 | `Slack <detail>`                | bounded result         |
 | unknown or MCP tool                  | `Running tool <detail>`          | `Ran tool <detail>`             | bounded result         |
 
-Adjacent reads and searches collapse into `Explored <counts>`. Adjacent edits collapse into `Edited <count> files +<added> -<removed>`. Adjacent shell calls collapse into `Ran <count> commands[, <failed> failed]`. A failed single command appends `(exit code: <code>)`.
+Adjacent reads and searches collapse into `Explored <counts>`. Adjacent edits collapse into `Edited <count> files +<added> -<removed>`. Adjacent shell calls collapse into `Ran <count> commands[, <failed> failed]`. A failed single command appends `(exit code: <code>)`. Shell commands render syntax-highlighted: command words bold, flags amber, quoted strings green, and operators, line continuations, comments, and heredoc bodies dim or muted.
 
 Groups expand and collapse when they have displayable detail. Web search and web-page reads keep their own results in the transcript but show only the inline call status; attached child-tool detail remains expandable. Multi-file edits and multi-command shell groups add independently expandable child rows. Read and search children keep clickable file targets. Running edits open automatically and turn argument deltas into per-file diffs; the final tool result replaces that preview on the same row.
