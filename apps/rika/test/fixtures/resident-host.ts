@@ -307,49 +307,59 @@ const program = Effect.gen(function* () {
                         ),
                       )
                     },
-                    submit: (prompt) =>
+                    submit: (prompt, _mode, parts) =>
                       prompt === "ambiguous"
                         ? append("mutation-attempts.log", `${process.pid}\n`).pipe(
                             Effect.andThen(Effect.sync(() => process.kill(process.pid, "SIGKILL"))),
                             Effect.asVoid,
                           )
-                        : prompt.startsWith("serialized-")
-                          ? Effect.gen(function* () {
-                              const index = Number(prompt.slice("serialized-".length))
-                              const admissionActive = yield* Ref.updateAndGet(
-                                interactiveAdmissionActive,
-                                (value) => value + 1,
-                              )
-                              yield* Ref.update(interactiveAdmissionMaximum, (value) =>
-                                Math.max(value, admissionActive),
-                              )
-                              yield* Ref.update(interactiveAdmissions, (values) => [...values, index])
-                              const execution = Effect.gen(function* () {
-                                const active = yield* Ref.updateAndGet(interactiveActive, (value) => value + 1)
-                                yield* Ref.update(interactiveMaximum, (value) => Math.max(value, active))
-                                yield* Effect.sleep(`${1 + ((99 - index) % 10)} millis`)
-                                const completions = yield* Ref.updateAndGet(interactiveCompletions, (values) => [
-                                  ...values,
-                                  index,
-                                ])
-                                if (completions.length === 4) {
-                                  const admissionMaximum = yield* Ref.get(interactiveAdmissionMaximum)
-                                  const admissions = yield* Ref.get(interactiveAdmissions)
-                                  const executionMaximum = yield* Ref.get(interactiveMaximum)
-                                  const encoded = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
-                                    admissionMaximum,
-                                    admissions,
-                                    executionMaximum,
-                                    completions,
-                                  })
-                                  yield* fs
-                                    .writeFileString(path.join(dataRoot, "interactive-serialization.json"), encoded)
-                                    .pipe(Effect.orDie)
-                                }
-                              }).pipe(Effect.ensuring(Ref.update(interactiveActive, (value) => value - 1)))
-                              yield* Effect.forkIn(execution, interactiveExecutionScope)
-                            }).pipe(Effect.ensuring(Ref.update(interactiveAdmissionActive, (value) => value - 1)))
-                          : Effect.void,
+                        : prompt === "oversized-submit"
+                          ? Effect.suspend(() => {
+                              const image = parts?.find((part) => part.type === "image")
+                              return fs
+                                .writeFileString(
+                                  path.join(dataRoot, "oversized-submit.json"),
+                                  String(image !== undefined && image.type === "image" ? image.data.length : 0),
+                                )
+                                .pipe(Effect.orDie, Effect.asVoid)
+                            })
+                          : prompt.startsWith("serialized-")
+                            ? Effect.gen(function* () {
+                                const index = Number(prompt.slice("serialized-".length))
+                                const admissionActive = yield* Ref.updateAndGet(
+                                  interactiveAdmissionActive,
+                                  (value) => value + 1,
+                                )
+                                yield* Ref.update(interactiveAdmissionMaximum, (value) =>
+                                  Math.max(value, admissionActive),
+                                )
+                                yield* Ref.update(interactiveAdmissions, (values) => [...values, index])
+                                const execution = Effect.gen(function* () {
+                                  const active = yield* Ref.updateAndGet(interactiveActive, (value) => value + 1)
+                                  yield* Ref.update(interactiveMaximum, (value) => Math.max(value, active))
+                                  yield* Effect.sleep(`${1 + ((99 - index) % 10)} millis`)
+                                  const completions = yield* Ref.updateAndGet(interactiveCompletions, (values) => [
+                                    ...values,
+                                    index,
+                                  ])
+                                  if (completions.length === 4) {
+                                    const admissionMaximum = yield* Ref.get(interactiveAdmissionMaximum)
+                                    const admissions = yield* Ref.get(interactiveAdmissions)
+                                    const executionMaximum = yield* Ref.get(interactiveMaximum)
+                                    const encoded = yield* Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)({
+                                      admissionMaximum,
+                                      admissions,
+                                      executionMaximum,
+                                      completions,
+                                    })
+                                    yield* fs
+                                      .writeFileString(path.join(dataRoot, "interactive-serialization.json"), encoded)
+                                      .pipe(Effect.orDie)
+                                  }
+                                }).pipe(Effect.ensuring(Ref.update(interactiveActive, (value) => value - 1)))
+                                yield* Effect.forkIn(execution, interactiveExecutionScope)
+                              }).pipe(Effect.ensuring(Ref.update(interactiveAdmissionActive, (value) => value - 1)))
+                            : Effect.void,
                     shell: () => Effect.void,
                     editQueued: () => Effect.void,
                     dequeue: () => Effect.void,

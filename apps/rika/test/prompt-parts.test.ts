@@ -122,6 +122,47 @@ test("materializes exact precomputed pasted text and image parts without reparsi
     }),
   ))
 
+test("rejects an image attachment larger than the size limit with an actionable message", () =>
+  run(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* workspace("rika-prompt-parts-")
+      yield* fileSystem.writeFile(path.join(root, "huge.png"), new Uint8Array(6_000_000))
+      const error = yield* Effect.flip(materializePromptParts([{ type: "image", path: "huge.png" }] as const, root))
+      expect(error._tag).toBe("PromptAttachmentError")
+      expect(error.index).toBe(0)
+      expect(error.path).toBe("huge.png")
+      expect(error.message).toBe("Image attachment is too large (6.0 MB; the limit is 5.0 MB): huge.png")
+    }),
+  ))
+
+test("rejects combined image attachments beyond the wire ceiling and names the largest image", () =>
+  run(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* workspace("rika-prompt-parts-")
+      yield* fileSystem.writeFile(path.join(root, "a.png"), new Uint8Array(4_500_000))
+      yield* fileSystem.writeFile(path.join(root, "b.png"), new Uint8Array(4_600_000))
+      yield* fileSystem.writeFile(path.join(root, "c.png"), new Uint8Array(4_500_000))
+      const error = yield* Effect.flip(
+        materializePromptParts(
+          [
+            { type: "image", path: "a.png" },
+            { type: "image", path: "b.png" },
+            { type: "image", path: "c.png" },
+          ] as const,
+          root,
+        ),
+      )
+      expect(error._tag).toBe("PromptAttachmentError")
+      expect(error.index).toBe(1)
+      expect(error.path).toBe("b.png")
+      expect(error.message).toContain("remove an image")
+    }),
+  ))
+
 test("preserves expanded text-only paste parts instead of falling back to the composer token", () =>
   run(
     Effect.gen(function* () {

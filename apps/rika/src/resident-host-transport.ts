@@ -30,6 +30,7 @@ import {
   defaultOutboundCapacity,
   failureKind,
   json,
+  makeClientMessageFrameDecoder,
   maxFrameBytes,
   outputFrames,
   parse,
@@ -495,6 +496,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     )
     const inbound = yield* Semaphore.make(1)
     const attached = yield* Ref.make(false)
+    const decodeClientFrame = makeClientMessageFrameDecoder()
     const requests = yield* Ref.make(new Map<string, Fiber.Fiber<void, unknown>>())
     const connectionId = yield* crypto.randomUUIDv4
     const routeKey = (requestId: string) => `${connectionId}\0${requestId}`
@@ -513,15 +515,17 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         inbound.withPermits(1)(
           Effect.gen(function* () {
             if (new TextEncoder().encode(text).byteLength > maxFrameBytes) return yield* close(4400)
+            const isAttached = yield* Ref.get(attached)
             const decoded = yield* Effect.result(
               Effect.try({
-                try: () => decodeClient(parse(text)),
+                try: () => (isAttached ? decodeClientFrame(text) : decodeClient(parse(text))),
                 catch: () => transportError("Invalid resident request"),
               }),
             )
             if (decoded._tag === "Failure") return yield* close(4400)
             const message = decoded.success
-            if (!(yield* Ref.get(attached))) {
+            if (message === undefined) return
+            if (!isAttached) {
               if (!("family" in message)) return yield* close(4401)
               const result = ResidentService.validateHandshake(message, {
                 identity: options.identity,

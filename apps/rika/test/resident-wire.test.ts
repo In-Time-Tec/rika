@@ -2,7 +2,10 @@ import { describe, expect, it } from "@effect/vitest"
 import * as ResidentService from "@rika/app/resident-service"
 import { Schema } from "effect"
 import {
+  clientMessageFrames,
+  makeClientMessageFrameDecoder,
   makeServerMessageFrameDecoder,
+  maxClientMessageBytes,
   maxFrameBytes,
   outputFrames,
   parse,
@@ -41,6 +44,81 @@ describe("resident output frames", () => {
     const frames = outputFrames("request", "stderr", "small")
     expect(frames).toHaveLength(1)
     expect(encoder.encode(frames[0]!).byteLength).toBeLessThanOrEqual(maxFrameBytes)
+  })
+})
+
+describe("resident client message frames", () => {
+  const submitMessage = (dataBytes: number) =>
+    Schema.decodeUnknownSync(ResidentService.ClientMessage)({
+      _tag: "interactive-command",
+      connectionId: "connection",
+      requestId: "request",
+      sessionId: "session",
+      feedGeneration: "generation",
+      commandSequence: 1,
+      command: {
+        _tag: "Submit",
+        prompt: "look at this",
+        promptParts: [
+          { type: "text", text: "look at this" },
+          { type: "image", mediaType: "image/png", data: "x".repeat(dataBytes), filename: "shot.png" },
+        ],
+      },
+    })
+
+  it("splits and reassembles an oversized interactive submit", () => {
+    const message = submitMessage(2_000_000)
+    const frames = clientMessageFrames("message", message)
+    const decodeFrame = makeClientMessageFrameDecoder()
+    const decoded = frames.map(decodeFrame).filter((value) => value !== undefined)
+
+    expect(frames.length).toBeGreaterThan(1)
+    expect(Math.max(...frames.map((frame) => encoder.encode(frame).byteLength))).toBeLessThanOrEqual(maxFrameBytes)
+    expect(decoded).toEqual([message])
+  })
+
+  it("keeps a small client message whole", () => {
+    const message = submitMessage(16)
+    const frames = clientMessageFrames("message", message)
+    expect(frames).toHaveLength(1)
+    expect(makeClientMessageFrameDecoder()(frames[0]!)).toEqual(message)
+  })
+
+  it("fails a message beyond the chunk ceiling with a typed message-too-large error", () => {
+    expect(maxClientMessageBytes).toBe(16 * maxFrameBytes)
+    try {
+      clientMessageFrames("message", submitMessage(maxClientMessageBytes + 1_000_000))
+      expect.unreachable("clientMessageFrames must throw for an over-ceiling message")
+    } catch (error) {
+      expect(Schema.is(ResidentService.ResidentServiceError)(error)).toBe(true)
+      expect(error).toMatchObject({ reason: "message-too-large" })
+    }
+  })
+
+  it("rejects malformed, oversized, and excessive-fragment frames", () => {
+    const decodeFrame = makeClientMessageFrameDecoder()
+    expect(() => decodeFrame("{")).toThrow()
+    expect(() => decodeFrame("x".repeat(maxFrameBytes + 1))).toThrow("Resident frame exceeds maximum size")
+    expect(() =>
+      decodeFrame(
+        JSON.stringify({
+          _tag: "resident-client-message-chunk",
+          messageId: "message",
+          index: 0,
+          count: 17,
+          text: "{}",
+        }),
+      ),
+    ).toThrow("maximum chunk count")
+  })
+
+  it("discards out-of-order fragments and accepts a fresh ordered replay", () => {
+    const message = submitMessage(2_000_000)
+    const frames = clientMessageFrames("message", message)
+    const decodeFrame = makeClientMessageFrameDecoder()
+
+    expect(decodeFrame(frames.at(-1)!)).toBeUndefined()
+    expect(frames.map(decodeFrame).filter(Boolean)).toEqual([message])
   })
 })
 

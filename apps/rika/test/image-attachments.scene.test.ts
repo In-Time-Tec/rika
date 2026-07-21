@@ -121,6 +121,56 @@ test(
   45_000,
 )
 
+test("submits an image larger than one wire frame without disconnecting the resident transport", () => {
+  const bigPng = new Uint8Array(1_500_000)
+  bigPng.set(png)
+  return Scene.run({
+    files: [{ path: "big.png", bytes: bigPng }],
+    script: [Scene.model.text("Large image received.")],
+    actions: [
+      Scene.action.writeAfter("Welcome to Rika", "\u001b[200~big.png\u001b[201~"),
+      Scene.action.writeAfter("[Image #1]", " large\r"),
+      Scene.action.writeAfter("Large image received.", "", 100),
+    ],
+  }).then((result) => {
+    expect(result.output).not.toContain("Resident transport disconnected")
+    expect(result.turns.map((turn) => turn.prompt)).toEqual(["[Image #1] large"])
+    expect(JSON.parse(result.persistedTurns[0]?.prompt_parts_json ?? "null")).toEqual([
+      {
+        type: "image",
+        mediaType: "image/png",
+        data: Buffer.from(bigPng).toString("base64"),
+        filename: "big.png",
+      },
+      { type: "text", text: " large" },
+    ])
+    expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
+    expect(result.diagnostics).toContain('"rika.model.backend.kind":"test-script"')
+  })
+}, 45_000)
+
+test(
+  "rejects an over-limit image with a composer message and keeps the session healthy",
+  () =>
+    Scene.run({
+      files: [{ path: "huge.png", bytes: new Uint8Array(6_000_000) }],
+      script: [Scene.model.text("Recovered without the image.")],
+      actions: [
+        Scene.action.writeAfter("Welcome to Rika", "\u001b[200~huge.png\u001b[201~"),
+        Scene.action.writeAfter("[Image #1]", " too big\r"),
+        Scene.action.writeAfter("Image attachment is too large", "\r"),
+        Scene.action.writeAfter("Recovered without the image.", "", 100),
+      ],
+    }).then((result) => {
+      expect(result.output).toContain("Image attachment is too large")
+      expect(result.output).not.toContain("Resident transport disconnected")
+      expect(result.turns.map((turn) => turn.prompt)).toEqual([" too big"])
+      expect(result.diagnostics).not.toContain('"rika.model.backend.kind":"provider"')
+      expect(result.diagnostics).toContain('"rika.model.backend.kind":"test-script"')
+    }),
+  45_000,
+)
+
 test(
   "blocks clipboard and path images while editing a queued prompt",
   () =>

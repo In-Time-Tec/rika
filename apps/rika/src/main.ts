@@ -47,6 +47,7 @@ import {
   Layer,
   Option,
   Path,
+  PlatformError,
   Redacted,
   Ref,
   References,
@@ -65,6 +66,7 @@ import * as ModelProviderRuntime from "./model-provider-runtime"
 import * as OpenAiAuthAdapter from "./openai-auth-adapter"
 import * as OpenAiCredentialStore from "./openai-credential-store"
 import { layer as residentLayer } from "./resident-client-transport"
+import { maxClientMessageBytes } from "./resident-wire"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 
@@ -137,6 +139,42 @@ const rm = (path: string, options?: { readonly force?: boolean }) =>
     ),
   )
 const stat = (path: string) => FileSystem.FileSystem.pipe(Effect.flatMap((fileSystem) => fileSystem.stat(path)))
+
+const fffError = (workspace: string, method: string, cause: unknown) =>
+  PlatformError.systemError({
+    _tag: "Unknown",
+    module: "FFF",
+    method,
+    pathOrDescriptor: workspace,
+    description: cause instanceof Error ? cause.message : String(cause),
+    cause,
+  })
+
+const fffGlob = (workspace: string, pattern: string, maximumFiles: number) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const created = yield* Effect.try({
+        try: () => FileFinder.create({ basePath: workspace, aiMode: true }),
+        catch: (cause) => fffError(workspace, "initialize", cause),
+      })
+      if (!created.ok) return yield* Effect.fail(fffError(workspace, "initialize", created.error))
+      const finder = yield* Effect.acquireRelease(Effect.succeed(created.value), (finder) =>
+        Effect.sync(() => finder.destroy()).pipe(Effect.ignore),
+      )
+      const scanned = yield* Effect.tryPromise({
+        try: () => finder.waitForScan(10_000),
+        catch: (cause) => fffError(workspace, "scan", cause),
+      })
+      if (!scanned.ok) return yield* Effect.fail(fffError(workspace, "scan", scanned.error))
+      if (!scanned.value) return yield* Effect.fail(fffError(workspace, "scan", "Initial workspace scan timed out"))
+      const result = yield* Effect.try({
+        try: () => finder.glob(pattern, { pageSize: maximumFiles }),
+        catch: (cause) => fffError(workspace, "glob", cause),
+      })
+      if (!result.ok) return yield* Effect.fail(fffError(workspace, "glob", result.error))
+      return result.value.items.map((item) => item.relativePath)
+    }),
+  )
 
 const imageMediaType = (path: string) => {
   const lower = path.toLowerCase()
@@ -296,6 +334,10 @@ class OperationProductError extends Schema.TaggedErrorClass<OperationProductErro
   message: Schema.String,
 }) {}
 
+export const maxAttachmentBytes = 5_000_000
+const maxPromptPartsBytes = maxClientMessageBytes - 65_536
+const attachmentMegabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
+
 const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
   Effect.forEach(
     parts,
@@ -321,7 +363,15 @@ const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, 
                   message: `Image attachment is missing or empty: ${part.path}`,
                 }),
               )
-            : Effect.succeed({ mediaType: imageMediaType(path), bytes }),
+            : bytes.byteLength > maxAttachmentBytes
+              ? Effect.fail(
+                  PromptAttachmentError.make({
+                    index,
+                    path: part.path,
+                    message: `Image attachment is too large (${attachmentMegabytes(bytes.byteLength)}; the limit is ${attachmentMegabytes(maxAttachmentBytes)}): ${part.path}`,
+                  }),
+                )
+              : Effect.succeed({ mediaType: imageMediaType(path), bytes }),
         ),
         Effect.flatMap(({ mediaType, bytes }) =>
           !mediaType.startsWith("image/")
@@ -342,6 +392,23 @@ const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, 
       )
     },
     { concurrency: "unbounded" },
+  ).pipe(
+    Effect.flatMap((materialized) => {
+      const images = materialized.flatMap((part, index) =>
+        part.type === "image" ? [{ index, bytes: part.data.length }] : [],
+      )
+      const total = images.reduce((sum, image) => sum + image.bytes, 0)
+      if (total <= maxPromptPartsBytes) return Effect.succeed(materialized)
+      const largest = images.reduce((left, right) => (right.bytes > left.bytes ? right : left))
+      const largestPart = parts[largest.index]
+      return Effect.fail(
+        PromptAttachmentError.make({
+          index: largest.index,
+          path: largestPart !== undefined && largestPart.type === "image" ? largestPart.path : "",
+          message: "Image attachments exceed the 16 MiB prompt limit; remove an image and try again",
+        }),
+      )
+    }),
   )
 
 export const materializePromptParts: {
@@ -1697,7 +1764,7 @@ if (import.meta.main) {
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
   )
-  const resolvedContextLayer = ResolvedContext.layer.pipe(
+  const resolvedContextLayer = ResolvedContext.layer(fffGlob).pipe(
     Layer.provide(ContextFileSystem.liveLayer),
     Layer.provide(BunServices.layer),
   )
@@ -2498,60 +2565,15 @@ if (import.meta.main) {
                 run(session.events(feedBatcher.offer))
                 run(watchChangedFiles)
                 run(
-                  Effect.gen(function* () {
-                    const [gitText, gitExit] = yield* gitOutput([
-                      "git",
-                      "-C",
-                      model.workspace,
-                      "ls-files",
-                      "--cached",
-                      "--others",
-                      "--exclude-standard",
-                      "-z",
-                    ])
-                    if (gitExit === 0) {
-                      const files = gitText.split("\0").filter((line) => line.length > 0)
-                      if (files.length > 0) {
+                  fffGlob(model.workspace, "**/*", 10_000).pipe(
+                    Effect.tap((files) =>
+                      Effect.sync(() => {
                         model = ViewState.update(model, { _tag: "FilesReplaced", files: files.toSorted() })
                         created.surface.update(model)
-                        return
-                      }
-                    }
-                    const initialized = yield* Effect.try({
-                      try: () => FileFinder.create({ basePath: model.workspace, aiMode: true }),
-                      catch: (cause) =>
-                        ExternalBoundaryError.make({ operation: "create file finder", message: String(cause) }),
-                    }).pipe(Effect.orElseSucceed(() => undefined))
-                    if (initialized?.ok !== true) {
-                      const files = yield* Effect.tryPromise({
-                        try: () =>
-                          Array.fromAsync(new Bun.Glob("**/*").scan({ cwd: model.workspace, onlyFiles: true })),
-                        catch: (cause) =>
-                          ExternalBoundaryError.make({ operation: "scan workspace files", message: String(cause) }),
-                      })
-                      model = ViewState.update(model, { _tag: "FilesReplaced", files: files.toSorted() })
-                      created.surface.update(model)
-                      return
-                    }
-                    yield* Effect.tryPromise({
-                      try: () => initialized.value.waitForScan(10_000),
-                      catch: (cause) =>
-                        ExternalBoundaryError.make({ operation: "scan file index", message: String(cause) }),
-                    }).pipe(
-                      Effect.andThen(
-                        Effect.sync(() => {
-                          const result = initialized.value.glob("**/*", { pageSize: 10_000 })
-                          if (!result.ok) throw new Error(result.error)
-                          model = ViewState.update(model, {
-                            _tag: "FilesReplaced",
-                            files: result.value.items.map((item) => item.relativePath),
-                          })
-                          created.surface.update(model)
-                        }),
-                      ),
-                      Effect.ensuring(Effect.sync(() => initialized.value.destroy())),
-                    )
-                  }).pipe(Effect.asVoid),
+                      }),
+                    ),
+                    Effect.asVoid,
+                  ),
                 )
                 run(
                   gitOutput(["git", "-C", model.workspace, "symbolic-ref", "--short", "HEAD"]).pipe(

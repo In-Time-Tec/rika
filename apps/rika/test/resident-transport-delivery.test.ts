@@ -79,6 +79,56 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
+    "delivers an oversized interactive submit without reconnecting",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root)
+            yield* attachedEffect(client)
+
+            yield* client.send("oversized-submit")
+            expect(yield* client.nextEffect).toEqual({
+              type: "oversized-submit-completed",
+              text: "2000000",
+              callbacks: 1,
+            })
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
+    "rejects an over-ceiling submit with an actionable message and keeps the session",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const client = yield* start(root)
+            yield* attachedEffect(client)
+
+            yield* client.send("over-ceiling-submit")
+            const event = yield* client.nextEffect
+            expect(event.type).toBe("over-ceiling-submit-completed")
+            expect(event.error).toContain("16 MiB resident message limit")
+            expect(event.error).not.toContain("transport disconnected")
+            expect(event.text).toBe("2000000")
+            yield* client.closeEffect
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
     "delivers a long bounded burst of interactive execution events without overflowing",
     () =>
       run(

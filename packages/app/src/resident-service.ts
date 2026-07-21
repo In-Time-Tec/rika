@@ -21,7 +21,7 @@ export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
 declare const RIKA_BUILD_IDENTITY: string | undefined
 
-export const protocolVersion = 2
+export const protocolVersion = 3
 export const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])
 const WireIdentifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
@@ -195,6 +195,7 @@ export class ResidentServiceError extends Schema.TaggedErrorClass<ResidentServic
     "identity-mismatch",
     "incompatible-resident",
     "foreign-listener",
+    "message-too-large",
     "resident-absent",
     "resident-draining",
     "startup-failed",

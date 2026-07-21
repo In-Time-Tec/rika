@@ -312,6 +312,77 @@ const program = Effect.gen(function* () {
               },
             )
             .pipe(Effect.catch((error) => emit({ type: "serialized-interactive-failed", error: error.message })))
+        if (command === "oversized-submit")
+          return Effect.gen(function* () {
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: [], ephemeral: false, workspace },
+                {
+                  interactive: (_input, session) =>
+                    Effect.gen(function* () {
+                      yield* session.submit("oversized-submit", undefined, [
+                        { type: "text", text: "look at this" },
+                        { type: "image", mediaType: "image/png", data: "x".repeat(2_000_000), filename: "shot.png" },
+                      ])
+                      while (!(yield* fs.exists(path.join(dataRoot, "oversized-submit.json")).pipe(Effect.orDie)))
+                        yield* Effect.sleep("1 millis")
+                      const text = yield* fs
+                        .readFileString(path.join(dataRoot, "oversized-submit.json"))
+                        .pipe(Effect.orDie)
+                      const acquisitions = (yield* fs
+                        .readFileString(path.join(dataRoot, "owner-acquisitions.log"))
+                        .pipe(Effect.orDie))
+                        .trim()
+                        .split("\n")
+                      yield* emit({ type: "oversized-submit-completed", text, callbacks: acquisitions.length })
+                    }),
+                },
+              ),
+            )
+            if (exit._tag === "Failure") yield* emit({ type: "oversized-submit-failed", error: String(exit.cause) })
+          })
+        if (command === "over-ceiling-submit")
+          return Effect.gen(function* () {
+            const exit = yield* Effect.exit(
+              connection.run(
+                { _tag: "Interactive", prompt: [], ephemeral: false, workspace },
+                {
+                  interactive: (_input, session) =>
+                    Effect.gen(function* () {
+                      const events = yield* Queue.unbounded<{ readonly tag: string; readonly message: string }>()
+                      const feed = yield* Effect.forkChild(
+                        session.events((event) =>
+                          Queue.offerUnsafe(events, {
+                            tag: event._tag,
+                            message: event._tag === "ExecutionFailed" ? event.message : "",
+                          }),
+                        ),
+                      )
+                      yield* Queue.take(events)
+                      yield* session.submit("over-ceiling", undefined, [
+                        { type: "image", mediaType: "image/png", data: "x".repeat(17_000_000), filename: "big.png" },
+                      ])
+                      let failure = ""
+                      while (failure === "") {
+                        const next = yield* Queue.take(events)
+                        if (next.tag === "ExecutionFailed") failure = next.message
+                      }
+                      yield* session.submit("oversized-submit", undefined, [
+                        { type: "image", mediaType: "image/png", data: "y".repeat(2_000_000), filename: "ok.png" },
+                      ])
+                      while (!(yield* fs.exists(path.join(dataRoot, "oversized-submit.json")).pipe(Effect.orDie)))
+                        yield* Effect.sleep("1 millis")
+                      const text = yield* fs
+                        .readFileString(path.join(dataRoot, "oversized-submit.json"))
+                        .pipe(Effect.orDie)
+                      yield* Fiber.interrupt(feed)
+                      yield* emit({ type: "over-ceiling-submit-completed", error: failure, text })
+                    }),
+                },
+              ),
+            )
+            if (exit._tag === "Failure") yield* emit({ type: "over-ceiling-submit-failed", error: String(exit.cause) })
+          })
         if (command === "rejected-interactive")
           return connection
             .run(

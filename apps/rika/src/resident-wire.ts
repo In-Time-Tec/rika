@@ -24,8 +24,10 @@ export const parse: {
 export const maxFrameBytes = 1_048_576
 export const defaultOutboundCapacity = 1_024
 export const maxServerMessageChunks = 16
+export const maxClientMessageChunks = 16
 const encoder = new TextEncoder()
 const maxServerMessageBytes = maxFrameBytes * maxServerMessageChunks
+export const maxClientMessageBytes = maxFrameBytes * maxClientMessageChunks
 const defaultFragmentTtlMilliseconds = 30_000
 const degradedReason =
   "Resident live delivery omitted an event larger than 16 MiB; reload the durable transcript for the full content"
@@ -44,19 +46,29 @@ const resyncTarget = (event: object) =>
       ? event.thread.id
       : undefined
 
-const ServerMessageChunk = Schema.Struct({
-  _tag: Schema.tag("resident-server-message-chunk"),
+const messageChunkFields = {
   messageId: Schema.String,
   index: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   count: Schema.Int.check(Schema.isGreaterThan(0)),
   text: Schema.String,
+}
+const ServerMessageChunk = Schema.Struct({
+  _tag: Schema.tag("resident-server-message-chunk"),
+  ...messageChunkFields,
 })
 type ServerMessageChunk = typeof ServerMessageChunk.Type
+const ClientMessageChunk = Schema.Struct({
+  _tag: Schema.tag("resident-client-message-chunk"),
+  ...messageChunkFields,
+})
+type ClientMessageChunk = typeof ClientMessageChunk.Type
+type ChunkTag = ServerMessageChunk["_tag"] | ClientMessageChunk["_tag"]
 const decodeServerWire = Schema.decodeUnknownSync(Schema.Union([ResidentService.ServerMessage, ServerMessageChunk]))
-const chunkFrame = (messageId: string, index: number, count: number, text: string) =>
-  json({ _tag: "resident-server-message-chunk", messageId, index, count, text } satisfies ServerMessageChunk)
+const decodeClientWire = Schema.decodeUnknownSync(Schema.Union([ResidentService.ClientMessage, ClientMessageChunk]))
+const chunkFrame = (tag: ChunkTag, messageId: string, index: number, count: number, text: string) =>
+  json({ _tag: tag, messageId, index, count, text })
 
-const splitServerMessage = (messageId: string, text: string) => {
+const splitMessage = (tag: ChunkTag, maxChunks: number, onOverflow: () => never, messageId: string, text: string) => {
   const parts = new Array<string>()
   let start = 0
   while (start < text.length) {
@@ -65,7 +77,7 @@ const splitServerMessage = (messageId: string, text: string) => {
     let best = start
     while (low <= high) {
       const middle = Math.floor((low + high) / 2)
-      const frame = chunkFrame(messageId, maxServerMessageChunks - 1, maxServerMessageChunks, text.slice(start, middle))
+      const frame = chunkFrame(tag, messageId, maxChunks - 1, maxChunks, text.slice(start, middle))
       if (encoder.encode(frame).byteLength <= maxFrameBytes) {
         best = middle
         low = middle + 1
@@ -80,13 +92,24 @@ const splitServerMessage = (messageId: string, text: string) => {
       text.charCodeAt(best) <= 0xdfff
     )
       best -= 1
-    if (best === start) throw new Error("Resident server message chunk metadata exceeds the maximum frame size")
+    if (best === start) throw new Error("Resident message chunk metadata exceeds the maximum frame size")
     parts.push(text.slice(start, best))
-    if (parts.length > maxServerMessageChunks) throw serverMessageTooLarge
+    if (parts.length > maxChunks) onOverflow()
     start = best
   }
-  return parts.map((part, index) => chunkFrame(messageId, index, parts.length, part))
+  return parts.map((part, index) => chunkFrame(tag, messageId, index, parts.length, part))
 }
+
+const splitServerMessage = (messageId: string, text: string) =>
+  splitMessage(
+    "resident-server-message-chunk",
+    maxServerMessageChunks,
+    () => {
+      throw serverMessageTooLarge
+    },
+    messageId,
+    text,
+  )
 
 const serverMessageFramesImpl = (
   messageId: string,
@@ -156,14 +179,32 @@ export const serverMessageFrames: {
   (messageId: string, message: ResidentService.ServerMessage): ReadonlyArray<string>
 } = Function.dual(2, serverMessageFramesImpl)
 
-export const makeServerMessageFrameDecoder = (options?: {
+type MessageChunk = {
+  readonly messageId: string
+  readonly index: number
+  readonly count: number
+  readonly text: string
+}
+
+type FrameDecoderOptions = {
   readonly now?: () => number
   readonly fragmentTtlMilliseconds?: number
   readonly maxPendingBytes?: number
+}
+
+const makeMessageFrameDecoder = <Message>(config: {
+  readonly chunkTag: ChunkTag
+  readonly maxChunks: number
+  readonly maxMessageBytes: number
+  readonly tooManyChunksMessage: string
+  readonly decodeWire: (input: unknown) => Message | (MessageChunk & { readonly _tag: ChunkTag })
+  readonly decodeComplete: (input: unknown) => Message
+  readonly options?: FrameDecoderOptions | undefined
 }) => {
+  const options = config.options
   const now = options?.now ?? Date.now
   const ttl = Math.max(1, options?.fragmentTtlMilliseconds ?? defaultFragmentTtlMilliseconds)
-  const pendingByteLimit = Math.max(maxFrameBytes, options?.maxPendingBytes ?? maxServerMessageBytes)
+  const pendingByteLimit = Math.max(maxFrameBytes, options?.maxPendingBytes ?? config.maxMessageBytes)
   const pending = new Map<
     string,
     { readonly count: number; readonly parts: Array<string>; nextIndex: number; bytes: number; updatedAt: number }
@@ -188,12 +229,17 @@ export const makeServerMessageFrameDecoder = (options?: {
   const expire = (currentTime: number) => {
     for (const [messageId, state] of pending) if (currentTime - state.updatedAt >= ttl) remove(messageId)
   }
-  return (frame: string): ResidentService.ServerMessage | undefined => {
+  return (frame: string): Message | undefined => {
     if (encoder.encode(frame).byteLength > maxFrameBytes) throw new Error("Resident frame exceeds maximum size")
-    const decoded = decodeServerWire(parse(frame))
-    if (decoded._tag !== "resident-server-message-chunk") return decoded
-    if (decoded.count > maxServerMessageChunks)
-      throw new Error("Resident server message exceeds the maximum chunk count")
+    const wire = config.decodeWire(parse(frame))
+    const isChunk =
+      typeof wire === "object" &&
+      wire !== null &&
+      "_tag" in wire &&
+      (wire as { readonly _tag: unknown })._tag === config.chunkTag
+    if (!isChunk) return wire as Message
+    const decoded = wire as unknown as MessageChunk
+    if (decoded.count > config.maxChunks) throw new Error(config.tooManyChunksMessage)
     const currentTime = now()
     expire(currentTime)
     let state = pending.get(decoded.messageId)
@@ -203,7 +249,7 @@ export const makeServerMessageFrameDecoder = (options?: {
     }
     if (state === undefined) {
       if (decoded.index !== 0) return undefined
-      while (pending.size >= maxServerMessageChunks) evictOldest()
+      while (pending.size >= config.maxChunks) evictOldest()
       state = { count: decoded.count, parts: [], nextIndex: 0, bytes: 0, updatedAt: currentTime }
       pending.set(decoded.messageId, state)
     }
@@ -226,9 +272,52 @@ export const makeServerMessageFrameDecoder = (options?: {
     pendingBytes += chunkBytes
     if (state.nextIndex < state.count) return undefined
     remove(decoded.messageId)
-    return decodeServer(parse(state.parts.join("")))
+    return config.decodeComplete(parse(state.parts.join("")))
   }
 }
+
+export const makeServerMessageFrameDecoder = (options?: FrameDecoderOptions) =>
+  makeMessageFrameDecoder<ResidentService.ServerMessage>({
+    chunkTag: "resident-server-message-chunk",
+    maxChunks: maxServerMessageChunks,
+    maxMessageBytes: maxServerMessageBytes,
+    tooManyChunksMessage: "Resident server message exceeds the maximum chunk count",
+    decodeWire: decodeServerWire,
+    decodeComplete: decodeServer,
+    options,
+  })
+
+export const makeClientMessageFrameDecoder = (options?: FrameDecoderOptions) =>
+  makeMessageFrameDecoder<ResidentService.ClientMessage>({
+    chunkTag: "resident-client-message-chunk",
+    maxChunks: maxClientMessageChunks,
+    maxMessageBytes: maxClientMessageBytes,
+    tooManyChunksMessage: "Resident client message exceeds the maximum chunk count",
+    decodeWire: decodeClientWire,
+    decodeComplete: decodeClient,
+    options,
+  })
+
+const clientMessageFramesImpl = (messageId: string, message: ResidentService.ClientMessage): ReadonlyArray<string> => {
+  const complete = json(message)
+  if (encoder.encode(complete).byteLength <= maxFrameBytes) return [complete]
+  return splitMessage(
+    "resident-client-message-chunk",
+    maxClientMessageChunks,
+    () => {
+      throw ResidentService.ResidentServiceError.make({
+        reason: "message-too-large",
+        message: "Resident client message exceeds the 16 MiB limit",
+      })
+    },
+    messageId,
+    complete,
+  )
+}
+export const clientMessageFrames: {
+  (message: ResidentService.ClientMessage): (messageId: string) => ReadonlyArray<string>
+  (messageId: string, message: ResidentService.ClientMessage): ReadonlyArray<string>
+} = Function.dual(2, clientMessageFramesImpl)
 
 const outputFrame = (requestId: string, channel: "stdout" | "stderr", text: string) =>
   json({ _tag: "output", requestId, channel, text } satisfies ResidentService.ServerMessage)

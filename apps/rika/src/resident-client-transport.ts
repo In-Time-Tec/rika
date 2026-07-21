@@ -28,6 +28,7 @@ import { readOrCreateToken, recordedResidentProcesses, resolve } from "./residen
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { claimStartup } from "./resident-startup"
 import {
+  clientMessageFrames,
   defaultOutboundCapacity,
   failureKind,
   json,
@@ -214,6 +215,12 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   const connectionFailure = yield* Deferred.make<never, ResidentService.ResidentServiceError>()
   const write = (frame: string | Socket.CloseEvent) =>
     writer(frame).pipe(Effect.tapError((error) => Deferred.fail(connectionFailure, error)))
+  const writeClientMessage = (messageId: string, message: ResidentService.ClientMessage) =>
+    Effect.try({
+      try: () => clientMessageFrames(messageId, message),
+      catch: (error) =>
+        Schema.is(ResidentService.ResidentServiceError)(error) ? error : transportError(String(error)),
+    }).pipe(Effect.flatMap(Effect.forEach((frame) => write(frame), { discard: true })))
   const pongs = yield* Ref.make(new Map<string, Deferred.Deferred<void, ResidentService.ResidentServiceError>>())
   const inbound = yield* Semaphore.make(1)
   const receivedDeltas = new Set<string>()
@@ -393,26 +400,45 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                             }
                             request.feed = feed
                             let nextCommandSequence = 1
+                            const commandWriteLock = yield* Semaphore.make(1)
                             const unavailable = (text: string) =>
                               Operation.OperationUnavailable.make({ operation: "ResidentConnection", message: text })
                             const invoke = Effect.fn("ResidentTransport.interactiveCommand")(function* (
                               command: Operation.InteractiveCommand,
                             ) {
-                              const commandSequence = nextCommandSequence
-                              nextCommandSequence += 1
                               const done = yield* Deferred.make<void, Operation.OperationUnavailable>()
-                              request.commands.set(commandSequence, done)
-                              yield* write(
-                                json({
-                                  _tag: "interactive-command",
-                                  connectionId: message.connectionId,
-                                  requestId: message.requestId,
-                                  sessionId: message.sessionId,
-                                  feedGeneration: message.feedGeneration,
-                                  commandSequence,
-                                  command,
-                                } satisfies ResidentService.ClientMessage),
-                              ).pipe(Effect.mapError((error) => unavailable(error.message)))
+                              const commandSequence = yield* commandWriteLock.withPermits(1)(
+                                Effect.gen(function* () {
+                                  const frames = yield* Effect.try({
+                                    try: () =>
+                                      clientMessageFrames(`${message.requestId}:${nextCommandSequence}`, {
+                                        _tag: "interactive-command",
+                                        connectionId: message.connectionId,
+                                        requestId: message.requestId,
+                                        sessionId: message.sessionId,
+                                        feedGeneration: message.feedGeneration,
+                                        commandSequence: nextCommandSequence,
+                                        command,
+                                      }),
+                                    catch: (error) =>
+                                      Schema.is(ResidentService.ResidentServiceError)(error) &&
+                                      error.reason === "message-too-large"
+                                        ? Operation.OperationUnavailable.make({
+                                            operation: command._tag,
+                                            message:
+                                              "The prompt and attachments exceed the 16 MiB resident message limit; remove or shrink image attachments",
+                                          })
+                                        : unavailable(String(error)),
+                                  })
+                                  const sequence = nextCommandSequence
+                                  nextCommandSequence += 1
+                                  request.commands.set(sequence, done)
+                                  yield* Effect.forEach(frames, write, { discard: true }).pipe(
+                                    Effect.mapError((error) => unavailable(error.message)),
+                                  )
+                                  return sequence
+                                }),
+                              )
                               yield* Effect.raceFirst(
                                 Deferred.await(done),
                                 Deferred.await(closed).pipe(
@@ -675,7 +701,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
               commands: new Map(),
             }),
           )
-          yield* write(json({ _tag: "operation", requestId, input } satisfies ResidentService.ClientMessage))
+          yield* writeClientMessage(requestId, { _tag: "operation", requestId, input })
           return { requestId, done, interactiveStarted }
         }),
         ({ requestId, done, interactiveStarted }) =>
