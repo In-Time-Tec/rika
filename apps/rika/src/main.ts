@@ -1465,12 +1465,12 @@ const lazyBackendLayer = (
             ),
           ),
         start: (input) => load.pipe(Effect.flatMap((backend) => backend.start(input))),
-        follow: (turnId, afterCursor, onEvent) =>
+        follow: (turnId, afterCursor, onEvent, reference, eventScope) =>
           load.pipe(
             Effect.flatMap((backend) =>
               backend.follow === undefined
-                ? backend.replay(turnId, afterCursor)
-                : backend.follow(turnId, afterCursor, onEvent),
+                ? backend.replay(turnId, afterCursor, reference)
+                : backend.follow(turnId, afterCursor, onEvent, reference, eventScope),
             ),
           ),
         replay: (turnId, afterCursor) => load.pipe(Effect.flatMap((backend) => backend.replay(turnId, afterCursor))),
@@ -1678,6 +1678,7 @@ export const interactiveTui =
         let threadCostUsd = 0
         const appliedDeltas = new Set<string>()
         let activeSelectionEpoch = 0
+        let submissionSequence = 0
         const fibers = new Set<Fiber.Fiber<void, never>>()
         let selectionFiber: Fiber.Fiber<void, never> | undefined
         let selectionGeneration = 0
@@ -1742,6 +1743,14 @@ export const interactiveTui =
               (model.currentThreadId !== previousThreadId || model.currentThreadTitle !== previousThreadTitle)
             )
               process.stdout.write(terminalTitleSequence(event.thread.title, model.workspace))
+            if (event._tag === "TranscriptPatched" && event.event.type === "steering.delivered") {
+              const rawSequences = event.event.data?.message_sequences
+              const sequences = Array.isArray(rawSequences)
+                ? rawSequences.filter((value): value is number => typeof value === "number")
+                : []
+              if (sequences.length > 0)
+                model = ViewState.update(model, { _tag: "SteeringDelivered", turnId: event.turnId, sequences })
+            }
             if (event._tag === "TranscriptPatched") fork(traceTuiModelEvent(appliedDeltas, event))
             if (event._tag === "TranscriptResyncRequired" && model.currentThreadId !== undefined)
               requestSelectionResync(model.currentThreadId, event.selectionEpoch)
@@ -1808,8 +1817,19 @@ export const interactiveTui =
                 _tag: "TurnStarted",
                 turnId: event.turn.id,
                 prompt: event.turn.prompt,
+                ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
               })
             }
+          } else if (event._tag === "SubmissionAdmitted") {
+            if (
+              event.selectionEpoch === activeSelectionEpoch &&
+              (model.currentThreadId === undefined || model.currentThreadId === event.threadId)
+            )
+              model = ViewState.update(model, {
+                _tag: "SubmissionAdmitted",
+                turnId: event.turnId,
+                ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
+              })
           } else if (event._tag === "ThreadsListed") {
             model = ViewState.update(model, {
               _tag: "ThreadsReplaced",
@@ -1828,10 +1848,25 @@ export const interactiveTui =
           } else if (event._tag === "ExecutionControlled") {
             if (event.threadId !== undefined && event.selectionEpoch !== activeSelectionEpoch) return
             if (event.threadId !== undefined && model.currentThreadId !== event.threadId) return
-            if (event.action === "cancelled" && model.busy)
+            if (event.action === "cancelled")
               model = ViewState.update(model, {
                 _tag: "ExecutionCancelled",
                 ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+                ...(event.agentResponseArrived === undefined
+                  ? {}
+                  : { agentResponseArrived: event.agentResponseArrived }),
+              })
+            if (
+              event.action === "steered" &&
+              event.turnId !== undefined &&
+              event.steeringSequence !== undefined &&
+              event.steeringText !== undefined
+            )
+              model = ViewState.update(model, {
+                _tag: "SteeringAccepted",
+                turnId: event.turnId,
+                sequence: event.steeringSequence,
+                text: event.steeringText,
               })
           } else if (event._tag === "ContextDiagnostics") {
             if (event.selectionEpoch !== activeSelectionEpoch) return
@@ -1936,6 +1971,16 @@ export const interactiveTui =
             if (renderer !== undefined && !renderSuppressed) renderer.surface.update(model, feedPreserveAnchor)
             feedPreserveAnchor = false
           },
+          lane: (event) =>
+            event._tag === "TranscriptPatched" ? `${String(event.threadId)}:${String(event.turnId)}` : undefined,
+          boundary: (event) =>
+            event._tag === "TranscriptPatched" &&
+            (event.event.type === "tool.result.received" ||
+              event.event.type === "tool.approval.requested" ||
+              event.event.type === "permission.ask.requested" ||
+              event.event.type === "execution.completed" ||
+              event.event.type === "execution.failed" ||
+              event.event.type === "execution.cancelled"),
         })
         let closing = false
         let teardownStarted = false
@@ -2052,13 +2097,16 @@ export const interactiveTui =
           parts: ReadonlyArray<ViewState.PromptPart>,
           mode: ViewState.Mode,
           tuning?: Session.ModelTuning,
+          submissionId?: string,
         ) => {
           const classified = ViewState.classifyPrompt(prompt)
           const effect =
             classified._tag === "Shell"
               ? session.shell(classified.command, classified.incognito)
               : materializePromptParts(parts, model.workspace).pipe(
-                  Effect.flatMap((materialized) => session.submit(classified.prompt, mode, materialized, tuning)),
+                  Effect.flatMap((materialized) =>
+                    session.submit(classified.prompt, mode, materialized, tuning, submissionId),
+                  ),
                   Effect.catchTag("PromptAttachmentError", (failure) =>
                     Effect.sync(() => {
                       let restored: ViewState.Model = {
@@ -2257,7 +2305,7 @@ export const interactiveTui =
           editQueued: (id, prompt) => run(session.editQueued(id, prompt)),
           dequeue: (id) => run(session.dequeue(id)),
           steerQueued: (id, prompt) => run(session.steerQueued(id, prompt)),
-          steer: (prompt) => run(session.steer(prompt)),
+          steer: (prompt, turnId) => run(session.steer(prompt, turnId)),
           interruptAndSend: (prompt) => run(session.interruptAndSend(prompt)),
           cancel: () => run(session.cancel),
           decidePermission: (id, kind, decision) => run(session.resolvePermission(id, kind, decision)),
@@ -2371,12 +2419,24 @@ export const interactiveTui =
                   ? ViewState.selectedThreadMetadata(model)?.id
                   : undefined
                 const submitting = key.name === "return" && !key.shift && !key.ctrl && ViewState.canSubmit(model)
+                const steering =
+                  submitting &&
+                  model.busy &&
+                  !model.cancelPending &&
+                  model.activeTurnId !== undefined &&
+                  ViewState.classifyPrompt(model.input)._tag !== "Shell" &&
+                  !model.pastedText.some((attachment) => attachment.type === "image")
+                const submissionId = submitting && !steering ? `submission-${++submissionSequence}` : undefined
                 const prompt = submitting ? model.input : undefined
                 const parts = prompt === undefined ? undefined : ViewState.promptParts(prompt, model.pastedText)
                 const submittedPrompt =
                   prompt === undefined ? undefined : ViewState.expandPastedText(prompt, model.pastedText)
                 model = ViewState.update(model, { _tag: "KeyPressed", key })
-                if (submitting) model = ViewState.update(model, { _tag: "Submitted" })
+                if (submitting)
+                  model = ViewState.update(model, {
+                    _tag: "Submitted",
+                    ...(submissionId === undefined ? {} : { submissionId }),
+                  })
                 if (!wasChangedFilesOpen && model.changedFilesOpen)
                   model = ViewState.update(model, { _tag: "ChangedFilesRequested" })
                 const afterPreviewId = model.threadSwitcher.open
@@ -2400,13 +2460,14 @@ export const interactiveTui =
                   )
                   previewTimer = selectedPreviewTimer
                 }
-                if (submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined)
+                if (!steering && submittedPrompt !== undefined && submittedPrompt.length > 0 && parts !== undefined)
                   Session.execute(adapter, {
                     _tag: "Submit",
                     prompt: submittedPrompt,
                     parts,
                     mode: model.mode,
                     tuning: { fastMode: model.fastMode },
+                    ...(submissionId === undefined ? {} : { submissionId }),
                   })
                 const action = model.pendingAction as Session.Action | undefined
                 if (action !== undefined) consumePendingAction()

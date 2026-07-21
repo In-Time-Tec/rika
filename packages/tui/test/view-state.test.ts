@@ -432,19 +432,164 @@ describe("ViewState", () => {
     expect(repeated).toBe(cancelled)
   })
 
-  test("keeps one keyed cancellation marker when no transcript unit can carry it", () => {
+  test("restores a submitted draft when cancellation arrives before an agent response", () => {
+    let running = ViewState.update(
+      { ...ViewState.initial("/work"), input: "cancel this prompt", cursor: 6 },
+      { _tag: "Submitted" },
+    )
+    const attachment = { type: "text" as const, token: "token", value: "attachment", label: "Pasted text #1" }
+    running = ViewState.update(
+      { ...running, pastedText: [attachment] },
+      { _tag: "TurnStarted", turnId: "turn", prompt: "cancel this prompt" },
+    )
+    running = {
+      ...running,
+      submittedDrafts: [{ input: "cancel this prompt", cursor: 6, attachments: [attachment], turnId: "turn" }],
+    }
+
+    const cancelled = ViewState.update(running, {
+      _tag: "ExecutionCancelled",
+      turnId: "turn",
+      agentResponseArrived: false,
+    })
+    const repeated = ViewState.update(cancelled, {
+      _tag: "ExecutionCancelled",
+      turnId: "turn",
+      agentResponseArrived: false,
+    })
+
+    expect(cancelled).toMatchObject({
+      input: "cancel this prompt",
+      cursor: 6,
+      pastedText: [attachment],
+      busy: false,
+      activeTurnId: undefined,
+    })
+    expect(cancelled.entries.filter((entry) => entry.role === "notice")).toEqual([])
+    expect(repeated).toBe(cancelled)
+  })
+
+  test("submitting while a turn is active becomes a pending steering send", () => {
+    const busy: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-a",
+      input: "focus on the fixture",
+      cursor: 5,
+    }
+    const steered = ViewState.update(busy, { _tag: "Submitted" })
+    expect(steered.input).toBe("")
+    expect(steered.busy).toBe(true)
+    expect(steered.activeTurnId).toBe("turn-a")
+    expect(steered.submittedDrafts).toEqual([])
+    expect(steered.pendingSteering).toEqual([{ turnId: "turn-a", text: "focus on the fixture" }])
+    expect(steered.pendingAction).toEqual({ _tag: "Steer", prompt: "focus on the fixture", turnId: "turn-a" })
+  })
+
+  test("binds an accepted steering sequence and removes it on delivery", () => {
+    const busy: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-a",
+      pendingSteering: [{ turnId: "turn-a", text: "focus on the fixture" }],
+    }
+    const accepted = ViewState.update(busy, {
+      _tag: "SteeringAccepted",
+      turnId: "turn-a",
+      sequence: 0,
+      text: "focus on the fixture",
+    })
+    expect(accepted.pendingSteering).toEqual([{ turnId: "turn-a", text: "focus on the fixture", sequence: 0 }])
+    const delivered = ViewState.update(accepted, { _tag: "SteeringDelivered", turnId: "turn-a", sequences: [0] })
+    expect(delivered.pendingSteering).toEqual([])
+    const foreign = ViewState.update(accepted, { _tag: "SteeringDelivered", turnId: "turn-b", sequences: [0] })
+    expect(foreign.pendingSteering).toHaveLength(1)
+  })
+
+  test("restores undelivered steering text into an empty composer when the turn settles", () => {
+    const busy: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-a",
+      pendingSteering: [{ turnId: "turn-a", text: "left behind", sequence: 0 }],
+    }
+    const completed = ViewState.update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+    expect(completed.pendingSteering).toEqual([])
+    expect(completed.input).toBe("left behind")
+    const occupied = ViewState.update({ ...busy, input: "typing" }, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+    expect(occupied.pendingSteering).toEqual([])
+    expect(occupied.input).toBe("typing")
+  })
+
+  test("keeps steering rows for other turns when one turn settles", () => {
+    const busy: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-a",
+      pendingSteering: [
+        { turnId: "turn-a", text: "for a", sequence: 0 },
+        { turnId: "turn-b", text: "for b", sequence: 1 },
+      ],
+    }
+    const completed = ViewState.update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+    expect(completed.pendingSteering).toEqual([{ turnId: "turn-b", text: "for b", sequence: 1 }])
+  })
+
+  test("binds keyed submission drafts and restores only the cancelled turn's draft", () => {
+    let model = ViewState.update(
+      { ...ViewState.initial("/work"), input: "first prompt" },
+      { _tag: "Submitted", submissionId: "sub-a" },
+    )
+    model = { ...model, busy: false, activity: undefined }
+    model = ViewState.update({ ...model, input: "second prompt" }, { _tag: "Submitted", submissionId: "sub-b" })
+    model = ViewState.update(model, { _tag: "SubmissionAdmitted", turnId: "turn-a", submissionId: "sub-a" })
+    model = ViewState.update(model, { _tag: "SubmissionAdmitted", turnId: "turn-b", submissionId: "sub-b" })
+    model = ViewState.update(model, { _tag: "TurnStarted", turnId: "turn-a", prompt: "first prompt" })
+    expect(model.submittedDrafts).toEqual([
+      { input: "first prompt", attachments: [], cursor: 0, submissionId: "sub-a", turnId: "turn-a" },
+      { input: "second prompt", attachments: [], cursor: 0, submissionId: "sub-b", turnId: "turn-b" },
+    ])
+    const cancelled = ViewState.update(model, {
+      _tag: "ExecutionCancelled",
+      turnId: "turn-a",
+      agentResponseArrived: false,
+    })
+    expect(cancelled.input).toBe("first prompt")
+    expect(cancelled.submittedDrafts).toEqual([
+      { input: "second prompt", attachments: [], cursor: 0, submissionId: "sub-b", turnId: "turn-b" },
+    ])
+  })
+
+  test("a stale terminal event for another turn does not clear the active turn", () => {
+    const busy: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-b",
+      submittedDrafts: [{ input: "second", attachments: [], cursor: 0, turnId: "turn-b" }],
+    }
+    const afterStale = ViewState.update(busy, { _tag: "ExecutionCompleted", turnId: "turn-a" })
+    expect(afterStale.busy).toBe(true)
+    expect(afterStale.activeTurnId).toBe("turn-b")
+    expect(afterStale.submittedDrafts).toHaveLength(1)
+  })
+
+  test("keeps a cancellation marker after an agent response when no transcript unit can carry it", () => {
     const running: ViewState.Model = {
       ...ViewState.initial("/work"),
       busy: true,
       activeTurnId: "turn",
+      submittedDrafts: [{ input: "submitted", cursor: 9, attachments: [], turnId: "turn" }],
     }
 
-    const cancelled = ViewState.update(running, { _tag: "ExecutionCancelled", turnId: "turn" })
-    const repeated = ViewState.update(cancelled, { _tag: "ExecutionCancelled", turnId: "turn" })
+    const cancelled = ViewState.update(running, {
+      _tag: "ExecutionCancelled",
+      turnId: "turn",
+      agentResponseArrived: true,
+    })
 
     expect(cancelled.entries).toEqual([{ role: "notice", text: "cancelled", turnId: "turn" }])
     expect(cancelled.items).toEqual([{ _tag: "Entry", index: 0, id: "execution:turn:cancelled", turnId: "turn" }])
-    expect(repeated).toBe(cancelled)
+    expect(cancelled.input).toBe("")
   })
 
   test("does not add a fallback marker when the parent cancellation event arrived first", () => {

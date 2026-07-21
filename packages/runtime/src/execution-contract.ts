@@ -60,6 +60,10 @@ export interface ExecutionRoutePin {
   }
 }
 
+export type SessionPurpose =
+  | { readonly _tag: "Conversation" }
+  | { readonly _tag: "ThreadTitle"; readonly owningTurnId: string }
+
 export interface StartInput {
   readonly threadId: string
   readonly turnId: string
@@ -70,8 +74,12 @@ export interface StartInput {
   readonly executionRoute: ExecutionRoutePin
   readonly reasoningEffort?: string
   readonly fastMode?: boolean
+  readonly eventScope?: EventScope
+  readonly sessionPurpose?: SessionPurpose
   readonly onEvent?: (event: Event) => void
 }
+
+export type EventScope = "execution" | "tree"
 
 export interface ExecutionReference {
   readonly _tag: "ExecutionReference"
@@ -161,6 +169,11 @@ export interface Result {
   readonly events: ReadonlyArray<Event>
 }
 
+export interface SteerReceipt {
+  readonly steeringMessageId: string
+  readonly sequence: number
+}
+
 export interface EventPage {
   readonly events: ReadonlyArray<Event>
   readonly hasMore: boolean
@@ -247,6 +260,7 @@ export interface Interface {
     afterCursor: string | undefined,
     onEvent?: (event: Event) => void,
     reference?: ExecutionReference,
+    eventScope?: EventScope,
   ) => Effect.Effect<Result, BackendError>
   readonly replay: (
     turnId: string,
@@ -274,7 +288,7 @@ export interface Interface {
     text: string,
     createdAt: number,
     reference?: ExecutionReference,
-  ) => Effect.Effect<void, BackendError>
+  ) => Effect.Effect<SteerReceipt, BackendError>
   readonly listApprovals: (
     turnId: string,
     reference?: ExecutionReference,

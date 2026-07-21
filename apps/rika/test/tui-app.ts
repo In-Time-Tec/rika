@@ -32,6 +32,8 @@ export interface TuiAppOptions {
   readonly height?: number
 }
 
+export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
+
 export interface TuiApp {
   readonly workspace: string
   readonly type: (text: string) => Promise<void>
@@ -40,6 +42,7 @@ export interface TuiApp {
   readonly pressArrow: (direction: "up" | "down" | "left" | "right") => void
   readonly pressKey: (key: string, modifiers?: { ctrl?: boolean; alt?: boolean; shift?: boolean }) => void
   readonly frame: () => string
+  readonly spans: () => CapturedSpans
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly close: () => void
@@ -143,6 +146,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     pressKey: (key, modifiers) =>
       modifiers?.alt === true ? setup.mockInput.pressKey(`\u001b${key}`) : setup.mockInput.pressKey(key, modifiers),
     frame,
+    spans: () => setup.captureSpans(),
     waitFrame: (marker, timeoutMillis = 60_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
     waitGone: (marker, timeoutMillis = 60_000) => waitFor((captured) => !captured.includes(marker), timeoutMillis),
     close: () => setup.mockInput.pressCtrlC(),

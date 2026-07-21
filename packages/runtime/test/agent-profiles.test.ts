@@ -12,6 +12,19 @@ import {
 } from "../src/agent-profiles"
 
 const model = { provider: "test", model: "deterministic" }
+const expectedMainInstructions =
+  "Oracle is a read-only, high-reasoning advisor for planning, reviewing, understanding code, and debugging. Consult Oracle frequently for complex or difficult tasks. Before consulting Oracle, tell the user that you are consulting it; after consulting Oracle, state that you did and use its advice while remaining responsible for the implementation and conclusion. Use web_search when the task depends on current external facts, documentation, or public code. Use auto for normal lookups and compare only when claims are disputed, recent, safety-sensitive, or high-impact. Use kind code for semantic implementation examples and kind github for exact code, repository metadata, issues, pull requests, or commits. Treat search snippets as discovery evidence: fetch authoritative pages when details matter, cite the URLs used, and state when sources disagree. Delegate broad or multi-source research to Librarian, but handle simple lookups directly and do not query every source by default."
+const expectedInstructions = {
+  Oracle:
+    "Act as a read-only, high-reasoning technical advisor for planning, reviewing, understanding code, and debugging. Ground your advice in workspace evidence, explain your reasoning and recommendations, and do not modify files.",
+  Librarian:
+    "Research current external sources and return concise, cited findings without modifying files. Start with a self-contained objective and one to three focused queries. Use auto for a normal lookup. Use compare only for disputed, recent, safety-sensitive, or high-impact claims where independent perspectives improve confidence; do not query every source by default. Choose the search kind deliberately. Use web for general research, Exa through kind code for semantic implementation examples, and kind github with githubSearchType for exact code, repositories, issues and pull requests, or commit history. Prefer primary and authoritative sources. Search excerpts are leads, not final proof: use read_web_page when the source text, version, date, qualification, or surrounding context matters. Cross-check important claims, distinguish sourced facts from your conclusions, cite the URLs that support each material finding, and call out disagreement or uncertainty explicitly. Stop when the evidence is sufficient for the request.",
+  Painter:
+    "Produce a requested visual artifact through the available media route and report its metadata. Do not modify source files.",
+  Review: "Review workspace changes for correctness, regressions, and missing tests. Do not modify files.",
+  ReadThread: "Answer only from local thread transcripts and identify the threads used.",
+  Task: "Complete the assigned implementation task in the workspace and report changed files and verification.",
+} as const
 const relayModel = (selection: {
   readonly provider: string
   readonly model: string
@@ -23,6 +36,15 @@ const relayModel = (selection: {
 })
 
 describe("product agent profiles", () => {
+  it("loads normalized instructions for every shipping profile", () => {
+    expect(mainInstructions).toBe(expectedMainInstructions)
+    for (const name of names) {
+      const profile = resolve(name, model)
+      expect(profile.preset.instructions).toBe(expectedInstructions[name])
+      expect(profile.agent.instructions).toBe(profile.preset.instructions)
+    }
+  })
+
   it("resolves the exact narrowed tools and permissions for each shipping specialist", () => {
     const registered = presets(model)
     expect(Object.keys(registered)).toEqual(names)

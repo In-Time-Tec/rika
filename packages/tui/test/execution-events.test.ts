@@ -96,6 +96,42 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(model.blocks).toEqual([expect.objectContaining({ _tag: "ChildAgent", id: "child", status: "complete" })])
   })
 
+  it("renders a subagent answer while streaming and keeps it once after settlement", () => {
+    const childId = "child:turn:agent"
+    const parent = Transcript.project("turn", "delegate", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Investigate" } },
+      }),
+      event("spawn", 1, "child_run.spawned", {
+        data: { tool_call_id: "agent", child_execution_id: childId },
+      }),
+    ])
+    let child = Transcript.project(childId, "", [event("hel", 0, "model.output.delta", { text: "hel" })])
+    let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+    model = { ...model, expandedRowKeys: ["tool:turn:agent"] }
+
+    expect(
+      renderTranscriptStyled(model)
+        .chunks.map((chunk) => chunk.text)
+        .join(""),
+    ).toContain("hel")
+
+    child = Transcript.applyEvent(child, event("lo", 1, "model.output.delta", { text: "lo" }))
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+    const streaming = renderTranscriptStyled(model)
+      .chunks.map((chunk) => chunk.text)
+      .join("")
+    expect(streaming).toContain("hello")
+
+    child = Transcript.applyEvent(child, event("done", 2, "execution.completed"))
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+    const settled = renderTranscriptStyled(model)
+      .chunks.map((chunk) => chunk.text)
+      .join("")
+    expect(settled.split("hello")).toHaveLength(2)
+  })
+
   it("projects child execution tools beneath their subagent with stable nested keys", () => {
     const parent = Transcript.project("turn", "prompt", [
       event("agent", 0, "tool.call.requested", {
@@ -287,7 +323,7 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(units[1]).toMatchObject({
       kind: "tool",
       children: [{ kind: "tool" }],
-      terminal: { kind: "answer", entry: 1 },
+      agentResponse: { _tag: "Settled", outcome: { kind: "answer", entry: 1 } },
     })
     expect(model.entries[1]).toMatchObject({ role: "assistant", text: "## Projection fixed\n\n**All checks pass.**" })
     expect(model.items).toContainEqual(
@@ -661,19 +697,21 @@ describe("ExecutionEvents.projectUnits", () => {
     const reloadedModel = ExecutionEvents.projectUnits(ViewState.initial("/work"), durable.units)
 
     const shape = (model: ViewState.Model) =>
-      transcriptUnits(model).map((unit) =>
-        unit.kind === "tool"
-          ? {
-              kind: unit.kind,
-              id: transcriptUnitId(model, unit),
-              children: unit.children?.map((child) => transcriptUnitId(model, child)),
-              response:
-                unit.terminal?.kind === "answer"
-                  ? (model.entries[unit.terminal.entry]?.text ?? "").replaceAll("\n", "\\n")
-                  : undefined,
-            }
-          : { kind: unit.kind },
-      )
+      transcriptUnits(model).map((unit) => {
+        if (unit.kind === "tool") {
+          const response = unit.agentResponse
+          let answer: number | undefined
+          if (response?._tag === "Streaming") answer = response.answer
+          else if (response?._tag === "Settled" && response.outcome.kind === "answer") answer = response.outcome.entry
+          return {
+            kind: unit.kind,
+            id: transcriptUnitId(model, unit),
+            children: unit.children?.map((child) => transcriptUnitId(model, child)),
+            response: answer === undefined ? undefined : (model.entries[answer]?.text ?? "").replaceAll("\n", "\\n"),
+          }
+        }
+        return { kind: unit.kind }
+      })
 
     expect(shape(reloadedModel)).toEqual(shape(liveModel))
   })
@@ -842,16 +880,15 @@ describe("ExecutionEvents.projectUnits", () => {
     }
   })
 
-  it("projects one durable cancellation marker when no parent row can carry it", () => {
+  it("keeps an early durable cancellation as an invisible execution outcome", () => {
     const projection = Transcript.project("turn", "wait", [event("cancelled", 0, "execution.cancelled")])
     const once = ExecutionEvents.projectUnits(ViewState.initial("/work"), projection.units)
     const twice = ExecutionEvents.projectUnits(once, projection.units)
 
-    expect(twice.entries.filter((entry) => entry.role === "notice")).toEqual([
-      { _tag: "Entry", role: "notice", text: "cancelled", turnId: "turn" },
-    ])
-    expect(twice.items).toContainEqual(
-      expect.objectContaining({ _tag: "Entry", id: "execution:turn:cancelled", turnId: "turn" }),
-    )
+    expect(projection.units.find((unit) => unit.executionOutcome !== undefined)?.executionOutcome).toEqual({
+      status: "cancelled",
+    })
+    expect(twice.entries.filter((entry) => entry.role === "notice")).toEqual([])
+    expect(twice.items).not.toContainEqual(expect.objectContaining({ id: "execution:turn:cancelled", turnId: "turn" }))
   })
 })

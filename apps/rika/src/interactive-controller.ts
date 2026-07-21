@@ -512,24 +512,58 @@ export const makeFeedFrameBatcher = <Event>(options: {
   readonly schedule: (flush: () => void) => void
   readonly apply: (events: ReadonlyArray<Event>) => void
   readonly render: () => void
+  readonly lane?: (event: Event) => string | undefined
+  readonly boundary?: (event: Event) => boolean
 }) => {
+  type BatchState = { readonly _tag: "Idle" } | { readonly _tag: "Scheduled" }
   const pending: Array<Event> = []
-  let scheduled = false
+  let state: BatchState = { _tag: "Idle" }
   const schedule = (flush: () => void) => {
-    scheduled = true
+    state = { _tag: "Scheduled" }
     options.schedule(flush)
   }
+  const takeBatch = (): ReadonlyArray<Event> => {
+    const laneOf = options.lane
+    const isBoundary = options.boundary
+    if (pending.length <= 256 || laneOf === undefined || isBoundary === undefined) return pending.splice(0, 256)
+    const boundaryIndex = pending.findIndex((event, index) => {
+      if (index < 256 || !isBoundary(event)) return false
+      const lane = laneOf(event)
+      return lane !== undefined
+    })
+    if (boundaryIndex < 0) return pending.splice(0, 256)
+    const boundaryLane = laneOf(pending[boundaryIndex]!)
+    if (boundaryLane === undefined) return pending.splice(0, 256)
+    let prefixCount = 255
+    let promotedIndexes: ReadonlyArray<number> = [boundaryIndex]
+    while (true) {
+      const required = pending
+        .map((event, index) => ({ event, index }))
+        .filter(({ event, index }) => index >= prefixCount && index <= boundaryIndex && laneOf(event) === boundaryLane)
+        .map(({ index }) => index)
+      const nextPrefixCount = 256 - required.length
+      if (nextPrefixCount === prefixCount) {
+        promotedIndexes = required
+        break
+      }
+      if (nextPrefixCount < 0) return pending.splice(0, 256)
+      prefixCount = nextPrefixCount
+    }
+    const promoted = promotedIndexes.map((index) => pending[index]!)
+    for (const index of promotedIndexes.toReversed()) pending.splice(index, 1)
+    return [...pending.splice(0, prefixCount), ...promoted]
+  }
   const flush = () => {
-    scheduled = false
+    state = { _tag: "Idle" }
     if (pending.length === 0) return
-    const events = pending.splice(0, 256)
+    const events = takeBatch()
     options.apply(events)
     options.render()
     if (pending.length > 0) schedule(flush)
   }
   const offer = (event: Event) => {
     pending.push(event)
-    if (scheduled) return
+    if (state._tag === "Scheduled") return
     schedule(flush)
   }
   return { offer, flush }

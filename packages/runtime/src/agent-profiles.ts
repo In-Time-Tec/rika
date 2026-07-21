@@ -2,6 +2,13 @@ import { Agent, type ModelRegistry, TurnPolicy } from "@batonfx/core"
 import { AgentTools, Runtime as Tools, ThreadTools } from "@rika/tools"
 import { Effect, Function, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
+import librarianPrompt from "./prompts/librarian.prompt.txt"
+import oraclePrompt from "./prompts/oracle.prompt.txt"
+import painterPrompt from "./prompts/painter.prompt.txt"
+import readThreadPrompt from "./prompts/read-thread.prompt.txt"
+import reviewPrompt from "./prompts/review.prompt.txt"
+import rootPrompt from "./prompts/root.prompt.txt"
+import taskPrompt from "./prompts/task.prompt.txt"
 
 export const names = ["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"] as const
 export type Name = (typeof names)[number]
@@ -11,49 +18,42 @@ export class PainterUnavailableError extends Schema.TaggedErrorClass<PainterUnav
   { message: Schema.String, provider: Schema.String, model: Schema.String },
 ) {}
 
-export const mainInstructions = [
-  "Oracle is a read-only, high-reasoning advisor for planning, reviewing, understanding code, and debugging. Consult Oracle frequently for complex or difficult tasks. Before consulting Oracle, tell the user that you are consulting it; after consulting Oracle, state that you did and use its advice while remaining responsible for the implementation and conclusion.",
-  "Use web_search when the task depends on current external facts, documentation, or public code. Use auto for normal lookups and compare only when claims are disputed, recent, safety-sensitive, or high-impact. Use kind code for semantic implementation examples and kind github for exact code, repository metadata, issues, pull requests, or commits. Treat search snippets as discovery evidence: fetch authoritative pages when details matter, cite the URLs used, and state when sources disagree. Delegate broad or multi-source research to Librarian, but handle simple lookups directly and do not query every source by default.",
-].join(" ")
+const instructions = (name: string, prompt: string) => {
+  const normalized = prompt.trim()
+  if (normalized.length === 0) throw new Error(`Built-in ${name} prompt is empty`)
+  return normalized
+}
 
-const librarianInstructions = [
-  "Research current external sources and return concise, cited findings without modifying files.",
-  "Start with a self-contained objective and one to three focused queries. Use auto for a normal lookup. Use compare only for disputed, recent, safety-sensitive, or high-impact claims where independent perspectives improve confidence; do not query every source by default.",
-  "Choose the search kind deliberately. Use web for general research, Exa through kind code for semantic implementation examples, and kind github with githubSearchType for exact code, repositories, issues and pull requests, or commit history.",
-  "Prefer primary and authoritative sources. Search excerpts are leads, not final proof: use read_web_page when the source text, version, date, qualification, or surrounding context matters. Cross-check important claims, distinguish sourced facts from your conclusions, cite the URLs that support each material finding, and call out disagreement or uncertainty explicitly. Stop when the evidence is sufficient for the request.",
-].join(" ")
+export const mainInstructions = instructions("root", rootPrompt)
 
 const definitions = {
   Oracle: {
-    instructions:
-      "Act as a read-only, high-reasoning technical advisor for planning, reviewing, understanding code, and debugging. Ground your advice in workspace evidence, explain your reasoning and recommendations, and do not modify files.",
+    instructions: instructions("Oracle", oraclePrompt),
     tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
     permissions: ["workspace.read", "network.read"],
   },
   Librarian: {
-    instructions: librarianInstructions,
+    instructions: instructions("Librarian", librarianPrompt),
     tools: [Tools.webSearchTool, Tools.readWebPageTool],
     permissions: ["network.read"],
   },
   Painter: {
-    instructions:
-      "Produce a requested visual artifact through the available media route and report its metadata. Do not modify source files.",
+    instructions: instructions("Painter", painterPrompt),
     tools: [Tools.viewMediaTool],
     permissions: ["workspace.read"],
   },
   Review: {
-    instructions: "Review workspace changes for correctness, regressions, and missing tests. Do not modify files.",
+    instructions: instructions("Review", reviewPrompt),
     tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
     permissions: ["workspace.read", "network.read"],
   },
   ReadThread: {
-    instructions: "Answer only from local thread transcripts and identify the threads used.",
+    instructions: instructions("ReadThread", readThreadPrompt),
     tools: [ThreadTools.findThreadTool, ThreadTools.readThreadTool],
     permissions: ["thread.read"],
   },
   Task: {
-    instructions:
-      "Complete the assigned implementation task in the workspace and report changed files and verification.",
+    instructions: instructions("Task", taskPrompt),
     tools: [
       Tools.grepTool,
       Tools.readTool,

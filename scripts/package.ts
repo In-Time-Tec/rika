@@ -255,6 +255,8 @@ const program = Effect.scoped(
               `--target=${target.bun}`,
               "--define",
               `RIKA_BUILD_IDENTITY=${JSON.stringify(buildIdentity)}`,
+              "--loader",
+              ".txt:text",
               "--external",
               "msgpackr-extract",
               ...platformPackages

@@ -109,7 +109,10 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
             : { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] },
         ),
       ),
-    steer: (turnId, text, now) => record("steer", turnId, text, now),
+    steer: (turnId, text, now) =>
+      record("steer", turnId, text, now).pipe(
+        Effect.as({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
+      ),
     cancel: (turnId, now) =>
       record("cancel", turnId, now).pipe(
         Effect.as({
@@ -365,9 +368,16 @@ describe("InteractiveSession controls", () => {
       yield* session.reopenThread(1)
       yield* session.submit("")
       while ((yield* turns.get(Turn.TurnId.make("created-turn")))?.status !== "completed") yield* Effect.yieldNow
-      while (events.filter((event) => event._tag !== "ThreadsListed").length < 4) yield* Effect.yieldNow
+      while (events.filter((event) => event._tag !== "ThreadsListed").length < 5) yield* Effect.yieldNow
       expect(events.filter((event) => event._tag !== "ThreadsListed")).toEqual([
         { _tag: "ThreadActivated", threadId: "created", title: "New thread" },
+        {
+          _tag: "SubmissionAdmitted",
+          selectionEpoch: 0,
+          threadId: "created",
+          turnId: "created-turn",
+          status: "active",
+        },
         {
           _tag: "TurnStarted",
           selectionEpoch: 0,
@@ -574,6 +584,7 @@ describe("InteractiveSession controls", () => {
         threadId: "older",
         turnId: "active",
         action: "cancelled",
+        agentResponseArrived: false,
       })
     }),
   )
@@ -598,8 +609,16 @@ describe("InteractiveSession controls", () => {
             events: [{ cursor: "replacement-done", sequence: 1, type: "execution.completed", createdAt: 4 }],
           }),
         replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
-        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-        steer: () => Effect.void,
+        inspect: (turnId) =>
+          turns.get(Turn.TurnId.make(turnId)).pipe(
+            Effect.orDie,
+            Effect.map((turn) =>
+              turn === undefined
+                ? undefined
+                : { turnId, status: turn.status, waits: [], pendingTools: [], children: [] },
+            ),
+          ),
+        steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
         cancel: (turnId) =>
           turns.get(Turn.TurnId.make("pending")).pipe(
             Effect.orDie,

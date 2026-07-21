@@ -524,6 +524,33 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("isolates title executions in a tool-free auxiliary session", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* start(backend, {
+          threadId: "thread-a",
+          turnId: "title:turn-a",
+          prompt: "title prompt",
+          startedAt: 5,
+          sessionPurpose: { _tag: "ThreadTitle", owningTurnId: "turn-a" },
+        })
+      }).pipe(provideBackendWithThreadTools(fixture.implementation))
+      const registration = (yield* Ref.get(fixture.registrations))[0]
+      if (registration === undefined || !("agent" in registration)) return yield* Effect.die("Missing Baton agent")
+      const agent = registration.agent as { readonly toolkit: { readonly tools: Record<string, unknown> } }
+      expect(Object.keys(agent.toolkit.tools)).toEqual([])
+      expect(registration.permissions).toEqual([])
+      expect(registration).not.toHaveProperty("child_run_presets")
+      expect((yield* Ref.get(fixture.starts))[0]).toMatchObject({
+        session_id: "session:aux:title:turn-a",
+        idempotency_key: "title:turn-a",
+        execution_id: "execution:title:turn-a",
+      })
+    }),
+  )
+
   it.effect("maps distinct top-level Turn identities to distinct deterministic Relay identities", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({
@@ -1489,6 +1516,41 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect((yield* Ref.get(fixture.pages)).map((input) => input.execution_id)).toEqual([childExecutionId])
       expect((yield* Ref.get(fixture.cancellations)).map((input) => input.execution_id)).toEqual([childExecutionId])
     }),
+  )
+
+  it.effect("follows only the selected execution when the event scope is execution", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fixture = yield* makeClient()
+        const rootExecutionId = Ids.ExecutionId.make("execution:parent")
+        const childExecutionId = Ids.ChildExecutionId.make("execution:parent:child:Task:call-task")
+        const followed = yield* Ref.make<ReadonlyArray<string>>([])
+        Object.assign(fixture.implementation.executions, {
+          inspect: (id: Ids.ExecutionId) =>
+            Effect.succeed({
+              status: "running",
+              waiting_on: [],
+              pending_tool_calls: [],
+              child_runs: id === rootExecutionId ? [{ child_execution_id: childExecutionId, status: "running" }] : [],
+            }),
+          follow: (input: { readonly execution_id: Ids.ExecutionId }) =>
+            Stream.fromEffect(
+              Ref.update(followed, (executionIds) => [...executionIds, String(input.execution_id)]),
+            ).pipe(Stream.concat(Stream.never)),
+        })
+
+        const follower = yield* Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          if (backend.follow === undefined) return yield* Effect.die("Missing execution follow")
+          return yield* Effect.forkChild(backend.follow("parent", undefined, undefined, undefined, "execution"))
+        }).pipe(provideBackend(fixture.implementation))
+        while ((yield* Ref.get(followed)).length === 0) yield* Effect.yieldNow
+        for (let index = 0; index < 10; index += 1) yield* Effect.yieldNow
+
+        expect(yield* Ref.get(followed)).toEqual([rootExecutionId])
+        yield* Fiber.interrupt(follower)
+      }),
+    ),
   )
 
   it.effect("surfaces nested child permission asks and approvals through the parent execution", () =>

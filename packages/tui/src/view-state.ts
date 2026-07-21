@@ -110,6 +110,56 @@ export interface ComposerDraft {
   readonly input: string
   readonly attachments: ReadonlyArray<ComposerAttachment>
 }
+
+interface SubmittedDraft extends ComposerDraft {
+  readonly cursor: number
+  readonly submissionId?: string
+  readonly turnId?: string
+}
+
+export interface PendingSteering {
+  readonly turnId: string
+  readonly text: string
+  readonly sequence?: number
+}
+
+const bindSubmittedDraft = (
+  drafts: ReadonlyArray<SubmittedDraft>,
+  turnId: string,
+  submissionId?: string,
+): ReadonlyArray<SubmittedDraft> => {
+  if (drafts.some((draft) => draft.turnId === turnId)) return drafts
+  const index =
+    submissionId === undefined
+      ? drafts.findIndex((draft) => draft.turnId === undefined)
+      : drafts.findIndex((draft) => draft.submissionId === submissionId && draft.turnId === undefined)
+  if (index < 0) return drafts
+  return drafts.map((draft, position) => (position === index ? { ...draft, turnId } : draft))
+}
+
+const dropSubmittedDrafts = (
+  drafts: ReadonlyArray<SubmittedDraft>,
+  turnId: string | undefined,
+): ReadonlyArray<SubmittedDraft> => (turnId === undefined ? [] : drafts.filter((draft) => draft.turnId !== turnId))
+
+const takeSubmittedDraft = (
+  drafts: ReadonlyArray<SubmittedDraft>,
+  turnId: string | undefined,
+): { readonly draft: SubmittedDraft | undefined; readonly rest: ReadonlyArray<SubmittedDraft> } => {
+  const index = drafts.findIndex((draft) => turnId === undefined || draft.turnId === turnId)
+  if (index < 0) return { draft: undefined, rest: drafts }
+  return { draft: drafts[index], rest: drafts.filter((_, position) => position !== index) }
+}
+
+const settleSteering = (
+  model: Model,
+  turnId: string | undefined,
+): { readonly pendingSteering: ReadonlyArray<PendingSteering>; readonly restoredInput?: string } => {
+  const matching = model.pendingSteering.filter((row) => turnId === undefined || row.turnId === turnId)
+  const pendingSteering = model.pendingSteering.filter((row) => !matching.includes(row))
+  if (matching.length === 0 || model.input.length > 0) return { pendingSteering }
+  return { pendingSteering, restoredInput: matching.map((row) => row.text).join("\n") }
+}
 export interface PastedTextAttachment {
   readonly type: "text" | "image"
   readonly token: string
@@ -278,6 +328,23 @@ export const Model = Schema.Struct({
   historyDraft: Schema.optional(ComposerDraftSchema),
   historyIndex: Schema.optional(Schema.Finite),
   historySearch: Schema.String,
+  submittedDrafts: Schema.Array(
+    Schema.Struct({
+      input: Schema.String,
+      attachments: Schema.Array(PastedTextAttachmentSchema),
+      cursor: Schema.Finite,
+      submissionId: Schema.optionalKey(Schema.String),
+      turnId: Schema.optionalKey(Schema.String),
+    }),
+  ),
+  pendingSteering: Schema.Array(
+    Schema.Struct({
+      turnId: Schema.String,
+      text: Schema.String,
+      sequence: Schema.optionalKey(Schema.Finite),
+    }),
+  ),
+  cancelPending: Schema.Boolean,
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
@@ -330,13 +397,34 @@ export type Message =
   | { readonly _tag: "PastedTextExpanded"; readonly token: string }
   | { readonly _tag: "Resized"; readonly width: number; readonly height: number }
   | { readonly _tag: "ComposerHeightChanged"; readonly height: number }
-  | { readonly _tag: "Submitted" }
-  | { readonly _tag: "TurnStarted"; readonly turnId: string; readonly prompt: string }
+  | { readonly _tag: "Submitted"; readonly submissionId?: string }
+  | {
+      readonly _tag: "SubmissionAdmitted"
+      readonly turnId: string
+      readonly submissionId?: string
+    }
+  | {
+      readonly _tag: "TurnStarted"
+      readonly turnId: string
+      readonly prompt: string
+      readonly submissionId?: string
+    }
+  | {
+      readonly _tag: "SteeringAccepted"
+      readonly turnId: string
+      readonly sequence: number
+      readonly text: string
+    }
+  | {
+      readonly _tag: "SteeringDelivered"
+      readonly turnId: string
+      readonly sequences: ReadonlyArray<number>
+    }
   | { readonly _tag: "AssistantStreamed"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "ExecutionCompleted"; readonly turnId?: string }
   | { readonly _tag: "ExecutionFailed"; readonly turnId?: string; readonly message: string }
-  | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string }
+  | { readonly _tag: "ExecutionCancelled"; readonly turnId?: string; readonly agentResponseArrived?: boolean }
   | { readonly _tag: "BlockAdded"; readonly block: TranscriptBlock }
   | { readonly _tag: "ReasoningStreamed"; readonly text: string }
   | { readonly _tag: "ReasoningToggled"; readonly index: number }
@@ -511,6 +599,9 @@ export const initial: {
     history: [],
     historyComposers: [],
     historySearch: "",
+    submittedDrafts: [],
+    pendingSteering: [],
+    cancelPending: false,
     busy: false,
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
@@ -1131,35 +1222,98 @@ export const update: {
       return { ...model, scrollOffset: Math.max(0, message.offset), scrollFollow: false }
     case "ScrollFollowed":
       return { ...model, scrollOffset: 0, scrollFollow: true }
-    case "Submitted":
+    case "Submitted": {
       if (model.input.length === 0) return model
       const submission = classifyPrompt(model.input)
       const submittedPrompt = expandPastedText(model.input, model.pastedText)
-      return submission._tag === "Shell" && submission.command.length === 0
-        ? model
-        : {
-            ...model,
-            input: "",
-            cursor: 0,
-            pastedText: [],
-            history: [...model.history.filter((prompt) => prompt !== submittedPrompt), submittedPrompt],
-            historyComposers: [
-              ...model.historyComposers.filter(
-                (draft) => expandPastedText(draft.input, draft.attachments) !== submittedPrompt,
-              ),
-              { input: model.input, attachments: model.pastedText },
-            ],
-            historyDraft: undefined,
-            historyIndex: undefined,
-            historySearch: "",
-            busy: true,
-            activity: { _tag: "Sending" },
-          }
-    case "TurnStarted":
-      if (model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId))
-        return { ...model, activeTurnId: message.turnId, busy: true, activity: { _tag: "Waiting" } }
+      if (submission._tag === "Shell" && submission.command.length === 0) return model
+      const submittedHistory = {
+        history: [...model.history.filter((prompt) => prompt !== submittedPrompt), submittedPrompt],
+        historyComposers: [
+          ...model.historyComposers.filter(
+            (draft) => expandPastedText(draft.input, draft.attachments) !== submittedPrompt,
+          ),
+          { input: model.input, attachments: model.pastedText },
+        ],
+        historyDraft: undefined,
+        historyIndex: undefined,
+        historySearch: "",
+      }
+      if (
+        model.busy &&
+        !model.cancelPending &&
+        model.activeTurnId !== undefined &&
+        submission._tag !== "Shell" &&
+        !model.pastedText.some((attachment) => attachment.type === "image")
+      )
+        return {
+          ...model,
+          input: "",
+          cursor: 0,
+          pastedText: [],
+          ...submittedHistory,
+          pendingSteering: [...model.pendingSteering, { turnId: model.activeTurnId, text: submittedPrompt }],
+          pendingAction: { _tag: "Steer", prompt: submittedPrompt, turnId: model.activeTurnId },
+        }
       return {
         ...model,
+        input: "",
+        cursor: 0,
+        pastedText: [],
+        ...submittedHistory,
+        submittedDrafts: [
+          ...model.submittedDrafts,
+          {
+            input: model.input,
+            attachments: model.pastedText,
+            cursor: model.cursor,
+            ...(message.submissionId === undefined ? {} : { submissionId: message.submissionId }),
+          },
+        ],
+        busy: true,
+        activity: { _tag: "Sending" },
+      }
+    }
+    case "SubmissionAdmitted":
+      return {
+        ...model,
+        submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
+      }
+    case "SteeringAccepted": {
+      const index = model.pendingSteering.findIndex(
+        (row) => row.turnId === message.turnId && row.sequence === undefined && row.text === message.text,
+      )
+      const pendingSteering =
+        index < 0
+          ? [...model.pendingSteering, { turnId: message.turnId, text: message.text, sequence: message.sequence }]
+          : model.pendingSteering.map((row, position) =>
+              position === index ? { ...row, sequence: message.sequence } : row,
+            )
+      return { ...model, pendingSteering }
+    }
+    case "SteeringDelivered":
+      return {
+        ...model,
+        pendingSteering: model.pendingSteering.filter(
+          (row) =>
+            row.turnId !== message.turnId || row.sequence === undefined || !message.sequences.includes(row.sequence),
+        ),
+      }
+    case "TurnStarted": {
+      const boundDrafts = bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId)
+      if (model.entries.some((entry) => entry.role === "user" && entry.turnId === message.turnId))
+        return {
+          ...model,
+          submittedDrafts: boundDrafts,
+          cancelPending: false,
+          activeTurnId: message.turnId,
+          busy: true,
+          activity: { _tag: "Waiting" },
+        }
+      return {
+        ...model,
+        submittedDrafts: boundDrafts,
+        cancelPending: false,
         entries: [...model.entries, { role: "user", text: message.prompt, turnId: message.turnId }],
         items: [
           ...model.items,
@@ -1169,6 +1323,7 @@ export const update: {
         busy: true,
         activity: { _tag: "Waiting" },
       }
+    }
     case "BlockAdded": {
       const activityForAddedBlock = (): Activity => {
         if (message.block._tag === "ToolCall") return { _tag: "RunningTools" }
@@ -1290,10 +1445,22 @@ export const update: {
         activity: model.busy && model.activeTurnId !== undefined ? { _tag: "Waiting" } : undefined,
       }
     }
-    case "ExecutionCompleted":
-      return message.turnId !== undefined && model.activeTurnId !== message.turnId
-        ? model
-        : { ...model, busy: false, activity: undefined, activeTurnId: undefined }
+    case "ExecutionCompleted": {
+      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
+      const settled = settleSteering(model, message.turnId ?? model.activeTurnId)
+      return {
+        ...model,
+        submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),
+        pendingSteering: settled.pendingSteering,
+        ...(settled.restoredInput === undefined
+          ? {}
+          : { input: settled.restoredInput, cursor: settled.restoredInput.length }),
+        cancelPending: false,
+        busy: false,
+        activity: undefined,
+        activeTurnId: undefined,
+      }
+    }
     case "ExecutionFailed":
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       return {
@@ -1308,55 +1475,78 @@ export const update: {
           },
         ],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],
+        submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, message.turnId),
+        pendingSteering: settleSteering(model, message.turnId ?? model.activeTurnId).pendingSteering,
+        cancelPending: false,
         busy: false,
         activity: undefined,
         activeTurnId: undefined,
       }
-    case "ExecutionCancelled":
-      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
-      if (!model.busy) return model
-      {
-        const turnId = message.turnId ?? model.activeTurnId
-        const hasMarkerUnit = model.blocks.some((candidate) => {
-          const block = candidate as TranscriptBlock
-          if (block._tag === "ChildAgent") return block.status === "running" || block.status === "cancelled"
-          return (
-            block._tag === "ToolCall" &&
-            (block.status === "running" || block.status === "cancelled") &&
-            block.presentation.family === "agent"
-          )
-        })
-        const entries = hasMarkerUnit
-          ? model.entries
-          : [
-              ...model.entries,
-              { role: "notice" as const, text: "cancelled", ...(turnId === undefined ? {} : { turnId }) },
-            ]
-        const items = hasMarkerUnit
-          ? model.items
-          : [
-              ...model.items,
-              {
-                _tag: "Entry" as const,
-                index: model.entries.length,
-                ...(turnId === undefined ? {} : { id: `execution:${turnId}:cancelled`, turnId }),
-              },
-            ]
+    case "ExecutionCancelled": {
+      const turnId = message.turnId ?? model.activeTurnId
+      const taken = takeSubmittedDraft(model.submittedDrafts, turnId)
+      if (message.agentResponseArrived === false && taken.draft !== undefined) {
+        const draft = taken.draft
         return {
           ...model,
-          entries,
-          items,
-          blocks: model.blocks.map((candidate) => {
-            const block = candidate as TranscriptBlock
-            return (block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running"
-              ? { ...block, status: "cancelled" as const }
-              : candidate
-          }),
-          busy: false,
-          activity: undefined,
-          activeTurnId: undefined,
+          ...(model.input.length === 0
+            ? { input: draft.input, cursor: draft.cursor, pastedText: draft.attachments }
+            : {}),
+          submittedDrafts: taken.rest,
+          pendingSteering: settleSteering(model, turnId).pendingSteering,
+          cancelPending: model.activeTurnId === turnId ? false : model.cancelPending,
+          busy: model.activeTurnId === turnId ? false : model.busy,
+          activity: model.activeTurnId === turnId ? undefined : model.activity,
+          activeTurnId: model.activeTurnId === turnId ? undefined : model.activeTurnId,
         }
       }
+      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
+      if (!model.busy) return model
+      const cancelSettled = settleSteering(model, turnId)
+      const hasMarkerUnit = model.blocks.some((candidate) => {
+        const block = candidate as TranscriptBlock
+        return (
+          (block._tag === "ToolCall" || block._tag === "ChildAgent") &&
+          (block.status === "running" || block.status === "cancelled")
+        )
+      })
+      const entries = hasMarkerUnit
+        ? model.entries
+        : [
+            ...model.entries,
+            { role: "notice" as const, text: "cancelled", ...(turnId === undefined ? {} : { turnId }) },
+          ]
+      const items = hasMarkerUnit
+        ? model.items
+        : [
+            ...model.items,
+            {
+              _tag: "Entry" as const,
+              index: model.entries.length,
+              ...(turnId === undefined ? {} : { id: `execution:${turnId}:cancelled`, turnId }),
+            },
+          ]
+      return {
+        ...model,
+        entries,
+        items,
+        submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, turnId),
+        pendingSteering: cancelSettled.pendingSteering,
+        cancelPending: false,
+        ...(cancelSettled.restoredInput === undefined
+          ? {}
+          : { input: cancelSettled.restoredInput, cursor: cancelSettled.restoredInput.length }),
+        blocks: model.blocks.map((candidate) => {
+          const block = candidate as TranscriptBlock
+          return (block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running"
+            ? { ...block, status: "cancelled" as const }
+            : candidate
+        }),
+        busy: false,
+        activity: undefined,
+        activeTurnId: undefined,
+      }
+    }
     case "UsageReported":
       return message.costUsd === undefined ? model : { ...model, costUsd: (model.costUsd ?? 0) + message.costUsd }
     case "DetailMoved": {
@@ -1668,9 +1858,23 @@ export const update: {
               (block as Extract<TranscriptBlock, { _tag: "Permission" }>).status === "pending",
           ))
       )
-        return { ...model, activity: { _tag: "Waiting" }, pendingAction: { _tag: "Cancel" } }
-      if (key.ctrl && key.name === "s" && model.busy && model.input.length > 0)
-        return { ...model, pendingAction: { _tag: "Steer", prompt: model.input }, input: "", cursor: 0 }
+        return { ...model, activity: { _tag: "Waiting" }, cancelPending: model.busy, pendingAction: { _tag: "Cancel" } }
+      if (key.ctrl && key.name === "s" && model.busy && !model.cancelPending && model.input.length > 0) {
+        const steerText = expandPastedText(model.input, model.pastedText)
+        return {
+          ...model,
+          pendingAction: {
+            _tag: "Steer",
+            prompt: steerText,
+            ...(model.activeTurnId === undefined ? {} : { turnId: model.activeTurnId }),
+          },
+          ...(model.activeTurnId === undefined
+            ? {}
+            : { pendingSteering: [...model.pendingSteering, { turnId: model.activeTurnId, text: steerText }] }),
+          input: "",
+          cursor: 0,
+        }
+      }
       if (key.ctrl && key.name === "return" && model.busy && model.input.length > 0)
         return { ...model, pendingAction: { _tag: "InterruptAndSend", prompt: model.input }, input: "", cursor: 0 }
       if (key.alt && key.name === "t") {

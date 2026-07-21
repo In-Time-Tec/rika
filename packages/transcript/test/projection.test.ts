@@ -1205,4 +1205,73 @@ describe("Transcript projection", () => {
     expect(block.files[0]?.path).toBe("src/app.ts")
     expect(block.files[0]?.kind).toBe("add")
   })
+
+  it("projects a delivered steering message as a user entry in event order", () => {
+    const projection = project("turn", "prompt", [
+      { cursor: "output-0", sequence: 0, type: "model.output.completed", createdAt: 0, text: "Working." },
+      {
+        cursor: "tool-1",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "call", tool_name: "bash", input: { command: "ls" } },
+      },
+      { cursor: "tool-2", sequence: 2, type: "tool.result.received", createdAt: 2, data: { tool_call_id: "call" } },
+      {
+        cursor: "steer-3",
+        sequence: 3,
+        type: "steering.delivered",
+        createdAt: 3,
+        text: "Focus on the fixture text.",
+        data: {
+          kind: "steering",
+          drain_id: "drain:turn:steering:steering:sequence:3",
+          message_sequences: [0],
+          message_count: 1,
+        },
+      },
+      { cursor: "output-4", sequence: 4, type: "model.output.completed", createdAt: 4, text: "Refocused." },
+    ])
+    const steering = projection.units.find((candidate) => candidate.key === "steering:turn:3")
+    expect(steering?.content).toEqual({ _tag: "Entry", role: "user", text: "Focus on the fixture text." })
+    const keys = projection.units.map((candidate) => candidate.key)
+    expect(keys.indexOf("steering:turn:3")).toBeGreaterThan(keys.indexOf("tool:turn:call"))
+  })
+
+  it("ignores an empty steering drain event", () => {
+    const projection = project("turn", "prompt", [
+      {
+        cursor: "steer-0",
+        sequence: 0,
+        type: "steering.delivered",
+        createdAt: 0,
+        data: {
+          kind: "steering",
+          drain_id: "drain:turn:steering:steering:sequence:0",
+          message_sequences: [],
+          message_count: 0,
+        },
+      },
+    ])
+    expect(projection.units.some((candidate) => candidate.key.startsWith("steering:"))).toBe(false)
+  })
+
+  it("replays a delivered steering event into one stable unit", () => {
+    const delivered: SourceEvent = {
+      cursor: "steer-1",
+      sequence: 1,
+      type: "steering.delivered",
+      createdAt: 1,
+      text: "Check the failure path.",
+      data: {
+        kind: "steering",
+        drain_id: "drain:turn:steering:steering:sequence:1",
+        message_sequences: [0],
+        message_count: 1,
+      },
+    }
+    const first = applyEvent(empty("turn", "prompt"), delivered)
+    const replayed = applyEvent(first, delivered)
+    expect(replayed.units.filter((candidate) => candidate.key === "steering:turn:1")).toHaveLength(1)
+  })
 })

@@ -1,6 +1,22 @@
+import { readFile } from "node:fs/promises"
+import { dirname, resolve } from "node:path"
 import { defineConfig } from "vitest/config"
 
 export default defineConfig({
+  plugins: [
+    {
+      name: "prompt-text",
+      enforce: "pre",
+      resolveId(id, importer) {
+        if (!id.endsWith(".prompt.txt")) return undefined
+        return importer === undefined ? id : resolve(dirname(importer), id)
+      },
+      async load(id) {
+        if (!id.endsWith(".prompt.txt")) return undefined
+        return `export default ${JSON.stringify(await readFile(id, "utf8"))}`
+      },
+    },
+  ],
   test: {
     projects: [
       {

@@ -25,7 +25,7 @@ test("dispatches every session action and reports absent optional callbacks", ()
     { _tag: "SelectThread", id: "t" },
   ]
   for (const action of actions) expect(execute(adapter, action)).toBe(true)
-  expect(adapter.submit).toHaveBeenCalledWith("a", [{ type: "text", text: "a" }], "medium", undefined)
+  expect(adapter.submit).toHaveBeenCalledWith("a", [{ type: "text", text: "a" }], "medium", undefined, undefined)
   expect(adapter.quit).toHaveBeenCalledOnce()
   const minimal: Adapter = { submit: vi.fn(), quit: vi.fn() }
   for (const action of actions.slice(2)) expect(execute(minimal, action)).toBe(false)

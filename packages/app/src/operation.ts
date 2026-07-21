@@ -69,6 +69,24 @@ const isTerminalStatus = (
   status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
 ) => status === "completed" || status === "failed" || status === "cancelled"
 
+const isAgentResponseEvent = (event: ExecutionBackend.Event): boolean =>
+  event.type.includes("reasoning") ||
+  event.type === "model.output.delta" ||
+  event.type === "model.output.completed" ||
+  event.type === "model.toolcall.delta" ||
+  event.type === "tool.call.requested" ||
+  event.type === "tool.approval.requested" ||
+  event.type === "permission.ask.requested" ||
+  event.type === "child_run.spawned"
+
+const agentResponseArrived = (events: ReadonlyArray<ExecutionBackend.Event>): boolean => {
+  for (const event of events) {
+    if (event.type === "execution.cancelled") return false
+    if (isAgentResponseEvent(event)) return true
+  }
+  return false
+}
+
 const interactiveEventThreadId = (event: InteractiveEvent): string | undefined => {
   if (event._tag === "SelectionLoaded") return String(event.thread.id)
   if ("threadId" in event && event.threadId !== undefined) return String(event.threadId)
@@ -298,6 +316,7 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
                 Effect.gen(function* () {
                   const now = yield* Clock.currentTimeMillis
                   if (inspection === undefined) {
+                    if ((yield* awaitSessionQuiescence(backend, turn.threadId)) !== undefined) return
                     if (prepare === undefined && extensions !== undefined && turn.extensionPin === undefined)
                       return yield* operationError(`Turn ${turn.id} has no durable extension pin`)
                     if (prepare === undefined && extensions !== undefined && turn.extensionPin !== undefined)
@@ -438,6 +457,8 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
             Effect.onInterrupt(() => turns.releaseQueuedClaim(claim)),
           )
         while (true) {
+          if ((yield* turns.readQueue(threadId)).queuedCount === 0) return
+          if ((yield* awaitSessionQuiescence(backend, threadId)) !== undefined) return
           let promotedTurn: TurnRepository.QueueClaim
           let result: ExecutionBackend.Result
           if (ownership === undefined) {
@@ -707,6 +728,99 @@ const activeDescendantExecutionIds = Effect.fn("Operation.activeDescendantExecut
   return active
 })
 
+const sessionQuiescencePollAttempts = 40
+const sessionQuiescenceCandidateLimit = 8
+
+const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(function* (
+  backend: ExecutionBackend.Interface,
+  turnId: string,
+) {
+  const root = yield* backend.inspect(turnId)
+  if (root === undefined) return true
+  if (!isTerminalStatus(root.status) || root.pendingTools.length > 0) return false
+  const pending: Array<string> = []
+  const seen = new Set<string>()
+  for (const child of root.children) {
+    if (!isTerminalStatus(child.status)) return false
+    seen.add(normalizeChildExecutionId(child.executionId))
+    pending.push(child.executionId)
+  }
+  while (pending.length > 0) {
+    const current = pending.shift()!
+    const inspection = yield* backend.inspect(current, ExecutionBackend.executionReference)
+    if (inspection === undefined) continue
+    if (!isTerminalStatus(inspection.status) || inspection.pendingTools.length > 0) return false
+    for (const child of inspection.children) {
+      const normalized = normalizeChildExecutionId(child.executionId)
+      if (seen.has(normalized)) continue
+      seen.add(normalized)
+      if (!isTerminalStatus(child.status)) return false
+      pending.push(child.executionId)
+    }
+  }
+  return true
+})
+
+const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(function* (
+  backend: ExecutionBackend.Interface,
+  threadId: Thread.ThreadId,
+) {
+  const turns = yield* TurnRepository.Service
+  const history = yield* turns.list(threadId)
+  const candidates = history
+    .filter((turn) => turn.status === "cancelled" || turn.status === "failed")
+    .slice(-sessionQuiescenceCandidateLimit)
+    .toReversed()
+  for (const candidate of candidates) {
+    const quiescent = yield* executionTreeQuiescent(backend, candidate.id).pipe(Effect.orElseSucceed(() => false))
+    if (!quiescent) return candidate
+  }
+  return undefined
+})
+
+const cancelLiveDescendants = Effect.fn("Operation.cancelLiveDescendants")(function* (
+  backend: ExecutionBackend.Interface,
+  turnId: string,
+) {
+  const descendants = yield* activeDescendantExecutionIds(backend, turnId).pipe(Effect.orElseSucceed(() => []))
+  if (descendants.length === 0) return
+  const cancelledAt = yield* Clock.currentTimeMillis
+  yield* Effect.forEach(
+    descendants.toReversed(),
+    (executionId) => backend.cancel(executionId, cancelledAt, ExecutionBackend.executionReference).pipe(Effect.ignore),
+    { concurrency: "unbounded", discard: true },
+  )
+})
+
+const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(function* (
+  backend: ExecutionBackend.Interface,
+  threadId: Thread.ThreadId,
+) {
+  let blocked = yield* blockedSessionWriter(backend, threadId)
+  if (blocked === undefined) return undefined
+  yield* Effect.logInfo("execution.admission.blocked").pipe(
+    Effect.annotateLogs({
+      "rika.thread.id": String(threadId),
+      "rika.predecessor.turn.id": String(blocked.id),
+      "rika.predecessor.turn.status": blocked.status,
+    }),
+  )
+  yield* cancelLiveDescendants(backend, blocked.id)
+  for (let attempt = 1; attempt < sessionQuiescencePollAttempts; attempt += 1) {
+    yield* Effect.sleep("250 millis")
+    blocked = yield* blockedSessionWriter(backend, threadId)
+    if (blocked === undefined) return undefined
+  }
+  yield* Effect.logWarning("execution.admission.deferred").pipe(
+    Effect.annotateLogs({
+      "rika.thread.id": String(threadId),
+      "rika.predecessor.turn.id": String(blocked.id),
+      "rika.predecessor.turn.status": blocked.status,
+    }),
+  )
+  return blocked
+})
+
 const persistExecutionTree = Effect.fn("Operation.persistExecutionTree")(function* (turn: Turn.Turn, force: boolean) {
   const transcripts = yield* TranscriptRepository.Service
   const current = yield* transcripts.get(turn.id)
@@ -973,6 +1087,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               prompt: `Generate a concise 3-6 word title for a conversation that starts with the following user message. Reply with only the title, no quotes, no punctuation.\n\n${firstTurn.prompt.slice(0, 2000)}`,
               startedAt: firstTurn.updatedAt,
               executionRoute: titleExecutionRoute,
+              sessionPurpose: { _tag: "ThreadTitle", owningTurnId: String(firstTurn.id) },
             })
           } else if (isTerminalStatus(inspection.status)) {
             result = yield* backend.replay(executionId)
@@ -1462,48 +1577,136 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           readonly generation: number
           readonly threadId: string | undefined
           readonly stopped: Deferred.Deferred<void>
-          readonly executions: Set<string>
         }
         type ChildFollowerJob = {
+          readonly key: string
           readonly executionId: string
           readonly threadId: Thread.ThreadId
           readonly rootTurnId: Turn.TurnId
           readonly selection: ChildFollowerSelection
         }
+        type ChildFollowerState =
+          | { readonly _tag: "Idle"; readonly afterCursor?: string }
+          | {
+              readonly _tag: "Following"
+              readonly selection: ChildFollowerSelection
+              readonly afterCursor?: string
+            }
+          | {
+              readonly _tag: "Waiting"
+              readonly executionId: string
+              readonly threadId: Thread.ThreadId
+              readonly rootTurnId: Turn.TurnId
+              readonly afterCursor?: string
+            }
+          | { readonly _tag: "Terminal"; readonly afterCursor?: string }
         const childFollowerJobs = yield* Queue.bounded<ChildFollowerJob>(512)
+        const childFollowerStates = new Map<string, ChildFollowerState>()
+        const deliveredChildCursors = new Map<string, Set<string>>()
         let childFollowerSelection: ChildFollowerSelection = {
           generation: 0,
           threadId: settings.initialThreadId,
           stopped: yield* Deferred.make<void>(),
-          executions: new Set(),
         }
         const activateChildFollowers = Effect.fn("Operation.interactive.activateChildFollowers")(function* (
           threadId: Thread.ThreadId,
         ) {
           const previous = childFollowerSelection
+          for (const [key, state] of childFollowerStates)
+            if (state._tag === "Following" && state.selection === previous)
+              childFollowerStates.set(
+                key,
+                state.afterCursor === undefined ? { _tag: "Idle" } : { _tag: "Idle", afterCursor: state.afterCursor },
+              )
           childFollowerSelection = {
             generation: previous.generation + 1,
             threadId: String(threadId),
             stopped: yield* Deferred.make<void>(),
-            executions: new Set(),
           }
           yield* Deferred.succeed(previous.stopped, undefined)
           yield* Queue.clear(childFollowerJobs)
         })
-        const enqueueChildFollower = (threadId: Thread.ThreadId, executionId: string, rootTurnId: Turn.TurnId) => {
-          const normalizedExecutionId = normalizeChildExecutionId(executionId)
+        const enqueueChildFollower = (
+          threadId: Thread.ThreadId,
+          executionId: string,
+          rootTurnId: Turn.TurnId,
+          status?: ExecutionBackend.Status,
+        ) => {
+          const key = normalizeChildExecutionId(executionId)
           const selection = childFollowerSelection
-          if (selection.threadId !== String(threadId) || selection.executions.has(normalizedExecutionId)) return
-          selection.executions.add(normalizedExecutionId)
+          if (selection.threadId !== String(threadId)) return
+          const current = childFollowerStates.get(key) ?? { _tag: "Idle" as const }
+          if (current._tag === "Terminal") return
+          if (isTerminalStatus(status ?? "running") && current.afterCursor === undefined) {
+            childFollowerStates.set(
+              key,
+              current.afterCursor === undefined
+                ? { _tag: "Terminal" }
+                : { _tag: "Terminal", afterCursor: current.afterCursor },
+            )
+            return
+          }
+          if (
+            (current._tag === "Waiting" && (status === undefined || status === "waiting")) ||
+            (current._tag === "Following" && current.selection === selection)
+          )
+            return
+          const following: ChildFollowerState =
+            current.afterCursor === undefined
+              ? { _tag: "Following", selection }
+              : { _tag: "Following", selection, afterCursor: current.afterCursor }
+          childFollowerStates.set(key, following)
           if (
             !Queue.offerUnsafe(childFollowerJobs, {
+              key,
               executionId,
               threadId,
               rootTurnId,
               selection,
             })
           )
-            selection.executions.delete(normalizedExecutionId)
+            childFollowerStates.set(
+              key,
+              following.afterCursor === undefined
+                ? { _tag: "Idle" }
+                : { _tag: "Idle", afterCursor: following.afterCursor },
+            )
+        }
+        const resumeWaitingChildFollowers = (threadId: Thread.ThreadId) => {
+          for (const [key, state] of childFollowerStates) {
+            if (state._tag !== "Waiting" || state.threadId !== threadId) continue
+            childFollowerStates.set(
+              key,
+              state.afterCursor === undefined ? { _tag: "Idle" } : { _tag: "Idle", afterCursor: state.afterCursor },
+            )
+            enqueueChildFollower(state.threadId, state.executionId, state.rootTurnId)
+          }
+        }
+        const deliverChildEvent = (
+          threadId: Thread.ThreadId,
+          executionId: string,
+          rootTurnId: Turn.TurnId,
+          event: ExecutionBackend.Event,
+          publishUsage: boolean,
+        ) => {
+          const key = normalizeChildExecutionId(executionId)
+          const delivered = deliveredChildCursors.get(key) ?? new Set<string>()
+          if (delivered.has(event.cursor)) return
+          delivered.add(event.cursor)
+          deliveredChildCursors.set(key, delivered)
+          const state = childFollowerStates.get(key)
+          if (state !== undefined)
+            childFollowerStates.set(
+              key,
+              event.type === "execution.completed" ||
+                event.type === "execution.failed" ||
+                event.type === "execution.cancelled"
+                ? { _tag: "Terminal", afterCursor: event.cursor }
+                : { ...state, afterCursor: event.cursor },
+            )
+          const patch = childTranscriptPatch(threadId, executionId, rootTurnId, event)
+          sessionDispatch(patch)
+          if (publishUsage && event.type === "model.usage.reported") publishInteractiveActivity(sessionId, patch)
         }
         observeChildSpawn = (event) => {
           if (event._tag !== "TranscriptPatched") return
@@ -1554,6 +1757,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           mode: "low" | "medium" | "high" | "ultra" = "medium",
           promptParts?: ReadonlyArray<Turn.PromptPart>,
           modelTuning?: { readonly fastMode?: boolean },
+          submissionId?: string,
         ) {
           let observerTurn: Turn.Turn | undefined
           let executionLaunched = false
@@ -1606,6 +1810,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   observerTurn = turn
                 }
                 yield* ensureTurnSummary(turn)
+                emit(dispatch, {
+                  _tag: "SubmissionAdmitted",
+                  selectionEpoch: 0,
+                  threadId: thread.id,
+                  turnId: turn.id,
+                  status: turn.status === "queued" ? "queued" : "active",
+                  ...(submissionId === undefined ? {} : { submissionId }),
+                })
                 yield* Effect.logInfo("turn.accepted").pipe(
                   Effect.annotateLogs({
                     "rika.thread.id": String(thread.id),
@@ -1623,6 +1835,15 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   const outcome = yield* Effect.exit(
                     Effect.gen(function* () {
                       yield* Effect.logInfo("turn.started")
+                      if ((yield* awaitSessionQuiescence(backend, thread.id)) !== undefined) {
+                        const requeued = yield* turns.requeueAccepted(
+                          turn.id,
+                          pendingTurnCapacity,
+                          yield* Clock.currentTimeMillis,
+                        )
+                        emit(dispatch, queueMutationEvent(requeued.queue))
+                        return undefined
+                      }
                       const prepared = yield* prepareExecution(turn, thread.workspace)
                       if (prepared.messages.length > 0)
                         emit(dispatch, {
@@ -1634,7 +1855,13 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                         })
                       const runningTurn = yield* setTurnStatus(turn.id, "running", turn.lastCursor, startedAt)
                       if (runningTurn.status !== "running") return undefined
-                      emit(dispatch, { _tag: "TurnStarted", selectionEpoch: 0, threadId: thread.id, turn: runningTurn })
+                      emit(dispatch, {
+                        _tag: "TurnStarted",
+                        selectionEpoch: 0,
+                        threadId: thread.id,
+                        turn: runningTurn,
+                        ...(submissionId === undefined ? {} : { submissionId }),
+                      })
                       const result = yield* backend.start({
                         threadId: thread.id,
                         turnId: turn.id,
@@ -1643,6 +1870,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                         startedAt,
                         executionRoute: turn.executionRoute,
                         ...(modelTuning?.fastMode === undefined ? {} : { fastMode: modelTuning.fastMode }),
+                        eventScope: "execution",
                         onEvent: (event) => {
                           deliveredCursors.add(event.cursor)
                           emit(dispatch, transcriptPatch(turn, event))
@@ -1790,26 +2018,66 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         ) {
           const follow = acquiredBackend.follow
           if (follow === undefined) return
-          const deliveredCursors = new Set<string>()
-          let afterCursor: string | undefined
-          while (childFollowerSelection === job.selection) {
+          while (true) {
+            const state = childFollowerStates.get(job.key)
+            if (state?._tag !== "Following" || state.selection !== job.selection) return
             const deliverEvent = (event: ExecutionBackend.Event) => {
-              if (childFollowerSelection !== job.selection || deliveredCursors.has(event.cursor)) return
-              deliveredCursors.add(event.cursor)
-              const patch = childTranscriptPatch(job.threadId, job.executionId, job.rootTurnId, event)
-              sessionDispatch(patch)
-              if (event.type === "model.usage.reported") publishInteractiveActivity(sessionId, patch)
+              if (childFollowerSelection !== job.selection) return
+              deliverChildEvent(job.threadId, job.executionId, job.rootTurnId, event, true)
             }
             const result = yield* Effect.raceFirst(
-              follow(job.executionId, afterCursor, deliverEvent, ExecutionBackend.executionReference),
+              follow(
+                job.executionId,
+                state.afterCursor,
+                deliverEvent,
+                ExecutionBackend.executionReference,
+                "execution",
+              ),
               Deferred.await(job.selection.stopped).pipe(Effect.as(undefined)),
             )
-            if (result === undefined || childFollowerSelection !== job.selection) return
+            if (result === undefined || childFollowerSelection !== job.selection) {
+              const current = childFollowerStates.get(job.key)
+              if (current?._tag === "Following" && current.selection === job.selection)
+                childFollowerStates.set(
+                  job.key,
+                  current.afterCursor === undefined
+                    ? { _tag: "Idle" }
+                    : { _tag: "Idle", afterCursor: current.afterCursor },
+                )
+              return
+            }
             for (const event of result.events) deliverEvent(event)
-            if (isTerminalStatus(result.status)) return
+            const current = childFollowerStates.get(job.key)
+            if (current?._tag !== "Following" || current.selection !== job.selection) return
+            if (isTerminalStatus(result.status)) {
+              childFollowerStates.set(
+                job.key,
+                current.afterCursor === undefined
+                  ? { _tag: "Terminal" }
+                  : { _tag: "Terminal", afterCursor: current.afterCursor },
+              )
+              return
+            }
+            if (result.status === "waiting") {
+              childFollowerStates.set(job.key, {
+                _tag: "Waiting",
+                executionId: job.executionId,
+                threadId: job.threadId,
+                rootTurnId: job.rootTurnId,
+                ...(current.afterCursor === undefined ? {} : { afterCursor: current.afterCursor }),
+              })
+              return
+            }
             const nextCursor = ThreadActivity.latestCursor(result.events)
-            if (nextCursor === undefined || nextCursor === afterCursor) return
-            afterCursor = nextCursor
+            if (nextCursor === undefined || nextCursor === state.afterCursor) {
+              childFollowerStates.set(
+                job.key,
+                current.afterCursor === undefined
+                  ? { _tag: "Idle" }
+                  : { _tag: "Idle", afterCursor: current.afterCursor },
+              )
+              return
+            }
           }
         })
         const runChildFollower = Effect.forever(
@@ -1903,6 +2171,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
                 startedAt: promotedAt,
                 executionRoute,
+                eventScope: "execution",
                 onEvent: (event) => {
                   deliveredCursors.add(event.cursor)
                   emit(dispatch, transcriptPatch(promotedTurn, event))
@@ -1986,6 +2255,13 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             )
           })
           while (true) {
+            if ((yield* turns.readQueue(thread.id)).queuedCount === 0) break
+            if ((yield* awaitSessionQuiescence(backend, thread.id)) !== undefined) {
+              const wake = yield* turns.requestQueueWake(thread.id)
+              if (wake !== undefined && backend.wakeThreadHost !== undefined)
+                yield* backend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
+              break
+            }
             const keepDraining = yield* runNext()
             if (keepDraining === undefined) break
             claimed += 1
@@ -2073,10 +2349,16 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           if (turn === undefined) return yield* operationError(`Turn ${turnId} does not exist`)
           const thread = yield* threadForTurn(turn)
           const deliveredCursors = new Set<string>()
-          const result = yield* follow(turn.id, turn.lastCursor, (event) => {
-            deliveredCursors.add(event.cursor)
-            emit(dispatch, transcriptPatch(turn, event))
-          })
+          const result = yield* follow(
+            turn.id,
+            turn.lastCursor,
+            (event) => {
+              deliveredCursors.add(event.cursor)
+              emit(dispatch, transcriptPatch(turn, event))
+            },
+            undefined,
+            "execution",
+          )
           for (const event of result.events)
             if (!deliveredCursors.has(event.cursor)) {
               emit(dispatch, transcriptPatch(turn, event))
@@ -2424,7 +2706,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             if (activeTurn !== undefined) {
               const inspection = yield* backend.inspect(activeTurn.id)
               for (const child of inspection?.children ?? [])
-                enqueueChildFollower(thread.id, child.executionId, activeTurn.id)
+                enqueueChildFollower(thread.id, child.executionId, activeTurn.id, child.status)
             }
           } else
             dispatch({
@@ -2606,7 +2888,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   : OperationUnavailable.make({ operation: "InteractiveSession.events", message: String(error) }),
               ),
             ),
-          submit: (prompt, mode, parts, tuning) => submit(prompt, sessionDispatch, mode, parts, tuning),
+          submit: (prompt, mode, parts, tuning, submissionId) =>
+            submit(prompt, sessionDispatch, mode, parts, tuning, submissionId),
           newThread: safe(
             sessionDispatch,
             submissionAdmission.withPermits(1)(Effect.uninterruptible(createAndSelectThread())),
@@ -2747,24 +3030,30 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                       threadId: turn.threadId,
                       turnId: turn.id,
                       action: "steered",
+                      steeringSequence: outcome.value.sequence,
+                      steeringText,
                     })
                   }),
                 ),
               ),
             ),
-          steer: (text) =>
+          steer: (text, targetTurnId) =>
             safe(
               sessionDispatch,
               Effect.gen(function* () {
                 const backend = yield* ExecutionBackend.Service
                 const turn = yield* active()
-                yield* backend.steer(turn.id, text, yield* Clock.currentTimeMillis)
+                if (targetTurnId !== undefined && String(turn.id) !== targetTurnId)
+                  return yield* operationError(`Steering target ${targetTurnId} is no longer the active turn`)
+                const receipt = yield* backend.steer(turn.id, text, yield* Clock.currentTimeMillis)
                 emit(sessionDispatch, {
                   _tag: "ExecutionControlled",
                   selectionEpoch: 0,
                   threadId: turn.threadId,
                   turnId: turn.id,
                   action: "steered",
+                  steeringSequence: receipt.sequence,
+                  steeringText: text,
                 })
               }),
             ),
@@ -2841,7 +3130,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 const childId = cancellationOrder[index]!
                 if (outcome._tag === "Success") {
                   for (const event of outcome.success.events)
-                    sessionDispatch(childTranscriptPatch(thread.id, childId, turn.id, event))
+                    deliverChildEvent(thread.id, childId, turn.id, event, false)
                 } else
                   yield* Effect.logError("child-execution.cancel.failed").pipe(
                     Effect.annotateLogs({
@@ -2864,6 +3153,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 threadId: turn.threadId,
                 turnId: turn.id,
                 action: "cancelled",
+                agentResponseArrived: agentResponseArrived(result.events),
               })
               if (isTerminalStatus(result.status)) yield* settleThread(thread, sessionDispatch)
             }),
@@ -2891,6 +3181,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                       else resolution = "Always"
                       yield* backend.resolvePermission(waitId, resolution, resolvedAt)
                     }
+                    resumeWaitingChildFollowers(activeTurn.threadId)
                     emit(sessionDispatch, {
                       _tag: "ExecutionControlled",
                       selectionEpoch: 0,
@@ -3022,13 +3313,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         }
         const session: InteractiveSession = {
           events: (dispatch) => attachFeed(implementation.events(dispatch)),
-          submit: (prompt, mode, parts, tuning) => admit(implementation.submit(prompt, mode, parts, tuning)),
+          submit: (prompt, mode, parts, tuning, submissionId) =>
+            admit(implementation.submit(prompt, mode, parts, tuning, submissionId)),
           newThread: admitLocal(implementation.newThread),
           shell: (command, incognito) => admitLocal(implementation.shell(command, incognito)),
           editQueued: (turnId, prompt) => admitLocal(implementation.editQueued(turnId, prompt)),
           dequeue: (turnId) => admitLocal(implementation.dequeue(turnId)),
           steerQueued: (turnId, text) => admitLocal(implementation.steerQueued(turnId, text)),
-          steer: (text) => admitLocal(implementation.steer(text)),
+          steer: (text, targetTurnId) => admitLocal(implementation.steer(text, targetTurnId)),
           interruptAndSend: (prompt) => admitLocal(implementation.interruptAndSend(prompt)),
           cancel: admitLocal(implementation.cancel),
           resolvePermission: (waitId, kind, decision) =>
@@ -3200,6 +3492,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   readonly extensionPin: Turn.ExecutionExtensionPin | undefined
                 },
               ) {
+                const blockedTurn = yield* awaitSessionQuiescence(backend, turn.threadId)
+                if (blockedTurn !== undefined)
+                  return yield* operationError(
+                    `Cancelled turn ${blockedTurn.id} is still releasing its execution; try again shortly`,
+                  )
                 const startedAt = yield* Clock.currentTimeMillis
                 const deliveredCursors = new Set<string>()
                 let directDelivery = true
@@ -3309,6 +3606,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               })
               const drainRunQueue = Effect.fn("Operation.drainRunQueue")(function* () {
                 while (true) {
+                  if ((yield* turns.readQueue(thread.id)).queuedCount === 0) return
+                  if ((yield* awaitSessionQuiescence(backend, thread.id)) !== undefined) return
                   const promoted = yield* claimQueuedTurn(thread.id, yield* Clock.currentTimeMillis)
                   if (promoted === undefined) return
                   const prepared = yield* prepareExecution(promoted.turn, thread.workspace, false).pipe(

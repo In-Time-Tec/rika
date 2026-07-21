@@ -12,11 +12,12 @@ export type Action =
       readonly parts: ReadonlyArray<PromptPart>
       readonly mode: Mode
       readonly tuning?: ModelTuning
+      readonly submissionId?: string
     }
   | { readonly _tag: "EditQueued"; readonly id: string; readonly prompt: string }
   | { readonly _tag: "Dequeue"; readonly id: string }
   | { readonly _tag: "SteerQueued"; readonly id: string; readonly prompt: string }
-  | { readonly _tag: "Steer"; readonly prompt: string }
+  | { readonly _tag: "Steer"; readonly prompt: string; readonly turnId?: string }
   | { readonly _tag: "InterruptAndSend"; readonly prompt: string }
   | { readonly _tag: "Cancel" }
   | { readonly _tag: "Quit" }
@@ -29,12 +30,18 @@ export type Action =
   | { readonly _tag: "SelectThread"; readonly id: string }
 
 export interface Adapter {
-  readonly submit: (prompt: string, parts: ReadonlyArray<PromptPart>, mode: Mode, tuning?: ModelTuning) => void
+  readonly submit: (
+    prompt: string,
+    parts: ReadonlyArray<PromptPart>,
+    mode: Mode,
+    tuning?: ModelTuning,
+    submissionId?: string,
+  ) => void
   readonly quit: () => void
   readonly editQueued?: (id: string, prompt: string) => void
   readonly dequeue?: (id: string) => void
   readonly steerQueued?: (id: string, prompt: string) => void
-  readonly steer?: (prompt: string) => void
+  readonly steer?: (prompt: string, turnId?: string) => void
   readonly interruptAndSend?: (prompt: string) => void
   readonly cancel?: () => void
   readonly decidePermission?: (id: string, kind: "permission" | "tool-approval", decision: PermissionDecision) => void
@@ -47,7 +54,7 @@ export const execute: {
 } = Function.dual(2, (adapter: Adapter, action: Action): boolean => {
   switch (action._tag) {
     case "Submit":
-      adapter.submit(action.prompt, action.parts, action.mode, action.tuning)
+      adapter.submit(action.prompt, action.parts, action.mode, action.tuning, action.submissionId)
       return true
     case "EditQueued":
       adapter.editQueued?.(action.id, action.prompt)
@@ -59,7 +66,7 @@ export const execute: {
       adapter.steerQueued?.(action.id, action.prompt)
       return adapter.steerQueued !== undefined
     case "Steer":
-      adapter.steer?.(action.prompt)
+      adapter.steer?.(action.prompt, action.turnId)
       return adapter.steer !== undefined
     case "InterruptAndSend":
       adapter.interruptAndSend?.(action.prompt)

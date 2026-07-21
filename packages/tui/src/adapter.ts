@@ -95,7 +95,8 @@ import {
   unitId as transcriptUnitId,
   rows as transcriptUnits,
   toolDetails,
-  type AgentTerminal,
+  type AgentOutcome,
+  type AgentResponseState,
   type PathTarget,
   type ToolKind,
   type ToolTranscriptUnit,
@@ -741,6 +742,9 @@ const identityRevision = (value: unknown): number => {
   return transcriptIdentityCounter
 }
 
+const agentResponseOutcome = (state: AgentResponseState): AgentOutcome =>
+  state._tag === "Streaming" ? { kind: "answer", entry: state.answer } : state.outcome
+
 const transcriptUnitRevision = (
   model: Model,
   unit: TranscriptUnit,
@@ -762,8 +766,9 @@ const transcriptUnitRevision = (
     }
     for (const index of tool.diffs) ids.push(identityRevision(model.blocks[index]))
     for (const child of tool.children ?? []) walkTool(child)
-    if (tool.terminal?.kind === "answer") ids.push(identityRevision(model.entries[tool.terminal.entry]))
-    else if (tool.terminal?.kind === "error") bits.push(`${tool.terminal.tone}:${tool.terminal.text}`)
+    const response = tool.agentResponse === undefined ? undefined : agentResponseOutcome(tool.agentResponse)
+    if (response?.kind === "answer") ids.push(identityRevision(model.entries[response.entry]))
+    else if (response?.kind === "error") bits.push(`${response.tone}:${response.text}`)
   }
   if (unit.kind === "entry") ids.push(identityRevision(model.entries[unit.entry]))
   else if (unit.kind === "tool") walkTool(unit)
@@ -881,7 +886,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     }
   }
   const renderAgentError = (
-    terminal: Extract<AgentTerminal, { kind: "error" }>,
+    terminal: Extract<AgentOutcome, { kind: "error" }>,
     ownerId: string,
     prefix: string,
     gap = false,
@@ -1231,7 +1236,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     const output = agent || !isToolOutputDisplayed(block) ? undefined : block.output
     const expandable =
       children.length > 0 ||
-      unit.terminal !== undefined ||
+      unit.agentResponse !== undefined ||
       (agent && block.detail.length > 0) ||
       (output !== undefined && output.length > 0)
     const rowWidth = markdownWidthForColumn(model.width)
@@ -1295,14 +1300,15 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     }
     if (expanded)
       for (const [childIndex, child] of children.entries())
-        renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.terminal === undefined)
-    if (expanded && unit.terminal !== undefined) {
+        renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.agentResponse === undefined)
+    if (expanded && unit.agentResponse !== undefined) {
       const timeline = children.length > 0
       const terminalPrefix = timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `
+      const response = agentResponseOutcome(unit.agentResponse)
       const range =
-        unit.terminal.kind === "answer"
-          ? renderAgentResponse(unit.terminal.entry, terminalPrefix, timeline)
-          : renderAgentError(unit.terminal, block.id, terminalPrefix, timeline)
+        response.kind === "answer"
+          ? renderAgentResponse(response.entry, terminalPrefix, timeline)
+          : renderAgentError(response, block.id, terminalPrefix, timeline)
       if (range !== undefined) nestedRanges.push(range)
     }
     nestedRanges[rangeIndex] = {
@@ -1397,25 +1403,30 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       renderChildAgentBody(model.blocks[unit.block] as Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded)
     else if (unit.kind === "diff") renderDiffBody(unit.block, selected, expanded)
     else if (unit.kind === "block") renderPlainBlock(unit.block)
-    else if (unit.children !== undefined || unit.terminal !== undefined) {
+    else if (unit.children !== undefined || unit.agentResponse !== undefined) {
       renderOtherToolBody(
         toolUnitsFor(model, unit.blocks)[0]!,
         selected,
         expanded,
         unit.children !== undefined,
-        unit.terminal !== undefined,
+        unit.agentResponse !== undefined,
       )
       if (expanded)
         for (const [childIndex, child] of (unit.children ?? []).entries())
-          renderNestedTool(child, "  ", childIndex === (unit.children?.length ?? 0) - 1 && unit.terminal === undefined)
-      if (expanded && unit.terminal !== undefined) {
+          renderNestedTool(
+            child,
+            "  ",
+            childIndex === (unit.children?.length ?? 0) - 1 && unit.agentResponse === undefined,
+          )
+      if (expanded && unit.agentResponse !== undefined) {
         const timeline = (unit.children?.length ?? 0) > 0
         const prefix = timeline ? "  │   " : "  "
         const ownerId = (model.blocks[unit.blocks[0]!] as Extract<TranscriptBlock, { _tag: "ToolCall" }>).id
+        const response = agentResponseOutcome(unit.agentResponse)
         const range =
-          unit.terminal.kind === "answer"
-            ? renderAgentResponse(unit.terminal.entry, prefix, timeline)
-            : renderAgentError(unit.terminal, ownerId, prefix, timeline)
+          response.kind === "answer"
+            ? renderAgentResponse(response.entry, prefix, timeline)
+            : renderAgentError(response, ownerId, prefix, timeline)
         if (range !== undefined) nestedRanges.push(range)
       }
     } else if (unit.group === "explore") renderExploreBody(toolUnitsFor(model, unit.blocks), selected, expanded)
@@ -2865,9 +2876,10 @@ export class Surface {
       this.welcomeTimer = undefined
     }
     const queue = model.queue as ReadonlyArray<QueueItem>
+    const pendingSteering = model.pendingSteering
     this.queueBox.marginLeft = contentWidth <= 4 ? 0 : 1
     this.queueBox.marginRight = contentWidth <= 4 ? 0 : 1
-    this.queueBox.visible = queue.length > 0
+    this.queueBox.visible = queue.length > 0 || pendingSteering.length > 0
     const queueTextWidth = queueContentWidth(model)
     const queueLength = queue.length
     const selectedIndex = queue.findIndex((item) => item.id === model.queueSelection)
@@ -2886,7 +2898,14 @@ export class Surface {
       return [inline, ...remaining].join("\n")
     })
     const heights = labels.map((label) => wrappedRowCount(label, queueTextWidth))
-    const queueRows = heights.reduce((sum, rows) => sum + rows, 0)
+    const steeringLabels = pendingSteering.map((row) => {
+      const firstLine = row.text.split("\n")[0] ?? ""
+      const label = `steering: ${firstLine}`
+      return stringWidth(label) <= queueTextWidth
+        ? label
+        : `${truncateToWidth(label, Math.max(1, queueTextWidth - 1))}…`
+    })
+    const queueRows = heights.reduce((sum, rows) => sum + rows, 0) + steeringLabels.length
     const queueBoxHeight = Math.min(
       Math.max(1, model.height),
       Math.min(Math.max(3, model.height - renderedInputHeight - 2), Math.max(3, queueRows + 2)),
@@ -2907,6 +2926,13 @@ export class Surface {
     const queueChunks: Array<TextChunk> = []
     let hintTop = 0
     let renderedRows = 0
+    for (const [steeringIndex, steeringLabel] of steeringLabels.entries()) {
+      if (renderedRows >= availableRows) break
+      queueChunks.push(fg(colors.muted)(steeringLabel))
+      renderedRows += 1
+      if (steeringIndex < steeringLabels.length - 1 || queueLength > 0) queueChunks.push(fg(colors.text)("\n"))
+    }
+    hintTop = renderedRows
     for (const [offset, item] of queue.slice(start, end).entries()) {
       const index = start + offset
       const label = clampToRows(labels[index]!, availableRows)
@@ -2927,8 +2953,8 @@ export class Surface {
     if (hintSegments.length > 0) hintChunks.push(dim(fg(colors.text)(" ")))
     this.queueHint.content = new StyledText(hintChunks)
     this.queueHint.visible = hintSegments.length > 0
-    this.queueLeftJoint.visible = queue.length > 0
-    this.queueRightJoint.visible = queue.length > 0
+    this.queueLeftJoint.visible = queue.length > 0 || pendingSteering.length > 0
+    this.queueRightJoint.visible = queue.length > 0 || pendingSteering.length > 0
     this.inputBox.borderColor = colors.text
     let costText = ""
     if (model.costUsd !== undefined) costText = formatCost(model.costUsd)

@@ -1366,3 +1366,34 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
   batcher.offer(events[0]!)
   expect(scheduled).toHaveLength(1)
 })
+
+it("applies a root lifecycle boundary without waiting behind a child delta flood", () => {
+  type FeedEvent = {
+    readonly id: string
+    readonly lane: "root" | "child"
+    readonly boundary: boolean
+  }
+  const scheduled: Array<() => void> = []
+  const applied: Array<string> = []
+  const batcher = InteractiveController.makeFeedFrameBatcher<FeedEvent>({
+    schedule: (flush) => scheduled.push(flush),
+    apply: (events) => applied.push(...events.map((event) => event.id)),
+    render: () => undefined,
+    lane: (event) => event.lane,
+    boundary: (event) => event.boundary,
+  })
+  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child", boundary: false })
+  batcher.offer({ id: "root-progress", lane: "root", boundary: false })
+  batcher.offer({ id: "root-result", lane: "root", boundary: true })
+
+  scheduled.shift()?.()
+
+  expect(applied).toHaveLength(256)
+  expect(applied.at(-1)).toBe("root-result")
+  expect(applied.at(-2)).toBe("root-progress")
+  expect(applied.slice(0, -2)).toEqual(Array.from({ length: 254 }, (_, index) => `child-${index}`))
+  while (scheduled.length > 0) scheduled.shift()?.()
+  expect(applied.filter((id) => id.startsWith("child-"))).toEqual(
+    Array.from({ length: 300 }, (_, index) => `child-${index}`),
+  )
+})

@@ -51,8 +51,10 @@ import {
   Event,
   type ExecutionReference,
   type ExecutionRoutePin,
+  type EventScope,
   type PromptPart,
   Service,
+  type StartInput,
   Status,
 } from "./execution-contract"
 import { mainInstructions, parentPermissions, presets, resolve } from "./agent-profiles"
@@ -111,6 +113,7 @@ const observableEventTypes = new Set([
   "model.usage.reported",
   "tool.call.requested",
   "tool.result.received",
+  "steering.delivered",
   "tool.approval.requested",
   "tool.approval.resolved",
   "permission.ask.requested",
@@ -632,6 +635,10 @@ export const workspaceFromExecutionId = (value: string): string | undefined => {
   return parent === undefined ? undefined : workspaceFromExecutionId(parent)
 }
 const sessionId = (threadId: string) => Ids.SessionId.make(`session:${threadId}`)
+const startSessionId = (input: Pick<StartInput, "threadId" | "sessionPurpose">) =>
+  input.sessionPurpose?._tag === "ThreadTitle"
+    ? Ids.SessionId.make(`session:aux:title:${input.sessionPurpose.owningTurnId}`)
+    : sessionId(input.threadId)
 const childSessionId = (childExecutionId: Ids.ChildExecutionId) =>
   Ids.SessionId.make(`session:child:${String(childExecutionId)}`)
 const isBackendError = Schema.is(BackendError)
@@ -774,6 +781,7 @@ const followExecution = (
   onEvent: ((item: Event) => void) | undefined,
   stopAtActionableWait = true,
   reference?: ExecutionReference,
+  eventScope: EventScope = "tree",
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -862,7 +870,8 @@ const followExecution = (
                   actionable: actionable && !root,
                   ...(root && terminal !== undefined ? { terminal } : {}),
                 })
-                if (spawnedChild !== undefined) yield* launch(Ids.ExecutionId.make(spawnedChild), false)
+                if (eventScope === "tree" && spawnedChild !== undefined)
+                  yield* launch(Ids.ExecutionId.make(spawnedChild), false)
                 if (actionable && root)
                   yield* Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true })
                 return terminal === undefined && !actionable
@@ -877,11 +886,12 @@ const followExecution = (
               times: 100,
             }),
           )
-          yield* Effect.forEach(
-            inspection.child_runs,
-            (child) => launch(Ids.ExecutionId.make(String(child.child_execution_id)), false),
-            { discard: true },
-          )
+          if (eventScope === "tree")
+            yield* Effect.forEach(
+              inspection.child_runs,
+              (child) => launch(Ids.ExecutionId.make(String(child.child_execution_id)), false),
+              { discard: true },
+            )
           yield* consume(cursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => consume(undefined)))
         }).pipe(
           Effect.catchCause((cause) =>
@@ -1441,27 +1451,46 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   "rika.model.provider": selection.provider,
                 }),
               )
-              const registered = yield* client.agents.register({
-                id: agentId,
-                address: addressId,
-                agent: Agent.make({
-                  name: `rika-${encodeURIComponent(input.turnId)}`,
-                  instructions: mainInstructions,
-                  model: selection,
-                  toolkit: toolkitFor(executionToolOptions),
-                  policy: TurnPolicy.forever,
-                  toolExecution: { concurrency: 4 },
-                }),
-                permissions: parentPermissions,
-                ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
-                metadata,
-                ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
-                child_run_presets: childRunPresets,
-              })
+              const auxiliaryTitle = input.sessionPurpose?._tag === "ThreadTitle"
+              const agentName = `rika-${encodeURIComponent(input.turnId)}`
+              const registered = yield* auxiliaryTitle
+                ? client.agents.register({
+                    id: agentId,
+                    address: addressId,
+                    agent: Agent.make({
+                      name: agentName,
+                      instructions: mainInstructions,
+                      model: selection,
+                      toolkit: Toolkit.make(),
+                      policy: TurnPolicy.forever,
+                      toolExecution: { concurrency: 4 },
+                    }),
+                    permissions: [],
+                    ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
+                    metadata,
+                    ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
+                  })
+                : client.agents.register({
+                    id: agentId,
+                    address: addressId,
+                    agent: Agent.make({
+                      name: agentName,
+                      instructions: mainInstructions,
+                      model: selection,
+                      toolkit: toolkitFor(executionToolOptions),
+                      policy: TurnPolicy.forever,
+                      toolExecution: { concurrency: 4 },
+                    }),
+                    permissions: parentPermissions,
+                    ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
+                    metadata,
+                    ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
+                    child_run_presets: childRunPresets,
+                  })
               const start = client.executions
                 .startByAgentDefinition({
                   root_address_id: addressId,
-                  session_id: sessionId(input.threadId),
+                  session_id: startSessionId(input),
                   agent_id: agentId,
                   agent_revision: registered.record.current_revision,
                   input: executionInput(input),
@@ -1497,9 +1526,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   ),
                 ),
               )
-              return yield* followExecution(client, input.turnId, undefined, input.onEvent).pipe(
-                Effect.ensuring(Fiber.interrupt(starter)),
-              )
+              return yield* followExecution(
+                client,
+                input.turnId,
+                undefined,
+                input.onEvent,
+                true,
+                undefined,
+                input.eventScope,
+              ).pipe(Effect.ensuring(Fiber.interrupt(starter)))
             }).pipe(
               Effect.tapCause((cause) =>
                 Effect.logError("execution.start.failed").pipe(
@@ -1517,8 +1552,8 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           (effect) => traceWithoutResult("ExecutionBackend.start", effect),
         ),
         follow: Effect.fn(
-          function* (turnId, afterCursor, onEvent, reference) {
-            return yield* followExecution(client, turnId, afterCursor, onEvent, true, reference).pipe(
+          function* (turnId, afterCursor, onEvent, reference, eventScope) {
+            return yield* followExecution(client, turnId, afterCursor, onEvent, true, reference, eventScope).pipe(
               Effect.mapError(error),
             )
           },
@@ -1601,7 +1636,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           )
         }, Effect.mapError(error)),
         steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, createdAt, reference) {
-          yield* client.executions
+          const accepted = yield* client.executions
             .steer({
               execution_id: executionId(turnId, reference),
               kind: "steering",
@@ -1609,6 +1644,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               created_at: createdAt,
             })
             .pipe(Effect.mapError(error))
+          return { steeringMessageId: String(accepted.steering_message_id), sequence: accepted.sequence }
         }),
         listApprovals: Effect.fn("ExecutionBackend.listApprovals")(function* (turnId, reference) {
           return yield* Effect.gen(function* () {

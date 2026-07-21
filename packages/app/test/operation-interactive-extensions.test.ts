@@ -23,7 +23,7 @@ const baseBackend = ExecutionBackend.Service.of({
   replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
-  steer: () => Effect.void,
+  steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.void,
   resolvePermission: () => Effect.void,
@@ -438,6 +438,7 @@ describe("interactive session extensions", () => {
         const turns = yield* TurnRepository.makeMemory()
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
         const followed = yield* Ref.make<ReadonlyArray<string>>([])
+        const startEventScopes = yield* Ref.make<ReadonlyArray<ExecutionBackend.EventScope | undefined>>([])
         const childCallId = "agent"
         const childId = `child:execution%3Aparent-turn:${childCallId}`
         const nestedCallId = "worker"
@@ -531,10 +532,14 @@ describe("interactive session extensions", () => {
               },
               { cursor: "parent-done", sequence: 3, type: "execution.completed", createdAt: 8 },
             ]
-            return Effect.sync(() => {
-              for (const event of parentEvents) input.onEvent?.(event)
-              return { turnId: input.turnId, status: "completed" as const, events: parentEvents }
-            })
+            return Ref.update(startEventScopes, (values) => [...values, input.eventScope]).pipe(
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  for (const event of parentEvents) input.onEvent?.(event)
+                }),
+              ),
+              Effect.as({ turnId: input.turnId, status: "completed" as const, events: parentEvents }),
+            )
           },
           follow: (executionId, _afterCursor, onEvent) => {
             if (executionId === "parent-turn")
@@ -595,6 +600,7 @@ describe("interactive session extensions", () => {
           yield* Effect.yieldNow
 
         expect(yield* Ref.get(followed)).toEqual([childId, nestedId])
+        expect(yield* Ref.get(startEventScopes)).toEqual(["execution"])
         const patches = events.filter((event) => event._tag === "TranscriptPatched")
         expect(patches.map((event) => [event.turnId, event.event.cursor])).toEqual([
           ["parent-turn", "parent-tool"],
@@ -661,6 +667,107 @@ describe("interactive session extensions", () => {
     ),
   )
 
+  it.effect("resumes a waiting child from its last cursor after permission resolution", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const repository = yield* ThreadRepository.makeMemory()
+        const turns = yield* TurnRepository.makeMemory()
+        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const childId = "child:execution%3Aparent-turn:worker"
+        const childFollows = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+        const childFollowCount = yield* Ref.make(0)
+        const backend = ExecutionBackend.Service.of({
+          ...baseBackend,
+          start: (input) =>
+            Effect.sync(() => {
+              input.onEvent?.({
+                cursor: "spawn",
+                sequence: 0,
+                type: "child_run.spawned",
+                createdAt: 1,
+                data: { child_execution_id: childId },
+              })
+              return {
+                turnId: input.turnId,
+                status: "running" as const,
+                events: [],
+              }
+            }),
+          follow: (executionId, afterCursor, onEvent) => {
+            if (executionId === "parent-turn")
+              return Effect.succeed({ turnId: executionId, status: "running" as const, events: [] })
+            const waiting: ExecutionBackend.Event = {
+              cursor: "wait",
+              sequence: 0,
+              type: "permission.ask.requested",
+              createdAt: 2,
+              data: { wait_id: "wait-child", tool_call_id: "read", tool_name: "read" },
+            }
+            const completed: ReadonlyArray<ExecutionBackend.Event> = [
+              { cursor: "answer", sequence: 1, type: "model.output.delta", createdAt: 3, text: "resumed" },
+              { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 4 },
+            ]
+            return Ref.update(childFollows, (cursors) => [...cursors, afterCursor]).pipe(
+              Effect.andThen(Ref.getAndUpdate(childFollowCount, (count) => count + 1)),
+              Effect.flatMap((count) => {
+                const events = count === 0 ? [waiting] : completed
+                return Effect.sync(() => events.forEach((event) => onEvent?.(event))).pipe(
+                  Effect.as({
+                    turnId: executionId,
+                    status: count === 0 ? ("waiting" as const) : ("completed" as const),
+                    events,
+                  }),
+                )
+              }),
+            )
+          },
+          resolvePermission: () => Effect.void,
+          inspect: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "running" as const,
+              waits: [],
+              pendingTools: [],
+              children: executionId === "parent-turn" ? [{ executionId: childId, status: "running" as const }] : [],
+            }),
+        })
+        const layer = interactiveLayer(
+          repository,
+          turns,
+          backend,
+          registration,
+          Effect.succeed(Thread.ThreadId.make("thread")),
+          Effect.succeed(Turn.TurnId.make("parent-turn")),
+        )
+        const context = yield* Layer.build(layer)
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+        )
+        const session = yield* Deferred.await(registration)
+        const events: Array<Operation.InteractiveEvent> = []
+        const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
+        yield* Effect.yieldNow
+
+        yield* session.submit("delegate")
+        while (!events.some((event) => event._tag === "TranscriptPatched" && event.event.cursor === "wait"))
+          yield* Effect.yieldNow
+        yield* session.resolvePermission("wait-child", "permission", "allow")
+        while (!events.some((event) => event._tag === "TranscriptPatched" && event.event.cursor === "done"))
+          yield* Effect.yieldNow
+
+        expect(yield* Ref.get(childFollows)).toEqual([undefined, "wait"])
+        const childCursors = events.flatMap((event) =>
+          event._tag === "TranscriptPatched" && event.turnId === childId ? [event.event.cursor] : [],
+        )
+        expect(childCursors).toEqual(["wait", "answer", "done"])
+
+        yield* Fiber.interrupt(feed)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
+  )
+
   it.effect("interrupts child followers on cancel, selection change, and session close", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -669,7 +776,7 @@ describe("interactive session extensions", () => {
         const repository = yield* ThreadRepository.makeMemory([first, second])
         const turns = yield* TurnRepository.makeMemory()
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
-        const followed = yield* Queue.unbounded<string>()
+        const followed = yield* Queue.unbounded<{ readonly executionId: string; readonly afterCursor?: string }>()
         const stopped = yield* Queue.unbounded<string>()
         const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
         const turnSequence = yield* Ref.make(0)
@@ -692,27 +799,68 @@ describe("interactive session extensions", () => {
               }
             })
           },
-          follow: (executionId) =>
+          follow: (executionId, afterCursor, onEvent) =>
             executionId.includes(":child:")
-              ? Queue.offer(followed, executionId).pipe(
+              ? Queue.offer(followed, { executionId, ...(afterCursor === undefined ? {} : { afterCursor }) }).pipe(
+                  Effect.tap(() =>
+                    afterCursor === undefined
+                      ? Effect.sync(() =>
+                          onEvent?.({
+                            cursor: `${executionId}:cursor`,
+                            sequence: 0,
+                            type: "model.output.delta",
+                            createdAt: 2,
+                            text: "working",
+                          }),
+                        )
+                      : Effect.void,
+                  ),
                   Effect.andThen(Effect.never),
                   Effect.ensuring(Queue.offer(stopped, executionId)),
                 )
               : Effect.succeed({ turnId: executionId, status: "running" as const, events: [] }),
           inspect: (turnId) =>
-            Effect.succeed({
-              turnId,
-              status: "running" as const,
-              waits: [],
-              pendingTools: [],
-              children: turnId.includes(":child:")
-                ? []
-                : [{ executionId: `${turnId}:child:worker`, status: "running" as const }],
-            }),
-          cancel: (turnId) =>
-            Ref.update(cancelled, (values) => [...values, turnId]).pipe(
-              Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+            Ref.get(cancelled).pipe(
+              Effect.map((values) => {
+                const childId = `${turnId}:child:worker`
+                return {
+                  turnId,
+                  status: values.includes(turnId) ? ("cancelled" as const) : ("running" as const),
+                  waits: [],
+                  pendingTools: [],
+                  children: turnId.includes(":child:")
+                    ? []
+                    : [
+                        {
+                          executionId: childId,
+                          status: values.includes(childId) ? ("cancelled" as const) : ("running" as const),
+                        },
+                      ],
+                }
+              }),
             ),
+          cancel: (turnId) => {
+            const events: ReadonlyArray<ExecutionBackend.Event> = turnId.includes(":child:")
+              ? [
+                  {
+                    cursor: `${turnId}:cursor`,
+                    sequence: 0,
+                    type: "model.output.delta",
+                    createdAt: 2,
+                    text: "working",
+                  },
+                  {
+                    cursor: `${turnId}:cancelled`,
+                    sequence: 1,
+                    type: "execution.cancelled",
+                    createdAt: 3,
+                  },
+                ]
+              : []
+            return Ref.update(cancelled, (values) => [...values, turnId]).pipe(
+              Effect.as({ turnId, status: "cancelled" as const, events }),
+            )
+          },
         })
         const layer = interactiveLayer(
           repository,
@@ -730,22 +878,41 @@ describe("interactive session extensions", () => {
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
         )
         const session = yield* Deferred.await(registration)
-        const feed = yield* Effect.forkChild(session.events(() => undefined))
+        const events: Array<Operation.InteractiveEvent> = []
+        const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
         yield* session.selectThread(first.id, 1)
 
         yield* session.submit("cancelled")
-        expect(yield* Queue.take(followed)).toBe("turn-1:child:worker")
+        expect(yield* Queue.take(followed)).toEqual({ executionId: "turn-1:child:worker" })
         yield* session.cancel
         expect(yield* Queue.take(stopped)).toBe("turn-1:child:worker")
         expect(new Set(yield* Ref.get(cancelled))).toEqual(new Set(["turn-1:child:worker", "turn-1"]))
+        while (
+          !events.some(
+            (event) => event._tag === "TranscriptPatched" && event.event.cursor === "turn-1:child:worker:cancelled",
+          )
+        )
+          yield* Effect.yieldNow
+        expect(
+          events.flatMap((event) =>
+            event._tag === "TranscriptPatched" && event.turnId === "turn-1:child:worker" ? [event.event.cursor] : [],
+          ),
+        ).toEqual(["turn-1:child:worker:cursor", "turn-1:child:worker:cancelled"])
 
         yield* session.submit("selected away")
-        expect(yield* Queue.take(followed)).toBe("turn-2:child:worker")
+        expect(yield* Queue.take(followed)).toEqual({ executionId: "turn-2:child:worker" })
         yield* session.selectThread(second.id, 2)
+        expect(yield* Queue.take(stopped)).toBe("turn-2:child:worker")
+        yield* session.selectThread(first.id, 3)
+        expect(yield* Queue.take(followed)).toEqual({
+          executionId: "turn-2:child:worker",
+          afterCursor: "turn-2:child:worker:cursor",
+        })
+        yield* session.selectThread(second.id, 4)
         expect(yield* Queue.take(stopped)).toBe("turn-2:child:worker")
 
         yield* session.submit("closed")
-        expect(yield* Queue.take(followed)).toBe("turn-3:child:worker")
+        expect(yield* Queue.take(followed)).toEqual({ executionId: "turn-3:child:worker" })
         yield* Fiber.interrupt(operationFiber)
         expect(yield* Queue.take(stopped)).toBe("turn-3:child:worker")
         yield* Fiber.interrupt(feed)

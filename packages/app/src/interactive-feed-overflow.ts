@@ -55,6 +55,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "QueueUpdated":
     case "QueueResyncRequired":
     case "TurnStarted":
+    case "SubmissionAdmitted":
     case "SelectionLoaded":
     case "TranscriptPagePrepended":
     case "ThreadActivated":

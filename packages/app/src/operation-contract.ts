@@ -365,6 +365,15 @@ export type InteractiveEvent =
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
       readonly turn: Turn.Turn
+      readonly submissionId?: string
+    }
+  | {
+      readonly _tag: "SubmissionAdmitted"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly turnId: Turn.TurnId
+      readonly status: "active" | "queued"
+      readonly submissionId?: string
     }
   | {
       readonly _tag: "SelectionLoaded"
@@ -400,6 +409,9 @@ export type InteractiveEvent =
       readonly threadId?: Thread.ThreadId
       readonly turnId?: Turn.TurnId
       readonly action: "steered" | "cancelled" | "permission-resolved"
+      readonly agentResponseArrived?: boolean
+      readonly steeringSequence?: number
+      readonly steeringText?: string
     }
   | { readonly _tag: "ThreadTitled"; readonly threadId: string; readonly title: string }
   | { readonly _tag: "ThreadActivated"; readonly threadId: string; readonly title: string }
@@ -506,6 +518,15 @@ export const InteractiveEventSchema = Schema.Union([
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
     turn: Turn.Turn,
+    submissionId: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("SubmissionAdmitted"),
+    selectionEpoch: Schema.Int,
+    threadId: Thread.ThreadId,
+    turnId: Turn.TurnId,
+    status: Schema.Literals(["active", "queued"]),
+    submissionId: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({
     _tag: Schema.tag("SelectionLoaded"),
@@ -552,6 +573,9 @@ export const InteractiveEventSchema = Schema.Union([
     threadId: Schema.optionalKey(Thread.ThreadId),
     turnId: Schema.optionalKey(Turn.TurnId),
     action: Schema.Literals(["steered", "cancelled", "permission-resolved"]),
+    agentResponseArrived: Schema.optionalKey(Schema.Boolean),
+    steeringSequence: Schema.optionalKey(Schema.Int),
+    steeringText: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadTitled"), threadId: Schema.String, title: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("ThreadActivated"), threadId: Schema.String, title: Schema.String }),
@@ -566,6 +590,7 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("Submit"),
     prompt: Schema.String,
+    submissionId: Schema.optionalKey(Schema.String),
     mode: Schema.optionalKey(Mode),
     promptParts: Schema.optionalKey(Schema.Array(Turn.PromptPart)),
     modelTuning: Schema.optionalKey(
@@ -578,7 +603,7 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("EditQueued"), turnId: Schema.String, prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Dequeue"), turnId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("SteerQueued"), turnId: Schema.String, text: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("Steer"), text: Schema.String }),
+  Schema.Struct({ _tag: Schema.tag("Steer"), text: Schema.String, turnId: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
   Schema.Struct({ _tag: Schema.tag("NewThread") }),
@@ -612,12 +637,13 @@ export interface InteractiveSession {
     mode?: "low" | "medium" | "high" | "ultra",
     promptParts?: ReadonlyArray<Turn.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
+    submissionId?: string,
   ) => Effect.Effect<void, OperationUnavailable>
   readonly shell: (command: string, incognito: boolean) => Effect.Effect<void, OperationUnavailable>
   readonly editQueued: (turnId: string, prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly dequeue: (turnId: string) => Effect.Effect<void, OperationUnavailable>
   readonly steerQueued: (turnId: string, text: string) => Effect.Effect<void, OperationUnavailable>
-  readonly steer: (text: string) => Effect.Effect<void, OperationUnavailable>
+  readonly steer: (text: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
   readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly cancel: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
@@ -637,7 +663,13 @@ export interface InteractiveSession {
 const executeInteractiveCommandImpl = (session: InteractiveSession, command: InteractiveCommand) => {
   switch (command._tag) {
     case "Submit":
-      return session.submit(command.prompt, command.mode, command.promptParts, command.modelTuning)
+      return session.submit(
+        command.prompt,
+        command.mode,
+        command.promptParts,
+        command.modelTuning,
+        command.submissionId,
+      )
     case "Shell":
       return session.shell(command.command, command.incognito)
     case "EditQueued":
@@ -647,7 +679,7 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "SteerQueued":
       return session.steerQueued(command.turnId, command.text)
     case "Steer":
-      return session.steer(command.text)
+      return session.steer(command.text, command.turnId)
     case "InterruptAndSend":
       return session.interruptAndSend(command.prompt)
     case "Cancel":

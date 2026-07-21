@@ -1,7 +1,7 @@
 import * as Transcript from "@rika/transcript"
 import { describe, expect, it } from "vitest"
 import { ExecutionEvents, TranscriptPresenter, ViewState } from "../src"
-import { agentTerminal, unitId as transcriptUnitId, rows as transcriptUnits } from "../src/transcript-presenter"
+import { agentResponseState, unitId as transcriptUnitId, rows as transcriptUnits } from "../src/transcript-presenter"
 
 const event = (
   cursor: string,
@@ -354,9 +354,9 @@ const agentScenario = (opts: {
   return { model, tool, children }
 }
 
-const terminalOf = (opts: Parameters<typeof agentScenario>[0]) => {
+const responseStateOf = (opts: Parameters<typeof agentScenario>[0]) => {
   const { model, tool, children } = agentScenario(opts)
-  return agentTerminal(model, tool, children)
+  return agentResponseState(model, tool, children)
 }
 
 const childContent = ["answer", "error", "both", "neither"] as const
@@ -370,83 +370,107 @@ const optsFor = (
   ...(content === "error" || content === "both" ? { errorDetail: "explosion in the reactor" } : {}),
 })
 
-describe("agentTerminal", () => {
+describe("agentResponseState", () => {
   const settled = ["complete", "failed", "cancelled"] as const
 
-  for (const content of childContent)
-    it(`gives a running row no terminal (${content})`, () => {
-      expect(terminalOf(optsFor("running", content))).toBeUndefined()
+  it("exposes a growing answer while the agent remains running", () => {
+    expect(responseStateOf({ status: "running", answer: "hel" })).toEqual({ _tag: "Streaming", answer: 0 })
+    expect(responseStateOf({ status: "running", answer: "hello" })).toEqual({ _tag: "Streaming", answer: 0 })
+  })
+
+  for (const content of ["error", "neither"] as const)
+    it(`gives a running row without an answer no response state (${content})`, () => {
+      expect(responseStateOf(optsFor("running", content))).toBeUndefined()
     })
 
   for (const status of settled)
     for (const content of childContent)
-      it(`gives a settled ${status} row exactly one non-empty terminal (${content})`, () => {
-        const terminal = terminalOf(optsFor(status, content))
-        expect(terminal).toBeDefined()
-        if (terminal?.kind === "error") expect(terminal.text.trim().length).toBeGreaterThan(0)
-        else expect(terminal?.kind).toBe("answer")
+      it(`gives a settled ${status} row exactly one non-empty outcome (${content})`, () => {
+        const state = responseStateOf(optsFor(status, content))
+        expect(state?._tag).toBe("Settled")
+        if (state?._tag !== "Settled") return
+        if (state.outcome.kind === "error") expect(state.outcome.text.trim().length).toBeGreaterThan(0)
+        else expect(state.outcome.kind).toBe("answer")
       })
 
   it("keeps a completed answer and ignores a stray error child when an answer exists", () => {
-    expect(terminalOf({ status: "complete", answer: "All done.", errorDetail: "ignored" })).toEqual({
-      kind: "answer",
-      entry: 0,
+    expect(responseStateOf({ status: "complete", answer: "All done.", errorDetail: "ignored" })).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "answer", entry: 0 },
     })
-    expect(terminalOf({ status: "complete", answer: "All done." })).toEqual({ kind: "answer", entry: 0 })
+    expect(responseStateOf({ status: "complete", answer: "All done." })).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "answer", entry: 0 },
+    })
   })
 
   it("always fails a failed row even when a non-empty answer exists", () => {
-    const terminal = terminalOf({ status: "failed", answer: "partial work", errorDetail: "boom" })
-    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "boom" })
+    const state = responseStateOf({ status: "failed", answer: "partial work", errorDetail: "boom" })
+    expect(state).toEqual({ _tag: "Settled", outcome: { kind: "error", tone: "failed", text: "boom" } })
   })
 
   it("prefers an Error child's detail over the copied tool output on a failed row", () => {
-    const terminal = terminalOf({ status: "failed", errorDetail: "disk is full", output: "stale copied output" })
-    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "disk is full" })
+    const state = responseStateOf({ status: "failed", errorDetail: "disk is full", output: "stale copied output" })
+    expect(state).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "error", tone: "failed", text: "disk is full" },
+    })
   })
 
   it("falls back to the remembered execution reason when no Error child exists", () => {
-    const terminal = terminalOf({ status: "failed", outcomeReason: "network exploded", output: "raw" })
-    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "network exploded" })
+    const state = responseStateOf({ status: "failed", outcomeReason: "network exploded", output: "raw" })
+    expect(state).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "error", tone: "failed", text: "network exploded" },
+    })
   })
 
   it("extracts text from a JSON-object output instead of showing raw JSON or blank", () => {
     const output = JSON.stringify({ output: [{ text: "the child reported this failure" }] })
-    const terminal = terminalOf({ status: "failed", output })
-    expect(terminal).toEqual({ kind: "error", tone: "failed", text: "the child reported this failure" })
+    const state = responseStateOf({ status: "failed", output })
+    expect(state).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "error", tone: "failed", text: "the child reported this failure" },
+    })
   })
 
   it("uses a non-blank default when the only failure data is an opaque JSON object", () => {
-    const terminal = terminalOf({ status: "failed", output: JSON.stringify({ code: 42 }) })
-    expect(terminal?.kind).toBe("error")
-    if (terminal?.kind === "error") {
-      expect(terminal.text.trim().length).toBeGreaterThan(0)
-      expect(terminal.text).not.toContain("{")
+    const state = responseStateOf({ status: "failed", output: JSON.stringify({ code: 42 }) })
+    expect(state?._tag).toBe("Settled")
+    if (state?._tag === "Settled" && state.outcome.kind === "error") {
+      expect(state.outcome.text.trim().length).toBeGreaterThan(0)
+      expect(state.outcome.text).not.toContain("{")
     }
   })
 
   it("marks a completed row with only empty assistant text as a non-blank info terminal", () => {
-    const terminal = terminalOf({ status: "complete", answer: "   " })
-    expect(terminal?.kind).toBe("error")
-    if (terminal?.kind === "error") {
-      expect(terminal.tone).toBe("info")
-      expect(terminal.text.trim().length).toBeGreaterThan(0)
+    const state = responseStateOf({ status: "complete", answer: "   " })
+    expect(state?._tag).toBe("Settled")
+    if (state?._tag === "Settled" && state.outcome.kind === "error") {
+      expect(state.outcome.tone).toBe("info")
+      expect(state.outcome.text.trim().length).toBeGreaterThan(0)
     }
   })
 
   it("cancels with the cancellation reason when no answer survives", () => {
-    const withReason = terminalOf({ status: "cancelled", outcomeReason: "user stopped the run" })
-    expect(withReason).toEqual({ kind: "error", tone: "cancelled", text: "user stopped the run" })
-    const bare = terminalOf({ status: "cancelled" })
-    expect(bare?.kind).toBe("error")
-    if (bare?.kind === "error") {
-      expect(bare.tone).toBe("cancelled")
-      expect(bare.text.trim().length).toBeGreaterThan(0)
+    const withReason = responseStateOf({ status: "cancelled", outcomeReason: "user stopped the run" })
+    expect(withReason).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "error", tone: "cancelled", text: "user stopped the run" },
+    })
+    const bare = responseStateOf({ status: "cancelled" })
+    expect(bare?._tag).toBe("Settled")
+    if (bare?._tag === "Settled" && bare.outcome.kind === "error") {
+      expect(bare.outcome.tone).toBe("cancelled")
+      expect(bare.outcome.text.trim().length).toBeGreaterThan(0)
     }
   })
 
   it("keeps a cancelled row's answer when a non-empty one exists", () => {
-    expect(terminalOf({ status: "cancelled", answer: "got this far" })).toEqual({ kind: "answer", entry: 0 })
+    expect(responseStateOf({ status: "cancelled", answer: "got this far" })).toEqual({
+      _tag: "Settled",
+      outcome: { kind: "answer", entry: 0 },
+    })
   })
 })
 
@@ -480,7 +504,7 @@ describe("nested subagent rows", () => {
     if (parentUnit?.kind !== "tool") throw new Error("expected tool unit")
     expect(parentUnit.children).toHaveLength(1)
     expect(parentUnit.children?.[0]?.blocks).toEqual([1])
-    expect(parentUnit.terminal).toEqual({ kind: "answer", entry: 0 })
+    expect(parentUnit.agentResponse).toEqual({ _tag: "Settled", outcome: { kind: "answer", entry: 0 } })
   })
 })
 

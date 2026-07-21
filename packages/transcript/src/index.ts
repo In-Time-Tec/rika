@@ -860,6 +860,22 @@ const advanceModelPhase = (projection: Projection, turnId: string): Projection =
   return hasOutput ? { ...projection, modelPhase: phase + 1 } : projection
 }
 
+const hasResponseEvidence = (projection: Projection, turnId: string): boolean =>
+  projection.units.some((candidate) => {
+    if (candidate.turnId !== turnId || candidate.content._tag !== "Block") return false
+    const block = candidate.content.block
+    return (
+      block._tag === "Reasoning" ||
+      block._tag === "ToolCall" ||
+      block._tag === "Permission" ||
+      block._tag === "ChildAgent"
+    )
+  }) ||
+  projection.units.some(
+    (candidate) =>
+      candidate.turnId === turnId && candidate.content._tag === "Entry" && candidate.content.role === "assistant",
+  )
+
 const hasUsableFinalResponse = (projection: Projection, turnId: string) => {
   const latestToolRevision = projection.units.reduce(
     (latest, candidate) =>
@@ -869,6 +885,21 @@ const hasUsableFinalResponse = (projection: Projection, turnId: string) => {
     -1,
   )
   return projection.usableCompletionSequence !== undefined && projection.usableCompletionSequence > latestToolRevision
+}
+
+const applySteeringDelivered = (projection: Projection, turnId: string, event: SourceEvent): Projection => {
+  const payload = sourcePayload(event)
+  const count = typeof payload.message_count === "number" ? payload.message_count : 0
+  const text = event.text ?? ""
+  if (count === 0 || text.length === 0) return projection
+  return upsertUnit(
+    projection,
+    unit(`steering:${turnId}:${event.sequence}`, turnId, event.sequence, 0, event.sequence, {
+      _tag: "Entry",
+      role: "user",
+      text,
+    }),
+  )
 }
 
 const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEvent): Projection => {
@@ -886,6 +917,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "tool.call.requested")
     return advanceModelPhase(applyToolRequested(projection, turnId, event), turnId)
   if (event.type === "tool.result.received") return applyToolResult(projection, turnId, event)
+  if (event.type === "steering.delivered") return applySteeringDelivered(projection, turnId, event)
   if (event.type === "model.usage.reported") return applyUsage(projection, event)
   if (event.type === "execution.completed")
     return applyExecutionOutcome(projection, turnId, event.sequence, { status: "complete" })
@@ -910,13 +942,16 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "execution.cancelled") {
     const payload = sourcePayload(event)
     const reason = event.text ?? string(payload.reason, string(payload.message))
-    return upsertUnit(settleRunningImpl(projection, "cancelled", event.sequence), {
+    const settled = settleRunningImpl(projection, "cancelled", event.sequence)
+    const outcome = { status: "cancelled" as const, ...(reason.length > 0 ? { reason } : {}) }
+    if (!hasResponseEvidence(projection, turnId)) return applyExecutionOutcome(settled, turnId, event.sequence, outcome)
+    return upsertUnit(settled, {
       ...unit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
         _tag: "Entry",
         role: "notice",
         text: reason.length > 0 ? reason : "cancelled",
       }),
-      executionOutcome: { status: "cancelled", ...(reason.length > 0 ? { reason } : {}) },
+      executionOutcome: outcome,
     })
   }
   if (event.type.startsWith("child_run.") || event.type.startsWith("child_fan_out.member."))

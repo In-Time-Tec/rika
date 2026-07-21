@@ -167,7 +167,10 @@ const reduceWheelSettleFired = (
   return { viewport: settled, effects: [{ _tag: "ReportSettled" }] }
 }
 
-export const reduceViewport = (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision => {
+export const reduceViewport: {
+  (event: ViewportEvent): (viewport: TranscriptViewport) => ViewportDecision
+  (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision
+} = Function.dual(2, (viewport: TranscriptViewport, event: ViewportEvent): ViewportDecision => {
   switch (event._tag) {
     case "WheelObserved":
       return reduceWheelObserved(viewport, event)
@@ -192,11 +195,13 @@ export const reduceViewport = (viewport: TranscriptViewport, event: ViewportEven
         ? { viewport, effects: [] }
         : { viewport: { ...viewport, mode: following }, effects: [{ _tag: "NotifyFollowed" }] }
     case "ModelSynced": {
-      const mode = !event.scrollFollow ? detachedMode(viewport.mode) : event.followForced ? following : viewport.mode
+      let mode = viewport.mode
+      if (!event.scrollFollow) mode = detachedMode(viewport.mode)
+      else if (event.followForced) mode = following
       return mode === viewport.mode ? { viewport, effects: [] } : { viewport: { ...viewport, mode }, effects: [] }
     }
   }
-}
+})
 
 export const reanchor: {
   (anchor: ViewportAnchor | undefined): (state: ViewportState) => ViewportState

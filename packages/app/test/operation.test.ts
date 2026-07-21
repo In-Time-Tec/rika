@@ -8,7 +8,7 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { Catalog as ToolCatalog } from "@rika/tools"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
 import { Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
-import { TestConsole } from "effect/testing"
+import { TestClock, TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
 import { Operation, ResolvedContext } from "../src/index"
 import { createTurn, executionRoute } from "./current-state"
@@ -85,11 +85,21 @@ const backend = ExecutionBackend.Service.of({
   replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
   cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
   inspect: () => Effect.void.pipe(Effect.as(undefined)),
-  steer: () => Effect.void,
+  steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.void,
   resolvePermission: () => Effect.void,
 })
+
+const inspectFromTurns =
+  (turns: TurnRepository.Interface) =>
+  (turnId: string): Effect.Effect<ExecutionBackend.Inspection | undefined, ExecutionBackend.BackendError> =>
+    turns.get(Turn.TurnId.make(turnId)).pipe(
+      Effect.map((turn) =>
+        turn === undefined ? undefined : { turnId, status: turn.status, waits: [], pendingTools: [], children: [] },
+      ),
+      Effect.orElseSucceed(() => undefined),
+    )
 
 const selectionThread = (id: string): Thread.Thread => ({
   id: Thread.ThreadId.make(id),
@@ -2143,15 +2153,7 @@ describe("Operation", () => {
         runSync(Ref.update(events, (current) => [...current, event]))
       const controlBackend = ExecutionBackend.Service.of({
         ...backend,
-        inspect: (turnId) =>
-          Effect.succeed({
-            turnId,
-            status: "running",
-            lastCursor: "inspected",
-            waits: [],
-            pendingTools: [],
-            children: [],
-          }),
+        inspect: inspectFromTurns(turns),
         cancel: (turnId) =>
           Effect.succeed({
             turnId,
@@ -2239,10 +2241,7 @@ describe("Operation", () => {
       )
       const preparedBackend = ExecutionBackend.Service.of({
         ...backend,
-        inspect: (turnId) =>
-          Effect.succeed(
-            turnId === activeId ? { turnId, status: "running", waits: [], pendingTools: [], children: [] } : undefined,
-          ),
+        inspect: inspectFromTurns(turns),
         cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
         start: (input) =>
           Effect.gen(function* () {
@@ -2339,10 +2338,7 @@ describe("Operation", () => {
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
       const preparedBackend = ExecutionBackend.Service.of({
         ...backend,
-        inspect: (turnId) =>
-          Effect.succeed(
-            turnId === activeId ? { turnId, status: "running", waits: [], pendingTools: [], children: [] } : undefined,
-          ),
+        inspect: inspectFromTurns(turns),
         cancel: (turnId) => Effect.succeed({ turnId, status: "cancelled", events: [] }),
         start: (input) =>
           Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
@@ -2432,7 +2428,10 @@ describe("Operation", () => {
       const raceBackend = ExecutionBackend.Service.of({
         ...backend,
         inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
-        steer: (_turnId, text) => Ref.update(steers, (values) => [...values, text]),
+        steer: (turnId, text) =>
+          Ref.update(steers, (values) => [...values, text]).pipe(
+            Effect.as({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
+          ),
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       yield* Effect.gen(function* () {
@@ -2588,8 +2587,7 @@ describe("Operation", () => {
             turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
             backendLayer: Layer.succeed(ExecutionBackend.Service, {
               ...backend,
-              inspect: (turnId) =>
-                Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
+              inspect: inspectFromTurns(turns),
             }),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
@@ -2601,6 +2599,156 @@ describe("Operation", () => {
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({ status: "cancelled" })
       expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "completed" })
       expect((yield* Ref.get(events)).map((event) => event._tag)).toContain("QueueUpdated")
+    }),
+  )
+
+  it.effect("holds a replacement queued until the cancelled execution tree quiesces", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("quiescence-thread")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: Turn.TurnId.make("active"),
+          threadId: thread.id,
+          prompt: "active",
+          executionRoute: executionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      const childLive = yield* Ref.make(true)
+      const starts = yield* Ref.make<ReadonlyArray<string>>([])
+      const cancelledExecutions = yield* Ref.make<ReadonlyArray<string>>([])
+      const childId = "child:active:worker"
+      const gateBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId, reference) =>
+          Effect.gen(function* () {
+            const live = yield* Ref.get(childLive)
+            const childStatus = live ? ("running" as const) : ("cancelled" as const)
+            if (reference !== undefined)
+              return { turnId, status: childStatus, waits: [], pendingTools: [], children: [] }
+            const turn = yield* turns.get(Turn.TurnId.make(turnId)).pipe(Effect.orDie)
+            if (turn === undefined) return undefined
+            return {
+              turnId,
+              status: turn.status,
+              waits: [],
+              pendingTools: [],
+              children: turnId === "active" ? [{ executionId: childId, status: childStatus }] : [],
+            }
+          }),
+        cancel: (turnId) =>
+          Ref.update(cancelledExecutions, (all) => [...all, turnId]).pipe(
+            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+          ),
+        start: (input) =>
+          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
+      })
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* session.reopenThread(1)
+        const interrupted = yield* Effect.forkChild(session.interruptAndSend("replacement prompt"))
+        for (let index = 0; index < 40; index += 1) yield* Effect.yieldNow
+        expect(yield* Ref.get(starts)).toEqual([])
+        expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({ status: "cancelled" })
+        expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "queued" })
+        expect(yield* Ref.get(cancelledExecutions)).toContain(childId)
+        yield* Ref.set(childLive, false)
+        yield* TestClock.adjust("250 millis")
+        yield* Fiber.join(interrupted)
+      }).pipe(
+        provideLayer(
+          Operation.productLayer({
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionBackend.Service, gateBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.succeed(Turn.TurnId.make("replacement")),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      expect(yield* Ref.get(starts)).toEqual(["replacement"])
+      expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "completed" })
+    }),
+  )
+
+  it.effect("requeues a direct submission while a cancelled predecessor is still releasing", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("blocked-submit-thread")
+      const turns = yield* TurnRepository.makeMemory([
+        {
+          id: Turn.TurnId.make("stale"),
+          threadId: thread.id,
+          prompt: "stale",
+          executionRoute: executionRoute(),
+          status: "cancelled",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ])
+      const starts = yield* Ref.make<ReadonlyArray<string>>([])
+      const cancelledExecutions = yield* Ref.make<ReadonlyArray<string>>([])
+      const childId = "child:stale:worker"
+      const gateBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId, reference) =>
+          Effect.gen(function* () {
+            if (reference !== undefined)
+              return { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] }
+            const turn = yield* turns.get(Turn.TurnId.make(turnId)).pipe(Effect.orDie)
+            if (turn === undefined) return undefined
+            return {
+              turnId,
+              status: turn.status,
+              waits: [],
+              pendingTools: [],
+              children: turnId === "stale" ? [{ executionId: childId, status: "running" as const }] : [],
+            }
+          }),
+        cancel: (turnId) =>
+          Ref.update(cancelledExecutions, (all) => [...all, turnId]).pipe(
+            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+          ),
+        start: (input) =>
+          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(Effect.andThen(backend.start(input))),
+      })
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        yield* session.reopenThread(1)
+        const submitted = yield* Effect.forkChild(session.submit("fresh"))
+        for (let index = 0; index < 40; index += 1) yield* Effect.yieldNow
+        expect(yield* Ref.get(starts)).toEqual([])
+        expect(yield* Ref.get(cancelledExecutions)).toContain(childId)
+        yield* TestClock.adjust("30 seconds")
+        yield* Fiber.join(submitted)
+      }).pipe(
+        provideLayer(
+          Operation.productLayer({
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionBackend.Service, gateBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.succeed(Turn.TurnId.make("fresh")),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      expect(yield* Ref.get(starts)).toEqual([])
+      expect(yield* turns.get(Turn.TurnId.make("fresh"))).toMatchObject({ status: "queued" })
     }),
   )
 
@@ -2702,7 +2850,7 @@ describe("Operation", () => {
       const observerClaimed = yield* Deferred.make<void>()
       const collisionBackend = ExecutionBackend.Service.of({
         ...backend,
-        inspect: (turnId) => Effect.succeed({ turnId, status: "running", waits: [], pendingTools: [], children: [] }),
+        inspect: inspectFromTurns(collisionTurns),
         follow: (turnId) =>
           (turnId === queued.id ? Deferred.succeed(observerClaimed, undefined) : Effect.void).pipe(
             Effect.andThen(Effect.never),
@@ -2743,14 +2891,19 @@ describe("Operation", () => {
       const events = yield* Ref.make<ReadonlyArray<Operation.InteractiveEvent>>([])
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+      const startInputs = yield* Ref.make<ReadonlyArray<ExecutionBackend.StartInput>>([])
       const liveBackend = ExecutionBackend.Service.of({
         ...backend,
         start: (input) =>
-          backend.start(input).pipe(
-            Effect.tap((result) =>
-              Effect.sync(() => {
-                for (const event of result.events) input.onEvent?.(event)
-              }),
+          Ref.update(startInputs, (all) => [...all, input]).pipe(
+            Effect.andThen(
+              backend.start(input).pipe(
+                Effect.tap((result) =>
+                  Effect.sync(() => {
+                    for (const event of result.events) input.onEvent?.(event)
+                  }),
+                ),
+              ),
             ),
           ),
       })
@@ -2773,13 +2926,20 @@ describe("Operation", () => {
         yield* Effect.yieldNow
         yield* session.submit("exact prompt")
         while ((yield* turns.get(Turn.TurnId.make("turn-interactive")))?.status !== "completed") yield* Effect.yieldNow
-        while ((yield* Ref.get(events)).filter((event) => event._tag !== "ThreadsListed").length < 4)
+        while ((yield* Ref.get(events)).filter((event) => event._tag !== "ThreadsListed").length < 5)
           yield* Effect.yieldNow
       }).pipe(provideLayer(layer))
       const dispatched = yield* Ref.get(events)
       const transcript = dispatched.filter((event) => event._tag !== "ThreadsListed")
-      expect(transcript.slice(0, 4)).toEqual([
+      expect(transcript.slice(0, 5)).toEqual([
         { _tag: "ThreadActivated", threadId: "thread-interactive", title: "exact prompt" },
+        {
+          _tag: "SubmissionAdmitted",
+          selectionEpoch: 0,
+          threadId: "thread-interactive",
+          turnId: "turn-interactive",
+          status: "active",
+        },
         {
           _tag: "TurnStarted",
           selectionEpoch: 0,
@@ -2808,7 +2968,9 @@ describe("Operation", () => {
           event: { cursor: "cursor-b", sequence: 2, type: "execution.completed", createdAt: 2 },
         },
       ])
-      expect(transcript[4]).toMatchObject({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" })
+      expect(transcript[5]).toMatchObject({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" })
+      const titleStart = (yield* Ref.get(startInputs)).find((input) => input.turnId === "title:turn-interactive")
+      expect(titleStart?.sessionPurpose).toEqual({ _tag: "ThreadTitle", owningTurnId: "turn-interactive" })
       expect(yield* turns.get(Turn.TurnId.make("turn-interactive"))).toMatchObject({
         prompt: "exact prompt",
         status: "completed",

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest"
+import { Theme } from "@rika/tui"
 import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 
@@ -9,6 +10,46 @@ const settled = (app: TuiApp.TuiApp) =>
     yield* app.waitGone("Running tools")
     yield* app.waitGone("Thinking")
   })
+
+const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colors.text): boolean =>
+  app
+    .spans()
+    .lines.flatMap((line) => line.spans)
+    .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color.toInts().join(","))
+
+test(
+  "preserves primary and muted nested tool summary spans through the real app stack",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
+          script: [
+            TuiApp.model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
+            TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
+            TuiApp.model.text("ORACLE_STYLE_RESULT"),
+            TuiApp.model.text("ROOT_STYLE_RESULT"),
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Ask Oracle to inspect the fixture."))
+        app.pressEnter()
+        yield* app.waitFrame("ROOT_STYLE_RESULT")
+        expect(spanHasColor(app, "Oracle", Theme.colors.text), "Oracle primary span").toBe(true)
+        expect(spanHasColor(app, " has spoken", Theme.colors.muted), "Oracle lifecycle span").toBe(true)
+        app.pressKey("\t")
+        yield* app.waitFrame("Oracle has spoken")
+        app.pressEnter()
+        const completed = yield* app.waitFrame("Read nested.txt")
+        expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
+        expect(completed.match(/Read nested\.txt/g) ?? []).toHaveLength(1)
+        expect(spanHasColor(app, "Read", Theme.colors.text), "Read primary span").toBe(true)
+        expect(spanHasColor(app, " nested.txt", Theme.colors.muted), "Read path span").toBe(true)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
 
 test(
   "runs turns, tools, pickers, and surfaces in one real TUI session",
@@ -185,6 +226,32 @@ test(
 )
 
 test(
+  "restores a submitted prompt when cancellation wins before model output",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [TuiApp.model.text("CANCELLED_LATE_RESPONSE", 5_000), TuiApp.model.text("RESTORED_PROMPT_SENT")],
+        })
+
+        yield* Effect.promise(() => app.type("Restore this submitted prompt."))
+        app.pressEnter()
+        yield* app.waitFrame("Restore this submitted prompt.")
+        yield* app.waitFrame("Waiting")
+        app.close()
+        const restored = yield* app.waitFrame("Restore this submitted prompt.")
+        expect(restored).not.toContain("⊘")
+        expect(restored).not.toContain("cancelled")
+        yield* Effect.promise(() => app.type(" again"))
+        app.pressEnter()
+        yield* app.waitFrame("RESTORED_PROMPT_SENT")
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
   "cancels the active turn and promotes the queued turn",
   () =>
     TuiApp.run(
@@ -199,11 +266,11 @@ test(
         yield* Effect.promise(() => app.type("Hold the queue head."))
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
+        yield* app.waitFrame("Waiting")
+        app.pressKey("c", { ctrl: true })
         yield* Effect.promise(() => app.type("Queued follow-up prompt."))
         app.pressEnter()
         yield* app.waitFrame("Queued follow-up prompt.")
-        app.pressKey("c", { ctrl: true })
-        yield* app.waitFrame("\u2298")
         const promoted = yield* app.waitFrame("QUEUED_DONE")
         expect(promoted).not.toContain("LATE_QUEUE_HEAD")
         yield* app.quit
@@ -213,7 +280,7 @@ test(
 )
 
 test(
-  "steers composer text into the active execution without queueing a turn",
+  "steers composer text on Enter with a pending lane and a delivered green entry",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -234,10 +301,12 @@ test(
         yield* app.waitFrame("Waiting")
         yield* Effect.promise(() => app.type("Focus on the exact fixture text."))
         yield* app.waitFrame("Focus on the exact fixture text.")
-        app.pressKey("s", { ctrl: true })
-        yield* app.waitGone("Focus on the exact fixture text.")
+        app.pressEnter()
+        yield* app.waitFrame("steering: Focus on the exact fixture text.")
         const steered = yield* app.waitFrame("ACTIVE_STEER_COMPLETE")
         expect(steered).not.toContain("Execution failed")
+        expect(steered).not.toContain("steering: Focus on the exact fixture text.")
+        expect(steered).toContain("Focus on the exact fixture text.")
         yield* app.quit
       }),
     ),

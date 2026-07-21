@@ -6,9 +6,13 @@ export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
 
 export type ToolKind = "read" | "search" | "edit" | "shell" | "other"
 
-export type AgentTerminal =
+export type AgentOutcome =
   | { readonly kind: "answer"; readonly entry: number }
   | { readonly kind: "error"; readonly text: string; readonly tone: "failed" | "cancelled" | "info" }
+
+export type AgentResponseState =
+  | { readonly _tag: "Streaming"; readonly answer: number }
+  | { readonly _tag: "Settled"; readonly outcome: AgentOutcome }
 
 export type ToolTranscriptUnit = {
   readonly kind: "tool"
@@ -16,7 +20,7 @@ export type ToolTranscriptUnit = {
   readonly blocks: ReadonlyArray<number>
   readonly diffs: ReadonlyArray<number>
   readonly children?: ReadonlyArray<ToolTranscriptUnit>
-  readonly terminal?: AgentTerminal
+  readonly agentResponse?: AgentResponseState
 }
 
 export type TranscriptUnit =
@@ -262,36 +266,45 @@ const settledText = (
   (isToolOutputDisplayed(block) ? agentOutputText(block.output) : undefined) ??
   fallback
 
-export const agentTerminal: {
+export const agentResponseState: {
   (
     model: Model,
     block: Extract<TranscriptBlock, { _tag: "ToolCall" }>,
     children: ReadonlyArray<TranscriptItem>,
-  ): AgentTerminal | undefined
+  ): AgentResponseState | undefined
   (
     block: Extract<TranscriptBlock, { _tag: "ToolCall" }>,
     children: ReadonlyArray<TranscriptItem>,
-  ): (model: Model) => AgentTerminal | undefined
+  ): (model: Model) => AgentResponseState | undefined
 } = Function.dual(
   3,
   (
     model: Model,
     block: Extract<TranscriptBlock, { _tag: "ToolCall" }>,
     children: ReadonlyArray<TranscriptItem>,
-  ): AgentTerminal | undefined => {
+  ): AgentResponseState | undefined => {
     const answer = lastAnswerEntry(model, children)
-    if (block.status === "running") return undefined
+    if (block.status === "running") return answer === undefined ? undefined : { _tag: "Streaming", answer }
     if (block.status === "failed") {
-      return { kind: "error", tone: "failed", text: settledText(model, block, children, agentFailureFallback) }
+      return {
+        _tag: "Settled",
+        outcome: { kind: "error", tone: "failed", text: settledText(model, block, children, agentFailureFallback) },
+      }
     }
-    if (answer !== undefined) return { kind: "answer", entry: answer }
+    if (answer !== undefined) return { _tag: "Settled", outcome: { kind: "answer", entry: answer } }
     if (block.status === "complete") {
-      return { kind: "error", tone: "info", text: settledText(model, block, children, agentEmptyFallback) }
+      return {
+        _tag: "Settled",
+        outcome: { kind: "error", tone: "info", text: settledText(model, block, children, agentEmptyFallback) },
+      }
     }
     return {
-      kind: "error",
-      tone: "cancelled",
-      text: settledText(model, block, children, agentCancelledFallback),
+      _tag: "Settled",
+      outcome: {
+        kind: "error",
+        tone: "cancelled",
+        text: settledText(model, block, children, agentCancelledFallback),
+      },
     }
   },
 )
@@ -344,15 +357,15 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     if (item.parentId === undefined) continue
     childItems.set(item.parentId, [...(childItems.get(item.parentId) ?? []), item])
   }
-  const agentTerminalFor = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): AgentTerminal | undefined =>
-    block.presentation.family === "agent" ? agentTerminal(model, block, childItems.get(block.id) ?? []) : undefined
+  const agentResponseFor = (block: Extract<TranscriptBlock, { _tag: "ToolCall" }>): AgentResponseState | undefined =>
+    block.presentation.family === "agent" ? agentResponseState(model, block, childItems.get(block.id) ?? []) : undefined
   const nestedTools = (parentId: string): ReadonlyArray<ToolTranscriptUnit> =>
     (childItems.get(parentId) ?? []).flatMap((item) => {
       if (item._tag !== "Block") return []
       const block = model.blocks[item.index] as TranscriptBlock
       if (block._tag !== "ToolCall") return []
       const children = nestedTools(block.id)
-      const terminal = agentTerminalFor(block)
+      const agentResponse = agentResponseFor(block)
       return [
         {
           kind: "tool" as const,
@@ -360,7 +373,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
           blocks: [item.index],
           diffs: [],
           ...(children.length === 0 ? {} : { children }),
-          ...(terminal === undefined ? {} : { terminal }),
+          ...(agentResponse === undefined ? {} : { agentResponse }),
         },
       ]
     })
@@ -398,8 +411,8 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     const block = model.blocks[item.index] as TranscriptBlock
     if (block._tag === "ToolCall") {
       const children = nestedTools(block.id)
-      const terminal = agentTerminalFor(block)
-      if (children.length > 0 || terminal !== undefined) {
+      const agentResponse = agentResponseFor(block)
+      if (children.length > 0 || agentResponse !== undefined) {
         flush()
         units.push({
           kind: "tool",
@@ -407,7 +420,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
           blocks: [item.index],
           diffs: [],
           ...(children.length === 0 ? {} : { children }),
-          ...(terminal === undefined ? {} : { terminal }),
+          ...(agentResponse === undefined ? {} : { agentResponse }),
         })
         continue
       }
@@ -437,7 +450,7 @@ export const isExpandableUnit: {
   (unit: TranscriptUnit): (model: Model) => boolean
 } = Function.dual(2, (model: Model, unit: TranscriptUnit): boolean => {
   if (unit.kind !== "tool") return unit.kind === "reasoning" || unit.kind === "diff" || unit.kind === "childAgent"
-  if ((unit.children?.length ?? 0) > 0 || unit.terminal !== undefined) return true
+  if ((unit.children?.length ?? 0) > 0 || unit.agentResponse !== undefined) return true
   if (unit.group === "explore" || unit.group === "edit" || (unit.group === "shell" && unit.blocks.length > 1))
     return true
   return unit.blocks.some((index) => {

@@ -921,9 +921,9 @@ test(
                   start(backend, { threadId: "thread-steer", turnId: "turn-steer", prompt: "start", startedAt: 1 }),
                 )
                 yield* fixture.awaitRequests(1)
-                yield* backend.steer("turn-steer", "focus on the fixture", 2)
+                const receipt = yield* backend.steer("turn-steer", "focus on the fixture", 2)
                 const result = yield* Fiber.join(fiber)
-                return { result, requests: yield* fixture.requests }
+                return { result, receipt, requests: yield* fixture.requests }
               }),
             ),
         )
@@ -932,6 +932,14 @@ test(
         expect(result.requests).toHaveLength(2)
         expect(encodeJson(result.requests[0])).not.toContain("focus on the fixture")
         expect(encodeJson(result.requests[1]).match(/focus on the fixture/g)).toHaveLength(1)
+        expect(result.receipt.sequence).toBe(0)
+        expect(result.receipt.steeringMessageId.endsWith(":steering:0")).toBe(true)
+        const delivered = result.result.events.filter(
+          (event) => event.type === "steering.delivered" && (event.data?.message_count as number) > 0,
+        )
+        expect(delivered).toHaveLength(1)
+        expect(delivered[0]?.text).toBe("focus on the fixture")
+        expect(delivered[0]?.data?.message_sequences).toEqual([result.receipt.sequence])
       }),
     ),
   30_000,

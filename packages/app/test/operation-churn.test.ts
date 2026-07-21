@@ -85,7 +85,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
         Effect.succeed(
           running ? { turnId, status: "running" as const, waits: [], pendingTools: [], children: [] } : undefined,
         ),
-      steer: () => Effect.void,
+      steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
       listApprovals: () => Effect.succeed([]),
       resolveToolApproval: () => Effect.void,
       resolvePermission: () => Effect.void,
