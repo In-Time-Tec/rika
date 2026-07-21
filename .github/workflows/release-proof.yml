@@ -27,6 +27,11 @@ jobs:
       - name: Make Effect TypeScript binary executable
         if: runner.os == 'Linux'
         run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
+      - name: Prepare login shells for tool runs
+        if: runner.os == 'Linux'
+        run: |
+          sudo chmod a+r /run/blacksmith/job.env 2>/dev/null || true
+          echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
       - run: bun run check
       - run: bun run package -- --target ${{ matrix.target }}
       - run: bun run release-smoke -- --target ${{ matrix.target }}
