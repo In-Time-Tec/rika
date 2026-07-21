@@ -31,17 +31,6 @@
         "!**/dist/**"
       ]
     },
-    "//#effect-check": {
-      "inputs": [
-        "sgconfig.yml",
-        "ast-grep/**",
-        "apps/**/*.ts",
-        "packages/**/*.ts",
-        "scripts/**/*.ts",
-        "test/**/*.ts",
-        "!**/dist/**"
-      ]
-    },
     "//#format-check": {
       "inputs": [
         "package.json",
@@ -62,9 +51,6 @@
     },
     "//#lint": {
       "inputs": ["package.json", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "!**/dist/**"]
-    },
-    "//#pattern-check": {
-      "inputs": ["sgconfig.yml", "ast-grep/**", "apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts", "!**/dist/**"]
     },
     "//#test-unit": {
       "inputs": [
@@ -87,6 +73,29 @@
         "packages/**",
         "scripts/**",
         "test/**",
+        "!**/dist/**"
+      ]
+    },
+    "//#test-proc": {
+      "inputs": [
+        "vitest.config.ts",
+        "tsconfig.json",
+        "bun.lock",
+        "apps/**",
+        "packages/**",
+        "scripts/**",
+        "test/**",
+        "!**/dist/**"
+      ]
+    },
+    "//#ast-grep-check": {
+      "inputs": [
+        "sgconfig.yml",
+        "ast-grep/**",
+        "apps/**/*.ts",
+        "packages/**/*.ts",
+        "scripts/**/*.ts",
+        "test/**/*.ts",
         "!**/dist/**"
       ]
     }

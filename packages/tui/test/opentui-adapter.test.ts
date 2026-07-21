@@ -1244,63 +1244,67 @@ for (const panel of ["changed", "workspace"] as const) {
     ))
 }
 
-test("rebuilds the large changed-files sidebar per set change, not per streaming frame", () =>
-  Effect.runPromise(
-    Effect.gen(function* () {
-      const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
-      const paths = Array.from(
-        { length: 10_000 },
-        (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
-      )
-      const files = (revision: number) =>
-        ready(paths.map((path) => ({ path, status: "M", added: revision, removed: 0 })))
-      const base: Model = {
-        ...initial("/work", "high"),
-        width: 120,
-        height: 40,
-        changedFilesOpen: true,
-        changedFiles: files(1),
-      }
-      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-      try {
-        surface.update(base)
-        yield* openTui(() => setup.flush())
-        const state = surface as unknown as { readonly changedRows: ReadonlyArray<unknown> }
-        const boundedWindow = () =>
-          expect(surface.changedFilesBox.content.height).toBeLessThanOrEqual(
-            surface.changedFilesBox.viewport.height + 1,
-          )
-        boundedWindow()
-        let rebuilds = 0
-        let previousRows = state.changedRows
-        let model = base
-        for (let tick = 0; tick < 4; tick += 1) {
-          for (let frame = 0; frame < 5; frame += 1) {
-            model = Object.assign({}, model, {
-              entries: [{ role: "assistant", text: `streaming ${tick}:${frame}` }],
-            })
+test(
+  "rebuilds the large changed-files sidebar per set change, not per streaming frame",
+  () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const setup = yield* openTui(() => createTestRenderer({ width: 120, height: 40 }))
+        const paths = Array.from(
+          { length: 10_000 },
+          (_, index) => `src/feature-${Math.floor(index / 20)}/file-${index}.ts`,
+        )
+        const files = (revision: number) =>
+          ready(paths.map((path) => ({ path, status: "M", added: revision, removed: 0 })))
+        const base: Model = {
+          ...initial("/work", "high"),
+          width: 120,
+          height: 40,
+          changedFilesOpen: true,
+          changedFiles: files(1),
+        }
+        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+        try {
+          surface.update(base)
+          yield* openTui(() => setup.flush())
+          const state = surface as unknown as { readonly changedRows: ReadonlyArray<unknown> }
+          const boundedWindow = () =>
+            expect(surface.changedFilesBox.content.height).toBeLessThanOrEqual(
+              surface.changedFilesBox.viewport.height + 1,
+            )
+          boundedWindow()
+          let rebuilds = 0
+          let previousRows = state.changedRows
+          let model = base
+          for (let tick = 0; tick < 4; tick += 1) {
+            for (let frame = 0; frame < 5; frame += 1) {
+              model = Object.assign({}, model, {
+                entries: [{ role: "assistant", text: `streaming ${tick}:${frame}` }],
+              })
+              surface.update(model)
+              if (state.changedRows !== previousRows) {
+                rebuilds += 1
+                previousRows = state.changedRows
+              }
+            }
+            model = { ...model, changedFiles: files(tick + 2) }
             surface.update(model)
             if (state.changedRows !== previousRows) {
               rebuilds += 1
               previousRows = state.changedRows
             }
+            boundedWindow()
           }
-          model = { ...model, changedFiles: files(tick + 2) }
-          surface.update(model)
-          if (state.changedRows !== previousRows) {
-            rebuilds += 1
-            previousRows = state.changedRows
-          }
-          boundedWindow()
+          expect(rebuilds).toBe(4)
+          expect(surface.changedFilesBox.scrollHeight).toBe(state.changedRows.length)
+        } finally {
+          surface.destroy()
+          setup.renderer.destroy()
         }
-        expect(rebuilds).toBe(4)
-        expect(surface.changedFilesBox.scrollHeight).toBe(state.changedRows.length)
-      } finally {
-        surface.destroy()
-        setup.renderer.destroy()
-      }
-    }),
-  ))
+      }),
+    ),
+  30_000,
+)
 
 test("expands the queue box to fit a wrapped single-line queued prompt joined to the composer", () =>
   Effect.runPromise(

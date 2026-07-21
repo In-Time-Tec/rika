@@ -9,10 +9,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: check
     runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 20
     env:
       ENV: /dev/null
       BASH_ENV: /dev/null
@@ -24,7 +29,7 @@ jobs:
         with:
           bun-version: 1.3.14
       - name: Cache Bun downloads
-        uses: actions/cache@v6
+        uses: useblacksmith/cache@v5
         with:
           path: ~/.bun/install/cache
           key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
@@ -38,7 +43,15 @@ jobs:
         run: |
           sudo rm -f /etc/profile.d/blacksmith.sh
           echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
+      - name: Guard login shell behavior
+        run: |
+          cd /tmp
+          [ "$(sh -lc pwd)" = "/tmp" ] || { echo "login shells change directory; fix the runner image prep"; exit 1; }
+          noise="$(sh -lc true 2>&1)"
+          [ -z "$noise" ] || { echo "login shells emit profile noise: $noise"; exit 1; }
       - name: Check
         run: bun run check
       - name: TUI app tests
         run: bun run test-tui
+      - name: Process lifecycle tests
+        run: bun run test-proc

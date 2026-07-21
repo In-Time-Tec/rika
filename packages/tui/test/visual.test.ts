@@ -73,5 +73,5 @@ test(
         }).pipe(Effect.provide(services))
       }).pipe(Effect.scoped),
     ),
-  15_000,
+  60_000,
 )

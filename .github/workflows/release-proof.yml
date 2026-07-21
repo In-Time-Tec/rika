@@ -19,6 +19,7 @@ jobs:
           - { runner: blacksmith-4vcpu-ubuntu-2404-arm, target: linux-arm64 }
           - { runner: blacksmith-4vcpu-ubuntu-2404, target: linux-x64 }
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
     env:
       ENV: /dev/null
       BASH_ENV: /dev/null
@@ -27,15 +28,11 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.3.14 }
       - run: bun install --frozen-lockfile
-      - name: Make Effect TypeScript binary executable
-        if: runner.os == 'Linux'
-        run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - name: Prepare login shells for tool runs
         if: runner.os == 'Linux'
         run: |
           sudo rm -f /etc/profile.d/blacksmith.sh
           echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
-      - run: bun run check
       - run: bun run package -- --target ${{ matrix.target }}
       - run: bun run release-smoke -- --target ${{ matrix.target }}
       - uses: actions/upload-artifact@v7

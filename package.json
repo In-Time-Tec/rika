@@ -56,23 +56,23 @@
     "@batonfx/providers": "0.7.1"
   },
   "scripts": {
+    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts test",
     "build": "bun turbo build",
-    "check": "bun turbo run build typecheck \"//#test-unit\" \"//#dependency-check\" \"//#diagnostics\" \"//#effect-check\" \"//#format-check\" \"//#lint\" \"//#pattern-check\"",
+    "check": "bun turbo run --continue build typecheck \"//#test-unit\" \"//#dependency-check\" \"//#diagnostics\" \"//#ast-grep-check\" \"//#format-check\" \"//#lint\"",
     "dependency-check": "bun run scripts/check-dependencies.ts",
     "dev": "bun --cwd apps/rika start",
     "diagnostics": "bun node_modules/@effect/tsgo/dist/effect-tsgo.js diagnostics --project ./tsconfig.json --format pretty --strict",
-    "effect-check": "ast-grep scan --config sgconfig.yml --filter '^effect-' --report-style short apps packages scripts test",
     "format": "prettier --write .",
     "format-check": "prettier --check .",
     "install-local": "bun run scripts/install-local.ts",
     "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts",
     "package": "bun run scripts/package.ts",
-    "pattern-check": "ast-grep scan --config sgconfig.yml --filter '^(no-|tenant-|update-)' apps packages scripts",
     "release-smoke": "bun run scripts/release-smoke.ts",
     "test": "bun turbo run \"//#test-unit\"",
+    "test-proc": "bun --bun vitest run --project proc",
     "test-tui": "bun --bun vitest run --project tui",
     "test-unit": "bun --bun vitest run --project unit",
-    "typecheck": "bun turbo run typecheck \"//#diagnostics\" \"//#effect-check\"",
+    "typecheck": "bun turbo run typecheck",
     "uninstall-local": "bun run scripts/uninstall-local.ts"
   },
   "prettier": {

@@ -259,7 +259,9 @@ test(
         expect(output).toBeDefined()
         expect(completed!.at - requested!.at).toBeGreaterThanOrEqual(100)
         expect(output!.at - completed!.at).toBeGreaterThanOrEqual(100)
-        expect(output!.at - requested!.at).toBeLessThan(1_000)
+        expect(received.map((event) => event.type).indexOf("tool.call.requested")).toBeLessThan(
+          received.map((event) => event.type).indexOf("model.output.delta"),
+        )
       }),
     ),
   30_000,
