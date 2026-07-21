@@ -32,7 +32,9 @@ jobs:
         run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - name: Prepare login shells for tool runs
         if: runner.os == 'Linux'
-        run: echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
+        run: |
+          sudo sh -c 'for f in /etc/profile /etc/profile.d/*.sh; do [ -f "$f" ] && sed -i "\|blacksmith/job.env|d" "$f"; done' || true
+          echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
       - run: bun run check
       - run: bun run package -- --target ${{ matrix.target }}
       - run: bun run release-smoke -- --target ${{ matrix.target }}

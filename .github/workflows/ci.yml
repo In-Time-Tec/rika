@@ -35,7 +35,9 @@ jobs:
       - name: Make Effect TypeScript binary executable
         run: find node_modules/.bun -path '*/@effect/tsgo-linux-*/lib/tsc' -exec chmod +x {} +
       - name: Prepare login shells for tool runs
-        run: echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
+        run: |
+          sudo sh -c 'for f in /etc/profile /etc/profile.d/*.sh; do [ -f "$f" ] && sed -i "\|blacksmith/job.env|d" "$f"; done' || true
+          echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
       - name: Check
         run: bun run check
       - name: TUI app tests
