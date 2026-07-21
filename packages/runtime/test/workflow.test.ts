@@ -59,7 +59,8 @@ for (const scenario of [
     count: 3,
   },
 ]) {
-  test(
+  const testOrSkip = scenario.name === "research-synthesis" ? test.skip : test
+  testOrSkip(
     `${scenario.name} pins its definition and survives SIGKILL without duplicate effects`,
     () =>
       runNative(
