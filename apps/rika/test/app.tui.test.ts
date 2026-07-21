@@ -185,25 +185,17 @@ test(
 )
 
 test(
-  "queues, cancels, steers, and interrupts executions in one session",
+  "cancels the active turn and promotes the queued turn",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          workspaceFiles: { "fixture.txt": "steer fixture body" },
           script: [
             TuiApp.model.text("LATE_QUEUE_HEAD", 5_000),
             TuiApp.model.text("QUEUED_DONE"),
-            TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "fixture.txt" }, "steer-read")], {
-              delay: "3000 millis",
-            }),
-            TuiApp.model.text("ACTIVE_STEER_COMPLETE"),
-            TuiApp.model.text("LATE_INTERRUPTED_RESPONSE", 5_000),
-            TuiApp.model.text("REPLACEMENT_COMPLETE"),
-            TuiApp.model.text("REPLACEMENT_COMPLETE"),
+            TuiApp.model.text("QUEUED_DONE"),
           ],
         })
-
         yield* Effect.promise(() => app.type("Hold the queue head."))
         app.pressEnter()
         yield* app.waitFrame("Hold the queue head.")
@@ -211,11 +203,30 @@ test(
         app.pressEnter()
         yield* app.waitFrame("Queued follow-up prompt.")
         app.pressKey("c", { ctrl: true })
-        yield* app.waitFrame("⊘")
+        yield* app.waitFrame("\u2298")
         const promoted = yield* app.waitFrame("QUEUED_DONE")
         expect(promoted).not.toContain("LATE_QUEUE_HEAD")
-        yield* settled(app)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
 
+test(
+  "steers composer text into the active execution without queueing a turn",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          workspaceFiles: { "fixture.txt": "steer fixture body" },
+          script: [
+            TuiApp.model.turn([TuiApp.model.toolCall("read", { path: "fixture.txt" }, "steer-read")], {
+              delay: "3000 millis",
+            }),
+            TuiApp.model.text("ACTIVE_STEER_COMPLETE"),
+            TuiApp.model.text("ACTIVE_STEER_COMPLETE"),
+          ],
+        })
         yield* Effect.promise(() => app.type("Read the fixture slowly."))
         app.pressEnter()
         yield* app.waitFrame("Read the fixture slowly.")
@@ -225,8 +236,24 @@ test(
         yield* app.waitGone("Focus on the exact fixture text.")
         const steered = yield* app.waitFrame("ACTIVE_STEER_COMPLETE")
         expect(steered).not.toContain("Execution failed")
-        yield* settled(app)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
 
+test(
+  "interrupts the active turn with Ctrl+Enter and runs the replacement",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            TuiApp.model.text("LATE_INTERRUPTED_RESPONSE", 5_000),
+            TuiApp.model.text("REPLACEMENT_COMPLETE"),
+            TuiApp.model.text("REPLACEMENT_COMPLETE"),
+          ],
+        })
         yield* Effect.promise(() => app.type("Begin interruptible work."))
         app.pressEnter()
         yield* app.waitFrame("Begin interruptible work.")
@@ -236,7 +263,6 @@ test(
         const replaced = yield* app.waitFrame("REPLACEMENT_COMPLETE")
         expect(replaced).toContain("Run the replacement prompt.")
         expect(replaced).not.toContain("LATE_INTERRUPTED_RESPONSE")
-
         yield* app.quit
       }),
     ),

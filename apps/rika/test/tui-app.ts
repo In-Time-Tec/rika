@@ -108,6 +108,11 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     shellPermission: options.shellPermission ?? "allow",
     makeThreadId: Effect.sync(() => Thread.ThreadId.make(`tui-thread-${nextThread++}`)),
     makeTurnId: Effect.sync(() => Turn.TurnId.make(`tui-turn-${nextTurn++}`)),
+    resolveExecutionRoute: (mode) =>
+      Effect.sync(() => {
+        const { title: _title, ...pin } = Turn.testExecutionRoute(mode)
+        return pin
+      }),
     interactive: interactiveTui({ makeRenderer: () => Promise.resolve(setup.renderer) }),
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Operation.Service)
