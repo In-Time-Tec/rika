@@ -38,6 +38,13 @@ jobs:
         run: |
           sudo sh -c 'for f in /etc/profile /etc/profile.d/*.sh; do [ -f "$f" ] && sed -i "\|blacksmith/job.env|d" "$f"; done' || true
           echo "export PATH=$HOME/.bun/bin:\$PATH" | sudo tee /etc/profile.d/zz-bun.sh >/dev/null
+      - name: Inspect login shell behavior
+        run: |
+          cd /tmp && sh -lc 'pwd; echo HOME=$HOME; echo GIT_DIR=$GIT_DIR; git rev-parse --show-toplevel 2>&1 | head -1'
+          echo "--- /etc/profile tail"; tail -20 /etc/profile
+          echo "--- profile.d"; ls /etc/profile.d/
+          echo "--- ~/.profile"; cat ~/.profile 2>/dev/null | head -30
+          echo "--- ~/.bash_profile"; cat ~/.bash_profile 2>/dev/null | head -30
       - name: Check
         run: bun run check
       - name: TUI app tests
