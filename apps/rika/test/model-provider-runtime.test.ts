@@ -1,9 +1,14 @@
+import * as BunServices from "@effect/platform-bun/BunServices"
+import { ModelRegistry } from "@batonfx/core"
 import { expect, test } from "vitest"
 import { OpenAiAuth } from "@rika/app"
 import { ConfigContract } from "@rika/config"
 import * as Turn from "@rika/persistence/turn"
+import * as ExecutionBackend from "@rika/runtime/contract"
+import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { Runtime as RikaToolRuntime } from "@rika/tools"
-import { Cause, ConfigProvider, Context, Effect, Layer, Redacted, Schema, Scope, Stream } from "effect"
+import { Database } from "bun:sqlite"
+import { Cause, ConfigProvider, Context, Effect, FileSystem, Layer, Redacted, Schema, Scope, Stream } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 import {
   executionModelRoutes,
@@ -75,6 +80,7 @@ const sseResponse = (events: ReadonlyArray<unknown>) => {
 }
 
 const response = (id: string) => ({ id, model: "test-model", created_at: 1, output: [] })
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 
 test("prepares distinct registrations for every default model tuple and aligns every pin", () =>
   Effect.runPromise(
@@ -281,6 +287,187 @@ test("rejects a malformed OpenAI terminal without completing a partial function 
     ).pipe(Effect.ensuring(Effect.promise(() => server.stop(true)))),
   )
 })
+
+test("classifies a nested OpenAI Responses context error without exposing the Effect AI decoder failure", () => {
+  const server = Bun.serve({
+    port: 0,
+    fetch: () =>
+      sseResponse([
+        {
+          type: "error",
+          error: {
+            type: "invalid_request_error",
+            code: "context_length_exceeded",
+            message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+            param: "input",
+          },
+          sequence_number: 3,
+        },
+      ]),
+  })
+  return Effect.runPromise(
+    withRuntime(
+      authService(),
+      (runtime) =>
+        Effect.gen(function* () {
+          const route = ConfigContract.resolveModelRoute(openAiSettings(server.url.toString()), "medium", "main")
+          const prepared = yield* runtime.prepare([route])
+          const registration = prepared.registrations[0]!
+          const context = yield* Layer.build(registration.layer)
+          const parts = yield* LanguageModel.streamText({ prompt: "overflow" }).pipe(
+            Stream.runCollect,
+            Effect.provide(context),
+          )
+          const error = parts.find((part) => part.type === "error")
+          expect(error?.type).toBe("error")
+          if (error?.type !== "error") return
+          const rendered = encodeJson(error.error)
+
+          expect(registration.classifyFailure?.(error.error)).toBe("context-overflow")
+          expect(rendered).toContain("context_length_exceeded")
+          expect(rendered).not.toContain("Invalid output: Missing key")
+        }),
+      { OPENAI_API_KEY: "test-api-key" },
+    ).pipe(Effect.ensuring(Effect.promise(() => server.stop(true)))),
+  )
+})
+
+test("compacts and replays a nested OpenAI Responses context error through the durable backend", () => {
+  const requests = new Array<Record<string, unknown>>()
+  const server = Bun.serve({
+    port: 0,
+    fetch: (request) =>
+      request.json().then((value) => {
+        requests.push(value as Record<string, unknown>)
+        if (requests.length === 1)
+          return sseResponse([
+            {
+              type: "response.output_item.added",
+              output_index: 0,
+              sequence_number: 0,
+              item: {
+                id: "overflow-read",
+                type: "function_call",
+                call_id: "overflow-read",
+                name: "read",
+                arguments: "",
+              },
+            },
+            {
+              type: "response.function_call_arguments.done",
+              item_id: "overflow-read",
+              output_index: 0,
+              sequence_number: 1,
+              arguments: JSON.stringify({ path: "fixture.txt" }),
+            },
+            { type: "response.completed", sequence_number: 2, response: response("response-tool-call") },
+          ])
+        if (requests.length === 2)
+          return sseResponse([
+            {
+              type: "error",
+              error: {
+                type: "invalid_request_error",
+                code: "context_length_exceeded",
+                message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+                param: "input",
+              },
+              sequence_number: 3,
+            },
+          ])
+        return sseResponse([
+          {
+            type: "response.output_text.delta",
+            item_id: "response-recovered-message",
+            output_index: 0,
+            content_index: 0,
+            delta: "recovered",
+            sequence_number: 0,
+          },
+          { type: "response.completed", sequence_number: 1, response: response("response-recovered") },
+        ])
+      }),
+  })
+  const settings = openAiSettings(server.url.toString())
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const bunContext = yield* Layer.build(BunServices.layer)
+        return yield* Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-openai-overflow-" })
+          yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "durable overflow fixture")
+          const providerContext = yield* Layer.build(runtimeLayer(authService()))
+          const runtime = Context.get(providerContext, ModelProviderRuntime.Service)
+          const route = ConfigContract.resolveModelRoute(settings, "medium", "main")
+          const prepared = yield* runtime.prepare([route])
+          const registration = prepared.registrations[0]!
+          const selection = ModelProviderRuntime.modelRoutePlan(route).selection
+          const summarySelection = {
+            provider: "test",
+            model: "compaction-summary",
+            registrationKey: "compaction-summary",
+          }
+          const summaryModel = yield* LanguageModel.make({
+            generateText: () =>
+              Effect.succeed([
+                { type: "text", text: "Goal: Recover the rejected request from one compacted projection." },
+              ]),
+            streamText: () => Stream.empty,
+          })
+          const summaryRegistration = yield* ModelRegistry.registration({
+            ...summarySelection,
+            layer: Layer.succeed(LanguageModel.LanguageModel, summaryModel),
+          })
+          const backendContext = yield* Layer.build(
+            RelayExecutionBackend.layer({
+              filename: `${directory}/relay.db`,
+              workspace: directory,
+              registration,
+              additionalRegistrations: [summaryRegistration],
+              selection,
+              compactionSummarySelection: summarySelection,
+              modelVariantPolicy: "fixed-selection",
+              compaction: { contextWindow: 100_000, reserveTokens: 1, keepRecentTokens: 1 },
+            }),
+          )
+          const backend = Context.get(backendContext, ExecutionBackend.Service)
+          const execution = yield* backend.start({
+            threadId: "thread-openai-overflow",
+            turnId: "turn-openai-overflow",
+            prompt: "read fixture.txt and recover from the provider overflow",
+            startedAt: 1,
+            executionRoute: executionRoutePin(settings, "medium"),
+          })
+          const database = new Database(`${directory}/relay.db`, { readonly: true })
+          const checkpoint = database
+            .query("SELECT count(*) AS count FROM relay_agent_compactions WHERE execution_id = ?")
+            .get("execution:turn-openai-overflow") as { count: number }
+          database.close()
+          const renderedEvents = encodeJson(execution.events)
+
+          expect(execution.status, renderedEvents).toBe("completed")
+          expect(checkpoint.count).toBe(1)
+          expect(requests).toHaveLength(3)
+          expect(execution.events.filter((event) => event.type === "tool.result.received")).toHaveLength(1)
+          expect(
+            execution.events
+              .filter((event) => event.type === "model.output.delta")
+              .map((event) => event.text)
+              .join(""),
+          ).toBe("recovered")
+          expect(renderedEvents).not.toContain("Invalid output: Missing key")
+        }).pipe(Effect.provide(bunContext))
+      }),
+    ).pipe(
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({ OPENAI_API_KEY: "test-api-key" }),
+      ),
+      Effect.ensuring(Effect.promise(() => server.stop(true))),
+    ),
+  )
+}, 30_000)
 
 test("retains Anthropic registration behavior", () =>
   Effect.runPromise(
