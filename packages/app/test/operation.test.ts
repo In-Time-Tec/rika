@@ -2680,6 +2680,62 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("requeues and retries a submission the session owner transiently rejected", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("owned-session-thread")
+      const turns = yield* TurnRepository.makeMemory()
+      const starts = yield* Ref.make<ReadonlyArray<string>>([])
+      const failNext = yield* Ref.make(true)
+      const ownerBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: inspectFromTurns(turns),
+        start: (input) =>
+          Effect.gen(function* () {
+            yield* Ref.update(starts, (all) => [...all, String(input.turnId)])
+            if (yield* Ref.getAndSet(failNext, false))
+              return yield* ExecutionBackend.BackendError.make({
+                message: `Session session:${input.turnId} is owned by execution execution:old at epoch 2`,
+              })
+            return yield* backend.start(input)
+          }),
+      })
+      const turnSequence = yield* Ref.make(0)
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, {
+          _tag: "Interactive",
+          prompt: [],
+          ephemeral: false,
+        })
+        const eventsFiber = yield* collectEvents(session, events)
+        yield* session.reopenThread(1)
+        const submitted = yield* Effect.forkChild(session.submit("hello"))
+        yield* Fiber.join(submitted)
+        yield* settleEvents
+        yield* Fiber.interrupt(eventsFiber)
+      }).pipe(
+        provideLayer(
+          Operation.productLayer({
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+            backendLayer: Layer.succeed(ExecutionBackend.Service, ownerBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Ref.updateAndGet(turnSequence, (value) => value + 1).pipe(
+              Effect.map((value) => Turn.TurnId.make(value === 1 ? "submitted" : "retry")),
+            ),
+            interactive: holdSession(sessions),
+          }),
+        ),
+      )
+      expect(yield* turns.get(Turn.TurnId.make("submitted"))).toMatchObject({ status: "cancelled" })
+      expect(yield* turns.get(Turn.TurnId.make("retry"))).toMatchObject({ status: "completed", prompt: "hello" })
+      expect(yield* Ref.get(starts)).toEqual(["submitted", "retry"])
+      expect(nonActivation(events).filter((event) => event._tag === "ExecutionFailed")).toEqual([])
+    }),
+  )
+
   it.effect("requeues a direct submission while a cancelled predecessor is still releasing", () =>
     Effect.gen(function* () {
       const thread = selectionThread("blocked-submit-thread")
@@ -3746,6 +3802,10 @@ describe("Operation", () => {
           id: Turn.TurnId.make("queued-one"),
           threadId: thread.id,
           prompt: "one",
+          promptParts: [
+            { type: "text", text: "one " },
+            { type: "image", mediaType: "image/png", data: "cG5n", filename: "probe.png" },
+          ],
           executionRoute: executionRoute(),
           status: "queued",
           createdAt: 2,
@@ -3816,7 +3876,12 @@ describe("Operation", () => {
           }),
         ),
       )
-      expect((yield* Ref.get(starts)).map((value) => value.turnId)).toEqual(["queued-one", "queued-two", "initial"])
+      const started = yield* Ref.get(starts)
+      expect(started.map((value) => value.turnId)).toEqual(["queued-one", "queued-two", "initial"])
+      expect(started[0]?.promptParts).toEqual([
+        { type: "text", text: "one " },
+        { type: "image", mediaType: "image/png", data: "cG5n", filename: "probe.png" },
+      ])
       expect(yield* Ref.get(calls)).toEqual(["future", "resume:generation", "future"])
     }),
   )

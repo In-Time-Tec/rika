@@ -821,6 +821,17 @@ const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(fun
   return blocked
 })
 
+const sessionOwnershipMarker = "is owned by execution"
+
+const sessionOwnershipRejected = (failure: unknown): boolean => {
+  if (failure === undefined || failure === null) return false
+  if (typeof failure === "object" && "message" in failure) {
+    const message = (failure as { readonly message: unknown }).message
+    if (typeof message === "string" && message.includes(sessionOwnershipMarker)) return true
+  }
+  return String(failure).includes(sessionOwnershipMarker)
+}
+
 const persistExecutionTree = Effect.fn("Operation.persistExecutionTree")(function* (turn: Turn.Turn, force: boolean) {
   const transcripts = yield* TranscriptRepository.Service
   const current = yield* transcripts.get(turn.id)
@@ -1546,6 +1557,37 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           dispatch(event)
           publishInteractiveActivity(sessionId, event)
         }
+        const requeueOwnedSession = Effect.fn("Operation.interactive.requeueOwnedSession")(function* (
+          running: Turn.Turn,
+          dispatch: (event: InteractiveEvent) => void,
+        ) {
+          const turns = yield* TurnRepository.Service
+          const now = yield* Clock.currentTimeMillis
+          const retryId = yield* options.makeTurnId
+          const requeued = yield* turns
+            .copy(
+              {
+                id: retryId,
+                threadId: running.threadId,
+                prompt: running.prompt,
+                ...(running.promptParts === undefined ? {} : { promptParts: running.promptParts }),
+                status: "queued",
+                executionRoute: running.executionRoute,
+                ...(running.reviewFanOutId === undefined ? {} : { reviewFanOutId: running.reviewFanOutId }),
+                createdAt: now,
+                updatedAt: now,
+              },
+              pendingTurnCapacity,
+            )
+            .pipe(
+              Effect.map((submission) => submission.queue),
+              Effect.orElseSucceed(() => undefined),
+            )
+          if (requeued === undefined) return false
+          yield* setTurnStatus(running.id, "cancelled", running.lastCursor, now)
+          emit(dispatch, queueMutationEvent(requeued))
+          return true
+        })
         const submissionAdmission = yield* Semaphore.make(1)
         const shellPermission =
           typeof options.shellPermission === "function"
@@ -1890,6 +1932,16 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                       if (outcome._tag === "Failure") {
                         yield* flushProjection
                         const failedAt = yield* Clock.currentTimeMillis
+                        if (sessionOwnershipRejected(outcome.cause) && (yield* requeueOwnedSession(turn, dispatch))) {
+                          yield* Effect.logInfo("execution.admission.rejected").pipe(
+                            Effect.annotateLogs({
+                              "rika.thread.id": String(thread.id),
+                              "rika.turn.id": String(turn.id),
+                            }),
+                          )
+                          yield* settleThread(thread, dispatch)
+                          return
+                        }
                         yield* Effect.logError("turn.failed").pipe(
                           Effect.annotateLogs({
                             "rika.duration.ms": failedAt - startedAt,
@@ -2186,6 +2238,23 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             )
             if (outcome._tag === "Failure") {
               const current = yield* turns.get(promotedTurn.id)
+              if (
+                sessionOwnershipRejected(outcome.error) &&
+                current?.status === "running" &&
+                (yield* requeueOwnedSession(current, dispatch))
+              ) {
+                yield* Effect.logInfo("execution.admission.rejected").pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": String(thread.id),
+                    "rika.turn.id": String(promotedTurn.id),
+                  }),
+                )
+                yield* flushProjection
+                const wake = yield* turns.requestQueueWake(thread.id)
+                if (wake !== undefined && backend.wakeThreadHost !== undefined)
+                  yield* backend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
+                return false
+              }
               if (current?.status === "running")
                 yield* setTurnStatus(promotedTurn.id, "failed", promotedTurn.lastCursor, yield* Clock.currentTimeMillis)
               else {
@@ -3531,6 +3600,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                           deliveredCursors.add(event.cursor)
                           publishInteractiveActivity(0, transcriptPatch(turn, event))
                         },
+                        ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
                         ...(prepared.extensionPin === undefined ? {} : { extensionPin: prepared.extensionPin }),
                       })
                       .pipe(Effect.ensuring(Deferred.succeed(startCompleted, undefined))),
