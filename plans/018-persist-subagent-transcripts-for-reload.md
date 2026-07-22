@@ -167,6 +167,17 @@ only complexity.
    it dispatches `TranscriptResyncRequired` and the client re-selects.
    `recordedChildIds` only considers root-level units so a healed tree with
    unreplayable grandchildren cannot re-trigger the backfill forever.
+6. **Nested units page under their storage turn, not their projection turn.**
+   The SQL `page` keyset orders by `u.turn_id` (nested units are stored under
+   the root turn), but it decoded the entry's `turn.id` from `unit.turnId`
+   (the child execution id), so `cursorFor` produced a cursor that could not
+   round-trip: `loadTranscriptPage`'s boundary loop re-fetched the same page
+   forever once a turn held more nested units than the page limit — the
+   installed app hung on "Loading Thread". `page` now takes `turn.id` from the
+   stored `u.turn_id`, matching the in-memory repository. A persistence test
+   keyset-paginates a subagent tree whose nested units outnumber the page and
+   asserts full, duplicate-free coverage. This defect was latent until steps 1
+   and 4 first persisted many real nested units per turn.
 
 The `execution.child.replay_empty` diagnostic answers the one open question
 (why a resident-start replay returned zero events for children whose events
