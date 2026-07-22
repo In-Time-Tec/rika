@@ -2715,14 +2715,14 @@ for (const width of [80, 50] as const) {
           surface.update(model)
           yield* openTui(() => setup.renderOnce())
           const failed = setup.captureCharFrame()
-          expect(failed).toContain("ERROR: Execution failed")
-          expect(failed.replaceAll(/\s+/g, " ")).toContain("Next: Edit your prompt and press Enter to try again.")
+          expect(failed).toContain("ERROR: Message failed")
+          expect(failed.replaceAll(/\s+/g, " ")).toContain("Next: Press Enter to try again.")
           expect(
             setup
               .captureSpans()
               .lines.flatMap((line) => line.spans)
               .some(
-                (span) => span.text.includes("ERROR: Execution failed") && span.fg.toInts().join(",") === "128,0,0,255",
+                (span) => span.text.includes("ERROR: Message failed") && span.fg.toInts().join(",") === "128,0,0,255",
               ),
           ).toBe(true)
           yield* openTui(() => setup.mockInput.typeText("retry"))

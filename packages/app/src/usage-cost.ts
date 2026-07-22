@@ -23,6 +23,7 @@ export interface Snapshot {
 }
 
 export const maximumGlobalThreads = 100
+const collectionConcurrency = 1
 
 export const empty: Snapshot = {
   turnCostUsd: new Map(),
@@ -80,26 +81,39 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
   const pending = roots.map((root) => ({ ...root, executionId: root.executionId ?? root.turnId }))
   const seenExecutions = new Set<string>()
   while (pending.length > 0) {
-    const current = pending.shift()!
-    if (seenExecutions.has(current.executionId)) continue
-    seenExecutions.add(current.executionId)
-    const inspection = yield* readExecution(reader.inspect(current.executionId), current.executionId)
-    if (inspection === undefined) {
-      if (current.optional !== true) Object.assign(snapshot, { complete: false })
-      continue
+    const batch = pending.splice(0).filter((current) => {
+      if (seenExecutions.has(current.executionId)) return false
+      seenExecutions.add(current.executionId)
+      return true
+    })
+    const results = yield* Effect.forEach(
+      batch,
+      (current) =>
+        Effect.gen(function* () {
+          const inspection = yield* readExecution(reader.inspect(current.executionId), current.executionId)
+          if (inspection === undefined) return { current, inspection }
+          const replay = yield* readExecution(reader.replay(current.executionId), current.executionId)
+          return { current, inspection, replay }
+        }),
+      { concurrency: collectionConcurrency },
+    )
+    for (const { current, inspection, replay } of results) {
+      if (inspection === undefined) {
+        if (current.optional !== true) Object.assign(snapshot, { complete: false })
+        continue
+      }
+      if (replay === undefined) {
+        Object.assign(snapshot, { complete: false })
+        continue
+      }
+      for (const event of replay.events)
+        snapshot = observe(snapshot, {
+          threadId: current.threadId,
+          turnId: current.turnId,
+          event,
+        })
+      for (const child of inspection.children) pending.push({ ...current, executionId: child.executionId })
     }
-    const replay = yield* readExecution(reader.replay(current.executionId), current.executionId)
-    if (replay === undefined) {
-      Object.assign(snapshot, { complete: false })
-      continue
-    }
-    for (const event of replay.events)
-      snapshot = observe(snapshot, {
-        threadId: current.threadId,
-        turnId: current.turnId,
-        event,
-      })
-    for (const child of inspection.children) pending.push({ ...current, executionId: child.executionId })
   }
   return snapshot
 })

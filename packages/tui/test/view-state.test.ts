@@ -376,9 +376,9 @@ describe("ViewState", () => {
     model = ViewState.update(model, { _tag: "ExecutionFailed", message: "failed" })
     expect(model.blocks.at(-1)).toEqual({
       _tag: "Error",
-      title: "Execution failed",
+      title: "Message failed",
       detail: "failed",
-      recovery: "Edit your prompt and press Enter to try again.",
+      recovery: "Press Enter to try again.",
     })
     expect(model.items.at(-1)).toEqual({ _tag: "Block", index: 0 })
     expect(model.busy).toBe(false)

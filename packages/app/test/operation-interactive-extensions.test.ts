@@ -7,6 +7,7 @@ import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
+import { TestClock } from "effect/testing"
 import { Operation } from "../src/index"
 import { executeInteractiveCommand } from "../src/operation-contract"
 
@@ -63,6 +64,76 @@ const interactiveLayer = (
   })
 
 describe("interactive session extensions", () => {
+  it.effect("submits while historical cost reconciliation is still running", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const selected = thread("cost-reconciliation")
+        const historical: Turn.Turn = {
+          id: Turn.TurnId.make("historical-turn"),
+          threadId: selected.id,
+          prompt: "historical",
+          executionRoute: Turn.testExecutionRoute(),
+          status: "completed",
+          createdAt: 1,
+          updatedAt: 1,
+        }
+        const repository = yield* ThreadRepository.makeMemory([selected])
+        const turns = yield* TurnRepository.makeMemory([historical])
+        const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
+        const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
+        yield* transcripts.replace(historical, Transcript.empty(historical.id, historical.prompt))
+        const reconciliationStarted = yield* Deferred.make<void>()
+        const releaseReconciliation = yield* Deferred.make<void>()
+        const submissionStarted = yield* Deferred.make<void>()
+        const backend = ExecutionBackend.Service.of({
+          ...baseBackend,
+          inspect: (executionId) =>
+            executionId === historical.id
+              ? Deferred.succeed(reconciliationStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseReconciliation)),
+                  Effect.as({
+                    turnId: executionId,
+                    status: "completed" as const,
+                    waits: [],
+                    pendingTools: [],
+                    children: [],
+                  }),
+                )
+              : Effect.void.pipe(Effect.as(undefined)),
+          start: (input) =>
+            Deferred.succeed(submissionStarted, undefined).pipe(Effect.andThen(baseBackend.start(input))),
+        })
+        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const context = yield* Layer.build(
+          interactiveLayer(
+            repository,
+            turns,
+            backend,
+            registration,
+            Effect.die("unused"),
+            Effect.succeed(Turn.TurnId.make("submitted-turn")),
+            transcripts,
+          ),
+        )
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+        )
+        const session = yield* Deferred.await(registration)
+
+        yield* session.selectThread(selected.id, 1)
+        yield* Effect.yieldNow
+        yield* TestClock.adjust("1 second")
+        yield* Deferred.await(reconciliationStarted)
+        yield* session.submit("send now")
+        yield* Deferred.await(submissionStarted)
+
+        yield* Deferred.succeed(releaseReconciliation, undefined)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
+  )
+
   it.effect("replays a stale pricing checkpoint and allows its cost to decrease", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -130,11 +201,16 @@ describe("interactive session extensions", () => {
         while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
 
         expect(loaded.threadCostUsd).toBe(5)
-        expect(loaded.globalCostUsd).toBe(5)
+        expect(loaded.globalCostUsd).toBe(15)
         expect(yield* transcripts.get(target.id)).toMatchObject({
           costUsd: 5,
           pricingVersion: Transcript.pricingVersion,
         })
+        yield* TestClock.adjust("1 second")
+        let refreshed = yield* Queue.take(events)
+        while (refreshed._tag !== "TitleCostUpdated" || refreshed.turnId !== target.id)
+          refreshed = yield* Queue.take(events)
+        expect(refreshed).toMatchObject({ threadCostUsd: 5, globalCostUsd: 5 })
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)
@@ -244,9 +320,14 @@ describe("interactive session extensions", () => {
         let loaded = yield* Queue.take(events)
         while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
 
-        expect(loaded.threadCostUsd).toBe(3)
-        expect(loaded.globalCostUsd).toBe(7)
-        expect(new Set(loaded.entries.map((entry) => entry.projectionCostUsd))).toEqual(new Set([3]))
+        expect(loaded.threadCostUsd).toBe(1)
+        expect(loaded.globalCostUsd).toBe(0)
+        expect(new Set(loaded.entries.map((entry) => entry.projectionCostUsd))).toEqual(new Set([1]))
+        yield* TestClock.adjust("1 second")
+        let refreshed = yield* Queue.take(events)
+        while (refreshed._tag !== "TitleCostUpdated" || refreshed.threadId !== first.id)
+          refreshed = yield* Queue.take(events)
+        expect(refreshed).toMatchObject({ threadCostUsd: 3, globalCostUsd: 7 })
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)

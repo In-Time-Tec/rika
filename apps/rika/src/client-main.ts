@@ -83,7 +83,7 @@ export const interactiveRuntimeRestartPlan = (input: {
     if (input.attempt >= input.limit)
       return {
         _tag: "fail",
-        message: `Rika interactive runtime restarted ${input.limit} times without becoming compatible; rebuild or reinstall Rika`,
+        message: "Rika could not finish upgrading. Reinstall Rika, then run it again.",
       }
     return {
       _tag: "respawn",
@@ -94,7 +94,10 @@ export const interactiveRuntimeRestartPlan = (input: {
     }
   }
   if (cleanInteractiveRuntimeExit(input.exitCode)) return { _tag: "done" }
-  return { _tag: "fail", message: `Rika interactive runtime exited with code ${input.exitCode}` }
+  return {
+    _tag: "fail",
+    message: "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
+  }
 }
 
 let interactiveSigintObserved = false
@@ -232,13 +235,6 @@ export const run = Effect.fn("ClientMain.run")(function* (argv?: ReadonlyArray<s
       InvalidInput: (error: Operation.InvalidInput) =>
         Console.error(error.message).pipe(Effect.andThen(Effect.fail(error))),
     }),
-    Effect.tapCause((cause) =>
-      Cause.hasInterruptsOnly(cause)
-        ? Effect.void
-        : Effect.logError("process.failed").pipe(
-            Effect.annotateLogs("rika.failure.kind", Cause.squash(cause) instanceof Error ? "Error" : typeof cause),
-          ),
-    ),
     Effect.annotateLogs({
       "rika.process.role": "client",
       "rika.process.pid": process.pid,

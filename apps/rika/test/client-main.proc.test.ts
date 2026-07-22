@@ -26,14 +26,15 @@ test("restart plan respawns on exit 75 with a restart message", () => {
 test("restart plan fails on exit 75 without a message, at the limit, and on other failures", () => {
   expect(interactiveRuntimeRestartPlan({ exitCode: 75, restart: undefined, attempt: 0, limit: 3 })).toEqual({
     _tag: "fail",
-    message: "Rika interactive runtime exited with code 75",
+    message: "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
   })
-  expect(interactiveRuntimeRestartPlan({ exitCode: 75, restart: { _tag: "restart" }, attempt: 3, limit: 3 })._tag).toBe(
-    "fail",
-  )
+  expect(interactiveRuntimeRestartPlan({ exitCode: 75, restart: { _tag: "restart" }, attempt: 3, limit: 3 })).toEqual({
+    _tag: "fail",
+    message: "Rika could not finish upgrading. Reinstall Rika, then run it again.",
+  })
   expect(interactiveRuntimeRestartPlan({ exitCode: 2, restart: undefined, attempt: 0, limit: 3 })).toEqual({
     _tag: "fail",
-    message: "Rika interactive runtime exited with code 2",
+    message: "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
   })
 })
 
@@ -72,6 +73,13 @@ const stubbedInteractive = Effect.fn("ClientMainTest.stubbedInteractive")(functi
       },
     }),
   )
+  const stdout = yield* Effect.forkScoped(
+    Stream.runFold(
+      handle.stdout.pipe(Stream.decodeText()),
+      () => "",
+      (text, chunk) => text + chunk,
+    ),
+  )
   const stderr = yield* Effect.forkScoped(
     Stream.runFold(
       handle.stderr.pipe(Stream.decodeText()),
@@ -84,7 +92,7 @@ const stubbedInteractive = Effect.fn("ClientMainTest.stubbedInteractive")(functi
     .split("\n")
     .filter((line) => line.length > 0)
     .map((line) => JSON.parse(line) as { restarted: string; thread: string })
-  return { exitCode, runs, stderr: yield* Fiber.join(stderr) }
+  return { exitCode, runs, output: `${yield* Fiber.join(stdout)}${yield* Fiber.join(stderr)}` }
 })
 
 test(
@@ -93,7 +101,7 @@ test(
     run(
       Effect.gen(function* () {
         const result = yield* stubbedInteractive("restart-once")
-        expect(result.exitCode, result.stderr).toBe(0)
+        expect(result.exitCode, result.output).toBe(0)
         expect(result.runs).toEqual([
           { restarted: "", thread: "" },
           { restarted: "1", thread: "t-1" },
@@ -111,7 +119,8 @@ test(
         const result = yield* stubbedInteractive("always-restart")
         expect(result.exitCode).toBe(2)
         expect(result.runs.length).toBe(interactiveRuntimeRestartLimit + 1)
-        expect(result.stderr).toContain(`restarted ${interactiveRuntimeRestartLimit} times`)
+        expect(result.output).toContain("Rika could not finish upgrading. Reinstall Rika, then run it again.")
+        expect(result.output).not.toContain("process.failed")
       }),
     ),
   30_000,
@@ -125,7 +134,12 @@ test(
         const result = yield* stubbedInteractive("silent-75")
         expect(result.exitCode).toBe(2)
         expect(result.runs.length).toBe(1)
-        expect(result.stderr).toContain("exited with code 75")
+        expect(result.output).toContain(
+          "Rika closed unexpectedly. Run rika again. If it keeps happening, run rika diagnostics status.",
+        )
+        expect(result.output).not.toContain("exited with code")
+        expect(result.output).not.toContain("process.failed")
+        expect(result.output).not.toContain("rika.process.role")
       }),
     ),
   30_000,

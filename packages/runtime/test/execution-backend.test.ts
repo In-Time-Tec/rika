@@ -1111,7 +1111,7 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect.each(["start", "replay", "cancel"] as const)("maps %s client failures to BackendError", (operation) =>
+  it.effect.each(["replay", "cancel"] as const)("maps %s client failures to BackendError", (operation) =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({
         fail: operation,
@@ -1119,15 +1119,97 @@ describe("ExecutionBackend Relay client adapter", () => {
       })
       const failure = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        if (operation === "start")
-          return yield* Effect.flip(
-            start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "p", startedAt: 1 }),
-          )
         if (operation === "replay") return yield* Effect.flip(backend.replay("turn-a"))
         return yield* Effect.flip(backend.cancel("turn-a", 2))
       }).pipe(provideBackend(fixture.implementation))
       expect(failure._tag).toBe("ExecutionBackendError")
       expect(failure.message).toContain(`${operation} failed`)
+    }),
+  )
+
+  it.effect("retries an unknown start outcome with the exact durable identity", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      const attempts = yield* Ref.make(0)
+      const implementation: Client.Interface = {
+        ...fixture.implementation,
+        executions: {
+          ...fixture.implementation.executions,
+          startByAgentDefinition: (input) =>
+            Ref.getAndUpdate(attempts, (count) => count + 1).pipe(
+              Effect.flatMap((attempt) =>
+                attempt === 0
+                  ? Ref.update(fixture.starts, (values) => [...values, input]).pipe(
+                      Effect.andThen(Effect.fail(clientFailure("start outcome unknown"))),
+                    )
+                  : fixture.implementation.executions.startByAgentDefinition(input),
+              ),
+            ),
+        },
+      }
+      const resultFiber = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* start(backend, {
+          threadId: "thread-a",
+          turnId: "turn-a",
+          prompt: "prompt",
+          startedAt: 1,
+        })
+      }).pipe(provideBackend(implementation), Effect.forkChild)
+
+      yield* TestClock.adjust("1 second")
+      const result = yield* Fiber.join(resultFiber)
+      const starts = yield* Ref.get(fixture.starts)
+      expect(result.status).toBe("completed")
+      expect(starts).toHaveLength(2)
+      expect(starts[1]).toEqual(starts[0])
+      expect(starts[0]).toMatchObject({
+        execution_id: "execution:turn-a",
+        idempotency_key: "turn-a",
+      })
+    }),
+  )
+
+  it.effect("keeps waiting when durable acceptance is not visible after fifteen seconds", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      const visible = yield* Ref.make(false)
+      const implementation: Client.Interface = {
+        ...fixture.implementation,
+        executions: {
+          ...fixture.implementation.executions,
+          startByAgentDefinition: () => Effect.never,
+          get: () =>
+            Ref.get(visible).pipe(
+              Effect.map((accepted) =>
+                accepted
+                  ? {
+                      id: Ids.ExecutionId.make("execution:turn-a"),
+                      root_address_id: Ids.AddressId.make("address:rika"),
+                      status: "running" as const,
+                      created_at: 1,
+                      updated_at: 1,
+                    }
+                  : undefined,
+              ),
+            ),
+        },
+      }
+      const resultFiber = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* start(backend, {
+          threadId: "thread-a",
+          turnId: "turn-a",
+          prompt: "prompt",
+          startedAt: 1,
+        })
+      }).pipe(provideBackend(implementation), Effect.forkChild)
+
+      yield* TestClock.adjust("16 seconds")
+      expect(resultFiber.pollUnsafe()).toBeUndefined()
+      yield* Ref.set(visible, true)
+      yield* TestClock.adjust("25 millis")
+      expect((yield* Fiber.join(resultFiber)).status).toBe("completed")
     }),
   )
 

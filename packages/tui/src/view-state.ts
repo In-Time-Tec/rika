@@ -1453,9 +1453,9 @@ export const update: {
           ...model.blocks,
           {
             _tag: "Error",
-            title: "Execution failed",
+            title: "Message failed",
             detail: message.message,
-            recovery: "Edit your prompt and press Enter to try again.",
+            recovery: "Press Enter to try again.",
           },
         ],
         items: [...model.items, { _tag: "Block", index: model.blocks.length }],

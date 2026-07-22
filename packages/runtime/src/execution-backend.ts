@@ -426,26 +426,16 @@ const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
   Ids.AgentId.make(`agent:rika:fan-out:${String(fanOutId)}:${String(childExecutionId)}`)
 const executionId = (turnId: string, reference?: ExecutionReference) =>
   Ids.ExecutionId.make(reference === undefined ? `execution:${turnId}` : turnId)
-const awaitExecutionAvailable = (
-  client: Client.Interface,
-  id: Ids.ExecutionId,
-  timeoutMessage: string,
-): Effect.Effect<void, Client.ClientError> => {
-  const poll: Effect.Effect<void, Client.ClientError> = Effect.suspend(() =>
-    client.executions
-      .get(id)
-      .pipe(
-        Effect.flatMap((existing) =>
-          existing === undefined ? Effect.sleep("25 millis").pipe(Effect.andThen(poll)) : Effect.void,
-        ),
+const awaitExecutionAvailable = (client: Client.Interface, id: Ids.ExecutionId): Effect.Effect<void> => {
+  const poll: Effect.Effect<void> = Effect.suspend(() =>
+    client.executions.get(id).pipe(
+      Effect.flatMap((existing) =>
+        existing === undefined ? Effect.sleep("25 millis").pipe(Effect.andThen(poll)) : Effect.void,
       ),
+      Effect.catchTag("ClientError", () => Effect.sleep("250 millis").pipe(Effect.andThen(poll))),
+    ),
   )
-  return poll.pipe(
-    Effect.timeoutOrElse({
-      duration: "15 seconds",
-      orElse: () => Effect.fail(Client.ClientError.make({ message: timeoutMessage })),
-    }),
-  )
+  return poll
 }
 const makeChildExecutionId = (parentTurnId: string, childId: string) =>
   Ids.ChildExecutionId.make(encodeChildExecutionId(parentTurnId, childId))
@@ -1477,38 +1467,49 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                     ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
                     child_run_presets: childRunPresets,
                   })
-              const start = client.executions
-                .startByAgentDefinition({
-                  root_address_id: addressId,
-                  session_id: startSessionId(input),
-                  agent_id: agentId,
-                  agent_revision: registered.record.current_revision,
-                  input: executionInput(input),
-                  idempotency_key: input.turnId,
-                  execution_id: id,
-                  started_at: input.startedAt,
-                  completed_at: input.startedAt,
-                })
-                .pipe(
-                  Effect.asVoid,
-                  Effect.catchTag("ClientError", (startError) =>
-                    client.executions.get(id).pipe(
-                      Effect.matchEffect({
-                        onFailure: () => Effect.fail(startError),
-                        onSuccess: (existing) => (existing === undefined ? Effect.fail(startError) : Effect.void),
-                      }),
+              const startInput = {
+                root_address_id: addressId,
+                session_id: startSessionId(input),
+                agent_id: agentId,
+                agent_revision: registered.record.current_revision,
+                input: executionInput(input),
+                idempotency_key: input.turnId,
+                execution_id: id,
+                started_at: input.startedAt,
+                completed_at: input.startedAt,
+              } as const
+              let acceptanceUnknownLogged = false
+              const start: Effect.Effect<void, Client.ClientError | Client.ResidentNamespaceReserved> = Effect.suspend(
+                () =>
+                  client.executions.startByAgentDefinition(startInput).pipe(
+                    Effect.asVoid,
+                    Effect.catchTag("ClientError", (startError) =>
+                      client.executions.get(id).pipe(
+                        Effect.matchEffect({
+                          onFailure: () => Effect.fail(startError),
+                          onSuccess: (existing) =>
+                            existing === undefined
+                              ? Effect.suspend(() => {
+                                  if (acceptanceUnknownLogged) return Effect.void
+                                  acceptanceUnknownLogged = true
+                                  return Effect.logWarning("execution.acceptance.unknown").pipe(
+                                    Effect.annotateLogs({
+                                      "rika.failure.kind": startError._tag,
+                                      "rika.failure.message": startError.message,
+                                    }),
+                                  )
+                                }).pipe(Effect.andThen(Effect.sleep("1 second")), Effect.andThen(start))
+                              : Effect.void,
+                        }),
+                      ),
                     ),
                   ),
-                )
+              )
               const starter = yield* Effect.forkChild(start)
               yield* Effect.yieldNow
               const started = starter.pollUnsafe()
               if (started !== undefined) yield* Fiber.join(starter)
-              else
-                yield* Effect.raceFirst(
-                  awaitExecutionAvailable(client, id, "Execution acceptance timed out"),
-                  Fiber.join(starter),
-                )
+              else yield* Effect.raceFirst(awaitExecutionAvailable(client, id), Fiber.join(starter))
               yield* Clock.currentTimeMillis.pipe(
                 Effect.flatMap((acceptedAt) =>
                   Effect.logInfo("execution.accepted").pipe(
@@ -1589,7 +1590,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, cancelledAt, reference) {
           return yield* Effect.gen(function* () {
             const id = executionId(turnId, reference)
-            yield* awaitExecutionAvailable(client, id, "Execution did not become available for cancellation")
+            yield* awaitExecutionAvailable(client, id).pipe(
+              Effect.timeoutOrElse({
+                duration: "15 seconds",
+                orElse: () =>
+                  Effect.fail(
+                    Client.ClientError.make({ message: "Execution did not become available for cancellation" }),
+                  ),
+              }),
+            )
             const accepted = yield* client.executions.cancel({
               execution_id: id,
               cancelled_at: cancelledAt,

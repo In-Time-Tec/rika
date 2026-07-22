@@ -7,7 +7,7 @@ import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Catalog as ToolCatalog } from "@rika/tools"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
-import { Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
 import { Operation, ResolvedContext } from "../src/index"
@@ -1254,11 +1254,31 @@ describe("Operation", () => {
           Ref.update(inspections, (values) => [...values, String(turnId)]).pipe(
             Effect.as({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
           ),
-        replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: [] }),
+        replay: (turnId) =>
+          Effect.succeed({
+            turnId,
+            status: "completed" as const,
+            events: [
+              {
+                cursor: `summary-repair-completed-${turnId}`,
+                sequence: 1,
+                type: "execution.completed" as const,
+                createdAt: 1,
+              },
+            ],
+          }),
       })
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
-        yield* operation.run({ _tag: "Interactive", prompt: [], workspace: "/work", ephemeral: false })
+        yield* operation.run({
+          _tag: "Run",
+          prompt: ["continue"],
+          threadId: thread.id,
+          ephemeral: false,
+          streamJson: false,
+          streamJsonInput: false,
+          streamJsonThinking: false,
+        })
       }).pipe(
         provideLayer(
           Operation.productLayer({
@@ -1267,8 +1287,7 @@ describe("Operation", () => {
             backendLayer: Layer.succeed(ExecutionBackend.Service, repairBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
-            makeTurnId: Effect.die("unused"),
-            interactive: () => Effect.void,
+            makeTurnId: Effect.succeed(Turn.TurnId.make("continued-turn")),
           }),
         ),
       )
@@ -1276,6 +1295,59 @@ describe("Operation", () => {
         101,
       )
     }),
+  )
+
+  it.effect("opens the interactive operation without waiting for thread summary repair", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const thread = selectionThread("summary-repair-startup-thread")
+        const turn: Turn.Turn = {
+          id: Turn.TurnId.make("summary-repair-startup-turn"),
+          threadId: thread.id,
+          prompt: "repair",
+          executionRoute: executionRoute(),
+          status: "completed",
+          createdAt: 1,
+          updatedAt: 1,
+        }
+        const repairStarted = yield* Deferred.make<void>()
+        const releaseRepair = yield* Deferred.make<void>()
+        const opened = yield* Deferred.make<void>()
+        const repairBackend = ExecutionBackend.Service.of({
+          ...backend,
+          inspect: (turnId) =>
+            String(turnId) === String(turn.id)
+              ? Deferred.succeed(repairStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseRepair)),
+                  Effect.as({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
+                )
+              : Effect.void.pipe(Effect.as(undefined)),
+        })
+        const context = yield* Layer.build(
+          Operation.productLayer({
+            repositoryLayer: ThreadRepository.memoryLayer([thread]),
+            turnRepositoryLayer: TurnRepository.memoryLayer([turn]),
+            backendLayer: Layer.succeed(ExecutionBackend.Service, repairBackend),
+            defaultWorkspace: "/work",
+            makeThreadId: Effect.die("unused"),
+            makeTurnId: Effect.die("unused"),
+            interactive: () => Deferred.succeed(opened, undefined).pipe(Effect.andThen(Effect.never)),
+          }),
+        )
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], workspace: "/work", ephemeral: false }),
+        )
+
+        yield* Deferred.await(opened)
+        expect((yield* Deferred.poll(repairStarted))._tag).toBe("None")
+        yield* TestClock.adjust("2 seconds")
+        yield* Deferred.await(repairStarted)
+
+        yield* Deferred.succeed(releaseRepair, undefined)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
   )
 
   it.effect("repairs each orphan once in the owner scope and scans again on reconnect", () =>
@@ -1324,6 +1396,7 @@ describe("Operation", () => {
         const reconnects = yield* Effect.forEach(["/one", "/two"], (workspace) =>
           Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], workspace, ephemeral: false })),
         )
+        yield* TestClock.adjust("2 seconds")
         yield* Deferred.await(firstStarted)
         yield* settleEvents
         const callbacksBeforeRepairFinished = yield* Ref.get(callbacks)
@@ -1342,6 +1415,7 @@ describe("Operation", () => {
         })
         yield* turns.setStatus(Turn.TurnId.make("repair-two"), "running", undefined, 2)
         yield* operation.run({ _tag: "Interactive", prompt: [], workspace: "/three", ephemeral: false })
+        yield* TestClock.adjust("2 seconds")
         yield* settleEvents
         expect(yield* Ref.get(starts)).toEqual(["repair-one", "repair-two"])
       }).pipe(provideLayer(layer))
@@ -1385,6 +1459,7 @@ describe("Operation", () => {
             }),
           { concurrency: "unbounded", discard: true },
         )
+        yield* TestClock.adjust("2 seconds")
         yield* Deferred.await(firstScanStarted)
         yield* Deferred.succeed(releaseFirstScan, undefined)
         while ((yield* Ref.get(scans)) < 2) yield* Effect.yieldNow
@@ -1514,6 +1589,7 @@ describe("Operation", () => {
             yield* Effect.all([one.session.selectThread(thread.id, 1), two.session.selectThread(thread.id, 1)], {
               concurrency: 2,
             })
+            while ((yield* Ref.get(wakes)).length === 0) yield* Effect.sleep("10 millis")
             const promoter = (yield* Ref.get(promoters))[0]
             const wake = (yield* Ref.get(wakes))[0]
             if (promoter === undefined || wake === undefined) return yield* Effect.die("Missing promoter wake")
@@ -2538,7 +2614,10 @@ describe("Operation", () => {
         "steer-failure-later",
       ])
       expect(received).toContainEqual(
-        expect.objectContaining({ _tag: "ExecutionFailed", message: expect.stringContaining("forced steer failure") }),
+        expect.objectContaining({
+          _tag: "ExecutionFailed",
+          message: "Rika could not complete that action. Run rika diagnostics status if it keeps happening.",
+        }),
       )
     }),
   )
@@ -3310,6 +3389,7 @@ describe("Operation", () => {
       yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
+        yield* TestClock.adjust("2 seconds")
         while ((yield* repository.get(thread.id))?.title !== "Recovered Durable Title") yield* Effect.yieldNow
       }).pipe(
         provideLayer(
@@ -3468,8 +3548,11 @@ describe("Operation", () => {
       const failedEvent = yield* runCase("failed-event")
       const cancelled = yield* runCase("cancelled")
       const failedBackendEvent = nonActivation(failedBackend.events).find((event) => event._tag === "ExecutionFailed")
-      expect(failedBackendEvent).toMatchObject({ _tag: "ExecutionFailed" })
-      expect(failedBackendEvent?._tag === "ExecutionFailed" ? failedBackendEvent.message : undefined).toContain(
+      expect(failedBackendEvent).toMatchObject({
+        _tag: "ExecutionFailed",
+        message: "Rika could not start this message. Run rika diagnostics status if it keeps happening.",
+      })
+      expect(failedBackendEvent?._tag === "ExecutionFailed" ? failedBackendEvent.message : undefined).not.toContain(
         "interactive backend failed",
       )
       expect(failedBackend.turn?.status).toBe("failed")
