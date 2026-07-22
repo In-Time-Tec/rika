@@ -915,14 +915,13 @@ const backfillTranscriptTree = Effect.fn("Operation.backfillTranscriptTree")(fun
 ) {
   const transcripts = yield* TranscriptRepository.Service
   const current = yield* transcripts.get(turn.id)
-  if (current === undefined) return false
+  if (current === undefined) return
   const root = sourceProjection(current)
-  if (!force && !hasChildrenAwaitingBackfill(root)) return false
+  if (!force && !hasChildrenAwaitingBackfill(root)) return
   const backend = yield* ExecutionBackend.Service
   const tree = yield* backfillChildTranscripts(backend, turn.id, root)
-  if (tree === root) return false
+  if (tree === root) return
   yield* transcripts.replace(turn, tree)
-  return true
 })
 
 const childExecutionId = (event: ExecutionBackend.Event): string | undefined => {
@@ -2738,30 +2737,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             }),
           )
         })
-        const runDeferredBackfills = Effect.fn("Operation.interactive.runDeferredBackfills")(function* (
-          thread: Thread.Thread,
-          request: number,
-          deferred: ReadonlyArray<{ readonly turn: Turn.Turn; readonly force: boolean }>,
-          dispatch: (event: InteractiveEvent) => void,
-        ) {
-          let wrote = false
-          for (const { turn, force } of deferred) {
-            if ((yield* Ref.get(selectionRequest)) !== request) return
-            if (yield* backfillTree(turn, force).pipe(Effect.orElseSucceed(() => false))) wrote = true
-            yield* healTerminalTurn(turn).pipe(Effect.ignore)
-          }
-          if (!wrote || (yield* Ref.get(selectionRequest)) !== request) return
-          dispatch({
-            _tag: "TranscriptResyncRequired",
-            selectionEpoch: request,
-            threadId: thread.id,
-            reason: "Subagent transcripts were backfilled after the initial load",
-          })
-        })
         const projectTurnPage = Effect.fn("Operation.interactive.projectTurnPage")(function* (
           thread: Thread.Thread,
           request: number,
-          deferBackfill: (turn: Turn.Turn, force: boolean) => void,
           before?: TurnRepository.PageCursor,
         ) {
           const turns = yield* TurnRepository.Service
@@ -2778,7 +2756,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   isTerminalStatus(turn.status) &&
                   projected.checkpointCursor === turn.lastCursor
                 ) {
-                  deferBackfill(turn, false)
+                  yield* backfillTree(turn, false)
+                  yield* healTerminalTurn(turn)
                   return
                 }
                 if (turn.status === "queued") {
@@ -2790,11 +2769,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     yield* projectionAdmission.withPermits(1)(
                       transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
                     )
-                  else if (isTerminalStatus(turn.status)) deferBackfill(turn, false)
+                  else if (isTerminalStatus(turn.status)) yield* healTerminalTurn(turn)
                   return
                 }
                 yield* projectExecutionPages(backend, turn, execution.status)
-                deferBackfill({ ...turn, status: execution.status }, true)
+                yield* backfillTree({ ...turn, status: execution.status }, true)
+                yield* healTerminalTurn({ ...turn, status: execution.status })
               }),
             { concurrency: 4, discard: true },
           )
@@ -2813,32 +2793,21 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const turns = yield* TurnRepository.Service
           const transcripts = yield* TranscriptRepository.Service
           const backend = yield* ExecutionBackend.Service
-          const deferredBackfills: Array<{ readonly turn: Turn.Turn; readonly force: boolean }> = []
-          const deferBackfill = (turn: Turn.Turn, force: boolean) => {
-            deferredBackfills.push({ turn, force })
-          }
           if (before === undefined) {
-            if (!(yield* projectTurnPage(thread, request, deferBackfill))) return
+            if (!(yield* projectTurnPage(thread, request))) return
             while (yield* Ref.get(transcriptHasUnprojectedTurns)) {
               const available = yield* transcripts.page(thread.id, { limit: 200 })
               if (available.entries.length >= 200) break
               const turnBefore = yield* Ref.get(projectedTurnCursor)
-              if (turnBefore === undefined || !(yield* projectTurnPage(thread, request, deferBackfill, turnBefore)))
-                return
+              if (turnBefore === undefined || !(yield* projectTurnPage(thread, request, turnBefore))) return
             }
           } else {
             const available = yield* transcripts.page(thread.id, { before, limit: 50 })
             if (!available.hasOlder && (yield* Ref.get(transcriptHasUnprojectedTurns))) {
               const turnBefore = yield* Ref.get(projectedTurnCursor)
-              if (turnBefore !== undefined && !(yield* projectTurnPage(thread, request, deferBackfill, turnBefore)))
-                return
+              if (turnBefore !== undefined && !(yield* projectTurnPage(thread, request, turnBefore))) return
             }
           }
-          if (deferredBackfills.length > 0)
-            yield* Effect.forkIn(
-              runDeferredBackfills(thread, request, deferredBackfills, dispatch).pipe(Effect.ignore),
-              sessionScope,
-            )
           if ((yield* Ref.get(selectionRequest)) !== request) return
           const page = yield* transcripts.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
           const olderPages: Array<typeof page.entries> = []
