@@ -68,6 +68,8 @@ import {
   toolsAtDepth,
 } from "./agent-depth"
 import { resolveSpawnModel } from "./agent-model"
+import * as DataBlobStore from "./data-blob-store"
+import * as ImageInputModel from "./image-input-model"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"
 
@@ -283,11 +285,15 @@ const withResilience = (
   registration: ModelRegistry.Registration,
   resilience: ModelResilience.Interface | undefined,
 ): ModelRegistry.Registration => {
-  if (resilience === undefined) return registration
+  const imageInputLayer = Layer.effect(
+    LanguageModel.LanguageModel,
+    LanguageModel.LanguageModel.pipe(Effect.map(ImageInputModel.make)),
+  ).pipe(Layer.provideMerge(registration.layer))
+  if (resilience === undefined) return { ...registration, layer: imageInputLayer }
   const modelLayer = Layer.effect(
     LanguageModel.LanguageModel,
     LanguageModel.LanguageModel.pipe(Effect.map((model) => ModelResilience.apply(model, resilience))),
-  ).pipe(Layer.provideMerge(registration.layer))
+  ).pipe(Layer.provideMerge(imageInputLayer))
   return { ...registration, layer: modelLayer }
 }
 
@@ -646,14 +652,7 @@ const error = (cause: unknown): BackendError =>
   isBackendError(cause) ? cause : BackendError.make({ message: String(cause) })
 const executionInput = (input: { readonly prompt: string; readonly promptParts?: ReadonlyArray<PromptPart> }) =>
   input.promptParts?.map((part) =>
-    part.type === "text"
-      ? Content.text(part.text)
-      : {
-          type: "blob-reference" as const,
-          uri: `data:${part.mediaType};base64,${part.data}`,
-          media_type: part.mediaType,
-          ...(part.filename === undefined ? {} : { filename: part.filename }),
-        },
+    part.type === "text" ? Content.text(part.text) : DataBlobStore.reference(part.mediaType, part.data, part.filename),
   ) ?? [Content.text(input.prompt)]
 
 const mapFanOut = (value: any) => {
@@ -1915,8 +1914,6 @@ export const layer = <
             ...registrationsFor(options).map((registration) => Effect.succeed(registration)),
             ThreadHost.hostRegistration,
           ]
-          const modelContext = yield* Layer.build(ModelRegistry.layer(registrationEffects)).pipe(Effect.mapError(error))
-          const modelRegistry = Context.get(modelContext, ModelRegistry.ModelRegistry)
           const relayModelContext = yield* Layer.build(
             ModelHub.layerFromRegistrationEffects(
               registrationEffects as unknown as ReadonlyArray<
@@ -1924,6 +1921,7 @@ export const layer = <
               >,
             ),
           ).pipe(Effect.mapError(error))
+          const modelRegistry = Context.get(relayModelContext, ModelHub.Service).modelRegistry
           const languageModelLayer = Layer.succeedContext(relayModelContext)
           const sharedModelRegistryLayer = Layer.succeed(ModelRegistry.ModelRegistry, modelRegistry)
           const rikaToolRuntimeLayer =
@@ -2187,6 +2185,7 @@ export const layer = <
             database: SQLite.database({ filename: options.filename }),
             languageModelLayer,
             toolRuntimeLayer,
+            blobStoreLayer: DataBlobStore.layer,
             childFanOutHostLayer: fanOutHandlers,
             workflowDefinitionHostLayer: workflowHandlers,
           })
@@ -2194,9 +2193,12 @@ export const layer = <
             ...options,
             onClientReady: (client) => Deferred.complete(relayClient, Effect.succeed(client)).pipe(Effect.asVoid),
             registerModels: (registrations) =>
-              Effect.forEach(registrations, (registration) => modelRegistry.register({ registration }), {
-                discard: true,
-              }),
+              Effect.forEach(
+                registrations,
+                (registration) =>
+                  modelRegistry.register({ registration: withResilience(registration, options.modelResilience) }),
+                { discard: true },
+              ),
           }).pipe(Layer.provide(runtimeLayer), Layer.provide(promoterRegistryLayer))
         }
       }

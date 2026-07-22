@@ -46,7 +46,10 @@ const withBackend = <A, E>(
     fixture: TestModel.Fixture,
     directory: string,
   ) => Effect.Effect<A, E, ExecutionBackend.Service | FileSystem.FileSystem>,
-  options?: Pick<RelayExecutionBackend.LayerOptions, "modelResilience" | "compaction" | "permissionPolicy"> & {
+  options?: Pick<
+    RelayExecutionBackend.LayerOptions,
+    "modelResilience" | "compaction" | "permissionPolicy" | "modelVariantPolicy"
+  > & {
     readonly registration?: (fixture: TestModel.Fixture) => ModelRegistry.Registration
   },
 ) =>
@@ -108,6 +111,104 @@ test(
         expect(result.after.events[0]?.cursor).not.toBe(result.replay.events[0]?.cursor)
         expect(result.requests).toHaveLength(1)
       }),
+    ),
+  30_000,
+)
+
+test(
+  "delivers image attachments to Baton as image bytes",
+  () =>
+    runNative(
+      withBackend([TestModel.text("image received")], (fixture) =>
+        Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          yield* start(backend, {
+            threadId: "thread-image",
+            turnId: "turn-image",
+            prompt: "inspect [Image #1]",
+            promptParts: [
+              { type: "text", text: "inspect " },
+              { type: "image", mediaType: "image/png", data: "AQID", filename: "shot.png" },
+              { type: "text", text: " closely" },
+            ],
+            startedAt: 1,
+          })
+          const requests = yield* fixture.requests
+          const parts = requests[0]?.prompt.content.flatMap((message) =>
+            message.role === "user" && Array.isArray(message.content) ? message.content : [],
+          )
+          expect(parts).toMatchObject([
+            { type: "text", text: "inspect " },
+            { type: "file", mediaType: "image/png", data: Uint8Array.from([1, 2, 3]), fileName: "shot.png" },
+            { type: "text", text: " closely" },
+          ])
+        }),
+      ),
+    ),
+  30_000,
+)
+
+test(
+  "rejects malformed inline images before the model request",
+  () =>
+    runNative(
+      withBackend([TestModel.text("unused")], (fixture) =>
+        Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          const result = yield* start(backend, {
+            threadId: "thread-malformed-image",
+            turnId: "turn-malformed-image",
+            prompt: "inspect [Image #1]",
+            promptParts: [{ type: "image", mediaType: "image/png", data: "not-base64", filename: "shot.png" }],
+            startedAt: 1,
+          })
+          expect(result.status).toBe("failed")
+          expect(yield* fixture.requests).toHaveLength(0)
+        }),
+      ),
+    ),
+  30_000,
+)
+
+test(
+  "delivers image bytes through a dynamically registered model",
+  () =>
+    runNative(
+      withBackend(
+        [TestModel.text("unused")],
+        () =>
+          Effect.gen(function* () {
+            const dynamic = yield* TestModel.make([TestModel.text("dynamic image received")], {
+              provider: "test",
+              model: "dynamic-image",
+              registrationKey: "dynamic-image",
+            })
+            const backend = yield* ExecutionBackend.Service
+            yield* backend.registerModels!([dynamic.registration])
+            const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+              mode: "test",
+              main: executionModelRoute("main", dynamic.selection),
+              oracle: executionModelRoute("oracle", dynamic.selection),
+            }
+            const result = yield* start(backend, {
+              threadId: "thread-dynamic-image",
+              turnId: "turn-dynamic-image",
+              prompt: "inspect image",
+              promptParts: [{ type: "image", mediaType: "image/png", data: "AQID", filename: "shot.png" }],
+              startedAt: 1,
+              executionRoute,
+            })
+            const requests = yield* dynamic.requests
+            const parts = requests[0]?.prompt.content.flatMap((message) =>
+              message.role === "user" && Array.isArray(message.content) ? message.content : [],
+            )
+            expect(result.status).toBe("completed")
+            expect(parts).toMatchObject([
+              { type: "file", mediaType: "image/png", data: Uint8Array.from([1, 2, 3]), fileName: "shot.png" },
+            ])
+          }),
+        { modelVariantPolicy: "registration-key" },
+      ),
     ),
   30_000,
 )
@@ -1104,6 +1205,15 @@ for (const answer of ["Approved", "Denied", "Always"] as const) {
                 threadId: `thread-${answer}`,
                 turnId: `turn-${answer}`,
                 prompt: "read fixture",
+                ...(answer === "Approved"
+                  ? {
+                      promptParts: [
+                        { type: "text" as const, text: "read " },
+                        { type: "image" as const, mediaType: "image/png", data: "AQID", filename: "shot.png" },
+                        { type: "text" as const, text: " fixture" },
+                      ],
+                    }
+                  : {}),
                 startedAt: 1,
               }
               const waiting = yield* useBackend(
@@ -1134,6 +1244,16 @@ for (const answer of ["Approved", "Denied", "Always"] as const) {
           expect(result.duplicate.status).toBe(answer === "Denied" ? "failed" : "completed")
           expect(result.approvals).toEqual([])
           expect(result.requests).toHaveLength(answer === "Denied" ? 1 : 2)
+          if (answer === "Approved") {
+            const userParts = result.requests[1]?.prompt.content.flatMap((message) =>
+              message.role === "user" && Array.isArray(message.content) ? message.content : [],
+            )
+            expect(userParts).toMatchObject([
+              { type: "text", text: "read " },
+              { type: "file", mediaType: "image/png", data: Uint8Array.from([1, 2, 3]), fileName: "shot.png" },
+              { type: "text", text: " fixture" },
+            ])
+          }
           expect(result.replay.events.filter((event) => event.type === "tool.result.received")).toHaveLength(
             answer === "Denied" ? 0 : 1,
           )
