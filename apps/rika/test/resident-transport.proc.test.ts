@@ -20,25 +20,22 @@ afterEach(() => killTrackedHosts())
 
 describe("resident WebSocket process transport", () => {
   test(
-    "supersedes an authenticated old resident before starting the current host",
+    "does not disclose credentials to or supersede a pre-proof resident",
     () =>
       run(
         Effect.gen(function* () {
           const root = yield* makeRoot
+          const old = yield* startOldResident(root)
           try {
-            const old = yield* startOldResident(root)
-            const startedAt = yield* Clock.currentTimeMillis
             const client = yield* start(root, 1_000)
-            expect(yield* client.nextEffect).toEqual({ type: "resident-status", callbacks: 1 })
-            const attached = yield* attachedEffect(client)
-            expect(attached.hostPid).not.toBe(Number(old.pid))
-            expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(8_000)
-            yield* waitUntil(fileExists(`${root}/old-resident-stopped`), 2_000)
-            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${attached.hostPid}\n`)
-            yield* client.send("ping")
-            expect((yield* client.nextEffect).type).toBe("pong")
-            yield* client.closeEffect
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              tag: "ResidentServiceError",
+            })
+            expect(alive(Number(old.pid))).toBe(true)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
           } finally {
+            yield* old.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
             yield* cleanRoot(root)
           }
         }),
@@ -192,7 +189,7 @@ describe("resident WebSocket process transport", () => {
             const client = yield* start(root, 1_000)
             expect(yield* client.nextEffect).toMatchObject({
               type: "rejected",
-              error: expect.stringContaining("could not be verified"),
+              error: expect.stringContaining("could not be authenticated"),
             })
             expect(alive(Number(old.pid))).toBe(true)
             expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
@@ -206,7 +203,7 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
-    "fails once without spawning when an authenticated stale listener PID cannot be verified",
+    "fails once without spawning for an unrecorded pre-proof listener",
     () =>
       run(
         Effect.gen(function* () {
@@ -217,7 +214,7 @@ describe("resident WebSocket process transport", () => {
             const client = yield* start(root, 1_000)
             expect(yield* client.nextEffect).toMatchObject({
               type: "rejected",
-              error: expect.stringContaining("its PID could not be verified"),
+              error: expect.stringContaining("could not be authenticated"),
             })
             expect((yield* Clock.currentTimeMillis) - startedAt).toBeLessThan(4_000)
             expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
@@ -247,7 +244,7 @@ describe("resident WebSocket process transport", () => {
             const client = yield* start(root, 1_000)
             expect(yield* client.nextEffect).toMatchObject({
               type: "rejected",
-              error: expect.stringContaining("could not be verified"),
+              error: expect.stringContaining("could not be authenticated"),
             })
             expect(alive(Number(old.pid))).toBe(true)
             expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)

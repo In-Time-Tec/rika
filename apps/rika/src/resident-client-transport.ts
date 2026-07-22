@@ -24,7 +24,7 @@ import {
 } from "effect"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import * as Socket from "effect/unstable/socket/Socket"
-import { readOrCreateToken, recordedResidentProcesses, resolve } from "./resident-endpoint"
+import { readOrCreateToken, resolve } from "./resident-endpoint"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { claimStartup } from "./resident-startup"
 import {
@@ -34,7 +34,6 @@ import {
   json,
   makeServerMessageFrameDecoder,
   maxFrameBytes,
-  parse,
   transportError,
 } from "./resident-wire"
 
@@ -110,68 +109,6 @@ const isDisconnectedOperation = (error: unknown) =>
 const isReconnectableTransport = (error: unknown) =>
   Schema.is(ResidentService.ResidentServiceError)(error) &&
   (error.reason === "resident-absent" || error.reason === "resident-draining" || error.reason === "transport-failed")
-const legacyCapabilities = ["ping", "startup-state", "transcript-pages", "interactive-ack"]
-const probeWebSocket = (url: string, handshake: string, matches: (text: string) => boolean) =>
-  Effect.callback<boolean>((resume) => {
-    const socket = new WebSocket(url)
-    let settled = false
-    const finish = (matched: boolean) => {
-      if (settled) return
-      settled = true
-      socket.close()
-      resume(Effect.succeed(matched))
-    }
-    socket.addEventListener("open", () => socket.send(handshake))
-    socket.addEventListener("message", (event) => finish(matches(String(event.data))))
-    socket.addEventListener("close", () => finish(false))
-    socket.addEventListener("error", () => finish(false))
-    return Effect.sync(() => {
-      settled = true
-      socket.close()
-    })
-  }).pipe(Effect.timeoutOrElse({ duration: "750 millis", orElse: () => Effect.succeed(false) }))
-
-const probeLegacyResident = Effect.fn("ResidentTransport.probeLegacyResident")(function* (options: {
-  readonly urls: ReadonlyArray<string>
-  readonly identity: string
-  readonly token: string
-  readonly clientKind: ResidentService.Handshake["clientKind"]
-}) {
-  const crypto = yield* Crypto.Crypto
-  for (const url of options.urls) {
-    const clientNonce = yield* crypto.randomUUIDv4
-    const matched = yield* probeWebSocket(
-      url,
-      json({
-        family: "rika-resident",
-        version: { major: 1, minor: 0 },
-        identity: options.identity,
-        token: options.token,
-        clientNonce,
-        clientKind: options.clientKind,
-        clientVersion: "resident-upgrade",
-        capabilities: legacyCapabilities,
-      }),
-      (text) => {
-        const message = parse(text)
-        return (
-          message !== null &&
-          typeof message === "object" &&
-          "_tag" in message &&
-          message._tag === "accepted" &&
-          "family" in message &&
-          message.family === "rika-resident" &&
-          "identity" in message &&
-          message.identity === options.identity &&
-          "clientNonce" in message &&
-          message.clientNonce === clientNonce
-        )
-      },
-    )
-    if (matched) return true
-  }
-  return false
-})
 const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
   readonly url: string
   readonly identity: string
@@ -859,34 +796,20 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                     }
                     if (lastFailure.reason === "resident-absent" || lastFailure.reason === "incompatible-resident") {
                       if (yield* ResidentProcessStartup.listenerIsLive(endpoint.port)) {
-                        const oldProtocolVerified =
-                          lastFailure.reason === "resident-absent" &&
-                          (yield* probeLegacyResident({
-                            urls: [endpoint.url, endpoint.legacyUrl],
-                            identity: endpoint.identity,
-                            token,
-                            clientKind: input.clientKind,
-                          }))
-                        const recorded = yield* recordedResidentProcesses(endpoint).pipe(Effect.orElseSucceed(() => []))
-                        const alive = [] as Array<(typeof recorded)[number]>
-                        for (const resident of recorded)
-                          if (
-                            resident.pid !== process.pid &&
-                            (yield* ResidentProcessStartup.processIsAlive(resident.pid))
-                          )
-                            alive.push(resident)
-                        const candidates =
-                          lastFailure.reason === "incompatible-resident" && lastFailure.residentPid !== undefined
-                            ? [lastFailure.residentPid]
-                            : alive.map((resident) => resident.pid)
-                        const listeners = yield* ResidentProcessStartup.listenerProcessIds(endpoint.port, candidates)
-                        const protocolVerified = lastFailure.reason === "incompatible-resident" || oldProtocolVerified
-                        if (listeners.length !== 1 || !protocolVerified) {
+                        if (lastFailure.reason !== "incompatible-resident" || lastFailure.residentPid === undefined) {
                           yield* claim.release
                           return yield* transportError(
-                            protocolVerified
-                              ? `The stale Rika resident on port ${endpoint.port} was authenticated, but its PID could not be verified. Stop it, then run rika again`
-                              : `A process is listening on Rika resident port ${endpoint.port}, but it could not be verified as this profile's resident. Stop that process, then run rika again`,
+                            `A process is listening on Rika resident port ${endpoint.port}, but it could not be authenticated. Stop that process, then run rika again`,
+                            "foreign-listener",
+                          )
+                        }
+                        const listeners = yield* ResidentProcessStartup.listenerProcessIds(endpoint.port, [
+                          lastFailure.residentPid,
+                        ])
+                        if (listeners.length !== 1) {
+                          yield* claim.release
+                          return yield* transportError(
+                            `The stale Rika resident on port ${endpoint.port} was authenticated, but its PID could not be verified. Stop it, then run rika again`,
                             "foreign-listener",
                           )
                         }
