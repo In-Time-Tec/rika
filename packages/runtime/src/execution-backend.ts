@@ -640,10 +640,26 @@ const childSessionId = (childExecutionId: Ids.ChildExecutionId) =>
 const isBackendError = Schema.is(BackendError)
 const error = (cause: unknown): BackendError =>
   isBackendError(cause) ? cause : BackendError.make({ message: String(cause) })
-const executionInput = (input: { readonly prompt: string; readonly promptParts?: ReadonlyArray<PromptPart> }) =>
-  input.promptParts?.map((part) =>
-    part.type === "text" ? Content.text(part.text) : DataBlobStore.reference(part.mediaType, part.data, part.filename),
-  ) ?? [Content.text(input.prompt)]
+const executionInput = (input: { readonly prompt: string; readonly promptParts?: ReadonlyArray<PromptPart> }) => {
+  if (input.promptParts === undefined) return [Content.text(input.prompt)]
+  const parts: Array<ReturnType<typeof Content.text> | ReturnType<typeof DataBlobStore.reference>> = []
+  let pendingText: string | undefined
+  const flushText = () => {
+    if (pendingText === undefined) return
+    parts.push(Content.text(pendingText))
+    pendingText = undefined
+  }
+  for (const part of input.promptParts) {
+    if (part.type === "text") {
+      pendingText = (pendingText ?? "") + part.text
+      continue
+    }
+    flushText()
+    parts.push(DataBlobStore.reference(part.mediaType, part.data, part.filename))
+  }
+  flushText()
+  return parts
+}
 
 const mapFanOut = (value: any) => {
   const parentTurnId = String(value.parent_execution_id).replace(/^execution:/, "")

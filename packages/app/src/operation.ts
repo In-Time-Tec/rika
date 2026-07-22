@@ -501,7 +501,7 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
             ThreadActivity.latestCursor(result.events),
             yield* Clock.currentTimeMillis,
           )
-          if (!isTerminalStatus(result.status)) return
+          if (!isTerminalStatus(result.status) || result.status === "failed") return
         }
       }),
     { discard: true },
@@ -2075,7 +2075,6 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                           turnId: turn.id,
                           message: executionStartFailureMessage,
                         })
-                        yield* settleThread(thread, dispatch)
                         return
                       }
                       const result = outcome.value
@@ -2124,7 +2123,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                           turnId: turn.id,
                           message: `Execution ${result.status}`,
                         })
-                      yield* settleThread(thread, dispatch)
+                      if (result.status !== "failed") yield* settleThread(thread, dispatch)
                     }),
                   )
                 }).pipe(
@@ -2417,7 +2416,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             yield* projectExecutionResult(thread.id, result)
             yield* appendProjection(updatedTurn, result.events)
             yield* backfillTree(updatedTurn, true)
-            return isTerminalStatus(result.status)
+            return isTerminalStatus(result.status) && result.status !== "failed"
           })
           const runNext = Effect.fn("Operation.interactive.runNextQueued")(function* () {
             return yield* Effect.uninterruptibleMask((restore) =>

@@ -658,11 +658,11 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("reconciles FIFO successors after failed and cancelled turns", () =>
+  it.effect("drains past a cancelled turn but halts the queue at a failed turn", () =>
     Effect.gen(function* () {
       const threadId = Thread.ThreadId.make("terminal-fifo")
       const turns = yield* TurnRepository.makeMemory(
-        ["failed", "cancelled", "completed"].map((id, index) => ({
+        ["cancelled", "failed", "completed"].map((id, index) => ({
           id: Turn.TurnId.make(id),
           threadId,
           prompt: id,
@@ -698,7 +698,49 @@ describe("Operation", () => {
           ),
         ),
       )
-      expect(yield* Ref.get(starts)).toEqual(["failed", "cancelled", "completed"])
+      expect(yield* Ref.get(starts)).toEqual(["cancelled", "failed"])
+      expect((yield* turns.get(Turn.TurnId.make("completed")))?.status).toBe("queued")
+    }),
+  )
+
+  it.effect("holds the remaining queue after a promoted turn fails", () =>
+    Effect.gen(function* () {
+      const threadId = Thread.ThreadId.make("failed-holds-queue")
+      const turns = yield* TurnRepository.makeMemory(
+        ["failing", "later"].map((id, index) => ({
+          id: Turn.TurnId.make(id),
+          threadId,
+          prompt: id,
+          executionRoute: executionRoute(),
+          status: "queued" as const,
+          createdAt: index + 1,
+          updatedAt: index + 1,
+        })),
+      )
+      const starts = yield* Ref.make<ReadonlyArray<string>>([])
+      const failingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        start: (input) =>
+          Ref.update(starts, (values) => [...values, String(input.turnId)]).pipe(
+            Effect.as({
+              turnId: input.turnId,
+              status: input.turnId === "failing" ? ("failed" as const) : ("completed" as const),
+              events: [],
+            }),
+          ),
+      })
+      yield* Operation.reconcile().pipe(
+        provideLayer(
+          Layer.mergeAll(
+            reconcileDependencies(unusedExtensions),
+            ThreadRepository.memoryLayer(),
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(ExecutionBackend.Service, failingBackend),
+          ),
+        ),
+      )
+      expect(yield* Ref.get(starts)).toEqual(["failing"])
+      expect((yield* turns.get(Turn.TurnId.make("later")))?.status).toBe("queued")
     }),
   )
 
@@ -3515,9 +3557,6 @@ describe("Operation", () => {
               yield* Effect.yieldNow
             }
             if (status === "backend")
-              while ((yield* turns.get(Turn.TurnId.make("successor-backend")))?.status !== "completed")
-                yield* Effect.yieldNow
-            if (status === "backend")
               while (!(yield* Ref.get(events)).some((event) => event._tag === "ExecutionFailed")) yield* Effect.yieldNow
             if (status === "failed")
               while (!(yield* Ref.get(events)).some((event) => event._tag === "ExecutionFailed")) yield* Effect.yieldNow
@@ -3556,7 +3595,7 @@ describe("Operation", () => {
         "interactive backend failed",
       )
       expect(failedBackend.turn?.status).toBe("failed")
-      expect(failedBackend.successor?.status).toBe("completed")
+      expect(failedBackend.successor?.status).toBe("queued")
       expect(nonActivation(failed.events)).toContainEqual({
         _tag: "ExecutionFailed",
         selectionEpoch: 0,

@@ -149,6 +149,51 @@ test(
 )
 
 test(
+  "submits adjacent text parts to Baton as one text block",
+  () =>
+    runNative(
+      withBackend(
+        [TestModel.text("first answer"), TestModel.text("second answer")],
+        (fixture) =>
+          Effect.gen(function* () {
+            const backend = yield* ExecutionBackend.Service
+            const first = yield* start(backend, {
+              threadId: "thread-text-parts",
+              turnId: "turn-text-parts-1",
+              prompt: "stash changes please\n\n<resolved-context>\nguidance\n</resolved-context>",
+              promptParts: [
+                { type: "text", text: "stash changes please" },
+                { type: "text", text: "\n\n<resolved-context>\nguidance\n</resolved-context>" },
+              ],
+              startedAt: 1,
+            })
+            const second = yield* start(backend, {
+              threadId: "thread-text-parts",
+              turnId: "turn-text-parts-2",
+              prompt: "continue please",
+              startedAt: 2,
+            })
+            expect(first.status).toBe("completed")
+            expect(second.status).toBe("completed")
+            const requests = yield* fixture.requests
+            const userContents = requests[0]?.prompt.content.flatMap((message) =>
+              message.role === "user" ? [message.content] : [],
+            )
+            expect(userContents).toHaveLength(1)
+            const parts = Array.isArray(userContents?.[0]) ? userContents[0] : []
+            expect(parts.filter((part: { type: string }) => part.type === "text")).toHaveLength(1)
+            expect(parts[0]).toMatchObject({
+              type: "text",
+              text: "stash changes please\n\n<resolved-context>\nguidance\n</resolved-context>",
+            })
+          }),
+        { compaction: { contextWindow: 1_000_000, reserveTokens: 100, keepRecentTokens: 100 } },
+      ),
+    ),
+  30_000,
+)
+
+test(
   "rejects malformed inline images before the model request",
   () =>
     runNative(
