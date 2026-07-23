@@ -3,6 +3,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
 import { Runtime } from "@rika/tools"
 import { Config, Context, Effect, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
+import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { start } from "./current-execution-route"
@@ -13,12 +14,17 @@ class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("RecoveryProc
 
 const Message = Schema.Struct({
   id: Schema.String,
-  type: Schema.Literal("start"),
+  type: Schema.Literals(["start", "logs"]),
   value: Schema.optional(Schema.String),
 })
 const decodeMessage = Schema.decodeEffect(Schema.fromJsonString(Message))
 const encodeLine = Schema.encodeEffect(Schema.UnknownFromJsonString)
 const fixtureError = (error: unknown) => FixtureError.make({ message: String(error) })
+const promptSecret = "PROMPT_SECRET_SENTINEL_206_207_209"
+const initialSystemSecret = "SYSTEM_SECRET_SENTINEL_INITIAL_206_207_209"
+const recoveredSystemSecret = "SYSTEM_SECRET_SENTINEL_RECOVERED_206_207_209"
+const logs: Array<string> = []
+const logger = Logger.make((options) => logs.push(Logger.formatJson.log(options)))
 
 const main = Effect.gen(function* () {
   const database = yield* Config.string("RIKA_RECOVERY_DATABASE")
@@ -45,6 +51,13 @@ const main = Effect.gen(function* () {
     turns = Array.from({ length: 6 }, (_, index) =>
       TestModel.turn([TestModel.text(`delayed recovered child ${index}`)], { delay: "5 minutes" }),
     )
+  if (phase === "recovered-stuck")
+    turns = [
+      ...Array.from({ length: 3 }, (_, index) =>
+        TestModel.turn([TestModel.text(`stuck recovered child ${index}`)], { delay: "5 minutes" }),
+      ),
+      ...Array.from({ length: 9 }, (_, index) => TestModel.text(`recovered child ${index}`)),
+    ]
   if (phase === "initial")
     turns = [
       initial,
@@ -54,6 +67,15 @@ const main = Effect.gen(function* () {
       TestModel.text("root must not continue"),
     ]
   const fixture = yield* TestModel.make(turns)
+  const systemSecret = phase === "initial" ? initialSystemSecret : recoveredSystemSecret
+  const contextProbe = Tool.make("context_probe", {
+    description: `Recovery context probe ${systemSecret}`,
+    parameters: Schema.Struct({}),
+    success: Schema.String,
+    failure: Schema.String,
+    failureMode: "return",
+  })
+  const contextToolkit = Toolkit.make(contextProbe)
   const backendLayer = RelayExecutionBackend.layer({
     filename: database,
     workspace,
@@ -63,6 +85,9 @@ const main = Effect.gen(function* () {
     toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
     toolNeedsApproval: () => false,
     permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
+    additionalToolkit: contextToolkit,
+    additionalHandlerLayer: contextToolkit.toLayer({ context_probe: () => Effect.succeed("unused") }),
+    recoveryChildSettlementGrace: phase === "recovered-stuck" ? "0 millis" : "5 minutes",
   })
   const services = yield* Layer.build(backendLayer).pipe(Effect.mapError(fixtureError))
   const backend = Context.get(services, ExecutionBackend.Service)
@@ -74,15 +99,17 @@ const main = Effect.gen(function* () {
       decodeMessage(line).pipe(
         Effect.mapError(fixtureError),
         Effect.flatMap((message) =>
-          start(backend, {
-            threadId: message.value === undefined ? "thread-recovery" : "thread-after-recovery",
-            turnId: message.value ?? "turn-recovery",
-            prompt: "delegate three investigations",
-            startedAt: 1,
-          }).pipe(
-            Effect.flatMap((result) => send({ id: message.id, ok: true, value: result.status })),
-            Effect.catch((error) => send({ id: message.id, ok: false, error: String(error) })),
-          ),
+          message.type === "logs"
+            ? send({ id: message.id, ok: true, value: logs })
+            : start(backend, {
+                threadId: "thread-recovery",
+                turnId: message.value ?? "turn-recovery",
+                prompt: promptSecret,
+                startedAt: 1,
+              }).pipe(
+                Effect.flatMap((result) => send({ id: message.id, ok: true, value: result.status })),
+                Effect.catch((error) => send({ id: message.id, ok: false, error: String(error) })),
+              ),
         ),
         Effect.forkScoped,
       ),
@@ -93,7 +120,7 @@ const main = Effect.gen(function* () {
 BunRuntime.runMain(
   Effect.scoped(
     Effect.gen(function* () {
-      const context = yield* Layer.build(Layer.merge(BunServices.layer, Logger.layer([])))
+      const context = yield* Layer.build(Layer.merge(BunServices.layer, Logger.layer([logger])))
       return yield* Effect.provide(main, context)
     }),
   ),

@@ -6,6 +6,23 @@ import { FixtureProcessError, spawnFixtureProcess } from "./process-protocol"
 
 const script = new URL("./recovery-process.ts", import.meta.url).pathname
 const rootId = "execution:turn-recovery"
+const nextRootId = "execution:turn-after-recovery"
+const promptSecret = "PROMPT_SECRET_SENTINEL_206_207_209"
+const initialSystemSecret = "SYSTEM_SECRET_SENTINEL_INITIAL_206_207_209"
+const recoveredSystemSecret = "SYSTEM_SECRET_SENTINEL_RECOVERED_206_207_209"
+
+const baselineHashAnnotations = (lines: ReadonlyArray<string>) =>
+  lines.flatMap((line) => {
+    const record: unknown = JSON.parse(line)
+    if (record === null || typeof record !== "object" || !("annotations" in record)) return []
+    const annotations = record.annotations
+    if (annotations === null || typeof annotations !== "object" || !("rika.context.baseline.hash" in annotations))
+      return []
+    return [annotations["rika.context.baseline.hash"]]
+  })
+
+const baselineHashes = (lines: ReadonlyArray<string>) =>
+  baselineHashAnnotations(lines).filter((hash): hash is string => typeof hash === "string")
 
 const runNative = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof BunServices.layer>>) =>
   Effect.runPromise(
@@ -76,6 +93,10 @@ test(
             `select baseline from relay_execution_context_epochs where execution_id = '${rootId}'`,
           ))[0]?.baseline
           expect(baseline).toBeTypeOf("string")
+          const initialLogs = yield* waitFor(host.request(Schema.Array(Schema.String), "logs"), (lines) =>
+            baselineHashes(lines).some((hash) => /^[a-f0-9]{64}$/.test(hash)),
+          )
+          const initialHash = baselineHashes(initialLogs).at(-1)
           yield* host.kill
           host = yield* startHost("recovered-delayed")
           expect(yield* host.ready).not.toBe(firstPid)
@@ -90,8 +111,12 @@ test(
             }),
             ({ starts, prepared }) => starts[0]?.count === 2 && prepared[0]?.count === 2,
           )
+          const repeatedRecoveryLogs = yield* waitFor(host.request(Schema.Array(Schema.String), "logs"), (lines) =>
+            baselineHashes(lines).some((hash) => /^[a-f0-9]{64}$/.test(hash)),
+          )
+          const repeatedRecoveryHash = baselineHashes(repeatedRecoveryLogs).at(-1)
           yield* host.kill
-          host = yield* startHost("recovered")
+          host = yield* startHost("recovered-stuck")
           expect(yield* host.ready).not.toBe(firstPid)
           const settled = yield* waitFor(
             Effect.all({
@@ -106,7 +131,7 @@ test(
             ({ root, children, cancelled }) =>
               root[0]?.status === "cancelled" &&
               children.length === 3 &&
-              children.every((child) => child.status === "completed") &&
+              children.every((child) => child.status === "completed" || child.status === "cancelled") &&
               cancelled[0]?.count === 1,
           )
           expect(settled.children).toHaveLength(3)
@@ -117,8 +142,14 @@ test(
           const prepared = yield* query<{ count: number }>(
             `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'model.input.prepared'`,
           )
-          const delegationCalls = yield* query<{ count: number }>(
-            `select count(*) as count from relay_tool_calls where execution_id = '${rootId}' and name = 'task'`,
+          const delegationCalls = yield* query<{ id: string; name: string; state: string }>(
+            `select id, name, state from relay_tool_calls where execution_id = '${rootId}' order by id`,
+          )
+          const pendingDelegationCalls = yield* query<{ count: number }>(
+            `select count(*) as count from relay_tool_calls where execution_id = '${rootId}' and state not in ('completed', 'failed', 'cancelled')`,
+          )
+          const delegationResults = yield* query<{ tool_call_id: string; error: string | null }>(
+            `select result.tool_call_id, result.error from relay_tool_results result join relay_tool_calls call on call.id = result.tool_call_id where call.execution_id = '${rootId}' order by result.tool_call_id`,
           )
           const attempts = yield* query<{ state: string; completed_at: number | null }>(
             `select state, completed_at from relay_tool_attempts where execution_id = '${rootId}' order by tool_call_id`,
@@ -129,16 +160,70 @@ test(
           const recoveredBaseline = (yield* query<{ baseline: string }>(
             `select baseline from relay_execution_context_epochs where execution_id = '${rootId}'`,
           ))[0]?.baseline
-          expect(starts[0]?.count).toBe(3)
-          expect(prepared[0]?.count).toBe(3)
-          expect(delegationCalls[0]?.count).toBe(3)
+          const epochFailures = yield* query<{ count: number }>(
+            `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.failed'`,
+          )
+          expect(starts[0]?.count).toBeGreaterThanOrEqual(3)
+          expect(prepared[0]?.count).toBeGreaterThanOrEqual(3)
+          expect(delegationCalls).toHaveLength(3)
+          expect(delegationCalls.every((call) => call.name === "task")).toBe(true)
+          expect(delegationCalls.every((call) => ["completed", "failed", "cancelled"].includes(call.state))).toBe(true)
+          expect(pendingDelegationCalls[0]?.count).toBe(0)
+          expect(delegationResults.map((result) => result.tool_call_id)).toEqual(delegationCalls.map((call) => call.id))
           expect(attempts).toHaveLength(3)
           expect(attempts.every((attempt) => attempt.state !== "running" && attempt.completed_at !== null)).toBe(true)
-          expect(childOutcomes).toHaveLength(3)
+          expect(childOutcomes.length).toBeGreaterThanOrEqual(2)
           expect(childOutcomes.every((outcome) => outcome.content_json.includes("recovered child"))).toBe(true)
           expect(recoveredBaseline).toBe(baseline)
+          expect(epochFailures[0]?.count).toBe(0)
           expect(settled.cancelled[0]?.count).toBe(1)
+          const containedRecoveryLogs = yield* host.request(Schema.Array(Schema.String), "logs")
+          const recoveredHash = baselineHashes(containedRecoveryLogs).at(-1)
           expect(yield* host.request(Schema.String, "start", "turn-after-recovery")).toBe("completed")
+          const sessions = yield* query<{ id: string; session_id: string | null }>(
+            `select id, session_id from relay_executions where id in ('${rootId}', '${nextRootId}') order by id`,
+          )
+          expect(sessions).toHaveLength(2)
+          expect(sessions.map((execution) => execution.session_id)).toEqual([
+            "session:thread-recovery",
+            "session:thread-recovery",
+          ])
+          const cancellationAfterAdmission = yield* query<{ count: number }>(
+            `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.cancelled'`,
+          )
+          expect(cancellationAfterAdmission[0]?.count).toBe(1)
+          const finalLogs = yield* host.request(Schema.Array(Schema.String), "logs")
+          expect(initialHash).toMatch(/^[a-f0-9]{64}$/)
+          expect(repeatedRecoveryHash).toMatch(/^[a-f0-9]{64}$/)
+          expect(recoveredHash).toMatch(/^[a-f0-9]{64}$/)
+          expect(repeatedRecoveryHash).toBe(recoveredHash)
+          expect(recoveredHash).not.toBe(initialHash)
+          const capturedHashValues = baselineHashAnnotations([
+            ...initialLogs,
+            ...repeatedRecoveryLogs,
+            ...containedRecoveryLogs,
+            ...finalLogs,
+          ])
+          expect(capturedHashValues.length).toBeGreaterThan(0)
+          expect(capturedHashValues.every((hash) => typeof hash === "string" && /^[a-f0-9]{64}$/.test(hash))).toBe(true)
+          expect(
+            containedRecoveryLogs.some((line) => {
+              const record = JSON.parse(line) as {
+                readonly message?: unknown
+                readonly annotations?: Readonly<Record<string, unknown>>
+              }
+              return (
+                record.message === "execution.recovery.failed_safe" &&
+                record.annotations?.["rika.recovery.children.settled"] === false
+              )
+            }),
+          ).toBe(true)
+          const capturedLogs = [...initialLogs, ...repeatedRecoveryLogs, ...containedRecoveryLogs, ...finalLogs].join(
+            "\n",
+          )
+          expect(capturedLogs).not.toContain(promptSecret)
+          expect(capturedLogs).not.toContain(initialSystemSecret)
+          expect(capturedLogs).not.toContain(recoveredSystemSecret)
         }),
       ),
     ),
