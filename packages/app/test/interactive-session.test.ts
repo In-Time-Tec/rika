@@ -1086,7 +1086,7 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
-  it.effect("loads at least two hundred units to a Turn boundary and prepends older pages on demand", () =>
+  it.effect("bounds the initial page and exhausts older pages without duplicate units", () =>
     Effect.gen(function* () {
       const { session, turns, older } = yield* makeHarness()
       yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
@@ -1104,24 +1104,49 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
       const initial = events.find((event) => event._tag === "SelectionLoaded")
-      yield* session.loadOlder
-      yield* Effect.yieldNow
       expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
-      expect(initial?._tag === "SelectionLoaded" ? initial.entries : []).toHaveLength(200)
-      expect(initial?._tag === "SelectionLoaded" ? initial.entries[0]?.unit.key : undefined).toBe(
-        "turn:history-040:user",
+      const loaded = initial?._tag === "SelectionLoaded" ? [...initial.entries] : []
+      expect(loaded.length).toBeGreaterThan(0)
+      expect(loaded.length).toBeLessThanOrEqual(200)
+      let hasOlder = true
+      for (let page = 0; page < 10 && hasOlder; page += 1) {
+        const previous = events.filter((event) => event._tag === "TranscriptPagePrepended").length
+        yield* session.loadOlder
+        for (
+          let attempt = 0;
+          attempt < 400 && events.filter((event) => event._tag === "TranscriptPagePrepended").length === previous;
+          attempt += 1
+        )
+          yield* Effect.yieldNow
+        const prepended = events.findLast((event) => event._tag === "TranscriptPagePrepended")
+        if (prepended?._tag !== "TranscriptPagePrepended") break
+        loaded.unshift(...prepended.entries)
+        hasOlder = prepended.hasOlder
+      }
+      for (
+        let attempt = 0;
+        attempt < 400 &&
+        !events.some(
+          (event) =>
+            event._tag === "TranscriptReplaced" && event.entries.some((entry) => entry.unit.key === "turn:active:user"),
+        );
+        attempt += 1
       )
-      expect(
-        initial?._tag === "SelectionLoaded" ? initial.entries.map((entry) => entry.turn.id).at(-1) : undefined,
-      ).toBe(Turn.TurnId.make("history-239"))
-      const prepended = events.find((event) => event._tag === "TranscriptPagePrepended")
-      expect(prepended?._tag === "TranscriptPagePrepended" ? prepended.hasOlder : true).toBe(false)
-      expect(
-        prepended?._tag === "TranscriptPagePrepended" ? prepended.entries.map((entry) => entry.turn.id) : [],
-      ).toEqual([
-        Turn.TurnId.make("active"),
-        ...Array.from({ length: 40 }, (_, index) => Turn.TurnId.make(`history-${index.toString().padStart(3, "0")}`)),
-      ])
+        yield* Effect.yieldNow
+      const loadedKeys = new Set(loaded.map((entry) => entry.unit.key))
+      for (const replacement of events) {
+        if (replacement._tag !== "TranscriptReplaced") continue
+        for (const entry of replacement.entries) {
+          if (loadedKeys.has(entry.unit.key)) continue
+          loadedKeys.add(entry.unit.key)
+          loaded.push(entry)
+        }
+      }
+      expect(hasOlder).toBe(false)
+      expect(new Set(loaded.map((entry) => entry.unit.key)).size).toBe(loaded.length)
+      expect(loaded.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
+      expect(loaded.some((entry) => entry.unit.key === "turn:history-000:user")).toBe(true)
+      expect(loaded.some((entry) => entry.unit.key === "turn:history-239:user")).toBe(true)
     }),
   )
 

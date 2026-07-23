@@ -464,6 +464,71 @@ it.effect("persists an execution outcome appended after the initial projection",
   ).pipe(provideLayer(BunServices.layer)),
 )
 
+it.effect("pages a reopened SQLite transcript without duplicate units", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-sqlite-page-" })
+      const filename = `${directory}/rika.db`
+      const threadId = Thread.ThreadId.make("thread-sqlite-page")
+      const targetId = Turn.TurnId.make("turn-sqlite-page")
+      const makeLayer = () => {
+        const database = Database.layer(filename)
+        return Layer.mergeAll(
+          database,
+          ThreadRepository.layer.pipe(Layer.provide(database)),
+          TurnRepository.layer.pipe(Layer.provide(database)),
+          TranscriptRepository.layer.pipe(Layer.provide(database)),
+        )
+      }
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const threads = yield* ThreadRepository.Service
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          yield* threads.create({ id: threadId, workspace: "/work/page", title: "Page", now: 1 })
+          yield* turns.createForSubmission({
+            id: targetId,
+            threadId,
+            prompt: "persist me",
+            executionRoute: Turn.testExecutionRoute(),
+            queueCapacity: 128,
+            now: 2,
+          })
+          const target = yield* turns.setStatus(targetId, "completed", "cursor-124", 3)
+          const units = Array.from({ length: 125 }, (_, index) =>
+            semanticUnit(targetId, index, 0, `sqlite-page-unit-${index.toString().padStart(3, "0")}`),
+          )
+          yield* transcripts.replace(target, {
+            ...Transcript.empty(target.id, target.prompt),
+            units,
+            revision: 124,
+            checkpointCursor: "cursor-124",
+          })
+        }).pipe(provideLayer(makeLayer())),
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const transcripts = yield* TranscriptRepository.Service
+          const keys: Array<string> = []
+          let before: TranscriptRepository.PageCursor | undefined
+          let hasOlder = true
+          while (hasOlder) {
+            const page = yield* transcripts.page(threadId, { ...(before === undefined ? {} : { before }), limit: 17 })
+            keys.push(...page.entries.map((entry) => entry.unit.key))
+            hasOlder = page.hasOlder
+            before = page.oldestCursor
+          }
+          expect(keys).toHaveLength(125)
+          expect(new Set(keys).size).toBe(125)
+        }).pipe(provideLayer(makeLayer())),
+      )
+    }),
+  ).pipe(provideLayer(BunServices.layer)),
+)
+
 it.effect("returns a typed repository error for a malformed durable unit after reopen", () =>
   Effect.scoped(
     Effect.gen(function* () {

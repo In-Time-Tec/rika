@@ -144,16 +144,39 @@ class OperationError extends Schema.TaggedErrorClass<OperationError>()("Operatio
 }) {}
 
 const operationError = (message: string) => OperationError.make({ message })
-const operationFailureDetail = (error: unknown) =>
-  Schema.is(OperationError)(error) ||
-  Schema.is(OperationUnavailable)(error) ||
-  Schema.is(TurnRepository.QueuedTurnUnavailable)(error)
-    ? error.message
-    : operationFailureMessage
+const operationFailureDetail = (error: unknown) => {
+  if (
+    Schema.is(OperationError)(error) ||
+    Schema.is(OperationUnavailable)(error) ||
+    Schema.is(TurnRepository.QueuedTurnUnavailable)(error)
+  )
+    return error.message
+  if (Schema.is(ExecutionBackend.BackendError)(error) && error.message.includes("cursor did not advance"))
+    return error.message
+  return operationFailureMessage
+}
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 const untrustedData = (value: unknown) => JSON.stringify(value).replaceAll("<", "\\u003c")
 const transcriptPageEncoder = new TextEncoder()
 const maximumTranscriptPageBytes = 8 * 1024 * 1024
+const maximumTranscriptPayloadBytes = maximumTranscriptPageBytes - 64 * 1024
+const sameTranscriptCursor = (
+  left: TranscriptRepository.PageCursor | undefined,
+  right: TranscriptRepository.PageCursor | undefined,
+) => left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
+const sameTurnCursor = (left: TurnRepository.PageCursor | undefined, right: TurnRepository.PageCursor | undefined) =>
+  left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
+const selectionRepairNodeLimit = 128
+const selectionRepairPageLimit = 32
+const selectionRepairTurnPageLimit = 4
+const selectionRepairTranscriptPageLimit = 8
+const selectionRepairDeferredPrefix = "selection repair deferred:"
+type RepairBudget = { nodes: number; pages: number; bytes: number }
+const makeRepairBudget = (): RepairBudget => ({ nodes: 0, pages: 0, bytes: 0 })
+const selectionRepairDeferred = (reason: "nodes" | "pages" | "bytes") =>
+  ExecutionBackend.BackendError.make({ message: `${selectionRepairDeferredPrefix}${reason}` })
+const isSelectionRepairDeferred = (error: ExecutionBackend.BackendError) =>
+  error.message.startsWith(selectionRepairDeferredPrefix)
 
 export interface ProductLayerOptions<
   ThreadError,
@@ -707,39 +730,102 @@ const withoutSynthesizedTwins = (
   }),
 })
 
+type ChildBackfillWork = {
+  readonly stored: ReadonlyMap<string, ReadonlyArray<Transcript.Unit>>
+  readonly nested: Array<Transcript.NestedProjection>
+  readonly descendants: Array<{ readonly executionId: string; readonly status: ExecutionBackend.Status }>
+  readonly parents: Map<string, string>
+  rootProjection: Transcript.Projection
+  readonly pending: Array<{
+    readonly executionId: string
+    readonly nestedIndex: number | undefined
+    readonly reference: boolean
+    childIndex: number
+  }>
+  readonly seen: Set<string>
+}
+
+const makeChildBackfillWork = (rootExecutionId: string, root: Transcript.Projection): ChildBackfillWork => ({
+  stored: storedChildUnits(root),
+  nested: [],
+  descendants: [],
+  parents: new Map(),
+  rootProjection: root,
+  pending: [{ executionId: rootExecutionId, nestedIndex: undefined, reference: false, childIndex: 0 }],
+  seen: new Set([normalizeChildExecutionId(rootExecutionId)]),
+})
+
+type SelectionEpochState = {
+  readonly epoch: number
+  readonly thread: Thread.Thread
+  readonly loadedKeys: Set<string>
+  readonly authoritativeTurns: Map<string, Turn.Turn>
+  readonly authoritativeVersions: Map<string, { readonly status: Turn.Status; readonly lastCursor: string | undefined }>
+  readonly descendants: Map<string, { readonly rootTurnId: Turn.TurnId; readonly status: ExecutionBackend.Status }>
+  readonly inspections: Map<string, ExecutionBackend.Inspection | undefined>
+  readonly eventPages: Map<string, ExecutionBackend.EventPage>
+  readonly replays: Map<string, ExecutionBackend.Result>
+  readonly pendingTurns: Map<string, Turn.Turn>
+  readonly backfills: Map<string, ChildBackfillWork>
+  readonly initialRepairBudget: RepairBudget
+  transcriptCursor: TranscriptRepository.PageCursor | undefined
+  projectedTurnCursor: TurnRepository.PageCursor | undefined
+  hasUnprojectedTurns: boolean
+  hasOlder: boolean
+  turnPages: number
+  transcriptPages: number
+  continuationRunning: boolean
+}
+
+const invalidateSelectionTurn = (state: SelectionEpochState, turn: Turn.Turn) => {
+  const turnId = String(turn.id)
+  state.authoritativeTurns.set(turnId, turn)
+  state.authoritativeVersions.set(turnId, { status: turn.status, lastCursor: turn.lastCursor })
+  state.inspections.clear()
+  state.eventPages.clear()
+  state.replays.clear()
+  state.backfills.delete(turnId)
+  state.pendingTurns.set(turnId, turn)
+}
+
 const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")(function* (
   backend: ExecutionBackend.Interface,
   rootExecutionId: string,
   root: Transcript.Projection,
+  existing?: ChildBackfillWork,
 ) {
-  const stored = storedChildUnits(root)
-  const nested: Array<Transcript.NestedProjection> = []
-  const parents = new Map<string, string>()
-  let rootProjection = root
-  const pending: Array<{
-    readonly executionId: string
-    readonly nestedIndex: number | undefined
-    readonly reference: boolean
-  }> = [{ executionId: rootExecutionId, nestedIndex: undefined, reference: false }]
-  const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
-  while (pending.length > 0) {
-    const current = pending.shift()!
+  const work = existing ?? makeChildBackfillWork(rootExecutionId, root)
+  while (work.pending.length > 0) {
+    const current = work.pending[0]!
     const inspection = yield* backend.inspect(
       current.executionId,
       current.reference ? ExecutionBackend.executionReference : undefined,
     )
-    if (inspection === undefined) continue
-    const parentProjection = () =>
-      current.nestedIndex === undefined ? rootProjection : nested[current.nestedIndex]!.projection
-    const settleParent = (projection: Transcript.Projection) => {
-      if (current.nestedIndex === undefined) rootProjection = projection
-      else nested[current.nestedIndex] = { ...nested[current.nestedIndex]!, projection }
+    if (inspection === undefined) {
+      work.pending.shift()
+      continue
     }
-    for (const child of inspection.children) {
+    const parentProjection = () =>
+      current.nestedIndex === undefined ? work.rootProjection : work.nested[current.nestedIndex]!.projection
+    const settleParent = (projection: Transcript.Projection) => {
+      if (current.nestedIndex === undefined) work.rootProjection = projection
+      else work.nested[current.nestedIndex] = { ...work.nested[current.nestedIndex]!, projection }
+    }
+    const child = inspection.children[current.childIndex]
+    if (child === undefined) {
+      work.pending.shift()
+      continue
+    }
+    {
       const childKey = normalizeChildExecutionId(child.executionId)
-      if (seen.has(childKey)) continue
-      seen.add(childKey)
+      if (work.seen.has(childKey)) {
+        current.childIndex += 1
+        continue
+      }
       const replayed = yield* replayChildTranscript(backend, child.executionId)
+      current.childIndex += 1
+      work.seen.add(childKey)
+      work.descendants.push(child)
       if (replayed.revision < 0)
         yield* Effect.logWarning("execution.child.replay_empty").pipe(
           Effect.annotateLogs({
@@ -747,7 +833,7 @@ const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")
             "rika.execution.child": child.executionId,
           }),
         )
-      const storedUnits = stored.get(childKey) ?? []
+      const storedUnits = work.stored.get(childKey) ?? []
       const storedTranscript = storedUnits.some(realChildUnit) ? storedChildProjection(storedUnits) : undefined
       let projection: Transcript.Projection | undefined = replayed
       if (replayed.revision < 0) projection = undefined
@@ -770,20 +856,31 @@ const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")
         settleParent(
           Transcript.reconcileChild(parentProjection(), child.executionId, settled, parentProjection().revision),
         )
-      parents.set(childKey, parent.id)
-      nested.push({ parentId: parent.id, projection })
-      pending.push({ executionId: child.executionId, nestedIndex: nested.length - 1, reference: true })
+      work.parents.set(childKey, parent.id)
+      work.nested.push({ parentId: parent.id, projection })
+      work.pending.push({
+        executionId: child.executionId,
+        nestedIndex: work.nested.length - 1,
+        reference: true,
+        childIndex: 0,
+      })
     }
   }
-  for (const [childKey, units] of stored) {
-    if (parents.has(childKey) || !units.some(realChildUnit)) continue
+  for (const [childKey, units] of work.stored) {
+    if (work.parents.has(childKey) || !units.some(realChildUnit)) continue
     const parentId = units[0]!.parentId
     if (parentId === undefined) continue
-    parents.set(childKey, parentId)
-    nested.push({ parentId, projection: storedChildProjection(units) })
+    work.parents.set(childKey, parentId)
+    work.nested.push({ parentId, projection: storedChildProjection(units) })
   }
-  if (nested.length === 0) return rootProjection
-  return Transcript.withNestedProjections(withoutSynthesizedTwins(rootProjection, parents), nested)
+  if (work.nested.length === 0) return { projection: work.rootProjection, descendants: work.descendants }
+  return {
+    projection: Transcript.withNestedProjections(
+      withoutSynthesizedTwins(work.rootProjection, work.parents),
+      work.nested,
+    ),
+    descendants: work.descendants,
+  }
 })
 
 const descendantExecutions = Effect.fn("Operation.descendantExecutions")(function* (
@@ -929,16 +1026,17 @@ const sessionOwnershipRejected = (failure: unknown): boolean => {
 const backfillTranscriptTree = Effect.fn("Operation.backfillTranscriptTree")(function* (
   turn: Turn.Turn,
   force: boolean,
+  work?: ChildBackfillWork,
 ) {
   const transcripts = yield* TranscriptRepository.Service
   const current = yield* transcripts.get(turn.id)
-  if (current === undefined) return
+  if (current === undefined) return []
   const root = sourceProjection(current)
-  if (!force && !hasChildrenAwaitingBackfill(root)) return
+  if (!force && !hasChildrenAwaitingBackfill(root)) return []
   const backend = yield* ExecutionBackend.Service
-  const tree = yield* backfillChildTranscripts(backend, turn.id, root)
-  if (tree === root) return
-  yield* transcripts.replace(turn, tree)
+  const tree = yield* backfillChildTranscripts(backend, turn.id, root, work)
+  if (tree.projection !== root) yield* transcripts.replace(turn, tree.projection)
+  return tree.descendants
 })
 
 const childExecutionId = (event: ExecutionBackend.Event): string | undefined => {
@@ -1773,19 +1871,94 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         let shellPermissionAlways = shellPermission === "allow"
         const interactiveThread = yield* Ref.make<Thread.Thread | undefined>(undefined)
         const selectionRequest = yield* Ref.make(0)
-        const transcriptCursor = yield* Ref.make<TranscriptRepository.PageCursor | undefined>(undefined)
-        const transcriptLoadedKeys = yield* Ref.make<ReadonlySet<string>>(new Set())
-        const transcriptAuthoritativeTurns = yield* Ref.make<ReadonlyMap<string, Turn.Turn>>(new Map())
-        const transcriptDescendants = yield* Ref.make<
-          ReadonlyMap<string, { readonly rootTurnId: Turn.TurnId; readonly status: ExecutionBackend.Status }>
-        >(new Map())
-        const projectedTurnCursor = yield* Ref.make<TurnRepository.PageCursor | undefined>(undefined)
-        const transcriptHasUnprojectedTurns = yield* Ref.make(false)
-        const transcriptHasOlder = yield* Ref.make(false)
+        let activeSelectionState: SelectionEpochState | undefined
         const projectionAdmission = yield* Semaphore.make(1)
         const transcriptPageAdmission = yield* Semaphore.make(1)
-        const backfillTree = (turn: Turn.Turn, force: boolean) =>
-          projectionAdmission.withPermits(1)(backfillTranscriptTree(turn, force))
+        const backfillTree = (
+          turn: Turn.Turn,
+          force: boolean,
+          backend?: ExecutionBackend.Interface,
+          work?: ChildBackfillWork,
+        ) =>
+          projectionAdmission.withPermits(1)(
+            backfillTranscriptTree(turn, force, work).pipe(
+              backend === undefined ? Function.identity : Effect.provideService(ExecutionBackend.Service, backend),
+            ),
+          )
+        const repairBackend = (
+          state: SelectionEpochState,
+          backend: ExecutionBackend.Interface,
+          budget: RepairBudget,
+        ) => {
+          const reservePage = Effect.suspend(() => {
+            if (budget.pages >= selectionRepairPageLimit) return Effect.fail(selectionRepairDeferred("pages"))
+            budget.pages += 1
+            return Effect.void
+          })
+          const consume = (events: ReadonlyArray<ExecutionBackend.Event>) =>
+            Effect.gen(function* () {
+              const eventBytes = transcriptPageEncoder.encode(encodeJson(events)).byteLength
+              if (budget.bytes + eventBytes > maximumTranscriptPageBytes) return yield* selectionRepairDeferred("bytes")
+              budget.bytes += eventBytes
+            })
+          return ExecutionBackend.Service.of({
+            ...backend,
+            inspect: (executionId, reference) => {
+              const key = `${reference === undefined ? "root" : "reference"}:${executionId}`
+              if (state.inspections.has(key)) return Effect.succeed(state.inspections.get(key))
+              if (budget.nodes >= selectionRepairNodeLimit) return Effect.fail(selectionRepairDeferred("nodes"))
+              budget.nodes += 1
+              return backend.inspect(executionId, reference).pipe(
+                Effect.filterOrFail(
+                  () => activeSelectionState === state,
+                  () => selectionRepairDeferred("nodes"),
+                ),
+                Effect.tap((inspection) => Effect.sync(() => state.inspections.set(key, inspection))),
+              )
+            },
+            replay: (executionId, after, reference) => {
+              const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${after ?? ""}`
+              const cached = state.replays.get(key)
+              if (cached !== undefined) return Effect.succeed(cached)
+              return reservePage.pipe(
+                Effect.andThen(backend.replay(executionId, after, reference)),
+                Effect.filterOrFail(
+                  () => activeSelectionState === state,
+                  () => selectionRepairDeferred("pages"),
+                ),
+                Effect.tap((result) => consume(result.events)),
+                Effect.tap((result) => Effect.sync(() => state.replays.set(key, result))),
+              )
+            },
+            ...(backend.pageEvents === undefined
+              ? {}
+              : {
+                  pageEvents: (executionId, direction, cursor, limit, reference) => {
+                    const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${direction}:${cursor ?? ""}:${limit ?? ""}`
+                    const cached = state.eventPages.get(key)
+                    if (cached !== undefined) return Effect.succeed(cached)
+                    return reservePage.pipe(
+                      Effect.andThen(backend.pageEvents!(executionId, direction, cursor, limit, reference)),
+                      Effect.filterOrFail(
+                        () => activeSelectionState === state,
+                        () => selectionRepairDeferred("pages"),
+                      ),
+                      Effect.flatMap((page) =>
+                        page.hasMore &&
+                        (page.events.length === 0 || page.newestCursor === undefined || page.newestCursor === cursor)
+                          ? Effect.fail(
+                              ExecutionBackend.BackendError.make({
+                                message: `Execution event cursor did not advance for ${executionId}`,
+                              }),
+                            )
+                          : consume(page.events).pipe(Effect.as(page)),
+                      ),
+                      Effect.tap((page) => Effect.sync(() => state.eventPages.set(key, page))),
+                    )
+                  },
+                }),
+          })
+        }
         const appendProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
           projectionAdmission.withPermits(1)(
             Effect.gen(function* () {
@@ -2714,125 +2887,148 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             after = next
           }
         })
-        const healedTurns = new Set<string>()
-        const healTerminalTurn = Effect.fn("Operation.interactive.healTerminalTurn")(function* (turn: Turn.Turn) {
-          if (!isTerminalStatus(turn.status) || healedTurns.has(String(turn.id))) return
-          healedTurns.add(String(turn.id))
+        const repairSelectionTurn = Effect.fn("Operation.interactive.repairSelectionTurn")(function* (
+          state: SelectionEpochState,
+          backend: ExecutionBackend.Interface,
+          turn: Turn.Turn,
+        ) {
+          if (activeSelectionState !== state) return
           const transcripts = yield* TranscriptRepository.Service
-          const current = yield* transcripts.get(turn.id)
-          if (current === undefined) return
-          if (Transcript.hasRunningBlocks(sourceProjection(current))) {
-            yield* backfillTree(turn, true)
-            const settled = yield* transcripts.get(turn.id)
-            if (settled !== undefined) {
-              const source = sourceProjection(settled)
-              if (Transcript.hasRunningBlocks(source)) {
-                const leftover = turn.status === "failed" ? ("failed" as const) : ("cancelled" as const)
-                yield* projectionAdmission.withPermits(1)(
-                  transcripts.replace(turn, Transcript.settleRunning(source, leftover, source.revision)),
-                )
-              }
-            }
+          const projected = yield* transcripts.get(turn.id)
+          if (turn.status === "queued") {
+            state.authoritativeTurns.set(String(turn.id), turn)
+            return
           }
+          const execution = yield* backend.inspect(turn.id)
+          if (activeSelectionState !== state) return
+          let authoritativeTurn = turn
+          let descendants: ReadonlyArray<{
+            readonly executionId: string
+            readonly status: ExecutionBackend.Status
+          }> = []
+          if (execution === undefined) {
+            if (projected === undefined)
+              yield* projectionAdmission.withPermits(1)(
+                transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
+              )
+          } else {
+            authoritativeTurn =
+              isTerminalStatus(execution.status) && !isTerminalStatus(turn.status)
+                ? {
+                    ...turn,
+                    status: execution.status,
+                    ...(execution.lastCursor === undefined ? {} : { lastCursor: execution.lastCursor }),
+                  }
+                : turn
+            if (projected === undefined || projected.checkpointCursor !== execution.lastCursor) {
+              yield* projectExecutionPages(backend, authoritativeTurn, execution.status)
+              if (activeSelectionState !== state) return
+            }
+            const latest = yield* transcripts.get(turn.id)
+            if (latest !== undefined) {
+              const key = String(turn.id)
+              const work = state.backfills.get(key) ?? makeChildBackfillWork(String(turn.id), sourceProjection(latest))
+              state.backfills.set(key, work)
+              descendants = yield* backfillTree(authoritativeTurn, true, backend, work)
+              state.backfills.delete(key)
+            }
+            if (activeSelectionState !== state) return
+          }
+          state.authoritativeTurns.set(String(turn.id), authoritativeTurn)
+          state.authoritativeVersions.set(String(turn.id), {
+            status: turn.status,
+            lastCursor: turn.lastCursor,
+          })
+          for (const descendant of descendants) {
+            const key = normalizeChildExecutionId(descendant.executionId)
+            state.descendants.set(key, { rootTurnId: turn.id, status: descendant.status })
+          }
+          state.pendingTurns.delete(String(turn.id))
         })
         const projectTurnPage = Effect.fn("Operation.interactive.projectTurnPage")(function* (
-          thread: Thread.Thread,
-          request: number,
+          state: SelectionEpochState,
           before?: TurnRepository.PageCursor,
+          budget: RepairBudget = state.initialRepairBudget,
         ) {
+          const thread = state.thread
           const turns = yield* TurnRepository.Service
-          const transcripts = yield* TranscriptRepository.Service
-          const backend = yield* ExecutionBackend.Service
+          const sourceBackend = yield* ExecutionBackend.Service
+          const backend = repairBackend(state, sourceBackend, budget)
+          if (state.turnPages >= selectionRepairTurnPageLimit) {
+            state.hasUnprojectedTurns = true
+            return true
+          }
           const page = yield* turns.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
-          const recordAuthoritativeTree = Effect.fn("Operation.interactive.recordAuthoritativeTree")(function* (
-            turn: Turn.Turn,
-          ) {
-            yield* Ref.update(transcriptAuthoritativeTurns, (current) => new Map(current).set(String(turn.id), turn))
-            const descendants = yield* descendantExecutions(backend, turn.id)
-            yield* Ref.update(transcriptDescendants, (current) => {
-              const updated = new Map(current)
-              for (const descendant of descendants) {
-                const key = normalizeChildExecutionId(descendant.executionId)
-                updated.set(key, { rootTurnId: turn.id, status: descendant.status })
-              }
-              return updated
-            })
-          })
+          if (
+            page.hasOlder &&
+            (page.turns.length === 0 || page.oldestCursor === undefined || sameTurnCursor(page.oldestCursor, before))
+          )
+            return yield* operationError(`Turn page did not advance for Thread ${thread.id}`)
+          state.turnPages += 1
           yield* Effect.forEach(
             page.turns,
             (turn) =>
-              Effect.gen(function* () {
-                const projected = yield* transcripts.get(turn.id)
-                if (
-                  projected !== undefined &&
-                  isTerminalStatus(turn.status) &&
-                  projected.checkpointCursor === turn.lastCursor
-                ) {
-                  yield* backfillTree(turn, true)
-                  yield* healTerminalTurn(turn)
-                  yield* recordAuthoritativeTree(turn)
-                  return
-                }
-                if (turn.status === "queued") {
-                  yield* Ref.update(transcriptAuthoritativeTurns, (current) =>
-                    new Map(current).set(String(turn.id), turn),
-                  )
-                  return
-                }
-                const execution = yield* backend.inspect(turn.id)
-                if (execution === undefined) {
-                  if (projected === undefined)
-                    yield* projectionAdmission.withPermits(1)(
-                      transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
-                    )
-                  else if (isTerminalStatus(turn.status)) yield* healTerminalTurn(turn)
-                  yield* recordAuthoritativeTree(turn)
-                  return
-                }
-                const authoritativeTurn = {
-                  ...turn,
-                  status: execution.status,
-                  ...(execution.lastCursor === undefined ? {} : { lastCursor: execution.lastCursor }),
-                }
-                yield* projectExecutionPages(backend, authoritativeTurn, execution.status)
-                yield* backfillTree(authoritativeTurn, true)
-                yield* healTerminalTurn(authoritativeTurn)
-                yield* recordAuthoritativeTree(authoritativeTurn)
-              }),
-            { concurrency: 4, discard: true },
+              repairSelectionTurn(state, backend, turn).pipe(
+                Effect.catchTag("ExecutionBackendError", (error) =>
+                  isSelectionRepairDeferred(error)
+                    ? Effect.sync(() => state.pendingTurns.set(String(turn.id), turn))
+                    : Effect.fail(error),
+                ),
+              ),
+            { concurrency: 1, discard: true },
           )
-          if ((yield* Ref.get(selectionRequest)) !== request) return false
-          yield* Ref.set(projectedTurnCursor, page.oldestCursor)
-          yield* Ref.set(transcriptHasUnprojectedTurns, page.hasOlder)
+          if (activeSelectionState !== state) return false
+          state.projectedTurnCursor = page.oldestCursor
+          state.hasUnprojectedTurns = page.hasOlder
           return true
         })
         const loadTranscriptPage = Effect.fn("Operation.interactive.loadTranscriptPage")(function* (
-          thread: Thread.Thread,
-          request: number,
+          state: SelectionEpochState,
           dispatch: (event: InteractiveEvent) => void,
           before?: TranscriptRepository.PageCursor,
           repair: boolean = true,
         ) {
+          const thread = state.thread
+          const request = state.epoch
           const loadedAt = yield* Clock.currentTimeMillis
           const turns = yield* TurnRepository.Service
           const transcripts = yield* TranscriptRepository.Service
+          let transcriptPages = 0
+          if (before !== undefined) state.turnPages = 0
           if (before === undefined && repair) {
-            if (!(yield* projectTurnPage(thread, request))) return
-            while (yield* Ref.get(transcriptHasUnprojectedTurns)) {
+            if (!(yield* projectTurnPage(state))) return
+            while (state.hasUnprojectedTurns && transcriptPages < selectionRepairTranscriptPageLimit - 1) {
               const available = yield* transcripts.page(thread.id, { limit: 200 })
+              transcriptPages += 1
               if (available.entries.length >= 200) break
-              const turnBefore = yield* Ref.get(projectedTurnCursor)
-              if (turnBefore === undefined || !(yield* projectTurnPage(thread, request, turnBefore))) return
+              const turnBefore = state.projectedTurnCursor
+              if (turnBefore === undefined || !(yield* projectTurnPage(state, turnBefore))) return
             }
           } else {
             const available = yield* transcripts.page(thread.id, { before, limit: 50 })
-            if (!available.hasOlder && (yield* Ref.get(transcriptHasUnprojectedTurns))) {
-              const turnBefore = yield* Ref.get(projectedTurnCursor)
-              if (turnBefore !== undefined && !(yield* projectTurnPage(thread, request, turnBefore))) return
+            transcriptPages += 1
+            if (
+              available.hasOlder &&
+              (available.entries.length === 0 ||
+                available.oldestCursor === undefined ||
+                sameTranscriptCursor(available.oldestCursor, before))
+            )
+              return yield* operationError(`Transcript page did not advance for Thread ${thread.id}`)
+            if (!available.hasOlder && state.hasUnprojectedTurns) {
+              const turnBefore = state.projectedTurnCursor
+              if (turnBefore !== undefined && !(yield* projectTurnPage(state, turnBefore))) return
             }
           }
-          if ((yield* Ref.get(selectionRequest)) !== request) return
+          if (activeSelectionState !== state) return
           const page = yield* transcripts.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
+          transcriptPages += 1
+          if (
+            page.hasOlder &&
+            (page.entries.length === 0 ||
+              page.oldestCursor === undefined ||
+              sameTranscriptCursor(page.oldestCursor, before))
+          )
+            return yield* operationError(`Transcript page did not advance for Thread ${thread.id}`)
           const olderPages: Array<typeof page.entries> = []
           let entryCount = page.entries.length
           let oldestCursor = page.oldestCursor
@@ -2859,11 +3055,25 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   )
             }
             initialBoundary = locateInitialBoundary()
-            while (storedHasOlder && oldestCursor !== undefined && initialBoundary < 0) {
+            while (
+              storedHasOlder &&
+              oldestCursor !== undefined &&
+              initialBoundary < 0 &&
+              transcriptPages < selectionRepairTranscriptPageLimit
+            ) {
+              const previousCursor = oldestCursor
               const older = yield* transcripts.page(thread.id, {
                 before: oldestCursor,
                 limit: entryCount < 200 ? Math.min(50, 200 - entryCount) : 50,
               })
+              transcriptPages += 1
+              if (
+                older.hasOlder &&
+                (older.entries.length === 0 ||
+                  older.oldestCursor === undefined ||
+                  sameTranscriptCursor(older.oldestCursor, previousCursor))
+              )
+                return yield* operationError(`Transcript page did not advance for Thread ${thread.id}`)
               if (older.entries.length === 0) break
               olderPages.push(older.entries)
               entryCount += older.entries.length
@@ -2877,13 +3087,18 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           let storedEntries = initialBoundary <= 0 ? loadedEntries : loadedEntries.slice(initialBoundary)
           let boundedStart = storedEntries.length
           let boundedBytes = 0
+          let oversizedEntry = false
           let partialCursor: TranscriptRepository.PageCursor | undefined
           while (boundedStart > 0) {
             const entryBytes = transcriptPageEncoder.encode(encodeJson(storedEntries[boundedStart - 1])).byteLength
-            if (boundedBytes + entryBytes > maximumTranscriptPageBytes && boundedStart < storedEntries.length) break
+            if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes) {
+              oversizedEntry = boundedStart === storedEntries.length
+              break
+            }
             boundedStart -= 1
             boundedBytes += entryBytes
           }
+          if (oversizedEntry) return yield* operationError("Transcript entry exceeds the transcript event limit")
           if (boundedStart > 0) {
             const turnBoundary = storedEntries.findIndex(
               (entry, index) => index >= boundedStart && entry.unit.key === `turn:${entry.turn.id}:user`,
@@ -2903,7 +3118,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   const entry = storedEntries[index]!
                   if (entry.unit.parentId !== undefined || entry.unit.content._tag !== "Entry") continue
                   const entryBytes = transcriptPageEncoder.encode(encodeJson(entry)).byteLength
-                  if (semanticBytes + entryBytes > maximumTranscriptPageBytes) continue
+                  if (semanticBytes + entryBytes > maximumTranscriptPayloadBytes) continue
                   semanticIndexes.add(index)
                   semanticBytes += entryBytes
                 }
@@ -2914,7 +3129,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   const entryBytes = semanticIndexes.has(index)
                     ? 0
                     : transcriptPageEncoder.encode(encodeJson(storedEntries[index])).byteLength
-                  if (boundedBytes + entryBytes > maximumTranscriptPageBytes && boundedStart < storedEntries.length)
+                  if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes && boundedStart < storedEntries.length)
                     break
                   boundedStart -= 1
                   boundedBytes += entryBytes
@@ -2946,36 +3161,78 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               }
             storedHasOlder = true
           }
+          if (before === undefined) {
+            yield* Effect.forEach(
+              state.authoritativeVersions,
+              ([turnId, version]) =>
+                Effect.gen(function* () {
+                  const current = yield* turns.get(Turn.TurnId.make(turnId))
+                  if (current === undefined) {
+                    state.authoritativeTurns.delete(turnId)
+                    state.authoritativeVersions.delete(turnId)
+                    return
+                  }
+                  if (current.status === version.status && current.lastCursor === version.lastCursor) return
+                  invalidateSelectionTurn(state, current)
+                }),
+              { concurrency: 1, discard: true },
+            )
+          }
           const usageCosts = currentUsageCosts()
-          const authoritativeTurns = yield* Ref.get(transcriptAuthoritativeTurns)
-          const entries = storedEntries.map((storedEntry) => {
+          const authoritativeTurns = state.authoritativeTurns
+          let entries = storedEntries.flatMap((storedEntry) => {
             const authoritativeTurn = authoritativeTurns.get(String(storedEntry.turn.id))
+            if (state.pendingTurns.has(String(storedEntry.turn.id))) return []
             const entry =
               authoritativeTurn === undefined
                 ? storedEntry
                 : Object.assign({}, storedEntry, { turn: authoritativeTurn })
             const costUsd = usageCosts.turnCostUsd.get(entry.turn.id)
-            return costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
-              ? entry
-              : Object.assign({}, entry, { projectionCostUsd: costUsd })
+            return [
+              costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
+                ? entry
+                : Object.assign({}, entry, { projectionCostUsd: costUsd }),
+            ]
           })
-          const hasOlder = storedHasOlder || (yield* Ref.get(transcriptHasUnprojectedTurns))
-          const loadedKeys = yield* Ref.get(transcriptLoadedKeys)
+          const hasOlder = storedHasOlder || state.hasUnprojectedTurns
+          if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes)
+            return yield* operationError("Transcript page exceeds the transcript event limit")
+          const loadedKeys = state.loadedKeys
           const deliveredEntries =
             before === undefined ? entries : entries.filter((entry) => !loadedKeys.has(entry.unit.key))
           const completedAt = yield* Clock.currentTimeMillis
-          if ((yield* Ref.get(selectionRequest)) !== request) return
-          yield* Ref.set(transcriptCursor, oldestCursor)
-          yield* Ref.set(transcriptHasOlder, hasOlder)
-          yield* Ref.update(
-            transcriptLoadedKeys,
-            (keys) => new Set([...keys, ...deliveredEntries.map((entry) => entry.unit.key)]),
-          )
+          if (activeSelectionState !== state) return
+          state.transcriptCursor = oldestCursor
+          state.hasOlder = hasOlder
+          if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
           const threadCostUsd = usageCosts.complete ? (usageCosts.threadCostUsd.get(thread.id) ?? 0) : undefined
           const globalCostUsd = displayGlobalCostUsd(usageCosts)
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const storedActiveTurn = yield* turns.findActive(thread.id)
+            yield* activateChildFollowers(thread.id)
+            if (activeSelectionState !== state || (yield* Ref.get(selectionRequest)) !== request) return
+            yield* Effect.forEach(
+              state.authoritativeVersions,
+              ([turnId, version]) =>
+                Effect.gen(function* () {
+                  const current = yield* turns.get(Turn.TurnId.make(turnId))
+                  if (
+                    current === undefined ||
+                    (current.status === version.status && current.lastCursor === version.lastCursor)
+                  )
+                    return
+                  invalidateSelectionTurn(state, current)
+                }),
+              { concurrency: 1, discard: true },
+            )
+            entries = entries.flatMap((entry) => {
+              const turnId = String(entry.turn.id)
+              if (state.pendingTurns.has(turnId)) return []
+              const current = state.authoritativeTurns.get(turnId)
+              return [current === undefined ? entry : Object.assign({}, entry, { turn: current })]
+            })
+            for (const entry of entries) state.loadedKeys.add(entry.unit.key)
             const inspectedActiveTurn =
               storedActiveTurn === undefined ? undefined : authoritativeTurns.get(String(storedActiveTurn.id))
             const activeTurn =
@@ -2984,8 +3241,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 : (inspectedActiveTurn ?? storedActiveTurn)
             yield* Effect.uninterruptible(
               Effect.gen(function* () {
-                if ((yield* Ref.get(selectionRequest)) !== request) return
-                yield* activateChildFollowers(thread.id)
+                if (activeSelectionState !== state) return
                 yield* Ref.set(interactiveThread, thread)
                 selectedThreadId = String(thread.id)
                 const loading = selectionLoad
@@ -3009,9 +3265,13 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               }),
             )
             yield* startUsageCostLoad
-            for (const [executionId, descendant] of yield* Ref.get(transcriptDescendants))
+            if (activeSelectionState !== state) return
+            for (const [executionId, descendant] of state.descendants)
               enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
-          } else
+          } else {
+            if (activeSelectionState !== state) return
+            for (const [executionId, descendant] of state.descendants)
+              enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
             dispatch({
               _tag: "TranscriptPagePrepended",
               selectionEpoch: request,
@@ -3022,6 +3282,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
               ...(oldestCursor === undefined ? {} : { oldestCursor }),
             })
+          }
           yield* Effect.logInfo("transcript.page.loaded").pipe(
             Effect.annotateLogs({
               "rika.thread.id": String(thread.id),
@@ -3032,13 +3293,168 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             }),
           )
         })
+        const continueSelectionRepair = Effect.fn("Operation.interactive.continueSelectionRepair")(function* (
+          state: SelectionEpochState,
+          dispatch: (event: InteractiveEvent) => void,
+        ) {
+          const sourceBackend = yield* ExecutionBackend.Service
+          const transcripts = yield* TranscriptRepository.Service
+          const turns = yield* TurnRepository.Service
+          while (state.pendingTurns.size > 0 || state.hasUnprojectedTurns) {
+            if (activeSelectionState !== state) return
+            if (state.pendingTurns.size === 0) {
+              const before = state.projectedTurnCursor
+              if (before === undefined) {
+                state.hasUnprojectedTurns = false
+                continue
+              }
+              const page = yield* turns.page(state.thread.id, { before, limit: 50 })
+              if (
+                page.hasOlder &&
+                (page.turns.length === 0 ||
+                  page.oldestCursor === undefined ||
+                  sameTurnCursor(page.oldestCursor, before))
+              ) {
+                dispatch({
+                  _tag: "TranscriptResyncRequired",
+                  selectionEpoch: state.epoch,
+                  threadId: state.thread.id,
+                  reason: `Turn page did not advance for Thread ${state.thread.id}`,
+                })
+                return
+              }
+              if (activeSelectionState !== state) return
+              state.projectedTurnCursor = page.oldestCursor
+              state.hasUnprojectedTurns = page.hasOlder
+              for (const turn of page.turns) state.pendingTurns.set(String(turn.id), turn)
+              if (state.pendingTurns.size === 0) {
+                yield* Effect.yieldNow
+                continue
+              }
+            }
+            const beforeProgress = state.inspections.size + state.eventPages.size + state.replays.size
+            const backend = repairBackend(state, sourceBackend, makeRepairBudget())
+            const pending = [...state.pendingTurns.values()]
+            for (const turn of pending) {
+              if (activeSelectionState !== state) return
+              const completed = yield* repairSelectionTurn(state, backend, turn).pipe(
+                Effect.as(true),
+                Effect.catchTag("ExecutionBackendError", (error) =>
+                  isSelectionRepairDeferred(error) ? Effect.succeed(false) : Effect.fail(error),
+                ),
+              )
+              if (!completed || activeSelectionState !== state) continue
+              const projection = yield* transcripts.get(turn.id)
+              if (activeSelectionState !== state) return
+              const current = yield* turns.get(turn.id)
+              const version = state.authoritativeVersions.get(String(turn.id))
+              if (
+                current === undefined ||
+                version === undefined ||
+                current.status !== version.status ||
+                current.lastCursor !== version.lastCursor
+              ) {
+                if (current !== undefined) invalidateSelectionTurn(state, current)
+                continue
+              }
+              if (activeSelectionState !== state) return
+              const authoritativeTurn = state.authoritativeTurns.get(String(turn.id))
+              if (projection === undefined || authoritativeTurn === undefined) continue
+              const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
+                Object.assign(
+                  {
+                    turn: authoritativeTurn,
+                    unit,
+                    projectionRevision: projection.revision,
+                    projectionModelPhase: projection.modelPhase,
+                  },
+                  projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
+                ),
+              )
+              if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes) {
+                dispatch({
+                  _tag: "ExecutionFailed",
+                  selectionEpoch: state.epoch,
+                  message: `Repaired Turn ${turn.id} exceeds the transcript event limit`,
+                })
+                continue
+              }
+              for (const entry of entries) state.loadedKeys.add(entry.unit.key)
+              if (activeSelectionState !== state) return
+              dispatch({
+                _tag: "TranscriptReplaced",
+                selectionEpoch: state.epoch,
+                threadId: state.thread.id,
+                entries,
+                hasOlder: state.hasOlder,
+                ...(state.transcriptCursor === undefined ? {} : { oldestCursor: state.transcriptCursor }),
+              })
+              if (activeSelectionState !== state) return
+              for (const [executionId, descendant] of state.descendants)
+                enqueueChildFollower(state.thread.id, executionId, descendant.rootTurnId, descendant.status)
+            }
+            if (state.pendingTurns.size > 0) {
+              const afterProgress = state.inspections.size + state.eventPages.size + state.replays.size
+              if (afterProgress === beforeProgress) {
+                dispatch({
+                  _tag: "TranscriptResyncRequired",
+                  selectionEpoch: state.epoch,
+                  threadId: state.thread.id,
+                  reason: "Transcript repair made no progress within its bounded chunk",
+                })
+                return
+              }
+            }
+            yield* Effect.yieldNow
+          }
+        })
+        const startSelectionContinuation = (state: SelectionEpochState, dispatch: (event: InteractiveEvent) => void) =>
+          Effect.gen(function* () {
+            if (
+              state.continuationRunning ||
+              (state.pendingTurns.size === 0 && !state.hasUnprojectedTurns) ||
+              activeSelectionState !== state
+            )
+              return
+            state.continuationRunning = true
+            selectionBackground.push(
+              yield* Effect.forkIn(
+                continueSelectionRepair(state, dispatch).pipe(
+                  Effect.provide(executionDependencies),
+                  Effect.ensuring(Effect.sync(() => (state.continuationRunning = false))),
+                ),
+                sessionScope,
+              ),
+            )
+          })
         const loadThread = Effect.fn("Operation.interactive.loadThread")(function* (
           thread: Thread.Thread,
           request: number,
           dispatch: (event: InteractiveEvent) => void,
         ) {
           if ((yield* Ref.get(selectionRequest)) !== request) return
-          yield* interruptSelectionBackground
+          const state: SelectionEpochState = {
+            epoch: request,
+            thread,
+            loadedKeys: new Set(),
+            authoritativeTurns: new Map(),
+            authoritativeVersions: new Map(),
+            descendants: new Map(),
+            inspections: new Map(),
+            eventPages: new Map(),
+            replays: new Map(),
+            pendingTurns: new Map(),
+            backfills: new Map(),
+            initialRepairBudget: makeRepairBudget(),
+            transcriptCursor: undefined,
+            projectedTurnCursor: undefined,
+            hasUnprojectedTurns: false,
+            hasOlder: false,
+            turnPages: 0,
+            transcriptPages: 0,
+            continuationRunning: false,
+          }
+          activeSelectionState = state
           const usageState = {
             request,
             threadId: String(thread.id),
@@ -3046,18 +3462,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             pending: [] as Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>,
           }
           selectedUsage = usageState
-          yield* Ref.set(transcriptCursor, undefined)
-          yield* Ref.set(transcriptLoadedKeys, new Set())
-          yield* Ref.set(transcriptAuthoritativeTurns, new Map())
-          yield* Ref.set(transcriptDescendants, new Map())
-          yield* Ref.set(projectedTurnCursor, undefined)
-          yield* Ref.set(transcriptHasUnprojectedTurns, false)
-          yield* Ref.set(transcriptHasOlder, false)
-          yield* transcriptPageAdmission.withPermits(1)(loadTranscriptPage(thread, request, dispatch))
-          if ((yield* Ref.get(selectionRequest)) !== request) return
+          yield* transcriptPageAdmission.withPermits(1)(loadTranscriptPage(state, dispatch))
+          if (activeSelectionState !== state) return
           const summaries = yield* ThreadSummaryRepository.Service
           yield* summaries.markRead(thread.id, yield* Clock.currentTimeMillis)
           yield* notifyThreadSummaries
+          yield* startSelectionContinuation(state, dispatch)
           selectionBackground.push(
             yield* Effect.forkIn(
               Effect.gen(function* () {
@@ -3087,7 +3497,29 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             ),
           )
         })
+        const runThreadLoad = Effect.fn("Operation.interactive.runThreadLoad")(function* (
+          thread: Thread.Thread,
+          request: number,
+          dispatch: (event: InteractiveEvent) => void,
+        ) {
+          yield* interruptSelectionBackground
+          if ((yield* Ref.get(selectionRequest)) !== request) return
+          const fiber = yield* Effect.forkIn(
+            loadThread(thread, request, dispatch).pipe(Effect.provide(executionDependencies)),
+            sessionScope,
+          )
+          selectionBackground.push(fiber)
+          yield* Fiber.join(fiber).pipe(
+            Effect.catchCause((cause) =>
+              Ref.get(selectionRequest).pipe(
+                Effect.flatMap((current) => (current === request ? Effect.failCause(cause) : Effect.void)),
+              ),
+            ),
+          )
+        })
         const createAndSelectThread = Effect.fn("Operation.interactive.createAndSelectThread")(function* () {
+          activeSelectionState = undefined
+          yield* interruptSelectionBackground
           const threads = yield* ThreadRepository.Service
           const turns = yield* TurnRepository.Service
           const thread = yield* threads.create({
@@ -3103,11 +3535,28 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           selectedThreadId = String(thread.id)
           selectionLoad = undefined
           yield* Ref.set(selectionRequest, epoch)
+          activeSelectionState = {
+            epoch,
+            thread,
+            loadedKeys: new Set(),
+            authoritativeTurns: new Map(),
+            authoritativeVersions: new Map(),
+            descendants: new Map(),
+            inspections: new Map(),
+            eventPages: new Map(),
+            replays: new Map(),
+            pendingTurns: new Map(),
+            backfills: new Map(),
+            initialRepairBudget: makeRepairBudget(),
+            transcriptCursor: undefined,
+            projectedTurnCursor: undefined,
+            hasUnprojectedTurns: false,
+            hasOlder: false,
+            turnPages: 0,
+            transcriptPages: 0,
+            continuationRunning: false,
+          }
           yield* Ref.set(interactiveThread, thread)
-          yield* Ref.set(transcriptCursor, undefined)
-          yield* Ref.set(projectedTurnCursor, undefined)
-          yield* Ref.set(transcriptHasUnprojectedTurns, false)
-          yield* Ref.set(transcriptHasOlder, false)
           sessionDispatch({ _tag: "ThreadActivated", threadId: String(thread.id), title: thread.title })
           sessionDispatch({
             _tag: "SelectionLoaded",
@@ -3559,11 +4008,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   committed: false,
                   ...(joined?.overflow === undefined ? {} : { overflow: joined.overflow }),
                 }
+                activeSelectionState = undefined
                 yield* Ref.set(selectionRequest, epoch)
                 const threads = yield* ThreadRepository.Service
                 const thread = yield* threads.get(Thread.ThreadId.make(id))
                 if (thread === undefined) return yield* operationError(`Thread ${id} does not exist`)
-                yield* loadThread(thread, epoch, selectionDispatch(epoch))
+                yield* runThreadLoad(thread, epoch, selectionDispatch(epoch))
               }).pipe(Effect.ensuring(finishSelection(epoch))),
             ),
           readQueue: (id) =>
@@ -3576,14 +4026,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           loadOlder: safe(
             sessionDispatch,
             Effect.gen(function* () {
-              if (!(yield* Ref.get(transcriptHasOlder))) return
-              const thread = yield* Ref.get(interactiveThread)
-              const before = yield* Ref.get(transcriptCursor)
-              if (thread === undefined || before === undefined) return
-              const request = yield* Ref.get(selectionRequest)
+              const state = activeSelectionState
+              if (state === undefined || !state.hasOlder) return
+              const before = state.transcriptCursor
+              if (before === undefined) return
               yield* transcriptPageAdmission.withPermits(1)(
-                loadTranscriptPage(thread, request, selectionDispatch(request), before),
+                loadTranscriptPage(state, selectionDispatch(state.epoch), before),
               )
+              yield* startSelectionContinuation(state, selectionDispatch(state.epoch))
             }),
           ),
           previewThread: (id) =>
@@ -3627,6 +4077,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 const previousThread = yield* Ref.get(interactiveThread)
                 const previousEpoch = currentSelectionEpoch
                 currentSelectionEpoch = epoch
+                activeSelectionState = undefined
                 yield* Ref.set(selectionRequest, epoch)
                 selectedThreadId = String(thread.id)
                 selectionLoad = {
@@ -3637,7 +4088,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   events: [],
                   committed: false,
                 }
-                yield* loadThread(thread, epoch, selectionDispatch(epoch))
+                yield* runThreadLoad(thread, epoch, selectionDispatch(epoch))
               }).pipe(Effect.ensuring(finishSelection(epoch))),
             ),
           replay: (id, cursor) =>
