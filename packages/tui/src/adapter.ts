@@ -1381,13 +1381,6 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       append(italic(fg(colors.amber)(" (cancelled)")))
     } else {
       append(statusIcon(failed, running, cancelled))
-      const nestedSummary =
-        agent && block.detail.length > 0
-          ? {
-              primary: detail.summary.primary,
-              secondary: `${detail.summary.secondary ?? ""} ${block.detail}`,
-            }
-          : detail.summary
       if (block.presentation.family === "shell") {
         const failure = failed ? ` (exit code: ${shellExitCode(block) ?? 1})` : ""
         const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
@@ -1407,7 +1400,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
         }
         if (failure.length > 0) append(fg(colors.red)(failure))
       } else
-        for (const [labelIndex, labelLine] of renderToolSummary(nestedSummary, {
+        for (const [labelIndex, labelLine] of renderToolSummary(detail.summary, {
           width: rowWidth - stringWidth(continuationPrefix) - (expandable ? 2 : 0),
         }).entries()) {
           if (labelIndex > 0) {
