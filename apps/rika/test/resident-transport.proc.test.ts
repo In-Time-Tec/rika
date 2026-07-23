@@ -439,7 +439,7 @@ describe("resident WebSocket process transport", () => {
             expect(times[3]! - times[2]!).toBeGreaterThanOrEqual(100)
             expect(tags.map((tag) => tag.split(":")[2])).toEqual([
               "Running 1 tool",
-              "Running 1 tool",
+              "Running 2 tools",
               "Running 1 tool",
               "Waiting",
             ])
