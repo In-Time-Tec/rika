@@ -981,6 +981,47 @@ describe("Surface", () => {
     expect(text).not.toContain("Subagent finished Fix packaging integration tests")
   })
 
+  test("keeps the exit code on a failed shell row with nested process waits", () => {
+    const state = model({
+      blocks: [
+        {
+          ...shell("bash", "bun test", "initial output"),
+          status: "failed",
+          process: { processId: "1", running: false, exitCode: 7 },
+        },
+        {
+          _tag: "ToolCall",
+          id: "wait",
+          name: "shell_command_status",
+          input: JSON.stringify({ processId: "1" }),
+          output: "failed output",
+          status: "failed",
+          presentation: {
+            family: "direct",
+            action: "status",
+            activeLabel: "Waiting for",
+            completeLabel: "Waited for",
+          },
+          detail: "bun test",
+          parentId: "bash",
+          process: { processId: "1", running: false, exitCode: 7 },
+          files: [],
+        },
+      ],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:bash" },
+        { _tag: "Block", index: 1, id: "tool:wait", parentId: "bash" },
+      ],
+      expandedRowKeys: ["tool:bash"],
+    })
+
+    const text = buildTranscript(state)
+      .styled.chunks.map((chunk) => chunk.text)
+      .join("")
+    expect(text).toContain("$ bun test (exit code: 7)")
+    expect(text).toContain("Waited for bun test")
+  })
+
   test("renders an expanded failed subagent's failure text in red", () => {
     const state = model({
       blocks: [agentToolBlock("failed")],

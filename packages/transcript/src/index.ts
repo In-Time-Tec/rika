@@ -741,6 +741,7 @@ const applyToolRequested = (projection: Projection, turnId: string, event: Sourc
 const applyToolResult = (projection: Projection, turnId: string, event: SourceEvent): Projection => {
   const value = resultPayload(event)
   const id = eventId(turnId, rawToolId(event))
+  const requested = toolAt(projection, id)
   const output = value.output
   const outputStatus = string(record(output).status).toLowerCase()
   const process = processResult(output)
@@ -757,7 +758,7 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
     let status: Extract<Block, { _tag: "ToolCall" }>["status"] = "complete"
     if (failed) status = "failed"
     else if (cancelled) status = "cancelled"
-    else if (process?.running === true) status = "running"
+    else if (process?.running === true && tool.name !== "shell_command_status") status = "running"
     return {
       ...tool,
       status,
@@ -769,7 +770,34 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
           : tool.files.map((file) => ({ ...file, preview: false, status: failed ? "failed" : "complete" })),
     }
   })
-  if (updated !== projection) return updated
+  if (updated !== projection) {
+    if (
+      requested?.name !== "shell_command_status" ||
+      requested.parentId === undefined ||
+      process?.running === undefined ||
+      process.processId === undefined
+    )
+      return updated
+    const parentTool = toolAt(updated, requested.parentId)
+    if (parentTool?.status !== "running" || parentTool.process?.processId !== process.processId) return updated
+    const running = process.running
+    const processId = process.processId
+    return updateTool(updated, requested.parentId, event.sequence, (tool) => {
+      let status: Extract<Block, { _tag: "ToolCall" }>["status"] = "complete"
+      if (process.exitCode !== undefined && process.exitCode !== 0) status = "failed"
+      else if (running) status = "running"
+      return {
+        ...tool,
+        status,
+        process: {
+          ...tool.process,
+          processId,
+          running,
+          ...(process.exitCode === undefined ? {} : { exitCode: process.exitCode }),
+        },
+      }
+    })
+  }
   const result: Block = { _tag: "ToolResult", id, output: resultText, failed }
   return upsertUnit(
     projection,
@@ -953,7 +981,9 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "model.usage.reported") return applyUsage(projection, event)
   if (event.type === "model.attempt.failed" || event.type === "model.call.failed") return projection
   if (event.type === "execution.completed")
-    return applyExecutionOutcome(projection, turnId, event.sequence, { status: "complete" })
+    return applyExecutionOutcome(settleRunningImpl(projection, "cancelled", event.sequence), turnId, event.sequence, {
+      status: "complete",
+    })
   if (event.type === "execution.failed") {
     if (hasUsableFinalResponse(projection, turnId))
       return applyExecutionOutcome(settleRunningImpl(projection, "cancelled", event.sequence), turnId, event.sequence, {

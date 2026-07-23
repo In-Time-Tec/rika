@@ -1295,12 +1295,14 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     }
     const detail = unit.block.detail.length === 0 ? "" : ` ${unit.block.detail}`
     const agent = unit.block.presentation.family === "agent"
+    const shellFailure =
+      failed && unit.block.presentation.family === "shell" ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
     const output = agent || !isToolOutputDisplayed(unit.block) ? undefined : unit.block.output
     const expandable =
       hasChildren || hasTerminal || (agent ? unit.block.detail.length > 0 : output !== undefined && output.length > 0)
     if (selected)
       highlight(
-        `${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${expandable ? markerText(expanded) : ""}`,
+        `${iconChar(failed, running, spinnerFrame, cancelled)} ${label}${agent ? "" : detail}${shellFailure}${expandable ? markerText(expanded) : ""}`,
       )
     else {
       append(statusIcon(failed, running, cancelled))
@@ -1309,6 +1311,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
         presentation: { ...unit.block.presentation, activeLabel: label, completeLabel: label },
       }).summary
       for (const chunk of renderToolSummary(baseSummary, { leading: " " })[0]!) append(chunk)
+      if (shellFailure.length > 0) append(fg(colors.red)(shellFailure))
       if (expandable) append(marker(expanded))
     }
     if (expanded && agent && unit.block.detail.length > 0) {

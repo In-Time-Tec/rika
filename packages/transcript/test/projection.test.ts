@@ -564,8 +564,8 @@ describe("Transcript projection", () => {
     ).toBe(false)
   })
 
-  it("keeps a process wait as its own row and names it from the parent command", () => {
-    const projection = project("turn-a", "run tests", [
+  it("settles each process wait while the parent command owns process liveness", () => {
+    const events: ReadonlyArray<SourceEvent> = [
       {
         cursor: "bash",
         sequence: 1,
@@ -575,6 +575,168 @@ describe("Transcript projection", () => {
       },
       {
         cursor: "shell-result",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: {
+          tool_call_id: "bash-1",
+          output: { text: "initial", processId: "process-1", running: true, stdout: "initial" },
+        },
+      },
+      {
+        cursor: "wait-1",
+        sequence: 3,
+        type: "tool.call.requested",
+        createdAt: 3,
+        data: {
+          tool_call_id: "wait-1",
+          tool_name: "shell_command_status",
+          input: { processId: "process-1" },
+        },
+      },
+      {
+        cursor: "wait-result-1",
+        sequence: 4,
+        type: "tool.result.received",
+        createdAt: 4,
+        data: {
+          tool_call_id: "wait-1",
+          output: { text: "middle", processId: "process-1", running: true, stdout: "middle" },
+        },
+      },
+      {
+        cursor: "wait-2",
+        sequence: 5,
+        type: "tool.call.requested",
+        createdAt: 5,
+        data: {
+          tool_call_id: "wait-2",
+          tool_name: "shell_command_status",
+          input: { processId: "process-1" },
+        },
+      },
+      {
+        cursor: "wait-result-2",
+        sequence: 6,
+        type: "tool.result.received",
+        createdAt: 6,
+        data: {
+          tool_call_id: "wait-2",
+          output: { text: "final", processId: "process-1", running: false, exitCode: 0, stdout: "final" },
+        },
+      },
+      {
+        cursor: "wait-3",
+        sequence: 7,
+        type: "tool.call.requested",
+        createdAt: 7,
+        data: {
+          tool_call_id: "wait-3",
+          tool_name: "shell_command_status",
+          input: { processId: "process-1" },
+        },
+      },
+      {
+        cursor: "wait-result-3",
+        sequence: 8,
+        type: "tool.result.received",
+        createdAt: 8,
+        data: {
+          tool_call_id: "wait-3",
+          output: { text: "stale", processId: "process-1", running: true, stdout: "stale" },
+        },
+      },
+    ]
+    const interim = project("turn-a", "run tests", events.slice(0, 4))
+    const projection = project("turn-a", "run tests", events)
+
+    expect(interim.units[1]).toMatchObject({
+      revision: 4,
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "running" } },
+    })
+    expect(interim.units[2]).toMatchObject({
+      revision: 4,
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete", output: "middle" } },
+    })
+    expect(hasRunningBlocks(interim)).toBe(true)
+    expect(projection.units).toHaveLength(5)
+    expect(projection.units[1]).toMatchObject({
+      key: "tool:turn-a:bash-1",
+      revision: 6,
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          status: "complete",
+          output: "initial",
+          process: { processId: "process-1", running: false, exitCode: 0, stdout: "initial" },
+        },
+      },
+    })
+    expect(projection.units[2]).toMatchObject({
+      key: "tool:turn-a:wait-1",
+      revision: 4,
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          status: "complete",
+          output: "middle",
+          parentId: "turn-a:bash-1",
+          detail: "bun test",
+          process: { processId: "process-1", running: true, stdout: "middle" },
+          presentation: { activeLabel: "Waiting for", completeLabel: "Waited for" },
+        },
+      },
+    })
+    expect(projection.units[3]).toMatchObject({
+      key: "tool:turn-a:wait-2",
+      revision: 6,
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          status: "complete",
+          output: "final",
+          parentId: "turn-a:bash-1",
+          detail: "bun test",
+          process: { processId: "process-1", running: false, exitCode: 0, stdout: "final" },
+          presentation: { activeLabel: "Waiting for", completeLabel: "Waited for" },
+        },
+      },
+    })
+    expect(projection.units[4]).toMatchObject({
+      key: "tool:turn-a:wait-3",
+      revision: 8,
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          status: "complete",
+          output: "stale",
+          parentId: "turn-a:bash-1",
+          process: { processId: "process-1", running: true, stdout: "stale" },
+        },
+      },
+    })
+    expect(hasRunningBlocks(projection)).toBe(false)
+    expect(events.reduce((current, event) => applyEvent(current, event), empty("turn-a", "run tests"))).toEqual(
+      projection,
+    )
+    expect(applyEvent(projection, events.at(-1)!)).toEqual(projection)
+  })
+
+  it("separates process failure from status-call failure", () => {
+    const running: ReadonlyArray<SourceEvent> = [
+      {
+        cursor: "bash",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "bash-1", tool_name: "bash", input: { command: "bun test" } },
+      },
+      {
+        cursor: "bash-result",
         sequence: 2,
         type: "tool.result.received",
         createdAt: 2,
@@ -591,8 +753,11 @@ describe("Transcript projection", () => {
           input: { processId: "process-1" },
         },
       },
+    ]
+    const failed = project("turn-a", "run tests", [
+      ...running,
       {
-        cursor: "wait-result",
+        cursor: "failed",
         sequence: 4,
         type: "tool.result.received",
         createdAt: 4,
@@ -602,21 +767,42 @@ describe("Transcript projection", () => {
         },
       },
     ])
-    expect(projection.units).toHaveLength(3)
-    expect(projection.units[2]).toMatchObject({
-      key: "tool:turn-a:wait-1",
-      content: {
-        _tag: "Block",
-        block: {
-          _tag: "ToolCall",
-          parentId: "turn-a:bash-1",
-          detail: "bun test",
-          status: "failed",
-          process: { exitCode: 7 },
-          presentation: { activeLabel: "Waiting for", completeLabel: "Waited for" },
+    const statusError = project("turn-a", "run tests", [
+      ...running,
+      {
+        cursor: "status-error",
+        sequence: 4,
+        type: "tool.result.received",
+        createdAt: 4,
+        data: {
+          tool_call_id: "wait-1",
+          output: { _tag: "ToolError", message: "Unknown process id: process-1" },
         },
       },
+    ])
+
+    expect(failed.units[1]).toMatchObject({
+      revision: 4,
+      content: {
+        _tag: "Block",
+        block: { _tag: "ToolCall", status: "failed", process: { running: false, exitCode: 7 } },
+      },
     })
+    expect(failed.units[2]).toMatchObject({
+      content: {
+        _tag: "Block",
+        block: { _tag: "ToolCall", status: "failed", process: { running: false, exitCode: 7 } },
+      },
+    })
+    expect(hasRunningBlocks(failed)).toBe(false)
+    expect(statusError.units[1]).toMatchObject({
+      revision: 2,
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "running" } },
+    })
+    expect(statusError.units[2]).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "failed" } },
+    })
+    expect(hasRunningBlocks(statusError)).toBe(true)
   })
 
   it("preserves hidden web output with its presentation metadata", () => {
@@ -1080,7 +1266,7 @@ describe("Transcript projection", () => {
     expect(reordered.usageCursors).toEqual(["execution:turn-a\u0000usage-5", "execution:turn-a\u0000usage-2"])
   })
 
-  it("settles running tool and child blocks when the execution fails or is cancelled", () => {
+  it("settles running tool and child blocks at every execution terminal boundary", () => {
     const base: ReadonlyArray<SourceEvent> = [
       {
         cursor: "call",
@@ -1105,6 +1291,10 @@ describe("Transcript projection", () => {
       ...base,
       { cursor: "failed", sequence: 3, type: "execution.failed", createdAt: 3, data: { message: "boom" } },
     ])
+    const completed = project("turn-a", "prompt", [
+      ...base,
+      { cursor: "completed", sequence: 3, type: "execution.completed", createdAt: 3 },
+    ])
 
     expect(cancelled.units.find((item) => item.key === "tool:turn-a:call")).toMatchObject({
       revision: 3,
@@ -1120,6 +1310,15 @@ describe("Transcript projection", () => {
     expect(failed.units.find((item) => item.key === "child:turn-a:orphan-child")).toMatchObject({
       content: { _tag: "Block", block: { _tag: "ChildAgent", status: "failed" } },
     })
+    expect(completed.units.find((item) => item.key === "tool:turn-a:call")).toMatchObject({
+      revision: 3,
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "cancelled" } },
+    })
+    expect(completed.units.find((item) => item.key === "child:turn-a:orphan-child")).toMatchObject({
+      revision: 3,
+      content: { _tag: "Block", block: { _tag: "ChildAgent", status: "cancelled" } },
+    })
+    expect(hasRunningBlocks(completed)).toBe(false)
   })
 
   it("hides model failure telemetry and explains terminal compaction failure", () => {

@@ -52,6 +52,42 @@ test(
 )
 
 test(
+  "settles repeated process waits while the original shell row owns process liveness",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const command = "printf EARLY_OUTPUT; sleep 1; printf FINAL_OUTPUT"
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            TuiApp.model.turn([TuiApp.model.toolCall("bash", { command, timeout_ms: 0 }, "bash-wait")]),
+            TuiApp.model.turn([
+              TuiApp.model.toolCall("shell_command_status", { processId: "1", waitMillis: 0 }, "wait-immediate"),
+            ]),
+            TuiApp.model.turn([
+              TuiApp.model.toolCall("shell_command_status", { processId: "1", waitMillis: 10_000 }, "wait-final"),
+            ]),
+            TuiApp.model.text("SHELL_WAIT_COMPLETE"),
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Run the process and wait for it."))
+        app.pressEnter()
+        yield* app.waitFrame("SHELL_WAIT_COMPLETE")
+        yield* settled(app)
+        app.pressKey("\t")
+        app.pressEnter()
+        const completed = yield* app.waitFrame("FINAL_OUTPUT")
+        expect(completed.match(/Waited for/g) ?? []).toHaveLength(2)
+        expect(completed).not.toContain("Waiting for")
+        expect(completed).not.toContain("Running tools")
+        expect(completed.match(/\$ printf EARLY_OUTPUT/g) ?? []).toHaveLength(1)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
   "runs turns, tools, pickers, and surfaces in one real TUI session",
   () =>
     TuiApp.run(
