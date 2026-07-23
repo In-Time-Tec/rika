@@ -1287,7 +1287,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
           append(
             dim(
               fg(colors.text)(
-                wrapBodyText(output!.split("\n").slice(0, 12).join("\n"), transcriptWrapWidth(model.width), "   "),
+                wrapBodyText(output!.split("\n").slice(0, 12).join("\n"), transcriptWrapWidth(model.width), "     "),
               ),
             ),
           )
@@ -1437,16 +1437,18 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       append(dim(fg(colors.subtle)(bodyIndent)))
       append(dim(fg(colors.text)(wrapTextToWidth(block.detail, bodyWidth).join(`\n${bodyIndent}`))))
     } else if (expanded && output !== undefined && output.length > 0) {
-      const renderedOutput = wrapTextToWidth(output.split("\n").slice(0, 12).join("\n"), bodyWidth).join(
-        `\n${bodyIndent}`,
+      const outputIndent = block.presentation.family === "shell" ? `${bodyIndent}  ` : bodyIndent
+      const outputWidth = Math.max(1, rowWidth - stringWidth(outputIndent))
+      const renderedOutput = wrapTextToWidth(output.split("\n").slice(0, 12).join("\n"), outputWidth).join(
+        `\n${outputIndent}`,
       )
       append(fg(colors.text)("\n"))
-      append(dim(fg(colors.subtle)(bodyIndent)))
+      append(dim(fg(colors.subtle)(outputIndent)))
       append(dim(fg(colors.text)(renderedOutput)))
     }
     if (expanded)
       for (const [childIndex, child] of children.entries())
-        renderNestedTool(child, bodyPrefix, childIndex === children.length - 1 && unit.agentResponse === undefined)
+        renderNestedTool(child, bodyIndent, childIndex === children.length - 1 && unit.agentResponse === undefined)
     if (expanded && unit.agentResponse !== undefined) {
       const timeline = children.length > 0
       const terminalPrefix = timeline ? `${bodyPrefix}│   ` : `${bodyPrefix}  `
@@ -3000,6 +3002,13 @@ export class Surface {
         rowWindowEnd: this.transcriptRowWindow.end,
       }
       if (this.transcriptChanged(transcriptInput)) {
+        const previousExpandedRows = this.transcriptRenderInput?.expandedRowKeys
+        if (
+          previousExpandedRows !== undefined &&
+          (previousExpandedRows.length !== renderModel.expandedRowKeys.length ||
+            previousExpandedRows.some((row) => !renderModel.expandedRowKeys.includes(row)))
+        )
+          this.renderer.clearSelection()
         const toolSpinnerGlyph = this.toolSpinner.toBraille()
         const boundedModel = boundedTranscriptModel(renderModel, this.transcriptWindowEnd)
         const builder = transcriptUnitBuilder(boundedModel, toolSpinnerGlyph)

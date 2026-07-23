@@ -864,8 +864,14 @@ describe("Surface", () => {
       ...collapsedChild,
       expandedRowKeys: ["tool:one", "tool-child:one"],
     })
-    expect(expanded.styled.chunks.map((chunk) => chunk.text).join("")).toContain("passed")
-    expect(expanded.styled.chunks.map((chunk) => chunk.text).join("")).not.toContain("clean")
+    const expandedLines = expanded.styled.chunks
+      .map((chunk) => chunk.text)
+      .join("")
+      .split("\n")
+    const commandRow = expandedLines.find((line) => line.includes("bun test"))!
+    const outputRow = expandedLines.find((line) => line.includes("passed"))!
+    expect(outputRow.indexOf("passed")).toBe(commandRow.indexOf("bun test"))
+    expect(expandedLines.join("\n")).not.toContain("clean")
   })
 
   test("uses the tool presentation label for a single created file", () => {
@@ -1340,7 +1346,7 @@ describe("Surface", () => {
         { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
         { _tag: "Block", index: 2, id: "tool:child-b", turnId: "child:agent", parentId: "agent" },
       ],
-      expandedRowKeys: ["tool:agent"],
+      expandedRowKeys: ["tool:agent", "tool:child-a"],
     })
     const lines = nonEmptyLines(
       buildTranscript(state)
@@ -1349,6 +1355,9 @@ describe("Surface", () => {
     )
     expect(lines.some((line) => line.trimStart().startsWith("├"))).toBe(true)
     expect(lines.some((line) => line.trimStart().startsWith("└"))).toBe(true)
+    const commandRow = lines.find((line) => line.includes("bun test"))!
+    const outputRow = lines.find((line) => line.includes("passed"))!
+    expect(outputRow.indexOf("passed")).toBe(commandRow.indexOf("bun test"))
     expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
   })
 
@@ -1414,12 +1423,14 @@ describe("Surface", () => {
           id: "child",
           detail: "Read-only explore packages/config, extensions, and tools with concise source-file evidence.",
         },
+        shell("grandchild", "git status", "clean"),
         shell("following", "git status", "clean"),
       ],
       items: [
         { _tag: "Block", index: 0, id: "tool:parent", turnId: "turn" },
         { _tag: "Block", index: 1, id: "tool:child", turnId: "child:parent", parentId: "parent" },
-        { _tag: "Block", index: 2, id: "tool:following", turnId: "child:parent", parentId: "parent" },
+        { _tag: "Block", index: 2, id: "tool:grandchild", turnId: "child:child", parentId: "child" },
+        { _tag: "Block", index: 3, id: "tool:following", turnId: "child:parent", parentId: "parent" },
       ],
       expandedRowKeys: ["tool:parent", "tool:child"],
     })
@@ -1431,6 +1442,7 @@ describe("Surface", () => {
     const text = lines.join("\n")
     expect(lines.some((line) => line.startsWith("  ├ ✓ Subagent finished ▾"))).toBe(true)
     expect(lines.some((line) => line.startsWith("  │   Read-only explore"))).toBe(true)
+    expect(lines.some((line) => line.startsWith("  │   ├ ✓ $ git status"))).toBe(true)
     expect(text.match(/Read-only explore/g)).toHaveLength(1)
     expect(lines.every((line) => stringWidth(line) <= 44)).toBe(true)
   })

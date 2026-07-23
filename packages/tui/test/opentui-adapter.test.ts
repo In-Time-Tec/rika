@@ -2346,6 +2346,22 @@ test("renders a subagent tool tree and expands each child independently", () =>
         yield* openTui(() => setup.flush())
         expect(model.expandedRowKeys).toContain("tool:child-agent")
 
+        const agentBody = records().get("tool:child-agent:body")!.renderable
+        yield* openTui(() =>
+          setup.mockMouse.drag(agentBody.screenX, agentBody.screenY, agentBody.screenX + 24, agentBody.screenY),
+        )
+        yield* openTui(() => setup.flush())
+        expect(setup.renderer.getSelection()?.getSelectedText()).toContain("Read-only explore")
+        model = update(model, { _tag: "DetailToggled", id: "tool:oracle-parent" })
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+        expect(model.expandedRowKeys).not.toContain("tool:oracle-parent")
+        expect(setup.captureCharFrame()).not.toContain("Read-only explore")
+        expect(setup.renderer.getSelection()).toBeNull()
+        model = update(model, { _tag: "DetailToggled", id: "tool:oracle-parent" })
+        surface.update(model)
+        yield* openTui(() => setup.flush())
+
         const read = records().get("tool:child-read:header")!.renderable
         yield* openTui(() => setup.mockMouse.click(read.screenX + 4, read.screenY))
         yield* openTui(() => setup.flush())
