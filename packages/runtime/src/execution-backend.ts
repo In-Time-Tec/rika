@@ -1013,6 +1013,22 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
       const registry =
         Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
       const hostInstances = new Map<string, Resident.Instance>()
+      const hasActiveExecutionWork = Effect.gen(function* () {
+        for (const status of ["queued", "running", "waiting"] as const) {
+          let cursor: string | undefined
+          while (true) {
+            const page = yield* client.executions.list({
+              status,
+              limit: 100,
+              ...(cursor === undefined ? {} : { cursor }),
+            })
+            if (page.records.some((record) => record.agent_id !== ThreadHost.hostAgentId)) return true
+            cursor = page.next_cursor
+            if (cursor === undefined) break
+          }
+        }
+        return false
+      }).pipe(Effect.mapError(error))
       const hostReady = yield* Effect.cached(
         Effect.gen(function* () {
           yield* client.agents.register({
@@ -1129,6 +1145,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         return recreated
       })
       return Service.of({
+        hasActiveExecutionWork,
         ...(options.registerModels === undefined ? {} : { registerModels: options.registerModels }),
         wakeThreadHost: Effect.fn("ExecutionBackend.wakeThreadHost")(function* (wake) {
           yield* hostGate

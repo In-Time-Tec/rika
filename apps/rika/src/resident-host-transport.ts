@@ -66,6 +66,40 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const hostWork = yield* FiberSet.make<void, unknown>()
   const activeConnections = yield* Ref.make(new Map<string, Effect.Effect<void>>())
   const operationAdmission = yield* Semaphore.make(32)
+  const replacementAdmission = yield* Semaphore.make(1)
+  const activeExecutionWork = yield* Ref.make(0)
+  const runExecutionWork = <A, E, R>(
+    work: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E | Operation.OperationUnavailable, R> => {
+    const admit: Effect.Effect<boolean> = replacementAdmission.withPermits(1)(
+      lifecycle.state.pipe(
+        Effect.flatMap((state) =>
+          state === "draining" || state === "stopped"
+            ? Effect.succeed(false)
+            : Ref.update(activeExecutionWork, (active) => active + 1).pipe(Effect.as(true)),
+        ),
+      ),
+    )
+    return admit.pipe(
+      Effect.flatMap(
+        (admitted): Effect.Effect<A, E | Operation.OperationUnavailable, R> =>
+          admitted
+            ? work.pipe(
+                Effect.ensuring(
+                  replacementAdmission.withPermits(1)(
+                    Ref.update(activeExecutionWork, (active) => Math.max(0, active - 1)),
+                  ),
+                ),
+              )
+            : Effect.fail(
+                Operation.OperationUnavailable.make({
+                  operation: "ResidentService",
+                  message: "Resident service is draining",
+                }),
+              ),
+      ),
+    )
+  }
   const drainingFailure = (requestId: string, operation: string) =>
     writerFailure(
       requestId,
@@ -552,9 +586,33 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               })
               if (result._tag !== "Accepted") {
                 const incompatible = result._tag === "ProtocolMismatch" || result._tag === "BuildMismatch"
-                const reason = incompatible
-                  ? `Incompatible Rika resident PID ${process.pid}; the newly launched Rika replaces it`
-                  : `Rika resident PID ${process.pid} rejected this credential; close other Rika clients, stop PID ${process.pid}, then run rika again`
+                const replacementRequested = incompatible && message.connectRole === "launch"
+                const replacementAllowed = replacementRequested
+                  ? yield* replacementAdmission.withPermits(1)(
+                      Ref.get(activeExecutionWork).pipe(
+                        Effect.flatMap((active) =>
+                          active > 0
+                            ? Effect.succeed(true)
+                            : Deferred.await(operationReady).pipe(
+                                Effect.flatMap((operation) => operation.hasActiveExecutionWork ?? Effect.succeed(true)),
+                              ),
+                        ),
+                        Effect.map((active) => !active),
+                        Effect.tap((allowed) => (allowed ? lifecycle.beginDrain : Effect.void)),
+                        Effect.catch((error) =>
+                          Effect.logWarning("resident.replacement.readiness_failed").pipe(
+                            Effect.annotateLogs("rika.failure.message", error.message),
+                            Effect.as(false),
+                          ),
+                        ),
+                      ),
+                    )
+                  : false
+                let reason = `Rika resident PID ${process.pid} rejected this credential; close other Rika clients, stop PID ${process.pid}, then run rika again`
+                if (replacementAllowed)
+                  reason = `Incompatible Rika resident PID ${process.pid}; the newly launched Rika replaces it`
+                else if (incompatible)
+                  reason = `Rika resident PID ${process.pid} owns active execution work; let it finish, then run rika again`
                 yield* Effect.logWarning("resident.connection.rejected").pipe(
                   Effect.annotateLogs({
                     "rika.resident.connection.id": connectionId,
@@ -562,9 +620,11 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   }),
                 )
                 if (incompatible) {
+                  let disposition: ResidentService.HandshakeIncompatible["disposition"] = "restart"
+                  if (message.connectRole === "launch") disposition = replacementAllowed ? "supersede-idle" : "defer"
                   const response = {
                     _tag: "incompatible" as const,
-                    disposition: message.connectRole === "launch" ? ("supersede" as const) : ("restart" as const),
+                    disposition,
                     family: "rika-resident" as const,
                     identity: options.identity,
                     clientNonce: message.clientNonce,
@@ -709,7 +769,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               }
               const cancelled = yield* Deferred.make<void>()
               const effect = Effect.gen(function* () {
-                yield* Operation.executeInteractiveCommand(active.session, message.command)
+                yield* runExecutionWork(Operation.executeInteractiveCommand(active.session, message.command))
                 const completedAt = yield* Clock.currentTimeMillis
                 yield* Effect.logInfo("resident.interactive_command.completed").pipe(
                   Effect.annotateLogs({
@@ -857,7 +917,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                         .run(message.input)
                         .pipe(Effect.provideService(Console.Console, requestConsole))
                       const result = yield* Effect.exit(
-                        message.input._tag === "Interactive" ? execution : operationAdmission.withPermits(1)(execution),
+                        message.input._tag === "Interactive"
+                          ? execution
+                          : runExecutionWork(operationAdmission.withPermits(1)(execution)),
                       )
                       const delivery = yield* Effect.raceFirst(
                         Fiber.await(sender),

@@ -57,7 +57,7 @@ export type HandshakeAccepted = typeof HandshakeAccepted.Type
 
 export const HandshakeIncompatible = Schema.Struct({
   _tag: Schema.tag("incompatible"),
-  disposition: Schema.Literals(["supersede", "restart"]),
+  disposition: Schema.Literals(["supersede", "supersede-idle", "restart", "defer"]),
   family: Schema.tag("rika-resident"),
   identity: WireIdentifier,
   clientNonce: WireIdentifier,
@@ -217,6 +217,7 @@ export class ResidentServiceError extends Schema.TaggedErrorClass<ResidentServic
     "foreign-listener",
     "message-too-large",
     "resident-absent",
+    "resident-busy",
     "resident-draining",
     "startup-failed",
     "transport-failed",

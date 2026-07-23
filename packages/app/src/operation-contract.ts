@@ -267,6 +267,7 @@ export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()("Inval
 }
 
 export interface Interface {
+  readonly hasActiveExecutionWork?: Effect.Effect<boolean, OperationUnavailable>
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>
 }
 

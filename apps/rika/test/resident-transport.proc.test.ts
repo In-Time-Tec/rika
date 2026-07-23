@@ -68,6 +68,31 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
+    "does not supersede a legacy v4 resident that cannot attest it is idle",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          const old = yield* startOldResident(root, true, "legacy-v4")
+          try {
+            const client = yield* start(root, 1_000)
+            expect(yield* client.nextEffect).toMatchObject({
+              type: "rejected",
+              tag: "ResidentServiceError",
+              error: expect.stringContaining("cannot confirm"),
+            })
+            expect(alive(Number(old.pid))).toBe(true)
+            expect(yield* fileExists(`${root}/owner-acquisitions.log`)).toBe(false)
+          } finally {
+            yield* old.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore)
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
+  )
+
+  test(
     "returns the frozen v3 restart signal without attaching the old client",
     () =>
       run(
@@ -429,7 +454,7 @@ describe("resident WebSocket process transport", () => {
   )
 
   test(
-    "launching client supersedes a compatible different build while two interactive clients stay alive",
+    "launching client supersedes an idle compatible different build while two interactive clients stay alive",
     () =>
       run(
         Effect.gen(function* () {
@@ -495,6 +520,42 @@ describe("resident WebSocket process transport", () => {
         }),
       ),
     20_000,
+  )
+
+  test(
+    "a different build leaves an active resident with delegated work alive and returns a recoverable refusal",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const mismatched = yield* start(root, 1_000, 0, true, 1_024, 0, false, undefined, 0, {
+              script: "test/fixtures/resident-mismatched-client.ts",
+              environment: {
+                RIKA_TEST_RESIDENT_HOST_SCRIPT: "test/fixtures/resident-mismatched-host.ts",
+                RIKA_TEST_BUILD_IDENTITY: "rika-test-other-build",
+              },
+            })
+            const oldAttached = yield* attachedEffect(mismatched)
+            yield* mismatched.send("delayed")
+            yield* waitUntil(fileExists(`${root}/delayed-work-starts.log`))
+
+            const current = yield* start(root, 1_000)
+            expect(yield* current.nextEffect).toMatchObject({
+              type: "rejected",
+              tag: "ResidentServiceError",
+              error: expect.stringContaining("owns active execution work"),
+            })
+            expect(alive(oldAttached.hostPid!)).toBe(true)
+            expect(yield* fileExists(`${root}/delayed-work-finalizations.log`)).toBe(false)
+            expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${oldAttached.hostPid}\n`)
+            yield* mismatched.kill
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    15_000,
   )
 
   test(

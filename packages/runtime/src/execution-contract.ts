@@ -220,6 +220,7 @@ export interface ThreadQueueWake {
 export type TurnPromoter = (threadId: string, generation: number) => Effect.Effect<number>
 
 export interface Interface {
+  readonly hasActiveExecutionWork?: Effect.Effect<boolean, BackendError>
   readonly registerModels?: (
     registrations: ReadonlyArray<ModelRegistry.Registration>,
   ) => Effect.Effect<void, BackendError>

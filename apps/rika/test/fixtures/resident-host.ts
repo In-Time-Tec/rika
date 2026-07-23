@@ -59,6 +59,7 @@ const program = Effect.gen(function* () {
           ),
         )
         return Operation.Service.of({
+          hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
           run: (input) => {
             if (input._tag !== "Interactive")
               return Effect.suspend(() => {

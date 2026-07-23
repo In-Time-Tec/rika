@@ -3759,6 +3759,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         return scheduled.completed
       })
       return Service.of({
+        hasActiveExecutionWork: Context.get(dependencyContext, TurnRepository.Service).listNonterminal.pipe(
+          Effect.flatMap((turns) =>
+            turns.length > 0 ? Effect.succeed(true) : (acquiredBackend.hasActiveExecutionWork ?? Effect.succeed(true)),
+          ),
+          Effect.mapError((error) => unavailable({ _tag: "Doctor" }, error.message)),
+        ),
         run: Effect.fn("Operation.product.run")(function* (input) {
           if (
             input._tag === "Interactive" ||

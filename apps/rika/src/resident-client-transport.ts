@@ -217,8 +217,13 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                 if (!ResidentService.verifyServerProof(options.token, signedHandshake, message))
                   return Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
                 if (message._tag === "incompatible") {
-                  const expectedDisposition = options.connectRole === "launch" ? "supersede" : "restart"
-                  if (message.disposition !== expectedDisposition)
+                  const validDisposition =
+                    options.connectRole === "launch"
+                      ? message.disposition === "supersede" ||
+                        message.disposition === "supersede-idle" ||
+                        message.disposition === "defer"
+                      : message.disposition === "restart"
+                  if (!validDisposition)
                     return Effect.fail(
                       transportError("Resident returned an invalid upgrade disposition", "foreign-listener"),
                     )
@@ -228,6 +233,22 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                         "Resident returned an incompatible response for a compatible handshake",
                         "foreign-listener",
                       ),
+                    )
+                  if (message.disposition === "defer")
+                    return Effect.fail(
+                      ResidentService.ResidentServiceError.make({
+                        reason: "resident-busy",
+                        message: `Rika cannot upgrade while resident PID ${message.residentPid ?? "unknown"} owns active execution work. Let the active work finish, then run rika again`,
+                        ...(message.residentPid === undefined ? {} : { residentPid: message.residentPid }),
+                      }),
+                    )
+                  if (message.disposition === "supersede")
+                    return Effect.fail(
+                      ResidentService.ResidentServiceError.make({
+                        reason: "resident-busy",
+                        message: `Rika cannot confirm that resident PID ${message.residentPid ?? "unknown"} is idle enough to upgrade safely. Let active work finish and stop that resident before retrying`,
+                        ...(message.residentPid === undefined ? {} : { residentPid: message.residentPid }),
+                      }),
                     )
                   return Effect.fail(
                     ResidentService.ResidentServiceError.make({

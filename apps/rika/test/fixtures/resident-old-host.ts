@@ -1,7 +1,8 @@
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { Config, Effect, FileSystem, Layer, Logger, Path } from "effect"
+import * as ResidentService from "@rika/app/resident-service"
+import { Config, Effect, FileSystem, Layer, Logger, Path, Schema } from "effect"
 import { readOrCreateToken, resolve } from "../../src/resident-endpoint"
 
 const program = Effect.gen(function* () {
@@ -24,7 +25,7 @@ const program = Effect.gen(function* () {
       const url = new URL(request.url)
       let acceptedPath = false
       if (mode === "legacy") acceptedPath = url.pathname === "/resident/v1"
-      else if (mode === "schema-reject" || mode === "fake-incompatible" || mode === "v3")
+      else if (mode === "schema-reject" || mode === "fake-incompatible" || mode === "v3" || mode === "legacy-v4")
         acceptedPath = url.pathname === "/resident" || url.pathname === "/resident/v1"
       if (!acceptedPath || !upgradeServer.upgrade(request)) return new Response(null, { status: 404 })
       return undefined
@@ -36,6 +37,29 @@ const program = Effect.gen(function* () {
           return
         }
         if (mode === "fake-incompatible" || mode === "v3") {
+          socket.close(4406)
+          return
+        }
+        if (mode === "legacy-v4") {
+          const handshake = Schema.decodeUnknownSync(ResidentService.Handshake)(JSON.parse(String(text)))
+          const response = {
+            _tag: "incompatible" as const,
+            disposition: "supersede" as const,
+            family: "rika-resident" as const,
+            identity: endpoint.identity,
+            clientNonce: handshake.clientNonce,
+            serviceNonce: `old-service-${process.pid}`,
+            connectionId: `old-connection-${process.pid}`,
+            protocolVersion: ResidentService.protocolVersion,
+            buildIdentity: "rika-test-legacy-v4",
+            residentPid: process.pid,
+          }
+          socket.send(
+            JSON.stringify({
+              ...response,
+              serverProof: ResidentService.serverProof(token, handshake, response),
+            } satisfies ResidentService.HandshakeIncompatible),
+          )
           socket.close(4406)
           return
         }

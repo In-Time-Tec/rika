@@ -197,6 +197,20 @@ describe("resident service protocol", () => {
     expect(verifyServerProof("token", handshake, { ...incompatible, disposition: "restart" })).toBe(false)
     expect(verifyServerProof("token", handshake, { ...incompatible, residentPid: 124 })).toBe(false)
     expect(verifyServerProof("token", handshake, { ...incompatible, connectionId: "other" })).toBe(false)
+    const deferredFields = { ...incompatibleFields, disposition: "defer" as const }
+    const deferred = Schema.decodeUnknownSync(ServerMessage)({
+      ...deferredFields,
+      serverProof: serverProof("token", handshake, deferredFields),
+    })
+    expect(deferred._tag).toBe("incompatible")
+    if (deferred._tag === "incompatible") expect(verifyServerProof("token", handshake, deferred)).toBe(true)
+    const idleFields = { ...incompatibleFields, disposition: "supersede-idle" as const }
+    const idle = Schema.decodeUnknownSync(ServerMessage)({
+      ...idleFields,
+      serverProof: serverProof("token", handshake, idleFields),
+    })
+    expect(idle._tag).toBe("incompatible")
+    if (idle._tag === "incompatible") expect(verifyServerProof("token", handshake, idle)).toBe(true)
   })
 
   it("accepts only incompatibility responses justified by the connection role", () => {
