@@ -39,6 +39,15 @@ const runNative = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof BunSer
   Effect.runPromise(provide(effect, BunServices.layer))
 
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const decodeToolExecution = Schema.decodeUnknownSync(
+  Schema.fromJsonString(
+    Schema.Struct({
+      tool_execution: Schema.optional(
+        Schema.Struct({ concurrency: Schema.Union([Schema.Finite, Schema.Literal("unbounded")]) }),
+      ),
+    }),
+  ),
+)
 
 const withBackend = <A, E>(
   script: Parameters<typeof TestModel.make>[0],
@@ -125,7 +134,7 @@ test(
 )
 
 test(
-  "delivers image attachments to Baton as data URLs",
+  "delivers image attachments to Baton as inline data URLs",
   () =>
     runNative(
       withBackend([TestModel.text("image received")], (fixture) =>
@@ -148,11 +157,14 @@ test(
           )
           expect(parts).toMatchObject([
             { type: "text", text: "inspect " },
-            { type: "file", mediaType: "image/png", fileName: "shot.png" },
+            {
+              type: "file",
+              mediaType: "image/png",
+              data: new URL("data:image/png;base64,AQID"),
+              fileName: "shot.png",
+            },
             { type: "text", text: " closely" },
           ])
-          expect(String(parts?.[1]?.data)).toBe("data:image/png;base64,AQID")
-          expect(Object.prototype.toString.call(parts?.[1]?.data)).toBe("[object URL]")
         }),
       ),
     ),
@@ -227,7 +239,7 @@ test(
 )
 
 test(
-  "delivers image data URLs through a dynamically registered model",
+  "delivers inline image data through a dynamically registered model",
   () =>
     runNative(
       withBackend(
@@ -258,10 +270,16 @@ test(
             const parts = requests[0]?.prompt.content.flatMap((message) =>
               message.role === "user" && Array.isArray(message.content) ? message.content : [],
             )
+            expect(result.events.filter((event) => event.type === "execution.failed")).toEqual([])
             expect(result.status, encodeJson(result.events)).toBe("completed")
-            expect(parts).toHaveLength(1)
-            expect(parts?.[0]).toMatchObject({ type: "file", mediaType: "image/png", fileName: "shot.png" })
-            expect(String(parts?.[0]?.data)).toBe("data:image/png;base64,AQID")
+            expect(parts).toMatchObject([
+              {
+                type: "file",
+                mediaType: "image/png",
+                data: new URL("data:image/png;base64,AQID"),
+                fileName: "shot.png",
+              },
+            ])
           }),
         { modelVariantPolicy: "registration-key" },
       ),
@@ -609,7 +627,15 @@ test(
                     schedule: Schedule.spaced("20 millis"),
                   }),
                 )
-                return { completed, requests: yield* fixture.requests }
+                const database = new Database(`${directory}/relay.db`, { readonly: true })
+                const childSnapshots = database
+                  .query<
+                    { readonly agent_snapshot_json: string },
+                    []
+                  >("select agent_snapshot_json from relay_executions where id like 'child:%' order by id")
+                  .all()
+                database.close()
+                return { completed, requests: yield* fixture.requests, childSnapshots }
               }),
               backendLayer,
             )
@@ -619,6 +645,12 @@ test(
         expect(result.completed?.status).toBe("completed")
         expect(result.completed?.runId).toBe("workspace-run")
         expect(encodeJson(result.requests)).toContain("workflow workspace marker")
+        expect(result.childSnapshots).not.toHaveLength(0)
+        expect(
+          result.childSnapshots.every(
+            (child) => decodeToolExecution(child.agent_snapshot_json).tool_execution?.concurrency === "unbounded",
+          ),
+        ).toBe(true)
       }),
     ),
   60_000,
@@ -789,16 +821,23 @@ test(
               const database = new Database(`${directory}/relay.db`, { readonly: true })
               const childExecutions = database
                 .query<
-                  { readonly id: string; readonly status: string },
+                  { readonly id: string; readonly status: string; readonly agent_snapshot_json: string },
                   []
-                >("select id, status from relay_executions where id = 'child:turn-long-child-parent:long-child'")
+                >("select id, status, agent_snapshot_json from relay_executions where id = 'child:turn-long-child-parent:long-child'")
                 .all()
               database.close()
               return { fanOut, childExecutions }
             }),
         )
         expect(result.fanOut?.state).toBe("satisfied")
-        expect(result.childExecutions).toEqual([{ id: "child:turn-long-child-parent:long-child", status: "completed" }])
+        expect(result.childExecutions).toHaveLength(1)
+        expect(result.childExecutions[0]).toMatchObject({
+          id: "child:turn-long-child-parent:long-child",
+          status: "completed",
+        })
+        expect(
+          decodeToolExecution(result.childExecutions[0]?.agent_snapshot_json ?? "{}").tool_execution?.concurrency,
+        ).toBe("unbounded")
         expect(result.fanOut?.members).toEqual([
           {
             childId: "long-child",
@@ -1306,10 +1345,14 @@ for (const answer of ["Approved", "Denied", "Always"] as const) {
             )
             expect(userParts).toMatchObject([
               { type: "text", text: "read " },
-              { type: "file", mediaType: "image/png", fileName: "shot.png" },
+              {
+                type: "file",
+                mediaType: "image/png",
+                data: new URL("data:image/png;base64,AQID"),
+                fileName: "shot.png",
+              },
               { type: "text", text: " fixture" },
             ])
-            expect(String(userParts?.[1]?.data)).toBe("data:image/png;base64,AQID")
           }
           expect(result.replay.events.filter((event) => event.type === "tool.result.received")).toHaveLength(
             answer === "Denied" ? 0 : 1,

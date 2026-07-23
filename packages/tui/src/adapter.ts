@@ -248,6 +248,7 @@ export const renderBlock: {
       case "ContextUsage":
         return `◷ Context ${block.text}${block.cost === undefined ? "" : ` · ${block.cost}`}`
       case "Compaction":
+        if (block.status === "running") return `↻ Auto-compacting context…`
         return `↻ Compacted context${block.checkpoint === undefined ? "" : ` at ${block.checkpoint}`}\n${body(block.summary)}`
       case "Notification":
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`

@@ -84,6 +84,7 @@ describe("ContextCompaction", () => {
       const result = yield* ContextCompaction.compact(
         { contextWindow: 100, reserveTokens: 20, keepRecentTokens: 10, toolOutputMaxBytes: 100 },
         {
+          compactionId: "compaction-not-needed",
           agentName: "rika",
           sessionId: "session",
           turn: 1,
@@ -112,6 +113,7 @@ describe("ContextCompaction", () => {
       const result = yield* ContextCompaction.compact(
         { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 100 },
         {
+          compactionId: "compaction-structured",
           agentName: "rika",
           sessionId: "session",
           turn: 7,
@@ -145,6 +147,7 @@ describe("ContextCompaction", () => {
         ContextCompaction.compact(
           { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 100 },
           {
+            compactionId: "compaction-failure",
             agentName: "rika",
             sessionId: "session",
             turn: 7,
@@ -171,6 +174,7 @@ describe("ContextCompaction", () => {
       const result = yield* ContextCompaction.compact(
         { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 12 },
         {
+          compactionId: "compaction-microcompact",
           agentName: "rika",
           sessionId: "session",
           turn: 7,
@@ -212,6 +216,7 @@ describe("ContextCompaction", () => {
         ContextCompaction.compact(
           { contextWindow: 10, reserveTokens: 0, keepRecentTokens: 1, toolOutputMaxBytes: 12 },
           {
+            compactionId: "compaction-spill-failure",
             agentName: "rika",
             sessionId: "session",
             turn: 7,

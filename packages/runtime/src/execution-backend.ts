@@ -69,7 +69,6 @@ import {
 } from "./agent-depth"
 import { resolveSpawnModel } from "./agent-model"
 import * as DataBlobStore from "./data-blob-store"
-import * as ImageInputModel from "./image-input-model"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"
 
@@ -133,6 +132,7 @@ const observableEventTypes = new Set([
   "execution.failed",
   "execution.cancelled",
 ])
+const toolExecutionPolicy = { concurrency: "unbounded" as const }
 
 export interface CompactionPolicy {
   readonly context_window: number
@@ -285,15 +285,11 @@ const withResilience = (
   registration: ModelRegistry.Registration,
   resilience: ModelResilience.Interface | undefined,
 ): ModelRegistry.Registration => {
-  const imageInputLayer = Layer.effect(
-    LanguageModel.LanguageModel,
-    LanguageModel.LanguageModel.pipe(Effect.map(ImageInputModel.make)),
-  ).pipe(Layer.provideMerge(registration.layer))
-  if (resilience === undefined) return { ...registration, layer: imageInputLayer }
+  if (resilience === undefined) return registration
   const modelLayer = Layer.effect(
     LanguageModel.LanguageModel,
     LanguageModel.LanguageModel.pipe(Effect.map((model) => ModelResilience.apply(model, resilience))),
-  ).pipe(Layer.provideMerge(imageInputLayer))
+  ).pipe(Layer.provideMerge(registration.layer))
   return { ...registration, layer: modelLayer }
 }
 
@@ -703,6 +699,18 @@ const workflow = (value: any) => {
   }
 }
 
+const failureMessage = (data: Readonly<Record<string, unknown>> | undefined): string | undefined => {
+  const message = data?.message
+  if (typeof message === "string" && message.length > 0 && message !== "[object Object]") return message
+  const details =
+    typeof data?.details === "object" && data.details !== null
+      ? (data.details as Readonly<Record<string, unknown>>)
+      : undefined
+  if (details?.failure_classification === "context-overflow")
+    return "Automatic compaction could not reduce the thread enough for this model."
+  return message === "[object Object]" ? "The execution failed unexpectedly." : undefined
+}
+
 const event = (value: {
   readonly id: string
   readonly execution_id: string
@@ -718,10 +726,7 @@ const event = (value: {
     ?.filter((part) => part.type === "text")
     .map((part) => part.text ?? "")
     .join("")
-  const failureText =
-    value.type === "execution.failed" && typeof value.data?.message === "string" && value.data.message.length > 0
-      ? value.data.message
-      : undefined
+  const failureText = value.type === "execution.failed" ? failureMessage(value.data) : undefined
   const text = contentText !== undefined && contentText.length > 0 ? contentText : failureText
   return {
     id: value.id,
@@ -1469,7 +1474,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                     instructions: mainInstructions,
                     model: relayModelSelection(selection),
                     tools: [],
-                    tool_execution: { concurrency: 4 },
+                    tool_execution: toolExecutionPolicy,
                     permissions: [],
                     ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
                     metadata,
@@ -1482,7 +1487,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                     instructions: mainInstructions,
                     model: relayModelSelection(selection),
                     tools: Object.values(toolkitFor(executionToolOptions).tools).map((tool) => ({ name: tool.name })),
-                    tool_execution: { concurrency: 4 },
+                    tool_execution: toolExecutionPolicy,
                     permissions: parentPermissions,
                     ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
                     metadata,
@@ -2065,6 +2070,7 @@ export const layer = <
                         ...(override.instructions === undefined ? {} : { instructions: override.instructions }),
                         model: relayModelSelection(childSelection),
                         tools: Object.values(childToolkit.tools).map((tool) => ({ name: tool.name })),
+                        tool_execution: toolExecutionPolicy,
                         permissions:
                           override.permissions === undefined
                             ? parentPermissions
@@ -2162,6 +2168,7 @@ export const layer = <
                         instructions: preset.instructions,
                         model: relayModelSelection(childSelection),
                         tools: Object.values(childToolkit.tools).map((tool) => ({ name: tool.name })),
+                        tool_execution: toolExecutionPolicy,
                         permissions: preset.permissions.map((name) => ({ name, value: true })),
                         ...(options.permissionPolicy === undefined
                           ? {}

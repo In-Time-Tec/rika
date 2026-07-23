@@ -17,6 +17,7 @@
       "@batonfx/providers": "0.11.8",
       "@batonfx/skills": "0.11.8",
       "@batonfx/test": "0.11.8",
+      "@ff-labs/fff-bun": "0.9.6",
       "@effect/platform-bun": "4.0.0-beta.98",
       "@effect/sql-mysql2": "4.0.0-beta.98",
       "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -44,8 +45,10 @@
       "marked": "17.0.1",
       "oxlint": "1.60.0",
       "oxlint-tsgolint": "0.21.0",
+      "parallel-web": "1.1.0",
       "prettier": "3.6.2",
       "prismjs": "1.30.0",
+      "string-width": "7.2.0",
       "turbo": "2.8.13",
       "typescript": "7.0.2",
       "vitest": "4.0.16"

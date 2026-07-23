@@ -665,6 +665,43 @@ describe("Transcript projection", () => {
     expect(applyEvent(once, { ...event, cursor: "cursor-0", sequence: 0, text: "stale" })).toEqual(once)
   })
 
+  it("revises one compaction unit from a running start signal to the committed checkpoint", () => {
+    const started = project("turn-a", "prompt", [
+      {
+        cursor: "compaction-started",
+        sequence: 0,
+        type: "agent.compaction.started",
+        createdAt: 0,
+        data: { turn: 3, overflow: true },
+      },
+    ])
+    const startedUnit = started.units.find((item) => item.key === "compaction:turn-a")
+    expect(startedUnit).toMatchObject({ content: { _tag: "Block", block: { _tag: "Compaction", status: "running" } } })
+
+    const committed = project("turn-a", "prompt", [
+      {
+        cursor: "compaction-started",
+        sequence: 0,
+        type: "agent.compaction.started",
+        createdAt: 0,
+        data: { turn: 3, overflow: true },
+      },
+      {
+        cursor: "compaction-committed",
+        sequence: 1,
+        type: "agent.compaction.committed",
+        createdAt: 1,
+        data: { checkpoint_id: "entry:checkpoint", session_id: "session:one", summary_present: true },
+      },
+    ])
+    const committedUnit = committed.units.find((item) => item.key === "compaction:turn-a")
+    expect(committedUnit).toMatchObject({
+      revision: 1,
+      content: { _tag: "Block", block: { _tag: "Compaction", status: "complete", checkpoint: "entry:checkpoint" } },
+    })
+    expect(committed.units.filter((item) => item.key.startsWith("compaction:"))).toHaveLength(1)
+  })
+
   it("projects every semantic block shape with stable keys across lifecycle revisions", () => {
     const projection = project("turn-a", "prompt", [
       { cursor: "reason", sequence: 0, type: "model.reasoning.delta", createdAt: 0, text: "thinking" },
@@ -1083,6 +1120,37 @@ describe("Transcript projection", () => {
     expect(failed.units.find((item) => item.key === "child:turn-a:orphan-child")).toMatchObject({
       content: { _tag: "Block", block: { _tag: "ChildAgent", status: "failed" } },
     })
+  })
+
+  it("hides model failure telemetry and explains terminal compaction failure", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "attempt", sequence: 1, type: "model.attempt.failed", createdAt: 1 },
+      { cursor: "call", sequence: 2, type: "model.call.failed", createdAt: 2 },
+      {
+        cursor: "failed",
+        sequence: 3,
+        type: "execution.failed",
+        createdAt: 3,
+        text: "Automatic compaction could not reduce the thread enough for this model.",
+        data: { details: { failure_classification: "context-overflow" } },
+      },
+    ])
+
+    const errors = projection.units.filter(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error",
+    )
+    expect(errors).toHaveLength(1)
+    expect(errors[0]?.content).toMatchObject({
+      _tag: "Block",
+      block: {
+        _tag: "Error",
+        title: "Auto-compaction failed",
+        detail: "Automatic compaction could not reduce the thread enough for this model.",
+        recovery: "Try again. If the thread is still too large, start a new thread.",
+      },
+    })
+    expect(JSON.stringify(projection.units)).not.toContain("model.attempt.failed")
+    expect(JSON.stringify(projection.units)).not.toContain("model.call.failed")
   })
 
   it("settles linked tools and standalone child agents through the settlement helpers", () => {

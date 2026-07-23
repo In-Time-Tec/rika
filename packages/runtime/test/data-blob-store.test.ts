@@ -12,12 +12,12 @@ const blob = (uri: string, mediaType = "image/png", filename?: string): Content.
 
 describe("data blob store", () => {
   it.layer(DataBlobStore.layer)((test) => {
-    test.effect("validates canonical image data while keeping a durable string reference", () =>
+    test.effect("resolves canonical inline image data as bytes", () =>
       Effect.gen(function* () {
         const resolved = yield* BlobStore.resolve(blob("data:image/png;base64,AQ==", "image/png", "shot.png"))
         assert.deepStrictEqual(resolved, {
-          _tag: "Url",
-          url: "data:image/png;base64,AQ==",
+          _tag: "Bytes",
+          bytes: Uint8Array.from([1]),
           mediaType: "image/png",
           fileName: "shot.png",
         })

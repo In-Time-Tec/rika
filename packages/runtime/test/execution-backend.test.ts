@@ -486,7 +486,9 @@ describe("ExecutionBackend Relay client adapter", () => {
       const registration = registrations[0]
       if (registration === undefined || !("instructions" in registration))
         return yield* Effect.die("Missing agent definition")
-      expect((registration as { readonly tool_execution?: unknown }).tool_execution).toEqual({ concurrency: 4 })
+      expect((registration as { readonly tool_execution?: unknown }).tool_execution).toEqual({
+        concurrency: "unbounded",
+      })
       expect(registration.instructions).toContain("Consult Oracle frequently for complex or difficult tasks")
       expect(registration.instructions).toContain("tell the user that you are consulting it")
       expect(registration.instructions).toContain("after consulting Oracle, state that you did")
@@ -818,6 +820,25 @@ describe("ExecutionBackend Relay client adapter", () => {
         text: "opaque provider failure",
         data: { message: "opaque provider failure", diagnostic: { retained: true } },
       })
+    }),
+  )
+
+  it.effect("replaces opaque context overflow failures with an actionable message", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        streamEvents: [
+          relayEvent("execution.failed", 1, [], {
+            message: "[object Object]",
+            details: { failure_classification: "context-overflow" },
+          }),
+        ],
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.events[0]?.text).toBe("Automatic compaction could not reduce the thread enough for this model.")
     }),
   )
 

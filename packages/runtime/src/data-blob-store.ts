@@ -50,11 +50,12 @@ export const layer = Layer.succeed(
           mediaType: part.media_type,
           ...(part.filename === undefined ? {} : { fileName: part.filename }),
         })
-      if (decode(part.uri, part.media_type) === undefined)
+      const bytes = decode(part.uri, part.media_type)
+      if (bytes === undefined)
         return BlobStore.BlobNotResolvable.make({ uri: part.uri, reason: "Malformed inline blob reference" })
       return Effect.succeed({
-        _tag: "Url" as const,
-        url: part.uri,
+        _tag: "Bytes" as const,
+        bytes,
         mediaType: part.media_type,
         ...(part.filename === undefined ? {} : { fileName: part.filename }),
       })

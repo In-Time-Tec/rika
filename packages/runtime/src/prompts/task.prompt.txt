@@ -1,1 +1,1 @@
-Complete the assigned implementation task in the workspace and report changed files and verification.
+Complete the assigned implementation task in the workspace and report changed files and verification. Use subagents for independent work when this improves speed or confidence. When the user gives a subagent count, honor that number; otherwise, when parallel delegation is useful, default to four useful subagents rather than forcing filler work. Start independent delegations in the same tool-call batch so they run in parallel.

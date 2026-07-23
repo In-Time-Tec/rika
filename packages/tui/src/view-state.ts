@@ -15,6 +15,7 @@ export const Activity = Schema.Union([
   Schema.TaggedStruct("Thinking", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
   Schema.TaggedStruct("Streaming", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
   Schema.TaggedStruct("RunningTools", {}),
+  Schema.TaggedStruct("Compacting", {}),
 ])
 export type Activity = typeof Activity.Type
 
@@ -40,6 +41,7 @@ export const formatActivityCounter = (tokens: number): string => {
 export const formatActivity = (activity: Activity | undefined): string | undefined => {
   if (activity === undefined) return undefined
   if (activity._tag === "RunningTools") return "Running tools"
+  if (activity._tag === "Compacting") return "Auto-Compacting"
   if (activity._tag === "Thinking" || activity._tag === "Streaming") {
     const tokens = Math.floor(activity.bytes / 4)
     return `${activity._tag} ${formatActivityCounter(tokens)}`
@@ -1186,6 +1188,9 @@ export const update: {
         const activityForIncomingBlock = (): Activity => {
           if (incoming._tag === "ToolCall") return { _tag: "RunningTools" }
           if (incoming._tag === "ToolResult" || incoming._tag === "Permission") return { _tag: "Waiting" }
+          if (incoming._tag === "Compaction") {
+            return incoming.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }
+          }
           if (incoming._tag === "Reasoning") {
             return streamActivity(model.activity, "Thinking", incoming.text, undefined)
           }
@@ -1312,6 +1317,9 @@ export const update: {
       const activityForAddedBlock = (): Activity => {
         if (message.block._tag === "ToolCall") return { _tag: "RunningTools" }
         if (message.block._tag === "ToolResult" || message.block._tag === "Permission") return { _tag: "Waiting" }
+        if (message.block._tag === "Compaction") {
+          return message.block.status === "running" ? { _tag: "Compacting" } : { _tag: "Waiting" }
+        }
         return model.activity ?? { _tag: "Waiting" }
       }
       return {

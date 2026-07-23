@@ -91,6 +91,7 @@ const ContextUsage = Schema.TaggedStruct("ContextUsage", {
 const Compaction = Schema.TaggedStruct("Compaction", {
   summary: Schema.String,
   checkpoint: Schema.optionalKey(Schema.String),
+  status: Schema.optionalKey(Schema.Literals(["running", "complete"])),
 })
 const Notification = Schema.TaggedStruct("Notification", { title: Schema.String, detail: Schema.String })
 const ErrorBlock = Schema.TaggedStruct("Error", {

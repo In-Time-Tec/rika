@@ -21,7 +21,7 @@
     "effect": "catalog:",
     "marked": "catalog:",
     "prismjs": "catalog:",
-    "string-width": "7.2.0"
+    "string-width": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

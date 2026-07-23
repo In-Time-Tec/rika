@@ -20,6 +20,7 @@ export const Checkpoint = Schema.Struct({
 export type Checkpoint = typeof Checkpoint.Type
 
 export interface CompactInput {
+  readonly compactionId: string
   readonly agentName: string
   readonly sessionId: string
   readonly turn: number
@@ -82,9 +83,7 @@ export const compact = Effect.fn("ContextCompaction.compact")(function* (config:
     reserveTokens: config.reserveTokens,
   })
   const result = yield* service.maybeCompact({
-    compactionId: createHash("sha256")
-      .update(`${input.sessionId}\0${input.turn}\0${input.path.map((entry) => entry.id).join("\0")}`)
-      .digest("hex"),
+    compactionId: input.compactionId,
     agentName: input.agentName,
     sessionId: input.sessionId,
     turn: input.turn,

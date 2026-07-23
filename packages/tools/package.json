@@ -13,9 +13,9 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@ff-labs/fff-bun": "0.9.6",
+    "@ff-labs/fff-bun": "catalog:",
     "effect": "catalog:",
-    "parallel-web": "1.1.0"
+    "parallel-web": "catalog:"
   },
   "devDependencies": {
     "@effect/platform-bun": "catalog:",

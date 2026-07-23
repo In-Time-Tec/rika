@@ -4,7 +4,7 @@ import { TestModel } from "@batonfx/test"
 import { Runtime } from "@rika/tools"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
-import { Clock, Effect, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
+import { Clock, Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { start } from "./current-execution-route"
@@ -14,7 +14,9 @@ const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 const decodeToolExecution = Schema.decodeUnknownSync(
   Schema.fromJsonString(
     Schema.Struct({
-      tool_execution: Schema.optional(Schema.Struct({ concurrency: Schema.Finite })),
+      tool_execution: Schema.optional(
+        Schema.Struct({ concurrency: Schema.Union([Schema.Finite, Schema.Literal("unbounded")]) }),
+      ),
     }),
   ),
 )
@@ -162,12 +164,14 @@ test("three Task calls in one model turn run as overlapping durable children", (
           expect(settled.events.filter((event) => event.type === "child_run.spawned")).toHaveLength(3)
           expect(children).toHaveLength(3)
           expect(children.every((child) => child.status === "completed")).toBe(true)
-          expect(decodeToolExecution(root?.agent_snapshot_json ?? "{}").tool_execution).toEqual({ concurrency: 4 })
-          expect(children.map((child) => decodeToolExecution(child.agent_snapshot_json).tool_execution)).toEqual([
-            { concurrency: 4 },
-            { concurrency: 4 },
-            { concurrency: 4 },
-          ])
+          expect(decodeToolExecution(root?.agent_snapshot_json ?? "{}").tool_execution).toEqual({
+            concurrency: "unbounded",
+          })
+          expect(
+            children.every(
+              (child) => decodeToolExecution(child.agent_snapshot_json).tool_execution?.concurrency === "unbounded",
+            ),
+          ).toBe(true)
           expect(
             childRuns
               .map(({ metadata_json }) => JSON.parse(metadata_json))
@@ -378,7 +382,9 @@ test("depth-one agents call specialists and spawn a chosen depth-two model witho
               { prompt: "Do a cheap nested check.", model: "gpt-5.6-luna" },
               { id: "call-depth-two" },
             ),
+            TestModel.toolCall("task", { prompt: "Do another nested check." }, { id: "call-depth-three" }),
           ]),
+          TestModel.text("Terra completed another nested check."),
           TestModel.text("Depth one combined both results."),
           TestModel.text("Root received the nested result."),
         ],
@@ -394,6 +400,41 @@ test("depth-one agents call specialists and spawn a chosen depth-two model witho
         model: "gpt-5.6-sol",
         registrationKey: "sol-medium",
       })
+      const nestedStarted = yield* Ref.make(0)
+      const maximumNested = yield* Ref.make(0)
+      const allNestedStarted = yield* Deferred.make<void>()
+      const releaseNested = yield* Deferred.make<void>()
+      const trackedLayer = (layer: typeof terra.layer) =>
+        Layer.effect(
+          LanguageModel.LanguageModel,
+          Effect.gen(function* () {
+            const model = yield* LanguageModel.LanguageModel
+            const streamText = ((options: Parameters<LanguageModel.Service["streamText"]>[0]) =>
+              Stream.unwrap(
+                Effect.gen(function* () {
+                  const prompt = encodeJson(options.prompt)
+                  const nested = [
+                    "Check the nested design.",
+                    "Do a cheap nested check.",
+                    "Do another nested check.",
+                  ].some((text) => prompt.includes(text))
+                  if (!nested) return model.streamText(options)
+                  const active = yield* Ref.updateAndGet(nestedStarted, (value) => value + 1)
+                  yield* Ref.update(maximumNested, (value) => Math.max(value, active))
+                  if (active === 3) yield* Deferred.succeed(allNestedStarted, undefined)
+                  yield* Deferred.await(releaseNested)
+                  return model.streamText(options)
+                }),
+              )) as LanguageModel.Service["streamText"]
+            return { ...model, streamText }
+          }),
+        ).pipe(Layer.provide(layer))
+      const terraRegistration = yield* ModelRegistry.registration({
+        ...terra.selection,
+        layer: trackedLayer(terra.layer),
+      })
+      const lunaRegistration = yield* ModelRegistry.registration({ ...luna.selection, layer: trackedLayer(luna.layer) })
+      const solRegistration = yield* ModelRegistry.registration({ ...sol.selection, layer: trackedLayer(sol.layer) })
       const executionRoute: ExecutionBackend.ExecutionRoutePin = {
         mode: "test",
         main: executionModelRoute("main", terra.selection),
@@ -410,8 +451,8 @@ test("depth-one agents call specialists and spawn a chosen depth-two model witho
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/relay.db`,
         workspace: directory,
-        registration: terra.registration,
-        additionalRegistrations: [luna.registration, sol.registration],
+        registration: terraRegistration,
+        additionalRegistrations: [lunaRegistration, solRegistration],
         selection: terra.selection,
         toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
         toolNeedsApproval: () => false,
@@ -420,13 +461,20 @@ test("depth-one agents call specialists and spawn a chosen depth-two model witho
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        const settled = yield* start(backend, {
+        const running = yield* start(backend, {
           threadId: "thread-nested-spawn",
           turnId: "turn-nested-spawn",
           prompt: "Coordinate nested work.",
           startedAt: 1,
           executionRoute,
-        })
+        }).pipe(Effect.forkChild)
+        const allNestedOverlapped = yield* Deferred.await(allNestedStarted).pipe(
+          Effect.as(true),
+          Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => Effect.succeed(false) }),
+        )
+        const nestedMaximum = yield* Ref.get(maximumNested)
+        yield* Deferred.succeed(releaseNested, undefined)
+        const settled = yield* Fiber.join(running)
         const database = yield* Effect.acquireRelease(
           Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
@@ -465,6 +513,8 @@ test("depth-one agents call specialists and spawn a chosen depth-two model witho
           terraRequests: yield* terra.requests,
           lunaRequests: yield* luna.requests,
           solRequests: yield* sol.requests,
+          allNestedOverlapped,
+          nestedMaximum,
         }
       }).pipe(Effect.provide(backendContext))
     }),
@@ -476,77 +526,96 @@ test("depth-one agents call specialists and spawn a chosen depth-two model witho
         return yield* program.pipe(Effect.provide(bunContext))
       }),
     ).pipe(
-      Effect.tap(({ settled, children, failures, delegationResults, terraRequests, lunaRequests, solRequests }) =>
-        Effect.sync(() => {
-          const delegationTools = ["task", "oracle", "librarian", "review"]
-          const depthOneTools = terraRequests[1]?.tools.map((tool) => tool.name) ?? []
-          const lunaDepthTwoTools = lunaRequests[0]?.tools.map((tool) => tool.name) ?? []
-          const oracleDepthTwoTools = solRequests[0]?.tools.map((tool) => tool.name) ?? []
-          expect(settled.status).toBe("completed")
-          expect(failures).toEqual([])
-          expect(terraRequests).toHaveLength(4)
-          expect(delegationResults).toHaveLength(2)
-          expect(delegationResults.map((result) => ({ name: result.name, error: result.error }))).toEqual([
-            { name: "oracle", error: null },
-            { name: "task", error: null },
-          ])
-          expect(children).toHaveLength(3)
-          expect(children.every((child) => child.status === "completed")).toBe(true)
-          expect(depthOneTools).toEqual(expect.arrayContaining(delegationTools))
-          expect(lunaDepthTwoTools).not.toEqual(expect.arrayContaining(delegationTools))
-          expect(oracleDepthTwoTools).not.toEqual(expect.arrayContaining(delegationTools))
-          expect(lunaRequests).toHaveLength(1)
-          expect(solRequests).toHaveLength(1)
-          expect(
-            children.some((child) => {
-              const snapshot = JSON.parse(child.agent_snapshot_json) as {
-                readonly model?: {
-                  readonly model?: string
-                  readonly registration_key?: string
-                  readonly metadata?: {
-                    readonly rika_agent_depth?: number
-                    readonly rika_reasoning_effort?: string
+      Effect.tap(
+        ({
+          settled,
+          children,
+          failures,
+          delegationResults,
+          terraRequests,
+          lunaRequests,
+          solRequests,
+          allNestedOverlapped,
+          nestedMaximum,
+        }) =>
+          Effect.sync(() => {
+            const delegationTools = ["task", "oracle", "librarian", "review"]
+            const depthOneTools = terraRequests[1]?.tools.map((tool) => tool.name) ?? []
+            const lunaDepthTwoTools = lunaRequests[0]?.tools.map((tool) => tool.name) ?? []
+            const oracleDepthTwoTools = solRequests[0]?.tools.map((tool) => tool.name) ?? []
+            expect(settled.status).toBe("completed")
+            expect(failures).toEqual([])
+            expect(allNestedOverlapped).toBe(true)
+            expect(nestedMaximum).toBe(3)
+            expect(terraRequests).toHaveLength(5)
+            expect(delegationResults).toHaveLength(3)
+            expect(delegationResults.map((result) => ({ name: result.name, error: result.error }))).toEqual([
+              { name: "oracle", error: null },
+              { name: "task", error: null },
+              { name: "task", error: null },
+            ])
+            expect(children).toHaveLength(4)
+            expect(children.every((child) => child.status === "completed")).toBe(true)
+            expect(
+              children.every(
+                (child) => decodeToolExecution(child.agent_snapshot_json).tool_execution?.concurrency === "unbounded",
+              ),
+            ).toBe(true)
+            expect(depthOneTools).toEqual(expect.arrayContaining(delegationTools))
+            expect(lunaDepthTwoTools).not.toEqual(expect.arrayContaining(delegationTools))
+            expect(oracleDepthTwoTools).not.toEqual(expect.arrayContaining(delegationTools))
+            expect(lunaRequests).toHaveLength(1)
+            expect(solRequests).toHaveLength(1)
+            expect(
+              children.some((child) => {
+                const snapshot = JSON.parse(child.agent_snapshot_json) as {
+                  readonly model?: {
+                    readonly model?: string
+                    readonly registration_key?: string
+                    readonly metadata?: {
+                      readonly rika_agent_depth?: number
+                      readonly rika_reasoning_effort?: string
+                    }
                   }
                 }
-              }
-              return (
-                snapshot.model?.model === "gpt-5.6-terra" &&
-                snapshot.model.registration_key === "terra-medium" &&
-                snapshot.model.metadata?.rika_agent_depth === 1 &&
-                snapshot.model.metadata.rika_reasoning_effort === "medium"
-              )
-            }),
-          ).toBe(true)
-          expect(
-            children.some((child) => {
-              const snapshot = JSON.parse(child.agent_snapshot_json) as {
-                readonly model?: {
-                  readonly model?: string
-                  readonly registration_key?: string
-                  readonly metadata?: {
-                    readonly rika_agent_depth?: number
-                    readonly rika_reasoning_effort?: string
+                return (
+                  snapshot.model?.model === "gpt-5.6-terra" &&
+                  snapshot.model.registration_key === "terra-medium" &&
+                  snapshot.model.metadata?.rika_agent_depth === 1 &&
+                  snapshot.model.metadata.rika_reasoning_effort === "medium"
+                )
+              }),
+            ).toBe(true)
+            expect(
+              children.some((child) => {
+                const snapshot = JSON.parse(child.agent_snapshot_json) as {
+                  readonly model?: {
+                    readonly model?: string
+                    readonly registration_key?: string
+                    readonly metadata?: {
+                      readonly rika_agent_depth?: number
+                      readonly rika_reasoning_effort?: string
+                    }
                   }
                 }
-              }
-              return (
-                snapshot.model?.model === "gpt-5.6-luna" &&
-                snapshot.model.registration_key === "luna-medium" &&
-                snapshot.model.metadata?.rika_agent_depth === 2 &&
-                snapshot.model.metadata.rika_reasoning_effort === "medium"
-              )
-            }),
-          ).toBe(true)
-          expect(
-            settled.events
-              .filter(
-                (event) =>
-                  event.type === "model.output.delta" && event.cursor.startsWith("execution:turn-nested-spawn:"),
-              )
-              .map((event) => event.text)
-              .join(""),
-          ).toBe("Root received the nested result.")
-        }),
+                return (
+                  snapshot.model?.model === "gpt-5.6-luna" &&
+                  snapshot.model.registration_key === "luna-medium" &&
+                  snapshot.model.metadata?.rika_agent_depth === 2 &&
+                  snapshot.model.metadata.rika_reasoning_effort === "medium"
+                )
+              }),
+            ).toBe(true)
+            expect(
+              settled.events
+                .filter(
+                  (event) =>
+                    event.type === "model.output.delta" && event.cursor.startsWith("execution:turn-nested-spawn:"),
+                )
+                .map((event) => event.text)
+                .join(""),
+            ).toBe("Root received the nested result.")
+          }),
       ),
     ),
   )

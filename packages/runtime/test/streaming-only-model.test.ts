@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema, Stream } from "effect"
-import { LanguageModel, Response } from "effect/unstable/ai"
+import { AiError, LanguageModel, Response } from "effect/unstable/ai"
 import { streamingOnlyLanguageModel } from "../src/streaming-only-model"
 
 const usage = Response.Usage.make({
@@ -99,6 +99,33 @@ describe("streamingOnlyLanguageModel", () => {
       expect(response.reasoningText).toBe("thinking")
       expect((response.toolCalls as Array<{ name: string }>).map((call) => call.name)).toEqual(["bash"])
       expect(response.text).toBe("done")
+    }),
+  )
+
+  it.effect("fails generateText with the streamed provider error instead of dropping it", () =>
+    Effect.gen(function* () {
+      const overflow = AiError.make({
+        module: "OpenAiClient",
+        method: "createResponseStream",
+        reason: AiError.InvalidRequestError.make({ description: "context length exceeded" }),
+      })
+      const parts = [Response.makePart("error", { error: overflow })]
+      const model = streamingOnlyLanguageModel(scriptedModel(parts, []))
+      const outcome = yield* Effect.flip(model.generateText({ prompt: "hello" }))
+      expect(AiError.isAiError(outcome)).toBe(true)
+      expect(String((outcome as { message: string }).message)).toContain("context length exceeded")
+    }),
+  )
+
+  it.effect("fails generateObject with the streamed provider error instead of a decode failure", () =>
+    Effect.gen(function* () {
+      const parts = [Response.makePart("error", { error: "stream reset" })]
+      const model = streamingOnlyLanguageModel(scriptedModel(parts, []))
+      const outcome = yield* Effect.flip(
+        model.generateObject({ prompt: "hello", schema: Schema.Struct({ ok: Schema.Boolean }), objectName: "output" }),
+      )
+      expect(AiError.isAiError(outcome)).toBe(true)
+      expect(String((outcome as { message: string }).message)).toContain("stream reset")
     }),
   )
 })
