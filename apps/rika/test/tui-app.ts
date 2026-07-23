@@ -127,7 +127,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     Effect.gen(function* () {
       const started = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
       for (;;) {
-        yield* Effect.promise(() => setup.renderOnce())
+        yield* Effect.promise(() => setup.flush())
         const captured = frame()
         if (predicate(captured)) return captured
         const now = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
