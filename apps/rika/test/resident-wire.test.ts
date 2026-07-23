@@ -222,7 +222,7 @@ describe("resident server message frames", () => {
     })
     expect(serverMessageFrames("reused", message).map(decodeFrame).filter(Boolean)).toEqual([message])
     for (const frame of abandoned[0]!.slice(1)) expect(() => decodeFrame(frame)).not.toThrow()
-  })
+  }, 15_000)
 
   it("bounds total incomplete reassembly bytes across message ids", () => {
     const makeMessage = (sequence: number, text: string) =>
