@@ -210,6 +210,49 @@ describe("UsageCost", () => {
     expect(recovered.globalCostUsd).toBe(2.5)
   })
 
+  it("totals input and output once while ignoring reasoning and input breakdowns", () => {
+    const event = reportedTokens("tokens", "gpt-5.6-sol", 30_000_000, 10_100_000, {
+      input_tokens_uncached: 5_000_000,
+      input_tokens_cache_read: 20_000_000,
+      input_tokens_cache_write: 5_000_000,
+      output_tokens_reasoning: 8_000_000,
+    })
+    const snapshot = UsageCost.observe(UsageCost.empty, { threadId: "thread", turnId: "turn", event })
+
+    expect(snapshot.threadTokens.get("thread")).toBe(40_100_000)
+    expect(snapshot.tokenCompleteThreads.has("thread")).toBe(true)
+  })
+
+  it("keeps token and provider-cost completeness independent", () => {
+    const provider = usage("provider", 2)
+    const missingBreakdown = reportedTokens("tokens", "unknown", 10, 5, {
+      model_attempt_id: provider.data?.model_attempt_id,
+      input_tokens_uncached: null,
+    })
+    const snapshot = [provider, missingBreakdown].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.threadCostUsd.get("thread")).toBe(2)
+    expect(snapshot.costCompleteThreads.has("thread")).toBe(true)
+    expect(snapshot.threadTokens.get("thread")).toBe(15)
+    expect(snapshot.tokenCompleteThreads.has("thread")).toBe(true)
+  })
+
+  it("marks tokens unavailable when the exact input total is missing", () => {
+    const snapshot = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: reportedTokens("tokens", "gpt-5.6-sol", null, 5, {
+        input_tokens_uncached: 10,
+        input_tokens_cache_read: 20,
+      }),
+    })
+
+    expect(snapshot.tokenCompleteThreads.has("thread")).toBe(false)
+  })
+
   it("requires released identity and attempt fields only for cost-bearing events", () => {
     const unrelated = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
@@ -463,6 +506,10 @@ describe("UsageCost", () => {
       expect(snapshot.turnCostUsd.get("turn-a")).toBe(1.5)
       expect(snapshot.threadCostUsd.get("thread-b")).toBe(3)
       expect(snapshot.globalCostUsd).toBe(4.5)
+      expect(snapshot.costCompleteThreads.has("thread-a")).toBe(false)
+      expect(snapshot.tokenCompleteThreads.has("thread-a")).toBe(false)
+      expect(snapshot.costCompleteThreads.has("thread-b")).toBe(true)
+      expect(snapshot.tokenCompleteThreads.has("thread-b")).toBe(false)
     }),
   )
 

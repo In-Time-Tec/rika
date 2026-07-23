@@ -1731,9 +1731,11 @@ export const interactiveTui =
           if (closed) return
           if (
             event._tag === "SelectionLoaded" ||
+            event._tag === "TranscriptReplaced" ||
             event._tag === "TranscriptPagePrepended" ||
             event._tag === "TranscriptPatched" ||
-            event._tag === "TranscriptResyncRequired"
+            event._tag === "TranscriptResyncRequired" ||
+            event._tag === "ThreadUsageUpdated"
           ) {
             const selectionStartedAt = event._tag === "SelectionLoaded" ? performance.now() : undefined
             const previousThreadId = model.currentThreadId
@@ -2417,6 +2419,13 @@ export const interactiveTui =
               clickToggle: (unit) => {
                 model = ViewState.update(model, { _tag: "DetailToggled", id: unit })
                 renderer?.surface.update(model)
+              },
+              usageToggle: () => {
+                model = {
+                  ...model,
+                  usageDisplay: model.usageDisplay === "tokens" ? "cost" : "tokens",
+                }
+                render()
               },
               key: (key) => {
                 if (key.ctrl && key.name === "c" && !model.busy) {

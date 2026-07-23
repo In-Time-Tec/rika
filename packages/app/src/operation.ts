@@ -121,6 +121,7 @@ const sanitizeThreadTitle = (text: string) =>
 const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): InteractiveEvent => {
   switch (event._tag) {
     case "SelectionLoaded":
+    case "TranscriptReplaced":
     case "TranscriptPagePrepended":
     case "TranscriptPatched":
     case "TranscriptResyncRequired":
@@ -1102,29 +1103,28 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         Context.get(dependencyContext, TurnRepository.Service).resetQueueClaims,
         executionDependencies,
       )
+      const usageRoots = (thread: Thread.Thread, values: ReadonlyArray<Turn.Turn>) => {
+        const included = values.filter((turn) => turn.status !== "queued")
+        const roots: Array<UsageCost.RootExecution> = included.map((turn) => ({
+          threadId: String(thread.id),
+          turnId: String(turn.id),
+        }))
+        const first = included[0]
+        if (first?.executionRoute.title !== undefined)
+          roots.push({
+            threadId: String(thread.id),
+            turnId: String(first.id),
+            executionId: titleExecutionId(first.id),
+            optional: true,
+          })
+        return roots
+      }
       const readUsageCosts = Effect.fn("Operation.readUsageCosts")(function* () {
         const threads = yield* ThreadRepository.Service
         const turns = yield* TurnRepository.Service
         const roots = (yield* Effect.forEach(
           yield* threads.list({ includeArchived: true, limit: UsageCost.maximumGlobalThreads }),
-          (thread) =>
-            turns.list(thread.id).pipe(
-              Effect.map((values) => {
-                const threadRoots: Array<UsageCost.RootExecution> = values.map((turn) => ({
-                  threadId: String(thread.id),
-                  turnId: String(turn.id),
-                }))
-                const first = values[0]
-                if (first?.executionRoute.title !== undefined)
-                  threadRoots.push({
-                    threadId: String(thread.id),
-                    turnId: String(first.id),
-                    executionId: titleExecutionId(first.id),
-                    optional: true,
-                  })
-                return threadRoots
-              }),
-            ),
+          (thread) => turns.list(thread.id).pipe(Effect.map((values) => usageRoots(thread, values))),
         )).flat()
         return { roots, snapshot: yield* UsageCost.collect(acquiredBackend, roots) }
       })
@@ -1551,6 +1551,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 events: [],
                 committed: false,
               }
+        let selectedUsage:
+          | {
+              readonly request: number
+              readonly threadId: string
+              snapshot: UsageCost.Snapshot | undefined
+              readonly pending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
+            }
+          | undefined
         const bufferSelectionEvent = (event: InteractiveEvent) => {
           if (InteractiveFeedOverflow.isCritical(event)) return false
           const loading = selectionLoad
@@ -1571,36 +1579,61 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           return true
         }
         let observeChildSpawn = ignoreInteractiveEvent
-        const withUsageCosts = (event: InteractiveEvent): InteractiveEvent => {
+        type ThreadUsageEvent = Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>
+        const withUsageCosts = (
+          event: InteractiveEvent,
+        ): { readonly event: InteractiveEvent; readonly usage?: ThreadUsageEvent } => {
           if (
             event._tag !== "TranscriptPatched" ||
             (event.event.type !== "model.usage.reported" && event.event.type !== "model.attempt.completed")
           )
-            return event
+            return { event }
           const rootTurnId = event.rootTurnId ?? event.turnId
-          observeUsage({
+          const observation = {
             threadId: String(event.threadId),
             turnId: String(rootTurnId),
             event: event.event,
-          })
-          const totals = currentUsageCosts()
-          if (!totals.complete) return { ...event, rootTurnId }
-          return {
+          }
+          observeUsage(observation)
+          const selection = selectedUsage
+          if (selection !== undefined && selection.threadId === String(event.threadId)) {
+            if (selection.snapshot === undefined) selection.pending.push(observation)
+            else selection.snapshot = UsageCost.observe(selection.snapshot, observation)
+          }
+          const selectedTotals = selection?.threadId === String(event.threadId) ? selection.snapshot : undefined
+          const totals = selectedTotals ?? currentUsageCosts()
+          const threadComplete = totals.costCompleteThreads.has(String(event.threadId))
+          const patched = {
             ...event,
             rootTurnId,
             ...(totals.turnCostUsd.has(rootTurnId) ? { rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId)! } : {}),
-            ...(totals.threadCostUsd.has(event.threadId)
-              ? { threadCostUsd: totals.threadCostUsd.get(event.threadId)! }
-              : {}),
-            globalCostUsd: totals.globalCostUsd,
+            ...(threadComplete ? { threadCostUsd: totals.threadCostUsd.get(String(event.threadId)) ?? 0 } : {}),
+            ...(totals.complete ? { globalCostUsd: totals.globalCostUsd } : {}),
+          }
+          if (selectedTotals === undefined || selection === undefined) return { event: patched }
+          const threadId = String(event.threadId)
+          return {
+            event: patched,
+            usage: {
+              _tag: "ThreadUsageUpdated",
+              selectionEpoch: selection.request,
+              threadId: event.threadId,
+              cost: selectedTotals.costCompleteThreads.has(threadId)
+                ? { _tag: "Available", usd: selectedTotals.threadCostUsd.get(threadId) ?? 0 }
+                : { _tag: "Unavailable" },
+              tokens: selectedTotals.tokenCompleteThreads.has(threadId)
+                ? { _tag: "Available", total: selectedTotals.threadTokens.get(threadId) ?? 0 }
+                : { _tag: "Unavailable" },
+            },
           }
         }
         const deliver = (
           event: InteractiveEvent,
           deliveryOptions?: { readonly selectionRequest?: number; readonly selectedThreadOnly?: boolean },
         ) => {
+          const enriched = withUsageCosts(event)
           const selectedEvent = withSelectionEpoch(
-            withUsageCosts(event),
+            enriched.event,
             deliveryOptions?.selectionRequest ?? currentSelectionEpoch,
           )
           const envelope: SessionEnvelope = {
@@ -1618,6 +1651,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           }
           if (Queue.offerUnsafe(sessionEvents, envelope)) {
             observeChildSpawn(selectedEvent)
+            if (enriched.usage !== undefined)
+              deliver(enriched.usage, {
+                selectionRequest: enriched.usage.selectionEpoch,
+                selectedThreadOnly: true,
+              })
             return true
           }
           overflow = InteractiveFeedOverflow.make()
@@ -1742,6 +1780,12 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const lifecycleAdmission = yield* Semaphore.make(1)
         const closed = yield* Deferred.make<void>()
         const sessionScope = yield* Scope.make()
+        let selectionBackground: Array<Fiber.Fiber<unknown, unknown>> = []
+        const interruptSelectionBackground = Effect.suspend(() => {
+          const fibers = selectionBackground
+          selectionBackground = []
+          return Effect.forEach(fibers, Fiber.interrupt, { discard: true })
+        })
         type ChildFollowerSelection = {
           readonly generation: number
           readonly threadId: string | undefined
@@ -2751,12 +2795,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           request: number,
           dispatch: (event: InteractiveEvent) => void,
           before?: TranscriptRepository.PageCursor,
+          repair: boolean = true,
+          replace: boolean = false,
         ) {
           const loadedAt = yield* Clock.currentTimeMillis
           const turns = yield* TurnRepository.Service
           const transcripts = yield* TranscriptRepository.Service
           const backend = yield* ExecutionBackend.Service
-          if (before === undefined) {
+          if (before === undefined && repair) {
             if (!(yield* projectTurnPage(thread, request))) return
             while (yield* Ref.get(transcriptHasUnprojectedTurns)) {
               const available = yield* transcripts.page(thread.id, { limit: 200 })
@@ -2827,11 +2873,24 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const hasOlder = storedHasOlder || (yield* Ref.get(transcriptHasUnprojectedTurns))
           const completedAt = yield* Clock.currentTimeMillis
           if ((yield* Ref.get(selectionRequest)) !== request) return
-          yield* Ref.set(transcriptCursor, oldestCursor)
-          yield* Ref.set(transcriptHasOlder, hasOlder)
+          if (!replace) {
+            yield* Ref.set(transcriptCursor, oldestCursor)
+            yield* Ref.set(transcriptHasOlder, hasOlder)
+          }
           const threadCostUsd = usageCosts.complete ? (usageCosts.threadCostUsd.get(thread.id) ?? 0) : undefined
           const globalCostUsd = displayGlobalCostUsd(usageCosts)
-          if (before === undefined) {
+          if (before === undefined && replace) {
+            dispatch({
+              _tag: "TranscriptReplaced",
+              selectionEpoch: request,
+              threadId: thread.id,
+              entries,
+              hasOlder,
+              ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+              ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
+              ...(oldestCursor === undefined ? {} : { oldestCursor }),
+            })
+          } else if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const activeTurn = yield* turns.findActive(thread.id)
             yield* Effect.uninterruptible(
@@ -2893,15 +2952,74 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           dispatch: (event: InteractiveEvent) => void,
         ) {
           if ((yield* Ref.get(selectionRequest)) !== request) return
+          yield* interruptSelectionBackground
+          const usageState = {
+            request,
+            threadId: String(thread.id),
+            snapshot: undefined as UsageCost.Snapshot | undefined,
+            pending: [] as Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>,
+          }
+          selectedUsage = usageState
           yield* Ref.set(transcriptCursor, undefined)
           yield* Ref.set(projectedTurnCursor, undefined)
           yield* Ref.set(transcriptHasUnprojectedTurns, false)
           yield* Ref.set(transcriptHasOlder, false)
-          yield* loadTranscriptPage(thread, request, dispatch)
+          const transcripts = yield* TranscriptRepository.Service
+          const hasStoredSnapshot = (yield* transcripts.page(thread.id, { limit: 1 })).entries.length > 0
+          yield* loadTranscriptPage(thread, request, dispatch, undefined, !hasStoredSnapshot)
           if ((yield* Ref.get(selectionRequest)) !== request) return
           const summaries = yield* ThreadSummaryRepository.Service
           yield* summaries.markRead(thread.id, yield* Clock.currentTimeMillis)
           yield* notifyThreadSummaries
+          selectionBackground.push(
+            yield* Effect.forkIn(
+              Effect.gen(function* () {
+                const turns = yield* TurnRepository.Service
+                const snapshot = yield* UsageCost.collect(
+                  acquiredBackend,
+                  usageRoots(thread, yield* turns.list(thread.id)),
+                )
+                if ((yield* Ref.get(selectionRequest)) !== request || selectedUsage !== usageState) return
+                usageState.snapshot = usageState.pending.reduce(UsageCost.observe, snapshot)
+                usageState.pending.length = 0
+                const selectedSnapshot = usageState.snapshot
+                const threadId = String(thread.id)
+                dispatch({
+                  _tag: "ThreadUsageUpdated",
+                  selectionEpoch: request,
+                  threadId: thread.id,
+                  cost: selectedSnapshot.costCompleteThreads.has(threadId)
+                    ? { _tag: "Available", usd: selectedSnapshot.threadCostUsd.get(threadId) ?? 0 }
+                    : { _tag: "Unavailable" },
+                  tokens: selectedSnapshot.tokenCompleteThreads.has(threadId)
+                    ? { _tag: "Available", total: selectedSnapshot.threadTokens.get(threadId) ?? 0 }
+                    : { _tag: "Unavailable" },
+                })
+              }).pipe(Effect.provide(executionDependencies)),
+              sessionScope,
+            ),
+          )
+          if (hasStoredSnapshot)
+            selectionBackground.push(
+              yield* Effect.forkIn(
+                Effect.logInfo("transcript.selection.repair.started").pipe(
+                  Effect.annotateLogs("rika.thread.id", String(thread.id)),
+                  Effect.andThen(loadTranscriptPage(thread, request, dispatch, undefined, true, true)),
+                  Effect.tap(() =>
+                    Effect.logInfo("transcript.selection.repair.completed").pipe(
+                      Effect.annotateLogs("rika.thread.id", String(thread.id)),
+                    ),
+                  ),
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("transcript.selection.repair.failed").pipe(
+                      Effect.annotateLogs("rika.thread.id", String(thread.id)),
+                      Effect.annotateLogs("rika.failure.cause", String(cause)),
+                    ),
+                  ),
+                ),
+                sessionScope,
+              ),
+            )
         })
         const createAndSelectThread = Effect.fn("Operation.interactive.createAndSelectThread")(function* () {
           const threads = yield* ThreadRepository.Service

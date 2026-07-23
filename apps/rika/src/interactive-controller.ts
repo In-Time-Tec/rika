@@ -8,9 +8,11 @@ import { Effect, Function } from "effect"
 type TranscriptEvent = Extract<
   Operation.InteractiveEvent,
   | { readonly _tag: "SelectionLoaded" }
+  | { readonly _tag: "TranscriptReplaced" }
   | { readonly _tag: "TranscriptPagePrepended" }
   | { readonly _tag: "TranscriptPatched" }
   | { readonly _tag: "TranscriptResyncRequired" }
+  | { readonly _tag: "ThreadUsageUpdated" }
 >
 
 type QueueEvent = Extract<
@@ -307,6 +309,25 @@ const normalizeEntries = (
 }
 
 const updateState = (state: State, event: TranscriptEvent): Update => {
+  if (event._tag === "ThreadUsageUpdated") {
+    if (event.selectionEpoch !== state.selectionEpoch || event.threadId !== state.model.currentThreadId)
+      return { state, preserveAnchor: false }
+    const threadCostUsd = event.cost._tag === "Available" ? event.cost.usd : undefined
+    const { costUsd: _, ...withoutCost } = state.model
+    return {
+      state: {
+        ...state,
+        ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+        model: {
+          ...withoutCost,
+          usageCost: event.cost,
+          usageTokens: event.tokens,
+          ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
+        },
+      },
+      preserveAnchor: false,
+    }
+  }
   if (event._tag === "SelectionLoaded") {
     if (event.selectionEpoch < state.selectionEpoch) return { state, preserveAnchor: false }
     if (
@@ -323,8 +344,11 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     const queue = keepNewerQueue ? state.model.queue : event.queue
     const queueRevision = keepNewerQueue ? state.model.queueRevision : event.queueRevision
     const entries = normalizeEntries(event.entries)
+    const sameSelection =
+      event.selectionEpoch === state.selectionEpoch && state.model.currentThreadId === event.thread.id
     const model = cleared({
       ...state.model,
+      ...(sameSelection ? {} : { usageCost: { _tag: "Loading" as const }, usageTokens: { _tag: "Loading" as const } }),
       activeTurnId: activeTurn?.id,
       busy: activeTurn !== undefined,
       activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },
@@ -363,6 +387,37 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ...(event.threadCostUsd === undefined ? {} : { threadCostUsd: event.threadCostUsd }),
       },
       preserveAnchor: false,
+    }
+  }
+  if (event._tag === "TranscriptReplaced") {
+    if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
+      return { state, preserveAnchor: false }
+    const replacement = normalizeEntries(event.entries)
+    const replacementTurns = new Set(replacement.map((entry) => entry.turn.id))
+    const staleTurns = new Set(
+      replacement
+        .filter((entry) => entry.projectionRevision < (state.revisions.get(entry.turn.id) ?? -1))
+        .map((entry) => entry.turn.id),
+    )
+    const entries = normalizeEntries([
+      ...replacement.filter((entry) => !staleTurns.has(entry.turn.id)),
+      ...state.entries.filter((entry) => staleTurns.has(entry.turn.id) || !replacementTurns.has(entry.turn.id)),
+    ])
+    const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
+    return {
+      state: {
+        ...stateWithoutCost,
+        model: project(cleared(state.model), entries, event.threadCostUsd),
+        replayTurns: new Map([
+          ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
+          ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
+        ]),
+        entries,
+        revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
+        projections: projections(entries),
+        ...(event.threadCostUsd === undefined ? {} : { threadCostUsd: event.threadCostUsd }),
+      },
+      preserveAnchor: true,
     }
   }
   if (event._tag === "TranscriptPagePrepended") {

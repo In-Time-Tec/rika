@@ -1,6 +1,6 @@
 import { Function } from "effect"
 
-export const maxMountedTranscriptRows = 240
+export const maxMountedTranscriptRows = 3360
 
 export interface RowWindowState {
   readonly end: number

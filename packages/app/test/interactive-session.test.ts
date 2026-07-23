@@ -571,6 +571,8 @@ describe("InteractiveSession controls", () => {
       yield* Effect.yieldNow
       expect(yield* Ref.get(controls)).toEqual([
         ["replay", "active", undefined],
+        ["replay", "active", undefined],
+        ["replay", "child:active:title", undefined],
         ["steer", "active", "change course", 0],
         ["cancel", "active", 0],
       ])
@@ -677,7 +679,7 @@ describe("InteractiveSession controls", () => {
       yield* session.resolvePermission("deny-wait", "permission", "deny")
       yield* session.resolvePermission("always-wait", "permission", "always")
       yield* Effect.yieldNow
-      expect(yield* Ref.get(controls)).toEqual([
+      expect((yield* Ref.get(controls)).filter(([operation]) => operation !== "replay")).toEqual([
         ["permission", "allow-wait", "Approved", 0],
         ["permission", "deny-wait", "Denied", 0],
         ["permission", "always-wait", "Always", 0],
@@ -698,7 +700,7 @@ describe("InteractiveSession controls", () => {
       yield* session.resolvePermission("allow-tool", "tool-approval", "allow")
       yield* session.resolvePermission("always-tool", "tool-approval", "always")
       yield* session.resolvePermission("deny-tool", "tool-approval", "deny")
-      expect(yield* Ref.get(controls)).toEqual([
+      expect((yield* Ref.get(controls)).filter(([operation]) => operation !== "replay")).toEqual([
         ["tool-approval", "allow-tool", true, 0],
         ["tool-approval", "always-tool", true, 0],
         ["tool-approval", "deny-tool", false, 0],
@@ -946,7 +948,8 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* session.reopenThread(2)
       yield* session.replay("latest-active", "cursor-7")
-      yield* Effect.yieldNow
+      while (!events.some((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2))
+        yield* Effect.yieldNow
       expect(events.find((event) => event._tag === "SelectionLoaded" && event.thread.id === "older")).toMatchObject({
         _tag: "SelectionLoaded",
         thread: { id: "older" },
@@ -958,9 +961,20 @@ describe("InteractiveSession controls", () => {
         entries: [{ turn: { id: "latest-active" } }],
       })
       expect(events.filter((event) => event._tag === "TranscriptPatched")).toEqual([])
+      expect(events.find((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2)).toEqual({
+        _tag: "ThreadUsageUpdated",
+        selectionEpoch: 2,
+        threadId: "latest",
+        cost: { _tag: "Unavailable" },
+        tokens: { _tag: "Unavailable" },
+      })
       expect(yield* Ref.get(controls)).toEqual([
         ["replay", "active", undefined],
+        ["replay", "active", undefined],
+        ["replay", "child:active:title", undefined],
         ["replay", "latest-active", undefined],
+        ["replay", "latest-active", undefined],
+        ["replay", "child:latest-active:title", undefined],
         ["replay", "latest-active", "cursor-7"],
       ])
     }),
@@ -996,6 +1010,8 @@ describe("InteractiveSession controls", () => {
         ["page", "active", "forward", undefined, 200],
         ["page", "active", "forward", "cursor-200", 200],
         ["page", "active", "forward", "cursor-400", 200],
+        ["replay", "active", undefined],
+        ["replay", "child:active:title", undefined],
       ])
     }),
   )
@@ -1062,7 +1078,11 @@ describe("InteractiveSession controls", () => {
           { turn: { id: shell.id, status: "completed" }, unit: { content: { _tag: "Entry" } } },
         ],
       })
-      expect(yield* Ref.get(controls)).toEqual([["replay", "active", undefined]])
+      expect(yield* Ref.get(controls)).toEqual([
+        ["replay", "active", undefined],
+        ["replay", "active", undefined],
+        ["replay", "child:active:title", undefined],
+      ])
     }),
   )
 
@@ -1323,17 +1343,23 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
 const selectionEntriesFor = (
   session: Operation.InteractiveSession,
   threadId: Thread.ThreadId,
-): Effect.Effect<ReadonlyArray<TranscriptRepository.Entry>, Operation.OperationUnavailable> =>
+): Effect.Effect<
+  {
+    readonly entries: ReadonlyArray<TranscriptRepository.Entry>
+    readonly events: ReadonlyArray<Operation.InteractiveEvent>
+  },
+  Operation.OperationUnavailable
+> =>
   Effect.gen(function* () {
     const events: Array<Operation.InteractiveEvent> = []
     yield* collectEvents(session, events)
     yield* session.selectThread(threadId, 1)
     for (let attempt = 0; attempt < 400; attempt += 1) {
-      const loaded = events.find((event) => event._tag === "SelectionLoaded")
-      if (loaded !== undefined) return loaded._tag === "SelectionLoaded" ? loaded.entries : []
+      const loaded = events.find((event) => event._tag === "TranscriptReplaced")
+      if (loaded !== undefined) return { entries: loaded._tag === "TranscriptReplaced" ? loaded.entries : [], events }
       yield* Effect.yieldNow
     }
-    return []
+    return { entries: [], events }
   })
 
 const nestedSubagentExpectations = (entries: ReadonlyArray<TranscriptRepository.Entry>) => {
@@ -1365,7 +1391,10 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
       })
-      const entries = yield* selectionEntriesFor(session, subagentThread.id)
+      const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id)
+      expect(events.findIndex((event) => event._tag === "SelectionLoaded")).toBeLessThan(
+        events.findIndex((event) => event._tag === "TranscriptReplaced"),
+      )
       const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
       expect(nestedTool).toBe(true)
       expect(nestedAnswer).toBe(true)
@@ -1402,7 +1431,7 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-later",
         childReplayEvents: [],
       })
-      const entries = yield* selectionEntriesFor(session, subagentThread.id)
+      const { entries } = yield* selectionEntriesFor(session, subagentThread.id)
       const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
       expect(nestedTool).toBe(true)
       expect(nestedAnswer).toBe(true)

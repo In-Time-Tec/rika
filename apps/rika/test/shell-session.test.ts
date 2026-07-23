@@ -238,6 +238,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           else model = ViewState.applyQueueDelta(model, event.threadId, event.revision, event.change).model
         } else if (
           event._tag !== "SelectionLoaded" &&
+          event._tag !== "TranscriptReplaced" &&
           event._tag !== "TranscriptPagePrepended" &&
           event._tag !== "TranscriptPatched" &&
           event._tag !== "TranscriptResyncRequired" &&
@@ -247,6 +248,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           event._tag !== "ContextDiagnostics" &&
           event._tag !== "ThreadsListed" &&
           event._tag !== "TitleCostUpdated" &&
+          event._tag !== "ThreadUsageUpdated" &&
           event._tag !== "ThreadTitled" &&
           event._tag !== "ThreadActivated" &&
           event._tag !== "ThreadPreviewLoaded" &&

@@ -299,6 +299,13 @@ export type QueueChange =
 export type InteractiveEvent =
   | { readonly _tag: "ThreadsListed"; readonly threads: ReadonlyArray<ThreadSummary.ThreadSummary> }
   | {
+      readonly _tag: "ThreadUsageUpdated"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly cost: { readonly _tag: "Available"; readonly usd: number } | { readonly _tag: "Unavailable" }
+      readonly tokens: { readonly _tag: "Available"; readonly total: number } | { readonly _tag: "Unavailable" }
+    }
+  | {
       readonly _tag: "ContextDiagnostics"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
@@ -391,6 +398,16 @@ export type InteractiveEvent =
       readonly activeTurn?: Turn.Turn
     }
   | {
+      readonly _tag: "TranscriptReplaced"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly entries: ReadonlyArray<TranscriptPage.Entry>
+      readonly hasOlder: boolean
+      readonly threadCostUsd?: number
+      readonly globalCostUsd?: number
+      readonly oldestCursor?: TranscriptPage.PageCursor
+    }
+  | {
       readonly _tag: "TranscriptPagePrepended"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
@@ -422,6 +439,19 @@ export type InteractiveEvent =
     }
 
 export const InteractiveEventSchema = Schema.Union([
+  Schema.Struct({
+    _tag: Schema.tag("ThreadUsageUpdated"),
+    selectionEpoch: Schema.Int,
+    threadId: Thread.ThreadId,
+    cost: Schema.Union([
+      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite }),
+      Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+    ]),
+    tokens: Schema.Union([
+      Schema.Struct({ _tag: Schema.tag("Available"), total: Schema.Finite }),
+      Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+    ]),
+  }),
   Schema.Struct({
     _tag: Schema.tag("ContextDiagnostics"),
     selectionEpoch: Schema.Int,
@@ -548,6 +578,16 @@ export const InteractiveEventSchema = Schema.Union([
       }),
     ),
     activeTurn: Schema.optionalKey(Turn.Turn),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TranscriptReplaced"),
+    selectionEpoch: Schema.Int,
+    threadId: Thread.ThreadId,
+    entries: Schema.Array(TranscriptPage.EntrySchema),
+    hasOlder: Schema.Boolean,
+    threadCostUsd: Schema.optionalKey(Schema.Finite),
+    globalCostUsd: Schema.optionalKey(Schema.Finite),
+    oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
   }),
   Schema.Struct({
     _tag: Schema.tag("TranscriptPagePrepended"),

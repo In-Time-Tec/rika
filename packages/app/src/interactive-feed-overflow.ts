@@ -48,6 +48,8 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "TitleCostUpdated":
     case "ThreadTitled":
     case "ThreadPreviewLoaded":
+    case "ThreadUsageUpdated":
+    case "TranscriptReplaced":
       return true
     case "ThreadsListed":
     case "TranscriptPatched":

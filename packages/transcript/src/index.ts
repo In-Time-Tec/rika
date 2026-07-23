@@ -1,11 +1,11 @@
 import { Catalog } from "@rika/tools"
 import { Function, Option, Schema } from "effect"
-import { pricingVersion, usageCostUsd } from "./model-cost"
+import { pricingVersion, usageCostUsd, usageTokens } from "./model-cost"
 import { partialInputRecord } from "./partial-input"
 import type { Block, Content, Presentation, Projection, SourceEvent, ToolFile, ToolProcess, Unit } from "./schema"
 
 export * from "./schema"
-export { pricingVersion } from "./model-cost"
+export { pricingVersion, usageTokens, type UsageTokens } from "./model-cost"
 export { partialInputRecord } from "./partial-input"
 
 const record = (value: unknown): Record<string, unknown> =>

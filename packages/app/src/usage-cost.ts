@@ -22,6 +22,11 @@ export interface Snapshot {
   readonly complete: boolean
   readonly attempts: ReadonlyMap<string, AttemptCost>
   readonly collectionComplete: boolean
+  readonly turnTokens: ReadonlyMap<string, number>
+  readonly threadTokens: ReadonlyMap<string, number>
+  readonly tokenCompleteThreads: ReadonlySet<string>
+  readonly costCompleteThreads: ReadonlySet<string>
+  readonly incompleteThreads: ReadonlySet<string>
 }
 
 interface AttemptCost {
@@ -31,6 +36,8 @@ interface AttemptCost {
   readonly estimateAmount?: number
   readonly provider: "absent" | "valid" | "invalid"
   readonly providerAmount?: number
+  readonly tokens: "absent" | "valid" | "invalid"
+  readonly tokenAmount?: number
 }
 
 export const maximumGlobalThreads = 100
@@ -44,6 +51,11 @@ export const empty: Snapshot = {
   complete: true,
   attempts: new Map(),
   collectionComplete: true,
+  turnTokens: new Map(),
+  threadTokens: new Map(),
+  tokenCompleteThreads: new Set(),
+  costCompleteThreads: new Set(),
+  incompleteThreads: new Set(),
 }
 
 export const eventCostUsd = (event: ExecutionBackend.Event): number | undefined =>
@@ -84,22 +96,57 @@ const mergeProvider = (previous: AttemptCost, providerAmount: number | undefined
   return previous.providerAmount === providerAmount ? previous : invalidProvider(previous)
 }
 
-const totals = (attempts: ReadonlyMap<string, AttemptCost>, collectionComplete: boolean) => {
+const totals = (
+  attempts: ReadonlyMap<string, AttemptCost>,
+  collectionComplete: boolean,
+  incompleteThreads: ReadonlySet<string>,
+) => {
   const turnCostUsd = new Map<string, number>()
   const threadCostUsd = new Map<string, number>()
   let globalCostUsd = 0
   let complete = collectionComplete
+  const turnTokens = new Map<string, number>()
+  const threadTokens = new Map<string, number>()
+  const incompleteCostThreads = new Set(incompleteThreads)
+  const incompleteTokenThreads = new Set(incompleteThreads)
+  const observedThreads = new Set(incompleteThreads)
   for (const attempt of attempts.values()) {
+    observedThreads.add(attempt.threadId)
     const cost = pricedAttempt(attempt)
     if (cost === undefined) {
       complete = false
-      continue
+      incompleteCostThreads.add(attempt.threadId)
+    } else {
+      turnCostUsd.set(attempt.turnId, (turnCostUsd.get(attempt.turnId) ?? 0) + cost)
+      threadCostUsd.set(attempt.threadId, (threadCostUsd.get(attempt.threadId) ?? 0) + cost)
+      globalCostUsd += cost
     }
-    turnCostUsd.set(attempt.turnId, (turnCostUsd.get(attempt.turnId) ?? 0) + cost)
-    threadCostUsd.set(attempt.threadId, (threadCostUsd.get(attempt.threadId) ?? 0) + cost)
-    globalCostUsd += cost
+    if (attempt.tokens !== "valid") incompleteTokenThreads.add(attempt.threadId)
+    else {
+      turnTokens.set(attempt.turnId, (turnTokens.get(attempt.turnId) ?? 0) + attempt.tokenAmount!)
+      threadTokens.set(attempt.threadId, (threadTokens.get(attempt.threadId) ?? 0) + attempt.tokenAmount!)
+    }
   }
-  return { turnCostUsd, threadCostUsd, globalCostUsd, complete }
+  return {
+    turnCostUsd,
+    threadCostUsd,
+    globalCostUsd,
+    complete,
+    turnTokens,
+    threadTokens,
+    tokenCompleteThreads: new Set([...observedThreads].filter((thread) => !incompleteTokenThreads.has(thread))),
+    costCompleteThreads: new Set([...observedThreads].filter((thread) => !incompleteCostThreads.has(thread))),
+  }
+}
+
+const incomplete = (snapshot: Snapshot, threadId: string): Snapshot => {
+  const incompleteThreads = new Set(snapshot.incompleteThreads).add(threadId)
+  return {
+    ...snapshot,
+    collectionComplete: false,
+    incompleteThreads,
+    ...totals(snapshot.attempts, false, incompleteThreads),
+  }
 }
 
 export const observe: {
@@ -115,21 +162,33 @@ export const observe: {
       input.event.id === undefined ||
       input.event.id.length === 0
     )
-      return { ...snapshot, complete: false, collectionComplete: false }
+      return incomplete(snapshot, input.threadId)
     const deliveryKey = `${input.event.executionId}\u0000${input.event.id}`
     if (snapshot.usageCursors.has(deliveryKey)) return snapshot
     const attemptId = stringField(input.event.data, "model_attempt_id")
-    if (attemptId === undefined) return { ...snapshot, complete: false, collectionComplete: false }
+    if (attemptId === undefined) return incomplete(snapshot, input.threadId)
     const attemptKey = `${input.event.executionId}\u0000${attemptId}`
     const previous = snapshot.attempts.get(attemptKey) ?? {
       threadId: input.threadId,
       turnId: input.turnId,
       estimate: "absent" as const,
       provider: "absent" as const,
+      tokens: "absent" as const,
     }
     let attempt: AttemptCost
     if (input.event.type === "model.usage.reported") {
-      attempt = mergeEstimate(previous, eventCostUsd(input.event))
+      const decoded = Transcript.usageTokens(input.event.data ?? {})
+      const tokens = decoded._tag === "Available" ? decoded.total : undefined
+      const invalidTokens = (): AttemptCost => {
+        const { tokenAmount: _, ...withoutAmount } = previous
+        return { ...withoutAmount, tokens: "invalid" }
+      }
+      let tokenAttempt: AttemptCost
+      if (previous.tokens === "invalid" || tokens === undefined) tokenAttempt = invalidTokens()
+      else if (previous.tokens === "absent") tokenAttempt = { ...previous, tokens: "valid", tokenAmount: tokens }
+      else if (previous.tokenAmount === tokens) tokenAttempt = previous
+      else tokenAttempt = invalidTokens()
+      attempt = mergeEstimate(tokenAttempt, eventCostUsd(input.event))
     } else if (input.event.data !== undefined && Object.hasOwn(input.event.data, "cost")) {
       const cost = input.event.data.cost
       const valid =
@@ -147,7 +206,7 @@ export const observe: {
     const attempts = new Map(snapshot.attempts).set(attemptKey, attempt)
     return {
       ...snapshot,
-      ...totals(attempts, snapshot.collectionComplete),
+      ...totals(attempts, snapshot.collectionComplete, snapshot.incompleteThreads),
       attempts,
       usageCursors: new Set(snapshot.usageCursors).add(deliveryKey),
     }
@@ -172,6 +231,9 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
   let snapshot: Snapshot = { ...empty }
   const pending = roots.map((root) => ({ ...root, executionId: root.executionId ?? root.turnId, reference: false }))
   const seenExecutions = new Set<string>()
+  const markIncomplete = (threadId: string) => {
+    snapshot = incomplete(snapshot, threadId)
+  }
   while (pending.length > 0) {
     const batch = pending.splice(0).filter((current) => {
       if (seenExecutions.has(current.executionId)) return false
@@ -195,11 +257,11 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
     )
     for (const { current, inspection, replay } of results) {
       if (inspection === undefined) {
-        if (current.optional !== true) Object.assign(snapshot, { complete: false, collectionComplete: false })
+        if (current.optional !== true) markIncomplete(current.threadId)
         continue
       }
       if (replay === undefined) {
-        Object.assign(snapshot, { complete: false, collectionComplete: false })
+        if (current.optional !== true) markIncomplete(current.threadId)
         continue
       }
       for (const event of replay.events)

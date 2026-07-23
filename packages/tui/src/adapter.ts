@@ -607,9 +607,9 @@ export interface UnitLineRange {
   readonly targets?: ReadonlyArray<PathTarget>
 }
 
-export const maxMountedTranscriptEntries = 200
+export const maxMountedTranscriptEntries = 2800
 
-export const maxBoundedTranscriptItems = 2000
+export const maxBoundedTranscriptItems = 5600
 
 export { maxMountedTranscriptRows } from "./transcript-presenter"
 
@@ -1652,6 +1652,7 @@ export interface Handlers {
   readonly pasteImage?: (image?: { readonly bytes: Uint8Array; readonly mediaType?: string }) => void
   readonly expandPaste?: (token: string) => void
   readonly clickToggle?: (unit: string) => void
+  readonly usageToggle?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
   readonly threadSidebarSelect?: (index: number) => void
@@ -1821,6 +1822,7 @@ export class Surface {
   private welcomeKey = ""
   private welcomeTimer: Fiber.Fiber<void> | undefined
   private toastTimer: Fiber.Fiber<void> | undefined
+  private usageLabelWidth = 0
   private lastPaste: { readonly text: string; readonly at: number } | undefined
   private model: Model | undefined
   private transcriptChildren: Array<TextRenderable> = []
@@ -1992,6 +1994,10 @@ export class Surface {
       zIndex: 30,
       selectable: false,
     })
+    this.modeLabel.onMouseDown = (event) => {
+      const column = event.x - this.modeLabel.screenX
+      if (column >= 0 && column < this.usageLabelWidth) this.handlers.usageToggle?.()
+    }
     this.workspaceLabel = new TextRenderable(renderer, {
       content: "",
       position: "absolute",
@@ -3153,10 +3159,18 @@ export class Surface {
     this.queueRightJoint.visible = queue.length > 0 || pendingSteering.length > 0
     this.inputBox.borderColor = colors.text
     let costText = ""
-    if (model.costUsd !== undefined) costText = formatCost(model.costUsd)
-    else if (model.busy) costText = "$····"
+    if (model.usageDisplay === "tokens") {
+      if (model.usageTokens?._tag === "Available") costText = formatTokens(model.usageTokens.total)
+      else if (model.usageTokens?._tag === "Unavailable") costText = "— tok"
+      else costText = "···· tok"
+    } else if (model.costUsd !== undefined && model.usageCost?._tag !== "Unavailable")
+      costText = formatCost(model.costUsd)
+    else if (model.usageCost?._tag === "Available") costText = formatCost(model.usageCost.usd)
+    else if (model.usageCost?._tag === "Unavailable") costText = "$—"
+    else if (model.usageCost?._tag === "Loading" || model.busy) costText = "$····"
     this.inputBox.title = ""
     const modeChunks: Array<TextChunk> = []
+    this.usageLabelWidth = costText.length === 0 ? 0 : stringWidth(` ${costText} `)
     if (costText.length > 0) {
       modeChunks.push(dim(fg(colors.text)(` ${costText} `)))
       modeChunks.push(fg(colors.text)("─"))
@@ -3894,6 +3908,13 @@ const formatCost = (usd: number): string =>
     minimumFractionDigits: 2,
     maximumFractionDigits: Math.abs(usd) < 0.01 ? 3 : 2,
   })
+
+export const formatTokens = (tokens: number): string => {
+  if (tokens < 1_000) return `${tokens.toLocaleString("en-US")} tok`
+  const divisor = tokens >= 1_000_000 ? 1_000_000 : 1_000
+  const suffix = divisor === 1_000_000 ? "M" : "K"
+  return `${(tokens / divisor).toFixed(1).replace(/\.0$/, "")}${suffix} tok`
+}
 
 const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
   "                                        ",

@@ -374,7 +374,8 @@ test("moves the bounded transcript window to older mounted entries and keeps it 
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const entries = Array.from({ length: 500 }, (_, index) => ({
+      const historySize = maxMountedTranscriptEntries + 300
+      const entries = Array.from({ length: historySize }, (_, index) => ({
         role: "assistant" as const,
         text: `answer ${index}`,
         turnId: `turn-${index}`,
@@ -403,13 +404,13 @@ test("moves the bounded transcript window to older mounted entries and keeps it 
           readonly transcriptWindowEnd: number
           readonly transcriptChildren: ReadonlyArray<Renderable>
         }
-        expect(state.transcriptWindowEnd).toBe(400)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
         expect(firstBefore).toBe(300)
         expect(firstAfter).toBeLessThan(300)
         expect(firstAfter).toBeGreaterThan(200)
         expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
         surface.update({ ...base, input: "next", cursor: 4 })
-        expect(state.transcriptWindowEnd).toBe(400)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
       } finally {
         surface.destroy()
         setup.renderer.destroy()
@@ -612,11 +613,11 @@ test("keeps the bounded suffix of an oversized tool tree when a trailing message
     }),
   ))
 
-test("grows the row window backward inside a giant tree and keeps the reading position", () =>
+test("keeps a large expanded subagent tree in one mounted row window", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const model = giantSubagentModel(300)
+      const model = giantSubagentModel(maxMountedTranscriptEntries - 400)
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         surface.update(model)
@@ -630,12 +631,15 @@ test("grows the row window backward inside a giant tree and keeps the reading po
         yield* openTui(() => setup.flush())
         const state = surface as unknown as {
           readonly transcriptWindowEnd: number
+          readonly transcriptRowWindow: { readonly end: number }
+          readonly transcriptRowTotal: number
           readonly transcriptChildren: ReadonlyArray<Renderable>
         }
-        const firstAfter = Number(/cmd-(\d+)/.exec(setup.captureCharFrame())?.[1])
-        expect(state.transcriptWindowEnd).toBeGreaterThan(0)
-        expect(state.transcriptWindowEnd).toBeLessThan(301)
-        expect(firstAfter).toBeLessThan(firstBefore)
+        expect(state.transcriptWindowEnd).toBe(model.items.length)
+        expect(state.transcriptRowTotal).toBeGreaterThan(240)
+        expect(state.transcriptRowTotal).toBeLessThan(maxMountedTranscriptRows)
+        expect(state.transcriptRowWindow.end).toBe(0)
+        expect(Number(/cmd-(\d+)/.exec(setup.captureCharFrame())?.[1])).toBe(firstBefore)
         expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
       } finally {
         surface.destroy()
@@ -644,11 +648,11 @@ test("grows the row window backward inside a giant tree and keeps the reading po
     }),
   ))
 
-test("keeps the scrollbar geometry consistent across backward row-window growth", () =>
+test("keeps the scrollbar geometry consistent across backward transcript-window growth", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const model = giantSubagentModel(300)
+      const model = giantSubagentModel(maxMountedTranscriptEntries + 300)
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         surface.update(model)
@@ -878,7 +882,8 @@ test("does not follow the tail while a forward transcript-window anchor is pendi
     Effect.gen(function* () {
       const clock = new ManualClock()
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const entries = Array.from({ length: 500 }, (_, index) => ({
+      const historySize = maxMountedTranscriptEntries + 300
+      const entries = Array.from({ length: historySize }, (_, index) => ({
         role: "assistant" as const,
         text: `answer ${index}`,
         turnId: `turn-${index}`,
@@ -924,7 +929,7 @@ test("does not follow the tail while a forward transcript-window anchor is pendi
         surface.transcriptScroll.scrollTo(0)
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(state.transcriptWindowEnd).toBe(400)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
 
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         setup.renderer.requestRender()
@@ -934,7 +939,7 @@ test("does not follow the tail while a forward transcript-window anchor is pendi
 
         yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
         clock.advance(16)
-        expect(state.transcriptWindowEnd).toBe(500)
+        expect(state.transcriptWindowEnd).toBe(historySize)
         expect(state.pendingTranscriptPosition?._tag).toBe("Anchor")
 
         yield* openTui(() => setup.mockMouse.scroll(10, 5, "down", { delayMs: 0 }))
@@ -960,7 +965,8 @@ test("does not turn an upward wheel correction into a forward window page", () =
     Effect.gen(function* () {
       const clock = new ManualClock()
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const entries = Array.from({ length: 500 }, (_, index) => ({
+      const historySize = maxMountedTranscriptEntries + 300
+      const entries = Array.from({ length: historySize }, (_, index) => ({
         role: "assistant" as const,
         text: `answer ${index}`,
         turnId: `turn-${index}`,
@@ -997,7 +1003,7 @@ test("does not turn an upward wheel correction into a forward window page", () =
         surface.transcriptScroll.scrollTo(0)
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(state.transcriptWindowEnd).toBe(400)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
 
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         setup.renderer.requestRender()
@@ -1009,7 +1015,7 @@ test("does not turn an upward wheel correction into a forward window page", () =
         yield* openTui(() => setup.flush())
 
         expect(model.scrollFollow).toBe(false)
-        expect(state.transcriptWindowEnd).toBe(400)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
         expect(/answer (\d+)/.exec(setup.captureCharFrame())?.[1]).toBe(marker)
       } finally {
         surface.destroy()
@@ -1071,7 +1077,8 @@ test("moves the bounded transcript window forward by one measured page", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const entries = Array.from({ length: 500 }, (_, index) => ({
+      const historySize = maxMountedTranscriptEntries + 300
+      const entries = Array.from({ length: historySize }, (_, index) => ({
         role: "assistant" as const,
         text: `answer ${index}`,
         turnId: `turn-${index}`,
@@ -1101,7 +1108,7 @@ test("moves the bounded transcript window forward by one measured page", () =>
           readonly transcriptWindowEnd: number
           readonly transcriptAnchorScrollBy: number
         }
-        expect(state.transcriptWindowEnd).toBe(500)
+        expect(state.transcriptWindowEnd).toBe(historySize)
         expect(firstAfter).toBeGreaterThan(firstBefore)
         expect(firstAfter).toBeLessThan(firstBefore + 50)
         expect(state.transcriptAnchorScrollBy).toBe(0)
@@ -1116,7 +1123,8 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const entries = Array.from({ length: 600 }, (_, index) => ({
+      const historySize = maxMountedTranscriptEntries + 400
+      const entries = Array.from({ length: historySize }, (_, index) => ({
         role: "assistant" as const,
         text: `answer ${index}`,
         turnId: `turn-${index}`,
@@ -1139,7 +1147,7 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
         yield* openTui(() => setup.flush())
         setup.mockInput.pressKey("\x1b[5~")
         setup.mockInput.pressKey("\x1b[5~")
-        expect(state.transcriptWindowEnd).toBe(500)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
         yield* openTui(() => setup.flush())
         const firstAfterRepeatedUp = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
         expect(firstAfterRepeatedUp).toBeGreaterThan(300)
@@ -1148,14 +1156,14 @@ test("coalesces repeated page keys until the transcript anchor frame", () =>
         surface.transcriptScroll.scrollTo(0)
         setup.mockInput.pressKey("\x1b[5~")
         yield* openTui(() => setup.flush())
-        expect(state.transcriptWindowEnd).toBe(400)
+        expect(state.transcriptWindowEnd).toBe(historySize - 200)
         surface.transcriptScroll.scrollTo(surface.transcriptScroll.scrollHeight)
         setup.renderer.requestRender()
         yield* openTui(() => setup.flush())
         const firstBeforeRepeatedDown = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
         setup.mockInput.pressKey("\x1b[6~")
         setup.mockInput.pressKey("\x1b[6~")
-        expect(state.transcriptWindowEnd).toBe(500)
+        expect(state.transcriptWindowEnd).toBe(historySize - 100)
         yield* openTui(() => setup.flush())
         const firstAfterRepeatedDown = Number(/answer (\d+)/.exec(setup.captureCharFrame())?.[1])
         expect(firstAfterRepeatedDown).toBeGreaterThan(firstBeforeRepeatedDown)

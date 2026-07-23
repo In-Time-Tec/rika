@@ -296,7 +296,9 @@ import {
   boundedTranscriptModel,
   clipStyledLine,
   create,
+  formatTokens,
   maxMountedTranscriptEntries,
+  maxMountedTranscriptRows,
   previewBoxRows,
   renderBlock,
   renderChangedFiles,
@@ -311,6 +313,11 @@ const handlers = () => ({ key: vi.fn(), resize: vi.fn() })
 const nonEmptyLines = (text: string) => text.split("\n").filter((line) => line.length > 0)
 
 const model = (changes: Partial<Model> = {}): Model => ({ ...initial("/workspace", "medium"), ...changes })
+
+test("formats compact token totals", () => {
+  expect(formatTokens(999)).toBe("999 tok")
+  expect(formatTokens(40_100_000)).toBe("40.1M tok")
+})
 
 const thread = (input: Partial<ThreadItem> & Pick<ThreadItem, "id" | "title">): ThreadItem => ({
   workspace: "/workspace",
@@ -582,13 +589,14 @@ describe("Surface", () => {
   )
 
   test("limits transcript formatting input before reconciliation", () => {
+    const historySize = maxMountedTranscriptEntries + 800
     const state = model({
-      entries: Array.from({ length: 1_000 }, (_, index) => ({
+      entries: Array.from({ length: historySize }, (_, index) => ({
         role: "assistant" as const,
         text: `answer ${index}`,
         turnId: `turn-${index}`,
       })),
-      items: Array.from({ length: 1_000 }, (_, index) => ({
+      items: Array.from({ length: historySize }, (_, index) => ({
         _tag: "Entry" as const,
         index,
         id: `answer-${index}`,
@@ -598,14 +606,14 @@ describe("Surface", () => {
 
     const bounded = boundedTranscriptModel(state)
 
-    expect(bounded.entries).toHaveLength(200)
-    expect(bounded.items).toHaveLength(200)
+    expect(bounded.entries).toHaveLength(maxMountedTranscriptEntries)
+    expect(bounded.items).toHaveLength(maxMountedTranscriptEntries)
     expect(bounded.entries[0]?.text).toBe("answer 800")
     expect(bounded.items[0]).toEqual({ _tag: "Entry", index: 0, id: "answer-800", turnId: "turn-800" })
-    const older = boundedTranscriptModel(state, 400)
-    expect(older.entries).toHaveLength(200)
+    const older = boundedTranscriptModel(state, maxMountedTranscriptEntries + 200)
+    expect(older.entries).toHaveLength(maxMountedTranscriptEntries)
     expect(older.entries[0]?.text).toBe("answer 200")
-    expect(older.entries.at(-1)?.text).toBe("answer 399")
+    expect(older.entries.at(-1)?.text).toBe(`answer ${maxMountedTranscriptEntries + 199}`)
   })
 
   test("keeps a subagent parent within the bounded suffix when its children exceed the limit", () => {
@@ -624,7 +632,7 @@ describe("Surface", () => {
       detail: "Review the code",
       files: [],
     }
-    const children = Array.from({ length: 205 }, (_, index) => ({
+    const children = Array.from({ length: maxMountedTranscriptEntries + 5 }, (_, index) => ({
       _tag: "ToolCall" as const,
       id: `child-${index}`,
       name: "read",
@@ -656,7 +664,7 @@ describe("Surface", () => {
 
     const bounded = boundedTranscriptModel(state)
 
-    expect(bounded.items).toHaveLength(206)
+    expect(bounded.items).toHaveLength(children.length + 1)
     expect(bounded.blocks[0]).toMatchObject({ _tag: "ToolCall", id: "agent" })
     expect(bounded.items[0]).toMatchObject({ _tag: "Block", index: 0, id: "tool:agent" })
   })
@@ -674,7 +682,7 @@ describe("Surface", () => {
         parentId: "agent",
       })),
       { id: "nested", family: "agent", parentId: "agent" },
-      ...Array.from({ length: 250 }, (_, index) => ({
+      ...Array.from({ length: maxMountedTranscriptEntries + 50 }, (_, index) => ({
         id: `nested-child-${index}`,
         family: "explore" as const,
         parentId: "nested",
@@ -710,7 +718,7 @@ describe("Surface", () => {
       const { surface } = yield* createScoped(handlers())
       surface.update(
         model({
-          entries: Array.from({ length: 1_000 }, (_, index) => ({
+          entries: Array.from({ length: maxMountedTranscriptEntries + 1_000 }, (_, index) => ({
             role: "assistant" as const,
             text: `answer ${index}`,
             turnId: `turn-${index}`,
@@ -720,7 +728,7 @@ describe("Surface", () => {
 
       expect(
         (surface as unknown as { transcriptChildren: ReadonlyArray<object> }).transcriptChildren.length,
-      ).toBeLessThanOrEqual(400)
+      ).toBeLessThanOrEqual(maxMountedTranscriptRows * 2)
     }),
   )
 
@@ -1987,6 +1995,14 @@ describe("Surface", () => {
       const globalTotalUsd = 12.34
       surface.update(model({ mode: "medium", busy: false, costUsd: globalTotalUsd }))
       expect(modeLabelText()).toBe(" $12.34 ─ medium ")
+      surface.update(model({ mode: "medium", usageCost: { _tag: "Loading" } }))
+      expect(modeLabelText()).toBe(" $···· ─ medium ")
+      surface.update(model({ mode: "medium", usageCost: { _tag: "Unavailable" } }))
+      expect(modeLabelText()).toBe(" $— ─ medium ")
+      surface.update(
+        model({ mode: "medium", usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 40_100_000 } }),
+      )
+      expect(modeLabelText()).toBe(" 40.1M tok ─ medium ")
 
       surface.update(
         model({
@@ -2028,6 +2044,19 @@ describe("Surface", () => {
       expect(paletteText).not.toContain("review workspace changes")
       expect(paletteText).not.toContain("changed files")
       expect(opentui.requestRender.mock.calls.length).toBeGreaterThanOrEqual(7)
+    }),
+  )
+
+  it.effect("routes usage-label clicks to the local display toggle", () =>
+    Effect.gen(function* () {
+      const usageToggle = vi.fn()
+      const { surface } = yield* createScoped({ ...handlers(), usageToggle })
+      surface.update(model({ usageCost: { _tag: "Available", usd: 1.25 } }))
+      Object.assign(surface.modeLabel, { screenX: 20 })
+      surface.modeLabel.onMouseDown?.({ x: 20 } as never)
+      expect(usageToggle).toHaveBeenCalledOnce()
+      surface.modeLabel.onMouseDown?.({ x: 27 } as never)
+      expect(usageToggle).toHaveBeenCalledOnce()
     }),
   )
 

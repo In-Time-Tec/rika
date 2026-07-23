@@ -350,6 +350,21 @@ export const Model = Schema.Struct({
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
+  usageDisplay: Schema.optional(Schema.Literals(["cost", "tokens"])),
+  usageTokens: Schema.optional(
+    Schema.Union([
+      Schema.Struct({ _tag: Schema.tag("Loading") }),
+      Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+      Schema.Struct({ _tag: Schema.tag("Available"), total: Schema.Finite }),
+    ]),
+  ),
+  usageCost: Schema.optional(
+    Schema.Union([
+      Schema.Struct({ _tag: Schema.tag("Loading") }),
+      Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite }),
+    ]),
+  ),
   paletteOpen: Schema.Boolean,
   palette: PaletteStateSchema,
   modePicker: ModePickerStateSchema,
@@ -605,6 +620,7 @@ export const initial: {
     pendingSteering: [],
     cancelPending: false,
     busy: false,
+    usageDisplay: "cost",
     paletteOpen: false,
     palette: { open: false, query: "", selected: 0 },
     modePicker: { open: false, selected: 0 },
