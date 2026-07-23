@@ -39,6 +39,8 @@ const toolCall = (id: string, changes: Partial<Extract<TranscriptBlock, { _tag: 
     ...changes,
   }) as TranscriptBlock
 
+const nestedCommand = `git show --format=fuller ${"a".repeat(180)} -- packages/tui/src/adapter.ts packages/tui/test/transcript-bounds.test.ts`
+
 const blocks: ReadonlyArray<TranscriptBlock> = [
   { _tag: "Reasoning", text: `${longText} ${longText}` },
   {
@@ -58,6 +60,11 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
       command: `echo ${"a".repeat(90)} && rg --hidden --glob '!node_modules' ${"b".repeat(60)}`,
     }),
     output: `${longText}\n${longText}`,
+  }),
+  toolCall("shell-2", {
+    presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
+    input: JSON.stringify({ command: nestedCommand }),
+    detail: nestedCommand,
   }),
   toolCall("edit-1", {
     presentation: { family: "edit", action: "edit", activeLabel: "Editing", completeLabel: "Edited" },
@@ -89,6 +96,21 @@ const blocks: ReadonlyArray<TranscriptBlock> = [
     status: "failed",
     output: longText,
   }),
+  toolCall("nested-agent", {
+    status: "running",
+    presentation: {
+      family: "agent",
+      action: "agent",
+      activeLabel: "Subagent working",
+      completeLabel: "Subagent finished",
+    },
+    detail: "Inspect the transcript renderer",
+  }),
+  toolCall("nested-shell", {
+    presentation: { family: "shell", action: "command", activeLabel: "Running", completeLabel: "Ran" },
+    input: JSON.stringify({ command: nestedCommand }),
+    detail: nestedCommand,
+  }),
   { _tag: "ChildAgent", id: "child", name: "oracle", summary: longText, status: "complete", activity: [longText] },
   { _tag: "Workflow", name: "flow", step: longText, status: "waiting" },
 ]
@@ -98,7 +120,11 @@ const boundedModel = (width: number): Model => {
     ...initial("/workspace", "medium"),
     width,
     blocks,
-    items: blocks.map((_, index) => ({ _tag: "Block" as const, index, id: `item:${index}`, turnId: "turn" })),
+    items: blocks.map((block, index) =>
+      block._tag === "ToolCall" && block.id === "nested-shell"
+        ? { _tag: "Block" as const, index, id: `item:${index}`, turnId: "turn", parentId: "nested-agent" }
+        : { _tag: "Block" as const, index, id: `item:${index}`, turnId: "turn" },
+    ),
     entries: [
       { role: "assistant", text: `${longText} ${longText} ${"u".repeat(200)}`, turnId: "turn" },
       { role: "user", text: `${longText} ${longText}`, turnId: "turn" },

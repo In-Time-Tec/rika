@@ -44,22 +44,22 @@ const definitions = {
   Oracle: {
     instructions: instructions("Oracle", oraclePrompt),
     tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
-    permissions: ["workspace.read", "network.read"],
+    permissions: ["workspace.read", "network.read", "thread.read"],
   },
   Librarian: {
     instructions: instructions("Librarian", librarianPrompt),
     tools: [Tools.webSearchTool, Tools.readWebPageTool],
-    permissions: ["network.read"],
+    permissions: ["network.read", "thread.read"],
   },
   Painter: {
     instructions: instructions("Painter", painterPrompt),
     tools: [Tools.viewMediaTool],
-    permissions: ["workspace.read"],
+    permissions: ["workspace.read", "thread.read"],
   },
   Review: {
     instructions: instructions("Review", reviewPrompt),
     tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
-    permissions: ["workspace.read", "network.read"],
+    permissions: ["workspace.read", "network.read", "thread.read"],
   },
   ReadThread: {
     instructions: instructions("ReadThread", readThreadPrompt),
@@ -77,7 +77,7 @@ const definitions = {
       Tools.shellCommandStatusTool,
       Tools.webSearchTool,
     ],
-    permissions: ["workspace.read", "workspace.write", "process.run", "network.read"],
+    permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
   },
 } as const
 

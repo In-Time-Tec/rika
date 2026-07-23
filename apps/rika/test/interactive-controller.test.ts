@@ -1400,11 +1400,11 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
   expect(scheduled).toHaveLength(1)
 })
 
-it("applies a root lifecycle boundary without waiting behind a child delta flood", () => {
+it("keeps non-urgent lifecycle events behind earlier child events", () => {
   type FeedEvent = {
     readonly id: string
     readonly lane: "root" | "child"
-    readonly boundary: boolean
+    readonly urgent: boolean
   }
   const scheduled: Array<() => void> = []
   const applied: Array<string> = []
@@ -1413,20 +1413,69 @@ it("applies a root lifecycle boundary without waiting behind a child delta flood
     apply: (events) => applied.push(...events.map((event) => event.id)),
     render: () => undefined,
     lane: (event) => event.lane,
-    boundary: (event) => event.boundary,
+    urgent: (event) => event.urgent,
   })
-  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child", boundary: false })
-  batcher.offer({ id: "root-progress", lane: "root", boundary: false })
-  batcher.offer({ id: "root-result", lane: "root", boundary: true })
+  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child", urgent: false })
+  batcher.offer({ id: "root-progress", lane: "root", urgent: false })
+  batcher.offer({ id: "root-result", lane: "root", urgent: false })
 
   scheduled.shift()?.()
 
   expect(applied).toHaveLength(256)
-  expect(applied.at(-1)).toBe("root-result")
+  expect(applied).toEqual(Array.from({ length: 256 }, (_, index) => `child-${index}`))
+  while (scheduled.length > 0) scheduled.shift()?.()
+  expect(applied).toEqual([
+    ...Array.from({ length: 300 }, (_, index) => `child-${index}`),
+    "root-progress",
+    "root-result",
+  ])
+})
+
+it("promotes an urgent request with its same-lane predecessors", () => {
+  type FeedEvent = {
+    readonly id: string
+    readonly lane: "root" | "child"
+    readonly urgent: boolean
+  }
+  const scheduled: Array<() => void> = []
+  const applied: Array<string> = []
+  const batcher = InteractiveController.makeFeedFrameBatcher<FeedEvent>({
+    schedule: (flush) => scheduled.push(flush),
+    apply: (events) => applied.push(...events.map((event) => event.id)),
+    render: () => undefined,
+    lane: (event) => event.lane,
+    urgent: (event) => event.urgent,
+  })
+  for (let index = 0; index < 300; index += 1) batcher.offer({ id: `child-${index}`, lane: "child", urgent: false })
+  batcher.offer({ id: "root-progress", lane: "root", urgent: false })
+  batcher.offer({ id: "root-approval", lane: "root", urgent: true })
+
+  scheduled.shift()?.()
+
+  expect(applied).toHaveLength(256)
   expect(applied.at(-2)).toBe("root-progress")
+  expect(applied.at(-1)).toBe("root-approval")
   expect(applied.slice(0, -2)).toEqual(Array.from({ length: 254 }, (_, index) => `child-${index}`))
   while (scheduled.length > 0) scheduled.shift()?.()
   expect(applied.filter((id) => id.startsWith("child-"))).toEqual(
     Array.from({ length: 300 }, (_, index) => `child-${index}`),
   )
+})
+
+it("only treats user-blocking requests as urgent feed events", () => {
+  const patched = (type: string): Operation.InteractiveEvent => ({
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("turn"),
+    event: { cursor: type, sequence: 1, type, createdAt: 1 },
+    revision: 1,
+  })
+
+  expect(InteractiveController.isUrgentFeedEvent(patched("tool.approval.requested"))).toBe(true)
+  expect(InteractiveController.isUrgentFeedEvent(patched("permission.ask.requested"))).toBe(true)
+  expect(InteractiveController.isUrgentFeedEvent(patched("tool.result.received"))).toBe(false)
+  expect(InteractiveController.isUrgentFeedEvent(patched("execution.completed"))).toBe(false)
+  expect(InteractiveController.isUrgentFeedEvent(patched("execution.failed"))).toBe(false)
+  expect(InteractiveController.isUrgentFeedEvent(patched("execution.cancelled"))).toBe(false)
 })

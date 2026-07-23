@@ -1253,15 +1253,34 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
         const output = isToolOutputDisplayed(unit.block) ? unit.block.output : undefined
         const expandable = output !== undefined && output.length > 0
         const cancelled = unit.block.status === "cancelled"
+        const failed = unit.block.status === "failed"
+        const failure = failed ? ` (exit code: ${shellExitCode(unit.block) ?? 1})` : ""
+        const cancellation = cancelled ? " (cancelled)" : ""
+        const commandWidth = Math.max(
+          1,
+          transcriptWrapWidth(model.width) -
+            5 -
+            stringWidth(failure) -
+            stringWidth(cancellation) -
+            (expandable ? 2 : 0),
+        )
         if (cancelled) {
           append(bold(fg(colors.amber)("$ ")))
-          append(strikethrough(fg(colors.text)(shellCommandText(unit.block).split("\n")[0]!)))
+          append(
+            strikethrough(fg(colors.text)(wrapTextToWidth(shellCommandText(unit.block), commandWidth).join("\n     "))),
+          )
           append(italic(fg(colors.amber)(" (cancelled)")))
         } else {
           append(dim(fg(colors.text)("$ ")))
-          for (const chunk of highlightShellCommand(shellCommandText(unit.block))[0] ?? []) append(chunk)
+          const rows = shellCommandText(unit.block)
+            .split("\n")
+            .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
+          for (const [rowIndex, row] of rows.entries()) {
+            if (rowIndex > 0) append(fg(colors.text)("\n     "))
+            for (const chunk of row) append(chunk)
+          }
         }
-        if (unit.block.status === "failed") append(fg(colors.red)(` (exit code: ${shellExitCode(unit.block) ?? 1})`))
+        if (failure.length > 0) append(fg(colors.red)(failure))
         if (expandable) append(marker(childExpanded))
         if (expandable && childExpanded) {
           append(fg(colors.text)("\n"))
@@ -1353,23 +1372,38 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     if (cancelled && block.presentation.family === "shell") {
       const command = detail.label.startsWith("$ ") ? detail.label.slice(2) : detail.label
       append(bold(fg(colors.amber)("$ ")))
-      append(strikethrough(fg(colors.text)(command)))
+      const suffix = " (cancelled)"
+      const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
+      const commandWidth = Math.max(
+        1,
+        rowWidth - stringWidth(branchPrefix) - 2 - stringWidth(suffix) - (expandable ? 2 : 0),
+      )
+      append(
+        strikethrough(fg(colors.text)(wrapTextToWidth(command, commandWidth).join(`\n${shellContinuationPrefix}`))),
+      )
       append(italic(fg(colors.amber)(" (cancelled)")))
     } else {
       append(statusIcon(failed, running, cancelled))
-      const nestedSummary =
-        agent && block.detail.length > 0
-          ? {
-              primary: detail.summary.primary,
-              secondary: `${detail.summary.secondary ?? ""} ${block.detail}`,
-            }
-          : detail.summary
       if (block.presentation.family === "shell") {
+        const failure = failed ? ` (exit code: ${shellExitCode(block) ?? 1})` : ""
+        const shellContinuationPrefix = `${visiblePrefix}${last ? " " : "│"}     `
+        const commandWidth = Math.max(
+          1,
+          rowWidth - stringWidth(branchPrefix) - 4 - stringWidth(failure) - (expandable ? 2 : 0),
+        )
         append(fg(colors.text)(" "))
         append(dim(fg(colors.text)("$ ")))
-        for (const chunk of highlightShellCommand(detail.summary.secondary?.slice(1) ?? "")[0] ?? []) append(chunk)
+        const command = shellCommandText(block)
+        const rows = command
+          .split("\n")
+          .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
+        for (const [rowIndex, row] of rows.entries()) {
+          if (rowIndex > 0) append(fg(colors.text)(`\n${shellContinuationPrefix}`))
+          for (const chunk of row) append(chunk)
+        }
+        if (failure.length > 0) append(fg(colors.red)(failure))
       } else
-        for (const [labelIndex, labelLine] of renderToolSummary(nestedSummary, {
+        for (const [labelIndex, labelLine] of renderToolSummary(detail.summary, {
           width: rowWidth - stringWidth(continuationPrefix) - (expandable ? 2 : 0),
         }).entries()) {
           if (labelIndex > 0) {

@@ -27,7 +27,7 @@ test(
           script: [
             TuiApp.model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
             TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
-            TuiApp.model.text("ORACLE_STYLE_RESULT"),
+            TuiApp.model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
             TuiApp.model.text("ROOT_STYLE_RESULT"),
           ],
         })
@@ -40,9 +40,15 @@ test(
         app.pressKey("\t")
         yield* app.waitFrame("Oracle has spoken")
         app.pressEnter()
-        const completed = yield* app.waitFrame("Read nested.txt")
+        yield* app.waitFrame("Read nested.txt")
+        yield* settled(app)
+        const completed = app.frame()
         expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
         expect(completed.match(/Read nested\.txt/g) ?? []).toHaveLength(1)
+        expect(completed).toContain("Oracle result")
+        expect(completed).toContain("ORACLE_STYLE_RESULT")
+        expect(completed).not.toContain("## Oracle result")
+        expect(completed).not.toContain("The subagent finished without a final message.")
         expect(spanHasColor(app, "Read", Theme.colors.text), "Read primary span").toBe(true)
         expect(spanHasColor(app, " nested.txt", Theme.colors.muted), "Read path span").toBe(true)
         yield* app.quit

@@ -65,7 +65,7 @@ describe("product agent profiles", () => {
     }
     expect(registered.Oracle).toMatchObject({
       tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
-      permissions: ["workspace.read", "network.read"],
+      permissions: ["workspace.read", "network.read", "thread.read"],
     })
     expect(registered.Oracle?.instructions).toContain("planning, reviewing, understanding code, and debugging")
     expect(registered.Oracle?.instructions).toContain("do not modify files")
@@ -93,7 +93,7 @@ describe("product agent profiles", () => {
         "read_thread",
         ...threadRecoveryTools,
       ],
-      permissions: ["network.read"],
+      permissions: ["network.read", "thread.read"],
     })
     expect(registered.Librarian?.instructions).toContain("one to three focused queries")
     expect(registered.Librarian?.instructions).toContain("Use compare only")
@@ -103,7 +103,7 @@ describe("product agent profiles", () => {
     expect(registered.Librarian?.instructions).toContain("Stop when the evidence is sufficient")
     expect(registered.Review).toMatchObject({
       tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
-      permissions: ["workspace.read", "network.read"],
+      permissions: ["workspace.read", "network.read", "thread.read"],
     })
     expect(registered.Oracle?.tool_names).not.toContain("task")
     expect(registered.Task).toMatchObject({
@@ -122,11 +122,23 @@ describe("product agent profiles", () => {
         "read_thread",
         ...threadRecoveryTools,
       ],
-      permissions: ["workspace.read", "workspace.write", "process.run", "network.read"],
+      permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
     })
     expect(registered.Task?.instructions).toContain("default to four useful subagents")
     expect(registered.Task?.instructions).toContain("honor that number")
     expect(registered.Task?.instructions).toContain("same tool-call batch")
+  })
+
+  it("grants thread read permission to every profile that can recover thread context", () => {
+    const registered = presets({ model })
+    for (const profile of Object.values(registered)) {
+      if (
+        profile.tool_names.some(
+          (tool) => tool === "read_thread" || tool === "search_threads" || tool === "read_thread_transcript",
+        )
+      )
+        expect(profile.permissions).toContain("thread.read")
+    }
   })
 
   it("routes Task to main and every specialist to oracle", () => {
@@ -178,6 +190,7 @@ describe("product agent profiles", () => {
         "read_thread",
         ...threadRecoveryTools,
       ])
+      expect(painter.preset.permissions).toEqual(["workspace.read", "thread.read"])
       const unavailable = yield* Effect.flip(resolvePainter(model, false))
       expect(unavailable._tag).toBe("PainterUnavailableError")
       expect(unavailable).toMatchObject(model)

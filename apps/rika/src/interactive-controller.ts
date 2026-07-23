@@ -517,12 +517,16 @@ export const update: {
   (state: State, event: TranscriptEvent): Update
 } = Function.dual(2, updateState)
 
+export const isUrgentFeedEvent = (event: Operation.InteractiveEvent): boolean =>
+  event._tag === "TranscriptPatched" &&
+  (event.event.type === "tool.approval.requested" || event.event.type === "permission.ask.requested")
+
 export const makeFeedFrameBatcher = <Event>(options: {
   readonly schedule: (flush: () => void) => void
   readonly apply: (events: ReadonlyArray<Event>) => void
   readonly render: () => void
   readonly lane?: (event: Event) => string | undefined
-  readonly boundary?: (event: Event) => boolean
+  readonly urgent?: (event: Event) => boolean
 }) => {
   type BatchState = { readonly _tag: "Idle" } | { readonly _tag: "Scheduled" }
   const pending: Array<Event> = []
@@ -533,22 +537,22 @@ export const makeFeedFrameBatcher = <Event>(options: {
   }
   const takeBatch = (): ReadonlyArray<Event> => {
     const laneOf = options.lane
-    const isBoundary = options.boundary
-    if (pending.length <= 256 || laneOf === undefined || isBoundary === undefined) return pending.splice(0, 256)
-    const boundaryIndex = pending.findIndex((event, index) => {
-      if (index < 256 || !isBoundary(event)) return false
+    const isUrgent = options.urgent
+    if (pending.length <= 256 || laneOf === undefined || isUrgent === undefined) return pending.splice(0, 256)
+    const urgentIndex = pending.findIndex((event, index) => {
+      if (index < 256 || !isUrgent(event)) return false
       const lane = laneOf(event)
       return lane !== undefined
     })
-    if (boundaryIndex < 0) return pending.splice(0, 256)
-    const boundaryLane = laneOf(pending[boundaryIndex]!)
-    if (boundaryLane === undefined) return pending.splice(0, 256)
+    if (urgentIndex < 0) return pending.splice(0, 256)
+    const urgentLane = laneOf(pending[urgentIndex]!)
+    if (urgentLane === undefined) return pending.splice(0, 256)
     let prefixCount = 255
-    let promotedIndexes: ReadonlyArray<number> = [boundaryIndex]
+    let promotedIndexes: ReadonlyArray<number> = [urgentIndex]
     while (true) {
       const required = pending
         .map((event, index) => ({ event, index }))
-        .filter(({ event, index }) => index >= prefixCount && index <= boundaryIndex && laneOf(event) === boundaryLane)
+        .filter(({ event, index }) => index >= prefixCount && index <= urgentIndex && laneOf(event) === urgentLane)
         .map(({ index }) => index)
       const nextPrefixCount = 256 - required.length
       if (nextPrefixCount === prefixCount) {

@@ -14,25 +14,25 @@ const cases = [
     tool: "task",
     profile: "Task",
     output: { summary: "Implemented and verified.", files: ["src/change.ts"] },
-    permissions: ["workspace.read", "workspace.write", "process.run", "network.read"],
+    permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
   },
   {
     tool: "oracle",
     profile: "Oracle",
     output: { answer: "Use the public boundary.", evidence: ["packages/runtime/src/index.ts:1"] },
-    permissions: ["workspace.read", "network.read"],
+    permissions: ["workspace.read", "network.read", "thread.read"],
   },
   {
     tool: "librarian",
     profile: "Librarian",
     output: { answer: "The documented API is current.", sources: ["https://example.test/docs"] },
-    permissions: ["network.read"],
+    permissions: ["network.read", "thread.read"],
   },
   {
     tool: "painter",
     profile: "Painter",
     output: { text: "Rendered.", artifact: { path: "artifacts/card.png", mimeType: "image/png", kind: "image" } },
-    permissions: ["workspace.read"],
+    permissions: ["workspace.read", "thread.read"],
   },
 ] as const
 

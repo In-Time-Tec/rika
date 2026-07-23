@@ -1060,6 +1060,12 @@ describe("Surface", () => {
     ) as { readonly text: string; readonly fg?: string } | undefined
     expect(infoChunk).toBeDefined()
     expect(infoChunk?.fg).toBe(colors.text)
+    expect(
+      built.styled.chunks
+        .map((current) => current.text)
+        .join("")
+        .match(/The subagent finished without a final message\./g),
+    ).toHaveLength(1)
   })
 
   test("renders a completed subagent's final answer, not a blank terminal", () => {
@@ -1343,7 +1349,7 @@ describe("Surface", () => {
     expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
   })
 
-  test("wraps a nested agent label beneath its text while preserving the connector", () => {
+  test("shows a nested agent title and renders its prompt once in the expanded body", () => {
     const state = model({
       width: 48,
       blocks: [
@@ -1360,15 +1366,17 @@ describe("Surface", () => {
         { _tag: "Block", index: 1, id: "tool:child", turnId: "child:parent", parentId: "parent" },
         { _tag: "Block", index: 2, id: "tool:following", turnId: "child:parent", parentId: "parent" },
       ],
-      expandedRowKeys: ["tool:parent"],
+      expandedRowKeys: ["tool:parent", "tool:child"],
     })
     const lines = buildTranscript(state)
       .styled.chunks.map((chunk) => chunk.text)
       .join("")
       .split("\n")
 
-    expect(lines.some((line) => line.startsWith("  ├ ✓ Subagent finished Read-only explore"))).toBe(true)
-    expect(lines.some((line) => line.startsWith("  │   packages/config"))).toBe(true)
+    const text = lines.join("\n")
+    expect(lines.some((line) => line.startsWith("  ├ ✓ Subagent finished ▾"))).toBe(true)
+    expect(lines.some((line) => line.startsWith("  │   Read-only explore"))).toBe(true)
+    expect(text.match(/Read-only explore/g)).toHaveLength(1)
     expect(lines.every((line) => stringWidth(line) <= 44)).toBe(true)
   })
 
@@ -1402,8 +1410,7 @@ describe("Surface", () => {
     )
     const headers = nestedRanges.flatMap((range) => lines.slice(range.start, range.headerEnd! + 1))
 
-    expect(headers.length).toBeGreaterThan(blocks.length)
-    expect(headers.some((line) => line.includes("界"))).toBe(true)
+    expect(headers.some((line) => line.includes("界"))).toBe(false)
     expect(headers.every((line) => stringWidth(line) <= 16)).toBe(true)
     expect(nestedRanges.every((range) => lines[range.headerEnd!]!.endsWith("▾"))).toBe(true)
   })
@@ -1571,6 +1578,7 @@ describe("Surface", () => {
     )
     expect(lines.some((line) => line.includes("Inspect the projection"))).toBe(true)
     expect(lines.some((line) => line.includes("AgentToolError: Model gpt-5.6-luna is not available"))).toBe(true)
+    expect(lines.filter((line) => line.includes("AgentToolError: Model gpt-5.6-luna is not available"))).toHaveLength(1)
   })
 
   test("renders a finished subagent response as markdown inside the expanded unit", () => {

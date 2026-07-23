@@ -2304,7 +2304,7 @@ test("renders a subagent tool tree and expands each child independently", () =>
         expect(collapsed).toContain("Oracle has spoken ▾")
         expect(collapsed).toContain("Review the code")
         expect(collapsed).toContain("├ ✓ Read src/a.ts L2-4 ▸")
-        expect(collapsed).toContain("├ ✓ Subagent finished Read-only explore")
+        expect(collapsed).toContain("├ ✓ Subagent finished ▸")
         expect(collapsed).toContain("├ ✓ $ bun test ▸")
         expect(collapsed).toContain("Review complete")
         expect(collapsed).toContain("No defects found.")
@@ -2330,9 +2330,8 @@ test("renders a subagent tool tree and expands each child independently", () =>
 
         const agent = records().get("tool:child-agent:header")!.renderable
         const agentLines = styledTextValue(agent.content).split("\n")
-        expect(agentLines.length).toBeGreaterThan(1)
-        expect(agentLines.slice(1).every((line) => line.startsWith("  │   "))).toBe(true)
-        const markerLine = agentLines.at(-1)!
+        expect(agentLines).toHaveLength(1)
+        const markerLine = agentLines[0]!
         yield* openTui(() =>
           setup.mockMouse.click(agent.screenX + markerLine.indexOf("▸"), agent.screenY + agentLines.length - 1),
         )

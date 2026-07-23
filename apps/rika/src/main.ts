@@ -1694,6 +1694,7 @@ export const interactiveTui =
         let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
         let projectionRevisions = new Map<string, number>()
         let transcriptProjections = new Map<string, Transcript.Projection>()
+        let attachedChildRevisions: ReadonlyMap<string, number> | undefined
         let threadCostUsd: number | undefined
         const appliedDeltas = new Set<string>()
         let activeSelectionEpoch = 0
@@ -1745,6 +1746,7 @@ export const interactiveTui =
                 entries: loadedTranscriptEntries,
                 revisions: projectionRevisions,
                 projections: transcriptProjections,
+                ...(attachedChildRevisions === undefined ? {} : { attachedChildRevisions }),
                 ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
               },
               event,
@@ -1755,6 +1757,7 @@ export const interactiveTui =
             loadedTranscriptEntries = controlled.state.entries
             projectionRevisions = new Map(controlled.state.revisions)
             transcriptProjections = new Map(controlled.state.projections)
+            attachedChildRevisions = controlled.state.attachedChildRevisions
             threadCostUsd = controlled.state.threadCostUsd
             if (
               event._tag === "SelectionLoaded" &&
@@ -1992,14 +1995,7 @@ export const interactiveTui =
           },
           lane: (event) =>
             event._tag === "TranscriptPatched" ? `${String(event.threadId)}:${String(event.turnId)}` : undefined,
-          boundary: (event) =>
-            event._tag === "TranscriptPatched" &&
-            (event.event.type === "tool.result.received" ||
-              event.event.type === "tool.approval.requested" ||
-              event.event.type === "permission.ask.requested" ||
-              event.event.type === "execution.completed" ||
-              event.event.type === "execution.failed" ||
-              event.event.type === "execution.cancelled"),
+          urgent: InteractiveController.isUrgentFeedEvent,
         })
         let closing = false
         let teardownStarted = false
