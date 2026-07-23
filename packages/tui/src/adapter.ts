@@ -1378,9 +1378,13 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
         1,
         rowWidth - stringWidth(branchPrefix) - 2 - stringWidth(suffix) - (expandable ? 2 : 0),
       )
-      append(
-        strikethrough(fg(colors.text)(wrapTextToWidth(command, commandWidth).join(`\n${shellContinuationPrefix}`))),
-      )
+      for (const [rowIndex, row] of wrapTextToWidth(command, commandWidth).entries()) {
+        if (rowIndex > 0) {
+          append(fg(colors.text)("\n"))
+          append(dim(fg(colors.subtle)(shellContinuationPrefix)))
+        }
+        append(strikethrough(fg(colors.text)(row)))
+      }
       append(italic(fg(colors.amber)(" (cancelled)")))
     } else {
       append(statusIcon(failed, running, cancelled))
@@ -1398,7 +1402,10 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
           .split("\n")
           .flatMap((current) => wrapStyledLine(highlightShellCommand(current)[0] ?? [], commandWidth))
         for (const [rowIndex, row] of rows.entries()) {
-          if (rowIndex > 0) append(fg(colors.text)(`\n${shellContinuationPrefix}`))
+          if (rowIndex > 0) {
+            append(fg(colors.text)("\n"))
+            append(dim(fg(colors.subtle)(shellContinuationPrefix)))
+          }
           for (const chunk of row) append(chunk)
         }
         if (failure.length > 0) append(fg(colors.red)(failure))

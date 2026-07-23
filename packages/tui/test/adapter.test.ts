@@ -1330,6 +1330,33 @@ describe("Surface", () => {
     expect(lines.every((line) => !line.startsWith("│"))).toBe(true)
   })
 
+  test("keeps wrapped nested shell continuation connectors subtle", () => {
+    const state = model({
+      width: 60,
+      blocks: [
+        { ...subagentToolBlock, status: "running", detail: "Inspect the projection" },
+        shell("child-a", `git status --short ${"packages/tui ".repeat(8)}`, "clean"),
+        {
+          ...shell("child-b", `bun run check ${"packages/runtime ".repeat(8)}`, "cancelled"),
+          status: "cancelled",
+        },
+        shell("child-c", "git diff --check", "clean"),
+      ],
+      items: [
+        { _tag: "Block", index: 0, id: "tool:agent", turnId: "turn" },
+        { _tag: "Block", index: 1, id: "tool:child-a", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Block", index: 2, id: "tool:child-b", turnId: "child:agent", parentId: "agent" },
+        { _tag: "Block", index: 3, id: "tool:child-c", turnId: "child:agent", parentId: "agent" },
+      ],
+      expandedRowKeys: ["tool:agent"],
+    })
+    const continuationConnectors = buildTranscript(state).styled.chunks.filter((chunk) =>
+      chunk.text.includes("│     "),
+    )
+    expect(continuationConnectors.length).toBeGreaterThan(1)
+    expect(continuationConnectors.every((chunk) => chunk.fg === colors.subtle)).toBe(true)
+  })
+
   test("closes an expanded settled subagent's nested tree with the terminal connector", () => {
     const state = model({
       entries: [{ role: "assistant", text: "All checks passed." }],
