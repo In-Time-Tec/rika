@@ -131,7 +131,7 @@ only complexity.
    `linkedToolFor` adds a turn-scoped raw-call-id fallback that preserves the
    old handoff-format behavior.
 2. **Additive, self-healing backfill** (`packages/app/src/operation.ts`).
-   `backfillTranscriptTree` (was `persistExecutionTree`) → 
+   `backfillTranscriptTree` (was `persistExecutionTree`) →
    `backfillChildTranscripts` (was `projectExecutionTree`):
    - `hasChildrenAwaitingBackfill` (was `hasMissingNestedProjection`) finds
      expected children from linked tools **and** legacy `ChildAgent` units,
