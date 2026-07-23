@@ -1372,9 +1372,7 @@ describe("Surface", () => {
       ],
       expandedRowKeys: ["tool:agent"],
     })
-    const continuationConnectors = buildTranscript(state).styled.chunks.filter((chunk) =>
-      chunk.text.includes("│     "),
-    )
+    const continuationConnectors = buildTranscript(state).styled.chunks.filter((chunk) => chunk.text.includes("│     "))
     expect(continuationConnectors.length).toBeGreaterThan(1)
     expect(continuationConnectors.every((chunk) => chunk.fg === colors.subtle)).toBe(true)
   })

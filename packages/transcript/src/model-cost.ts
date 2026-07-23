@@ -62,7 +62,8 @@ export const usageCostUsd = (value: Record<string, unknown>): number | undefined
   if (input === undefined || reportedUncached === undefined || cacheRead === undefined || output === undefined)
     return undefined
   const cacheWrite =
-    reportedCacheWrite ?? (reportedUncached + cacheRead === input && value.input_tokens_cache_write === null ? 0 : undefined)
+    reportedCacheWrite ??
+    (reportedUncached + cacheRead === input && value.input_tokens_cache_write === null ? 0 : undefined)
   if (cacheWrite === undefined) return undefined
   const accountedInput = [reportedUncached, cacheRead, cacheWrite].reduce<number>((sum, count) => sum + (count ?? 0), 0)
   if (accountedInput > input) return undefined
