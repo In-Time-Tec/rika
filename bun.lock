@@ -205,16 +205,16 @@
     },
   },
   "overrides": {
-    "@batonfx/core": "0.11.5",
-    "@batonfx/providers": "0.11.5",
+    "@batonfx/core": "0.11.7",
+    "@batonfx/providers": "0.11.7",
   },
   "catalog": {
     "@ast-grep/cli": "0.44.0",
-    "@batonfx/core": "0.11.5",
-    "@batonfx/mcp": "0.11.5",
-    "@batonfx/providers": "0.11.5",
-    "@batonfx/skills": "0.11.5",
-    "@batonfx/test": "0.11.5",
+    "@batonfx/core": "0.11.7",
+    "@batonfx/mcp": "0.11.7",
+    "@batonfx/providers": "0.11.7",
+    "@batonfx/skills": "0.11.7",
+    "@batonfx/test": "0.11.7",
     "@effect/platform-bun": "4.0.0-beta.98",
     "@effect/sql-mysql2": "4.0.0-beta.98",
     "@effect/sql-sqlite-bun": "4.0.0-beta.98",
@@ -231,7 +231,7 @@
     "@opentui/core-win32-arm64": "0.4.3",
     "@opentui/core-win32-x64": "0.4.3",
     "@pierre/diffs": "1.2.11",
-    "@relayfx/sdk": "0.7.7",
+    "@relayfx/sdk": "0.7.9",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.3.13",
     "@types/node": "24.12.2",
@@ -335,15 +335,15 @@
 
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
-    "@batonfx/core": ["@batonfx/core@0.11.5", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-o1Fs+xuvKPEcMAH4kkblofQbItJvTZUkwZZjxkt6+uos060lJ+ocSzzXqMyTSRrNzAiFhLT4PMRbMNKI+X82hw=="],
+    "@batonfx/core": ["@batonfx/core@0.11.7", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-zW16KuLcz6BnS+DOzLiMyCQweuZOBabptB0xtIMShUDH/6ii38exNTd4fMfK3A+yKNH8TfXBGZHIyUJhwZDk4g=="],
 
-    "@batonfx/mcp": ["@batonfx/mcp@0.11.5", "", { "dependencies": { "@batonfx/core": "0.11.5", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-/QI/UFpukuCQi+YH0wTj2ZQoIAQzt4dAh9elr0gvMCAIeRyMB3/MZwUFzNRvziCE4VfA4TXXihoToZ3/9ree3g=="],
+    "@batonfx/mcp": ["@batonfx/mcp@0.11.7", "", { "dependencies": { "@batonfx/core": "0.11.7", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-iBk3lYsMS2EcCvS5DJVPtkiF6PyVSXOTrKQD+VQumqmGWLcWwB3RynoJZwSDi9u17umg26Z6EhmzJo8+V+SG2w=="],
 
-    "@batonfx/providers": ["@batonfx/providers@0.11.5", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.11.5", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-e6r43nwdh07Mbsqf5uySK1UPWBsHx5bNpSrAQVJY6r0/ugO4RBkgNYuOSaKZhOV35UcofJgMbfy86TFG4Tak6w=="],
+    "@batonfx/providers": ["@batonfx/providers@0.11.7", "", { "dependencies": { "@aws-sdk/client-bedrock-runtime": "3.859.0", "@aws-sdk/credential-provider-node": "3.859.0", "@batonfx/core": "0.11.7", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@smithy/types": "4.3.1" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-WPd9Nc6euFNMlt+/f2D9V2F6c0sOKdK1FOcxVhtqIaonz0nQ94s4SVAtjDwjrC53qt58TRBI/ws6RfsU2r6PiA=="],
 
-    "@batonfx/skills": ["@batonfx/skills@0.11.5", "", { "dependencies": { "@batonfx/core": "0.11.5" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-Jl5GhLuQ3ckGQns5Wc/AUrokKsR42h16NjKE6YIDJgChS/znIBwW/717KNZ1ui5dz12cDFxRxLMpJs9XX2eifg=="],
+    "@batonfx/skills": ["@batonfx/skills@0.11.7", "", { "dependencies": { "@batonfx/core": "0.11.7" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-RAR9G3sCBMn/Z0zchwQ452kXZ++L436lJHNNUve4LJzSplRAdnRbCHRQJ8IpQAALf+fuEnXhKzA/33MB3pVT5g=="],
 
-    "@batonfx/test": ["@batonfx/test@0.11.5", "", { "dependencies": { "@batonfx/core": "0.11.5" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-LihKLHbZrvbLLA/o/97pyg2K31P8IazHVxEl3rQCBAzd8r8K/b32xVvCtVcQ0c+C5VhZwz7mv6SyOvUv1Aqd/A=="],
+    "@batonfx/test": ["@batonfx/test@0.11.7", "", { "dependencies": { "@batonfx/core": "0.11.7" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-HJB7ZdvSMaRtUhyRk29hqfwVq3y+wH/EePdQFgSLtjVzq44koeCF3/HzyWdJVqAkBZPtwTXsD2BdY/A8oHl8qw=="],
 
     "@bcoe/v8-coverage": ["@bcoe/v8-coverage@1.0.2", "", {}, "sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA=="],
 
@@ -551,7 +551,7 @@
 
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
-    "@relayfx/sdk": ["@relayfx/sdk@0.7.7", "", { "dependencies": { "@batonfx/core": "0.11.5", "@batonfx/providers": "0.11.5", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-M8r/E3yLiJvluJWEAO97cw9fGLR9nnO59/xOy19o7h+Qff2bjiVsmBQMiWIzm5qDev3i60k5Y0YmLtk712Qgog=="],
+    "@relayfx/sdk": ["@relayfx/sdk@0.7.9", "", { "dependencies": { "@batonfx/core": "0.11.7", "@batonfx/providers": "0.11.7", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-DW+h/ifmNCqHusFfKWbSesZUwdOodDjZT1n8QPhSdBJ/RR2gwWygFfSbgb427nSN9IzmBH+4BzBr7kMjy9kClg=="],
 
     "@rika/app": ["@rika/app@workspace:packages/app"],
 

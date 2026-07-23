@@ -87,7 +87,6 @@ export const compact = Effect.fn("ContextCompaction.compact")(function* (config:
     agentName: input.agentName,
     sessionId: input.sessionId,
     turn: input.turn,
-    compactionId: `compaction:${input.sessionId}:turn:${input.turn}`,
     history: input.history,
     prompt: input.prompt,
     path: input.path,
