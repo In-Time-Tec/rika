@@ -559,3 +559,90 @@ it.effect("persists usage cursors across reopen so redelivered usage never doubl
     }),
   ).pipe(provideLayer(BunServices.layer)),
 )
+
+it.effect("keyset-paginates a durable subagent tree whose nested units outnumber the page", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-nested-page-" })
+      const filename = `${directory}/rika.db`
+      const threadId = Thread.ThreadId.make("thread-nested-page")
+      const targetId = Turn.TurnId.make("turn-nested-page")
+      const childId = "turn-nested-page:child:agent"
+      const database = Database.layer(filename)
+      const layer = Layer.mergeAll(
+        database,
+        ThreadRepository.layer.pipe(Layer.provide(database)),
+        TurnRepository.layer.pipe(Layer.provide(database)),
+        TranscriptRepository.layer.pipe(Layer.provide(database)),
+      )
+      const parent = Transcript.project(targetId, "delegate", [
+        {
+          cursor: "agent",
+          sequence: 0,
+          type: "tool.call.requested",
+          createdAt: 0,
+          data: {
+            tool_call_id: "agent",
+            tool_name: "transfer_to_oracle",
+            input: { input: [{ type: "text", text: "Investigate" }] },
+          },
+        },
+        {
+          cursor: "spawned",
+          sequence: 1,
+          type: "child_run.spawned",
+          createdAt: 1,
+          data: { tool_call_id: "agent", child_execution_id: `execution:${childId}` },
+        },
+        { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 2 },
+      ])
+      const child = Transcript.project(
+        childId,
+        "",
+        Array.from({ length: 8 }, (_, index) => ({
+          cursor: `child-tool-${index}`,
+          sequence: index,
+          type: "tool.call.requested" as const,
+          createdAt: index,
+          data: { tool_call_id: `child-call-${index}`, tool_name: "read", input: { path: `file-${index}.ts` } },
+        })),
+      )
+      const live = Transcript.withNestedProjections(parent, [{ parentId: `${targetId}:agent`, projection: child }])
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const threads = yield* ThreadRepository.Service
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          yield* threads.create({ id: threadId, workspace: "/work/nested", title: "Nested", now: 1 })
+          yield* turns.createForSubmission({
+            id: targetId,
+            threadId,
+            prompt: "delegate",
+            executionRoute: Turn.testExecutionRoute(),
+            queueCapacity: 128,
+            now: 2,
+          })
+          yield* turns.setStatus(targetId, "completed", undefined, 3)
+          const target = yield* turns.get(targetId)
+          if (target === undefined) return yield* Effect.die("turn was not stored")
+          yield* transcripts.replace(target, live)
+
+          const collected: Array<string> = []
+          let before: TranscriptRepository.PageCursor | undefined
+          for (let iteration = 0; iteration < live.units.length + 5; iteration += 1) {
+            const page = yield* transcripts.page(threadId, { ...(before === undefined ? {} : { before }), limit: 3 })
+            collected.push(...page.entries.map((entry) => entry.unit.key))
+            if (!page.hasOlder || page.oldestCursor === undefined) break
+            before = page.oldestCursor
+          }
+
+          expect(new Set(collected).size).toBe(live.units.length)
+          expect(collected.length).toBe(live.units.length)
+          expect(new Set(collected)).toEqual(new Set(live.units.map((unit) => unit.key)))
+        }).pipe(provideLayer(layer)),
+      )
+    }),
+  ).pipe(provideLayer(BunServices.layer)),
+)

@@ -131,7 +131,7 @@ only complexity.
    `linkedToolFor` adds a turn-scoped raw-call-id fallback that preserves the
    old handoff-format behavior.
 2. **Additive, self-healing backfill** (`packages/app/src/operation.ts`).
-   `backfillTranscriptTree` (was `persistExecutionTree`) → 
+   `backfillTranscriptTree` (was `persistExecutionTree`) →
    `backfillChildTranscripts` (was `projectExecutionTree`):
    - `hasChildrenAwaitingBackfill` (was `hasMissingNestedProjection`) finds
      expected children from linked tools **and** legacy `ChildAgent` units,
@@ -151,6 +151,38 @@ only complexity.
    backfill fires for old rows (husk-only children, `childId: null` tools with
    `ChildAgent` units), re-replays from `relay.db`, attaches under the real
    tools, and removes the synthesized duplicates.
+4. **The root cause of the empty replays was the lazy backend facade**
+   (`apps/rika/src/main.ts`): it dropped the optional `reference` parameter on
+   `replay`/`inspect`/`cancel`/`steer`/`listApprovals` and did not expose
+   `pageEvents`, so child ids were re-prefixed to `execution:child:...` and
+   every child replay returned zero events in the installed app — while tests,
+   which wire the backend without the facade, stayed green. The facade now
+   forwards the full contract and a regression test
+   (`apps/rika/test/lazy-backend.test.ts`) drives it against a recording
+   backend.
+5. **Backfill stays synchronous with the selection load.** An interim change
+   deferred backfill to a forked task and re-selected via
+   `TranscriptResyncRequired`, on the theory that replaying child events would
+   delay the first paint. Once defect 6 (the pagination hang) was fixed
+   independently, that theory no longer held: the reproduction loads in
+   ~230ms. Deferring also made the first `SelectionLoaded` show the
+   un-healed content ("finished without a final message") and then correct
+   itself — a visible flash — and broke the `SelectionLoaded`-is-complete
+   contract that existing tests rely on. The deferral was reverted; backfill
+   and terminal-turn healing run inline in `projectTurnPage` as before.
+   `recordedChildIds` still only considers root-level units so a healed tree
+   with unreplayable grandchildren cannot re-trigger the backfill forever.
+6. **Nested units page under their storage turn, not their projection turn.**
+   The SQL `page` keyset orders by `u.turn_id` (nested units are stored under
+   the root turn), but it decoded the entry's `turn.id` from `unit.turnId`
+   (the child execution id), so `cursorFor` produced a cursor that could not
+   round-trip: `loadTranscriptPage`'s boundary loop re-fetched the same page
+   forever once a turn held more nested units than the page limit — the
+   installed app hung on "Loading Thread". `page` now takes `turn.id` from the
+   stored `u.turn_id`, matching the in-memory repository. A persistence test
+   keyset-paginates a subagent tree whose nested units outnumber the page and
+   asserts full, duplicate-free coverage. This defect was latent until steps 1
+   and 4 first persisted many real nested units per turn.
 
 The `execution.child.replay_empty` diagnostic answers the one open question
 (why a resident-start replay returned zero events for children whose events

@@ -1328,7 +1328,7 @@ const selectionEntriesFor = (
     const events: Array<Operation.InteractiveEvent> = []
     yield* collectEvents(session, events)
     yield* session.selectThread(threadId, 1)
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
       const loaded = events.find((event) => event._tag === "SelectionLoaded")
       if (loaded !== undefined) return loaded._tag === "SelectionLoaded" ? loaded.entries : []
       yield* Effect.yieldNow

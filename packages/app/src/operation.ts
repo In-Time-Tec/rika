@@ -501,7 +501,7 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
             ThreadActivity.latestCursor(result.events),
             yield* Clock.currentTimeMillis,
           )
-          if (!isTerminalStatus(result.status)) return
+          if (!isTerminalStatus(result.status) || result.status === "failed") return
         }
       }),
     { discard: true },
@@ -628,7 +628,7 @@ const storedChildUnits = (projection: Transcript.Projection): ReadonlyMap<string
 const recordedChildIds = (projection: Transcript.Projection): ReadonlySet<string> => {
   const ids = new Set<string>()
   for (const unit of projection.units) {
-    if (unit.content._tag !== "Block") continue
+    if (unit.parentId !== undefined || unit.content._tag !== "Block") continue
     const block = unit.content.block
     if (block._tag === "ToolCall" && block.childId !== undefined) ids.add(normalizeChildExecutionId(block.childId))
     else if (block._tag === "ChildAgent") ids.add(normalizeChildExecutionId(block.id))
@@ -738,12 +738,9 @@ const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")
         )
       const storedUnits = stored.get(childKey) ?? []
       const storedTranscript = storedUnits.some(realChildUnit) ? storedChildProjection(storedUnits) : undefined
-      const projection =
-        storedTranscript !== undefined && storedTranscript.revision > replayed.revision
-          ? storedTranscript
-          : replayed.revision < 0
-            ? undefined
-            : replayed
+      let projection: Transcript.Projection | undefined = replayed
+      if (replayed.revision < 0) projection = undefined
+      if (storedTranscript !== undefined && storedTranscript.revision > replayed.revision) projection = storedTranscript
       if (projection === undefined) continue
       let parent = toolForChild(parentProjection(), child.executionId)
       if (parent === undefined) {
@@ -2075,7 +2072,6 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                           turnId: turn.id,
                           message: executionStartFailureMessage,
                         })
-                        yield* settleThread(thread, dispatch)
                         return
                       }
                       const result = outcome.value
@@ -2124,7 +2120,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                           turnId: turn.id,
                           message: `Execution ${result.status}`,
                         })
-                      yield* settleThread(thread, dispatch)
+                      if (result.status !== "failed") yield* settleThread(thread, dispatch)
                     }),
                   )
                 }).pipe(
@@ -2417,7 +2413,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             yield* projectExecutionResult(thread.id, result)
             yield* appendProjection(updatedTurn, result.events)
             yield* backfillTree(updatedTurn, true)
-            return isTerminalStatus(result.status)
+            return isTerminalStatus(result.status) && result.status !== "failed"
           })
           const runNext = Effect.fn("Operation.interactive.runNextQueued")(function* () {
             return yield* Effect.uninterruptibleMask((restore) =>

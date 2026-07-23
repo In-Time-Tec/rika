@@ -73,6 +73,7 @@ const CheckpointRow = Schema.Struct({
 
 const UnitRow = Schema.Struct({
   unit_json: Schema.String,
+  turn_id: Schema.String,
   projection_revision: Schema.Finite,
   model_phase: Schema.Finite,
   cost_usd: Schema.NullOr(Schema.Finite),
@@ -353,7 +354,7 @@ export const layer = Layer.effect(
         const limit = pageSize(options.limit)
         const rows =
           options.before === undefined
-            ? yield* sql`SELECT u.unit_json, c.revision AS projection_revision, c.model_phase, c.cost_usd,
+            ? yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
                   t.extension_pin_json, t.review_fan_out_id, t.status, t.created_at, t.updated_at
                 FROM rika_transcript_units u
@@ -362,7 +363,7 @@ export const layer = Layer.effect(
                 WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
                 ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
                 LIMIT ${limit + 1}`.pipe(Effect.mapError(error))
-            : yield* sql`SELECT u.unit_json, c.revision AS projection_revision, c.model_phase, c.cost_usd,
+            : yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
                   t.extension_pin_json, t.review_fan_out_id, t.status, t.created_at, t.updated_at
                 FROM rika_transcript_units u
@@ -391,7 +392,7 @@ export const layer = Layer.effect(
                       : yield* Schema.decodeUnknownEffect(ExtensionPinJson)(row.extension_pin_json)
                   return {
                     turn: {
-                      id: TurnId.make(unit.turnId),
+                      id: TurnId.make(row.turn_id),
                       threadId,
                       prompt: row.prompt,
                       ...(promptParts === undefined ? {} : { promptParts }),

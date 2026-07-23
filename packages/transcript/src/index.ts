@@ -45,7 +45,7 @@ const rawToolId = (event: SourceEvent): string => {
 
 const toolKey = (turnId: string, id: string): string => `tool:${eventId(turnId, id)}`
 
-const unit = (
+const makeUnit = (
   key: string,
   turnId: string,
   sequence: number,
@@ -76,7 +76,7 @@ const applyExecutionOutcome = (
   if (index >= 0)
     return replaceUnit(projection, index, { ...projection.units[index]!, revision, executionOutcome: outcome })
   return upsertUnit(projection, {
-    ...unit(`execution:${turnId}:outcome`, turnId, Number.MAX_SAFE_INTEGER, 0, revision, {
+    ...makeUnit(`execution:${turnId}:outcome`, turnId, Number.MAX_SAFE_INTEGER, 0, revision, {
       _tag: "Entry",
       role: "notice",
       text: "",
@@ -398,7 +398,7 @@ export const ensureChildTool: {
     const turnId = projection.units[0]?.turnId ?? ""
     const next = upsertUnit(
       projection,
-      unit(`tool:${id}`, turnId, projection.revision, 0, projection.revision, { _tag: "Block", block }),
+      makeUnit(`tool:${id}`, turnId, projection.revision, 0, projection.revision, { _tag: "Block", block }),
     )
     return { projection: next, tool: block }
   },
@@ -486,7 +486,7 @@ const applyAssistant = (projection: Projection, turnId: string, event: SourceEve
   return finish(
     upsertUnit(
       projection,
-      unit(key, turnId, event.sequence, 0, event.sequence, { _tag: "Entry", role: "assistant", text }),
+      makeUnit(key, turnId, event.sequence, 0, event.sequence, { _tag: "Entry", role: "assistant", text }),
     ),
   )
 }
@@ -558,7 +558,7 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
   }
   return upsertUnit(
     projection,
-    unit(key, turnId, current?.order.sequence ?? event.sequence, 0, event.sequence, { _tag: "Block", block }),
+    makeUnit(key, turnId, current?.order.sequence ?? event.sequence, 0, event.sequence, { _tag: "Block", block }),
   )
 }
 
@@ -688,7 +688,7 @@ export const empty: {
 } = Function.dual(
   2,
   (turnId: string, prompt: string): Projection => ({
-    units: [unit(`turn:${turnId}:user`, turnId, -1, 0, 0, { _tag: "Entry", role: "user", text: prompt })],
+    units: [makeUnit(`turn:${turnId}:user`, turnId, -1, 0, 0, { _tag: "Entry", role: "user", text: prompt })],
     revision: -1,
     modelPhase: -1,
   }),
@@ -705,7 +705,7 @@ const applyToolDelta = (projection: Projection, turnId: string, event: SourceEve
   const block = toolBlock(id, name, input, previous)
   return upsertUnit(
     projection,
-    unit(toolKey(turnId, rawId), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
+    makeUnit(toolKey(turnId, rawId), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
   )
 }
 
@@ -732,7 +732,7 @@ const applyToolRequested = (projection: Projection, turnId: string, event: Sourc
       : base
   return upsertUnit(
     projection,
-    unit(toolKey(turnId, rawId), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
+    makeUnit(toolKey(turnId, rawId), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
   )
 }
 
@@ -771,7 +771,7 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
   const result: Block = { _tag: "ToolResult", id, output: resultText, failed }
   return upsertUnit(
     projection,
-    unit(`tool-result:${id}`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block: result }),
+    makeUnit(`tool-result:${id}`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block: result }),
   )
 }
 
@@ -783,7 +783,7 @@ const applyReasoning = (projection: Projection, turnId: string, event: SourceEve
   const block: Block = { _tag: "Reasoning", text: previous + (event.text ?? string(sourcePayload(event).text)) }
   return upsertUnit(
     projection,
-    unit(key, turnId, current?.order.sequence ?? event.sequence, 0, event.sequence, { _tag: "Block", block }),
+    makeUnit(key, turnId, current?.order.sequence ?? event.sequence, 0, event.sequence, { _tag: "Block", block }),
   )
 }
 
@@ -922,7 +922,7 @@ const applySteeringDelivered = (projection: Projection, turnId: string, event: S
     (updated, text, index) =>
       upsertUnit(
         updated,
-        unit(`steering:${turnId}:${event.sequence}:${index}`, turnId, event.sequence, index, event.sequence, {
+        makeUnit(`steering:${turnId}:${event.sequence}:${index}`, turnId, event.sequence, index, event.sequence, {
           _tag: "Entry",
           role: "user",
           text,
@@ -965,7 +965,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
       recovery: "Edit your prompt and press Enter to try again.",
     }
     return upsertUnit(settleRunningImpl(projection, "failed", event.sequence), {
-      ...unit(`execution:${turnId}:failed`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
+      ...makeUnit(`execution:${turnId}:failed`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
       executionOutcome: { status: "failed", reason },
     })
   }
@@ -976,7 +976,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
     const outcome = { status: "cancelled" as const, ...(reason.length > 0 ? { reason } : {}) }
     if (!hasResponseEvidence(projection, turnId)) return applyExecutionOutcome(settled, turnId, event.sequence, outcome)
     return upsertUnit(settled, {
-      ...unit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
+      ...makeUnit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
         _tag: "Entry",
         role: "notice",
         text: reason.length > 0 ? reason : "cancelled",
@@ -990,7 +990,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (block === undefined) return projection
   const updated = upsertUnit(
     projection,
-    unit(genericKey(turnId, event, block), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
+    makeUnit(genericKey(turnId, event, block), turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
   )
   return block._tag === "Permission" && block.status === "pending" ? advanceModelPhase(updated, turnId) : updated
 }

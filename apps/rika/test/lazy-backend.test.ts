@@ -3,9 +3,10 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { Context, Effect, Layer } from "effect"
 import { lazyBackendLayer } from "../src/main"
 
+const completedResult = (turnId: string): ExecutionBackend.Result => ({ turnId, status: "completed", events: [] })
+
 const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
   const record = (...call: ReadonlyArray<unknown>) => Effect.sync(() => calls.push(call))
-  const result = (turnId: string): ExecutionBackend.Result => ({ turnId, status: "completed", events: [] })
   return ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
     createFanOut: () => Effect.die("unused"),
@@ -15,15 +16,13 @@ const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
     startWorkflow: () => Effect.die("unused"),
     inspectWorkflow: () => Effect.die("unused"),
     cancelWorkflow: () => Effect.die("unused"),
-    start: (input) => Effect.succeed(result(String(input.turnId))),
+    start: (input) => Effect.succeed(completedResult(String(input.turnId))),
     replay: (turnId, afterCursor, reference) =>
-      record("replay", turnId, afterCursor, reference).pipe(Effect.as(result(turnId))),
+      record("replay", turnId, afterCursor, reference).pipe(Effect.as(completedResult(turnId))),
     pageEvents: (turnId, direction, cursor, limit, reference) =>
-      record("pageEvents", turnId, direction, cursor, limit, reference).pipe(
-        Effect.as({ events: [], hasMore: false }),
-      ),
+      record("pageEvents", turnId, direction, cursor, limit, reference).pipe(Effect.as({ events: [], hasMore: false })),
     cancel: (turnId, cancelledAt, reference) =>
-      record("cancel", turnId, cancelledAt, reference).pipe(Effect.as(result(turnId))),
+      record("cancel", turnId, cancelledAt, reference).pipe(Effect.as(completedResult(turnId))),
     inspect: (turnId, reference) =>
       record("inspect", turnId, reference).pipe(
         Effect.as({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
