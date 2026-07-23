@@ -7,6 +7,7 @@ import {
   ensureChildTool,
   hasRunningBlocks,
   project,
+  reconcileChild,
   settleChild,
   settleRunning,
   withNestedProjections,
@@ -1392,6 +1393,11 @@ describe("Transcript projection", () => {
     expect(hasRunningBlocks(settledOrphan)).toBe(false)
     expect(hasRunningBlocks(swept)).toBe(false)
     expect(settleChild(settledOrphan, "child-1", "failed", 120)).toEqual(settledOrphan)
+    expect(
+      reconcileChild(swept, "child-1", "complete", 50).units.find((item) => item.key === "tool:turn-a:call"),
+    ).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete" } },
+    })
   })
 
   it("matches a child to its scoped parent tool and rejects a same-callId tool in another scope", () => {

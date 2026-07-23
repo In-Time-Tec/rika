@@ -854,11 +854,12 @@ const settleChildImpl = (
   childId: string,
   status: "complete" | "failed" | "cancelled",
   sequence: number,
+  reconcile: boolean,
 ): Projection => {
   const turnId = projection.units[0]?.turnId ?? ""
   const linkedTool = linkedToolFor(projection, turnId, childId, "")
   const settledTool =
-    linkedTool === undefined || linkedTool.status !== "running"
+    linkedTool === undefined || (!reconcile && linkedTool.status !== "running") || linkedTool.status === status
       ? projection
       : updateTool(
           projection,
@@ -871,7 +872,7 @@ const settleChildImpl = (
     if (candidate.content._tag !== "Block") return candidate
     const block = candidate.content.block
     if (block._tag !== "ChildAgent" || executionKey(block.id) !== executionKey(childId)) return candidate
-    if (block.status !== "running") return candidate
+    if ((!reconcile && block.status !== "running") || block.status === status) return candidate
     changed = true
     return {
       ...candidate,
@@ -889,7 +890,24 @@ export const settleChild: {
     status: "complete" | "failed" | "cancelled",
     sequence: number,
   ): (projection: Projection) => Projection
-} = Function.dual(4, settleChildImpl)
+} = Function.dual(
+  4,
+  (projection: Projection, childId: string, status: "complete" | "failed" | "cancelled", sequence: number) =>
+    settleChildImpl(projection, childId, status, sequence, false),
+)
+
+export const reconcileChild: {
+  (projection: Projection, childId: string, status: "complete" | "failed" | "cancelled", sequence: number): Projection
+  (
+    childId: string,
+    status: "complete" | "failed" | "cancelled",
+    sequence: number,
+  ): (projection: Projection) => Projection
+} = Function.dual(
+  4,
+  (projection: Projection, childId: string, status: "complete" | "failed" | "cancelled", sequence: number) =>
+    settleChildImpl(projection, childId, status, sequence, true),
+)
 
 export const hasRunningBlocks = (projection: Projection): boolean =>
   projection.units.some(

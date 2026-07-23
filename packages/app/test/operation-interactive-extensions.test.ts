@@ -119,10 +119,12 @@ describe("interactive session extensions", () => {
         const reconciliationStarted = yield* Deferred.make<void>()
         const releaseReconciliation = yield* Deferred.make<void>()
         const submissionStarted = yield* Deferred.make<void>()
+        let inspectionCount = 0
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
-          inspect: (executionId) =>
-            executionId === historical.id
+          inspect: (executionId) => {
+            inspectionCount += 1
+            return executionId === historical.id && inspectionCount > 3
               ? Deferred.succeed(reconciliationStarted, undefined).pipe(
                   Effect.andThen(Deferred.await(releaseReconciliation)),
                   Effect.as({
@@ -133,7 +135,14 @@ describe("interactive session extensions", () => {
                     children: [],
                   }),
                 )
-              : Effect.void.pipe(Effect.as(undefined)),
+              : Effect.succeed({
+                  turnId: executionId,
+                  status: "completed" as const,
+                  waits: [],
+                  pendingTools: [],
+                  children: [],
+                })
+          },
           start: (input) =>
             Deferred.succeed(submissionStarted, undefined).pipe(Effect.andThen(baseBackend.start(input))),
         })

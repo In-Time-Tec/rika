@@ -18,6 +18,47 @@ const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colo
     .some((span) => span.text.includes(text) && span.fg.toInts().join(",") === color.toInts().join(","))
 
 test(
+  "reloads a failed root with completed nested subagents from durable state",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            TuiApp.model.toolCall("task", { prompt: "Run top-level work." }, "top-agent"),
+            TuiApp.model.toolCall("task", { prompt: "Run nested work." }, "nested-agent"),
+            TuiApp.model.text("NESTED_RELOAD_COMPLETE"),
+            TuiApp.model.text("TOP_LEVEL_RELOAD_COMPLETE"),
+            TuiApp.model.failure("ROOT_RELOAD_FAILED"),
+          ],
+        })
+
+        yield* Effect.promise(() => app.type("Delegate nested work, then fail."))
+        app.pressEnter()
+        const failed = yield* app.waitFrame("ROOT_RELOAD_FAILED")
+        expect(failed).toContain("Execution failed")
+        expect(failed).not.toContain("Running 1 subagent")
+
+        yield* app.reload
+        const reloaded = yield* app.waitFrame("ROOT_RELOAD_FAILED")
+        expect(reloaded).toContain("Execution failed")
+        expect(reloaded).not.toContain("Running 1 subagent")
+        app.pressKey("\t")
+        app.pressEnter()
+        yield* app.waitFrame("TOP_LEVEL_RELOAD_COMPLETE")
+        app.pressKey("\t")
+        app.pressEnter()
+        const nested = yield* app.waitFrame("NESTED_RELOAD_COMPLETE")
+        expect(nested).toContain("Subagent finished")
+        expect(nested).not.toContain("Subagent working")
+        expect(nested).not.toContain("Subagent failed")
+        expect(nested).not.toContain("Running 1 subagent")
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
   "preserves primary and muted nested tool summary spans through the real app stack",
   () =>
     TuiApp.run(

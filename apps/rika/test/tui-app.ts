@@ -9,7 +9,8 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { MediaView, ReadWebPage, Runtime as ToolRuntime, WebSearch } from "@rika/tools"
-import { Config, Context, Effect, Fiber, FileSystem, Layer, Path, Scope } from "effect"
+import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Scope } from "effect"
+import { AiError } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { interactiveTui } from "../src/main"
 
@@ -21,6 +22,14 @@ export const model = {
   reasoning: TestModel.reasoning,
   toolCall: (name: string, params: unknown, id?: string) =>
     TestModel.toolCall(name, params, id === undefined ? {} : { id }),
+  failure: (description: string) =>
+    TestModel.failure(
+      AiError.make({
+        module: "TestModel",
+        method: "streamText",
+        reason: AiError.UnknownError.make({ description }),
+      }),
+    ),
 }
 
 export interface TuiAppOptions {
@@ -45,6 +54,7 @@ export interface TuiApp {
   readonly spans: () => CapturedSpans
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
+  readonly reload: Effect.Effect<void>
   readonly close: () => void
   readonly done: Effect.Effect<void>
   readonly quit: Effect.Effect<void>
@@ -102,6 +112,10 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   )
   let nextThread = 0
   let nextTurn = 0
+  let session: Operation.InteractiveSession | undefined
+  const reloadLoaded = yield* Deferred.make<void>()
+  const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+  const runInteractive = interactiveTui({ makeRenderer: () => Promise.resolve(setup.renderer) })
   const operationLayer = Operation.productLayer({
     repositoryLayer,
     turnRepositoryLayer,
@@ -116,7 +130,18 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
         const { title: _title, ...pin } = Turn.testExecutionRoute(mode)
         return pin
       }),
-    interactive: interactiveTui({ makeRenderer: () => Promise.resolve(setup.renderer) }),
+    interactive: (settings, current) => {
+      session = current
+      return runInteractive(settings, {
+        ...current,
+        events: (dispatch) =>
+          current.events((event) => {
+            dispatch(event)
+            if (event._tag === "SelectionLoaded" && event.selectionEpoch === 100)
+              runSync(Deferred.succeed(reloadLoaded, undefined))
+          }),
+      })
+    },
   })
   const operation = Context.get(yield* Layer.buildWithScope(operationLayer, yield* Effect.scope), Operation.Service)
   const operationFiber = yield* Effect.forkChild(
@@ -149,6 +174,10 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     spans: () => setup.captureSpans(),
     waitFrame: (marker, timeoutMillis = 60_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
     waitGone: (marker, timeoutMillis = 60_000) => waitFor((captured) => !captured.includes(marker), timeoutMillis),
+    reload: Effect.gen(function* () {
+      yield* session?.reopenThread(100).pipe(Effect.orDie) ?? Effect.die("TUI session is unavailable")
+      yield* Deferred.await(reloadLoaded)
+    }),
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {
