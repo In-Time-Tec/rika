@@ -41,7 +41,7 @@ export const formatActivityCounter = (tokens: number): string => {
 export const formatActivity = (activity: Activity | undefined): string | undefined => {
   if (activity === undefined) return undefined
   if (activity._tag === "RunningTools") return "Running tools"
-  if (activity._tag === "Compacting") return "Auto-compacting context"
+  if (activity._tag === "Compacting") return "Auto-Compacting"
   if (activity._tag === "Thinking" || activity._tag === "Streaming") {
     const tokens = Math.floor(activity.bytes / 4)
     return `${activity._tag} ${formatActivityCounter(tokens)}`

@@ -81,6 +81,7 @@ describe("ViewState", () => {
     expect(ViewState.formatActivity(model.activity)).toBe("Streaming 2 tok")
     model = ViewState.update(model, { _tag: "AssistantCompleted", text: "abcdefgh", turnId: "turn" })
     expect(ViewState.formatActivity(model.activity)).toBe("Waiting")
+    expect(ViewState.formatActivity({ _tag: "Compacting" })).toBe("Auto-Compacting")
 
     model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })
     expect(ViewState.formatActivity(model.activity)).toBe("Waiting")

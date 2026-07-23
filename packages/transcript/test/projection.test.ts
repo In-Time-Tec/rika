@@ -1097,6 +1097,37 @@ describe("Transcript projection", () => {
     })
   })
 
+  it("hides model failure telemetry and explains terminal compaction failure", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "attempt", sequence: 1, type: "model.attempt.failed", createdAt: 1 },
+      { cursor: "call", sequence: 2, type: "model.call.failed", createdAt: 2 },
+      {
+        cursor: "failed",
+        sequence: 3,
+        type: "execution.failed",
+        createdAt: 3,
+        text: "Automatic compaction could not reduce the thread enough for this model.",
+        data: { details: { failure_classification: "context-overflow" } },
+      },
+    ])
+
+    const errors = projection.units.filter(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Error",
+    )
+    expect(errors).toHaveLength(1)
+    expect(errors[0]?.content).toMatchObject({
+      _tag: "Block",
+      block: {
+        _tag: "Error",
+        title: "Auto-compaction failed",
+        detail: "Automatic compaction could not reduce the thread enough for this model.",
+        recovery: "Try again. If the thread is still too large, start a new thread.",
+      },
+    })
+    expect(JSON.stringify(projection.units)).not.toContain("model.attempt.failed")
+    expect(JSON.stringify(projection.units)).not.toContain("model.call.failed")
+  })
+
   it("settles linked tools and standalone child agents through the settlement helpers", () => {
     const projection = project("turn-a", "prompt", [
       {

@@ -699,6 +699,18 @@ const workflow = (value: any) => {
   }
 }
 
+const failureMessage = (data: Readonly<Record<string, unknown>> | undefined): string | undefined => {
+  const message = data?.message
+  if (typeof message === "string" && message.length > 0 && message !== "[object Object]") return message
+  const details =
+    typeof data?.details === "object" && data.details !== null
+      ? (data.details as Readonly<Record<string, unknown>>)
+      : undefined
+  if (details?.failure_classification === "context-overflow")
+    return "Automatic compaction could not reduce the thread enough for this model."
+  return message === "[object Object]" ? "The execution failed unexpectedly." : undefined
+}
+
 const event = (value: {
   readonly cursor: string
   readonly sequence: number
@@ -711,10 +723,7 @@ const event = (value: {
     ?.filter((part) => part.type === "text")
     .map((part) => part.text ?? "")
     .join("")
-  const failureText =
-    value.type === "execution.failed" && typeof value.data?.message === "string" && value.data.message.length > 0
-      ? value.data.message
-      : undefined
+  const failureText = value.type === "execution.failed" ? failureMessage(value.data) : undefined
   const text = contentText !== undefined && contentText.length > 0 ? contentText : failureText
   return {
     cursor: value.cursor,

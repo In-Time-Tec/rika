@@ -806,6 +806,25 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("replaces opaque context overflow failures with an actionable message", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({
+        streamEvents: [
+          relayEvent("execution.failed", 1, [], {
+            message: "[object Object]",
+            details: { failure_classification: "context-overflow" },
+          }),
+        ],
+      })
+      const result = yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        return yield* start(backend, { threadId: "thread-a", turnId: "turn-a", prompt: "prompt", startedAt: 1 })
+      }).pipe(provideBackend(fixture.implementation))
+
+      expect(result.events[0]?.text).toBe("Automatic compaction could not reduce the thread enough for this model.")
+    }),
+  )
+
   it.effect("prefers terminal failure content over Relay failure metadata", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({

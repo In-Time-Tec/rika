@@ -9,7 +9,7 @@ import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { Runtime as RikaToolRuntime } from "@rika/tools"
 import { Database } from "bun:sqlite"
 import { Cause, ConfigProvider, Context, Effect, FileSystem, Layer, Redacted, Schema, Scope, Stream } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel, Response as AiResponse } from "effect/unstable/ai"
 import {
   executionModelRoutes,
   executionRoutePin,
@@ -332,63 +332,15 @@ test("classifies a nested OpenAI Responses context error without exposing the Ef
   )
 })
 
-test("compacts and replays a nested OpenAI Responses context error through the durable backend", () => {
-  const requests = new Array<Record<string, unknown>>()
-  const server = Bun.serve({
-    port: 0,
-    fetch: (request) =>
-      request.json().then((value) => {
-        requests.push(value as Record<string, unknown>)
-        if (requests.length === 1)
-          return sseResponse([
-            {
-              type: "response.output_item.added",
-              output_index: 0,
-              sequence_number: 0,
-              item: {
-                id: "overflow-read",
-                type: "function_call",
-                call_id: "overflow-read",
-                name: "read",
-                arguments: "",
-              },
-            },
-            {
-              type: "response.function_call_arguments.done",
-              item_id: "overflow-read",
-              output_index: 0,
-              sequence_number: 1,
-              arguments: JSON.stringify({ path: "fixture.txt" }),
-            },
-            { type: "response.completed", sequence_number: 2, response: response("response-tool-call") },
-          ])
-        if (requests.length === 2)
-          return sseResponse([
-            {
-              type: "error",
-              error: {
-                type: "invalid_request_error",
-                code: "context_length_exceeded",
-                message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
-                param: "input",
-              },
-              sequence_number: 3,
-            },
-          ])
-        return sseResponse([
-          {
-            type: "response.output_text.delta",
-            item_id: "response-recovered-message",
-            output_index: 0,
-            content_index: 0,
-            delta: "recovered",
-            sequence_number: 0,
-          },
-          { type: "response.completed", sequence_number: 1, response: response("response-recovered") },
-        ])
-      }),
-  })
-  const settings = openAiSettings(server.url.toString())
+test("compacts a restored durable session and replays a nested OpenAI Responses context error", () => {
+  let modelCalls = 0
+  const overflow = {
+    type: "invalid_request_error",
+    code: "context_length_exceeded",
+    message: "Your input exceeds the context window of this model. Please adjust your input and try again.",
+    param: "input",
+  }
+  const settings = ConfigContract.defaults
   return Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
@@ -401,8 +353,45 @@ test("compacts and replays a nested OpenAI Responses context error through the d
           const runtime = Context.get(providerContext, ModelProviderRuntime.Service)
           const route = ConfigContract.resolveModelRoute(settings, "medium", "main")
           const prepared = yield* runtime.prepare([route])
-          const registration = prepared.registrations[0]!
+          const preparedRegistration = prepared.registrations[0]!
           const selection = ModelProviderRuntime.modelRoutePlan(route).selection
+          const model = yield* LanguageModel.make({
+            generateText: () => Effect.die("the conversation model is streaming only"),
+            streamText: () => {
+              modelCalls += 1
+              if (modelCalls === 1)
+                return Stream.make(
+                  AiResponse.makePart("tool-call", {
+                    id: "overflow-read",
+                    name: "read",
+                    params: { path: "fixture.txt" },
+                    providerExecuted: false,
+                  }),
+                )
+              if (modelCalls === 2)
+                return Stream.make(AiResponse.makePart("text-delta", { id: "history", delta: "history ready" }))
+              if (modelCalls === 3)
+                return Stream.make(
+                  Schema.encodeSync(AiResponse.ResponseMetadataPart)(
+                    AiResponse.makePart("response-metadata", {
+                      id: "overflow-response",
+                      modelId: "overflow-model",
+                      timestamp: undefined,
+                      request: undefined,
+                    }),
+                  ),
+                  AiResponse.makePart("error", { error: overflow }),
+                )
+              return Stream.make(AiResponse.makePart("text-delta", { id: "recovered", delta: "recovered" }))
+            },
+          })
+          const registration = yield* ModelRegistry.registration({
+            ...selection,
+            layer: Layer.succeed(LanguageModel.LanguageModel, model),
+            ...(preparedRegistration.classifyFailure === undefined
+              ? {}
+              : { classifyFailure: preparedRegistration.classifyFailure }),
+          })
           const summarySelection = {
             provider: "test",
             model: "compaction-summary",
@@ -432,11 +421,20 @@ test("compacts and replays a nested OpenAI Responses context error through the d
             }),
           )
           const backend = Context.get(backendContext, ExecutionBackend.Service)
+          const historyExecution = yield* backend.start({
+            threadId: "thread-openai-overflow",
+            turnId: "turn-openai-history",
+            prompt: "read fixture.txt and retain the result for the next turn",
+            startedAt: 1,
+            executionRoute: executionRoutePin(settings, "medium"),
+          })
+          expect(historyExecution.status, encodeJson(historyExecution.events)).toBe("completed")
+
           const execution = yield* backend.start({
             threadId: "thread-openai-overflow",
             turnId: "turn-openai-overflow",
-            prompt: "read fixture.txt and recover from the provider overflow",
-            startedAt: 1,
+            prompt: "recover the restored session from the provider overflow",
+            startedAt: 2,
             executionRoute: executionRoutePin(settings, "medium"),
           })
           const database = new Database(`${directory}/relay.db`, { readonly: true })
@@ -448,8 +446,9 @@ test("compacts and replays a nested OpenAI Responses context error through the d
 
           expect(execution.status, renderedEvents).toBe("completed")
           expect(checkpoint.count).toBe(1)
-          expect(requests).toHaveLength(3)
-          expect(execution.events.filter((event) => event.type === "tool.result.received")).toHaveLength(1)
+          expect(modelCalls).toBe(4)
+          expect(historyExecution.events.filter((event) => event.type === "tool.result.received")).toHaveLength(1)
+          expect(execution.events.some((event) => event.type === "agent.compaction.started")).toBe(true)
           expect(
             execution.events
               .filter((event) => event.type === "model.output.delta")
@@ -464,7 +463,6 @@ test("compacts and replays a nested OpenAI Responses context error through the d
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromUnknown({ OPENAI_API_KEY: "test-api-key" }),
       ),
-      Effect.ensuring(Effect.promise(() => server.stop(true))),
     ),
   )
 }, 30_000)

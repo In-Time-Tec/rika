@@ -949,6 +949,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "tool.result.received") return applyToolResult(projection, turnId, event)
   if (event.type === "steering.delivered") return applySteeringDelivered(projection, turnId, event)
   if (event.type === "model.usage.reported") return applyUsage(projection, event)
+  if (event.type === "model.attempt.failed" || event.type === "model.call.failed") return projection
   if (event.type === "execution.completed")
     return applyExecutionOutcome(projection, turnId, event.sequence, { status: "complete" })
   if (event.type === "execution.failed") {
@@ -956,13 +957,18 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
       return applyExecutionOutcome(settleRunningImpl(projection, "cancelled", event.sequence), turnId, event.sequence, {
         status: "complete",
       })
-    const reason = event.text ?? string(sourcePayload(event).message, "Execution failed")
+    const payload = sourcePayload(event)
+    const details = record(payload.details)
+    const compactionFailed = details.failure_classification === "context-overflow"
+    const reason = event.text ?? string(payload.message, "The execution failed unexpectedly.")
     const block: Block = {
       _tag: "Error",
-      title: "Execution failed",
+      title: compactionFailed ? "Auto-compaction failed" : "Execution failed",
       detail: reason,
       turnId,
-      recovery: "Edit your prompt and press Enter to try again.",
+      recovery: compactionFailed
+        ? "Try again. If the thread is still too large, start a new thread."
+        : "Edit your prompt and press Enter to try again.",
     }
     return upsertUnit(settleRunningImpl(projection, "failed", event.sequence), {
       ...makeUnit(`execution:${turnId}:failed`, turnId, event.sequence, 0, event.sequence, { _tag: "Block", block }),
