@@ -104,7 +104,7 @@ test(
             const replay = yield* backend.replay(input.turnId)
             const cursor = replay.events.at(1)?.cursor
             const after = yield* backend.replay(input.turnId, cursor)
-            return { first, duplicate, replay, after, streamed, requests: yield* fixture.requests }
+            return { first, duplicate, replay, after, cursor, streamed, requests: yield* fixture.requests }
           }),
         )
         const result = yield* program
@@ -117,7 +117,16 @@ test(
         expect(result.replay.events.map((event) => event.cursor)).toEqual(
           result.first.events.map((event) => event.cursor),
         )
-        expect(result.after.events[0]?.cursor).not.toBe(result.replay.events[0]?.cursor)
+        expect(result.replay.events.every((event) => event.id !== undefined)).toBe(true)
+        expect(result.replay.events.every((event) => event.executionId === "execution:turn-a")).toBe(true)
+        expect(new Set(result.replay.events.map((event) => `${event.executionId}\u0000${event.id}`)).size).toBe(
+          result.replay.events.length,
+        )
+        expect(result.after.events.map((event) => event.cursor)).toEqual(
+          result.replay.events
+            .slice(result.replay.events.findIndex((event) => event.cursor === result.cursor) + 1)
+            .map((event) => event.cursor),
+        )
         expect(result.requests).toHaveLength(1)
       }),
     ),
@@ -262,7 +271,7 @@ test(
               message.role === "user" && Array.isArray(message.content) ? message.content : [],
             )
             expect(result.events.filter((event) => event.type === "execution.failed")).toEqual([])
-            expect(result.status).toBe("completed")
+            expect(result.status, encodeJson(result.events)).toBe("completed")
             expect(parts).toMatchObject([
               {
                 type: "file",

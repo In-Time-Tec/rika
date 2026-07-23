@@ -382,7 +382,7 @@ export type InteractiveEvent =
       readonly thread: Thread.Thread
       readonly entries: ReadonlyArray<TranscriptPage.Entry>
       readonly hasOlder: boolean
-      readonly threadCostUsd: number
+      readonly threadCostUsd?: number
       readonly globalCostUsd?: number
       readonly oldestCursor?: TranscriptPage.PageCursor
       readonly queueRevision: number
@@ -396,7 +396,7 @@ export type InteractiveEvent =
       readonly threadId: Thread.ThreadId
       readonly entries: ReadonlyArray<TranscriptPage.Entry>
       readonly hasOlder: boolean
-      readonly threadCostUsd: number
+      readonly threadCostUsd?: number
       readonly globalCostUsd?: number
       readonly oldestCursor?: TranscriptPage.PageCursor
     }
@@ -535,7 +535,7 @@ export const InteractiveEventSchema = Schema.Union([
     thread: Thread.Thread,
     entries: Schema.Array(TranscriptPage.EntrySchema),
     hasOlder: Schema.Boolean,
-    threadCostUsd: Schema.Finite,
+    threadCostUsd: Schema.optionalKey(Schema.Finite),
     globalCostUsd: Schema.optionalKey(Schema.Finite),
     oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
     queueRevision: Schema.Int,
@@ -555,7 +555,7 @@ export const InteractiveEventSchema = Schema.Union([
     threadId: Thread.ThreadId,
     entries: Schema.Array(TranscriptPage.EntrySchema),
     hasOlder: Schema.Boolean,
-    threadCostUsd: Schema.Finite,
+    threadCostUsd: Schema.optionalKey(Schema.Finite),
     globalCostUsd: Schema.optionalKey(Schema.Finite),
     oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
   }),

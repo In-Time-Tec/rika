@@ -267,7 +267,11 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [TuiApp.model.text("CANCELLED_LATE_RESPONSE", 5_000), TuiApp.model.text("RESTORED_PROMPT_SENT")],
+          script: [
+            TuiApp.model.text("CANCELLED_LATE_RESPONSE", 5_000),
+            TuiApp.model.text("RESTORED_PROMPT_SENT"),
+            TuiApp.model.text("RESTORED_PROMPT_SENT"),
+          ],
         })
 
         yield* Effect.promise(() => app.type("Restore this submitted prompt."))

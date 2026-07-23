@@ -510,6 +510,8 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(result.status).toBe("completed")
       expect(result.events).toEqual([
         {
+          id: "event:1",
+          executionId: "execution:turn-a",
           cursor: "cursor-1",
           sequence: 1,
           type: "model.output.delta",
@@ -517,8 +519,23 @@ describe("ExecutionBackend Relay client adapter", () => {
           text: "hello world",
           content: [Content.text("hello "), { type: "structured", value: { n: 1 } }, Content.text("world")],
         },
-        { cursor: "cursor-2", sequence: 2, type: "model.output.delta", createdAt: 20, content: [] },
-        { cursor: "cursor-3", sequence: 3, type: "execution.completed", createdAt: 30 },
+        {
+          id: "event:2",
+          executionId: "execution:turn-a",
+          cursor: "cursor-2",
+          sequence: 2,
+          type: "model.output.delta",
+          createdAt: 20,
+          content: [],
+        },
+        {
+          id: "event:3",
+          executionId: "execution:turn-a",
+          cursor: "cursor-3",
+          sequence: 3,
+          type: "execution.completed",
+          createdAt: 30,
+        },
       ])
     }),
   )

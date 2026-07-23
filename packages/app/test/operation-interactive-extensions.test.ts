@@ -41,6 +41,40 @@ const thread = (id: string): Thread.Thread => ({
   updatedAt: 1,
 })
 
+const providerCostEvent = (
+  executionId: string,
+  cursor: string,
+  amount: number,
+  sequence = 0,
+): ExecutionBackend.Event => ({
+  id: `${cursor}-id`,
+  executionId,
+  cursor,
+  sequence,
+  type: "model.attempt.completed",
+  createdAt: 1,
+  data: { model_attempt_id: `${cursor}-attempt`, cost: { amount, currency: "USD" } },
+})
+
+const estimatedCostEvent = (executionId: string, cursor: string, amount: number): ExecutionBackend.Event => ({
+  id: `${cursor}-id`,
+  executionId,
+  cursor,
+  sequence: 0,
+  type: "model.usage.reported",
+  createdAt: 1,
+  data: {
+    model_attempt_id: `${cursor}-attempt`,
+    provider: "openai",
+    model: "gpt-5.6-sol",
+    input_tokens: amount * 200_000,
+    input_tokens_uncached: amount * 200_000,
+    input_tokens_cache_read: 0,
+    input_tokens_cache_write: 0,
+    output_tokens: 0,
+  },
+})
+
 const interactiveLayer = (
   repository: ThreadRepository.Interface,
   turns: TurnRepository.Interface,
@@ -134,7 +168,7 @@ describe("interactive session extensions", () => {
     ),
   )
 
-  it.effect("replays a stale pricing checkpoint and allows its cost to decrease", () =>
+  it.effect("uses current Relay replay without rewriting a persisted checkpoint", () =>
     Effect.scoped(
       Effect.gen(function* () {
         const selected = thread("priced")
@@ -152,13 +186,7 @@ describe("interactive session extensions", () => {
         const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         yield* transcripts.replace(target, { ...Transcript.empty(target.id, target.prompt), costUsd: 15 })
-        const usage: ExecutionBackend.Event = {
-          cursor: "corrected-usage",
-          sequence: 1,
-          type: "model.usage.reported",
-          createdAt: 1,
-          data: { cost_usd: 5 },
-        }
+        const usage = { ...estimatedCostEvent(String(target.id), "corrected-usage", 5), sequence: 1 }
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           inspect: (executionId) =>
@@ -200,17 +228,16 @@ describe("interactive session extensions", () => {
         let loaded = yield* Queue.take(events)
         while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
 
-        expect(loaded.threadCostUsd).toBe(5)
-        expect(loaded.globalCostUsd).toBe(15)
+        expect(loaded.threadCostUsd).toBeUndefined()
+        expect(loaded.globalCostUsd).toBeUndefined()
         expect(yield* transcripts.get(target.id)).toMatchObject({
-          costUsd: 5,
-          pricingVersion: Transcript.pricingVersion,
+          costUsd: 15,
         })
         yield* TestClock.adjust("1 second")
         let refreshed = yield* Queue.take(events)
         while (refreshed._tag !== "TitleCostUpdated" || refreshed.turnId !== target.id)
           refreshed = yield* Queue.take(events)
-        expect(refreshed).toMatchObject({ threadCostUsd: 5, globalCostUsd: 5 })
+        expect(refreshed).toMatchObject({ threadCostUsd: 10, globalCostUsd: 10 })
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)
@@ -246,42 +273,9 @@ describe("interactive session extensions", () => {
         ])
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
         const executionEvents = new Map<string, ReadonlyArray<ExecutionBackend.Event>>([
-          [
-            "turn-first",
-            [
-              {
-                cursor: "first-usage",
-                sequence: 0,
-                type: "model.usage.reported",
-                createdAt: 1,
-                data: { cost_usd: 1 },
-              },
-            ],
-          ],
-          [
-            "turn-first-child",
-            [
-              {
-                cursor: "first-child-usage",
-                sequence: 0,
-                type: "model.usage.reported",
-                createdAt: 1,
-                data: { cost_usd: 2 },
-              },
-            ],
-          ],
-          [
-            "turn-second",
-            [
-              {
-                cursor: "second-usage",
-                sequence: 0,
-                type: "model.usage.reported",
-                createdAt: 2,
-                data: { cost_usd: 4 },
-              },
-            ],
-          ],
+          ["turn-first", [estimatedCostEvent("turn-first", "first-usage", 1)]],
+          ["turn-first-child", [estimatedCostEvent("turn-first-child", "first-child-usage", 2)]],
+          ["turn-second", [estimatedCostEvent("turn-second", "second-usage", 4)]],
         ])
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
@@ -320,14 +314,14 @@ describe("interactive session extensions", () => {
         let loaded = yield* Queue.take(events)
         while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
 
-        expect(loaded.threadCostUsd).toBe(1)
-        expect(loaded.globalCostUsd).toBe(0)
+        expect(loaded.threadCostUsd).toBeUndefined()
+        expect(loaded.globalCostUsd).toBeUndefined()
         expect(new Set(loaded.entries.map((entry) => entry.projectionCostUsd))).toEqual(new Set([1]))
         yield* TestClock.adjust("1 second")
         let refreshed = yield* Queue.take(events)
         while (refreshed._tag !== "TitleCostUpdated" || refreshed.threadId !== first.id)
           refreshed = yield* Queue.take(events)
-        expect(refreshed).toMatchObject({ threadCostUsd: 3, globalCostUsd: 7 })
+        expect(refreshed).toMatchObject({ threadCostUsd: 5, globalCostUsd: 13 })
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)
@@ -493,7 +487,6 @@ describe("interactive session extensions", () => {
           thread: { id: "fresh", title: "New thread" },
           entries: [],
           hasOlder: false,
-          threadCostUsd: 0,
           queueRevision: 0,
           queuedCount: 0,
           queue: [],
@@ -546,13 +539,7 @@ describe("interactive session extensions", () => {
             createdAt: 4,
             data: { tool_call_id: nestedCallId, child_execution_id: nestedId },
           },
-          {
-            cursor: "child-usage",
-            sequence: 3,
-            type: "model.usage.reported",
-            createdAt: 5,
-            data: { cost_usd: 2 },
-          },
+          providerCostEvent(childId, "child-usage", 2, 3),
           {
             cursor: "child-response",
             sequence: 4,
@@ -577,13 +564,7 @@ describe("interactive session extensions", () => {
             createdAt: 7,
             text: "Nested checks passed.",
           },
-          {
-            cursor: "nested-usage",
-            sequence: 2,
-            type: "model.usage.reported",
-            createdAt: 7,
-            data: { cost_usd: 4 },
-          },
+          providerCostEvent(nestedId, "nested-usage", 4, 2),
           { cursor: "nested-done", sequence: 3, type: "execution.completed", createdAt: 7 },
         ]
         const backend = ExecutionBackend.Service.of({
@@ -604,13 +585,7 @@ describe("interactive session extensions", () => {
                 createdAt: 2,
                 data: { child_execution_id: childId },
               },
-              {
-                cursor: "parent-usage",
-                sequence: 2,
-                type: "model.usage.reported",
-                createdAt: 8,
-                data: { cost_usd: 1 },
-              },
+              providerCostEvent(String(input.turnId), "parent-usage", 1, 2),
               { cursor: "parent-done", sequence: 3, type: "execution.completed", createdAt: 8 },
             ]
             return Ref.update(startEventScopes, (values) => [...values, input.eventScope]).pipe(
@@ -701,21 +676,12 @@ describe("interactive session extensions", () => {
         ])
         expect(patches.find((event) => event.event.cursor === "parent-usage")).toMatchObject({
           rootTurnId: "parent-turn",
-          rootTurnCostUsd: 1,
-          threadCostUsd: 1,
-          globalCostUsd: 1,
         })
         expect(patches.find((event) => event.event.cursor === "child-usage")).toMatchObject({
           rootTurnId: "parent-turn",
-          rootTurnCostUsd: 3,
-          threadCostUsd: 3,
-          globalCostUsd: 3,
         })
         expect(patches.find((event) => event.event.cursor === "nested-usage")).toMatchObject({
           rootTurnId: "parent-turn",
-          rootTurnCostUsd: 7,
-          threadCostUsd: 7,
-          globalCostUsd: 7,
         })
         events.length = 0
         yield* session.selectThread(Thread.ThreadId.make("thread"), 1)

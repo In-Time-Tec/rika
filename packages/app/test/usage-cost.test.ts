@@ -5,11 +5,18 @@ import { Effect } from "effect"
 import * as UsageCost from "../src/usage-cost"
 
 const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
+  id: cursor,
+  executionId: "execution",
   cursor,
   sequence: 0,
-  type: "model.usage.reported",
+  type: "model.attempt.completed",
   createdAt: 1,
-  data: { cost_usd: costUsd },
+  data: {
+    model_call_id: `call-${cursor}`,
+    model_attempt_id: `attempt-${cursor}`,
+    attempt: 1,
+    cost: { amount: costUsd, currency: "USD" },
+  },
 })
 
 const reportedTokens = (
@@ -19,11 +26,25 @@ const reportedTokens = (
   outputTokens: number | null,
   data: Readonly<Record<string, unknown>> = {},
 ): ExecutionBackend.Event => ({
+  id: cursor,
+  executionId: "execution",
   cursor,
   sequence: 0,
   type: "model.usage.reported",
   createdAt: 1,
-  data: { provider: "openai", model, input_tokens: inputTokens, output_tokens: outputTokens, ...data },
+  data: {
+    model_call_id: `call-${cursor}`,
+    model_attempt_id: `attempt-${cursor}`,
+    attempt: 1,
+    provider: "openai",
+    model,
+    input_tokens: inputTokens,
+    input_tokens_uncached: inputTokens,
+    input_tokens_cache_read: 0,
+    input_tokens_cache_write: 0,
+    output_tokens: outputTokens,
+    ...data,
+  },
 })
 
 const reader = (
@@ -65,10 +86,19 @@ describe("UsageCost", () => {
         reportedTokens("cached", "gpt-5.6-sol", 10_000, 100, {
           input_tokens_uncached: 1_000,
           input_tokens_cache_read: 9_000,
-          input_tokens_cache_write: null,
+          input_tokens_cache_write: 0,
         }),
       ),
     ).toBeCloseTo(0.0125, 10)
+    expect(
+      UsageCost.eventCostUsd(
+        reportedTokens("cache-write", "gpt-5.6-sol", 100, 0, {
+          input_tokens_uncached: 0,
+          input_tokens_cache_read: 0,
+          input_tokens_cache_write: 100,
+        }),
+      ),
+    ).toBeCloseTo(0.000625, 10)
   })
 
   it("uses the provider-returned model snapshot and falls back to the configured model", () => {
@@ -109,7 +139,7 @@ describe("UsageCost", () => {
     ).toBeUndefined()
   })
 
-  it("derives uncached input without charging cache reads at the full rate", () => {
+  it("does not derive missing uncached input from other buckets", () => {
     expect(
       UsageCost.eventCostUsd(
         reportedTokens("derived", "gpt-5.6-terra", 200_000, 0, {
@@ -118,7 +148,41 @@ describe("UsageCost", () => {
           input_tokens_cache_write: 0,
         }),
       ),
-    ).toBeCloseTo(0.095, 10)
+    ).toBeUndefined()
+    expect(
+      UsageCost.eventCostUsd(
+        reportedTokens("missing-total", "gpt-5.6-sol", null, 0, {
+          input_tokens_uncached: 100_000,
+          input_tokens_cache_read: 100_000,
+          input_tokens_cache_write: 0,
+        }),
+      ),
+    ).toBeUndefined()
+  })
+
+  it("requires output and every input pricing bucket without double charging reasoning", () => {
+    expect(
+      UsageCost.eventCostUsd(
+        reportedTokens("missing-output", "gpt-5.6-sol", 100, null, {
+          input_tokens_uncached: 100,
+        }),
+      ),
+    ).toBeUndefined()
+    expect(
+      UsageCost.eventCostUsd(
+        reportedTokens("missing-cache-write", "gpt-5.6-sol", 100, 0, {
+          input_tokens_cache_write: null,
+        }),
+      ),
+    ).toBeUndefined()
+    expect(
+      UsageCost.eventCostUsd(
+        reportedTokens("reasoning-subset", "gpt-5.6-sol", 0, 100, {
+          input_tokens_uncached: 0,
+          output_tokens_reasoning: 50,
+        }),
+      ),
+    ).toBe(0.003)
   })
 
   it("leaves missing and malformed reports unpriced", () => {
@@ -133,21 +197,6 @@ describe("UsageCost", () => {
         }),
       ),
     ).toBeUndefined()
-    expect(UsageCost.eventCostUsd(usage("negative", -10))).toBeUndefined()
-  })
-
-  it("accepts only explicit event-local USD aliases", () => {
-    expect(UsageCost.eventCostUsd(usage("snake", 1.25))).toBe(1.25)
-    expect(UsageCost.eventCostUsd({ ...usage("camel", 0), data: { costUsd: 2.5 } })).toBe(2.5)
-  })
-
-  it.each([
-    ["generic cost", { cost: 1 }],
-    ["generic usd", { usd: 1 }],
-    ["nested usage cost", { usage: { cost: 1 } }],
-    ["cumulative total", { total_cost_usd: 1 }],
-  ])("rejects %s as event-local monetary usage", (_, data) => {
-    expect(UsageCost.eventCostUsd({ ...usage("rejected", 0), data })).toBeUndefined()
   })
 
   it("counts a durable usage cursor only once across replay and live recovery", () => {
@@ -159,6 +208,145 @@ describe("UsageCost", () => {
     expect(recovered.turnCostUsd.get("turn")).toBe(2.5)
     expect(recovered.threadCostUsd.get("thread")).toBe(2.5)
     expect(recovered.globalCostUsd).toBe(2.5)
+  })
+
+  it("requires released identity and attempt fields only for cost-bearing events", () => {
+    const unrelated = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: { cursor: "output", sequence: 0, type: "model.output.completed", createdAt: 1 },
+    })
+    const { id: _, ...eventWithoutId } = usage("missing-identity", 1)
+    const missingIdentity = UsageCost.observe(unrelated, {
+      threadId: "thread",
+      turnId: "turn",
+      event: eventWithoutId,
+    })
+    const missingAttempt = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: { ...usage("missing-attempt", 1), data: {} },
+    })
+
+    expect(unrelated).toBe(UsageCost.empty)
+    expect(missingIdentity.complete).toBe(false)
+    expect(missingAttempt.complete).toBe(false)
+  })
+
+  it("replaces an attempt estimate with provider USD cost in either arrival order", () => {
+    const report = reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
+      model_attempt_id: "shared-attempt",
+      input_tokens_uncached: 1_000,
+      input_tokens_cache_read: 9_000,
+    })
+    const completed = {
+      ...usage("completed", 2.5),
+      data: { ...usage("completed", 2.5).data, model_attempt_id: "shared-attempt" },
+    }
+    for (const events of [
+      [report, completed],
+      [completed, report],
+    ]) {
+      const snapshot = events.reduce(
+        (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+        UsageCost.empty,
+      )
+      expect(snapshot.globalCostUsd).toBe(2.5)
+      expect(snapshot.complete).toBe(true)
+    }
+  })
+
+  it.each([
+    ["non-USD", { amount: 2, currency: "EUR" }],
+    ["malformed", { amount: "2", currency: "USD" }],
+    ["negative", { amount: -2, currency: "USD" }],
+  ])("makes cost unknown for present %s provider cost", (_, cost) => {
+    const report = reportedTokens("report", "gpt-5.6-sol", 1_000, 0, { model_attempt_id: "attempt" })
+    const completed = {
+      ...usage("completed", 0),
+      data: { ...usage("completed", 0).data, model_attempt_id: "attempt", cost },
+    }
+    const estimated = UsageCost.observe(UsageCost.empty, { threadId: "thread", turnId: "turn", event: report })
+    const snapshot = UsageCost.observe(estimated, { threadId: "thread", turnId: "turn", event: completed })
+
+    expect(snapshot.globalCostUsd).toBe(0)
+    expect(snapshot.complete).toBe(false)
+  })
+
+  it("keeps an estimate when completed provider cost is absent", () => {
+    const report = reportedTokens("report", "gpt-5.6-sol", 10_000, 100, {
+      model_attempt_id: "attempt",
+      input_tokens_uncached: 1_000,
+      input_tokens_cache_read: 9_000,
+    })
+    const completed = {
+      ...usage("completed", 0),
+      data: { model_call_id: "call", model_attempt_id: "attempt", attempt: 1 },
+    }
+    const snapshot = [completed, report].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.globalCostUsd).toBeCloseTo(0.0125, 10)
+    expect(snapshot.complete).toBe(true)
+  })
+
+  it("does not estimate nested completed usage and marks partial totals incomplete", () => {
+    const nested = {
+      ...usage("nested", 0),
+      data: {
+        model_call_id: "nested-call",
+        model_attempt_id: "nested-attempt",
+        attempt: 1,
+        usage: { provider: "openai", model: "gpt-5.6-sol", input_tokens: 1_000, output_tokens: 0 },
+      },
+    }
+    const snapshot = [usage("priced", 1), nested].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.globalCostUsd).toBe(1)
+    expect(snapshot.complete).toBe(false)
+  })
+
+  it("deduplicates values by attempt and deliveries by execution and event id", () => {
+    const first = usage("first", 1)
+    const sameAttempt = {
+      ...usage("second", 9),
+      data: { ...usage("second", 9).data, model_attempt_id: first.data?.model_attempt_id },
+    }
+    const duplicateDelivery = { ...usage("ignored", 8), id: "first" }
+    const snapshot = [first, sameAttempt, duplicateDelivery].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.globalCostUsd).toBe(0)
+    expect(snapshot.complete).toBe(false)
+  })
+
+  it("scopes reused event and attempt ids to their execution", () => {
+    const first = { ...usage("same", 1), executionId: "execution-a" }
+    const second = { ...usage("same", 2), executionId: "execution-b" }
+    const snapshot = [first, second].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.globalCostUsd).toBe(3)
+  })
+
+  it("does not require dense or arrival-ordered execution sequences", () => {
+    const later = { ...usage("later", 2), sequence: 100 }
+    const earlier = { ...usage("earlier", 1), sequence: 3 }
+    const snapshot = [later, earlier].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.globalCostUsd).toBe(3)
   })
 
   it.effect("rolls two children and a grandchild into the parent turn and thread total", () =>

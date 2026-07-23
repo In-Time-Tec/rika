@@ -35,23 +35,7 @@ const costFor = (model: Model, serviceTier: string, inputTokens: number): Cost |
   return model.cost === undefined ? undefined : contextCost(model.cost, inputTokens)
 }
 
-const totalInput = (
-  total: number | undefined,
-  uncached: number | undefined,
-  cacheRead: number | undefined,
-  cacheWrite: number | undefined,
-): number | undefined =>
-  total ??
-  (uncached !== undefined && cacheRead !== undefined && cacheWrite !== undefined
-    ? uncached + cacheRead + cacheWrite
-    : undefined)
-
 export const usageCostUsd = (value: Record<string, unknown>): number | undefined => {
-  for (const key of ["cost_usd", "costUsd"]) {
-    const candidate = nonNegativeFinite(value[key])
-    if (candidate !== undefined) return candidate
-  }
-
   const tokenKeys = [
     "input_tokens",
     "input_tokens_uncached",
@@ -66,23 +50,16 @@ export const usageCostUsd = (value: Record<string, unknown>): number | undefined
   const cacheRead = token(value, "input_tokens_cache_read")
   const cacheWrite = token(value, "input_tokens_cache_write")
   const output = token(value, "output_tokens")
-  const accountedInput = [reportedUncached, cacheRead, cacheWrite].reduce<number>((sum, count) => sum + (count ?? 0), 0)
-  if (input !== undefined && accountedInput > input) return undefined
   if (
-    input !== undefined &&
-    accountedInput < input &&
-    reportedUncached === undefined &&
-    (cacheRead === undefined || cacheWrite === undefined)
+    input === undefined ||
+    reportedUncached === undefined ||
+    cacheRead === undefined ||
+    cacheWrite === undefined ||
+    output === undefined
   )
     return undefined
-
-  const uncached =
-    reportedUncached ??
-    (input !== undefined && cacheRead !== undefined && cacheWrite !== undefined
-      ? input - cacheRead - cacheWrite
-      : undefined)
-  const inputForTier = totalInput(input, uncached, cacheRead, cacheWrite)
-  if (inputForTier === undefined) return undefined
+  const accountedInput = [reportedUncached, cacheRead, cacheWrite].reduce<number>((sum, count) => sum + (count ?? 0), 0)
+  if (accountedInput > input) return undefined
 
   const provider = typeof value.provider === "string" ? value.provider : ""
   const configuredModel = typeof value.model === "string" ? value.model : ""
@@ -90,14 +67,18 @@ export const usageCostUsd = (value: Record<string, unknown>): number | undefined
   const model = modelFor(provider, configuredModel, snapshot)
   if (model === undefined) return undefined
   const serviceTier = typeof value.service_tier === "string" ? value.service_tier : ""
-  const cost = costFor(model, serviceTier, inputForTier)
+  const cost = costFor(model, serviceTier, input)
   if (cost === undefined) return undefined
-  if ((uncached ?? 0) > 0 && cost.input === undefined) return undefined
-  if ((cacheRead ?? 0) > 0 && cost.cache_read === undefined) return undefined
-  if ((output ?? 0) > 0 && cost.output === undefined) return undefined
-  if (uncached === undefined && cacheRead === undefined && output === undefined) return undefined
+  if (reportedUncached > 0 && cost.input === undefined) return undefined
+  if (cacheRead > 0 && cost.cache_read === undefined) return undefined
+  if (cacheWrite > 0 && cost.cache_write === undefined) return undefined
+  if (output > 0 && cost.output === undefined) return undefined
 
   return (
-    ((uncached ?? 0) * cost.input + (cacheRead ?? 0) * (cost.cache_read ?? 0) + (output ?? 0) * cost.output) / 1_000_000
+    (reportedUncached * cost.input +
+      cacheRead * (cost.cache_read ?? 0) +
+      cacheWrite * (cost.cache_write ?? 0) +
+      output * cost.output) /
+    1_000_000
   )
 }

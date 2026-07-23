@@ -5,6 +5,9 @@ export const Status = Schema.Literals(["accepted", "queued", "running", "waiting
 export type Status = typeof Status.Type
 
 export const Event = Schema.Struct({
+  id: Schema.optionalKey(Schema.String),
+  executionId: Schema.optionalKey(Schema.String),
+  childExecutionId: Schema.optionalKey(Schema.String),
   cursor: Schema.String,
   sequence: Schema.Finite,
   type: Schema.String,
@@ -185,6 +188,7 @@ export interface EventPage {
 export interface Inspection {
   readonly turnId: string
   readonly status: Status
+  readonly createdAt?: number
   readonly lastCursor?: string
   readonly waits: ReadonlyArray<{ readonly id: string; readonly mode: string; readonly createdAt: number }>
   readonly pendingTools: ReadonlyArray<{

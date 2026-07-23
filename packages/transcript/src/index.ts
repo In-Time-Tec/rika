@@ -436,13 +436,15 @@ const processResult = (output: unknown): ToolProcess | undefined => {
 const usageCost = (value: Record<string, unknown>): number | undefined => usageCostUsd(value)
 
 const applyUsage = (projection: Projection, event: SourceEvent): Projection => {
-  if ((projection.usageCursors ?? []).includes(event.cursor)) return projection
+  if (event.executionId === undefined || event.id === undefined) return projection
+  const identity = `${event.executionId}\u0000${event.id}`
+  if ((projection.usageCursors ?? []).includes(identity)) return projection
   const cost = usageCost(sourcePayload(event))
   if (cost === undefined) return projection
   return {
     ...projection,
     costUsd: (projection.costUsd ?? 0) + cost,
-    usageCursors: [...(projection.usageCursors ?? []), event.cursor],
+    usageCursors: [...(projection.usageCursors ?? []), identity],
     ...(projection.costUsd === undefined || projection.pricingVersion === pricingVersion ? { pricingVersion } : {}),
   }
 }

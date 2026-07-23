@@ -1692,7 +1692,7 @@ export const interactiveTui =
         let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
         let projectionRevisions = new Map<string, number>()
         let transcriptProjections = new Map<string, Transcript.Projection>()
-        let threadCostUsd = 0
+        let threadCostUsd: number | undefined
         const appliedDeltas = new Set<string>()
         let activeSelectionEpoch = 0
         let submissionSequence = 0
@@ -1743,7 +1743,7 @@ export const interactiveTui =
                 entries: loadedTranscriptEntries,
                 revisions: projectionRevisions,
                 projections: transcriptProjections,
-                threadCostUsd,
+                ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
               },
               event,
             )

@@ -542,8 +542,11 @@ export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
 
 const normalizeChildExecutionId = (executionId: string): string => executionId.replace(/^execution:/, "")
 
+const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number | undefined =>
+  totals.complete ? totals.globalCostUsd : undefined
+
 const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): InteractiveEvent => {
-  const executionId = event.data?.execution_id
+  const executionId = event.executionId ?? event.data?.execution_id
   const turnId =
     typeof executionId === "string" && executionId.length > 0
       ? Turn.TurnId.make(normalizeChildExecutionId(executionId))
@@ -553,7 +556,10 @@ const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): Intera
     selectionEpoch: 0,
     threadId: turn.threadId,
     turnId,
-    ...(turnId === turn.id || (event.type !== "model.usage.reported" && event.type !== "child_run.spawned")
+    ...(turnId === turn.id ||
+    (event.type !== "model.usage.reported" &&
+      event.type !== "model.attempt.completed" &&
+      event.type !== "child_run.spawned")
       ? {}
       : { rootTurnId: turn.id }),
     event,
@@ -940,7 +946,11 @@ const childTranscriptPatch = (
   selectionEpoch: 0,
   threadId,
   turnId: Turn.TurnId.make(normalizeChildExecutionId(executionId)),
-  ...(event.type === "model.usage.reported" || event.type === "child_run.spawned" ? { rootTurnId } : {}),
+  ...(event.type === "model.usage.reported" ||
+  event.type === "model.attempt.completed" ||
+  event.type === "child_run.spawned"
+    ? { rootTurnId }
+    : {}),
   event,
   revision: event.sequence,
 })
@@ -1091,7 +1101,6 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         Context.get(dependencyContext, TurnRepository.Service).resetQueueClaims,
         executionDependencies,
       )
-      let persistedGlobalCostUsd = yield* Context.get(dependencyContext, TranscriptRepository.Service).globalCostUsd
       const readUsageCosts = Effect.fn("Operation.readUsageCosts")(function* () {
         const threads = yield* ThreadRepository.Service
         const turns = yield* TurnRepository.Service
@@ -1119,13 +1128,13 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         return { roots, snapshot: yield* UsageCost.collect(acquiredBackend, roots) }
       })
       const usageCostAdmission = yield* Semaphore.make(1)
-      let usageSnapshot: UsageCost.Snapshot = { ...UsageCost.empty, complete: false }
+      let usageSnapshot: UsageCost.Snapshot = { ...UsageCost.empty, complete: false, collectionComplete: false }
       let usageCostsLoaded = false
+      const deletedUsageThreads = new Set<string>()
       const pendingUsageEvents: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }> = []
       const currentUsageCosts = (): UsageCost.Snapshot => usageSnapshot
-      const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number =>
-        totals.complete ? totals.globalCostUsd : persistedGlobalCostUsd + totals.globalCostUsd
       const observeUsage = (input: UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }) => {
+        if (deletedUsageThreads.has(input.threadId)) return usageSnapshot
         if (!usageCostsLoaded) pendingUsageEvents.push(input)
         usageSnapshot = UsageCost.observe(usageSnapshot, input)
         return usageSnapshot
@@ -1140,6 +1149,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 usageSnapshot = pendingUsageEvents.reduce(UsageCost.observe, snapshot)
                 pendingUsageEvents.length = 0
                 usageCostsLoaded = true
+                if (!usageSnapshot.complete) return
                 const threadByTurn = new Map(roots.map((root) => [root.turnId, root.threadId]))
                 for (const [turnId, turnCostUsd] of usageSnapshot.turnCostUsd) {
                   const threadId = threadByTurn.get(turnId)
@@ -1149,8 +1159,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     threadId: Thread.ThreadId.make(threadId),
                     turnId: Turn.TurnId.make(turnId),
                     turnCostUsd,
-                    threadCostUsd: usageSnapshot.threadCostUsd.get(threadId) ?? 0,
-                    globalCostUsd: displayGlobalCostUsd(usageSnapshot),
+                    threadCostUsd: usageSnapshot.threadCostUsd.get(threadId)!,
+                    globalCostUsd: usageSnapshot.globalCostUsd,
                   })
                 }
               }),
@@ -1227,14 +1237,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               event,
             })
           const totals = currentUsageCosts()
-          if (totals.globalCostUsd !== previousGlobalCostUsd)
+          if (totals.complete && totals.globalCostUsd !== previousGlobalCostUsd)
             announce({
               _tag: "TitleCostUpdated",
               threadId: thread.id,
               turnId: firstTurn.id,
               turnCostUsd: totals.turnCostUsd.get(firstTurn.id) ?? 0,
-              threadCostUsd: totals.threadCostUsd.get(thread.id) ?? 0,
-              globalCostUsd: displayGlobalCostUsd(totals),
+              threadCostUsd: totals.threadCostUsd.get(thread.id)!,
+              globalCostUsd: totals.globalCostUsd,
             })
           if (!isTerminalStatus(result.status)) return
           settledTitleExecutions.add(executionId)
@@ -1564,7 +1574,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         }
         let observeChildSpawn = ignoreInteractiveEvent
         const withUsageCosts = (event: InteractiveEvent): InteractiveEvent => {
-          if (event._tag !== "TranscriptPatched" || event.event.type !== "model.usage.reported") return event
+          if (
+            event._tag !== "TranscriptPatched" ||
+            (event.event.type !== "model.usage.reported" && event.event.type !== "model.attempt.completed")
+          )
+            return event
           const rootTurnId = event.rootTurnId ?? event.turnId
           observeUsage({
             threadId: String(event.threadId),
@@ -1572,12 +1586,15 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             event: event.event,
           })
           const totals = currentUsageCosts()
+          if (!totals.complete) return { ...event, rootTurnId }
           return {
             ...event,
             rootTurnId,
-            rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId) ?? 0,
-            threadCostUsd: totals.threadCostUsd.get(event.threadId) ?? 0,
-            globalCostUsd: displayGlobalCostUsd(totals),
+            ...(totals.turnCostUsd.has(rootTurnId) ? { rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId)! } : {}),
+            ...(totals.threadCostUsd.has(event.threadId)
+              ? { threadCostUsd: totals.threadCostUsd.get(event.threadId)! }
+              : {}),
+            globalCostUsd: totals.globalCostUsd,
           }
         }
         const deliver = (
@@ -1860,7 +1877,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             )
           const patch = childTranscriptPatch(threadId, executionId, rootTurnId, event)
           sessionDispatch(patch)
-          if (publishUsage && event.type === "model.usage.reported") publishInteractiveActivity(sessionId, patch)
+          if (publishUsage && (event.type === "model.usage.reported" || event.type === "model.attempt.completed"))
+            publishInteractiveActivity(sessionId, patch)
         }
         observeChildSpawn = (event) => {
           if (event._tag !== "TranscriptPatched") return
@@ -2663,41 +2681,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             after = next
           }
         })
-        const replayRootProjection = Effect.fn("Operation.interactive.replayRootProjection")(function* (
-          backend: ExecutionBackend.Interface,
-          turn: Turn.Turn,
-        ) {
-          let projection = Transcript.empty(turn.id, turn.prompt)
-          const apply = (events: ReadonlyArray<ExecutionBackend.Event>) => {
-            for (const event of rootExecutionEvents(turn.id, events).toSorted(
-              (left, right) => left.sequence - right.sequence,
-            ))
-              projection = Transcript.applyEvent(projection, event)
-          }
-          if (backend.pageEvents === undefined) {
-            const result = yield* backend.replay(turn.id)
-            apply(result.events)
-            return { ...projection, pricingVersion: Transcript.pricingVersion }
-          }
-          let after: string | undefined
-          const cursors = new Set<string>()
-          while (true) {
-            const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
-            apply(page.events)
-            if (!page.hasMore) return { ...projection, pricingVersion: Transcript.pricingVersion }
-            const next = page.newestCursor
-            if (next === undefined || cursors.has(next))
-              return yield* operationError(`Transcript event cursor did not advance for Turn ${turn.id}`)
-            cursors.add(next)
-            after = next
-          }
-        })
         const healedTurns = new Set<string>()
         const healTerminalTurn = Effect.fn("Operation.interactive.healTerminalTurn")(function* (turn: Turn.Turn) {
           if (!isTerminalStatus(turn.status) || healedTurns.has(String(turn.id))) return
           healedTurns.add(String(turn.id))
           const transcripts = yield* TranscriptRepository.Service
-          const backend = yield* ExecutionBackend.Service
           const current = yield* transcripts.get(turn.id)
           if (current === undefined) return
           if (Transcript.hasRunningBlocks(sourceProjection(current))) {
@@ -2713,25 +2701,6 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               }
             }
           }
-          if (current.pricingVersion === Transcript.pricingVersion) return
-          const replayed = yield* replayRootProjection(backend, turn)
-          const stored = yield* transcripts.get(turn.id)
-          if (stored === undefined || stored.pricingVersion === Transcript.pricingVersion) return
-          const source = sourceProjection(stored)
-          const {
-            costUsd: _costUsd,
-            usageCursors: _usageCursors,
-            pricingVersion: _pricingVersion,
-            ...preserved
-          } = source
-          yield* projectionAdmission.withPermits(1)(
-            transcripts.replace(turn, {
-              ...preserved,
-              ...(replayed.costUsd === undefined ? {} : { costUsd: replayed.costUsd }),
-              ...(replayed.usageCursors === undefined ? {} : { usageCursors: replayed.usageCursors }),
-              pricingVersion: Transcript.pricingVersion,
-            }),
-          )
         })
         const projectTurnPage = Effect.fn("Operation.interactive.projectTurnPage")(function* (
           thread: Thread.Thread,
@@ -2862,9 +2831,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           if ((yield* Ref.get(selectionRequest)) !== request) return
           yield* Ref.set(transcriptCursor, oldestCursor)
           yield* Ref.set(transcriptHasOlder, hasOlder)
-          const observedThreadCostUsd = usageCosts.threadCostUsd.get(thread.id)
-          const threadCostUsd =
-            observedThreadCostUsd === undefined || !usageCosts.complete ? page.threadCostUsd : observedThreadCostUsd
+          const threadCostUsd = usageCosts.complete ? (usageCosts.threadCostUsd.get(thread.id) ?? 0) : undefined
+          const globalCostUsd = displayGlobalCostUsd(usageCosts)
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const activeTurn = yield* turns.findActive(thread.id)
@@ -2884,8 +2852,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   thread,
                   entries,
                   hasOlder,
-                  threadCostUsd,
-                  globalCostUsd: displayGlobalCostUsd(usageCosts),
+                  ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+                  ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
                   ...(oldestCursor === undefined ? {} : { oldestCursor }),
                   queueRevision: queue.revision,
                   queuedCount: queue.queuedCount,
@@ -2907,8 +2875,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               threadId: thread.id,
               entries,
               hasOlder,
-              threadCostUsd,
-              globalCostUsd: displayGlobalCostUsd(usageCosts),
+              ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+              ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
               ...(oldestCursor === undefined ? {} : { oldestCursor }),
             })
           yield* Effect.logInfo("transcript.page.loaded").pipe(
@@ -2966,8 +2934,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             thread,
             entries: [],
             hasOlder: false,
-            threadCostUsd: 0,
-            globalCostUsd: displayGlobalCostUsd(currentUsageCosts()),
+            ...(currentUsageCosts().complete
+              ? { threadCostUsd: 0, globalCostUsd: currentUsageCosts().globalCostUsd }
+              : {}),
             queueRevision: queue.revision,
             queuedCount: queue.queuedCount,
             queue: queue.turns.map(queueItem),
@@ -3030,7 +2999,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               threadId === undefined ||
               threadId === selectedThreadId ||
               event._tag === "TitleCostUpdated" ||
-              (event._tag === "TranscriptPatched" && event.event.type === "model.usage.reported")
+              (event._tag === "TranscriptPatched" &&
+                (event.event.type === "model.usage.reported" || event.event.type === "model.attempt.completed"))
             )
               deliver(event, { selectedThreadOnly: threadId !== undefined && event._tag !== "TitleCostUpdated" })
           })
@@ -4224,7 +4194,17 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 yield* notifyThreadSummaries
                 return
               case "delete":
-                yield* repository.remove(Thread.ThreadId.make(input.threadId))
+                yield* Effect.uninterruptible(
+                  Effect.gen(function* () {
+                    yield* repository.remove(Thread.ThreadId.make(input.threadId))
+                    deletedUsageThreads.add(input.threadId)
+                    usageSnapshot = { ...UsageCost.empty, complete: false, collectionComplete: false }
+                    usageCostsLoaded = false
+                    usageCostLoadStarted = false
+                    pendingUsageEvents.length = 0
+                  }),
+                )
+                yield* loadUsageCosts
                 yield* notifyThreadSummaries
                 return
               case "export": {

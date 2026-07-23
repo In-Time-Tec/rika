@@ -877,6 +877,8 @@ test("handoff child approval asks surface through the parent and resume after ap
         Effect.sync(() => {
           expect(waiting.status).toBe("waiting")
           expect(String(ask?.data?.execution_id).startsWith("child:execution%3Aturn-child-permission:")).toBe(true)
+          expect(ask?.executionId).toBe(ask?.data?.execution_id)
+          expect(ask?.id).toBeTypeOf("string")
           expect(approvals[0]?.executionId).toBe(String(ask?.data?.execution_id))
           expect(completed.status).toBe("completed")
           expect(requests.length).toBeGreaterThanOrEqual(4)

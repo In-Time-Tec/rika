@@ -1168,6 +1168,39 @@ it("shows the session total and updates it when child usage arrives", () => {
   expect(child.state.projections.get("parent")?.costUsd).toBe(0.75)
 })
 
+it("applies a late cost aggregate without lowering the semantic revision", () => {
+  const page = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("parent", 2),
+    hasOlder: false,
+    threadCostUsd: 0.5,
+  })
+  const current = { ...page.state, revisions: new Map([["parent", 9]]) }
+  const late = InteractiveController.update(current, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("parent"),
+    threadCostUsd: 0.75,
+    event: {
+      cursor: "late-cost",
+      sequence: 2,
+      type: "model.attempt.completed",
+      createdAt: 3,
+    },
+    revision: 2,
+  })
+
+  expect(late.state.model.costUsd).toBe(0.75)
+  expect(late.state.threadCostUsd).toBe(0.75)
+  expect(late.state.revisions.get("parent")).toBe(9)
+})
+
 it("clears working state when the semantic event stream reaches a terminal event", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",
