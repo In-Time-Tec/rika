@@ -306,6 +306,53 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect(
+    "authorizes replacement after a terminal child is pruned and retries after descendant inspection errors",
+    () =>
+      Effect.gen(function* () {
+        const turn = replacementTurn()
+        const child = AgentDepth.childExecutionId(turn.id, "terminal-child")
+        const turns = yield* TurnRepository.makeMemory([turn])
+        const childInspection = yield* Ref.make<"error" | "absent">("error")
+        const inspectedBackend = ExecutionBackend.Service.of({
+          ...backend,
+          inspect: (turnId) =>
+            Effect.gen(function* () {
+              if (turnId === child) {
+                if ((yield* Ref.get(childInspection)) === "error")
+                  return yield* ExecutionBackend.BackendError.make({ message: "child inspection failed" })
+                return undefined
+              }
+              return {
+                turnId,
+                status: "completed" as const,
+                waits: [],
+                pendingTools: [],
+                children: [{ executionId: child, status: "completed" as const }],
+              }
+            }),
+        })
+        const layer = Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        })
+        yield* Effect.gen(function* () {
+          const operation = yield* Operation.Service
+          const failed = yield* Effect.result(operation.authorizeResidentReplacement!)
+          expect(failed._tag).toBe("Failure")
+          expect((yield* turns.get(turn.id))?.status).toBe("running")
+
+          yield* Ref.set(childInspection, "absent")
+          expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
+          expect((yield* turns.get(turn.id))?.status).toBe("completed")
+        }).pipe(provideLayer(layer))
+      }),
+  )
+
   it.effect("rejects every action after an interactive session closes", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
@@ -1011,6 +1058,49 @@ describe("Operation", () => {
         })
         expect(yield* operation.authorizeResidentReplacement!).toBe("defer")
         yield* Ref.set(status, "completed")
+        expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
+      }).pipe(provideLayer(layer))
+    }),
+  )
+
+  it.effect("reconciles an absent workflow and retries replacement after workflow inspection errors", () =>
+    Effect.gen(function* () {
+      const inspection = yield* Ref.make<"error" | "absent">("error")
+      const workflowBackend = ExecutionBackend.Service.of({
+        ...backend,
+        registerWorkflows: () => Effect.succeed([]),
+        startWorkflow: () => Effect.succeed(replacementWorkflow("running")),
+        inspectWorkflow: () =>
+          Ref.get(inspection).pipe(
+            Effect.flatMap((current) =>
+              current === "error"
+                ? Effect.fail(ExecutionBackend.BackendError.make({ message: "workflow inspection failed" }))
+                : Effect.void.pipe(Effect.as(undefined)),
+            ),
+          ),
+      })
+      const layer = Layer.merge(
+        TestConsole.layer,
+        Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: TurnRepository.memoryLayer(),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        }),
+      )
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({
+          _tag: "Workflow",
+          action: "start",
+          name: "delivery",
+          runId: "replacement-workflow",
+          clientWorkspace: "/work",
+        })
+        expect((yield* Effect.result(operation.authorizeResidentReplacement!))._tag).toBe("Failure")
+        yield* Ref.set(inspection, "absent")
         expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
       }).pipe(provideLayer(layer))
     }),

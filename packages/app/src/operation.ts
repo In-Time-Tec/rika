@@ -834,7 +834,7 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
   while (pending.length > 0) {
     const current = pending.shift()!
     const inspection = yield* backend.inspect(current, ExecutionBackend.executionReference)
-    if (inspection === undefined) return false
+    if (inspection === undefined) continue
     if (!isTerminalStatus(inspection.status) || inspection.pendingTools.length > 0) return false
     for (const child of inspection.children) {
       const normalized = normalizeChildExecutionId(child.executionId)
@@ -3869,7 +3869,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   workflow.ownerTurnId,
                   workflow.workspace,
                 )
-                if (inspection === undefined || inspection.status === "running") return "defer" as const
+                if (inspection?.status === "running") return "defer" as const
                 activeWorkflows.delete(key)
               }
               yield* Ref.set(replacementState, { closed: true, active: 0 })
