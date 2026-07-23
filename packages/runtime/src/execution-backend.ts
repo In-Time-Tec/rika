@@ -68,6 +68,7 @@ import {
   toolsAtDepth,
 } from "./agent-depth"
 import * as DataBlobStore from "./data-blob-store"
+import * as StartupRecovery from "./startup-recovery"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"
 
@@ -1318,6 +1319,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   rika_agent_depth: depth,
                   rika_reasoning_effort: route.effort,
                   ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
+                  rika_execution_id: String(makeChildExecutionId(input.parentTurnId, input.childId)),
                 },
               },
               tool_names:
@@ -1590,29 +1592,40 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         inspect: Effect.fn("ExecutionBackend.inspect")(function* (turnId, reference) {
           const existing = yield* client.executions.get(executionId(turnId, reference))
           if (existing === undefined) return undefined
-          return yield* client.executions.inspect(executionId(turnId, reference)).pipe(
-            Effect.map((value) => ({
-              turnId,
-              status: Status.make(value.status),
-              ...(existing.created_at === undefined ? {} : { createdAt: existing.created_at }),
-              ...(value.last_event_cursor === undefined ? {} : { lastCursor: value.last_event_cursor }),
-              waits: value.waiting_on.map((wait) => ({
-                id: wait.wait_id,
-                mode: wait.mode,
-                createdAt: wait.created_at,
-              })),
-              pendingTools: value.pending_tool_calls.map((tool) => ({
-                callId: tool.tool_call_id,
-                name: tool.tool_name,
-                input: tool.input,
-                requestedAt: tool.requested_at,
-              })),
-              children: value.child_runs.map((child) => ({
+          const value = yield* client.executions.inspect(executionId(turnId, reference))
+          const terminal = value.status === "completed" || value.status === "failed" || value.status === "cancelled"
+          const children = yield* Effect.forEach(value.child_runs, (child) =>
+            Effect.gen(function* () {
+              const recorded = Status.make(child.status)
+              if (!terminal || recorded === "completed" || recorded === "failed" || recorded === "cancelled")
+                return { executionId: child.child_execution_id, status: recorded }
+              const live = yield* client.executions.get(Ids.ExecutionId.make(String(child.child_execution_id)))
+              return {
                 executionId: child.child_execution_id,
-                status: Status.make(child.status),
-              })),
-            })),
+                status: live === undefined ? recorded : Status.make(live.status),
+              }
+            }),
           )
+          return {
+            turnId,
+            status: Status.make(value.status),
+            ...(existing.created_at === undefined ? {} : { createdAt: existing.created_at }),
+            ...(value.last_event_cursor === undefined ? {} : { lastCursor: value.last_event_cursor }),
+            waits: value.waiting_on.map((wait) => ({
+              id: wait.wait_id,
+              mode: wait.mode,
+              createdAt: wait.created_at,
+            })),
+            pendingTools: terminal
+              ? []
+              : value.pending_tool_calls.map((tool) => ({
+                  callId: tool.tool_call_id,
+                  name: tool.tool_name,
+                  input: tool.input,
+                  requestedAt: tool.requested_at,
+                })),
+            children,
+          }
         }, Effect.mapError(error)),
         steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, createdAt, reference) {
           const accepted = yield* client.executions
@@ -1806,6 +1819,7 @@ export const layer = <
                         ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
                         rika_agent_depth: childDepth,
                         rika_reasoning_effort: selected.effort,
+                        rika_execution_id: String(base.child_execution_id),
                       },
                     },
                     tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, childDepth)),
@@ -2156,6 +2170,7 @@ export const layer = <
             languageModelLayer,
             toolRuntimeLayer,
             blobStoreLayer: DataBlobStore.layer,
+            promptAssemblerLayer: StartupRecovery.assemblerLayer(Deferred.await(relayClient)),
             childFanOutHostLayer: fanOutHandlers,
             workflowDefinitionHostLayer: workflowHandlers,
           })
