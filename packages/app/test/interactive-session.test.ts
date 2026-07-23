@@ -1183,6 +1183,85 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
+  it.effect("keeps the user entry and paging cursor when the newest Turn exceeds the wire page", () =>
+    Effect.gen(function* () {
+      const { session, turns, transcripts, older } = yield* makeHarness()
+      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      const created = yield* createTurn(turns, {
+        id: Turn.TurnId.make("oversized"),
+        threadId: older.id,
+        prompt: "oversized prompt",
+        now: 10,
+      })
+      const completed = yield* turns.setStatus(created.id, "completed", undefined, 10)
+      const units: Array<Transcript.Unit> = [
+        {
+          key: `turn:${created.id}:user`,
+          turnId: created.id,
+          order: { sequence: 0, part: 0 },
+          revision: 0,
+          content: { _tag: "Entry", role: "user", text: created.prompt },
+        },
+        {
+          key: `${created.id}:assistant:opening`,
+          turnId: created.id,
+          order: { sequence: 1, part: 0 },
+          revision: 1,
+          content: { _tag: "Entry", role: "assistant", text: "opening response" },
+        },
+        ...Array.from(
+          { length: 180 },
+          (_, index): Transcript.Unit => ({
+            key: `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
+            turnId: created.id,
+            order: { sequence: index + 2, part: 0 },
+            revision: index + 2,
+            parentId: "nested-agent",
+            content: {
+              _tag: "Block",
+              block: { _tag: "Notification", title: String(index), detail: "x".repeat(55_000) },
+            },
+          }),
+        ),
+        {
+          key: `${created.id}:assistant:final`,
+          turnId: created.id,
+          order: { sequence: 182, part: 0 },
+          revision: 182,
+          content: { _tag: "Entry", role: "assistant", text: "final response" },
+        },
+      ]
+      yield* transcripts.replace(completed, { ...Transcript.empty(created.id, created.prompt), units, revision: 182 })
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(older.id, 1)
+      yield* Effect.yieldNow
+
+      const initial = events.find((event) => event._tag === "SelectionLoaded")
+      const loaded = initial?._tag === "SelectionLoaded" ? initial.entries : []
+      const cursor = initial?._tag === "SelectionLoaded" ? initial.oldestCursor : undefined
+      const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(initial)
+      expect(new TextEncoder().encode(encoded).byteLength).toBeLessThan(10 * 1024 * 1024)
+      expect(loaded[0]?.unit.key).toBe(`turn:${created.id}:user`)
+      expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:opening`)).toBe(true)
+      expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:final`)).toBe(true)
+      expect(cursor?.key).not.toBe(`turn:${created.id}:user`)
+
+      yield* session.loadOlder
+      yield* Effect.yieldNow
+      const prepended = events.find((event) => event._tag === "TranscriptPagePrepended")
+      const olderEntries = prepended?._tag === "TranscriptPagePrepended" ? prepended.entries : []
+      expect(olderEntries.length).toBeGreaterThan(0)
+      const cursorEntry = loaded.find((entry) => entry.unit.key === cursor?.key)
+      expect(olderEntries.at(-1)?.unit.order.sequence).toBeLessThan(cursorEntry!.unit.order.sequence)
+      expect(
+        olderEntries
+          .filter((entry) => loaded.some((loadedEntry) => loadedEntry.unit.key === entry.unit.key))
+          .map((entry) => entry.unit.key),
+      ).toEqual([`turn:${created.id}:user`, `${created.id}:assistant:opening`])
+    }),
+  )
+
   it.effect("projects control failures instead of failing the session effect", () =>
     Effect.gen(function* () {
       const { session } = yield* makeHarness()

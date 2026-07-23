@@ -1769,6 +1769,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const transcriptHasUnprojectedTurns = yield* Ref.make(false)
         const transcriptHasOlder = yield* Ref.make(false)
         const projectionAdmission = yield* Semaphore.make(1)
+        const transcriptPageAdmission = yield* Semaphore.make(1)
         const backfillTree = (turn: Turn.Turn, force: boolean) =>
           projectionAdmission.withPermits(1)(backfillTranscriptTree(turn, force))
         const appendProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
@@ -2838,6 +2839,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           let storedEntries = initialBoundary <= 0 ? loadedEntries : loadedEntries.slice(initialBoundary)
           let boundedStart = storedEntries.length
           let boundedBytes = 0
+          let partialCursor: TranscriptRepository.PageCursor | undefined
           while (boundedStart > 0) {
             const entryBytes = transcriptPageEncoder.encode(encodeJson(storedEntries[boundedStart - 1])).byteLength
             if (boundedBytes + entryBytes > maximumTranscriptPageBytes && boundedStart < storedEntries.length) break
@@ -2848,12 +2850,54 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             const turnBoundary = storedEntries.findIndex(
               (entry, index) => index >= boundedStart && entry.unit.key === `turn:${entry.turn.id}:user`,
             )
-            storedEntries = storedEntries.slice(turnBoundary < 0 ? boundedStart : turnBoundary)
+            if (turnBoundary < 0) {
+              const newest = storedEntries.at(-1)
+              const userBoundary =
+                newest === undefined
+                  ? -1
+                  : storedEntries.findIndex((entry) => entry.unit.key === `turn:${newest.turn.id}:user`)
+              if (userBoundary >= 0) {
+                const userEntry = storedEntries[userBoundary]!
+                const semanticIndexes = new Set([userBoundary])
+                let semanticBytes = transcriptPageEncoder.encode(encodeJson(userEntry)).byteLength
+                for (let index = storedEntries.length - 1; index > userBoundary; index -= 1) {
+                  const entry = storedEntries[index]!
+                  if (entry.unit.parentId !== undefined || entry.unit.content._tag !== "Entry") continue
+                  const entryBytes = transcriptPageEncoder.encode(encodeJson(entry)).byteLength
+                  if (semanticBytes + entryBytes > maximumTranscriptPageBytes) continue
+                  semanticIndexes.add(index)
+                  semanticBytes += entryBytes
+                }
+                boundedStart = storedEntries.length
+                boundedBytes = semanticBytes
+                while (boundedStart > userBoundary + 1) {
+                  const index = boundedStart - 1
+                  const entryBytes = semanticIndexes.has(index)
+                    ? 0
+                    : transcriptPageEncoder.encode(encodeJson(storedEntries[index])).byteLength
+                  if (boundedBytes + entryBytes > maximumTranscriptPageBytes && boundedStart < storedEntries.length)
+                    break
+                  boundedStart -= 1
+                  boundedBytes += entryBytes
+                }
+                const cursorEntry = storedEntries[boundedStart]
+                storedEntries = storedEntries.filter((_, index) => semanticIndexes.has(index) || index >= boundedStart)
+                if (cursorEntry !== undefined)
+                  partialCursor = {
+                    createdAt: cursorEntry.turn.createdAt,
+                    turnId: cursorEntry.turn.id,
+                    sequence: cursorEntry.unit.order.sequence,
+                    part: cursorEntry.unit.order.part,
+                    key: cursorEntry.unit.key,
+                  }
+              } else storedEntries = storedEntries.slice(boundedStart)
+            } else storedEntries = storedEntries.slice(turnBoundary)
             initialBoundary = 1
           }
           if (initialBoundary > 0) {
             const oldest = storedEntries[0]
-            if (oldest !== undefined)
+            if (partialCursor !== undefined) oldestCursor = partialCursor
+            else if (oldest !== undefined)
               oldestCursor = {
                 createdAt: oldest.turn.createdAt,
                 turnId: oldest.turn.id,
@@ -2873,10 +2917,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const hasOlder = storedHasOlder || (yield* Ref.get(transcriptHasUnprojectedTurns))
           const completedAt = yield* Clock.currentTimeMillis
           if ((yield* Ref.get(selectionRequest)) !== request) return
-          if (!replace) {
-            yield* Ref.set(transcriptCursor, oldestCursor)
-            yield* Ref.set(transcriptHasOlder, hasOlder)
-          }
+          yield* Ref.set(transcriptCursor, oldestCursor)
+          yield* Ref.set(transcriptHasOlder, hasOlder)
           const threadCostUsd = usageCosts.complete ? (usageCosts.threadCostUsd.get(thread.id) ?? 0) : undefined
           const globalCostUsd = displayGlobalCostUsd(usageCosts)
           if (before === undefined && replace) {
@@ -2966,7 +3008,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           yield* Ref.set(transcriptHasOlder, false)
           const transcripts = yield* TranscriptRepository.Service
           const hasStoredSnapshot = (yield* transcripts.page(thread.id, { limit: 1 })).entries.length > 0
-          yield* loadTranscriptPage(thread, request, dispatch, undefined, !hasStoredSnapshot)
+          yield* transcriptPageAdmission.withPermits(1)(
+            loadTranscriptPage(thread, request, dispatch, undefined, !hasStoredSnapshot),
+          )
           if ((yield* Ref.get(selectionRequest)) !== request) return
           const summaries = yield* ThreadSummaryRepository.Service
           yield* summaries.markRead(thread.id, yield* Clock.currentTimeMillis)
@@ -3004,7 +3048,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               yield* Effect.forkIn(
                 Effect.logInfo("transcript.selection.repair.started").pipe(
                   Effect.annotateLogs("rika.thread.id", String(thread.id)),
-                  Effect.andThen(loadTranscriptPage(thread, request, dispatch, undefined, true, true)),
+                  Effect.andThen(
+                    transcriptPageAdmission.withPermits(1)(
+                      loadTranscriptPage(thread, request, dispatch, undefined, true, true),
+                    ),
+                  ),
                   Effect.tap(() =>
                     Effect.logInfo("transcript.selection.repair.completed").pipe(
                       Effect.annotateLogs("rika.thread.id", String(thread.id)),
@@ -3515,7 +3563,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               const before = yield* Ref.get(transcriptCursor)
               if (thread === undefined || before === undefined) return
               const request = yield* Ref.get(selectionRequest)
-              yield* loadTranscriptPage(thread, request, selectionDispatch(request), before)
+              yield* transcriptPageAdmission.withPermits(1)(
+                loadTranscriptPage(thread, request, selectionDispatch(request), before),
+              )
             }),
           ),
           previewThread: (id) =>
