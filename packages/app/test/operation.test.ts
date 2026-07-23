@@ -5,6 +5,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
+import { AgentDepth } from "@rika/runtime"
 import { Catalog as ToolCatalog } from "@rika/tools"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
@@ -188,7 +189,123 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
   }
 })
 
+const replacementWorkflow = (
+  status: ExecutionBackend.WorkflowInspection["status"],
+): ExecutionBackend.WorkflowInspection => ({
+  runId: "replacement-workflow",
+  workflow: "delivery",
+  revision: 1,
+  digest: "digest",
+  status,
+  createdAt: 1,
+  updatedAt: 1,
+})
+
 describe("Operation", () => {
+  const replacementTurn = (status: Turn.Status = "running"): Turn.Turn => ({
+    id: Turn.TurnId.make("replacement-turn"),
+    threadId: Thread.ThreadId.make("replacement-thread"),
+    prompt: "replacement",
+    executionRoute: executionRoute(),
+    status,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+
+  it.effect("reconciles a stale nonterminal row from authoritative Relay state", () =>
+    Effect.gen(function* () {
+      for (const status of ["accepted", "running", "waiting"] as const) {
+        const stale = replacementTurn(status)
+        const turns = yield* TurnRepository.makeMemory([stale])
+        const result = yield* Operation.hasActiveExecutionWork().pipe(
+          provideLayer(
+            Layer.merge(
+              Layer.succeed(TurnRepository.Service, turns),
+              Layer.succeed(ExecutionBackend.Service, {
+                ...backend,
+                inspect: () => Effect.void.pipe(Effect.as(undefined)),
+              }),
+            ),
+          ),
+        )
+        expect(result).toBe(false)
+        expect((yield* turns.get(stale.id))?.status).toBe("failed")
+      }
+    }),
+  )
+
+  it.effect("finds active work in a real recursively delegated Relay child tree", () =>
+    Effect.gen(function* () {
+      const turn = replacementTurn()
+      const turns = yield* TurnRepository.makeMemory([turn])
+      const child = AgentDepth.childExecutionId(turn.id, "task")
+      const grandchild = AgentDepth.childExecutionId(child, "oracle")
+      const inspection = (turnId: string): ExecutionBackend.Inspection => {
+        let children: ExecutionBackend.Inspection["children"] = []
+        if (turnId === turn.id) children = [{ executionId: child, status: "completed" }]
+        else if (turnId === child) children = [{ executionId: grandchild, status: "running" }]
+        return { turnId, status: "completed", waits: [], pendingTools: [], children }
+      }
+      const result = yield* Operation.hasActiveExecutionWork().pipe(
+        provideLayer(
+          Layer.merge(
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(
+              ExecutionBackend.Service,
+              ExecutionBackend.Service.of({ ...backend, inspect: (turnId) => Effect.succeed(inspection(turnId)) }),
+            ),
+          ),
+        ),
+      )
+      expect(result).toBe(true)
+      expect((yield* turns.get(turn.id))?.status).toBe("running")
+    }),
+  )
+
+  it.effect("authorizes retry only after Relay work becomes terminal and fails closed on inspection errors", () =>
+    Effect.gen(function* () {
+      const turn = replacementTurn()
+      const turns = yield* TurnRepository.makeMemory([turn])
+      const status = yield* Ref.make<Turn.Status>("running")
+      const inspectedBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) =>
+          Ref.get(status).pipe(
+            Effect.map((current) => ({ turnId, status: current, waits: [], pendingTools: [], children: [] })),
+          ),
+      })
+      const layer = Layer.merge(
+        Layer.succeed(TurnRepository.Service, turns),
+        Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+      )
+      expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
+      yield* Ref.set(status, "completed")
+      expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+      expect((yield* turns.get(turn.id))?.status).toBe("completed")
+
+      const active = replacementTurn()
+      const failingTurns = yield* TurnRepository.makeMemory([active])
+      const failed = yield* Effect.result(
+        Operation.hasActiveExecutionWork().pipe(
+          provideLayer(
+            Layer.merge(
+              Layer.succeed(TurnRepository.Service, failingTurns),
+              Layer.succeed(
+                ExecutionBackend.Service,
+                ExecutionBackend.Service.of({
+                  ...backend,
+                  inspect: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "inspection failed" })),
+                }),
+              ),
+            ),
+          ),
+        ),
+      )
+      expect(failed._tag).toBe("Failure")
+      expect((yield* failingTurns.get(active.id))?.status).toBe("running")
+    }),
+  )
+
   it.effect("rejects every action after an interactive session closes", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
@@ -860,6 +977,42 @@ describe("Operation", () => {
         "cancel:run:/client-work",
         "inspect:missing:/client-work",
       ])
+    }),
+  )
+
+  it.effect("defers replacement for a running workflow and authorizes retry after Relay reports terminal", () =>
+    Effect.gen(function* () {
+      const status = yield* Ref.make<ExecutionBackend.WorkflowInspection["status"]>("running")
+      const workflowBackend = ExecutionBackend.Service.of({
+        ...backend,
+        registerWorkflows: () => Effect.succeed([]),
+        startWorkflow: () => Ref.get(status).pipe(Effect.map(replacementWorkflow)),
+        inspectWorkflow: () => Ref.get(status).pipe(Effect.map(replacementWorkflow)),
+      })
+      const layer = Layer.merge(
+        TestConsole.layer,
+        Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: TurnRepository.memoryLayer(),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        }),
+      )
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({
+          _tag: "Workflow",
+          action: "start",
+          name: "delivery",
+          runId: "replacement-workflow",
+          clientWorkspace: "/work",
+        })
+        expect(yield* operation.authorizeResidentReplacement!).toBe("defer")
+        yield* Ref.set(status, "completed")
+        expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
+      }).pipe(provideLayer(layer))
     }),
   )
 

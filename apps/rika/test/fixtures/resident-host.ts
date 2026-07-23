@@ -21,6 +21,9 @@ const program = Effect.gen(function* () {
     yield* Config.string("RIKA_TEST_RESIDENT_OWNER_STARTUP_DELAY").pipe(Config.withDefault("0")),
   )
   const delayedWork = (yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))) === "1"
+  const activeWorkMilliseconds = Number(
+    yield* Config.string("RIKA_TEST_RESIDENT_ACTIVE_WORK_MILLIS").pipe(Config.withDefault("0")),
+  )
   const uninterruptibleOwner =
     (yield* Config.string("RIKA_TEST_RESIDENT_UNINTERRUPTIBLE_OWNER").pipe(Config.withDefault("0"))) === "1"
   const outboundCapacity = yield* Config.int("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault(1_024))
@@ -42,7 +45,6 @@ const program = Effect.gen(function* () {
     startupHoldMilliseconds: Number(startupHold),
     outboundCapacity,
     onReady: ResidentProcessStartup.signalReady,
-    hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
     owner: (interactive) =>
       Effect.gen(function* () {
         yield* append("owner-acquisitions.log", `${process.pid}\n`)
@@ -60,6 +62,8 @@ const program = Effect.gen(function* () {
           ),
         )
         return Operation.Service.of({
+          hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
+          authorizeResidentReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
           run: (input) => {
             if (input._tag !== "Interactive")
               return Effect.suspend(() => {
@@ -80,7 +84,9 @@ const program = Effect.gen(function* () {
                       ? append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
                       : Effect.void,
                   ),
-                  Effect.andThen(Effect.never),
+                  Effect.andThen(
+                    delegated && activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never,
+                  ),
                   Effect.ensuring(
                     Effect.sync(() => {
                       activeWork -= delegated ? 2 : 1

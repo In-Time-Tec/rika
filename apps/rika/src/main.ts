@@ -3051,6 +3051,22 @@ if (import.meta.main) {
             ),
           )
           return Operation.Service.of({
+            hasActiveExecutionWork: loadProduct.pipe(
+              Effect.flatMap((service) => service.hasActiveExecutionWork ?? Effect.succeed(true)),
+              Effect.mapError((error) =>
+                Schema.is(Operation.OperationUnavailable)(error)
+                  ? error
+                  : Operation.OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+              ),
+            ),
+            authorizeResidentReplacement: loadProduct.pipe(
+              Effect.flatMap((service) => service.authorizeResidentReplacement ?? Effect.succeed("defer" as const)),
+              Effect.mapError((error) =>
+                Schema.is(Operation.OperationUnavailable)(error)
+                  ? error
+                  : Operation.OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+              ),
+            ),
             run: (input) => {
               if (input._tag === "Auth") return Effect.scoped(Operation.runAuth(input, authOperations, process.cwd()))
               return loadProduct.pipe(
@@ -3066,17 +3082,6 @@ if (import.meta.main) {
         }),
       ),
     )
-  const hasActiveExecutionWork = TurnRepository.Service.pipe(
-    Effect.flatMap((turns) => turns.listNonterminal),
-    Effect.map((turns) => turns.some((turn) => turn.status !== "queued")),
-    provideLayerScoped(turnRepositoryLayer),
-    Effect.catch((error) =>
-      Effect.logError("resident.replacement.status_failed").pipe(
-        Effect.annotateLogs("rika.failure.kind", String(error)),
-        Effect.as(true),
-      ),
-    ),
-  )
   const observedProgram = <A, E>(role: Logging.ProcessRole, dataRoot: string, program: Effect.Effect<A, E>) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((startedAt) =>
@@ -3278,7 +3283,6 @@ if (import.meta.main) {
               environment.residentStartupHold._tag === "Some" ? environment.residentStartupHold.value : "10000",
             ),
             onReady: ResidentProcessStartup.signalReady,
-            hasActiveExecutionWork,
             owner: residentOwner,
           }),
         ).pipe(

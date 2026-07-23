@@ -128,7 +128,7 @@ export const legacyClose = (url: string) =>
 export const startOldResident = Effect.fn("ResidentTransportTest.startOldResident")(function* (
   root: string,
   recordPid: boolean = true,
-  mode: "fake-incompatible" | "legacy" | "schema-reject" | "v3" = "legacy",
+  mode: "fake-incompatible" | "legacy" | "schema-reject" | "signed-v4" | "v3" = "legacy",
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const old = yield* spawner.spawn(

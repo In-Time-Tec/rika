@@ -54,7 +54,6 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   readonly stopped: Deferred.Deferred<void>
   readonly ready: Deferred.Deferred<void>
   readonly onReady: Effect.Effect<void, ResidentService.ResidentServiceError, FileSystem.FileSystem>
-  readonly hasActiveExecutionWork: Effect.Effect<boolean>
   readonly owner: ResidentService.Owner
 }) {
   const crypto = yield* Crypto.Crypto
@@ -95,6 +94,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     readonly ended: Deferred.Deferred<void>
     readonly feedGeneration: string
     readonly commands: Map<number, Deferred.Deferred<void>>
+    readonly commandReleases: Map<number, Effect.Effect<void>>
     readonly commandQueue: Queue.Queue<{
       readonly sequence: number
       readonly cancelled: Deferred.Deferred<void>
@@ -158,6 +158,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
     >()
     const barrierAcknowledgements = new Map<number, Deferred.Deferred<void>>()
     const commands = new Map<number, Deferred.Deferred<void>>()
+    const commandReleases = new Map<number, Effect.Effect<void>>()
     const commandQueue = yield* Queue.bounded<{
       readonly sequence: number
       readonly cancelled: Deferred.Deferred<void>
@@ -356,6 +357,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       ended,
       feedGeneration,
       commands,
+      commandReleases,
       commandQueue,
       acceptCommand: (sequence) => {
         if (sequence !== nextCommandSequence) return false
@@ -414,7 +416,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         Effect.gen(function* () {
           route.sessions.delete(sessionId)
           for (const command of commands.values()) yield* Deferred.succeed(command, undefined)
+          for (const release of commandReleases.values()) yield* release
           commands.clear()
+          commandReleases.clear()
           yield* Queue.shutdown(commandQueue)
           yield* Queue.shutdown(feed)
           yield* Queue.shutdown(sendPermits)
@@ -470,6 +474,19 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   )
   const server = yield* Scope.provide(BunHttpServer.make({ hostname: "127.0.0.1", port: options.port }), serverScope)
   const operationReady = yield* Deferred.make<Operation.Interface>()
+  const hasActiveExecutionWork = Deferred.await(operationReady).pipe(
+    Effect.flatMap((operation) =>
+      operation.authorizeResidentReplacement !== undefined
+        ? operation.authorizeResidentReplacement.pipe(Effect.map((disposition) => disposition === "defer"))
+        : (operation.hasActiveExecutionWork ?? Effect.succeed(true)),
+    ),
+    Effect.catch((error) =>
+      Effect.logError("resident.replacement.status_failed").pipe(
+        Effect.annotateLogs("rika.failure.kind", String(error)),
+        Effect.as(true),
+      ),
+    ),
+  )
   const handle = Effect.fn("ResidentTransport.connection")(function* (socket: Socket.Socket) {
     const rawWriter = yield* socket.writer
     const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(options.outboundCapacity)
@@ -563,13 +580,15 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   }),
                 )
                 if (incompatible) {
-                  const replacementDelayed = message.connectRole === "launch" && (yield* options.hasActiveExecutionWork)
+                  const disposition =
+                    message.connectRole === "launch"
+                      ? yield* lifecycle.authorizeReplacement(hasActiveExecutionWork)
+                      : ("restart" as const)
+                  const replacementDelayed = disposition === "defer"
                   const response = {
                     _tag: "incompatible" as const,
-                    disposition: ResidentService.replacementDisposition({
-                      connectRole: message.connectRole,
-                      hasActiveExecutionWork: replacementDelayed,
-                    }),
+                    disposition,
+                    replacementGuard: ResidentService.replacementGuard,
                     family: "rika-resident" as const,
                     identity: options.identity,
                     clientNonce: message.clientNonce,
@@ -703,8 +722,8 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   "rika.resident.command.tag": message.command._tag,
                 }),
               )
-              const state = yield* lifecycle.state
-              if (state === "draining" || state === "stopped") {
+              const releaseReplacementWork = yield* lifecycle.reserveReplacementWork
+              if (releaseReplacementWork === undefined) {
                 yield* writer(
                   json({
                     _tag: "interactive-command-failed",
@@ -780,8 +799,15 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     ),
                   ),
                 ),
+                Effect.ensuring(releaseReplacementWork),
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    active.commandReleases.delete(message.commandSequence)
+                  }),
+                ),
               )
               active.commands.set(message.commandSequence, cancelled)
+              active.commandReleases.set(message.commandSequence, releaseReplacementWork)
               if (message.command._tag === "ResolvePermission" || message.command._tag === "Cancel")
                 yield* Effect.forkIn(
                   Effect.raceFirst(Deferred.await(cancelled), effect).pipe(
@@ -799,7 +825,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                   sequence: message.commandSequence,
                   cancelled,
                   effect,
-                })
+                }).pipe(Effect.onError(() => releaseReplacementWork))
             }
             if (message._tag === "operation") {
               if ((yield* Ref.get(requests)).has(message.requestId)) return yield* close(4400)
@@ -955,6 +981,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
                     ),
                   ),
                 ),
+                message.input._tag !== "Interactive",
               )
               if (fiber === undefined) {
                 yield* Ref.update(routes, (current) => (current.delete(requestRouteKey), current))
@@ -1042,7 +1069,6 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
   readonly startupHoldMilliseconds?: number
   readonly outboundCapacity?: number
   readonly onReady?: Effect.Effect<void, ResidentService.ResidentServiceError, FileSystem.FileSystem>
-  readonly hasActiveExecutionWork: Effect.Effect<boolean>
   readonly owner: ResidentService.Owner
 }) {
   const endpoint = yield* resolve(options.profile, options.dataRoot)
@@ -1067,7 +1093,6 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
     stopped,
     ready,
     onReady: options.onReady ?? Effect.void,
-    hasActiveExecutionWork: options.hasActiveExecutionWork,
     owner: options.owner,
   }).pipe(Effect.ensuring(releaseAdoptedStartup(endpoint.startupPath, endpoint.identity, process.pid)))
 })

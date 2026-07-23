@@ -819,8 +819,9 @@ const sessionQuiescenceCandidateLimit = 8
 const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(function* (
   backend: ExecutionBackend.Interface,
   turnId: string,
+  reference: boolean = false,
 ) {
-  const root = yield* backend.inspect(turnId)
+  const root = yield* backend.inspect(turnId, reference ? ExecutionBackend.executionReference : undefined)
   if (root === undefined) return true
   if (!isTerminalStatus(root.status) || root.pendingTools.length > 0) return false
   const pending: Array<string> = []
@@ -833,7 +834,7 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
   while (pending.length > 0) {
     const current = pending.shift()!
     const inspection = yield* backend.inspect(current, ExecutionBackend.executionReference)
-    if (inspection === undefined) continue
+    if (inspection === undefined) return false
     if (!isTerminalStatus(inspection.status) || inspection.pendingTools.length > 0) return false
     for (const child of inspection.children) {
       const normalized = normalizeChildExecutionId(child.executionId)
@@ -844,6 +845,45 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
     }
   }
   return true
+})
+
+const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?: string) =>
+  JSON.stringify([runId, ownerTurnId, workspace])
+
+export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWork")(function* () {
+  const turns = yield* TurnRepository.Service
+  const backend = yield* ExecutionBackend.Service
+  const nonterminal = (yield* turns.listNonterminal).filter((turn) => turn.status !== "queued")
+  for (const turn of nonterminal) {
+    if (turn.reviewFanOutId !== undefined) {
+      const fanOut = yield* backend.inspectFanOut(turn.reviewFanOutId)
+      if (fanOut === undefined) {
+        yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+        continue
+      }
+      if (fanOut.state === "joining" || fanOut.members.some((member) => !isTerminalStatus(member.state))) return true
+      for (const member of fanOut.members) {
+        const executionId = AgentDepth.childExecutionId(turn.id, member.childId)
+        if (!(yield* executionTreeQuiescent(backend, executionId, true))) return true
+      }
+      const status = fanOut.state === "satisfied" ? "completed" : fanOut.state
+      yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
+      continue
+    }
+    const inspection = yield* backend.inspect(turn.id)
+    if (inspection === undefined) {
+      yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+      continue
+    }
+    if (!(yield* executionTreeQuiescent(backend, turn.id))) return true
+    yield* turns.setStatus(
+      turn.id,
+      inspection.status,
+      inspection.lastCursor ?? turn.lastCursor,
+      yield* Clock.currentTimeMillis,
+    )
+  }
+  return false
 })
 
 const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(function* (
@@ -1089,10 +1129,61 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
       )
       const dependencyContext = yield* Layer.buildWithScope(dependencies, ownerScope)
       const acquiredDependencies = Layer.succeedContext(dependencyContext)
-      const acquiredBackend = Context.get(
+      const rawBackend = Context.get(
         yield* Layer.buildWithScope(options.backendLayer, ownerScope),
         ExecutionBackend.Service,
       )
+      const replacementAdmission = yield* Semaphore.make(1)
+      const replacementState = yield* Ref.make({ closed: false, active: 0 })
+      const activeWorkflows = new Map<
+        string,
+        { readonly runId: string; readonly ownerTurnId?: string; readonly workspace?: string }
+      >()
+      const withExecutionAdmission = <A, E, R>(
+        effect: Effect.Effect<A, E, R>,
+      ): Effect.Effect<A, E | ExecutionBackend.BackendError, R> =>
+        Effect.acquireUseRelease(
+          replacementAdmission.withPermits(1)(
+            Ref.modify(replacementState, (state) =>
+              state.closed ? [false, state] : [true, { ...state, active: state.active + 1 }],
+            ),
+          ),
+          (admitted): Effect.Effect<A, E | ExecutionBackend.BackendError, R> =>
+            admitted
+              ? effect
+              : Effect.fail(
+                  ExecutionBackend.BackendError.make({
+                    message: "Resident replacement has closed execution admission",
+                  }),
+                ),
+          (admitted) =>
+            admitted
+              ? Ref.update(replacementState, (state) => ({ ...state, active: Math.max(0, state.active - 1) }))
+              : Effect.void,
+        )
+      const acquiredBackend = ExecutionBackend.Service.of({
+        ...rawBackend,
+        start: (input) => withExecutionAdmission(rawBackend.start(input)),
+        invokeChild: (input) => withExecutionAdmission(rawBackend.invokeChild(input)),
+        createFanOut: (input) => withExecutionAdmission(rawBackend.createFanOut(input)),
+        startWorkflow: (name, runId, revision, ownerTurnId, workspace) =>
+          withExecutionAdmission(
+            rawBackend.startWorkflow(name, runId, revision, ownerTurnId, workspace).pipe(
+              Effect.tap((inspection) =>
+                Effect.sync(() => {
+                  const key = workflowReplacementKey(runId, ownerTurnId, workspace)
+                  if (inspection.status === "running")
+                    activeWorkflows.set(key, {
+                      runId,
+                      ...(ownerTurnId === undefined ? {} : { ownerTurnId }),
+                      ...(workspace === undefined ? {} : { workspace }),
+                    })
+                  else activeWorkflows.delete(key)
+                }),
+              ),
+            ),
+          ),
+      })
       const backendLayer = Layer.succeed(ExecutionBackend.Service, acquiredBackend)
       const extensionService =
         options.executionExtensions === undefined
@@ -1266,7 +1357,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           announce({ _tag: "ThreadTitled", threadId: String(thread.id), title })
           yield* notifyThreadSummaries
         })
-        yield* program.pipe(Effect.orElseSucceed(() => undefined))
+        yield* withExecutionAdmission(program).pipe(Effect.orElseSucceed(() => undefined))
       })
       const notifyTurnChanged = (_turn: Pick<Turn.Turn, "id" | "threadId">) =>
         PubSub.publish(turnChanges, undefined).pipe(Effect.asVoid)
@@ -3759,6 +3850,37 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         return scheduled.completed
       })
       return Service.of({
+        hasActiveExecutionWork: hasActiveExecutionWork().pipe(
+          Effect.provide(executionDependencies),
+          Effect.mapError((error) =>
+            OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+          ),
+        ),
+        authorizeResidentReplacement: replacementAdmission
+          .withPermits(1)(
+            Effect.gen(function* () {
+              const state = yield* Ref.get(replacementState)
+              if (state.closed) return "supersede" as const
+              if (state.active > 0 || (yield* hasActiveExecutionWork().pipe(Effect.provide(executionDependencies))))
+                return "defer" as const
+              for (const [key, workflow] of activeWorkflows) {
+                const inspection = yield* rawBackend.inspectWorkflow(
+                  workflow.runId,
+                  workflow.ownerTurnId,
+                  workflow.workspace,
+                )
+                if (inspection === undefined || inspection.status === "running") return "defer" as const
+                activeWorkflows.delete(key)
+              }
+              yield* Ref.set(replacementState, { closed: true, active: 0 })
+              return "supersede" as const
+            }),
+          )
+          .pipe(
+            Effect.mapError((error) =>
+              OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+            ),
+          ),
         run: Effect.fn("Operation.product.run")(function* (input) {
           if (
             input._tag === "Interactive" ||

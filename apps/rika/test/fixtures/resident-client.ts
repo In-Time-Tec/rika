@@ -33,6 +33,9 @@ const program = Effect.gen(function* () {
   const grace = yield* Config.string("RIKA_TEST_RESIDENT_GRACE").pipe(Config.withDefault("500"))
   const finalizerDelay = yield* Config.string("RIKA_TEST_RESIDENT_FINALIZER_DELAY").pipe(Config.withDefault("0"))
   const delayedWork = yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))
+  const activeWorkMilliseconds = yield* Config.string("RIKA_TEST_RESIDENT_ACTIVE_WORK_MILLIS").pipe(
+    Config.withDefault("0"),
+  )
   const startupHold = yield* Config.string("RIKA_TEST_RESIDENT_STARTUP_HOLD").pipe(Config.withDefault("0"))
   const outboundCapacity = yield* Config.string("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault("1024"))
   const stdio = yield* Stdio.Stdio
@@ -76,6 +79,7 @@ const program = Effect.gen(function* () {
             RIKA_TEST_RESIDENT_GRACE: grace,
             RIKA_TEST_RESIDENT_FINALIZER_DELAY: finalizerDelay,
             RIKA_TEST_RESIDENT_DELAYED_WORK: delayedWork,
+            RIKA_TEST_RESIDENT_ACTIVE_WORK_MILLIS: activeWorkMilliseconds,
             RIKA_TEST_RESIDENT_STARTUP_HOLD: startupHold,
             RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY: outboundCapacity,
             ...(buildIdentity === "" ? {} : { RIKA_TEST_BUILD_IDENTITY: buildIdentity }),
