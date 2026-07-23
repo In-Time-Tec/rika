@@ -1354,19 +1354,12 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       append(italic(fg(colors.amber)(" (cancelled)")))
     } else {
       append(statusIcon(failed, running, cancelled))
-      const nestedSummary =
-        agent && block.detail.length > 0
-          ? {
-              primary: detail.summary.primary,
-              secondary: `${detail.summary.secondary ?? ""} ${block.detail}`,
-            }
-          : detail.summary
       if (block.presentation.family === "shell") {
         append(fg(colors.text)(" "))
         append(dim(fg(colors.text)("$ ")))
         for (const chunk of highlightShellCommand(detail.summary.secondary?.slice(1) ?? "")[0] ?? []) append(chunk)
       } else
-        for (const [labelIndex, labelLine] of renderToolSummary(nestedSummary, {
+        for (const [labelIndex, labelLine] of renderToolSummary(detail.summary, {
           width: rowWidth - stringWidth(continuationPrefix) - (expandable ? 2 : 0),
         }).entries()) {
           if (labelIndex > 0) {
