@@ -15,8 +15,8 @@ export const Activity = Schema.Union([
   Schema.TaggedStruct("Thinking", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
   Schema.TaggedStruct("Streaming", { bytes: Schema.Finite, blockId: Schema.optionalKey(Schema.String) }),
   Schema.TaggedStruct("RunningTools", {
-    subagents: Schema.optionalKey(Schema.Number),
-    tools: Schema.optionalKey(Schema.Number),
+    subagents: Schema.optionalKey(Schema.Finite),
+    tools: Schema.optionalKey(Schema.Finite),
   }),
   Schema.TaggedStruct("Compacting", {}),
 ])

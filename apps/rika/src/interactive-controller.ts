@@ -190,7 +190,8 @@ const activityAfter = (
   model: ViewState.Model,
 ): ViewState.Activity | undefined => {
   const runningActivity = ViewState.runningToolsActivity(model)
-  const running = (runningActivity.subagents ?? 0) + (runningActivity.tools ?? 0) > 0
+  const running =
+    runningActivity._tag === "RunningTools" && (runningActivity.subagents ?? 0) + (runningActivity.tools ?? 0) > 0
   if (event.type.includes("reasoning"))
     return running
       ? runningActivity
