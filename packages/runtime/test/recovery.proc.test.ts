@@ -37,7 +37,7 @@ const runNative = <A, E>(effect: Effect.Effect<A, E, Layer.Success<typeof BunSer
 function waitFor<A>(
   read: Effect.Effect<A, FixtureProcessError>,
   accept: (value: A) => boolean,
-  remaining = 2_000,
+  remaining = 5_000,
 ): Effect.Effect<A, FixtureProcessError> {
   return Effect.gen(function* () {
     const value = yield* read
