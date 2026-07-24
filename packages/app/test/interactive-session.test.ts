@@ -47,6 +47,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   toolApprovalWaitIds: ReadonlyArray<string> = [],
   pagedEvents?: ReadonlyArray<ExecutionBackend.Event>,
   stalePageCursor: boolean = false,
+  turnPageRequests?: Ref.Ref<ReadonlyArray<TurnRepository.PageCursor | undefined>>,
 ) {
   const older = thread("older", 1)
   const latest = thread("latest", 2)
@@ -180,9 +181,19 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
     resolvePermission: (waitId, decision, now) =>
       record("permission", waitId, decision, now).pipe(Effect.andThen(Deferred.succeed(permissionResolved, undefined))),
   })
+  const selectionTurns: TurnRepository.Interface =
+    turnPageRequests === undefined
+      ? turns
+      : {
+          ...turns,
+          page: (threadId, options) =>
+            Ref.update(turnPageRequests, (requests) => [...requests, options?.before]).pipe(
+              Effect.andThen(turns.page(threadId, options)),
+            ),
+        }
   const layer = Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
@@ -1088,7 +1099,8 @@ describe("InteractiveSession controls", () => {
 
   it.effect("bounds the initial page and exhausts older pages without duplicate units", () =>
     Effect.gen(function* () {
-      const { session, turns, older } = yield* makeHarness()
+      const turnPageRequests = yield* Ref.make<ReadonlyArray<TurnRepository.PageCursor | undefined>>([])
+      const { session, turns, older } = yield* makeHarness(false, [], undefined, false, turnPageRequests)
       yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
       for (let index = 0; index < 240; index += 1) {
         const created = yield* createTurn(turns, {
@@ -1108,6 +1120,9 @@ describe("InteractiveSession controls", () => {
       const loaded = initial?._tag === "SelectionLoaded" ? [...initial.entries] : []
       expect(loaded.length).toBeGreaterThan(0)
       expect(loaded.length).toBeLessThanOrEqual(200)
+      const turnPagesBeforeIdle = (yield* Ref.get(turnPageRequests)).length
+      for (let attempt = 0; attempt < 100; attempt += 1) yield* Effect.yieldNow
+      expect(yield* Ref.get(turnPageRequests)).toHaveLength(turnPagesBeforeIdle)
       let hasOlder = true
       for (let page = 0; page < 10 && hasOlder; page += 1) {
         const previous = events.filter((event) => event._tag === "TranscriptPagePrepended").length
@@ -1147,6 +1162,7 @@ describe("InteractiveSession controls", () => {
       expect(loaded.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === "turn:history-000:user")).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === "turn:history-239:user")).toBe(true)
+      expect((yield* Ref.get(turnPageRequests)).length).toBeGreaterThan(turnPagesBeforeIdle)
     }),
   )
 
@@ -1287,7 +1303,7 @@ describe("InteractiveSession controls", () => {
           yield* Effect.yieldNow
         const prepended = events.findLast((event) => event._tag === "TranscriptPagePrepended")
         if (prepended?._tag !== "TranscriptPagePrepended") break
-        olderEntries.push(...prepended.entries)
+        olderEntries.unshift(...prepended.entries)
         hasOlder = prepended.hasOlder
       }
       expect(olderEntries.length).toBeGreaterThan(0)

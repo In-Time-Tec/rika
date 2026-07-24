@@ -97,7 +97,206 @@ const interactiveLayer = (
     interactive: (_, session) => Deferred.succeed(registration, session).pipe(Effect.andThen(Effect.never)),
   })
 
+const terminalTransitionScenario = (
+  inspectedStatus: "failed" | "cancelled",
+  deferred: boolean,
+  overlapOlder: boolean = false,
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const selected = thread(`terminal-${inspectedStatus}-${deferred ? "deferred" : "initial"}`)
+      const target: Turn.Turn = {
+        id: Turn.TurnId.make(`turn-${selected.id}`),
+        threadId: selected.id,
+        prompt: "terminal transition",
+        executionRoute: Turn.testExecutionRoute(),
+        status: "completed",
+        lastCursor: "terminal-cursor",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const historical: Turn.Turn = {
+        ...target,
+        id: Turn.TurnId.make(`historical-${selected.id}`),
+        prompt: "historical",
+        status: "queued",
+        createdAt: 0,
+        updatedAt: 0,
+      }
+      const repository = yield* ThreadRepository.makeMemory([selected])
+      const turns = yield* TurnRepository.makeMemory(overlapOlder ? [historical, target] : [target])
+      const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
+      const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
+      const stale = Transcript.project(target.id, target.prompt, [
+        {
+          cursor: "terminal-cursor",
+          sequence: 1,
+          type: "execution.completed",
+          createdAt: 1,
+        },
+      ])
+      yield* transcripts.replace(target, stale)
+      if (overlapOlder)
+        yield* transcripts.replace(historical, {
+          ...Transcript.empty(historical.id, historical.prompt),
+          units: Array.from(
+            { length: 220 },
+            (_, index): Transcript.Unit => ({
+              key: `historical-nested-${index}`,
+              turnId: historical.id,
+              order: { sequence: index + 1, part: 0 },
+              revision: index + 1,
+              parentId: "historical-child",
+              content: {
+                _tag: "Block",
+                block: { _tag: "Notification", title: String(index), detail: "x".repeat(40_000) },
+              },
+            }),
+          ),
+          revision: 220,
+        })
+      const pageCount = deferred ? 34 : 1
+      const replayEvents: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: pageCount }, (_, index) => {
+        const terminal = index === pageCount - 1
+        return {
+          cursor: terminal ? "terminal-cursor" : `cursor-${index}`,
+          sequence: index + 1,
+          type: terminal ? (`execution.${inspectedStatus}` as const) : "execution.started",
+          createdAt: index + 1,
+          ...(terminal && inspectedStatus === "failed" ? { text: "durable failure" } : {}),
+        }
+      })
+      const terminalPageRequested = yield* Deferred.make<void>()
+      const releaseTerminalPage = yield* Deferred.make<void>()
+      const backend = ExecutionBackend.Service.of({
+        ...baseBackend,
+        inspect: (executionId) =>
+          Effect.succeed({
+            turnId: executionId,
+            status: inspectedStatus,
+            lastCursor: "terminal-cursor",
+            waits: [],
+            pendingTools: [],
+            children: [],
+          }),
+        replay: (executionId) => Effect.succeed({ turnId: executionId, status: inspectedStatus, events: replayEvents }),
+        pageEvents: (executionId, _direction, cursor) => {
+          const index = cursor === undefined ? 0 : replayEvents.findIndex((event) => event.cursor === cursor) + 1
+          const event = replayEvents[index]
+          const page = {
+            events: event === undefined ? [] : [event],
+            hasMore: index < replayEvents.length - 1,
+            ...(event === undefined ? {} : { oldestCursor: event.cursor, newestCursor: event.cursor }),
+          }
+          return overlapOlder && index === replayEvents.length - 1
+            ? Deferred.succeed(terminalPageRequested, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseTerminalPage)),
+                Effect.as(page),
+              )
+            : Effect.succeed(page)
+        },
+      })
+      const olderPageRequested = yield* Deferred.make<void>()
+      const releaseOlderPage = yield* Deferred.make<void>()
+      let blockOlderPage = false
+      const selectionTranscripts: TranscriptRepository.Interface = {
+        ...transcripts,
+        page: (threadId, options) =>
+          overlapOlder && blockOlderPage && options?.before !== undefined
+            ? Deferred.succeed(olderPageRequested, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseOlderPage)),
+                Effect.andThen(transcripts.page(threadId, options)),
+              )
+            : transcripts.page(threadId, options),
+      }
+      const registration = yield* Deferred.make<Operation.InteractiveSession>()
+      const context = yield* Layer.build(
+        interactiveLayer(
+          repository,
+          turns,
+          backend,
+          registration,
+          Effect.die("unused"),
+          Effect.die("unused"),
+          selectionTranscripts,
+        ),
+      )
+      const operation = Context.get(context, Operation.Service)
+      const operationFiber = yield* Effect.forkChild(
+        operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+      )
+      const session = yield* Deferred.await(registration)
+      const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+      const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
+
+      yield* session.selectThread(selected.id, 1)
+      let selectedEvent = yield* Queue.take(events)
+      while (selectedEvent._tag !== "SelectionLoaded") selectedEvent = yield* Queue.take(events)
+      let deliveredEntries: ReadonlyArray<TranscriptRepository.Entry>
+      if (!deferred) {
+        expect(selectedEvent.entries).not.toHaveLength(0)
+        expect(selectedEvent.entries.every((entry) => entry.turn.status === inspectedStatus)).toBe(true)
+        expect(selectedEvent.entries.every((entry) => entry.turn.lastCursor === "terminal-cursor")).toBe(true)
+        deliveredEntries = selectedEvent.entries
+      } else if (!overlapOlder) {
+        let replacement = yield* Queue.take(events)
+        while (replacement._tag !== "TranscriptReplaced") replacement = yield* Queue.take(events)
+        expect(replacement.entries).not.toHaveLength(0)
+        expect(replacement.entries.every((entry) => entry.turn.status === inspectedStatus)).toBe(true)
+        expect(replacement.entries.every((entry) => entry.turn.lastCursor === "terminal-cursor")).toBe(true)
+        deliveredEntries = replacement.entries
+      } else {
+        expect(selectedEvent.hasOlder).toBe(true)
+        blockOlderPage = true
+        yield* Deferred.await(terminalPageRequested)
+        const olderFiber = yield* Effect.forkChild(session.loadOlder)
+        yield* Deferred.await(olderPageRequested)
+        yield* Deferred.succeed(releaseTerminalPage, undefined)
+        for (let attempt = 0; attempt < 100; attempt += 1) yield* Effect.yieldNow
+        expect((yield* Queue.takeAll(events)).some((event) => event._tag === "TranscriptReplaced")).toBe(false)
+        yield* Deferred.succeed(releaseOlderPage, undefined)
+        yield* Fiber.join(olderFiber)
+        for (let attempt = 0; attempt < 400; attempt += 1) yield* Effect.yieldNow
+        const ordered = yield* Queue.takeAll(events)
+        const tags = ordered.map((event) => event._tag)
+        expect(tags).toContain("TranscriptPagePrepended")
+        expect(tags).toContain("TranscriptReplaced")
+        expect(tags).not.toContain("ExecutionFailed")
+        expect(ordered.findIndex((event) => event._tag === "TranscriptPagePrepended")).toBeLessThan(
+          ordered.findIndex((event) => event._tag === "TranscriptReplaced"),
+        )
+        const replacement = ordered.find((event) => event._tag === "TranscriptReplaced")
+        if (replacement?._tag !== "TranscriptReplaced") return yield* Effect.die("Missing replacement")
+        deliveredEntries = replacement.entries
+      }
+      expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === inspectedStatus)).toBe(true)
+      expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === "complete")).toBe(false)
+      const stored = yield* transcripts.get(target.id)
+      expect(stored?.units.some((unit) => unit.executionOutcome?.status === inspectedStatus)).toBe(true)
+      expect(stored?.units.some((unit) => unit.executionOutcome?.status === "complete")).toBe(false)
+
+      yield* Fiber.interrupt(feed)
+      yield* Fiber.interrupt(operationFiber)
+    }),
+  )
+
 describe("interactive session extensions", () => {
+  it.effect("adopts completed to failed and cancelled transitions in SelectionLoaded", () =>
+    Effect.forEach(["failed", "cancelled"] as const, (status) => terminalTransitionScenario(status, false), {
+      discard: true,
+    }),
+  )
+
+  it.effect("adopts completed to failed and cancelled transitions in deferred replacements", () =>
+    Effect.forEach(["failed", "cancelled"] as const, (status) => terminalTransitionScenario(status, true), {
+      discard: true,
+    }),
+  )
+
+  it.effect("serializes a deferred replacement behind an in-flight older page", () =>
+    terminalTransitionScenario("failed", true, true),
+  )
+
   it.effect("submits while historical cost reconciliation is still running", () =>
     Effect.scoped(
       Effect.gen(function* () {

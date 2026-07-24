@@ -73,7 +73,7 @@ const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   eventType: input.eventType ?? "press",
 })
 
-it("projects prepended pages without rebuilding the loaded transcript", () => {
+it("rebuilds prepended pages in authoritative transcript order", () => {
   const initial = initialState()
   const page = InteractiveController.update(initial, {
     _tag: "SelectionLoaded",
@@ -96,7 +96,6 @@ it("projects prepended pages without rebuilding the loaded transcript", () => {
     hasOlder: true,
     threadCostUsd: 0,
   })
-  const loadedAnswer = page.state.model.entries.at(-1)
   const prepended = InteractiveController.update(page.state, {
     _tag: "TranscriptPagePrepended",
     selectionEpoch: 1,
@@ -117,7 +116,6 @@ it("projects prepended pages without rebuilding the loaded transcript", () => {
   })
 
   expect(prepended.state.model.entries.map((value) => value.text)).toEqual(["old", "old answer", "new", "new answer"])
-  expect(prepended.state.model.entries.some((value) => value === loadedAnswer)).toBe(true)
 })
 
 it("clears queue edit mode when a selection loads a thread", () => {
@@ -487,6 +485,45 @@ it("normalizes malformed page order and duplicate units across selection and pre
   ])
   expect(prepended.state.entries).toEqual(selected.state.entries)
   expect(prepended.state.model.entries.map((entry) => entry.text)).toEqual(["old", "old answer", "new", "new answer"])
+})
+
+it("inserts an older partial Turn page between retained opening and final entries", () => {
+  const base = entries("partial", 2)
+  const turn = base[0]!.turn
+  const entry = (unitKey: string, sequence: number, text: string) => ({
+    turn,
+    unit: {
+      key: unitKey,
+      turnId: turn.id,
+      order: { sequence, part: 0 },
+      revision: sequence,
+      content: { _tag: "Entry" as const, role: "assistant" as const, text },
+    },
+    projectionRevision: 222,
+    projectionModelPhase: 0,
+  })
+  const selected = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: [entry("opening", 1, "opening"), entry("final", 222, "final")],
+    hasOlder: true,
+    threadCostUsd: 0,
+  })
+  const prepended = InteractiveController.update(selected.state, {
+    _tag: "TranscriptPagePrepended",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    entries: [entry("middle-3", 3, "middle 3"), entry("middle-2", 2, "middle 2")],
+    hasOlder: false,
+    threadCostUsd: 0,
+  })
+
+  expect(prepended.state.entries.map((value) => value.unit.key)).toEqual(["opening", "middle-2", "middle-3", "final"])
+  expect(prepended.state.model.entries.map((value) => value.text)).toEqual(["opening", "middle 2", "middle 3", "final"])
 })
 
 it("projects replayed child execution tools beneath the matching subagent", () => {

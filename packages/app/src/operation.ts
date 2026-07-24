@@ -765,7 +765,7 @@ type SelectionEpochState = {
   readonly inspections: Map<string, ExecutionBackend.Inspection | undefined>
   readonly eventPages: Map<string, ExecutionBackend.EventPage>
   readonly replays: Map<string, ExecutionBackend.Result>
-  readonly pendingTurns: Map<string, Turn.Turn>
+  readonly pendingTurns: Map<string, { readonly turn: Turn.Turn; readonly window: number }>
   readonly backfills: Map<string, ChildBackfillWork>
   readonly initialRepairBudget: RepairBudget
   transcriptCursor: TranscriptRepository.PageCursor | undefined
@@ -775,17 +775,37 @@ type SelectionEpochState = {
   turnPages: number
   transcriptPages: number
   continuationRunning: boolean
+  requestedWindow: number
 }
 
 const invalidateSelectionTurn = (state: SelectionEpochState, turn: Turn.Turn) => {
   const turnId = String(turn.id)
   state.authoritativeTurns.set(turnId, turn)
   state.authoritativeVersions.set(turnId, { status: turn.status, lastCursor: turn.lastCursor })
-  state.inspections.clear()
-  state.eventPages.clear()
-  state.replays.clear()
+  const backfill = state.backfills.get(turnId)
+  const executionIds = new Set([
+    turnId,
+    ...(backfill === undefined ? [] : [...backfill.seen]),
+    ...(backfill === undefined ? [] : backfill.pending.map((pending) => pending.executionId)),
+    ...(backfill === undefined ? [] : backfill.descendants.map((descendant) => descendant.executionId)),
+    ...[...state.descendants]
+      .filter(([, descendant]) => String(descendant.rootTurnId) === turnId)
+      .map(([executionId]) => executionId),
+  ])
+  const belongsToTurn = (key: string) =>
+    [...executionIds].some((executionId) =>
+      ["root", "reference"].some((scope) => {
+        const prefix = `${scope}:${executionId}`
+        return key === prefix || key.startsWith(`${prefix}:`)
+      }),
+    )
+  for (const key of state.inspections.keys()) if (belongsToTurn(key)) state.inspections.delete(key)
+  for (const key of state.eventPages.keys()) if (belongsToTurn(key)) state.eventPages.delete(key)
+  for (const key of state.replays.keys()) if (belongsToTurn(key)) state.replays.delete(key)
+  for (const [executionId, descendant] of state.descendants)
+    if (String(descendant.rootTurnId) === turnId) state.descendants.delete(executionId)
   state.backfills.delete(turnId)
-  state.pendingTurns.set(turnId, turn)
+  state.pendingTurns.set(turnId, { turn, window: state.requestedWindow })
 }
 
 const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")(function* (
@@ -1752,16 +1772,17 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 events: [],
                 committed: false,
               }
-        let selectedUsage:
-          | {
-              readonly request: number
-              readonly threadId: string
-              snapshot: UsageCost.Snapshot | undefined
-              readonly pending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
-            }
-          | undefined
+        type SelectionUsage = {
+          readonly request: number
+          readonly threadId: string
+          snapshot: UsageCost.Snapshot | undefined
+          readonly pending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
+        }
+        let selectedUsage: SelectionUsage | undefined
+        let candidateUsage: SelectionUsage | undefined
+        let activeSelectionState: SelectionEpochState | undefined
+        let candidateSelectionState: SelectionEpochState | undefined
         const bufferSelectionEvent = (event: InteractiveEvent) => {
-          if (InteractiveFeedOverflow.isCritical(event)) return false
           const loading = selectionLoad
           if (loading === undefined || interactiveEventThreadId(event) !== loading.threadId) return false
           const selectedEvent = withSelectionEpoch(event, loading.epoch)
@@ -1889,35 +1910,32 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 current === epoch ? [true, loading.previousEpoch] : [false, current],
               )
               if (!restored) return
-              selectedThreadId = loading.previousThreadId
-              currentSelectionEpoch = loading.previousEpoch
+              if (candidateSelectionState?.epoch === epoch) candidateSelectionState = undefined
+              if (candidateUsage?.request === epoch) candidateUsage = undefined
+              if (loading.previousThreadId !== loading.threadId) return
+              if (loading.overflow === undefined) {
+                for (const event of loading.events)
+                  deliver(event, { selectionRequest: loading.previousEpoch, selectedThreadOnly: true })
+                return
+              }
+              for (const event of InteractiveFeedOverflow.events(
+                loading.overflow,
+                loading.previousEpoch,
+                "Reload activity exceeded its bounded live window",
+              ))
+                deliver(event, { selectionRequest: loading.previousEpoch, selectedThreadOnly: true })
               return
             }
             if (loading.overflow === undefined) {
               for (const event of loading.events) deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
               return
             }
-            const threadId = Thread.ThreadId.make(loading.threadId)
-            if (loading.overflow.transcriptThreadIds.size > 0)
-              deliver(
-                {
-                  _tag: "TranscriptResyncRequired",
-                  selectionEpoch: epoch,
-                  threadId,
-                  reason: "Selection activity exceeded its bounded live window",
-                },
-                { selectionRequest: epoch, selectedThreadOnly: true },
-              )
-            if (loading.overflow.queueThreadIds.size > 0)
-              deliver(
-                {
-                  _tag: "QueueResyncRequired",
-                  selectionEpoch: epoch,
-                  threadId,
-                  reason: "Selection queue activity exceeded its bounded live window",
-                },
-                { selectionRequest: epoch, selectedThreadOnly: true },
-              )
+            for (const event of InteractiveFeedOverflow.events(
+              loading.overflow,
+              epoch,
+              "Selection activity exceeded its bounded live window",
+            ))
+              deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
           })
         const emit = (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => {
           dispatch(event)
@@ -1962,9 +1980,11 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         let shellPermissionAlways = shellPermission === "allow"
         const interactiveThread = yield* Ref.make<Thread.Thread | undefined>(undefined)
         const selectionRequest = yield* Ref.make(0)
-        let activeSelectionState: SelectionEpochState | undefined
+        const isCurrentSelectionState = (state: SelectionEpochState) =>
+          activeSelectionState === state || candidateSelectionState === state
         const projectionAdmission = yield* Semaphore.make(1)
         const transcriptPageAdmission = yield* Semaphore.make(1)
+        const selectionAdmission = yield* Semaphore.make(1)
         const backfillTree = (
           turn: Turn.Turn,
           force: boolean,
@@ -2001,7 +2021,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               budget.nodes += 1
               return backend.inspect(executionId, reference).pipe(
                 Effect.filterOrFail(
-                  () => activeSelectionState === state,
+                  () => isCurrentSelectionState(state),
                   () => selectionRepairDeferred("nodes"),
                 ),
                 Effect.tap((inspection) => Effect.sync(() => state.inspections.set(key, inspection))),
@@ -2014,7 +2034,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               return reservePage.pipe(
                 Effect.andThen(backend.replay(executionId, after, reference)),
                 Effect.filterOrFail(
-                  () => activeSelectionState === state,
+                  () => isCurrentSelectionState(state),
                   () => selectionRepairDeferred("pages"),
                 ),
                 Effect.tap((result) => consume(result.events)),
@@ -2031,7 +2051,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     return reservePage.pipe(
                       Effect.andThen(backend.pageEvents!(executionId, direction, cursor, limit, reference)),
                       Effect.filterOrFail(
-                        () => activeSelectionState === state,
+                        () => isCurrentSelectionState(state),
                         () => selectionRepairDeferred("pages"),
                       ),
                       Effect.flatMap((page) =>
@@ -2063,10 +2083,16 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const closed = yield* Deferred.make<void>()
         const sessionScope = yield* Scope.make()
         let selectionBackground: Array<Fiber.Fiber<unknown, unknown>> = []
+        let selectionLoadFiber: Fiber.Fiber<unknown, unknown> | undefined
         const interruptSelectionBackground = Effect.suspend(() => {
           const fibers = selectionBackground
           selectionBackground = []
           return Effect.forEach(fibers, Fiber.interrupt, { discard: true })
+        })
+        const interruptSelectionLoad = Effect.suspend(() => {
+          const fiber = selectionLoadFiber
+          selectionLoadFiber = undefined
+          return fiber === undefined ? Effect.void : Fiber.interrupt(fiber)
         })
         type ChildFollowerSelection = {
           readonly generation: number
@@ -2978,12 +3004,40 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             after = next
           }
         })
+        const rebuildExecutionProjection = Effect.fn("Operation.interactive.rebuildExecutionProjection")(function* (
+          backend: ExecutionBackend.Interface,
+          turn: Turn.Turn,
+        ) {
+          let projection = Transcript.empty(turn.id, turn.prompt)
+          if (backend.pageEvents === undefined) {
+            const result = yield* backend.replay(turn.id)
+            projection = Transcript.project(turn.id, turn.prompt, rootExecutionEvents(turn.id, result.events))
+          } else {
+            const cursors = new Set<string>()
+            let after: string | undefined
+            while (true) {
+              const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
+              for (const event of rootExecutionEvents(turn.id, page.events).toSorted(
+                (left, right) => left.sequence - right.sequence,
+              ))
+                projection = Transcript.applyEvent(projection, event)
+              if (!page.hasMore) break
+              const next = page.newestCursor
+              if (next === undefined || cursors.has(next))
+                return yield* operationError(`Transcript event cursor did not advance for Turn ${turn.id}`)
+              cursors.add(next)
+              after = next
+            }
+          }
+          const transcripts = yield* TranscriptRepository.Service
+          yield* projectionAdmission.withPermits(1)(transcripts.replace(turn, projection))
+        })
         const repairSelectionTurn = Effect.fn("Operation.interactive.repairSelectionTurn")(function* (
           state: SelectionEpochState,
           backend: ExecutionBackend.Interface,
           turn: Turn.Turn,
         ) {
-          if (activeSelectionState !== state) return
+          if (!isCurrentSelectionState(state)) return
           const transcripts = yield* TranscriptRepository.Service
           const projected = yield* transcripts.get(turn.id)
           if (turn.status === "queued") {
@@ -2991,7 +3045,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             return
           }
           const execution = yield* backend.inspect(turn.id)
-          if (activeSelectionState !== state) return
+          if (!isCurrentSelectionState(state)) return
           let authoritativeTurn = turn
           let descendants: ReadonlyArray<{
             readonly executionId: string
@@ -3003,17 +3057,20 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
               )
           } else {
-            authoritativeTurn =
-              isTerminalStatus(execution.status) && !isTerminalStatus(turn.status)
-                ? {
-                    ...turn,
-                    status: execution.status,
-                    ...(execution.lastCursor === undefined ? {} : { lastCursor: execution.lastCursor }),
-                  }
-                : turn
-            if (projected === undefined || projected.checkpointCursor !== execution.lastCursor) {
+            const terminalTransition = isTerminalStatus(execution.status) && execution.status !== turn.status
+            if (isTerminalStatus(execution.status)) {
+              const { lastCursor: _lastCursor, ...turnWithoutCursor } = turn
+              authoritativeTurn =
+                execution.lastCursor === undefined
+                  ? { ...turnWithoutCursor, status: execution.status }
+                  : { ...turn, status: execution.status, lastCursor: execution.lastCursor }
+            }
+            if (terminalTransition) {
+              yield* rebuildExecutionProjection(backend, authoritativeTurn)
+              if (!isCurrentSelectionState(state)) return
+            } else if (projected === undefined || projected.checkpointCursor !== execution.lastCursor) {
               yield* projectExecutionPages(backend, authoritativeTurn, execution.status)
-              if (activeSelectionState !== state) return
+              if (!isCurrentSelectionState(state)) return
             }
             const latest = yield* transcripts.get(turn.id)
             if (latest !== undefined) {
@@ -3023,7 +3080,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               descendants = yield* backfillTree(authoritativeTurn, true, backend, work)
               state.backfills.delete(key)
             }
-            if (activeSelectionState !== state) return
+            if (!isCurrentSelectionState(state)) return
           }
           state.authoritativeTurns.set(String(turn.id), authoritativeTurn)
           state.authoritativeVersions.set(String(turn.id), {
@@ -3062,13 +3119,15 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               repairSelectionTurn(state, backend, turn).pipe(
                 Effect.catchTag("ExecutionBackendError", (error) =>
                   isSelectionRepairDeferred(error)
-                    ? Effect.sync(() => state.pendingTurns.set(String(turn.id), turn))
+                    ? Effect.sync(() =>
+                        state.pendingTurns.set(String(turn.id), { turn, window: state.requestedWindow }),
+                      )
                     : Effect.fail(error),
                 ),
               ),
             { concurrency: 1, discard: true },
           )
-          if (activeSelectionState !== state) return false
+          if (!isCurrentSelectionState(state)) return false
           state.projectedTurnCursor = page.oldestCursor
           state.hasUnprojectedTurns = page.hasOlder
           return true
@@ -3085,7 +3144,10 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const turns = yield* TurnRepository.Service
           const transcripts = yield* TranscriptRepository.Service
           let transcriptPages = 0
-          if (before !== undefined) state.turnPages = 0
+          if (before !== undefined) {
+            state.turnPages = 0
+            state.requestedWindow += 1
+          }
           if (before === undefined && repair) {
             if (!(yield* projectTurnPage(state))) return
             while (state.hasUnprojectedTurns && transcriptPages < selectionRepairTranscriptPageLimit - 1) {
@@ -3110,7 +3172,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               if (turnBefore !== undefined && !(yield* projectTurnPage(state, turnBefore))) return
             }
           }
-          if (activeSelectionState !== state) return
+          if (!isCurrentSelectionState(state)) return
           const page = yield* transcripts.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
           transcriptPages += 1
           if (
@@ -3292,7 +3354,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const deliveredEntries =
             before === undefined ? entries : entries.filter((entry) => !loadedKeys.has(entry.unit.key))
           const completedAt = yield* Clock.currentTimeMillis
-          if (activeSelectionState !== state) return
+          if (!isCurrentSelectionState(state)) return
           state.transcriptCursor = oldestCursor
           state.hasOlder = hasOlder
           if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
@@ -3301,8 +3363,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const storedActiveTurn = yield* turns.findActive(thread.id)
-            yield* activateChildFollowers(thread.id)
-            if (activeSelectionState !== state || (yield* Ref.get(selectionRequest)) !== request) return
+            if (!isCurrentSelectionState(state) || (yield* Ref.get(selectionRequest)) !== request) return
             yield* Effect.forEach(
               state.authoritativeVersions,
               ([turnId, version]) =>
@@ -3330,37 +3391,50 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               inspectedActiveTurn !== undefined && isTerminalStatus(inspectedActiveTurn.status)
                 ? undefined
                 : (inspectedActiveTurn ?? storedActiveTurn)
-            yield* Effect.uninterruptible(
-              Effect.gen(function* () {
-                if (activeSelectionState !== state) return
-                yield* Ref.set(interactiveThread, thread)
-                selectedThreadId = String(thread.id)
-                const loading = selectionLoad
-                if (loading !== undefined && loading.epoch === request && loading.threadId === String(thread.id))
+            yield* selectionAdmission.withPermits(1)(
+              Effect.uninterruptible(
+                Effect.gen(function* () {
+                  if ((yield* Ref.get(selectionRequest)) !== request || candidateSelectionState !== state) return
+                  const usage = candidateUsage
+                  if (usage === undefined || usage.request !== request) return
+                  const loading = selectionLoad
+                  if (loading === undefined || loading.epoch !== request || loading.threadId !== String(thread.id))
+                    return
+                  yield* interruptSelectionBackground
+                  yield* activateChildFollowers(thread.id)
+                  activeSelectionState = state
+                  candidateSelectionState = undefined
+                  selectedUsage = usage
+                  candidateUsage = undefined
+                  currentSelectionEpoch = request
+                  yield* Ref.set(interactiveThread, thread)
+                  selectedThreadId = String(thread.id)
+                  for (const [executionId, descendant] of state.descendants)
+                    enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
                   loading.committed = true
-                dispatch({
-                  _tag: "SelectionLoaded",
-                  selectionEpoch: request,
-                  activitySequence,
-                  thread,
-                  entries,
-                  hasOlder,
-                  ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
-                  ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
-                  ...(oldestCursor === undefined ? {} : { oldestCursor }),
-                  queueRevision: queue.revision,
-                  queuedCount: queue.queuedCount,
-                  queue: queue.turns.map(queueItem),
-                  ...(activeTurn === undefined ? {} : { activeTurn }),
-                })
-              }),
+                  dispatch({
+                    _tag: "SelectionLoaded",
+                    selectionEpoch: request,
+                    activitySequence,
+                    thread,
+                    entries,
+                    hasOlder,
+                    ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+                    ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
+                    ...(oldestCursor === undefined ? {} : { oldestCursor }),
+                    queueRevision: queue.revision,
+                    queuedCount: queue.queuedCount,
+                    queue: queue.turns.map(queueItem),
+                    ...(activeTurn === undefined ? {} : { activeTurn }),
+                  })
+                  yield* startSelectionContinuation(state, dispatch)
+                  yield* startSelectionUsage(state, usage, dispatch)
+                }),
+              ),
             )
             yield* startUsageCostLoad
-            if (activeSelectionState !== state) return
-            for (const [executionId, descendant] of state.descendants)
-              enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
           } else {
-            if (activeSelectionState !== state) return
+            if (!isCurrentSelectionState(state)) return
             for (const [executionId, descendant] of state.descendants)
               enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
             dispatch({
@@ -3391,42 +3465,14 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const sourceBackend = yield* ExecutionBackend.Service
           const transcripts = yield* TranscriptRepository.Service
           const turns = yield* TurnRepository.Service
-          while (state.pendingTurns.size > 0 || state.hasUnprojectedTurns) {
+          while (state.pendingTurns.size > 0) {
             if (activeSelectionState !== state) return
-            if (state.pendingTurns.size === 0) {
-              const before = state.projectedTurnCursor
-              if (before === undefined) {
-                state.hasUnprojectedTurns = false
-                continue
-              }
-              const page = yield* turns.page(state.thread.id, { before, limit: 50 })
-              if (
-                page.hasOlder &&
-                (page.turns.length === 0 ||
-                  page.oldestCursor === undefined ||
-                  sameTurnCursor(page.oldestCursor, before))
-              ) {
-                dispatch({
-                  _tag: "TranscriptResyncRequired",
-                  selectionEpoch: state.epoch,
-                  threadId: state.thread.id,
-                  reason: `Turn page did not advance for Thread ${state.thread.id}`,
-                })
-                return
-              }
-              if (activeSelectionState !== state) return
-              state.projectedTurnCursor = page.oldestCursor
-              state.hasUnprojectedTurns = page.hasOlder
-              for (const turn of page.turns) state.pendingTurns.set(String(turn.id), turn)
-              if (state.pendingTurns.size === 0) {
-                yield* Effect.yieldNow
-                continue
-              }
-            }
             const beforeProgress = state.inspections.size + state.eventPages.size + state.replays.size
             const backend = repairBackend(state, sourceBackend, makeRepairBudget())
             const pending = [...state.pendingTurns.values()]
-            for (const turn of pending) {
+            for (const work of pending) {
+              if (work.window > state.requestedWindow) continue
+              const turn = work.turn
               if (activeSelectionState !== state) return
               const completed = yield* repairSelectionTurn(state, backend, turn).pipe(
                 Effect.as(true),
@@ -3435,52 +3481,57 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 ),
               )
               if (!completed || activeSelectionState !== state) continue
-              const projection = yield* transcripts.get(turn.id)
-              if (activeSelectionState !== state) return
-              const current = yield* turns.get(turn.id)
-              const version = state.authoritativeVersions.get(String(turn.id))
-              if (
-                current === undefined ||
-                version === undefined ||
-                current.status !== version.status ||
-                current.lastCursor !== version.lastCursor
-              ) {
-                if (current !== undefined) invalidateSelectionTurn(state, current)
-                continue
-              }
-              if (activeSelectionState !== state) return
-              const authoritativeTurn = state.authoritativeTurns.get(String(turn.id))
-              if (projection === undefined || authoritativeTurn === undefined) continue
-              const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
-                Object.assign(
-                  {
-                    turn: authoritativeTurn,
-                    unit,
-                    projectionRevision: projection.revision,
-                    projectionModelPhase: projection.modelPhase,
-                  },
-                  projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
-                ),
+              const committed = yield* transcriptPageAdmission.withPermits(1)(
+                Effect.gen(function* () {
+                  if (activeSelectionState !== state) return false
+                  const projection = yield* transcripts.get(turn.id)
+                  const current = yield* turns.get(turn.id)
+                  const version = state.authoritativeVersions.get(String(turn.id))
+                  if (
+                    current === undefined ||
+                    version === undefined ||
+                    current.status !== version.status ||
+                    current.lastCursor !== version.lastCursor
+                  ) {
+                    if (current !== undefined) invalidateSelectionTurn(state, current)
+                    return false
+                  }
+                  if (activeSelectionState !== state) return false
+                  const authoritativeTurn = state.authoritativeTurns.get(String(turn.id))
+                  if (projection === undefined || authoritativeTurn === undefined) return false
+                  const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
+                    Object.assign(
+                      {
+                        turn: authoritativeTurn,
+                        unit,
+                        projectionRevision: projection.revision,
+                        projectionModelPhase: projection.modelPhase,
+                      },
+                      projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
+                    ),
+                  )
+                  if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes) {
+                    dispatch({
+                      _tag: "ExecutionFailed",
+                      selectionEpoch: state.epoch,
+                      message: `Repaired Turn ${turn.id} exceeds the transcript event limit`,
+                    })
+                    return true
+                  }
+                  for (const entry of entries) state.loadedKeys.add(entry.unit.key)
+                  if (activeSelectionState !== state) return false
+                  dispatch({
+                    _tag: "TranscriptReplaced",
+                    selectionEpoch: state.epoch,
+                    threadId: state.thread.id,
+                    entries,
+                    hasOlder: state.hasOlder,
+                    ...(state.transcriptCursor === undefined ? {} : { oldestCursor: state.transcriptCursor }),
+                  })
+                  return true
+                }),
               )
-              if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes) {
-                dispatch({
-                  _tag: "ExecutionFailed",
-                  selectionEpoch: state.epoch,
-                  message: `Repaired Turn ${turn.id} exceeds the transcript event limit`,
-                })
-                continue
-              }
-              for (const entry of entries) state.loadedKeys.add(entry.unit.key)
-              if (activeSelectionState !== state) return
-              dispatch({
-                _tag: "TranscriptReplaced",
-                selectionEpoch: state.epoch,
-                threadId: state.thread.id,
-                entries,
-                hasOlder: state.hasOlder,
-                ...(state.transcriptCursor === undefined ? {} : { oldestCursor: state.transcriptCursor }),
-              })
-              if (activeSelectionState !== state) return
+              if (!committed || activeSelectionState !== state) continue
               for (const [executionId, descendant] of state.descendants)
                 enqueueChildFollower(state.thread.id, executionId, descendant.rootTurnId, descendant.status)
             }
@@ -3501,12 +3552,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         })
         const startSelectionContinuation = (state: SelectionEpochState, dispatch: (event: InteractiveEvent) => void) =>
           Effect.gen(function* () {
-            if (
-              state.continuationRunning ||
-              (state.pendingTurns.size === 0 && !state.hasUnprojectedTurns) ||
-              activeSelectionState !== state
-            )
-              return
+            if (state.continuationRunning || state.pendingTurns.size === 0 || activeSelectionState !== state) return
             state.continuationRunning = true
             selectionBackground.push(
               yield* Effect.forkIn(
@@ -3514,6 +3560,41 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   Effect.provide(executionDependencies),
                   Effect.ensuring(Effect.sync(() => (state.continuationRunning = false))),
                 ),
+                sessionScope,
+              ),
+            )
+          })
+        const startSelectionUsage = (
+          state: SelectionEpochState,
+          usageState: SelectionUsage,
+          dispatch: (event: InteractiveEvent) => void,
+        ) =>
+          Effect.gen(function* () {
+            selectionBackground.push(
+              yield* Effect.forkIn(
+                Effect.gen(function* () {
+                  const turns = yield* TurnRepository.Service
+                  const snapshot = yield* UsageCost.collect(
+                    acquiredBackend,
+                    usageRoots(state.thread, yield* turns.list(state.thread.id)),
+                  )
+                  if (selectedUsage !== usageState) return
+                  usageState.snapshot = usageState.pending.reduce(UsageCost.observe, snapshot)
+                  usageState.pending.length = 0
+                  const selectedSnapshot = usageState.snapshot
+                  const threadId = String(state.thread.id)
+                  dispatch({
+                    _tag: "ThreadUsageUpdated",
+                    selectionEpoch: state.epoch,
+                    threadId: state.thread.id,
+                    cost: selectedSnapshot.costCompleteThreads.has(threadId)
+                      ? { _tag: "Available", usd: selectedSnapshot.threadCostUsd.get(threadId) ?? 0 }
+                      : { _tag: "Unavailable" },
+                    tokens: selectedSnapshot.tokenCompleteThreads.has(threadId)
+                      ? { _tag: "Available", total: selectedSnapshot.threadTokens.get(threadId) ?? 0 }
+                      : { _tag: "Unavailable" },
+                  })
+                }).pipe(Effect.provide(executionDependencies)),
                 sessionScope,
               ),
             )
@@ -3544,62 +3625,34 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             turnPages: 0,
             transcriptPages: 0,
             continuationRunning: false,
+            requestedWindow: 0,
           }
-          activeSelectionState = state
-          const usageState = {
+          const usageState: SelectionUsage = {
             request,
             threadId: String(thread.id),
             snapshot: undefined as UsageCost.Snapshot | undefined,
             pending: [] as Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>,
           }
-          selectedUsage = usageState
+          candidateSelectionState = state
+          candidateUsage = usageState
           yield* transcriptPageAdmission.withPermits(1)(loadTranscriptPage(state, dispatch))
           if (activeSelectionState !== state) return
           const summaries = yield* ThreadSummaryRepository.Service
           yield* summaries.markRead(thread.id, yield* Clock.currentTimeMillis)
           yield* notifyThreadSummaries
-          yield* startSelectionContinuation(state, dispatch)
-          selectionBackground.push(
-            yield* Effect.forkIn(
-              Effect.gen(function* () {
-                const turns = yield* TurnRepository.Service
-                const snapshot = yield* UsageCost.collect(
-                  acquiredBackend,
-                  usageRoots(thread, yield* turns.list(thread.id)),
-                )
-                if ((yield* Ref.get(selectionRequest)) !== request || selectedUsage !== usageState) return
-                usageState.snapshot = usageState.pending.reduce(UsageCost.observe, snapshot)
-                usageState.pending.length = 0
-                const selectedSnapshot = usageState.snapshot
-                const threadId = String(thread.id)
-                dispatch({
-                  _tag: "ThreadUsageUpdated",
-                  selectionEpoch: request,
-                  threadId: thread.id,
-                  cost: selectedSnapshot.costCompleteThreads.has(threadId)
-                    ? { _tag: "Available", usd: selectedSnapshot.threadCostUsd.get(threadId) ?? 0 }
-                    : { _tag: "Unavailable" },
-                  tokens: selectedSnapshot.tokenCompleteThreads.has(threadId)
-                    ? { _tag: "Available", total: selectedSnapshot.threadTokens.get(threadId) ?? 0 }
-                    : { _tag: "Unavailable" },
-                })
-              }).pipe(Effect.provide(executionDependencies)),
-              sessionScope,
-            ),
-          )
         })
         const runThreadLoad = Effect.fn("Operation.interactive.runThreadLoad")(function* (
           thread: Thread.Thread,
           request: number,
           dispatch: (event: InteractiveEvent) => void,
         ) {
-          yield* interruptSelectionBackground
+          yield* interruptSelectionLoad
           if ((yield* Ref.get(selectionRequest)) !== request) return
           const fiber = yield* Effect.forkIn(
             loadThread(thread, request, dispatch).pipe(Effect.provide(executionDependencies)),
             sessionScope,
           )
-          selectionBackground.push(fiber)
+          selectionLoadFiber = fiber
           yield* Fiber.join(fiber).pipe(
             Effect.catchCause((cause) =>
               Ref.get(selectionRequest).pipe(
@@ -3610,6 +3663,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         })
         const createAndSelectThread = Effect.fn("Operation.interactive.createAndSelectThread")(function* () {
           activeSelectionState = undefined
+          candidateSelectionState = undefined
+          candidateUsage = undefined
+          yield* interruptSelectionLoad
           yield* interruptSelectionBackground
           const threads = yield* ThreadRepository.Service
           const turns = yield* TurnRepository.Service
@@ -3646,6 +3702,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             turnPages: 0,
             transcriptPages: 0,
             continuationRunning: false,
+            requestedWindow: 0,
           }
           yield* Ref.set(interactiveThread, thread)
           sessionDispatch({ _tag: "ThreadActivated", threadId: String(thread.id), title: thread.title })
@@ -3743,7 +3800,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     })
                   for (const event of InteractiveFeedOverflow.events(
                     state,
-                    yield* Ref.get(selectionRequest),
+                    currentSelectionEpoch,
                     "Interactive event feed exceeded its bounded live window",
                   ))
                     dispatch(event)
@@ -3754,10 +3811,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                   InteractiveFeedOverflow.remember(overflow, envelope.event)
                   continue
                 }
-                if (
-                  envelope.selectionRequest !== undefined &&
-                  envelope.selectionRequest !== (yield* Ref.get(selectionRequest))
-                )
+                if (envelope.selectionRequest !== undefined && envelope.selectionRequest !== currentSelectionEpoch)
                   continue
                 if (envelope.selectedThreadOnly === true) {
                   const threadId = interactiveEventThreadId(envelope.event)
@@ -4084,23 +4138,27 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             safe(
               sessionDispatch,
               Effect.gen(function* () {
-                if (epoch <= currentSelectionEpoch) return
-                const previousThread = yield* Ref.get(interactiveThread)
-                const previousEpoch = currentSelectionEpoch
-                currentSelectionEpoch = epoch
-                selectedThreadId = id
-                const joined = selectionLoad?.epoch === 0 && selectionLoad.threadId === id ? selectionLoad : undefined
-                selectionLoad = {
-                  epoch,
-                  threadId: id,
-                  previousEpoch,
-                  previousThreadId: previousThread === undefined ? undefined : String(previousThread.id),
-                  events: joined?.events ?? [],
-                  committed: false,
-                  ...(joined?.overflow === undefined ? {} : { overflow: joined.overflow }),
-                }
-                activeSelectionState = undefined
-                yield* Ref.set(selectionRequest, epoch)
+                const admitted = yield* selectionAdmission.withPermits(1)(
+                  Effect.gen(function* () {
+                    if (epoch <= (yield* Ref.get(selectionRequest))) return false
+                    const previousThread = yield* Ref.get(interactiveThread)
+                    const previousEpoch = currentSelectionEpoch
+                    const joined =
+                      selectionLoad?.epoch === 0 && selectionLoad.threadId === id ? selectionLoad : undefined
+                    selectionLoad = {
+                      epoch,
+                      threadId: id,
+                      previousEpoch,
+                      previousThreadId: previousThread === undefined ? undefined : String(previousThread.id),
+                      events: joined?.events ?? [],
+                      committed: false,
+                      ...(joined?.overflow === undefined ? {} : { overflow: joined.overflow }),
+                    }
+                    yield* Ref.set(selectionRequest, epoch)
+                    return true
+                  }),
+                )
+                if (!admitted) return
                 const threads = yield* ThreadRepository.Service
                 const thread = yield* threads.get(Thread.ThreadId.make(id))
                 if (thread === undefined) return yield* operationError(`Thread ${id} does not exist`)
@@ -4108,12 +4166,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               }).pipe(Effect.ensuring(finishSelection(epoch))),
             ),
           readQueue: (id) =>
-            safe(
-              sessionDispatch,
-              Ref.get(selectionRequest).pipe(
-                Effect.flatMap((request) => readQueue(Thread.ThreadId.make(id), selectionDispatch(request))),
-              ),
-            ),
+            safe(sessionDispatch, readQueue(Thread.ThreadId.make(id), selectionDispatch(currentSelectionEpoch))),
           loadOlder: safe(
             sessionDispatch,
             Effect.gen(function* () {
@@ -4161,24 +4214,28 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
             safe(
               sessionDispatch,
               Effect.gen(function* () {
-                if (epoch <= currentSelectionEpoch) return
+                if (epoch <= (yield* Ref.get(selectionRequest))) return
                 const threads = yield* ThreadRepository.Service
                 const thread = (yield* threads.list({ limit: 1 }))[0]
-                if (thread === undefined || epoch <= currentSelectionEpoch) return
-                const previousThread = yield* Ref.get(interactiveThread)
-                const previousEpoch = currentSelectionEpoch
-                currentSelectionEpoch = epoch
-                activeSelectionState = undefined
-                yield* Ref.set(selectionRequest, epoch)
-                selectedThreadId = String(thread.id)
-                selectionLoad = {
-                  epoch,
-                  threadId: String(thread.id),
-                  previousEpoch,
-                  previousThreadId: previousThread === undefined ? undefined : String(previousThread.id),
-                  events: [],
-                  committed: false,
-                }
+                if (thread === undefined) return
+                const admitted = yield* selectionAdmission.withPermits(1)(
+                  Effect.gen(function* () {
+                    if (epoch <= (yield* Ref.get(selectionRequest))) return false
+                    const previousThread = yield* Ref.get(interactiveThread)
+                    const previousEpoch = currentSelectionEpoch
+                    selectionLoad = {
+                      epoch,
+                      threadId: String(thread.id),
+                      previousEpoch,
+                      previousThreadId: previousThread === undefined ? undefined : String(previousThread.id),
+                      events: [],
+                      committed: false,
+                    }
+                    yield* Ref.set(selectionRequest, epoch)
+                    return true
+                  }),
+                )
+                if (!admitted) return
                 yield* runThreadLoad(thread, epoch, selectionDispatch(epoch))
               }).pipe(Effect.ensuring(finishSelection(epoch))),
             ),
@@ -4194,7 +4251,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                 for (const event of result.events)
                   sessionDispatch({
                     _tag: "TranscriptPatched",
-                    selectionEpoch: yield* Ref.get(selectionRequest),
+                    selectionEpoch: currentSelectionEpoch,
                     threadId: thread.id,
                     turnId,
                     event,

@@ -47,6 +47,49 @@ describe("interactive feed overflow", () => {
     )
   })
 
+  it("coalesces usage snapshots without overflowing the recovery window", () => {
+    const state = InteractiveFeedOverflow.make()
+    for (let index = 0; index < InteractiveFeedOverflow.capacity + 20; index += 1)
+      InteractiveFeedOverflow.remember(state, {
+        _tag: "ThreadUsageUpdated",
+        selectionEpoch: 7,
+        threadId: Thread.ThreadId.make("thread"),
+        cost: { _tag: "Available", usd: index },
+        tokens: { _tag: "Available", total: index },
+      })
+
+    expect(state.criticalOverflowed).toBe(false)
+    expect(InteractiveFeedOverflow.events(state, 7, "bounded")).toEqual([
+      {
+        _tag: "ThreadUsageUpdated",
+        selectionEpoch: 7,
+        threadId: "thread",
+        cost: { _tag: "Available", usd: InteractiveFeedOverflow.capacity + 19 },
+        tokens: { _tag: "Available", total: InteractiveFeedOverflow.capacity + 19 },
+      },
+    ])
+  })
+
+  it("recovers an overflowed replacement as an authoritative transcript resync", () => {
+    const state = InteractiveFeedOverflow.make()
+    InteractiveFeedOverflow.remember(state, {
+      _tag: "TranscriptReplaced",
+      selectionEpoch: 7,
+      threadId: Thread.ThreadId.make("thread"),
+      entries: [],
+      hasOlder: false,
+    })
+
+    expect(InteractiveFeedOverflow.events(state, 7, "bounded")).toEqual([
+      {
+        _tag: "TranscriptResyncRequired",
+        selectionEpoch: 7,
+        threadId: "thread",
+        reason: "bounded",
+      },
+    ])
+  })
+
   it("latches terminal overflow without growing past the bound", () => {
     const state = InteractiveFeedOverflow.make()
     for (let index = 0; index < InteractiveFeedOverflow.capacity + 1; index += 1)

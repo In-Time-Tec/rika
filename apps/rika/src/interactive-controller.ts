@@ -148,6 +148,45 @@ const project = (
   return displayCostUsd === undefined ? withoutCost : { ...withoutCost, costUsd: displayCostUsd }
 }
 
+const reconcileTranscriptBlocks = (model: ViewState.Model): ViewState.Model => {
+  const blocks: Array<ViewState.TranscriptBlock> = []
+  const items: Array<ViewState.TranscriptItem> = []
+  const mutableBlocks = new Map<string, number>()
+  for (const item of model.items as ReadonlyArray<ViewState.TranscriptItem>) {
+    if (item._tag === "Entry") {
+      items.push(item)
+      continue
+    }
+    const block = model.blocks[item.index] as ViewState.TranscriptBlock | undefined
+    if (block === undefined) continue
+    if (block._tag === "ToolResult") {
+      const index = mutableBlocks.get(`ToolCall\u0000${block.id}`)
+      const requested = index === undefined ? undefined : blocks[index]
+      if (index !== undefined && requested?._tag === "ToolCall") {
+        blocks[index] = {
+          ...requested,
+          output: block.output,
+          status: block.failed ? "failed" : "complete",
+        }
+        continue
+      }
+    }
+    if (block._tag === "ToolCall" || block._tag === "Permission") {
+      const key = `${block._tag}\u0000${block.id}`
+      const index = mutableBlocks.get(key)
+      const current = index === undefined ? undefined : blocks[index]
+      if (index !== undefined && current?._tag === block._tag) {
+        blocks[index] = { ...current, ...block } as ViewState.TranscriptBlock
+        continue
+      }
+      mutableBlocks.set(key, blocks.length)
+    }
+    items.push({ ...item, index: blocks.length })
+    blocks.push(block)
+  }
+  return { ...model, blocks, items }
+}
+
 const projections = (
   entries: ReadonlyArray<TranscriptRepository.Entry>,
 ): ReadonlyMap<string, Transcript.Projection> => {
@@ -221,73 +260,6 @@ const activityAfter = (
   if (event.type === "execution.completed" || event.type === "execution.failed" || event.type === "execution.cancelled")
     return running ? runningActivity : undefined
   return running ? runningActivity : activity
-}
-
-const prependProjection = (
-  model: ViewState.Model,
-  entries: ReadonlyArray<TranscriptRepository.Entry>,
-  displayCostUsd: number | undefined,
-): ViewState.Model => {
-  const { costUsd: _, ...withoutCost } = model
-  const older = project(
-    cleared({
-      ...(displayCostUsd === undefined ? withoutCost : { ...withoutCost, costUsd: displayCostUsd }),
-      activeTurnId: undefined,
-      busy: false,
-      activity: undefined,
-    }),
-    entries,
-    displayCostUsd,
-  )
-  const mergedEntries = [...older.entries]
-  const mergedBlocks = [...older.blocks] as Array<ViewState.TranscriptBlock>
-  const mergedItems = [...older.items] as Array<ViewState.TranscriptItem>
-  const mutableBlocks = new Map<string, number>()
-  for (const [index, block] of mergedBlocks.entries())
-    if (block._tag === "ToolCall" || block._tag === "Permission")
-      mutableBlocks.set(`${block._tag}\u0000${block.id}`, index)
-  for (const item of model.items as ReadonlyArray<ViewState.TranscriptItem>) {
-    if (item._tag === "Entry") {
-      const entry = model.entries[item.index]
-      if (entry === undefined) continue
-      mergedItems.push({ ...item, index: mergedEntries.length })
-      mergedEntries.push(entry)
-      continue
-    }
-    const block = model.blocks[item.index] as ViewState.TranscriptBlock | undefined
-    if (block === undefined) continue
-    if (block._tag === "ToolResult") {
-      const index = mutableBlocks.get(`ToolCall\u0000${block.id}`)
-      const requested = index === undefined ? undefined : mergedBlocks[index]
-      if (index !== undefined && requested?._tag === "ToolCall") {
-        mergedBlocks[index] = {
-          ...requested,
-          output: block.output,
-          status: block.failed ? "failed" : "complete",
-        }
-        continue
-      }
-    }
-    if (block._tag === "ToolCall" || block._tag === "Permission") {
-      const key = `${block._tag}\u0000${block.id}`
-      const index = mutableBlocks.get(key)
-      const current = index === undefined ? undefined : mergedBlocks[index]
-      if (index !== undefined && current?._tag === block._tag) {
-        mergedBlocks[index] = { ...current, ...block } as ViewState.TranscriptBlock
-        continue
-      }
-      mutableBlocks.set(key, mergedBlocks.length)
-    }
-    mergedItems.push({ ...item, index: mergedBlocks.length })
-    mergedBlocks.push(block)
-  }
-  return {
-    ...model,
-    entries: mergedEntries,
-    blocks: mergedBlocks,
-    items: mergedItems,
-    costUsd: displayCostUsd,
-  }
 }
 
 const normalizeEntries = (
@@ -408,7 +380,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     return {
       state: {
         ...stateWithoutCost,
-        model: project(cleared(state.model), entries, event.threadCostUsd),
+        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, event.threadCostUsd)),
         replayTurns: new Map([
           ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
           ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
@@ -424,21 +396,19 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "TranscriptPagePrepended") {
     if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
     if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false }
-    const known = new Set(state.entries.map((entry) => entry.unit.key))
-    const prepended = normalizeEntries(event.entries).filter((entry) => !known.has(entry.unit.key))
-    const entries = [...prepended, ...state.entries]
-    const revisions = new Map(state.revisions)
-    for (const entry of prepended)
-      revisions.set(entry.turn.id, Math.max(entry.projectionRevision, revisions.get(entry.turn.id) ?? -1))
+    const entries = normalizeEntries([...state.entries, ...event.entries])
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
     return {
       state: {
         ...stateWithoutCost,
-        model: prependProjection(state.model, prepended, event.threadCostUsd),
-        replayTurns: new Map([...prepended.map((entry) => [entry.turn.id, entry.turn] as const), ...state.replayTurns]),
+        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, event.threadCostUsd)),
+        replayTurns: new Map([
+          ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
+          ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
+        ]),
         entries,
-        revisions,
-        projections: new Map([...projections(prepended), ...state.projections]),
+        revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
+        projections: projections(entries),
         ...(event.threadCostUsd === undefined ? {} : { threadCostUsd: event.threadCostUsd }),
       },
       preserveAnchor: true,

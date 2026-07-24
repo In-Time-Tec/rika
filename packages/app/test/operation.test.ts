@@ -113,7 +113,10 @@ const selectionThread = (id: string): Thread.Thread => ({
   updatedAt: 1,
 })
 
-const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarness")(function* (eventCount: number) {
+const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarness")(function* (
+  eventCount: number,
+  deferredUsage: boolean = false,
+) {
   const previous = selectionThread("selection-previous")
   const target = selectionThread("selection-target")
   const repository = yield* ThreadRepository.makeMemory([previous, target])
@@ -121,10 +124,13 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
   const targetGetEntered = yield* Deferred.make<void>()
   const releaseTargetGet = yield* Deferred.make<void>()
   const liveEventsEmitted = yield* Deferred.make<void>()
+  const usageRequested = yield* Deferred.make<void>()
   const releaseExecution = yield* Deferred.make<void>()
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   let targetGetBlocked = false
   let targetGetFailed = false
+  let targetPageBlocked = false
+  let targetPageFailed = false
   const delayedRepository = ThreadRepository.Service.of({
     ...repository,
     get: (id) => {
@@ -145,6 +151,36 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     createdAt: index + 1,
     text: String(index + 1),
   }))
+  const usage: ExecutionBackend.Event = {
+    cursor: "selection-live-usage",
+    sequence: eventCount + 1,
+    type: "model.usage.reported",
+    createdAt: eventCount + 1,
+    data: {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      input_tokens: 100,
+      input_tokens_uncached: 100,
+      input_tokens_cache_read: 0,
+      input_tokens_cache_write: 0,
+      output_tokens: 10,
+    },
+  }
+  const targetPageEntered = yield* Deferred.make<void>()
+  const releaseTargetPage = yield* Deferred.make<void>()
+  const selectionTurns = TurnRepository.Service.of({
+    ...turns,
+    page: (threadId, options) => {
+      if (targetPageFailed && threadId === target.id)
+        return Effect.fail(TurnRepository.RepositoryError.make({ message: "forced Turn page failure" }))
+      if (targetPageBlocked && threadId === target.id)
+        return Deferred.succeed(targetPageEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseTargetPage)),
+          Effect.andThen(turns.page(threadId, options)),
+        )
+      return turns.page(threadId, options)
+    },
+  })
   const selectionBackend = ExecutionBackend.Service.of({
     ...backend,
     start: (input) =>
@@ -152,8 +188,14 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
         for (const event of streamed) input.onEvent?.(event)
       }).pipe(
         Effect.andThen(Deferred.succeed(liveEventsEmitted, undefined)),
+        Effect.andThen(deferredUsage ? Deferred.await(usageRequested) : Effect.void),
+        Effect.tap(() => (deferredUsage ? Effect.sync(() => input.onEvent?.(usage)) : Effect.void)),
         Effect.andThen(Deferred.await(releaseExecution)),
-        Effect.as({ turnId: input.turnId, status: "completed" as const, events: streamed }),
+        Effect.as({
+          turnId: input.turnId,
+          status: "completed" as const,
+          events: deferredUsage ? [...streamed, usage] : streamed,
+        }),
       ),
     inspect: (turnId) =>
       Effect.succeed({ turnId, status: "running" as const, waits: [], pendingTools: [], children: [] }),
@@ -161,7 +203,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
   })
   const layer = Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, delayedRepository),
-    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     backendLayer: Layer.succeed(ExecutionBackend.Service, selectionBackend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
@@ -175,17 +217,28 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     sessions,
     layer,
     targetGetEntered,
+    targetPageEntered,
     liveEventsEmitted,
     releaseExecution: Deferred.succeed(releaseExecution, undefined),
+    releaseUsage: Deferred.succeed(usageRequested, undefined),
     beginTargetGet: Effect.sync(() => {
       targetGetBlocked = true
     }),
     failTargetGet: Effect.sync(() => {
       targetGetFailed = true
     }),
+    beginTargetPage: Effect.sync(() => {
+      targetPageBlocked = true
+    }),
+    failTargetPage: Effect.sync(() => {
+      targetPageFailed = true
+    }),
     releaseTargetGet: Effect.sync(() => {
       targetGetBlocked = false
     }).pipe(Effect.andThen(Deferred.succeed(releaseTargetGet, undefined))),
+    releaseTargetPage: Effect.sync(() => {
+      targetPageBlocked = false
+    }).pipe(Effect.andThen(Deferred.succeed(releaseTargetPage, undefined))),
   }
 })
 
@@ -2123,6 +2176,79 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("preserves committed selection controls and usage when a candidate load fails or is interrupted", () =>
+    Effect.forEach(
+      ["failed", "interrupted"] as const,
+      (mode) =>
+        Effect.gen(function* () {
+          const harness = yield* makeSelectionLoadHarness(1, true)
+          yield* Effect.gen(function* () {
+            const source = yield* openInteractiveSession(harness.sessions, {
+              _tag: "Interactive",
+              prompt: [],
+              ephemeral: false,
+            })
+            const selecting = yield* openInteractiveSession(harness.sessions, {
+              _tag: "Interactive",
+              prompt: [],
+              ephemeral: false,
+            })
+            const received: Array<Operation.InteractiveEvent> = []
+            yield* collectEvents(selecting, received)
+            yield* source.selectThread(harness.previous.id, 1)
+            yield* selecting.selectThread(harness.previous.id, 1)
+            yield* source.submit("active committed turn")
+            yield* Deferred.await(harness.liveEventsEmitted)
+            yield* settleEvents
+            received.length = 0
+
+            let candidate: Fiber.Fiber<void, Operation.OperationUnavailable> | undefined
+            if (mode === "failed") {
+              yield* harness.failTargetPage
+              yield* selecting.selectThread(harness.target.id, 2)
+            } else {
+              yield* harness.beginTargetPage
+              candidate = yield* Effect.forkChild(selecting.selectThread(harness.target.id, 2))
+              yield* Deferred.await(harness.targetPageEntered)
+            }
+            yield* harness.releaseUsage
+            yield* source.steer("control committed turn")
+            yield* settleEvents
+            if (candidate !== undefined) yield* Fiber.interrupt(candidate)
+            yield* settleEvents
+
+            expect(received).toContainEqual(
+              expect.objectContaining({
+                _tag: "ExecutionControlled",
+                selectionEpoch: 1,
+                threadId: harness.previous.id,
+                action: "steered",
+              }),
+            )
+            expect(received).toContainEqual(
+              expect.objectContaining({
+                _tag: "ThreadUsageUpdated",
+                selectionEpoch: 1,
+                threadId: harness.previous.id,
+              }),
+            )
+            expect(
+              received.some(
+                (event) =>
+                  (event._tag === "SelectionLoaded" && event.thread.id === harness.target.id) ||
+                  ("threadId" in event &&
+                    "selectionEpoch" in event &&
+                    event.threadId === harness.target.id &&
+                    event.selectionEpoch === 2),
+              ),
+            ).toBe(false)
+            yield* harness.releaseExecution
+          }).pipe(provideLayer(harness.layer))
+        }),
+      { discard: true },
+    ),
+  )
+
   it.effect("does not let a failed selection overwrite a newer selection", () =>
     Effect.gen(function* () {
       const previous = selectionThread("selection-rollback-previous")
@@ -2182,7 +2308,7 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("delivers critical target events while selection is in flight", () =>
+  it.effect("commits a target selection before releasing its buffered critical events", () =>
     Effect.gen(function* () {
       const harness = yield* makeSelectionLoadHarness(1)
       yield* Effect.gen(function* () {
@@ -2211,6 +2337,27 @@ describe("Operation", () => {
         yield* source.steer("critical during selection")
         yield* settleEvents
 
+        expect(
+          received.filter(
+            (event) =>
+              "threadId" in event &&
+              "selectionEpoch" in event &&
+              event.threadId === harness.target.id &&
+              event.selectionEpoch === 2,
+          ),
+        ).toEqual([])
+        yield* harness.releaseTargetGet
+        yield* Fiber.join(selection)
+        yield* settleEvents
+        expect(
+          received
+            .filter(
+              (event) =>
+                (event._tag === "SelectionLoaded" && event.thread.id === harness.target.id) ||
+                (event._tag === "ExecutionControlled" && event.threadId === harness.target.id),
+            )
+            .map((event) => event._tag),
+        ).toEqual(["SelectionLoaded", "ExecutionControlled"])
         expect(received).toContainEqual(
           expect.objectContaining({
             _tag: "ExecutionControlled",
@@ -2219,7 +2366,6 @@ describe("Operation", () => {
             action: "steered",
           }),
         )
-        yield* Fiber.interrupt(selection)
         yield* harness.releaseExecution
       }).pipe(provideLayer(harness.layer))
     }),
