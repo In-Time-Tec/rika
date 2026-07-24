@@ -977,14 +977,20 @@ const workflowReplacementKey = (runId: string, ownerTurnId?: string, workspace?:
   JSON.stringify([runId, ownerTurnId, workspace])
 
 export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWork")(function* () {
+  const threads = yield* ThreadRepository.Service
   const turns = yield* TurnRepository.Service
   const backend = yield* ExecutionBackend.Service
-  const nonterminal = (yield* turns.listNonterminal).filter((turn) => turn.status !== "queued")
-  for (const turn of nonterminal) {
+  const persisted = (yield* Effect.forEach(yield* threads.listAll, (thread) => turns.list(thread.id), {
+    concurrency: 1,
+  }))
+    .flat()
+    .filter((turn) => turn.status !== "queued")
+  for (const turn of persisted) {
+    const terminal = isTerminalStatus(turn.status)
     if (turn.reviewFanOutId !== undefined) {
       const fanOut = yield* backend.inspectFanOut(turn.reviewFanOutId)
       if (fanOut === undefined) {
-        yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+        if (!terminal) yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
         continue
       }
       if (fanOut.state === "joining" || fanOut.members.some((member) => !isTerminalStatus(member.state))) return true
@@ -992,22 +998,25 @@ export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWor
         const executionId = AgentDepth.childExecutionId(turn.id, member.childId)
         if (!(yield* executionTreeQuiescent(backend, executionId, true))) return true
       }
-      const status = fanOut.state === "satisfied" ? "completed" : fanOut.state
-      yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
+      if (!terminal) {
+        const status = fanOut.state === "satisfied" ? "completed" : fanOut.state
+        yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
+      }
       continue
     }
     const inspection = yield* backend.inspect(turn.id)
     if (inspection === undefined) {
-      yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
+      if (!terminal) yield* turns.setStatus(turn.id, "failed", turn.lastCursor, yield* Clock.currentTimeMillis)
       continue
     }
     if (!(yield* executionTreeQuiescent(backend, turn.id))) return true
-    yield* turns.setStatus(
-      turn.id,
-      inspection.status,
-      inspection.lastCursor ?? turn.lastCursor,
-      yield* Clock.currentTimeMillis,
-    )
+    if (!terminal)
+      yield* turns.setStatus(
+        turn.id,
+        inspection.status,
+        inspection.lastCursor ?? turn.lastCursor,
+        yield* Clock.currentTimeMillis,
+      )
   }
   return false
 })

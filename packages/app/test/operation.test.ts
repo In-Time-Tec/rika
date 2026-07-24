@@ -270,9 +270,11 @@ describe("Operation", () => {
       for (const status of ["accepted", "running", "waiting"] as const) {
         const stale = replacementTurn(status)
         const turns = yield* TurnRepository.makeMemory([stale])
+        const threads = yield* ThreadRepository.makeMemory([selectionThread(String(stale.threadId))])
         const result = yield* Operation.hasActiveExecutionWork().pipe(
           provideLayer(
-            Layer.merge(
+            Layer.mergeAll(
+              Layer.succeed(ThreadRepository.Service, threads),
               Layer.succeed(TurnRepository.Service, turns),
               Layer.succeed(ExecutionBackend.Service, {
                 ...backend,
@@ -291,6 +293,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const turn = replacementTurn()
       const turns = yield* TurnRepository.makeMemory([turn])
+      const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
       const child = AgentDepth.childExecutionId(turn.id, "task")
       const grandchild = AgentDepth.childExecutionId(child, "oracle")
       const inspection = (turnId: string): ExecutionBackend.Inspection => {
@@ -301,7 +304,8 @@ describe("Operation", () => {
       }
       const result = yield* Operation.hasActiveExecutionWork().pipe(
         provideLayer(
-          Layer.merge(
+          Layer.mergeAll(
+            Layer.succeed(ThreadRepository.Service, threads),
             Layer.succeed(TurnRepository.Service, turns),
             Layer.succeed(
               ExecutionBackend.Service,
@@ -315,10 +319,54 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("defers replacement for active descendants beneath terminal roots", () =>
+    Effect.gen(function* () {
+      for (const status of ["completed", "failed", "cancelled"] as const) {
+        const turn = replacementTurn(status)
+        const turns = yield* TurnRepository.makeMemory([turn])
+        const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
+        const child = AgentDepth.childExecutionId(turn.id, `terminal-${status}`)
+        const childStatus = yield* Ref.make<Turn.Status | "absent">("running")
+        const inspectedBackend = ExecutionBackend.Service.of({
+          ...backend,
+          inspect: (turnId) =>
+            Effect.gen(function* () {
+              if (turnId === child) {
+                const current = yield* Ref.get(childStatus)
+                if (current === "absent") return undefined
+                return { turnId, status: current, waits: [], pendingTools: [], children: [] }
+              }
+              const current = yield* Ref.get(childStatus)
+              return {
+                turnId,
+                status,
+                waits: [],
+                pendingTools: [],
+                children: [{ executionId: child, status: current === "running" ? "running" : "completed" }],
+              }
+            }),
+        })
+        const layer = Layer.mergeAll(
+          Layer.succeed(ThreadRepository.Service, threads),
+          Layer.succeed(TurnRepository.Service, turns),
+          Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+        )
+
+        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
+        yield* Ref.set(childStatus, "completed")
+        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+        yield* Ref.set(childStatus, "absent")
+        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+        expect((yield* turns.get(turn.id))?.status).toBe(status)
+      }
+    }),
+  )
+
   it.effect("authorizes retry only after Relay work becomes terminal and fails closed on inspection errors", () =>
     Effect.gen(function* () {
       const turn = replacementTurn()
       const turns = yield* TurnRepository.makeMemory([turn])
+      const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
       const status = yield* Ref.make<Turn.Status>("running")
       const inspectedBackend = ExecutionBackend.Service.of({
         ...backend,
@@ -327,7 +375,8 @@ describe("Operation", () => {
             Effect.map((current) => ({ turnId, status: current, waits: [], pendingTools: [], children: [] })),
           ),
       })
-      const layer = Layer.merge(
+      const layer = Layer.mergeAll(
+        Layer.succeed(ThreadRepository.Service, threads),
         Layer.succeed(TurnRepository.Service, turns),
         Layer.succeed(ExecutionBackend.Service, inspectedBackend),
       )
@@ -338,10 +387,12 @@ describe("Operation", () => {
 
       const active = replacementTurn()
       const failingTurns = yield* TurnRepository.makeMemory([active])
+      const failingThreads = yield* ThreadRepository.makeMemory([selectionThread(String(active.threadId))])
       const failed = yield* Effect.result(
         Operation.hasActiveExecutionWork().pipe(
           provideLayer(
-            Layer.merge(
+            Layer.mergeAll(
+              Layer.succeed(ThreadRepository.Service, failingThreads),
               Layer.succeed(TurnRepository.Service, failingTurns),
               Layer.succeed(
                 ExecutionBackend.Service,
@@ -386,7 +437,7 @@ describe("Operation", () => {
             }),
         })
         const layer = Operation.productLayer({
-          repositoryLayer: ThreadRepository.memoryLayer(),
+          repositoryLayer: ThreadRepository.memoryLayer([selectionThread(String(turn.threadId))]),
           turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
           backendLayer: Layer.succeed(ExecutionBackend.Service, inspectedBackend),
           defaultWorkspace: "/work",
