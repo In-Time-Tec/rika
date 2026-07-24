@@ -424,6 +424,7 @@ describe("Operation", () => {
     Effect.gen(function* () {
       const turn = replacementTurn()
       const turns = yield* TurnRepository.makeMemory([turn])
+      const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
       const child = AgentDepth.childExecutionId(turn.id, "terminal-child")
       const staleTool = {
         callId: "stale-tool",
@@ -445,12 +446,9 @@ describe("Operation", () => {
       const result = yield* Operation.hasActiveExecutionWork().pipe(
         provideLayer(
           Layer.mergeAll(
+            Layer.succeed(ThreadRepository.Service, threads),
             Layer.succeed(TurnRepository.Service, turns),
             Layer.succeed(ExecutionBackend.Service, inspectedBackend),
-            Layer.succeed(
-              ThreadRepository.Service,
-              yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))]),
-            ),
           ),
         ),
       )
