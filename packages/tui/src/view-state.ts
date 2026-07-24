@@ -1,5 +1,5 @@
 import type * as Transcript from "@rika/transcript"
-import { Function, Schema } from "effect"
+import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
 import type { Key } from "./keys"
 import { isPrintable } from "./keys"
@@ -21,6 +21,46 @@ export const Activity = Schema.Union([
   Schema.TaggedStruct("Compacting", {}),
 ])
 export type Activity = typeof Activity.Type
+
+export const UsageTime = Schema.Union([
+  Schema.Struct({ _tag: Schema.tag("Loading") }),
+  Schema.Struct({ _tag: Schema.tag("Unavailable") }),
+  Schema.Struct({
+    _tag: Schema.tag("Available"),
+    accumulatedMillis: Schema.Finite,
+    activeSince: Schema.optionalKey(Schema.Finite),
+  }),
+])
+export type UsageTime = typeof UsageTime.Type
+
+export const UsageDisplay = Schema.Literals(["cost", "tokens", "time"])
+export type UsageDisplay = typeof UsageDisplay.Type
+
+export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
+  if (display === "cost" || display === undefined) return "tokens"
+  if (display === "tokens") return "time"
+  return "cost"
+}
+
+export const activeTimeAt: {
+  (time: Extract<UsageTime, { readonly _tag: "Available" }>, now: number): Duration.Duration
+  (now: number): (time: Extract<UsageTime, { readonly _tag: "Available" }>) => Duration.Duration
+} = Function.dual(
+  2,
+  (time: Extract<UsageTime, { readonly _tag: "Available" }>, now: number): Duration.Duration =>
+    Duration.sum(
+      Duration.millis(time.accumulatedMillis),
+      Duration.millis(time.activeSince === undefined ? 0 : Math.max(0, now - time.activeSince)),
+    ),
+)
+
+export const formatActiveTime = (duration: Duration.Duration): string => {
+  const parts = Duration.parts(duration)
+  if (parts.days > 0) return `◷ ${parts.days}d${parts.hours > 0 ? ` ${parts.hours}h` : ""}`
+  if (parts.hours > 0) return `◷ ${parts.hours}h${parts.minutes > 0 ? ` ${parts.minutes}m` : ""}`
+  if (parts.minutes > 0) return `◷ ${parts.minutes}m${parts.seconds > 0 ? ` ${parts.seconds}s` : ""}`
+  return `◷ ${parts.seconds}s`
+}
 
 export const utf8ByteLength = (value: string): number => {
   let bytes = 0
@@ -381,7 +421,8 @@ export const Model = Schema.Struct({
   busy: Schema.Boolean,
   activity: Schema.optional(Activity),
   costUsd: Schema.optional(Schema.Finite),
-  usageDisplay: Schema.optional(Schema.Literals(["cost", "tokens"])),
+  usageDisplay: Schema.optional(UsageDisplay),
+  usageTime: Schema.optional(UsageTime),
   usageTokens: Schema.optional(
     Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Loading") }),

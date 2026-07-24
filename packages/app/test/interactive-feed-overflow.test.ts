@@ -56,6 +56,7 @@ describe("interactive feed overflow", () => {
         threadId: Thread.ThreadId.make("thread"),
         cost: { _tag: "Available", usd: index },
         tokens: { _tag: "Available", total: index },
+        time: { _tag: "Available", accumulatedMillis: index },
       })
 
     expect(state.criticalOverflowed).toBe(false)
@@ -66,6 +67,7 @@ describe("interactive feed overflow", () => {
         threadId: "thread",
         cost: { _tag: "Available", usd: InteractiveFeedOverflow.capacity + 19 },
         tokens: { _tag: "Available", total: InteractiveFeedOverflow.capacity + 19 },
+        time: { _tag: "Available", accumulatedMillis: InteractiveFeedOverflow.capacity + 19 },
       },
     ])
   })

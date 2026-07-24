@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import type * as ExecutionBackend from "@rika/runtime/contract"
 import { BackendError } from "@rika/runtime/contract"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import * as UsageCost from "../src/usage-cost"
 
 const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
@@ -47,6 +47,27 @@ const reportedTokens = (
   },
 })
 
+const lifecycle = (
+  executionId: string,
+  id: string,
+  type:
+    | "execution.accepted"
+    | "execution.started"
+    | "wait.created"
+    | "execution.completed"
+    | "execution.failed"
+    | "execution.cancelled",
+  createdAt: number,
+  sequence: number,
+): ExecutionBackend.Event => ({
+  id,
+  executionId,
+  cursor: id,
+  sequence,
+  type,
+  createdAt,
+})
+
 const reader = (
   executions: Readonly<
     Record<
@@ -77,9 +98,202 @@ const reader = (
       events: execution?.events ?? [],
     })
   },
+  pageEvents: (executionId, _direction, cursor, limit = 1_000) => {
+    const events = executions[executionId]?.events ?? []
+    const start = cursor === undefined ? 0 : events.findIndex((event) => event.cursor === cursor) + 1
+    const page = events.slice(start, start + limit)
+    return Effect.succeed({
+      events: page,
+      hasMore: start + page.length < events.length,
+      ...(page.at(-1) === undefined ? {} : { newestCursor: page.at(-1)!.cursor }),
+    })
+  },
 })
 
 describe("UsageCost", () => {
+  it("keeps accepted and never-started cancelled executions at zero active time", () => {
+    const accepted = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "accepted", "execution.accepted", 1_000, 1),
+    })
+    const cancelled = UsageCost.observe(accepted, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "cancelled", "execution.cancelled", 2_000, 2),
+    })
+
+    expect(UsageCost.activeTime(accepted, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.zero,
+    })
+    expect(UsageCost.activeTime(cancelled, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.zero,
+    })
+  })
+
+  it("starts an accepted execution when the live started event arrives", () => {
+    const accepted = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "accepted", "execution.accepted", 1_000, 1),
+    })
+    const started = UsageCost.observe(accepted, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "started", "execution.started", 2_000, 2),
+    })
+
+    expect(UsageCost.activeTime(started, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.zero,
+      activeSince: 2_000,
+    })
+  })
+
+  it("accumulates execution work across durable waits and resumes", () => {
+    const snapshot = [
+      lifecycle("execution", "start-1", "execution.started", 1_000, 1),
+      lifecycle("execution", "wait", "wait.created", 11_000, 2),
+      lifecycle("execution", "start-2", "execution.started", 15_000, 3),
+      lifecycle("execution", "complete", "execution.completed", 20_000, 4),
+    ].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(UsageCost.activeTime(snapshot, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(15),
+    })
+  })
+
+  it("reconstructs open work deterministically from duplicate and out-of-order delivery", () => {
+    const started = lifecycle("execution", "start", "execution.started", 5_000, 1)
+    const waited = lifecycle("execution", "wait", "wait.created", 10_000, 2)
+    const resumed = lifecycle("execution", "resume", "execution.started", 12_000, 3)
+    const snapshot = [resumed, waited, started, resumed].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(UsageCost.activeTime(snapshot, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(5),
+      activeSince: 12_000,
+    })
+  })
+
+  it.effect("unions overlapping parent and child intervals instead of adding parallel work", () =>
+    Effect.gen(function* () {
+      const snapshot = yield* UsageCost.collect(
+        reader({
+          parent: {
+            events: [
+              lifecycle("parent", "parent-start", "execution.started", 0, 1),
+              lifecycle("parent", "parent-wait", "wait.created", 10_000, 2),
+            ],
+            children: ["child"],
+          },
+          child: {
+            events: [
+              lifecycle("child", "child-start", "execution.started", 5_000, 1),
+              lifecycle("child", "child-complete", "execution.completed", 15_000, 2),
+            ],
+          },
+        }),
+        [{ threadId: "thread", turnId: "parent" }],
+      )
+
+      expect(UsageCost.activeTime(snapshot, "thread")).toEqual({
+        _tag: "Available",
+        accumulated: Duration.seconds(15),
+      })
+    }),
+  )
+
+  it.effect("reconstructs the same active time when a persisted execution tree is reopened", () =>
+    Effect.gen(function* () {
+      const executions = {
+        parent: {
+          events: [
+            lifecycle("parent", "start", "execution.started", 1_000, 1),
+            lifecycle("parent", "wait", "wait.created", 11_000, 2),
+          ],
+        },
+      }
+      const roots = [{ threadId: "thread", turnId: "parent" }]
+      const beforeClose = yield* UsageCost.collect(reader(executions), roots)
+      const afterReopen = yield* UsageCost.collect(reader(executions), roots)
+
+      expect(UsageCost.activeTime(afterReopen, "thread")).toEqual(UsageCost.activeTime(beforeClose, "thread"))
+      expect(UsageCost.activeTime(afterReopen, "thread")).toEqual({
+        _tag: "Available",
+        accumulated: Duration.seconds(10),
+      })
+    }),
+  )
+
+  it("makes active time unavailable when lifecycle identity or timestamps are invalid", () => {
+    const missingIdentity = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: { cursor: "start", sequence: 1, type: "execution.started", createdAt: 1 },
+    })
+    const invalidTimestamp = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "start", "execution.started", -1, 1),
+    })
+
+    expect(UsageCost.activeTime(missingIdentity, "thread")).toEqual({ _tag: "Unavailable" })
+    expect(UsageCost.activeTime(invalidTimestamp, "thread")).toEqual({ _tag: "Unavailable" })
+  })
+
+  it("uses durable sequence order and rejects regressing lifecycle timestamps", () => {
+    const snapshot = [
+      lifecycle("execution", "start", "execution.started", 10_000, 1),
+      lifecycle("execution", "wait", "wait.created", 5_000, 2),
+    ].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(UsageCost.activeTime(snapshot, "thread")).toEqual({ _tag: "Unavailable" })
+  })
+
+  it.effect("reads every lifecycle page beyond Relay replay's bounded window", () =>
+    Effect.gen(function* () {
+      const events: Array<ExecutionBackend.Event> = [
+        lifecycle("execution", "accepted", "execution.accepted", 0, 0),
+        lifecycle("execution", "started", "execution.started", 1_000, 1),
+        ...Array.from({ length: 1_001 }, (_, index) => ({
+          id: `output-${index}`,
+          executionId: "execution",
+          cursor: `output-${index}`,
+          sequence: index + 2,
+          type: "model.output.delta",
+          createdAt: 1_001 + index,
+        })),
+        lifecycle("execution", "completed", "execution.completed", 11_000, 1_003),
+      ]
+      const complete = reader({ execution: { events } })
+      const snapshot = yield* UsageCost.collect(
+        {
+          ...complete,
+          replay: () => Effect.succeed({ turnId: "execution", status: "running", events: events.slice(0, 1_000) }),
+        },
+        [{ threadId: "thread", turnId: "execution" }],
+      )
+
+      expect(UsageCost.activeTime(snapshot, "thread")).toEqual({
+        _tag: "Available",
+        accumulated: Duration.seconds(10),
+      })
+    }),
+  )
+
   it("prices uncached input, cache reads, and output from the models.dev snapshot", () => {
     expect(
       UsageCost.eventCostUsd(

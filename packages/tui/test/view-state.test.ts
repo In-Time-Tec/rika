@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Duration, Effect } from "effect"
 import { Keys, Palette, ViewState } from "../src"
 
 const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
@@ -64,6 +64,30 @@ const busyQueueModel = (model: ViewState.Model): ViewState.Model => ({
 })
 
 describe("ViewState", () => {
+  test("cycles cost, tokens, and active time", () => {
+    expect(ViewState.nextUsageDisplay("cost")).toBe("tokens")
+    expect(ViewState.nextUsageDisplay("tokens")).toBe("time")
+    expect(ViewState.nextUsageDisplay("time")).toBe("cost")
+  })
+
+  test.each([
+    [Duration.zero, "◷ 0s"],
+    [Duration.seconds(43), "◷ 43s"],
+    [Duration.sum(Duration.minutes(1), Duration.seconds(43)), "◷ 1m 43s"],
+    [Duration.sum(Duration.hours(1), Duration.minutes(43)), "◷ 1h 43m"],
+    [Duration.sum(Duration.days(1), Duration.hours(2)), "◷ 1d 2h"],
+    [Duration.sum(Duration.days(1), Duration.minutes(43)), "◷ 1d"],
+  ])("formats active time as at most two adjacent units", (duration, expected) => {
+    expect(ViewState.formatActiveTime(duration)).toBe(expected)
+  })
+
+  test("adds only an open active interval to accumulated time", () => {
+    expect(
+      ViewState.activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 }, 53_000),
+    ).toEqual(Duration.seconds(48))
+    expect(ViewState.activeTimeAt({ _tag: "Available", accumulatedMillis: 5_000 }, 53_000)).toEqual(Duration.seconds(5))
+  })
+
   test("tracks only the five turn activity states", () => {
     let model = { ...ViewState.initial("/work", "medium"), input: "run it", cursor: 6 }
     model = ViewState.update(model, { _tag: "Submitted" })

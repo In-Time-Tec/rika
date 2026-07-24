@@ -978,6 +978,7 @@ describe("InteractiveSession controls", () => {
         threadId: "latest",
         cost: { _tag: "Unavailable" },
         tokens: { _tag: "Unavailable" },
+        time: { _tag: "Unavailable" },
       })
       expect(yield* Ref.get(controls)).toEqual([
         ["replay", "active", undefined],
@@ -1023,6 +1024,8 @@ describe("InteractiveSession controls", () => {
         ["page", "active", "forward", "cursor-400", 200],
         ["replay", "active", undefined],
         ["replay", "child:active:title", undefined],
+        ["page", "active", "forward", undefined, 1_000],
+        ["page", "child:active:title", "forward", undefined, 1_000],
       ])
     }),
   )
@@ -1802,6 +1805,7 @@ describe("InteractiveSession subagent reload", () => {
         threadId: "subagent-thread",
         cost: { _tag: "Available", usd: 1.25 },
         tokens: { _tag: "Available", total: 30 },
+        time: { _tag: "Unavailable" },
       })
     }),
   )

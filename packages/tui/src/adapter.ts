@@ -38,6 +38,7 @@ import {
   fileSidebarLayoutWidth,
   filteredFiles,
   filteredThreads,
+  formatActiveTime,
   formatActivity,
   initial,
   isLoading,
@@ -48,6 +49,7 @@ import {
   readyOr,
   selectedThreadMetadata,
   threadSidebarLayoutWidth,
+  activeTimeAt,
   wrappedRowCount,
   type Mode,
   type Model,
@@ -1675,6 +1677,8 @@ export interface Handlers {
 export interface SurfaceOptions {
   readonly animate?: boolean
   readonly clock?: OpenTuiClock
+  readonly epochMillis?: number
+  readonly currentTimeMillis?: () => number
 }
 
 interface TranscriptRenderableRecord {
@@ -1859,6 +1863,7 @@ export class Surface {
   private publishedWorkingFrame: string | undefined
   private workingFramePublished = false
   private readonly clock: OpenTuiClock
+  private readonly currentTimeMillis: () => number
   private readonly toolSpinner = new ToolSpinner()
   private transcriptViewportRows = 0
   private renderedTranscriptScrollTop = 0
@@ -1886,6 +1891,9 @@ export class Surface {
     private readonly options: SurfaceOptions = {},
   ) {
     this.clock = options.clock ?? new SystemClock()
+    const monotonicStartedAt = this.clock.now()
+    const epochStartedAt = options.epochMillis ?? Effect.runSync(Clock.currentTimeMillis)
+    this.currentTimeMillis = options.currentTimeMillis ?? (() => epochStartedAt + this.clock.now() - monotonicStartedAt)
     this.main = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
     this.contentColumn = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "column" })
     this.transcriptRow = new BoxRenderable(renderer, { flexGrow: 1, flexDirection: "row" })
@@ -2445,6 +2453,36 @@ export class Surface {
     this.handlers.workingFrame?.(frame)
   }
 
+  private renderModeLabel(model: Model): void {
+    let usageText = ""
+    if (model.usageDisplay === "time") {
+      if (model.usageTime?._tag === "Available")
+        usageText = formatActiveTime(activeTimeAt(model.usageTime, this.currentTimeMillis()))
+      else if (model.usageTime?._tag === "Unavailable") usageText = "◷ —"
+      else usageText = "◷ ····"
+    } else if (model.usageDisplay === "tokens") {
+      if (model.usageTokens?._tag === "Available") usageText = formatTokens(model.usageTokens.total)
+      else if (model.usageTokens?._tag === "Unavailable") usageText = "— tok"
+      else usageText = "···· tok"
+    } else if (model.costUsd !== undefined && model.usageCost?._tag !== "Unavailable")
+      usageText = formatCost(model.costUsd)
+    else if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
+    else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
+    else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
+    const modeChunks: Array<TextChunk> = []
+    this.usageLabelWidth = usageText.length === 0 ? 0 : stringWidth(` ${usageText} `)
+    if (usageText.length > 0) {
+      modeChunks.push(dim(fg(colors.text)(` ${usageText} `)))
+      modeChunks.push(fg(colors.text)("─"))
+    }
+    modeChunks.push(fg(colors.text)(" "))
+    if (model.fastMode) modeChunks.push(fg(colors.amber)("↯"))
+    modeChunks.push(fg(colors[model.mode])(model.mode))
+    modeChunks.push(fg(colors.text)(" "))
+    this.modeLabel.width = modeChunks.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
+    this.modeLabel.content = new StyledText(modeChunks)
+  }
+
   private tickLoader(): void {
     this.loaderPhase += 1
     this.toolSpinner.step()
@@ -2459,6 +2497,7 @@ export class Surface {
         ])
       const glyph = this.toolSpinner.toBraille()
       if (current.busy) this.publishWorkingFrame(glyph)
+      if (current.usageDisplay === "time" && current.usageTime?._tag === "Available") this.renderModeLabel(current)
       for (const record of this.transcriptRecords.values()) {
         if (record.spinnerChunk === undefined) continue
         const content = record.renderable.content
@@ -3187,30 +3226,9 @@ export class Surface {
     this.queueLeftJoint.visible = queue.length > 0 || pendingSteering.length > 0
     this.queueRightJoint.visible = queue.length > 0 || pendingSteering.length > 0
     this.inputBox.borderColor = colors.text
-    let costText = ""
-    if (model.usageDisplay === "tokens") {
-      if (model.usageTokens?._tag === "Available") costText = formatTokens(model.usageTokens.total)
-      else if (model.usageTokens?._tag === "Unavailable") costText = "— tok"
-      else costText = "···· tok"
-    } else if (model.costUsd !== undefined && model.usageCost?._tag !== "Unavailable")
-      costText = formatCost(model.costUsd)
-    else if (model.usageCost?._tag === "Available") costText = formatCost(model.usageCost.usd)
-    else if (model.usageCost?._tag === "Unavailable") costText = "$—"
-    else if (model.usageCost?._tag === "Loading" || model.busy) costText = "$····"
     this.inputBox.title = ""
-    const modeChunks: Array<TextChunk> = []
-    this.usageLabelWidth = costText.length === 0 ? 0 : stringWidth(` ${costText} `)
-    if (costText.length > 0) {
-      modeChunks.push(dim(fg(colors.text)(` ${costText} `)))
-      modeChunks.push(fg(colors.text)("─"))
-    }
-    modeChunks.push(fg(colors.text)(" "))
-    if (model.fastMode) modeChunks.push(fg(colors.amber)("↯"))
-    modeChunks.push(fg(colors[model.mode])(model.mode))
-    modeChunks.push(fg(colors.text)(" "))
     this.modeLabel.right = sidebarWidth + 2
-    this.modeLabel.width = modeChunks.reduce((total, chunk) => total + stringWidth(chunk.text), 0)
-    this.modeLabel.content = new StyledText(modeChunks)
+    this.renderModeLabel(model)
     const workspaceTitle = isNarrow(model)
       ? ""
       : ` ${compactWorkspace(model.workspace)}${model.branch === undefined ? "" : ` (${model.branch})`} `
@@ -3301,6 +3319,9 @@ export class Surface {
       model.busy ||
       model.activity !== undefined ||
       panelLoadingLabel !== undefined ||
+      (model.usageDisplay === "time" &&
+        model.usageTime?._tag === "Available" &&
+        model.usageTime.activeSince !== undefined) ||
       (model.threadSidebar.open &&
         (model.threads as ReadonlyArray<ThreadItem>).some((thread) => thread.status !== "idle"))
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
@@ -4242,51 +4263,54 @@ export const create = (handlers: Handlers) =>
     catch: adapterError,
   }).pipe(
     Effect.flatMap((renderer) =>
-      Effect.try({
-        try: () => {
-          let surface: Surface | undefined
-          let released = false
-          const releaseTerminal = () => {
-            if (released) return
-            released = true
-            try {
-              surface?.destroy()
-            } catch {
-            } finally {
+      Effect.gen(function* () {
+        const epochMillis = yield* Clock.currentTimeMillis
+        return yield* Effect.try({
+          try: () => {
+            let surface: Surface | undefined
+            let released = false
+            const releaseTerminal = () => {
+              if (released) return
+              released = true
               try {
-                renderer.destroy()
-              } catch {}
+                surface?.destroy()
+              } catch {
+              } finally {
+                try {
+                  renderer.destroy()
+                } catch {}
+              }
             }
-          }
-          const suspendTerminal = () => {
-            if (released) return
+            const suspendTerminal = () => {
+              if (released) return
+              try {
+                renderer.suspend()
+              } catch (cause) {
+                releaseTerminal()
+                throw cause
+              }
+            }
+            const resumeTerminal = () => {
+              if (released) return
+              try {
+                renderer.resume()
+              } catch (cause) {
+                releaseTerminal()
+                throw cause
+              }
+            }
             try {
-              renderer.suspend()
+              renderer.setBackgroundColor("transparent")
+              handlers.resize(renderer.terminalWidth, renderer.terminalHeight)
+              surface = new Surface(renderer, handlers, { epochMillis })
+              return { surface, releaseTerminal, suspendTerminal, resumeTerminal }
             } catch (cause) {
               releaseTerminal()
               throw cause
             }
-          }
-          const resumeTerminal = () => {
-            if (released) return
-            try {
-              renderer.resume()
-            } catch (cause) {
-              releaseTerminal()
-              throw cause
-            }
-          }
-          try {
-            renderer.setBackgroundColor("transparent")
-            handlers.resize(renderer.terminalWidth, renderer.terminalHeight)
-            surface = new Surface(renderer, handlers)
-            return { surface, releaseTerminal, suspendTerminal, resumeTerminal }
-          } catch (cause) {
-            releaseTerminal()
-            throw cause
-          }
-        },
-        catch: adapterError,
+          },
+          catch: adapterError,
+        })
       }),
     ),
   )

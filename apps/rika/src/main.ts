@@ -2440,7 +2440,7 @@ export const interactiveTui =
               usageToggle: () => {
                 model = {
                   ...model,
-                  usageDisplay: model.usageDisplay === "tokens" ? "cost" : "tokens",
+                  usageDisplay: ViewState.nextUsageDisplay(model.usageDisplay),
                 }
                 render()
               },

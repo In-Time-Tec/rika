@@ -295,6 +295,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
           ...withoutCost,
           usageCost: event.cost,
           usageTokens: event.tokens,
+          usageTime: event.time,
           ...(threadCostUsd === undefined ? {} : { costUsd: threadCostUsd }),
         },
       },
@@ -321,7 +322,13 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       event.selectionEpoch === state.selectionEpoch && state.model.currentThreadId === event.thread.id
     const model = cleared({
       ...state.model,
-      ...(sameSelection ? {} : { usageCost: { _tag: "Loading" as const }, usageTokens: { _tag: "Loading" as const } }),
+      ...(sameSelection
+        ? {}
+        : {
+            usageCost: { _tag: "Loading" as const },
+            usageTokens: { _tag: "Loading" as const },
+            usageTime: { _tag: "Loading" as const },
+          }),
       activeTurnId: activeTurn?.id,
       busy: activeTurn !== undefined,
       activity: activeTurn === undefined ? undefined : { _tag: "Waiting" },

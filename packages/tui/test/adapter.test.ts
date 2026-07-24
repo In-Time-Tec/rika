@@ -2079,6 +2079,18 @@ describe("Surface", () => {
         model({ mode: "medium", usageDisplay: "tokens", usageTokens: { _tag: "Available", total: 40_100_000 } }),
       )
       expect(modeLabelText()).toBe(" 40.1M tok ─ medium ")
+      surface.update(
+        model({
+          mode: "medium",
+          usageDisplay: "time",
+          usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+        }),
+      )
+      expect(modeLabelText()).toBe(" ◷ 1m 43s ─ medium ")
+      surface.update(model({ mode: "medium", usageDisplay: "time", usageTime: { _tag: "Loading" } }))
+      expect(modeLabelText()).toBe(" ◷ ···· ─ medium ")
+      surface.update(model({ mode: "medium", usageDisplay: "time", usageTime: { _tag: "Unavailable" } }))
+      expect(modeLabelText()).toBe(" ◷ — ─ medium ")
 
       surface.update(
         model({

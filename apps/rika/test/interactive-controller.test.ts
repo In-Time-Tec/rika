@@ -1159,6 +1159,42 @@ it("keeps the authoritative thread cost stable while older pages are prepended",
   expect(prepended.state.model.costUsd).toBe(3.75)
 })
 
+it("projects selected-thread active time and ignores stale selection updates", () => {
+  const page = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("new", 2),
+    hasOlder: false,
+  })
+  const active = InteractiveController.update(page.state, {
+    _tag: "ThreadUsageUpdated",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    cost: { _tag: "Unavailable" },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 },
+  })
+  const stale = InteractiveController.update(active.state, {
+    _tag: "ThreadUsageUpdated",
+    selectionEpoch: 0,
+    threadId: thread.id,
+    cost: { _tag: "Unavailable" },
+    tokens: { _tag: "Unavailable" },
+    time: { _tag: "Available", accumulatedMillis: 99_000 },
+  })
+
+  expect(active.state.model.usageTime).toEqual({
+    _tag: "Available",
+    accumulatedMillis: 5_000,
+    activeSince: 10_000,
+  })
+  expect(stale.state.model.usageTime).toBe(active.state.model.usageTime)
+})
+
 it("shows the session total and updates it when child usage arrives", () => {
   const page = InteractiveController.update(initialState(), {
     _tag: "SelectionLoaded",

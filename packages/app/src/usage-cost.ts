@@ -1,6 +1,6 @@
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
-import { Effect, Function } from "effect"
+import { Duration, Effect, Function } from "effect"
 
 export interface RootExecution {
   readonly threadId: string
@@ -12,6 +12,7 @@ export interface RootExecution {
 export interface ExecutionReader {
   readonly inspect: ExecutionBackend.Interface["inspect"]
   readonly replay: ExecutionBackend.Interface["replay"]
+  readonly pageEvents?: ExecutionBackend.Interface["pageEvents"]
 }
 
 export interface Snapshot {
@@ -27,7 +28,36 @@ export interface Snapshot {
   readonly tokenCompleteThreads: ReadonlySet<string>
   readonly costCompleteThreads: ReadonlySet<string>
   readonly incompleteThreads: ReadonlySet<string>
+  readonly activeEvents: ReadonlyMap<string, ActiveEvent>
+  readonly activeObservedThreads: ReadonlySet<string>
+  readonly timeMalformedThreads: ReadonlySet<string>
+  readonly threadActiveTime: ReadonlyMap<string, ActiveTime>
 }
+
+export interface ActiveTime {
+  readonly accumulated: Duration.Duration
+  readonly activeSince?: number
+}
+
+export type ActiveTimeAvailability = ({ readonly _tag: "Available" } & ActiveTime) | { readonly _tag: "Unavailable" }
+
+interface ActiveEvent {
+  readonly key: string
+  readonly id: string
+  readonly executionId: string
+  readonly threadId: string
+  readonly type: ActiveEventType
+  readonly createdAt: number
+  readonly sequence: number
+}
+
+type ActiveEventType =
+  | "execution.accepted"
+  | "execution.started"
+  | "wait.created"
+  | "execution.completed"
+  | "execution.failed"
+  | "execution.cancelled"
 
 interface AttemptCost {
   readonly threadId: string
@@ -56,6 +86,196 @@ export const empty: Snapshot = {
   tokenCompleteThreads: new Set(),
   costCompleteThreads: new Set(),
   incompleteThreads: new Set(),
+  activeEvents: new Map(),
+  activeObservedThreads: new Set(),
+  timeMalformedThreads: new Set(),
+  threadActiveTime: new Map(),
+}
+
+const activeEventTypes = new Set<string>([
+  "execution.accepted",
+  "execution.started",
+  "wait.created",
+  "execution.completed",
+  "execution.failed",
+  "execution.cancelled",
+])
+
+export const isRelevantEvent = (event: ExecutionBackend.Event): boolean =>
+  activeEventTypes.has(event.type) || event.type === "model.usage.reported" || event.type === "model.attempt.completed"
+
+const isActiveEventType = (type: string): type is ActiveEventType => activeEventTypes.has(type)
+
+interface Interval {
+  readonly start: number
+  readonly end?: number
+}
+
+const executionIntervals = (events: ReadonlyArray<ActiveEvent>): ReadonlyArray<Interval> | undefined => {
+  const ordered = events.toSorted(
+    (left, right) =>
+      left.sequence - right.sequence || left.type.localeCompare(right.type) || left.id.localeCompare(right.id),
+  )
+  const intervals: Array<Interval> = []
+  let activeSince: number | undefined
+  let accepted = false
+  let started = false
+  let terminal = false
+  let previousSequence: number | undefined
+  let previousCreatedAt: number | undefined
+  for (const event of ordered) {
+    if (previousSequence === event.sequence || (previousCreatedAt !== undefined && event.createdAt < previousCreatedAt))
+      return undefined
+    previousSequence = event.sequence
+    previousCreatedAt = event.createdAt
+    if (terminal) return undefined
+    if (event.type === "execution.accepted") {
+      if (accepted || started || terminal) return undefined
+      accepted = true
+      continue
+    }
+    if (event.type === "execution.started") {
+      if (terminal || activeSince !== undefined) return undefined
+      started = true
+      activeSince = event.createdAt
+      continue
+    }
+    if (!started) {
+      if (
+        accepted &&
+        (event.type === "execution.completed" ||
+          event.type === "execution.failed" ||
+          event.type === "execution.cancelled")
+      ) {
+        terminal = true
+        continue
+      }
+      return undefined
+    }
+    if (activeSince !== undefined) {
+      intervals.push({ start: activeSince, end: event.createdAt })
+      activeSince = undefined
+    }
+    if (
+      event.type === "execution.completed" ||
+      event.type === "execution.failed" ||
+      event.type === "execution.cancelled"
+    )
+      terminal = true
+  }
+  if (activeSince !== undefined) intervals.push({ start: activeSince })
+  return intervals
+}
+
+const unionIntervals = (intervals: ReadonlyArray<Interval>): ActiveTime => {
+  const ordered = intervals.toSorted(
+    (left, right) => left.start - right.start || (left.end ?? Infinity) - (right.end ?? Infinity),
+  )
+  let accumulated = Duration.zero
+  let currentStart: number | undefined
+  let currentEnd: number | undefined
+  for (const interval of ordered) {
+    if (currentStart === undefined) {
+      currentStart = interval.start
+      currentEnd = interval.end
+      continue
+    }
+    if (currentEnd === undefined) continue
+    if (interval.start <= currentEnd) {
+      currentEnd = interval.end === undefined ? undefined : Math.max(currentEnd, interval.end)
+      continue
+    }
+    accumulated = Duration.sum(accumulated, Duration.millis(currentEnd - currentStart))
+    currentStart = interval.start
+    currentEnd = interval.end
+  }
+  if (currentStart === undefined) return { accumulated }
+  if (currentEnd === undefined) return { accumulated, activeSince: currentStart }
+  return { accumulated: Duration.sum(accumulated, Duration.millis(currentEnd - currentStart)) }
+}
+
+const rebuildThreadActiveTime = (snapshot: Snapshot, threadId: string): Snapshot => {
+  const executions = new Map<string, Array<ActiveEvent>>()
+  for (const event of snapshot.activeEvents.values()) {
+    if (event.threadId !== threadId) continue
+    executions.set(event.executionId, [...(executions.get(event.executionId) ?? []), event])
+  }
+  const intervals: Array<Interval> = []
+  for (const events of executions.values()) {
+    const execution = executionIntervals(events)
+    if (execution === undefined) {
+      const threadActiveTime = new Map(snapshot.threadActiveTime)
+      threadActiveTime.delete(threadId)
+      return { ...snapshot, threadActiveTime }
+    }
+    intervals.push(...execution)
+  }
+  return {
+    ...snapshot,
+    threadActiveTime: new Map(snapshot.threadActiveTime).set(threadId, unionIntervals(intervals)),
+  }
+}
+
+const malformedTime = (snapshot: Snapshot, threadId: string): Snapshot => ({
+  ...snapshot,
+  activeObservedThreads: new Set(snapshot.activeObservedThreads).add(threadId),
+  timeMalformedThreads: new Set(snapshot.timeMalformedThreads).add(threadId),
+})
+
+export const activeTime: {
+  (snapshot: Snapshot, threadId: string): ActiveTimeAvailability
+  (threadId: string): (snapshot: Snapshot) => ActiveTimeAvailability
+} = Function.dual(2, (snapshot: Snapshot, threadId: string): ActiveTimeAvailability => {
+  if (snapshot.timeMalformedThreads.has(threadId)) return { _tag: "Unavailable" }
+  const time = snapshot.threadActiveTime.get(threadId)
+  if (time === undefined && snapshot.activeObservedThreads.has(threadId)) return { _tag: "Unavailable" }
+  return { _tag: "Available", ...(time ?? { accumulated: Duration.zero }) }
+})
+
+const observeActive = (
+  snapshot: Snapshot,
+  input: RootExecution & { readonly event: ExecutionBackend.Event },
+): Snapshot => {
+  const event = input.event
+  if (!isActiveEventType(event.type)) return snapshot
+  if (
+    event.executionId === undefined ||
+    event.executionId.length === 0 ||
+    event.id === undefined ||
+    event.id.length === 0 ||
+    !Number.isFinite(event.createdAt) ||
+    event.createdAt < 0
+  )
+    return malformedTime(snapshot, input.threadId)
+  const key = `${event.executionId}\u0000${event.id}`
+  const previous = snapshot.activeEvents.get(key)
+  if (previous !== undefined) {
+    if (
+      previous.threadId === input.threadId &&
+      previous.type === event.type &&
+      previous.createdAt === event.createdAt &&
+      previous.sequence === event.sequence
+    )
+      return snapshot
+    return malformedTime(snapshot, input.threadId)
+  }
+  const activeEvents = new Map(snapshot.activeEvents).set(key, {
+    key,
+    id: event.id,
+    executionId: event.executionId,
+    threadId: input.threadId,
+    type: event.type,
+    createdAt: event.createdAt,
+    sequence: event.sequence,
+  })
+  return rebuildThreadActiveTime(
+    {
+      ...snapshot,
+      activeEvents,
+      activeObservedThreads: new Set(snapshot.activeObservedThreads).add(input.threadId),
+    },
+    input.threadId,
+  )
 }
 
 export const eventCostUsd = (event: ExecutionBackend.Event): number | undefined =>
@@ -145,6 +365,8 @@ const incomplete = (snapshot: Snapshot, threadId: string): Snapshot => {
     ...snapshot,
     collectionComplete: false,
     incompleteThreads,
+    activeObservedThreads: new Set(snapshot.activeObservedThreads).add(threadId),
+    timeMalformedThreads: new Set(snapshot.timeMalformedThreads).add(threadId),
     ...totals(snapshot.attempts, false, incompleteThreads),
   }
 }
@@ -155,6 +377,7 @@ export const observe: {
 } = Function.dual(
   2,
   (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionBackend.Event }): Snapshot => {
+    if (isActiveEventType(input.event.type)) return observeActive(snapshot, input)
     if (input.event.type !== "model.usage.reported" && input.event.type !== "model.attempt.completed") return snapshot
     if (
       input.event.executionId === undefined ||
@@ -224,6 +447,27 @@ const readExecution = <A, E>(effect: Effect.Effect<A, E>, executionId: string): 
     ),
   )
 
+const readCompleteHistory = Effect.fn("UsageCost.readCompleteHistory")(function* (
+  reader: ExecutionReader,
+  executionId: string,
+  reference: ExecutionBackend.ExecutionReference | undefined,
+) {
+  if (reader.pageEvents === undefined) return undefined
+  const events: Array<ExecutionBackend.Event> = []
+  const seenCursors = new Set<string>()
+  let cursor: string | undefined
+  while (true) {
+    const page = yield* readExecution(reader.pageEvents(executionId, "forward", cursor, 1_000, reference), executionId)
+    if (page === undefined) return undefined
+    events.push(...page.events)
+    if (!page.hasMore) return events
+    const nextCursor = page.newestCursor ?? page.events.at(-1)?.cursor
+    if (nextCursor === undefined || seenCursors.has(nextCursor)) return undefined
+    seenCursors.add(nextCursor)
+    cursor = nextCursor
+  }
+})
+
 export const collect = Effect.fn("UsageCost.collect")(function* (
   reader: ExecutionReader,
   roots: ReadonlyArray<RootExecution>,
@@ -270,6 +514,24 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
           turnId: current.turnId,
           event,
         })
+      const reference = current.reference ? ExecutionBackend.executionReference : undefined
+      const history = yield* readCompleteHistory(reader, current.executionId, reference)
+      if (history !== undefined)
+        for (const event of history) {
+          if (!isActiveEventType(event.type)) continue
+          snapshot = observe(snapshot, {
+            threadId: current.threadId,
+            turnId: current.turnId,
+            event,
+          })
+        }
+      if (
+        history === undefined ||
+        (!history.some((event) => isActiveEventType(event.type)) &&
+          inspection.status !== "accepted" &&
+          inspection.status !== "queued")
+      )
+        snapshot = malformedTime(snapshot, current.threadId)
       for (const child of inspection.children)
         pending.push({ ...current, executionId: child.executionId, reference: true })
     }

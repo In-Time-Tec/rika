@@ -19,6 +19,7 @@ import {
   Console,
   Context,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -572,6 +573,17 @@ const normalizeChildExecutionId = (executionId: string): string => executionId.r
 
 const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number | undefined =>
   totals.complete ? totals.globalCostUsd : undefined
+
+const displayActiveTime = (totals: UsageCost.Snapshot, threadId: string) => {
+  const time = UsageCost.activeTime(totals, threadId)
+  return time._tag === "Unavailable"
+    ? time
+    : {
+        _tag: "Available" as const,
+        accumulatedMillis: Duration.toMillis(time.accumulated),
+        ...(time.activeSince === undefined ? {} : { activeSince: time.activeSince }),
+      }
+}
 
 const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): InteractiveEvent => {
   const executionId = event.executionId ?? event.data?.execution_id
@@ -1814,11 +1826,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const withUsageCosts = (
           event: InteractiveEvent,
         ): { readonly event: InteractiveEvent; readonly usage?: ThreadUsageEvent } => {
-          if (
-            event._tag !== "TranscriptPatched" ||
-            (event.event.type !== "model.usage.reported" && event.event.type !== "model.attempt.completed")
-          )
-            return { event }
+          if (event._tag !== "TranscriptPatched" || !UsageCost.isRelevantEvent(event.event)) return { event }
           const rootTurnId = event.rootTurnId ?? event.turnId
           const observation = {
             threadId: String(event.threadId),
@@ -1833,13 +1841,19 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           }
           const selectedTotals = selection?.threadId === String(event.threadId) ? selection.snapshot : undefined
           const totals = selectedTotals ?? currentUsageCosts()
+          const costBearing =
+            event.event.type === "model.usage.reported" || event.event.type === "model.attempt.completed"
           const threadComplete = totals.costCompleteThreads.has(String(event.threadId))
           const patched = {
             ...event,
-            rootTurnId,
-            ...(totals.turnCostUsd.has(rootTurnId) ? { rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId)! } : {}),
-            ...(threadComplete ? { threadCostUsd: totals.threadCostUsd.get(String(event.threadId)) ?? 0 } : {}),
-            ...(totals.complete ? { globalCostUsd: totals.globalCostUsd } : {}),
+            ...(costBearing ? { rootTurnId } : {}),
+            ...(costBearing && totals.turnCostUsd.has(rootTurnId)
+              ? { rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId)! }
+              : {}),
+            ...(costBearing && threadComplete
+              ? { threadCostUsd: totals.threadCostUsd.get(String(event.threadId)) ?? 0 }
+              : {}),
+            ...(costBearing && totals.complete ? { globalCostUsd: totals.globalCostUsd } : {}),
           }
           if (selectedTotals === undefined || selection === undefined) return { event: patched }
           const threadId = String(event.threadId)
@@ -1855,6 +1869,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               tokens: selectedTotals.tokenCompleteThreads.has(threadId)
                 ? { _tag: "Available", total: selectedTotals.threadTokens.get(threadId) ?? 0 }
                 : { _tag: "Unavailable" },
+              time: displayActiveTime(selectedTotals, threadId),
             },
           }
         }
@@ -3591,6 +3606,7 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     tokens: selectedSnapshot.tokenCompleteThreads.has(threadId)
                       ? { _tag: "Available", total: selectedSnapshot.threadTokens.get(threadId) ?? 0 }
                       : { _tag: "Unavailable" },
+                    time: displayActiveTime(selectedSnapshot, threadId),
                   })
                 }).pipe(Effect.provide(executionDependencies)),
                 sessionScope,
