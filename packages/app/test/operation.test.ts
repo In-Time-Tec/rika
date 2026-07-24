@@ -2065,9 +2065,9 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("commits a target selection before releasing its buffered critical events", () =>
+  it.effect("releases a committed selection feed before an overlapping candidate can fail", () =>
     Effect.gen(function* () {
-      const harness = yield* makeSelectionLoadHarness(1)
+      const harness = yield* makeSelectionLoadHarness(1, true)
       yield* Effect.gen(function* () {
         const source = yield* openInteractiveSession(harness.sessions, {
           _tag: "Interactive",
@@ -2083,15 +2083,14 @@ describe("Operation", () => {
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.target.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)
-        yield* source.submit("active target turn")
-        yield* Deferred.await(harness.liveEventsEmitted)
-        yield* settleEvents
-        received.length = 0
 
         yield* harness.beginTargetGet
         const selection = yield* Effect.forkChild(selecting.selectThread(harness.target.id, 2))
         yield* Deferred.await(harness.targetGetEntered)
+        const execution = yield* Effect.forkChild(source.submit("active target turn"))
+        yield* Deferred.await(harness.liveEventsEmitted)
         yield* source.steer("critical during selection")
+        yield* harness.releaseUsage
         yield* settleEvents
 
         expect(
@@ -2103,8 +2102,17 @@ describe("Operation", () => {
               event.selectionEpoch === 2,
           ),
         ).toEqual([])
+        const failedCandidate = yield* Effect.forkChild(
+          Effect.gen(function* () {
+            while (!received.some((event) => event._tag === "SelectionLoaded" && event.selectionEpoch === 2))
+              yield* Effect.yieldNow
+            yield* harness.failTargetPage
+            yield* selecting.selectThread(harness.target.id, 3)
+          }),
+        )
         yield* harness.releaseTargetGet
         yield* Fiber.join(selection)
+        yield* Fiber.join(failedCandidate)
         yield* settleEvents
         expect(
           received
@@ -2123,7 +2131,30 @@ describe("Operation", () => {
             action: "steered",
           }),
         )
+        expect(
+          received.filter(
+            (event) =>
+              event._tag === "TranscriptPatched" &&
+              event.selectionEpoch === 2 &&
+              event.event.type === "model.output.delta",
+          ),
+        ).toHaveLength(1)
+        expect(
+          received.filter((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2),
+        ).toHaveLength(1)
+        expect(
+          received.filter(
+            (event) =>
+              event._tag === "ExecutionControlled" &&
+              event.selectionEpoch === 2 &&
+              event.threadId === harness.target.id,
+          ),
+        ).toHaveLength(1)
+        expect(received.filter((event) => event._tag === "SelectionLoaded" && event.selectionEpoch === 3)).toHaveLength(
+          0,
+        )
         yield* harness.releaseExecution
+        yield* Fiber.join(execution)
       }).pipe(provideLayer(harness.layer))
     }),
   )

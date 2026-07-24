@@ -1809,12 +1809,20 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
         const selectionDispatch = (request: number) => (event: InteractiveEvent) => {
           deliver(event, { selectionRequest: request })
         }
+        const releaseSelectionEvents = (loading: SelectionLoad, epoch: number, reason: string) => {
+          if (loading.overflow === undefined) {
+            for (const event of loading.events) deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
+            return
+          }
+          for (const event of InteractiveFeedOverflow.events(loading.overflow, epoch, reason))
+            deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
+        }
         const finishSelection = (epoch: number) =>
-          Effect.gen(function* () {
-            const loading = selectionLoad
-            if (loading === undefined || loading.epoch !== epoch) return
-            selectionLoad = undefined
-            if (!loading.committed) {
+          selectionAdmission.withPermits(1)(
+            Effect.gen(function* () {
+              const loading = selectionLoad
+              if (loading === undefined || loading.epoch !== epoch || loading.committed) return
+              selectionLoad = undefined
               const restored = yield* Ref.modify(selectionRequest, (current) =>
                 current === epoch ? [true, loading.previousEpoch] : [false, current],
               )
@@ -1822,30 +1830,9 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
               if (candidateSelectionState?.epoch === epoch) candidateSelectionState = undefined
               if (candidateUsage?.request === epoch) candidateUsage = undefined
               if (loading.previousThreadId !== loading.threadId) return
-              if (loading.overflow === undefined) {
-                for (const event of loading.events)
-                  deliver(event, { selectionRequest: loading.previousEpoch, selectedThreadOnly: true })
-                return
-              }
-              for (const event of InteractiveFeedOverflow.events(
-                loading.overflow,
-                loading.previousEpoch,
-                "Reload activity exceeded its bounded live window",
-              ))
-                deliver(event, { selectionRequest: loading.previousEpoch, selectedThreadOnly: true })
-              return
-            }
-            if (loading.overflow === undefined) {
-              for (const event of loading.events) deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
-              return
-            }
-            for (const event of InteractiveFeedOverflow.events(
-              loading.overflow,
-              epoch,
-              "Selection activity exceeded its bounded live window",
-            ))
-              deliver(event, { selectionRequest: epoch, selectedThreadOnly: true })
-          })
+              releaseSelectionEvents(loading, loading.previousEpoch, "Reload activity exceeded its bounded live window")
+            }),
+          )
         const emit = (dispatch: (event: InteractiveEvent) => void, event: InteractiveEvent) => {
           dispatch(event)
           publishInteractiveActivity(sessionId, event)
@@ -3336,6 +3323,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     queue: queue.turns.map(queueItem),
                     ...(activeTurn === undefined ? {} : { activeTurn }),
                   })
+                  releaseSelectionEvents(loading, request, "Selection activity exceeded its bounded live window")
+                  selectionLoad = undefined
                   yield* startSelectionContinuation(state, dispatch)
                   yield* startSelectionUsage(state, usage, dispatch)
                 }),
