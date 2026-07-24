@@ -87,6 +87,28 @@ export const latestCursor = (events: ReadonlyArray<ExecutionBackend.Event>): str
     undefined,
   )?.cursor
 
+export const finalAssistantOutput = (events: ReadonlyArray<ExecutionBackend.Event>): string | undefined => {
+  const latestToolSequence = events.reduce(
+    (latest, event) => (event.type === "tool.call.requested" ? Math.max(latest, event.sequence) : latest),
+    -1,
+  )
+  return events
+    .flatMap((event) => {
+      if (event.type !== "model.output.completed" || event.sequence <= latestToolSequence) return []
+      const text =
+        event.text ??
+        event.content
+          ?.flatMap((part) => {
+            const value = record(part)
+            return value.type === "text" && typeof value.text === "string" ? [value.text] : []
+          })
+          .join("")
+      return text === undefined || text.trim().length === 0 ? [] : [{ sequence: event.sequence, text }]
+    })
+    .toSorted((left, right) => left.sequence - right.sequence)
+    .at(-1)?.text
+}
+
 export const projectionInput: {
   (
     result: ExecutionBackend.Result,

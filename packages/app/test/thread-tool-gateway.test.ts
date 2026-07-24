@@ -201,7 +201,7 @@ describe("ThreadToolService gateway", () => {
     }),
   )
 
-  it.effect("waits only for manual results and uses the invocation deadline", () =>
+  it.effect("waits for exact manual and reply results without treating result text as pending state", () =>
     Effect.gen(function* () {
       const { service, interactions } = yield* serviceHarness
       const manual = yield* service.createThread(
@@ -223,6 +223,31 @@ describe("ThreadToolService gateway", () => {
         { targets: [{ threadId: manual.threadId, turnId: manual.turnId }], timeoutSeconds: 1 },
       )
       expect(completed).toMatchObject({ timedOut: false, targets: [{ text: "Finished" }] })
+
+      const reply = yield* service.createThread(
+        { ...invocation, idempotencyKeyDigest: "reply-create" },
+        { prompt: "Reply" },
+      )
+      yield* interactions.markResultReady({
+        targetTurnId: Turn.TurnId.make(reply.turnId),
+        readiness: { _tag: "TerminalReady", cursor: "reply", sequence: 3, output: "Waiting" },
+        now: 4,
+      })
+      expect(
+        yield* service.waitForThreads(
+          { ...invocation, idempotencyKeyDigest: "wait-reply", toolName: "wait_for_threads" },
+          { targets: [{ threadId: reply.threadId, turnId: reply.turnId }], timeoutSeconds: 1 },
+        ),
+      ).toMatchObject({ timedOut: false, targets: [{ resultDelivery: "reply", text: "Waiting" }] })
+
+      expect(
+        yield* Effect.result(
+          service.waitForThreads(
+            { ...invocation, idempotencyKeyDigest: "wait-mismatch", toolName: "wait_for_threads" },
+            { targets: [{ threadId: sourceThread.id, turnId: manual.turnId }], timeoutSeconds: 1 },
+          ),
+        ),
+      ).toMatchObject({ _tag: "Failure", failure: { _tag: "ThreadWorkspaceMismatch" } })
     }),
   )
 })

@@ -89,4 +89,23 @@ describe("thread activity projection", () => {
       ),
     ).toMatchObject({ projectedCursor: "cursor-3", complete: false, lastEventAt: 20 })
   })
+
+  it("returns only a completed Agent response after the latest tool request", () => {
+    expect(
+      ThreadActivity.finalAssistantOutput([
+        event({ sequence: 1, type: "model.output.delta", text: "partial" }),
+        event({ sequence: 2, type: "model.output.completed", text: "stale" }),
+        event({ sequence: 3, type: "tool.call.requested" }),
+        event({ sequence: 4, type: "model.output.delta", text: "new partial" }),
+        event({ sequence: 5, type: "execution.failed" }),
+      ]),
+    ).toBeUndefined()
+    expect(
+      ThreadActivity.finalAssistantOutput([
+        event({ sequence: 1, type: "tool.call.requested" }),
+        event({ sequence: 2, type: "model.output.completed", content: [{ type: "text", text: "proven final" }] }),
+        event({ sequence: 3, type: "execution.completed" }),
+      ]),
+    ).toBe("proven final")
+  })
 })

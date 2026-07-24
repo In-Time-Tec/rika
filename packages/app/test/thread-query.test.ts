@@ -6,12 +6,20 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
-import { ThreadTools } from "@rika/tools"
+import { ThreadTools, ToolInvocation } from "@rika/tools"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "../src"
 import { provideLayer } from "./layer"
 
 const workspace = "/work/acme"
+const invocation = ToolInvocation.ToolInvocation.of({
+  executionId: "execution-one",
+  callId: "call-one",
+  toolName: "find_thread",
+  eventSequence: 1,
+  createdAt: 1,
+  idempotencyKeyDigest: "digest",
+})
 const storedThread: Thread.Thread = {
   id: Thread.ThreadId.make("one"),
   workspace,
@@ -312,8 +320,30 @@ describe("ThreadQuery", () => {
   it.effect("exposes separate public find handler and maps failures", () =>
     Effect.gen(function* () {
       const toolkit = yield* ThreadTools.findToolkit
-      const chunks = yield* toolkit.handle("find_thread", { query: "auth" }).pipe(Effect.flatMap(Stream.runCollect))
+      const chunks = yield* toolkit
+        .handle("find_thread", { query: "auth" })
+        .pipe(Effect.flatMap(Stream.runCollect), Effect.provideService(ToolInvocation.ToolInvocation, invocation))
       expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])).toContain("Fix auth")
     }).pipe(provideLayer(ThreadToolHandlers.findHandlerLayer.pipe(Layer.provide(queryLayer)))),
+  )
+
+  it.effect("resolves the invocation workspace and hides threads in another workspace", () =>
+    Effect.gen(function* () {
+      const toolkit = yield* ThreadTools.findToolkit
+      const handle = (executionId: string) =>
+        toolkit.handle("find_thread", { query: "auth" }).pipe(
+          Effect.flatMap(Stream.runCollect),
+          Effect.provideService(ToolInvocation.ToolInvocation, { ...invocation, executionId }),
+          Effect.flatMap((chunks) => Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])),
+        )
+      expect(yield* handle("acme-execution")).toContain("Fix auth")
+      expect(yield* handle("other-execution")).not.toContain("Fix auth")
+    }).pipe(
+      provideLayer(
+        ThreadToolHandlers.findHandlerLayerForWorkspace((executionId) =>
+          Effect.succeed(executionId === "acme-execution" ? workspace : "/work/other"),
+        ).pipe(Layer.provide(ThreadQuery.factoryLayer.pipe(Layer.provide(repositories)))),
+      ),
+    ),
   )
 })

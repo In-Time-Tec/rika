@@ -647,9 +647,16 @@ const relayBackendLayerImpl = (
     ...options,
     additionalToolkit: ThreadTools.allToolkit,
     additionalHandlerLayer: Layer.merge(
-      Layer.merge(ThreadToolHandlers.handlerLayer, ThreadToolHandlers.findHandlerLayer).pipe(
+      Layer.merge(
+        ThreadToolHandlers.handlerLayerForWorkspace(
+          options.resolveWorkspace ?? (() => Effect.succeed(options.workspace ?? "")),
+        ),
+        ThreadToolHandlers.findHandlerLayerForWorkspace(
+          options.resolveWorkspace ?? (() => Effect.succeed(options.workspace ?? "")),
+        ),
+      ).pipe(
         Layer.provide(
-          ThreadQuery.layer.pipe(
+          ThreadQuery.factoryLayer.pipe(
             Layer.provide(
               Layer.mergeAll(
                 repositoryLayer,

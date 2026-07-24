@@ -748,27 +748,13 @@ export const rootExecutionEvents: {
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
     events.filter(
       (event) =>
+        (event.executionId === undefined ||
+          event.executionId === turnId ||
+          event.executionId === `execution:${turnId}`) &&
         !event.cursor.startsWith("child:") &&
         (!event.cursor.startsWith("execution:") || event.cursor.startsWith(`execution:${turnId}:`)),
     ),
 )
-
-const finalAssistantOutput = (projection: TranscriptRepository.Projection | undefined): string | undefined =>
-  projection?.units
-    .flatMap((unit) =>
-      unit.parentId === undefined &&
-      unit.content._tag === "Entry" &&
-      unit.content.role === "assistant" &&
-      unit.content.text.trim().length > 0
-        ? [{ order: unit.order, text: unit.content.text }]
-        : [],
-    )
-    .toSorted((left, right) =>
-      left.order.sequence === right.order.sequence
-        ? left.order.part - right.order.part
-        : left.order.sequence - right.order.sequence,
-    )
-    .at(-1)?.text
 
 const rootCheckpointCursor = (turnId: string, cursor: string | undefined): string | undefined =>
   cursor === undefined ||
@@ -1909,6 +1895,7 @@ export const productLayer = <
             if (route.delivery === "awaiting-result" && isTerminalStatus(turn.status)) {
               let projection = yield* transcripts.get(turn.id)
               let checkpoint: ExecutionBackend.ExecutionCheckpoint | undefined
+              let replayedEvents: ReadonlyArray<ExecutionBackend.Event> = []
               if (turn.status !== "cancelled" || projection !== undefined) {
                 const replay = yield* Effect.exit(acquiredBackend.replay(turn.id))
                 if (replay._tag === "Failure" || replay.value.status !== turn.status) {
@@ -1916,10 +1903,10 @@ export const productLayer = <
                   continue
                 }
                 checkpoint = replay.value.checkpoint
-                if (replay.value.events.length > 0)
-                  projection = yield* transcripts.appendAll(turn, rootExecutionEvents(turn.id, replay.value.events))
+                replayedEvents = rootExecutionEvents(turn.id, replay.value.events)
+                if (replay.value.events.length > 0) projection = yield* transcripts.appendAll(turn, replayedEvents)
               }
-              const output = finalAssistantOutput(projection)?.slice(0, 8_000)
+              const output = ThreadActivity.finalAssistantOutput(replayedEvents)?.slice(0, 8_000)
               const sequence = checkpoint?.sequence ?? projection?.revision
               const readiness: ThreadInteractionRepository.RootProjectionReadiness =
                 turn.status === "cancelled" && projection === undefined

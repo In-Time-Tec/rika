@@ -256,44 +256,54 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
           const inspectTargets = Effect.forEach(input.targets, (target) =>
             Effect.gen(function* () {
               const turnId = Turn.TurnId.make(target.turnId)
-              const resultRoute = yield* interactions.getResultRoute(turnId)
-              if (resultRoute === undefined || resultRoute.kind !== "manual")
-                return yield* Effect.fail({ _tag: "ManualResultRequired" } as const)
               const thread = yield* interactions.getStatus(Thread.ThreadId.make(target.threadId))
               const sourceThread = yield* interactions.getStatus(sourceThreadId)
-              if (thread === undefined || sourceThread?.workspace !== thread.workspace)
+              const items = thread === undefined ? [] : yield* interactions.getMessages(thread.id)
+              const turn = items.find((item) => item.id === turnId)
+              if (
+                thread === undefined ||
+                sourceThread?.workspace !== thread.workspace ||
+                turn === undefined ||
+                turn.threadId !== thread.id
+              )
                 return yield* Effect.fail({ _tag: "ThreadWorkspaceMismatch" } as const)
-              const items = yield* interactions.getMessages(thread.id)
-              const turn = items.find((item) => item.id === target.turnId)
+              const resultRoute = yield* interactions.getResultRoute(turnId)
+              if (resultRoute === undefined)
+                return yield* Effect.fail({ _tag: "ThreadResultRouteUnavailable" } as const)
               const readiness = yield* interactions.getReadiness(turnId)
               const output = readiness?._tag === "TerminalReady" ? readiness.output : undefined
               let text = "Waiting"
-              if (turn === undefined) text = "Unavailable"
-              else if (readiness?._tag === "TerminalReady") text = output ?? turn.status
-              else if (readiness?._tag === "CancelledBeforeStartReady") text = "cancelled"
+              let pending = true
+              if (readiness?._tag === "TerminalReady") {
+                text = output ?? turn.status
+                pending = false
+              } else if (readiness?._tag === "CancelledBeforeStartReady") text = "cancelled"
               else if (turn.status === "waiting") text = "awaiting-approval"
-              else if (terminal(turn.status)) text = turn.status
+              if (readiness?._tag === "CancelledBeforeStartReady") pending = false
               const truncated = text.length > 3_000
               return {
-                threadId: target.threadId,
-                turnId: target.turnId,
-                state: state(items),
-                resultDelivery: "manual" as const,
-                text: text.slice(0, 3_000),
-                truncated,
+                pending,
+                result: {
+                  threadId: target.threadId,
+                  turnId: target.turnId,
+                  state: state(items),
+                  resultDelivery: resultRoute.kind,
+                  text: text.slice(0, 3_000),
+                  truncated,
+                },
               }
             }),
           )
           const deadline = invocation.createdAt + (input.timeoutSeconds ?? 300) * 1_000
           let results = yield* inspectTargets
-          while (results.some((result) => result.text === "Waiting") && (yield* Clock.currentTimeMillis) < deadline) {
+          while (results.some((result) => result.pending) && (yield* Clock.currentTimeMillis) < deadline) {
             yield* Effect.sleep("100 millis")
             results = yield* inspectTargets
           }
           return {
             schemaVersion: 2 as const,
-            targets: results,
-            timedOut: results.some((x) => x.text === "Waiting"),
+            targets: results.map((result) => result.result),
+            timedOut: results.some((result) => result.pending),
             truncated: false,
           }
         })

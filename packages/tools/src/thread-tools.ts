@@ -58,6 +58,7 @@ const TranscriptCursor = Schema.Struct({
   sequence: Schema.Finite,
   part: Schema.Finite,
   key: Schema.String,
+  offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
 const RelationshipCursor = Schema.Struct({ createdAt: Schema.Finite, targetTurnId: NonEmptyString })
 const ReadSelection = Schema.Union([
@@ -212,13 +213,12 @@ const makeCoordination = <Name extends string, Parameters extends Schema.Top, Su
 ) => make(name, description, parameters, success).addDependency(ToolInvocation)
 
 export const searchThreadsTool = Tool.make("search_threads", {
-  description:
-    "Internal ReadThread agent tool. Find local Rika threads by bounded metadata query terms. Supports plain text and workspace:, repo:, ref:, author:, label:, file:, after:, and before: terms.",
+  description: "Internal ReadThread agent tool. Find local Rika threads by bounded plain text and file: query terms.",
   parameters: FindThreadInput,
   success: Result,
   failure: Schema.Struct({ _tag: Schema.tag("ThreadToolError"), tool: Schema.String, message: Schema.String }),
   failureMode: "return",
-})
+}).addDependency(ToolInvocation)
 export const readThreadTranscriptTool = Tool.make("read_thread_transcript", {
   description:
     "Internal ReadThread agent tool. Read a bounded deterministic transcript for one local Rika thread by id",
@@ -226,13 +226,13 @@ export const readThreadTranscriptTool = Tool.make("read_thread_transcript", {
   success: Result,
   failure: Schema.Struct({ _tag: Schema.tag("ThreadToolError"), tool: Schema.String, message: Schema.String }),
   failureMode: "return",
-})
+}).addDependency(ToolInvocation)
 export const findThreadTool = make(
   "find_thread",
   "Find Rika threads by metadata without reading their transcript",
   FindThreadInput,
   FindThreadSuccess,
-)
+).addDependency(ToolInvocation)
 export const createThreadTool = makeCoordination(
   "create_thread",
   "Create a coordinated Rika thread and accept its first turn",
