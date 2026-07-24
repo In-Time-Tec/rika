@@ -4,7 +4,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
 import { OpenAiAuth, Operation, ThreadToolService } from "@rika/app"
-import { ConfigContract } from "@rika/config"
+import { ConfigContract, ConfigService } from "@rika/config"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as ThreadInteractionRepository from "@rika/persistence/thread-interaction-repository"
@@ -262,7 +262,7 @@ test("pins aliases, variants, candidates, specialists, titles, and summaries as 
     },
   }
   const resolved = modelRoutesForExecution(settings, "high", { fastMode: true })
-  expect(resolved.map((route) => route.alias)).toEqual(["sol", "sol", "luna", "sol"])
+  expect(resolved.map((route) => route.alias)).toEqual(["sol", "sol", "luna", "sol", "sol", "sol", "sol", "sol", "sol"])
   expect(resolved.map((route) => route.model)).toEqual(resolved.map((route) => route.candidates[0]))
 
   const pin = executionRoutePin(settings, "high", { fastMode: true })
@@ -648,7 +648,7 @@ test("resolves a legacy unavailable route to the current default when it starts"
       }
       const starts = new Array<ExecutionBackend.StartInput>()
       const isolated = yield* withPinnedRouteRegistration(recordingBackend(starts), {
-        registeredRoutes: [current.main, current.oracle, current.title!, current.compactionSummary!],
+        registeredRoutes: executionModelRoutes(current),
         unavailable: [],
         registerPinnedRoutes: (routes) =>
           Effect.succeed(
@@ -908,4 +908,62 @@ test("rejects malformed, empty, and unsafe scripts", () =>
       )
       expect(results.every((result) => result._tag === "Failure")).toBe(true)
     }),
+  ))
+
+test("renders configured model display names in the mode picker", () =>
+  Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const config = yield* Effect.scopedWith((scope) =>
+          Layer.buildWithScope(
+            ConfigService.memoryLayer({
+              global: {
+                modelAliases: {
+                  "gate-sonnet": {
+                    preset: "claude",
+                    provider: "anthropic",
+                    candidates: ["claude-sonnet-5"],
+                    displayName: "Sonnet 5",
+                  },
+                  "gate-opus": {
+                    preset: "claude",
+                    provider: "anthropic",
+                    candidates: ["claude-opus-5"],
+                    displayName: "Opus 5",
+                  },
+                },
+                modelRoutes: {
+                  modes: { high: { main: { alias: "gate-sonnet", effort: "high" }, oracle: "gate-opus" } },
+                },
+              },
+            }),
+            scope,
+          ).pipe(Effect.flatMap((context) => ConfigService.effective().pipe(Effect.provide(context)))),
+        )
+        const settings = config.settings
+        const setup = yield* Effect.acquireRelease(
+          Effect.tryPromise(() => createTestRenderer({ width: 80, height: 24 })),
+          (value) => Effect.sync(() => value.renderer.destroy()),
+        )
+        const surface = yield* Effect.acquireRelease(
+          Effect.sync(
+            () => new Surface(setup.renderer, { key: () => undefined, resize: () => undefined }, { animate: false }),
+          ),
+          (value) => Effect.sync(() => value.destroy()),
+        )
+        surface.update({
+          ...ViewState.withModeRoutes(
+            ViewState.initial("/workspace", "high"),
+            ConfigContract.modeRouteLabels(settings) as ViewState.ModeRoutes,
+          ),
+          modePicker: { open: true, selected: 2 },
+        })
+        yield* Effect.tryPromise(() => setup.flush())
+        yield* Effect.tryPromise(() => setup.renderOnce())
+        const frame = setup.captureCharFrame()
+        expect(frame).toContain("Agent:  Sonnet 5 high")
+        expect(frame).toContain("Oracle: Opus 5 high")
+        expect(frame).not.toContain("GPT-5.6")
+      }),
+    ),
   ))

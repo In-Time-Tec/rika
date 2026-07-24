@@ -61,6 +61,7 @@ export interface ModelAliasInput {
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
   readonly displayName?: string
+  readonly supportsMedia?: boolean
   readonly limits?: {
     readonly maxInputTokens: number
     readonly maxOutputTokens: number
@@ -76,7 +77,7 @@ export interface RoleRouteInput {
 export interface ModelRoutesInput {
   readonly modes?: Partial<Readonly<Record<ModeId, Partial<Readonly<Record<Role, string | RoleRouteInput>>>>>>
   readonly title?: string | RoleRouteInput
-  readonly agents?: Partial<Readonly<Record<AgentId, string>>>
+  readonly agents?: Partial<Readonly<Record<AgentId, string | RoleRouteInput>>>
   readonly compaction?: string
 }
 
@@ -96,6 +97,7 @@ export interface ModelVariant {
 
 export interface ModelAlias {
   readonly displayName: string
+  readonly supportsMedia: boolean
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
   readonly limits: {
@@ -140,6 +142,7 @@ export interface Settings {
   readonly models: Readonly<Record<string, ModelAlias>>
   readonly modes: Readonly<Record<ModeId, ModeConfig>>
   readonly threadTitle: RoleRoute
+  readonly agents: Partial<Readonly<Record<AgentId, RoleRouteInput>>>
   readonly compaction: { readonly summaryModel: RoleRoute }
   readonly keymap: Readonly<Record<string, string>>
   readonly permissions: Readonly<Record<string, PermissionDecision>>
@@ -291,6 +294,61 @@ export const resolveModelRoute: {
     resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
 )
 
+export const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
+
+const resolveAgentRouteImpl = (
+  settings: Settings,
+  mode: ModeId,
+  agent: AgentId,
+  tuning?: { readonly fastMode?: boolean },
+): ResolvedModelRoute => {
+  const role = agent === "task" ? "main" : "oracle"
+  const inherited = settings.modes[mode][role]
+  const configured = settings.agents[agent]
+  const fast = tuning?.fastMode ?? configured?.fast ?? inherited.fast ?? false
+  if (configured === undefined) return resolveRoute(settings, { ...inherited, fast }, `Agent ${agent}`)
+  return resolveRoute(
+    settings,
+    { alias: configured.alias, effort: configured.effort ?? inherited.effort, fast },
+    `Agent ${agent}`,
+  )
+}
+
+export const resolveAgentRoute: {
+  (mode: ModeId, agent: AgentId, tuning?: { readonly fastMode?: boolean }): (settings: Settings) => ResolvedModelRoute
+  (settings: Settings, mode: ModeId, agent: AgentId, tuning?: { readonly fastMode?: boolean }): ResolvedModelRoute
+} = Function.dual((args) => typeof args[0] === "object", resolveAgentRouteImpl)
+
+export interface ModeRouteLabel {
+  readonly name: string
+  readonly effort: string
+  readonly fast: boolean
+}
+
+const routeLabel = (settings: Settings, mode: ModeId, role: Role): ModeRouteLabel => {
+  const configured = settings.modes[mode][role]
+  try {
+    const route = resolveRoute(settings, configured, `Mode ${mode} ${role}`)
+    return { name: route.displayName, effort: route.effort, fast: route.fast }
+  } catch {
+    return {
+      name: settings.models[configured.alias]?.displayName ?? configured.alias,
+      effort: configured.effort,
+      fast: configured.fast === true,
+    }
+  }
+}
+
+export const modeRouteLabels = (
+  settings: Settings,
+): Readonly<Record<ModeId, { readonly main: ModeRouteLabel; readonly oracle: ModeRouteLabel }>> =>
+  Object.fromEntries(
+    (Object.keys(settings.modes) as ReadonlyArray<ModeId>).map((mode) => [
+      mode,
+      { main: routeLabel(settings, mode, "main"), oracle: routeLabel(settings, mode, "oracle") },
+    ]),
+  ) as Readonly<Record<ModeId, { readonly main: ModeRouteLabel; readonly oracle: ModeRouteLabel }>>
+
 export const resolveThreadTitleRoute = (settings: Settings): ResolvedModelRoute =>
   resolveRoute(settings, settings.threadTitle, "Thread title model")
 
@@ -422,9 +480,12 @@ export const decodeSettingsInput: {
         "provider",
         "candidates",
         "displayName",
+        "supportsMedia",
         "limits",
         "efforts",
       ])
+      if (alias.supportsMedia !== undefined && typeof alias.supportsMedia !== "boolean")
+        throw ConfigFileError.make({ path, message: `Model alias ${name} supportsMedia must be true or false` })
       if (typeof alias.provider !== "string" || !(alias.provider in providerDefaults))
         throw ConfigFileError.make({ path, message: `Model alias ${name} provider is unknown` })
       if (
@@ -547,8 +608,8 @@ export const decodeSettingsInput: {
         "readThread",
         "task",
       ])
-      if (Object.values(value.modelRoutes.agents).some((alias) => typeof alias !== "string" || alias.length === 0))
-        throw ConfigFileError.make({ path, message: "Model route agent aliases must be non-empty" })
+      for (const [agent, route] of Object.entries(value.modelRoutes.agents))
+        roleRoute(`Model route agent ${agent}`, route)
     }
     if (
       value.modelRoutes.compaction !== undefined &&
@@ -641,6 +702,7 @@ export const defaults: Settings = {
     ultra: { main: { alias: "sol", effort: "xhigh" }, oracle: { alias: "sol", effort: "max" } },
   },
   threadTitle: { alias: "luna", effort: "low" },
+  agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
   permissions: { read: "allow", search: "allow", write: "allow", shell: "allow", external: "allow" },

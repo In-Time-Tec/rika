@@ -57,7 +57,7 @@ import {
   type QueueItem,
   type TranscriptItem,
 } from "./view-state"
-import type { ThreadItem, TranscriptBlock } from "./view-state"
+import type { ModeRouteLabel, ThreadItem, TranscriptBlock } from "./view-state"
 import { applyTurnUnits as projectUnits, type Event } from "./transcript-presenter"
 import {
   includeRowEnd,
@@ -3668,18 +3668,8 @@ const paletteContent = (
 }
 
 const modeGaugeFill = { low: 2, medium: 19, high: 36, ultra: 54 } as const
-const modeAgentLabel = {
-  low: "GPT-5.6 Luna xhigh",
-  medium: "GPT-5.6 Terra xhigh",
-  high: "GPT-5.6 Sol medium",
-  ultra: "GPT-5.6 Sol xhigh",
-} as const
-const modeOracleLabel = {
-  low: "GPT-5.6 Terra xhigh",
-  medium: "GPT-5.6 Sol medium",
-  high: "GPT-5.6 Sol high",
-  ultra: "GPT-5.6 Sol max",
-} as const
+const routeLabel = (route: ModeRouteLabel | undefined): string =>
+  route === undefined ? "" : `${route.name} ${route.effort}${route.fast ? " fast" : ""}`
 const modeDescription = {
   low: "Fast, low-cost mode for small, well-defined tasks",
   medium: "Balanced intelligence, speed, and cost for most tasks",
@@ -3711,11 +3701,12 @@ const modePickerContent = (model: Model, innerWidth: number): StyledText => {
     column = Math.max(column, start) + mode.length
   })
   chunks.push(fg(colors.text)("\n\n"))
+  const routes = model.modeRoutes[selected]
   chunks.push(bold(fg(colors.text)("Agent:")))
-  chunks.push(fg(colors.muted)(`  ${modeAgentLabel[selected]}`))
+  chunks.push(fg(colors.muted)(`  ${routeLabel(routes?.main)}`))
   chunks.push(fg(colors.text)("\n"))
   chunks.push(bold(fg(colors.text)("Oracle:")))
-  chunks.push(fg(colors.muted)(` ${modeOracleLabel[selected]}`))
+  chunks.push(fg(colors.muted)(` ${routeLabel(routes?.oracle)}`))
   chunks.push(fg(colors.text)("\n\n"))
   chunks.push(fg(colors.text)(modeDescription[selected]))
   return new StyledText(chunks)

@@ -214,3 +214,23 @@ describe("product agent profiles", () => {
     }),
   )
 })
+
+it("routes a specialist to its configured agent model instead of oracle", () => {
+  const oracleModel = { provider: "oracle", model: "reasoning" }
+  const librarianModel = { provider: "gate", model: "claude-sonnet-5", registrationKey: "sonnet-high" }
+
+  const registered = presets({ model, oracleModel, agentModels: { Librarian: librarianModel } })
+
+  expect(registered.Librarian?.model).toEqual(relayModel(librarianModel))
+  expect(registered.Painter?.model).toEqual(relayModel(oracleModel))
+  expect(registered.Task?.model).toEqual(relayModel(model))
+})
+
+it("keeps main and oracle routing when no agent models are supplied", () => {
+  const oracleModel = { provider: "oracle", model: "reasoning" }
+
+  const registered = presets({ model, oracleModel, agentModels: undefined })
+
+  expect(registered.Task?.model).toEqual(relayModel(model))
+  expect(registered.Librarian?.model).toEqual(relayModel(oracleModel))
+})

@@ -861,6 +861,7 @@ const modelRoutesForExecutionImpl = (
   resolveTunedModeRoute(settings, mode, "main", tuning),
   resolveTunedModeRoute(settings, mode, "oracle", tuning),
   ...supportingModelRoutes(settings),
+  ...ConfigContract.agentIds.map((agent) => ConfigContract.resolveAgentRoute(settings, mode, agent, tuning)),
 ]
 
 export const modelRoutesForExecution: {
@@ -920,14 +921,27 @@ const executionRoutePinFromPreparedImpl = (
 ): Turn.ExecutionRoutePin => {
   const routes = prepared.routes
   const plans = prepared.plans
-  if (routes.length !== 4 || plans.length !== routes.length)
-    throw new Error(`Expected four prepared execution routes, received ${routes.length}`)
+  if (routes.length !== 9 || plans.length !== routes.length)
+    throw new Error(`Expected nine prepared execution routes, received ${routes.length}`)
+  const main = executionModelRoute(routes[0]!, plans[0]!, "main")
+  const oracle = executionModelRoute(routes[1]!, plans[1]!, "oracle")
+  const agents = {
+    librarian: executionModelRoute(routes[4]!, plans[4]!, "librarian"),
+    painter: executionModelRoute(routes[5]!, plans[5]!, "painter"),
+    review: executionModelRoute(routes[6]!, plans[6]!, "review"),
+    readThread: executionModelRoute(routes[7]!, plans[7]!, "readThread"),
+    task: executionModelRoute(routes[8]!, plans[8]!, "task"),
+  }
+  const inherited = (agent: keyof typeof agents) =>
+    agents[agent].registrationKey === (agent === "task" ? main : oracle).registrationKey
+  const allInherited = (Object.keys(agents) as Array<keyof typeof agents>).every(inherited)
   return {
     mode,
-    main: executionModelRoute(routes[0]!, plans[0]!, "main"),
-    oracle: executionModelRoute(routes[1]!, plans[1]!, "oracle"),
+    main,
+    oracle,
     title: executionModelRoute(routes[2]!, plans[2]!, "title"),
     compactionSummary: executionModelRoute(routes[3]!, plans[3]!, "compaction"),
+    ...(allInherited ? {} : { agents }),
   }
 }
 
@@ -1011,6 +1025,7 @@ export const executionModelRoutes = (route: Turn.ExecutionRoutePin): ReadonlyArr
   route.oracle,
   ...(route.title === undefined ? [] : [route.title]),
   ...(route.compactionSummary === undefined ? [] : [route.compactionSummary]),
+  ...(route.agents === undefined ? [] : Object.values(route.agents)),
 ]
 
 export const isLegacyUnavailableExecutionRoute = (route: Turn.ExecutionRoutePin) =>
@@ -1743,6 +1758,7 @@ export const settleTuiInitialization: {
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
+  readonly modeRoutes?: (() => ViewState.ModeRoutes | undefined) | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
 }
@@ -1757,8 +1773,10 @@ export const interactiveTui =
       if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return
       const context = yield* Effect.context<never>()
       const fork = Effect.runForkWith(context)
+      const resolvedModeRoutes = options.modeRoutes?.()
       return yield* Effect.callback<void, Operation.OperationUnavailable>((resume) => {
         let model = ViewState.initial(input.workspace ?? process.cwd(), input.mode ?? "medium")
+        if (resolvedModeRoutes !== undefined) model = ViewState.withModeRoutes(model, resolvedModeRoutes)
         let workingFrame: string | undefined
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))
         const refreshTerminalTitle = () => {
@@ -2845,7 +2863,8 @@ if (import.meta.main) {
     Layer.provide(ContextFileSystem.liveLayer),
     Layer.provide(BunServices.layer),
   )
-  const clientOwnedInteractiveFunction = interactiveTui({ editor })
+  let clientModeRoutes: ViewState.ModeRoutes | undefined
+  const clientOwnedInteractiveFunction = interactiveTui({ editor, modeRoutes: () => clientModeRoutes })
 
   const operationLayer = (
     injectedInteractive: (
@@ -3211,6 +3230,7 @@ if (import.meta.main) {
               const effectiveConfig = yield* ConfigService.effective().pipe(
                 provideLayerScoped(ConfigService.memoryLayer({ global: globalSettings, workspace: workspaceSettings })),
               )
+              clientModeRoutes = ConfigContract.modeRouteLabels(effectiveConfig.settings) as ViewState.ModeRoutes
               return yield* program.pipe(
                 Effect.provideService(
                   References.MinimumLogLevel,
