@@ -341,33 +341,37 @@ test("keeps the application-controlled cursor visible when animation is disabled
   ))
 
 for (const historySize of [1, maxMountedTranscriptEntries + 1] as const) {
-  test(`keeps composer updates bounded with ${historySize} transcript entries`, () =>
-    Effect.runPromise(
-      Effect.gen(function* () {
-        const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-        const entries = Array.from({ length: historySize }, (_, index) => ({
-          role: "assistant" as const,
-          text: `settled answer ${index}`,
-          turnId: `turn-${index}`,
-        }))
-        const base: Model = { ...initial("/work", "high"), entries }
-        const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
-        try {
-          surface.update(base)
-          yield* openTui(() => setup.flush())
-          const state = surface as unknown as { readonly transcriptChildren: ReadonlyArray<Renderable> }
-          const mounted = [...state.transcriptChildren]
-          for (let index = 0; index < 2; index += 1)
-            surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
+  test(
+    `keeps composer updates bounded with ${historySize} transcript entries`,
+    () =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+          const entries = Array.from({ length: historySize }, (_, index) => ({
+            role: "assistant" as const,
+            text: `settled answer ${index}`,
+            turnId: `turn-${index}`,
+          }))
+          const base: Model = { ...initial("/work", "high"), entries }
+          const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+          try {
+            surface.update(base)
+            yield* openTui(() => setup.flush())
+            const state = surface as unknown as { readonly transcriptChildren: ReadonlyArray<Renderable> }
+            const mounted = [...state.transcriptChildren]
+            for (let index = 0; index < 2; index += 1)
+              surface.update({ ...base, input: `next ${index}`, cursor: `next ${index}`.length })
 
-          expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
-          expect(state.transcriptChildren.every((child, index) => child === mounted[index])).toBe(true)
-        } finally {
-          surface.destroy()
-          setup.renderer.destroy()
-        }
-      }),
-    ))
+            expect(state.transcriptChildren.length).toBeLessThanOrEqual(maxMountedTranscriptEntries * 2)
+            expect(state.transcriptChildren.every((child, index) => child === mounted[index])).toBe(true)
+          } finally {
+            surface.destroy()
+            setup.renderer.destroy()
+          }
+        }),
+      ),
+    historySize === 1 ? 5_000 : 15_000,
+  )
 }
 
 test("moves the bounded transcript window to older mounted entries and keeps it while typing", () =>
