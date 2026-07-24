@@ -21,6 +21,9 @@ const program = Effect.gen(function* () {
     yield* Config.string("RIKA_TEST_RESIDENT_OWNER_STARTUP_DELAY").pipe(Config.withDefault("0")),
   )
   const delayedWork = (yield* Config.string("RIKA_TEST_RESIDENT_DELAYED_WORK").pipe(Config.withDefault("0"))) === "1"
+  const activeWorkMilliseconds = Number(
+    yield* Config.string("RIKA_TEST_RESIDENT_ACTIVE_WORK_MILLIS").pipe(Config.withDefault("0")),
+  )
   const uninterruptibleOwner =
     (yield* Config.string("RIKA_TEST_RESIDENT_UNINTERRUPTIBLE_OWNER").pipe(Config.withDefault("0"))) === "1"
   const outboundCapacity = yield* Config.int("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault(1_024))
@@ -59,6 +62,8 @@ const program = Effect.gen(function* () {
           ),
         )
         return Operation.Service.of({
+          hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
+          authorizeResidentReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
           run: (input) => {
             if (input._tag !== "Interactive")
               return Effect.suspend(() => {
@@ -69,14 +74,22 @@ const program = Effect.gen(function* () {
                     Effect.flatMap(Console.log),
                     Effect.orDie,
                   )
+                const delegated = input.prompt[0] === "active-root-with-child"
                 return Effect.sync(() => {
-                  activeWork += 1
+                  activeWork += delegated ? 2 : 1
                 }).pipe(
                   Effect.andThen(append("delayed-work-starts.log", `${process.pid}\n`)),
-                  Effect.andThen(Effect.never),
+                  Effect.andThen(
+                    delegated
+                      ? append("active-executions.log", `${process.pid}:root\n${process.pid}:child\n`)
+                      : Effect.void,
+                  ),
+                  Effect.andThen(
+                    delegated && activeWorkMilliseconds > 0 ? Effect.sleep(activeWorkMilliseconds) : Effect.never,
+                  ),
                   Effect.ensuring(
                     Effect.sync(() => {
-                      activeWork -= 1
+                      activeWork -= delegated ? 2 : 1
                     }).pipe(Effect.andThen(append("delayed-work-finalizations.log", `${process.pid}\n`))),
                   ),
                 )

@@ -22,11 +22,19 @@ export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
 declare const RIKA_BUILD_IDENTITY: string | undefined
 
-export const protocolVersion = 4
+export const protocolVersion = 5
 export const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
+export const replacementGuard = "active-execution-v1" as const
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])
 export const ConnectRole = Schema.Literals(["launch", "reattach"])
 export type ConnectRole = typeof ConnectRole.Type
+export const replacementDisposition = (options: {
+  readonly connectRole: ConnectRole
+  readonly hasActiveExecutionWork: boolean
+}) => {
+  if (options.connectRole === "reattach") return "restart" as const
+  return options.hasActiveExecutionWork ? ("defer" as const) : ("supersede" as const)
+}
 const WireIdentifier = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(1_024))
 const Proof = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))
 export const Handshake = Schema.Struct({
@@ -57,7 +65,8 @@ export type HandshakeAccepted = typeof HandshakeAccepted.Type
 
 export const HandshakeIncompatible = Schema.Struct({
   _tag: Schema.tag("incompatible"),
-  disposition: Schema.Literals(["supersede", "restart"]),
+  disposition: Schema.Literals(["supersede", "restart", "defer"]),
+  replacementGuard: Schema.Literal(replacementGuard),
   family: Schema.tag("rika-resident"),
   identity: WireIdentifier,
   clientNonce: WireIdentifier,
@@ -216,6 +225,7 @@ export class ResidentServiceError extends Schema.TaggedErrorClass<ResidentServic
     "incompatible-resident",
     "foreign-listener",
     "message-too-large",
+    "replacement-delayed",
     "resident-absent",
     "resident-draining",
     "startup-failed",
@@ -356,6 +366,7 @@ type ServerProofResponse =
       HandshakeIncompatible,
       | "_tag"
       | "disposition"
+      | "replacementGuard"
       | "family"
       | "identity"
       | "clientNonce"
@@ -377,6 +388,7 @@ const serverProofImpl = (token: string, handshake: ProofHandshake, response: Ser
     handshake.buildIdentity,
     response._tag,
     response._tag === "incompatible" ? response.disposition : "accepted",
+    response._tag === "incompatible" ? response.replacementGuard : "absent",
     response.serviceNonce,
     response.connectionId,
     response.protocolVersion,
@@ -478,11 +490,16 @@ export const validateHandshakeV3: {
 )
 
 export type LifecycleState = "starting" | "ready" | "grace" | "draining" | "stopped"
-type LifecycleValue = { state: LifecycleState; clients: number; graceGeneration: number }
+type LifecycleValue = { state: LifecycleState; clients: number; graceGeneration: number; replacementWork: number }
 
 export const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<void>) =>
   Effect.gen(function* () {
-    const value = yield* Ref.make<LifecycleValue>({ state: "starting", clients: 0, graceGeneration: 0 })
+    const value = yield* Ref.make<LifecycleValue>({
+      state: "starting",
+      clients: 0,
+      graceGeneration: 0,
+      replacementWork: 0,
+    })
     const admission = yield* Semaphore.make(1)
     const transition = (update: (current: LifecycleValue) => LifecycleValue) =>
       Ref.modify(value, (current) => {
@@ -495,30 +512,32 @@ export const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<
         if (current.state !== "starting") return [undefined, current] as const
         const next =
           current.clients === 0
-            ? { state: "grace" as const, clients: 0, graceGeneration: current.graceGeneration + 1 }
+            ? { ...current, state: "grace" as const, clients: 0, graceGeneration: current.graceGeneration + 1 }
             : { ...current, state: "ready" as const }
         return [next.state === "grace" ? next.graceGeneration : undefined, next] as const
       }).pipe(Effect.tap((generation) => changed(generation === undefined ? "ready" : "grace"))),
-      tryAttach: Ref.modify(
-        value,
-        (current): readonly [{ readonly attached: boolean; readonly changed: boolean }, LifecycleValue] => {
-          if (current.state === "draining" || current.state === "stopped")
-            return [{ attached: false, changed: false }, current] as const
-          const state = current.state === "grace" ? "ready" : current.state
-          return [
-            { attached: true, changed: state !== current.state },
-            { state, clients: current.clients + 1, graceGeneration: current.graceGeneration + 1 },
-          ] as const
-        },
-      ).pipe(
-        Effect.tap((result) => (result.changed === true ? changed("ready") : Effect.void)),
-        Effect.map((result) => result.attached),
+      tryAttach: admission.withPermits(1)(
+        Ref.modify(
+          value,
+          (current): readonly [{ readonly attached: boolean; readonly changed: boolean }, LifecycleValue] => {
+            if (current.state === "draining" || current.state === "stopped")
+              return [{ attached: false, changed: false }, current] as const
+            const state = current.state === "grace" ? "ready" : current.state
+            return [
+              { attached: true, changed: state !== current.state },
+              { ...current, state, clients: current.clients + 1, graceGeneration: current.graceGeneration + 1 },
+            ] as const
+          },
+        ).pipe(
+          Effect.tap((result) => (result.changed === true ? changed("ready") : Effect.void)),
+          Effect.map((result) => result.attached),
+        ),
       ),
       detach: Ref.modify(value, (current) => {
         const clients = Math.max(0, current.clients - 1)
         const entersGrace = clients === 0 && current.state === "ready"
         const next = entersGrace
-          ? { state: "grace" as const, clients, graceGeneration: current.graceGeneration + 1 }
+          ? { ...current, state: "grace" as const, clients, graceGeneration: current.graceGeneration + 1 }
           : { ...current, clients }
         return [entersGrace ? next.graceGeneration : undefined, next] as const
       }).pipe(Effect.tap((generation) => (generation === undefined ? Effect.void : changed("grace")))),
@@ -532,15 +551,50 @@ export const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<
             }),
           )
           .pipe(Effect.tap((draining) => (draining === true ? changed("draining") : Effect.void))),
-      runWork: <A, E, R>(fibers: FiberSet.FiberSet<A, E>, work: Effect.Effect<A, E, R>) =>
+      reserveReplacementWork: admission.withPermits(1)(
+        Ref.modify(value, (current) => {
+          if (current.state === "draining" || current.state === "stopped") return [undefined, current] as const
+          let released = false
+          const release = Effect.suspend(() => {
+            if (released) return Effect.void
+            released = true
+            return Ref.update(value, (state) => ({
+              ...state,
+              replacementWork: Math.max(0, state.replacementWork - 1),
+            }))
+          })
+          return [release, { ...current, replacementWork: current.replacementWork + 1 }] as const
+        }),
+      ),
+      runWork: <A, E, R>(
+        fibers: FiberSet.FiberSet<A, E>,
+        work: Effect.Effect<A, E, R>,
+        replacementRelevant: boolean = true,
+      ) =>
         admission.withPermits(1)(
-          Ref.get(value).pipe(
-            Effect.flatMap((current) =>
-              current.state === "draining" || current.state === "stopped"
-                ? Effect.void.pipe(Effect.as(undefined))
-                : FiberSet.run(fibers, work).pipe(Effect.map((fiber) => fiber as typeof fiber | undefined)),
-            ),
-          ),
+          Effect.gen(function* () {
+            const current = yield* Ref.get(value)
+            if (current.state === "draining" || current.state === "stopped") return undefined
+            if (replacementRelevant)
+              yield* Ref.update(value, (state) => ({ ...state, replacementWork: state.replacementWork + 1 }))
+            const release = replacementRelevant
+              ? Ref.update(value, (state) => ({
+                  ...state,
+                  replacementWork: Math.max(0, state.replacementWork - 1),
+                }))
+              : Effect.void
+            return yield* FiberSet.run(fibers, work.pipe(Effect.ensuring(release)))
+          }),
+        ),
+      authorizeReplacement: (hasActiveExecutionWork: Effect.Effect<boolean>) =>
+        admission.withPermits(1)(
+          Effect.gen(function* () {
+            const current = yield* Ref.get(value)
+            if (current.state === "draining" || current.state === "stopped") return "supersede" as const
+            if (current.replacementWork > 0 || (yield* hasActiveExecutionWork)) return "defer" as const
+            yield* transition((state) => ({ ...state, state: "draining" }))
+            return "supersede" as const
+          }).pipe(Effect.uninterruptible),
         ),
       beginDrain: admission.withPermits(1)(
         transition((current) => (current.state === "stopped" ? current : { ...current, state: "draining" })),

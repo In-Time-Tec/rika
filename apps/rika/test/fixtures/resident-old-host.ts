@@ -16,6 +16,8 @@ const program = Effect.gen(function* () {
   yield* fs.makeDirectory(diagnostics, { recursive: true, mode: 0o700 })
   const openLog = path.join(diagnostics, `resident-old-${process.pid}.open.jsonl`)
   const closedLog = openLog.replace(".open.jsonl", ".jsonl")
+  const proof = (fields: ReadonlyArray<unknown>) =>
+    new Bun.CryptoHasher("sha256", token).update(JSON.stringify(fields)).digest("hex")
   if (recordPid) yield* fs.open(openLog, { flag: "ax", mode: 0o600 }).pipe(Effect.asVoid)
   const host = Bun.serve({
     hostname: "127.0.0.1",
@@ -24,7 +26,7 @@ const program = Effect.gen(function* () {
       const url = new URL(request.url)
       let acceptedPath = false
       if (mode === "legacy") acceptedPath = url.pathname === "/resident/v1"
-      else if (mode === "schema-reject" || mode === "fake-incompatible" || mode === "v3")
+      else if (mode === "schema-reject" || mode === "fake-incompatible" || mode === "v3" || mode === "signed-v4")
         acceptedPath = url.pathname === "/resident" || url.pathname === "/resident/v1"
       if (!acceptedPath || !upgradeServer.upgrade(request)) return new Response(null, { status: 404 })
       return undefined
@@ -40,6 +42,60 @@ const program = Effect.gen(function* () {
           return
         }
         const message = JSON.parse(String(text)) as Record<string, unknown>
+        if (mode === "signed-v4") {
+          const clientFields = [
+            "rika-resident-client",
+            message.protocolVersion,
+            message.identity,
+            message.clientNonce,
+            message.clientKind,
+            message.connectRole,
+            message.buildIdentity,
+          ]
+          if (
+            message.family !== "rika-resident" ||
+            message.identity !== endpoint.identity ||
+            message.clientProof !== proof(clientFields)
+          ) {
+            socket.close(4401)
+            return
+          }
+          const response = {
+            _tag: "incompatible",
+            disposition: "supersede",
+            family: "rika-resident",
+            identity: endpoint.identity,
+            clientNonce: message.clientNonce,
+            serviceNonce: `old-service-${process.pid}`,
+            connectionId: `old-connection-${process.pid}`,
+            protocolVersion: 4,
+            buildIdentity: "rika-frozen-v4-build",
+            residentPid: process.pid,
+          }
+          socket.send(
+            JSON.stringify({
+              ...response,
+              serverProof: proof([
+                "rika-resident-server",
+                message.protocolVersion,
+                message.identity,
+                message.clientNonce,
+                message.clientKind,
+                message.connectRole,
+                message.buildIdentity,
+                response._tag,
+                response.disposition,
+                response.serviceNonce,
+                response.connectionId,
+                response.protocolVersion,
+                response.buildIdentity,
+                response.residentPid,
+              ]),
+            }),
+          )
+          socket.close(4406, "Resident protocol 4 cannot attest safe replacement")
+          return
+        }
         if (
           message.family !== "rika-resident" ||
           message.identity !== endpoint.identity ||

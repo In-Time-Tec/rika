@@ -8,6 +8,7 @@ export interface State {
   readonly transcriptThreadIds: Set<string>
   readonly queueThreadIds: Set<string>
   readonly critical: Array<InteractiveEvent>
+  readonly usage: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>>
   criticalOverflowed: boolean
   activated?: Extract<InteractiveEvent, { readonly _tag: "ThreadActivated" }>
   summaries?: Extract<InteractiveEvent, { readonly _tag: "ThreadsListed" }>
@@ -17,6 +18,7 @@ export const make = (): State => ({
   transcriptThreadIds: new Set(),
   queueThreadIds: new Set(),
   critical: [],
+  usage: new Map(),
   criticalOverflowed: false,
 })
 
@@ -74,6 +76,7 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "TurnStarted":
     case "SelectionLoaded":
     case "TranscriptPagePrepended":
+    case "TranscriptReplaced":
       if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
       return
     case "QueueUpdated":
@@ -85,6 +88,9 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
       return
     case "ThreadsListed":
       state.summaries = event
+      return
+    case "ThreadUsageUpdated":
+      if (id !== undefined) state.usage.set(id, event)
       return
     case "AssistantCompleted":
     case "ContextDiagnostics":
@@ -112,6 +118,7 @@ const eventsImpl = (state: State, selectionEpoch: number, reason: string): Reado
   if (state.activated !== undefined) recovered.push(state.activated)
   if (state.summaries !== undefined) recovered.push(state.summaries)
   recovered.push(...state.critical)
+  recovered.push(...state.usage.values())
   for (const id of state.transcriptThreadIds)
     recovered.push({
       _tag: "TranscriptResyncRequired",

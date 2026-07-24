@@ -12,9 +12,11 @@ import {
   ChildFanOutHost,
   Client,
   Content,
+  ArtifactStore,
   type Execution,
   Ids,
   ModelHub,
+  PromptAssembler,
   type Resident,
   Runtime,
   ToolRuntime as RelayToolRuntime,
@@ -45,6 +47,7 @@ import {
 import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import { createHash } from "node:crypto"
 import {
   type AgentProfile,
   BackendError,
@@ -132,6 +135,12 @@ const observableEventTypes = new Set([
   "execution.cancelled",
 ])
 const toolExecutionPolicy = { concurrency: "unbounded" as const }
+const unsafeRecoveryFailure = "Parent execution stopped before its first durable chat checkpoint"
+const defaultRecoveryChildSettlementGrace = Duration.seconds(30)
+const recoveryRetrySchedule = Schedule.exponential("100 millis").pipe(
+  Schedule.jittered,
+  Schedule.modifyDelay(({ duration }) => Effect.succeed(Duration.min(duration, Duration.seconds(5)))),
+)
 
 export interface CompactionPolicy {
   readonly context_window: number
@@ -171,6 +180,7 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   ) => Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements | ProcessRegistry.Service>
   readonly resolveWorkspace?: (executionId: string) => Effect.Effect<string, BackendError>
   readonly toolNeedsApproval?: (name: string) => boolean
+  readonly recoveryChildSettlementGrace?: Duration.Input
 }
 
 export const routedToolRuntimeLayer: {
@@ -456,6 +466,53 @@ const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.
       current = typeof parentId === "string" ? yield* client.executions.get(Ids.ExecutionId.make(parentId)) : undefined
     }
     return undefined
+  })
+
+const terminalExecutionStatus = (status: string) =>
+  status === "completed" || status === "failed" || status === "cancelled"
+
+const retryRecoveryPersistence = <A, E, R>(effect: Effect.Effect<A, E, R>, execution: string) =>
+  effect.pipe(
+    Effect.tapError(() =>
+      Effect.logWarning("execution.recovery.retrying").pipe(Effect.annotateLogs({ "rika.execution.id": execution })),
+    ),
+  )
+
+const reconcileUnsafeRecovery = (
+  client: Client.Interface,
+  execution: string,
+  childSettlementGrace: Duration.Duration,
+) =>
+  Effect.gen(function* () {
+    const id = Ids.ExecutionId.make(execution)
+    const inspect = retryRecoveryPersistence(client.executions.inspect(id), execution).pipe(
+      Effect.retry({ schedule: recoveryRetrySchedule }),
+    )
+    const settled = yield* inspect.pipe(
+      Effect.repeat({
+        while: (inspection) => inspection.child_runs.some((child) => !terminalExecutionStatus(child.status)),
+        schedule: Schedule.spaced("100 millis"),
+      }),
+      Effect.timeoutOption(childSettlementGrace),
+    )
+    const reconciledAt = yield* Clock.currentTimeMillis
+    yield* retryRecoveryPersistence(
+      client.executions.cancel({
+        execution_id: id,
+        cancelled_at: reconciledAt,
+        reason: unsafeRecoveryFailure,
+      }),
+      execution,
+    ).pipe(Effect.retry({ schedule: recoveryRetrySchedule }))
+    const inspection = yield* inspect
+    yield* Effect.logWarning("execution.recovery.failed_safe").pipe(
+      Effect.annotateLogs({
+        "rika.execution.id": execution,
+        "rika.recovery.child.count": inspection.child_runs.length,
+        "rika.recovery.children.settled": Option.isSome(settled),
+        "rika.recovery.pending_tool.count": inspection.pending_tool_calls.length,
+      }),
+    )
   })
 const routeForProfile = (pin: ExecutionRoutePin, profile: AgentProfile) => (profile === "Task" ? pin.main : pin.oracle)
 const recoveredDeltaOutput = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
@@ -1693,9 +1750,60 @@ export const layer = <
       const promoterRegistry = yield* ThreadHost.makeRegistry
       const promoterRegistryLayer = Layer.succeed(ThreadHost.Registry, promoterRegistry)
       const relayClient = yield* Deferred.make<Client.Interface>()
+      const recoveryScope = yield* Effect.scope
+      const recoveryChildSettlementGrace = Duration.fromInputUnsafe(
+        options.recoveryChildSettlementGrace ?? defaultRecoveryChildSettlementGrace,
+      )
+      if (!Duration.isFinite(recoveryChildSettlementGrace) || Duration.toMillis(recoveryChildSettlementGrace) < 0)
+        return yield* BackendError.make({ message: "Recovery child settlement grace must be finite and non-negative" })
       {
         const { SQLite } = sqliteModule
         {
+          const defaultPromptAssembler = Context.get(
+            yield* Layer.build(
+              PromptAssembler.defaultLayerWithStores.pipe(
+                Layer.provide(Layer.merge(DataBlobStore.layer, ArtifactStore.passthroughLayer)),
+              ),
+            ),
+            PromptAssembler.Service,
+          )
+          const promptAssemblerLayer = PromptAssembler.layer({
+            assemble: (input) =>
+              Effect.gen(function* () {
+                const assembled = yield* defaultPromptAssembler.assemble(input)
+                const metadata = input.agent.metadata
+                const execution = metadata?.rika_execution_id
+                if (metadata?.rika_agent_depth !== 0 || typeof execution !== "string") return assembled
+                const hash = createHash("sha256").update(assembled.system).digest("hex")
+                const client = yield* Deferred.await(relayClient)
+                const inspection = yield* client.executions.inspect(Ids.ExecutionId.make(execution)).pipe(
+                  Effect.tapError(() =>
+                    Effect.logWarning("execution.recovery.classification.retrying").pipe(
+                      Effect.annotateLogs({ "rika.execution.id": execution }),
+                    ),
+                  ),
+                  Effect.retry({ schedule: recoveryRetrySchedule }),
+                  Effect.orDie,
+                )
+                const unsafe =
+                  inspection.child_runs.length > 0 &&
+                  inspection.pending_tool_calls.some((tool) => AgentTools.isDelegationToolName(tool.tool_name))
+                yield* Effect.logInfo("execution.context.baseline.assembled").pipe(
+                  Effect.annotateLogs({
+                    "rika.context.baseline.hash": hash,
+                    "rika.execution.id": execution,
+                    "rika.recovery.quarantined": unsafe,
+                  }),
+                )
+                if (unsafe) {
+                  yield* reconcileUnsafeRecovery(client, execution, recoveryChildSettlementGrace).pipe(
+                    Effect.forkIn(recoveryScope),
+                  )
+                  return yield* Effect.never
+                }
+                return assembled
+              }),
+          })
           const toolkit = toolkitFor(
             options.webSearchCredentialsForWorkspace === undefined
               ? options
@@ -2156,6 +2264,7 @@ export const layer = <
             languageModelLayer,
             toolRuntimeLayer,
             blobStoreLayer: DataBlobStore.layer,
+            promptAssemblerLayer,
             childFanOutHostLayer: fanOutHandlers,
             workflowDefinitionHostLayer: workflowHandlers,
           })

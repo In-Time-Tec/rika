@@ -217,8 +217,11 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                 if (!ResidentService.verifyServerProof(options.token, signedHandshake, message))
                   return Effect.fail(transportError("Foreign resident listener", "foreign-listener"))
                 if (message._tag === "incompatible") {
-                  const expectedDisposition = options.connectRole === "launch" ? "supersede" : "restart"
-                  if (message.disposition !== expectedDisposition)
+                  const validDisposition =
+                    options.connectRole === "launch"
+                      ? message.disposition === "supersede" || message.disposition === "defer"
+                      : message.disposition === "restart"
+                  if (!validDisposition)
                     return Effect.fail(
                       transportError("Resident returned an invalid upgrade disposition", "foreign-listener"),
                     )
@@ -228,6 +231,14 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                         "Resident returned an incompatible response for a compatible handshake",
                         "foreign-listener",
                       ),
+                    )
+                  if (message.disposition === "defer")
+                    return Effect.fail(
+                      ResidentService.ResidentServiceError.make({
+                        reason: "replacement-delayed",
+                        message: `Rika resident replacement is delayed because resident${message.residentPid === undefined ? "" : ` PID ${message.residentPid}`} owns active execution work. Try again after that work completes`,
+                        ...(message.residentPid === undefined ? {} : { residentPid: message.residentPid }),
+                      }),
                     )
                   return Effect.fail(
                     ResidentService.ResidentServiceError.make({

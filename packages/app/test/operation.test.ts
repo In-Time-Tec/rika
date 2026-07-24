@@ -5,6 +5,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
+import { AgentDepth } from "@rika/runtime"
 import { Catalog as ToolCatalog } from "@rika/tools"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
@@ -112,7 +113,10 @@ const selectionThread = (id: string): Thread.Thread => ({
   updatedAt: 1,
 })
 
-const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarness")(function* (eventCount: number) {
+const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarness")(function* (
+  eventCount: number,
+  deferredUsage: boolean = false,
+) {
   const previous = selectionThread("selection-previous")
   const target = selectionThread("selection-target")
   const repository = yield* ThreadRepository.makeMemory([previous, target])
@@ -120,10 +124,13 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
   const targetGetEntered = yield* Deferred.make<void>()
   const releaseTargetGet = yield* Deferred.make<void>()
   const liveEventsEmitted = yield* Deferred.make<void>()
+  const usageRequested = yield* Deferred.make<void>()
   const releaseExecution = yield* Deferred.make<void>()
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   let targetGetBlocked = false
   let targetGetFailed = false
+  let targetPageBlocked = false
+  let targetPageFailed = false
   const delayedRepository = ThreadRepository.Service.of({
     ...repository,
     get: (id) => {
@@ -144,6 +151,36 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     createdAt: index + 1,
     text: String(index + 1),
   }))
+  const usage: ExecutionBackend.Event = {
+    cursor: "selection-live-usage",
+    sequence: eventCount + 1,
+    type: "model.usage.reported",
+    createdAt: eventCount + 1,
+    data: {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      input_tokens: 100,
+      input_tokens_uncached: 100,
+      input_tokens_cache_read: 0,
+      input_tokens_cache_write: 0,
+      output_tokens: 10,
+    },
+  }
+  const targetPageEntered = yield* Deferred.make<void>()
+  const releaseTargetPage = yield* Deferred.make<void>()
+  const selectionTurns = TurnRepository.Service.of({
+    ...turns,
+    page: (threadId, options) => {
+      if (targetPageFailed && threadId === target.id)
+        return Effect.fail(TurnRepository.RepositoryError.make({ message: "forced Turn page failure" }))
+      if (targetPageBlocked && threadId === target.id)
+        return Deferred.succeed(targetPageEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseTargetPage)),
+          Effect.andThen(turns.page(threadId, options)),
+        )
+      return turns.page(threadId, options)
+    },
+  })
   const selectionBackend = ExecutionBackend.Service.of({
     ...backend,
     start: (input) =>
@@ -151,8 +188,14 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
         for (const event of streamed) input.onEvent?.(event)
       }).pipe(
         Effect.andThen(Deferred.succeed(liveEventsEmitted, undefined)),
+        Effect.andThen(deferredUsage ? Deferred.await(usageRequested) : Effect.void),
+        Effect.tap(() => (deferredUsage ? Effect.sync(() => input.onEvent?.(usage)) : Effect.void)),
         Effect.andThen(Deferred.await(releaseExecution)),
-        Effect.as({ turnId: input.turnId, status: "completed" as const, events: streamed }),
+        Effect.as({
+          turnId: input.turnId,
+          status: "completed" as const,
+          events: deferredUsage ? [...streamed, usage] : streamed,
+        }),
       ),
     inspect: (turnId) =>
       Effect.succeed({ turnId, status: "running" as const, waits: [], pendingTools: [], children: [] }),
@@ -160,7 +203,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
   })
   const layer = Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, delayedRepository),
-    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
     backendLayer: Layer.succeed(ExecutionBackend.Service, selectionBackend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
@@ -174,21 +217,246 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     sessions,
     layer,
     targetGetEntered,
+    targetPageEntered,
     liveEventsEmitted,
     releaseExecution: Deferred.succeed(releaseExecution, undefined),
+    releaseUsage: Deferred.succeed(usageRequested, undefined),
     beginTargetGet: Effect.sync(() => {
       targetGetBlocked = true
     }),
     failTargetGet: Effect.sync(() => {
       targetGetFailed = true
     }),
+    beginTargetPage: Effect.sync(() => {
+      targetPageBlocked = true
+    }),
+    failTargetPage: Effect.sync(() => {
+      targetPageFailed = true
+    }),
     releaseTargetGet: Effect.sync(() => {
       targetGetBlocked = false
     }).pipe(Effect.andThen(Deferred.succeed(releaseTargetGet, undefined))),
+    releaseTargetPage: Effect.sync(() => {
+      targetPageBlocked = false
+    }).pipe(Effect.andThen(Deferred.succeed(releaseTargetPage, undefined))),
   }
 })
 
+const replacementWorkflow = (
+  status: ExecutionBackend.WorkflowInspection["status"],
+): ExecutionBackend.WorkflowInspection => ({
+  runId: "replacement-workflow",
+  workflow: "delivery",
+  revision: 1,
+  digest: "digest",
+  status,
+  createdAt: 1,
+  updatedAt: 1,
+})
+
 describe("Operation", () => {
+  const replacementTurn = (status: Turn.Status = "running"): Turn.Turn => ({
+    id: Turn.TurnId.make("replacement-turn"),
+    threadId: Thread.ThreadId.make("replacement-thread"),
+    prompt: "replacement",
+    executionRoute: executionRoute(),
+    status,
+    createdAt: 1,
+    updatedAt: 1,
+  })
+
+  it.effect("reconciles a stale nonterminal row from authoritative Relay state", () =>
+    Effect.gen(function* () {
+      for (const status of ["accepted", "running", "waiting"] as const) {
+        const stale = replacementTurn(status)
+        const turns = yield* TurnRepository.makeMemory([stale])
+        const threads = yield* ThreadRepository.makeMemory([selectionThread(String(stale.threadId))])
+        const result = yield* Operation.hasActiveExecutionWork().pipe(
+          provideLayer(
+            Layer.mergeAll(
+              Layer.succeed(ThreadRepository.Service, threads),
+              Layer.succeed(TurnRepository.Service, turns),
+              Layer.succeed(ExecutionBackend.Service, {
+                ...backend,
+                inspect: () => Effect.void.pipe(Effect.as(undefined)),
+              }),
+            ),
+          ),
+        )
+        expect(result).toBe(false)
+        expect((yield* turns.get(stale.id))?.status).toBe("failed")
+      }
+    }),
+  )
+
+  it.effect("finds active work in a real recursively delegated Relay child tree", () =>
+    Effect.gen(function* () {
+      const turn = replacementTurn()
+      const turns = yield* TurnRepository.makeMemory([turn])
+      const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
+      const child = AgentDepth.childExecutionId(turn.id, "task")
+      const grandchild = AgentDepth.childExecutionId(child, "oracle")
+      const inspection = (turnId: string): ExecutionBackend.Inspection => {
+        let children: ExecutionBackend.Inspection["children"] = []
+        if (turnId === turn.id) children = [{ executionId: child, status: "completed" }]
+        else if (turnId === child) children = [{ executionId: grandchild, status: "running" }]
+        return { turnId, status: "completed", waits: [], pendingTools: [], children }
+      }
+      const result = yield* Operation.hasActiveExecutionWork().pipe(
+        provideLayer(
+          Layer.mergeAll(
+            Layer.succeed(ThreadRepository.Service, threads),
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(
+              ExecutionBackend.Service,
+              ExecutionBackend.Service.of({ ...backend, inspect: (turnId) => Effect.succeed(inspection(turnId)) }),
+            ),
+          ),
+        ),
+      )
+      expect(result).toBe(true)
+      expect((yield* turns.get(turn.id))?.status).toBe("running")
+    }),
+  )
+
+  it.effect("defers replacement for active descendants beneath terminal roots", () =>
+    Effect.gen(function* () {
+      for (const status of ["completed", "failed", "cancelled"] as const) {
+        const turn = replacementTurn(status)
+        const turns = yield* TurnRepository.makeMemory([turn])
+        const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
+        const child = AgentDepth.childExecutionId(turn.id, `terminal-${status}`)
+        const childStatus = yield* Ref.make<Turn.Status | "absent">("running")
+        const inspectedBackend = ExecutionBackend.Service.of({
+          ...backend,
+          inspect: (turnId) =>
+            Effect.gen(function* () {
+              if (turnId === child) {
+                const current = yield* Ref.get(childStatus)
+                if (current === "absent") return undefined
+                return { turnId, status: current, waits: [], pendingTools: [], children: [] }
+              }
+              const current = yield* Ref.get(childStatus)
+              return {
+                turnId,
+                status,
+                waits: [],
+                pendingTools: [],
+                children: [{ executionId: child, status: current === "running" ? "running" : "completed" }],
+              }
+            }),
+        })
+        const layer = Layer.mergeAll(
+          Layer.succeed(ThreadRepository.Service, threads),
+          Layer.succeed(TurnRepository.Service, turns),
+          Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+        )
+
+        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
+        yield* Ref.set(childStatus, "completed")
+        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+        yield* Ref.set(childStatus, "absent")
+        expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+        expect((yield* turns.get(turn.id))?.status).toBe(status)
+      }
+    }),
+  )
+
+  it.effect("authorizes retry only after Relay work becomes terminal and fails closed on inspection errors", () =>
+    Effect.gen(function* () {
+      const turn = replacementTurn()
+      const turns = yield* TurnRepository.makeMemory([turn])
+      const threads = yield* ThreadRepository.makeMemory([selectionThread(String(turn.threadId))])
+      const status = yield* Ref.make<Turn.Status>("running")
+      const inspectedBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) =>
+          Ref.get(status).pipe(
+            Effect.map((current) => ({ turnId, status: current, waits: [], pendingTools: [], children: [] })),
+          ),
+      })
+      const layer = Layer.mergeAll(
+        Layer.succeed(ThreadRepository.Service, threads),
+        Layer.succeed(TurnRepository.Service, turns),
+        Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+      )
+      expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(true)
+      yield* Ref.set(status, "completed")
+      expect(yield* Operation.hasActiveExecutionWork().pipe(provideLayer(layer))).toBe(false)
+      expect((yield* turns.get(turn.id))?.status).toBe("completed")
+
+      const active = replacementTurn()
+      const failingTurns = yield* TurnRepository.makeMemory([active])
+      const failingThreads = yield* ThreadRepository.makeMemory([selectionThread(String(active.threadId))])
+      const failed = yield* Effect.result(
+        Operation.hasActiveExecutionWork().pipe(
+          provideLayer(
+            Layer.mergeAll(
+              Layer.succeed(ThreadRepository.Service, failingThreads),
+              Layer.succeed(TurnRepository.Service, failingTurns),
+              Layer.succeed(
+                ExecutionBackend.Service,
+                ExecutionBackend.Service.of({
+                  ...backend,
+                  inspect: () => Effect.fail(ExecutionBackend.BackendError.make({ message: "inspection failed" })),
+                }),
+              ),
+            ),
+          ),
+        ),
+      )
+      expect(failed._tag).toBe("Failure")
+      expect((yield* failingTurns.get(active.id))?.status).toBe("running")
+    }),
+  )
+
+  it.effect(
+    "authorizes replacement after a terminal child is pruned and retries after descendant inspection errors",
+    () =>
+      Effect.gen(function* () {
+        const turn = replacementTurn()
+        const child = AgentDepth.childExecutionId(turn.id, "terminal-child")
+        const turns = yield* TurnRepository.makeMemory([turn])
+        const childInspection = yield* Ref.make<"error" | "absent">("error")
+        const inspectedBackend = ExecutionBackend.Service.of({
+          ...backend,
+          inspect: (turnId) =>
+            Effect.gen(function* () {
+              if (turnId === child) {
+                if ((yield* Ref.get(childInspection)) === "error")
+                  return yield* ExecutionBackend.BackendError.make({ message: "child inspection failed" })
+                return undefined
+              }
+              return {
+                turnId,
+                status: "completed" as const,
+                waits: [],
+                pendingTools: [],
+                children: [{ executionId: child, status: "completed" as const }],
+              }
+            }),
+        })
+        const layer = Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer([selectionThread(String(turn.threadId))]),
+          turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        })
+        yield* Effect.gen(function* () {
+          const operation = yield* Operation.Service
+          const failed = yield* Effect.result(operation.authorizeResidentReplacement!)
+          expect(failed._tag).toBe("Failure")
+          expect((yield* turns.get(turn.id))?.status).toBe("running")
+
+          yield* Ref.set(childInspection, "absent")
+          expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
+          expect((yield* turns.get(turn.id))?.status).toBe("completed")
+        }).pipe(provideLayer(layer))
+      }),
+  )
+
   it.effect("rejects every action after an interactive session closes", () =>
     Effect.gen(function* () {
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
@@ -860,6 +1128,85 @@ describe("Operation", () => {
         "cancel:run:/client-work",
         "inspect:missing:/client-work",
       ])
+    }),
+  )
+
+  it.effect("defers replacement for a running workflow and authorizes retry after Relay reports terminal", () =>
+    Effect.gen(function* () {
+      const status = yield* Ref.make<ExecutionBackend.WorkflowInspection["status"]>("running")
+      const workflowBackend = ExecutionBackend.Service.of({
+        ...backend,
+        registerWorkflows: () => Effect.succeed([]),
+        startWorkflow: () => Ref.get(status).pipe(Effect.map(replacementWorkflow)),
+        inspectWorkflow: () => Ref.get(status).pipe(Effect.map(replacementWorkflow)),
+      })
+      const layer = Layer.merge(
+        TestConsole.layer,
+        Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: TurnRepository.memoryLayer(),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        }),
+      )
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({
+          _tag: "Workflow",
+          action: "start",
+          name: "delivery",
+          runId: "replacement-workflow",
+          clientWorkspace: "/work",
+        })
+        expect(yield* operation.authorizeResidentReplacement!).toBe("defer")
+        yield* Ref.set(status, "completed")
+        expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
+      }).pipe(provideLayer(layer))
+    }),
+  )
+
+  it.effect("reconciles an absent workflow and retries replacement after workflow inspection errors", () =>
+    Effect.gen(function* () {
+      const inspection = yield* Ref.make<"error" | "absent">("error")
+      const workflowBackend = ExecutionBackend.Service.of({
+        ...backend,
+        registerWorkflows: () => Effect.succeed([]),
+        startWorkflow: () => Effect.succeed(replacementWorkflow("running")),
+        inspectWorkflow: () =>
+          Ref.get(inspection).pipe(
+            Effect.flatMap((current) =>
+              current === "error"
+                ? Effect.fail(ExecutionBackend.BackendError.make({ message: "workflow inspection failed" }))
+                : Effect.void.pipe(Effect.as(undefined)),
+            ),
+          ),
+      })
+      const layer = Layer.merge(
+        TestConsole.layer,
+        Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: TurnRepository.memoryLayer(),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, workflowBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        }),
+      )
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({
+          _tag: "Workflow",
+          action: "start",
+          name: "delivery",
+          runId: "replacement-workflow",
+          clientWorkspace: "/work",
+        })
+        expect((yield* Effect.result(operation.authorizeResidentReplacement!))._tag).toBe("Failure")
+        yield* Ref.set(inspection, "absent")
+        expect(yield* operation.authorizeResidentReplacement!).toBe("supersede")
+      }).pipe(provideLayer(layer))
     }),
   )
 
@@ -1880,6 +2227,79 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("preserves committed selection controls and usage when a candidate load fails or is interrupted", () =>
+    Effect.forEach(
+      ["failed", "interrupted"] as const,
+      (mode) =>
+        Effect.gen(function* () {
+          const harness = yield* makeSelectionLoadHarness(1, true)
+          yield* Effect.gen(function* () {
+            const source = yield* openInteractiveSession(harness.sessions, {
+              _tag: "Interactive",
+              prompt: [],
+              ephemeral: false,
+            })
+            const selecting = yield* openInteractiveSession(harness.sessions, {
+              _tag: "Interactive",
+              prompt: [],
+              ephemeral: false,
+            })
+            const received: Array<Operation.InteractiveEvent> = []
+            yield* collectEvents(selecting, received)
+            yield* source.selectThread(harness.previous.id, 1)
+            yield* selecting.selectThread(harness.previous.id, 1)
+            yield* source.submit("active committed turn")
+            yield* Deferred.await(harness.liveEventsEmitted)
+            yield* settleEvents
+            received.length = 0
+
+            let candidate: Fiber.Fiber<void, Operation.OperationUnavailable> | undefined
+            if (mode === "failed") {
+              yield* harness.failTargetPage
+              yield* selecting.selectThread(harness.target.id, 2)
+            } else {
+              yield* harness.beginTargetPage
+              candidate = yield* Effect.forkChild(selecting.selectThread(harness.target.id, 2))
+              yield* Deferred.await(harness.targetPageEntered)
+            }
+            yield* harness.releaseUsage
+            yield* source.steer("control committed turn")
+            yield* settleEvents
+            if (candidate !== undefined) yield* Fiber.interrupt(candidate)
+            yield* settleEvents
+
+            expect(received).toContainEqual(
+              expect.objectContaining({
+                _tag: "ExecutionControlled",
+                selectionEpoch: 1,
+                threadId: harness.previous.id,
+                action: "steered",
+              }),
+            )
+            expect(received).toContainEqual(
+              expect.objectContaining({
+                _tag: "ThreadUsageUpdated",
+                selectionEpoch: 1,
+                threadId: harness.previous.id,
+              }),
+            )
+            expect(
+              received.some(
+                (event) =>
+                  (event._tag === "SelectionLoaded" && event.thread.id === harness.target.id) ||
+                  ("threadId" in event &&
+                    "selectionEpoch" in event &&
+                    event.threadId === harness.target.id &&
+                    event.selectionEpoch === 2),
+              ),
+            ).toBe(false)
+            yield* harness.releaseExecution
+          }).pipe(provideLayer(harness.layer))
+        }),
+      { discard: true },
+    ),
+  )
+
   it.effect("does not let a failed selection overwrite a newer selection", () =>
     Effect.gen(function* () {
       const previous = selectionThread("selection-rollback-previous")
@@ -1939,9 +2359,9 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("delivers critical target events while selection is in flight", () =>
+  it.effect("releases a committed selection feed before an overlapping candidate can fail", () =>
     Effect.gen(function* () {
-      const harness = yield* makeSelectionLoadHarness(1)
+      const harness = yield* makeSelectionLoadHarness(1, true)
       yield* Effect.gen(function* () {
         const source = yield* openInteractiveSession(harness.sessions, {
           _tag: "Interactive",
@@ -1957,17 +2377,46 @@ describe("Operation", () => {
         yield* collectEvents(selecting, received)
         yield* source.selectThread(harness.target.id, 1)
         yield* selecting.selectThread(harness.previous.id, 1)
-        yield* source.submit("active target turn")
-        yield* Deferred.await(harness.liveEventsEmitted)
-        yield* settleEvents
-        received.length = 0
 
         yield* harness.beginTargetGet
         const selection = yield* Effect.forkChild(selecting.selectThread(harness.target.id, 2))
         yield* Deferred.await(harness.targetGetEntered)
+        const execution = yield* Effect.forkChild(source.submit("active target turn"))
+        yield* Deferred.await(harness.liveEventsEmitted)
         yield* source.steer("critical during selection")
+        yield* harness.releaseUsage
         yield* settleEvents
 
+        expect(
+          received.filter(
+            (event) =>
+              "threadId" in event &&
+              "selectionEpoch" in event &&
+              event.threadId === harness.target.id &&
+              event.selectionEpoch === 2,
+          ),
+        ).toEqual([])
+        const failedCandidate = yield* Effect.forkChild(
+          Effect.gen(function* () {
+            while (!received.some((event) => event._tag === "SelectionLoaded" && event.selectionEpoch === 2))
+              yield* Effect.yieldNow
+            yield* harness.failTargetPage
+            yield* selecting.selectThread(harness.target.id, 3)
+          }),
+        )
+        yield* harness.releaseTargetGet
+        yield* Fiber.join(selection)
+        yield* Fiber.join(failedCandidate)
+        yield* settleEvents
+        expect(
+          received
+            .filter(
+              (event) =>
+                (event._tag === "SelectionLoaded" && event.thread.id === harness.target.id) ||
+                (event._tag === "ExecutionControlled" && event.threadId === harness.target.id),
+            )
+            .map((event) => event._tag),
+        ).toEqual(["SelectionLoaded", "ExecutionControlled"])
         expect(received).toContainEqual(
           expect.objectContaining({
             _tag: "ExecutionControlled",
@@ -1976,8 +2425,30 @@ describe("Operation", () => {
             action: "steered",
           }),
         )
-        yield* Fiber.interrupt(selection)
+        expect(
+          received.filter(
+            (event) =>
+              event._tag === "TranscriptPatched" &&
+              event.selectionEpoch === 2 &&
+              event.event.type === "model.output.delta",
+          ),
+        ).toHaveLength(1)
+        expect(
+          received.filter((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2),
+        ).toHaveLength(1)
+        expect(
+          received.filter(
+            (event) =>
+              event._tag === "ExecutionControlled" &&
+              event.selectionEpoch === 2 &&
+              event.threadId === harness.target.id,
+          ),
+        ).toHaveLength(1)
+        expect(received.filter((event) => event._tag === "SelectionLoaded" && event.selectionEpoch === 3)).toHaveLength(
+          0,
+        )
         yield* harness.releaseExecution
+        yield* Fiber.join(execution)
       }).pipe(provideLayer(harness.layer))
     }),
   )

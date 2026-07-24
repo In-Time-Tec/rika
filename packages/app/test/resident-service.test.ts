@@ -8,6 +8,8 @@ import {
   isValidIncompatibility,
   makeLifecycle,
   protocolVersion,
+  replacementGuard,
+  replacementDisposition,
   ResidentRestartRequired,
   runtimeRestartExitCode,
   ServerMessage,
@@ -17,6 +19,13 @@ import {
 } from "../src/resident-service"
 
 describe("resident service protocol", () => {
+  it("supersedes only an idle resident for a launching client", () => {
+    expect(replacementDisposition({ connectRole: "launch", hasActiveExecutionWork: false })).toBe("supersede")
+    expect(replacementDisposition({ connectRole: "launch", hasActiveExecutionWork: true })).toBe("defer")
+    expect(replacementDisposition({ connectRole: "reattach", hasActiveExecutionWork: false })).toBe("restart")
+    expect(replacementDisposition({ connectRole: "reattach", hasActiveExecutionWork: true })).toBe("restart")
+  })
+
   it.effect("uses canonical profile and data root identity", () => {
     const crypto = Layer.succeed(
       Crypto.Crypto,
@@ -178,6 +187,7 @@ describe("resident service protocol", () => {
     const incompatibleFields = {
       _tag: "incompatible" as const,
       disposition: "supersede" as const,
+      replacementGuard,
       family: "rika-resident" as const,
       identity: handshake.identity,
       clientNonce: handshake.clientNonce,
@@ -195,6 +205,8 @@ describe("resident service protocol", () => {
     if (incompatible._tag !== "incompatible") return
     expect(verifyServerProof("token", handshake, incompatible)).toBe(true)
     expect(verifyServerProof("token", handshake, { ...incompatible, disposition: "restart" })).toBe(false)
+    expect(verifyServerProof("token", handshake, { ...incompatible, disposition: "defer" })).toBe(false)
+    expect(() => Schema.decodeUnknownSync(ServerMessage)({ ...incompatible, replacementGuard: "unattested" })).toThrow()
     expect(verifyServerProof("token", handshake, { ...incompatible, residentPid: 124 })).toBe(false)
     expect(verifyServerProof("token", handshake, { ...incompatible, connectionId: "other" })).toBe(false)
   })
@@ -483,5 +495,74 @@ describe("resident service lifecycle", () => {
         }),
       )
       expect(result).toEqual({ interrupted: true, finalized: true, admittedAfterDrain: false })
+    }))
+
+  it("keeps work admission closed after an idle replacement decision", () =>
+    Effect.gen(function* () {
+      const lifecycle = yield* makeLifecycle(() => Effect.void)
+      const inspectionStarted = yield* Deferred.make<void>()
+      const finishInspection = yield* Deferred.make<void>()
+      yield* lifecycle.ready
+      const decision = yield* Effect.forkChild(
+        lifecycle.authorizeReplacement(
+          Deferred.succeed(inspectionStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(finishInspection)),
+            Effect.as(false),
+          ),
+        ),
+      )
+      yield* Deferred.await(inspectionStarted)
+      const admissionCompleted = yield* Deferred.make<void>()
+      const admission = yield* Effect.forkChild(
+        lifecycle.reserveReplacementWork.pipe(Effect.tap(() => Deferred.succeed(admissionCompleted, undefined))),
+      )
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(admissionCompleted)).toBe(false)
+      yield* Deferred.succeed(finishInspection, undefined)
+      expect(yield* Fiber.join(decision)).toBe("supersede")
+      expect(yield* Fiber.join(admission)).toBeUndefined()
+      expect(yield* lifecycle.state).toBe("draining")
+    }))
+
+  it("blocks attachment during replacement inspection and refuses it after authorization", () =>
+    Effect.gen(function* () {
+      const lifecycle = yield* makeLifecycle(() => Effect.void)
+      const inspectionStarted = yield* Deferred.make<void>()
+      const finishInspection = yield* Deferred.make<void>()
+      yield* lifecycle.ready
+      const decision = yield* Effect.forkChild(
+        lifecycle.authorizeReplacement(
+          Deferred.succeed(inspectionStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(finishInspection)),
+            Effect.as(false),
+          ),
+        ),
+      )
+      yield* Deferred.await(inspectionStarted)
+      const attachCompleted = yield* Deferred.make<void>()
+      const attachment = yield* Effect.forkChild(
+        lifecycle.tryAttach.pipe(Effect.tap(() => Deferred.succeed(attachCompleted, undefined))),
+      )
+      yield* Effect.yieldNow
+      expect(yield* Deferred.isDone(attachCompleted)).toBe(false)
+      yield* Deferred.succeed(finishInspection, undefined)
+      expect(yield* Fiber.join(decision)).toBe("supersede")
+      expect(yield* Fiber.join(attachment)).toBe(false)
+    }))
+
+  it("defers for admitted work, leaves the resident usable, and authorizes retry after release", () =>
+    Effect.gen(function* () {
+      const lifecycle = yield* makeLifecycle(() => Effect.void)
+      yield* lifecycle.ready
+      const release = yield* lifecycle.reserveReplacementWork
+      expect(release).toBeDefined()
+      expect(yield* lifecycle.authorizeReplacement(Effect.succeed(false))).toBe("defer")
+      expect(yield* lifecycle.state).not.toBe("draining")
+      yield* release!
+      const next = yield* lifecycle.reserveReplacementWork
+      expect(next).toBeDefined()
+      yield* next!
+      expect(yield* lifecycle.authorizeReplacement(Effect.succeed(false))).toBe("supersede")
+      expect(yield* lifecycle.state).toBe("draining")
     }))
 })

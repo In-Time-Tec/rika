@@ -3068,6 +3068,22 @@ if (import.meta.main) {
             ),
           )
           return Operation.Service.of({
+            hasActiveExecutionWork: loadProduct.pipe(
+              Effect.flatMap((service) => service.hasActiveExecutionWork ?? Effect.succeed(true)),
+              Effect.mapError((error) =>
+                Schema.is(Operation.OperationUnavailable)(error)
+                  ? error
+                  : Operation.OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+              ),
+            ),
+            authorizeResidentReplacement: loadProduct.pipe(
+              Effect.flatMap((service) => service.authorizeResidentReplacement ?? Effect.succeed("defer" as const)),
+              Effect.mapError((error) =>
+                Schema.is(Operation.OperationUnavailable)(error)
+                  ? error
+                  : Operation.OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+              ),
+            ),
             run: (input) => {
               if (input._tag === "Auth") return Effect.scoped(Operation.runAuth(input, authOperations, process.cwd()))
               return loadProduct.pipe(

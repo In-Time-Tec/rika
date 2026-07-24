@@ -97,7 +97,206 @@ const interactiveLayer = (
     interactive: (_, session) => Deferred.succeed(registration, session).pipe(Effect.andThen(Effect.never)),
   })
 
+const terminalTransitionScenario = (
+  inspectedStatus: "failed" | "cancelled",
+  deferred: boolean,
+  overlapOlder: boolean = false,
+) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const selected = thread(`terminal-${inspectedStatus}-${deferred ? "deferred" : "initial"}`)
+      const target: Turn.Turn = {
+        id: Turn.TurnId.make(`turn-${selected.id}`),
+        threadId: selected.id,
+        prompt: "terminal transition",
+        executionRoute: Turn.testExecutionRoute(),
+        status: "completed",
+        lastCursor: "terminal-cursor",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const historical: Turn.Turn = {
+        ...target,
+        id: Turn.TurnId.make(`historical-${selected.id}`),
+        prompt: "historical",
+        status: "queued",
+        createdAt: 0,
+        updatedAt: 0,
+      }
+      const repository = yield* ThreadRepository.makeMemory([selected])
+      const turns = yield* TurnRepository.makeMemory(overlapOlder ? [historical, target] : [target])
+      const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
+      const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
+      const stale = Transcript.project(target.id, target.prompt, [
+        {
+          cursor: "terminal-cursor",
+          sequence: 1,
+          type: "execution.completed",
+          createdAt: 1,
+        },
+      ])
+      yield* transcripts.replace(target, stale)
+      if (overlapOlder)
+        yield* transcripts.replace(historical, {
+          ...Transcript.empty(historical.id, historical.prompt),
+          units: Array.from(
+            { length: 220 },
+            (_, index): Transcript.Unit => ({
+              key: `historical-nested-${index}`,
+              turnId: historical.id,
+              order: { sequence: index + 1, part: 0 },
+              revision: index + 1,
+              parentId: "historical-child",
+              content: {
+                _tag: "Block",
+                block: { _tag: "Notification", title: String(index), detail: "x".repeat(40_000) },
+              },
+            }),
+          ),
+          revision: 220,
+        })
+      const pageCount = deferred ? 34 : 1
+      const replayEvents: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: pageCount }, (_, index) => {
+        const terminal = index === pageCount - 1
+        return {
+          cursor: terminal ? "terminal-cursor" : `cursor-${index}`,
+          sequence: index + 1,
+          type: terminal ? (`execution.${inspectedStatus}` as const) : "execution.started",
+          createdAt: index + 1,
+          ...(terminal && inspectedStatus === "failed" ? { text: "durable failure" } : {}),
+        }
+      })
+      const terminalPageRequested = yield* Deferred.make<void>()
+      const releaseTerminalPage = yield* Deferred.make<void>()
+      const backend = ExecutionBackend.Service.of({
+        ...baseBackend,
+        inspect: (executionId) =>
+          Effect.succeed({
+            turnId: executionId,
+            status: inspectedStatus,
+            lastCursor: "terminal-cursor",
+            waits: [],
+            pendingTools: [],
+            children: [],
+          }),
+        replay: (executionId) => Effect.succeed({ turnId: executionId, status: inspectedStatus, events: replayEvents }),
+        pageEvents: (executionId, _direction, cursor) => {
+          const index = cursor === undefined ? 0 : replayEvents.findIndex((event) => event.cursor === cursor) + 1
+          const event = replayEvents[index]
+          const page = {
+            events: event === undefined ? [] : [event],
+            hasMore: index < replayEvents.length - 1,
+            ...(event === undefined ? {} : { oldestCursor: event.cursor, newestCursor: event.cursor }),
+          }
+          return overlapOlder && index === replayEvents.length - 1
+            ? Deferred.succeed(terminalPageRequested, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseTerminalPage)),
+                Effect.as(page),
+              )
+            : Effect.succeed(page)
+        },
+      })
+      const olderPageRequested = yield* Deferred.make<void>()
+      const releaseOlderPage = yield* Deferred.make<void>()
+      let blockOlderPage = false
+      const selectionTranscripts: TranscriptRepository.Interface = {
+        ...transcripts,
+        page: (threadId, options) =>
+          overlapOlder && blockOlderPage && options?.before !== undefined
+            ? Deferred.succeed(olderPageRequested, undefined).pipe(
+                Effect.andThen(Deferred.await(releaseOlderPage)),
+                Effect.andThen(transcripts.page(threadId, options)),
+              )
+            : transcripts.page(threadId, options),
+      }
+      const registration = yield* Deferred.make<Operation.InteractiveSession>()
+      const context = yield* Layer.build(
+        interactiveLayer(
+          repository,
+          turns,
+          backend,
+          registration,
+          Effect.die("unused"),
+          Effect.die("unused"),
+          selectionTranscripts,
+        ),
+      )
+      const operation = Context.get(context, Operation.Service)
+      const operationFiber = yield* Effect.forkChild(
+        operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+      )
+      const session = yield* Deferred.await(registration)
+      const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+      const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
+
+      yield* session.selectThread(selected.id, 1)
+      let selectedEvent = yield* Queue.take(events)
+      while (selectedEvent._tag !== "SelectionLoaded") selectedEvent = yield* Queue.take(events)
+      let deliveredEntries: ReadonlyArray<TranscriptRepository.Entry>
+      if (!deferred) {
+        expect(selectedEvent.entries).not.toHaveLength(0)
+        expect(selectedEvent.entries.every((entry) => entry.turn.status === inspectedStatus)).toBe(true)
+        expect(selectedEvent.entries.every((entry) => entry.turn.lastCursor === "terminal-cursor")).toBe(true)
+        deliveredEntries = selectedEvent.entries
+      } else if (!overlapOlder) {
+        let replacement = yield* Queue.take(events)
+        while (replacement._tag !== "TranscriptReplaced") replacement = yield* Queue.take(events)
+        expect(replacement.entries).not.toHaveLength(0)
+        expect(replacement.entries.every((entry) => entry.turn.status === inspectedStatus)).toBe(true)
+        expect(replacement.entries.every((entry) => entry.turn.lastCursor === "terminal-cursor")).toBe(true)
+        deliveredEntries = replacement.entries
+      } else {
+        expect(selectedEvent.hasOlder).toBe(true)
+        blockOlderPage = true
+        yield* Deferred.await(terminalPageRequested)
+        const olderFiber = yield* Effect.forkChild(session.loadOlder)
+        yield* Deferred.await(olderPageRequested)
+        yield* Deferred.succeed(releaseTerminalPage, undefined)
+        for (let attempt = 0; attempt < 100; attempt += 1) yield* Effect.yieldNow
+        expect((yield* Queue.takeAll(events)).some((event) => event._tag === "TranscriptReplaced")).toBe(false)
+        yield* Deferred.succeed(releaseOlderPage, undefined)
+        yield* Fiber.join(olderFiber)
+        for (let attempt = 0; attempt < 400; attempt += 1) yield* Effect.yieldNow
+        const ordered = yield* Queue.takeAll(events)
+        const tags = ordered.map((event) => event._tag)
+        expect(tags).toContain("TranscriptPagePrepended")
+        expect(tags).toContain("TranscriptReplaced")
+        expect(tags).not.toContain("ExecutionFailed")
+        expect(ordered.findIndex((event) => event._tag === "TranscriptPagePrepended")).toBeLessThan(
+          ordered.findIndex((event) => event._tag === "TranscriptReplaced"),
+        )
+        const replacement = ordered.find((event) => event._tag === "TranscriptReplaced")
+        if (replacement?._tag !== "TranscriptReplaced") return yield* Effect.die("Missing replacement")
+        deliveredEntries = replacement.entries
+      }
+      expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === inspectedStatus)).toBe(true)
+      expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === "complete")).toBe(false)
+      const stored = yield* transcripts.get(target.id)
+      expect(stored?.units.some((unit) => unit.executionOutcome?.status === inspectedStatus)).toBe(true)
+      expect(stored?.units.some((unit) => unit.executionOutcome?.status === "complete")).toBe(false)
+
+      yield* Fiber.interrupt(feed)
+      yield* Fiber.interrupt(operationFiber)
+    }),
+  )
+
 describe("interactive session extensions", () => {
+  it.effect("adopts completed to failed and cancelled transitions in SelectionLoaded", () =>
+    Effect.forEach(["failed", "cancelled"] as const, (status) => terminalTransitionScenario(status, false), {
+      discard: true,
+    }),
+  )
+
+  it.effect("adopts completed to failed and cancelled transitions in deferred replacements", () =>
+    Effect.forEach(["failed", "cancelled"] as const, (status) => terminalTransitionScenario(status, true), {
+      discard: true,
+    }),
+  )
+
+  it.effect("serializes a deferred replacement behind an in-flight older page", () =>
+    terminalTransitionScenario("failed", true, true),
+  )
+
   it.effect("submits while historical cost reconciliation is still running", () =>
     Effect.scoped(
       Effect.gen(function* () {
@@ -119,10 +318,12 @@ describe("interactive session extensions", () => {
         const reconciliationStarted = yield* Deferred.make<void>()
         const releaseReconciliation = yield* Deferred.make<void>()
         const submissionStarted = yield* Deferred.make<void>()
+        let inspectionCount = 0
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
-          inspect: (executionId) =>
-            executionId === historical.id
+          inspect: (executionId) => {
+            inspectionCount += 1
+            return executionId === historical.id && inspectionCount > 3
               ? Deferred.succeed(reconciliationStarted, undefined).pipe(
                   Effect.andThen(Deferred.await(releaseReconciliation)),
                   Effect.as({
@@ -133,7 +334,14 @@ describe("interactive session extensions", () => {
                     children: [],
                   }),
                 )
-              : Effect.void.pipe(Effect.as(undefined)),
+              : Effect.succeed({
+                  turnId: executionId,
+                  status: "completed" as const,
+                  waits: [],
+                  pendingTools: [],
+                  children: [],
+                })
+          },
           start: (input) =>
             Deferred.succeed(submissionStarted, undefined).pipe(Effect.andThen(baseBackend.start(input))),
         })
@@ -187,10 +395,12 @@ describe("interactive session extensions", () => {
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         yield* transcripts.replace(target, { ...Transcript.empty(target.id, target.prompt), costUsd: 15 })
         const usage = { ...estimatedCostEvent(String(target.id), "corrected-usage", 5), sequence: 1 }
+        let inspections = 0
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
-          inspect: (executionId) =>
-            Effect.succeed(
+          inspect: (executionId) => {
+            inspections += 1
+            return Effect.succeed(
               executionId === target.id
                 ? {
                     turnId: executionId,
@@ -200,7 +410,8 @@ describe("interactive session extensions", () => {
                     children: [],
                   }
                 : undefined,
-            ),
+            )
+          },
           replay: (executionId) =>
             Effect.succeed({ turnId: executionId, status: "completed" as const, events: [usage] }),
         })
@@ -230,6 +441,7 @@ describe("interactive session extensions", () => {
 
         expect(loaded.threadCostUsd).toBeUndefined()
         expect(loaded.globalCostUsd).toBeUndefined()
+        expect(inspections).toBeGreaterThan(0)
         expect(yield* transcripts.get(target.id)).toMatchObject({
           costUsd: 15,
         })
@@ -238,6 +450,201 @@ describe("interactive session extensions", () => {
         while (refreshed._tag !== "TitleCostUpdated" || refreshed.turnId !== target.id)
           refreshed = yield* Queue.take(events)
         expect(refreshed).toMatchObject({ threadCostUsd: 10, globalCostUsd: 10 })
+
+        yield* Fiber.interrupt(feed)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
+  )
+
+  it.effect("does not commit a stale inspected status over a newer persisted cursor", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const selected = thread("selection-commit-race")
+        const target: Turn.Turn = {
+          id: Turn.TurnId.make("selection-commit-race-turn"),
+          threadId: selected.id,
+          prompt: "race",
+          executionRoute: Turn.testExecutionRoute(),
+          status: "running",
+          lastCursor: "cursor-old",
+          createdAt: 1,
+          updatedAt: 1,
+        }
+        const repository = yield* ThreadRepository.makeMemory([selected])
+        const turns = yield* TurnRepository.makeMemory([target])
+        const turnPageRead = yield* Deferred.make<void>()
+        let selectionRequested = false
+        const selectionTurns: TurnRepository.Interface = {
+          ...turns,
+          page: (threadId, options) =>
+            turns
+              .page(threadId, options)
+              .pipe(Effect.tap(() => (selectionRequested ? Deferred.succeed(turnPageRead, undefined) : Effect.void))),
+        }
+        const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
+        const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
+        yield* transcripts.replace(
+          target,
+          Transcript.project(target.id, target.prompt, [
+            {
+              cursor: "cursor-old",
+              sequence: 0,
+              type: "model.output.completed",
+              createdAt: 1,
+              text: "old",
+            },
+          ]),
+        )
+        const inspectionStarted = yield* Deferred.make<void>()
+        const releaseInspection = yield* Deferred.make<void>()
+        const backend = ExecutionBackend.Service.of({
+          ...baseBackend,
+          inspect: (executionId) =>
+            Effect.gen(function* () {
+              const inspection = {
+                turnId: executionId,
+                status: "running" as const,
+                lastCursor: "cursor-old",
+                waits: [],
+                pendingTools: [],
+                children: [],
+              }
+              if (!(yield* Deferred.isDone(turnPageRead))) return inspection
+              yield* Deferred.succeed(inspectionStarted, undefined)
+              yield* Deferred.await(releaseInspection)
+              return inspection
+            }),
+          replay: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "running" as const,
+              lastCursor: "cursor-old",
+              events: [],
+            }),
+        })
+        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const context = yield* Layer.build(
+          interactiveLayer(
+            repository,
+            selectionTurns,
+            backend,
+            registration,
+            Effect.die("unused"),
+            Effect.die("unused"),
+            transcripts,
+          ),
+        )
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+        )
+        const session = yield* Deferred.await(registration)
+        const events = yield* Queue.unbounded<Operation.InteractiveEvent>()
+        const feed = yield* Effect.forkChild(session.events((event) => Queue.offerUnsafe(events, event)))
+
+        selectionRequested = true
+        const selectionFiber = yield* Effect.forkChild(session.selectThread(selected.id, 1))
+        yield* Deferred.await(turnPageRead)
+        yield* Deferred.await(inspectionStarted)
+        yield* turns.setStatus(target.id, "running", "cursor-new", 2)
+        yield* Deferred.succeed(releaseInspection, undefined)
+        yield* Fiber.join(selectionFiber)
+        let loaded = yield* Queue.take(events)
+        while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
+
+        const entries = loaded.entries.filter((entry) => entry.turn.id === target.id)
+        expect(entries.every((entry) => entry.turn.status === "running")).toBe(true)
+        expect(entries.every((entry) => entry.turn.lastCursor === "cursor-new")).toBe(true)
+        let replaced = yield* Queue.take(events)
+        while (replaced._tag !== "TranscriptReplaced") replaced = yield* Queue.take(events)
+        expect(replaced.entries.length).toBeGreaterThan(0)
+        expect(replaced.entries.every((entry) => entry.turn.status === "running")).toBe(true)
+        expect(replaced.entries.every((entry) => entry.turn.lastCursor === "cursor-new")).toBe(true)
+
+        yield* Fiber.interrupt(feed)
+        yield* Fiber.interrupt(operationFiber)
+      }),
+    ),
+  )
+
+  it.effect("prevents an obsolete selection epoch from committing after its replacement", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const first = thread("selection-a")
+        const second = thread("selection-b")
+        const firstTurn: Turn.Turn = {
+          id: Turn.TurnId.make("selection-a-turn"),
+          threadId: first.id,
+          prompt: "a",
+          executionRoute: Turn.testExecutionRoute(),
+          status: "running",
+          createdAt: 1,
+          updatedAt: 1,
+        }
+        const secondTurn: Turn.Turn = {
+          ...firstTurn,
+          id: Turn.TurnId.make("selection-b-turn"),
+          threadId: second.id,
+          prompt: "b",
+        }
+        const repository = yield* ThreadRepository.makeMemory([first, second])
+        const turns = yield* TurnRepository.makeMemory([firstTurn, secondTurn])
+        const firstPageRead = yield* Deferred.make<void>()
+        const releaseFirst = yield* Deferred.make<void>()
+        let selectingFirst = false
+        const selectionTurns: TurnRepository.Interface = {
+          ...turns,
+          page: (threadId, options) => {
+            const block = selectingFirst && threadId === first.id
+            return turns.page(threadId, options).pipe(
+              Effect.tap(() => (block ? Deferred.succeed(firstPageRead, undefined) : Effect.void)),
+              Effect.tap(() => (block ? Deferred.await(releaseFirst) : Effect.void)),
+            )
+          },
+        }
+        const backend = ExecutionBackend.Service.of({
+          ...baseBackend,
+          inspect: (executionId) =>
+            Effect.succeed({
+              turnId: executionId,
+              status: "running" as const,
+              waits: [],
+              pendingTools: [],
+              children: [],
+            }),
+          replay: (executionId) => Effect.succeed({ turnId: executionId, status: "running" as const, events: [] }),
+        })
+        const registration = yield* Deferred.make<Operation.InteractiveSession>()
+        const context = yield* Layer.build(interactiveLayer(repository, selectionTurns, backend, registration))
+        const operation = Context.get(context, Operation.Service)
+        const operationFiber = yield* Effect.forkChild(
+          operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
+        )
+        const session = yield* Deferred.await(registration)
+        const events: Array<Operation.InteractiveEvent> = []
+        const feed = yield* Effect.forkChild(session.events((event) => events.push(event)))
+
+        selectingFirst = true
+        const firstSelection = yield* Effect.forkChild(session.selectThread(first.id, 1))
+        yield* Deferred.await(firstPageRead)
+        selectingFirst = false
+        const secondSelection = yield* Effect.forkChild(session.selectThread(second.id, 2))
+        yield* Fiber.join(secondSelection)
+        yield* Deferred.succeed(releaseFirst, undefined)
+        yield* Fiber.join(firstSelection)
+        for (let attempt = 0; attempt < 20; attempt += 1) yield* Effect.yieldNow
+
+        expect(events.filter((event) => event._tag === "SelectionLoaded").map((event) => event.thread.id)).toEqual([
+          second.id,
+        ])
+        expect(
+          events.some(
+            (event) =>
+              (event._tag === "SelectionLoaded" && event.thread.id === first.id) ||
+              (event._tag === "TranscriptReplaced" && event.threadId === first.id),
+          ),
+        ).toBe(false)
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)

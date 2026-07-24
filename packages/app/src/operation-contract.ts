@@ -268,6 +268,8 @@ export class InvalidInput extends Schema.TaggedErrorClass<InvalidInput>()("Inval
 
 export interface Interface {
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>
+  readonly hasActiveExecutionWork?: Effect.Effect<boolean, OperationUnavailable>
+  readonly authorizeResidentReplacement?: Effect.Effect<"defer" | "supersede", OperationUnavailable>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/app/operation-contract/Service") {}
