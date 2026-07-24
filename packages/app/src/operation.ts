@@ -1069,7 +1069,7 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
 ) {
   const root = yield* backend.inspect(turnId, reference ? ExecutionBackend.executionReference : undefined)
   if (root === undefined) return true
-  if (!isTerminalStatus(root.status) || root.pendingTools.length > 0) return false
+  if (!isTerminalStatus(root.status)) return false
   const pending: Array<string> = []
   const seen = new Set<string>()
   for (const child of root.children) {
@@ -1081,7 +1081,7 @@ const executionTreeQuiescent = Effect.fn("Operation.executionTreeQuiescent")(fun
     const current = pending.shift()!
     const inspection = yield* backend.inspect(current, ExecutionBackend.executionReference)
     if (inspection === undefined) continue
-    if (!isTerminalStatus(inspection.status) || inspection.pendingTools.length > 0) return false
+    if (!isTerminalStatus(inspection.status)) return false
     for (const child of inspection.children) {
       const normalized = normalizeChildExecutionId(child.executionId)
       if (seen.has(normalized)) continue
