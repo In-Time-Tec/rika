@@ -6,10 +6,10 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
-import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref } from "effect"
+import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { Operation } from "../src/index"
-import { executeInteractiveCommand } from "../src/operation-contract"
+import { executeInteractiveCommand, InteractiveEventSchema } from "../src/operation-contract"
 
 const baseBackend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
@@ -101,6 +101,7 @@ const terminalTransitionScenario = (
   inspectedStatus: "failed" | "cancelled",
   deferred: boolean,
   overlapOlder: boolean = false,
+  oversizedProjection: boolean = false,
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -110,7 +111,7 @@ const terminalTransitionScenario = (
         threadId: selected.id,
         prompt: "terminal transition",
         executionRoute: Turn.testExecutionRoute(),
-        status: "completed",
+        status: oversizedProjection ? inspectedStatus : "completed",
         lastCursor: "terminal-cursor",
         createdAt: 1,
         updatedAt: 1,
@@ -127,14 +128,57 @@ const terminalTransitionScenario = (
       const turns = yield* TurnRepository.makeMemory(overlapOlder ? [historical, target] : [target])
       const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
       const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
-      const stale = Transcript.project(target.id, target.prompt, [
-        {
-          cursor: "terminal-cursor",
-          sequence: 1,
-          type: "execution.completed",
-          createdAt: 1,
-        },
-      ])
+      const stale = oversizedProjection
+        ? {
+            ...Transcript.empty(target.id, target.prompt),
+            units: [
+              {
+                key: `turn:${target.id}:user`,
+                turnId: target.id,
+                order: { sequence: 0, part: 0 },
+                revision: 0,
+                content: { _tag: "Entry" as const, role: "user" as const, text: target.prompt },
+              },
+              {
+                key: `${target.id}:assistant:opening`,
+                turnId: target.id,
+                order: { sequence: 1, part: 0 },
+                revision: 1,
+                content: { _tag: "Entry" as const, role: "assistant" as const, text: "opening response" },
+              },
+              ...Array.from(
+                { length: 220 },
+                (_, index): Transcript.Unit => ({
+                  key: `${target.id}:nested:${index.toString().padStart(3, "0")}`,
+                  turnId: target.id,
+                  order: { sequence: index + 2, part: 0 },
+                  revision: index + 2,
+                  parentId: "nested-agent",
+                  content: {
+                    _tag: "Block",
+                    block: { _tag: "Notification", title: String(index), detail: "x".repeat(40_000) },
+                  },
+                }),
+              ),
+              {
+                key: `${target.id}:assistant:final`,
+                turnId: target.id,
+                order: { sequence: 222, part: 0 },
+                revision: 222,
+                content: { _tag: "Entry" as const, role: "assistant" as const, text: "final response" },
+              },
+            ],
+            revision: 222,
+            checkpointCursor: "stale-cursor",
+          }
+        : Transcript.project(target.id, target.prompt, [
+            {
+              cursor: "terminal-cursor",
+              sequence: 1,
+              type: "execution.completed",
+              createdAt: 1,
+            },
+          ])
       yield* transcripts.replace(target, stale)
       if (overlapOlder)
         yield* transcripts.replace(historical, {
@@ -244,7 +288,34 @@ const terminalTransitionScenario = (
         expect(replacement.entries).not.toHaveLength(0)
         expect(replacement.entries.every((entry) => entry.turn.status === inspectedStatus)).toBe(true)
         expect(replacement.entries.every((entry) => entry.turn.lastCursor === "terminal-cursor")).toBe(true)
-        deliveredEntries = replacement.entries
+        const replacementPages = [replacement.entries]
+        if (oversizedProjection) {
+          expect(replacement.hasOlder).toBe(true)
+          expect(replacement.entries.some((entry) => entry.unit.key === `turn:${target.id}:user`)).toBe(true)
+          expect(replacement.entries.some((entry) => entry.unit.key === `${target.id}:assistant:opening`)).toBe(true)
+          expect(replacement.entries.some((entry) => entry.unit.key === `${target.id}:assistant:final`)).toBe(true)
+          const encodedReplacement = yield* Schema.encodeEffect(InteractiveEventSchema)(replacement)
+          const replacementWire = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(encodedReplacement)
+          expect(new TextEncoder().encode(replacementWire).byteLength).toBeLessThan(8 * 1024 * 1024)
+          expect((yield* Queue.takeAll(events)).some((event) => event._tag === "ExecutionFailed")).toBe(false)
+          let hasOlder = replacement.hasOlder
+          for (let page = 0; page < 10 && hasOlder; page += 1) {
+            yield* session.loadOlder
+            let prepended = yield* Queue.take(events)
+            while (prepended._tag !== "TranscriptPagePrepended") prepended = yield* Queue.take(events)
+            replacementPages.push(prepended.entries)
+            hasOlder = prepended.hasOlder
+          }
+          replacementPages.reverse()
+          const replacementEntries = replacementPages.flat()
+          const stored = yield* transcripts.get(target.id)
+          expect(hasOlder).toBe(false)
+          expect(new Set(replacementEntries.map((entry) => entry.unit.key)).size).toBe(replacementEntries.length)
+          expect(new Set(replacementEntries.map((entry) => entry.unit.key))).toEqual(
+            new Set(stored?.units.map((unit) => unit.key)),
+          )
+        }
+        deliveredEntries = replacementPages.flat()
       } else {
         expect(selectedEvent.hasOlder).toBe(true)
         blockOlderPage = true
@@ -269,10 +340,12 @@ const terminalTransitionScenario = (
         if (replacement?._tag !== "TranscriptReplaced") return yield* Effect.die("Missing replacement")
         deliveredEntries = replacement.entries
       }
-      expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === inspectedStatus)).toBe(true)
+      if (!oversizedProjection)
+        expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === inspectedStatus)).toBe(true)
       expect(deliveredEntries.some((entry) => entry.unit.executionOutcome?.status === "complete")).toBe(false)
       const stored = yield* transcripts.get(target.id)
-      expect(stored?.units.some((unit) => unit.executionOutcome?.status === inspectedStatus)).toBe(true)
+      if (!oversizedProjection)
+        expect(stored?.units.some((unit) => unit.executionOutcome?.status === inspectedStatus)).toBe(true)
       expect(stored?.units.some((unit) => unit.executionOutcome?.status === "complete")).toBe(false)
 
       yield* Fiber.interrupt(feed)
@@ -291,6 +364,10 @@ describe("interactive session extensions", () => {
     Effect.forEach(["failed", "cancelled"] as const, (status) => terminalTransitionScenario(status, true), {
       discard: true,
     }),
+  )
+
+  it.effect("bounds an oversized repaired Turn without failing the selection", () =>
+    terminalTransitionScenario("failed", true, false, true),
   )
 
   it.effect("serializes a deferred replacement behind an in-flight older page", () =>

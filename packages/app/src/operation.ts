@@ -165,6 +165,104 @@ const sameTranscriptCursor = (
   left: TranscriptRepository.PageCursor | undefined,
   right: TranscriptRepository.PageCursor | undefined,
 ) => left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
+const transcriptCursorFor = (
+  entry: TranscriptRepository.Entry | undefined,
+): TranscriptRepository.PageCursor | undefined =>
+  entry === undefined
+    ? undefined
+    : {
+        createdAt: entry.turn.createdAt,
+        turnId: entry.turn.id,
+        sequence: entry.unit.order.sequence,
+        part: entry.unit.order.part,
+        key: entry.unit.key,
+      }
+const compareTranscriptCursors = (left: TranscriptRepository.PageCursor, right: TranscriptRepository.PageCursor) =>
+  left.createdAt - right.createdAt ||
+  left.turnId.localeCompare(right.turnId) ||
+  left.sequence - right.sequence ||
+  left.part - right.part ||
+  left.key.localeCompare(right.key)
+const boundTranscriptEntries = (
+  sourceEntries: ReadonlyArray<TranscriptRepository.Entry>,
+): {
+  readonly entries: ReadonlyArray<TranscriptRepository.Entry>
+  readonly partialCursor?: TranscriptRepository.PageCursor
+  readonly truncated: boolean
+  readonly oversizedEntry: boolean
+} => {
+  let entries = sourceEntries
+  let boundedStart = entries.length
+  let boundedBytes = 0
+  while (boundedStart > 0) {
+    const entryBytes = transcriptPageEncoder.encode(encodeJson(entries[boundedStart - 1])).byteLength
+    if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes) {
+      if (boundedStart === entries.length) return { entries: [], truncated: false, oversizedEntry: true }
+      const bounded = boundPartialTranscriptEntries(entries, boundedStart, boundedBytes)
+      return transcriptPageEncoder.encode(encodeJson(bounded.entries)).byteLength > maximumTranscriptPayloadBytes
+        ? { entries: [], truncated: false, oversizedEntry: true }
+        : bounded
+    }
+    boundedStart -= 1
+    boundedBytes += entryBytes
+  }
+  return { entries, truncated: false, oversizedEntry: false }
+}
+const boundPartialTranscriptEntries = (
+  sourceEntries: ReadonlyArray<TranscriptRepository.Entry>,
+  initialStart: number,
+  initialBytes: number,
+): {
+  readonly entries: ReadonlyArray<TranscriptRepository.Entry>
+  readonly partialCursor?: TranscriptRepository.PageCursor
+  readonly truncated: true
+  readonly oversizedEntry: false
+} => {
+  let entries = sourceEntries
+  let boundedStart = initialStart
+  let boundedBytes = initialBytes
+  let partialCursor: TranscriptRepository.PageCursor | undefined
+  const turnBoundary = entries.findIndex(
+    (entry, index) => index >= boundedStart && entry.unit.key === `turn:${entry.turn.id}:user`,
+  )
+  if (turnBoundary < 0) {
+    const newest = entries.at(-1)
+    const userBoundary =
+      newest === undefined ? -1 : entries.findIndex((entry) => entry.unit.key === `turn:${newest.turn.id}:user`)
+    if (userBoundary >= 0) {
+      const userEntry = entries[userBoundary]!
+      const semanticIndexes = new Set([userBoundary])
+      let semanticBytes = transcriptPageEncoder.encode(encodeJson(userEntry)).byteLength
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        if (index === userBoundary) continue
+        const entry = entries[index]!
+        if (
+          entry.unit.parentId !== undefined ||
+          (entry.unit.content._tag !== "Entry" && entry.unit.executionOutcome === undefined)
+        )
+          continue
+        const entryBytes = transcriptPageEncoder.encode(encodeJson(entry)).byteLength
+        if (semanticBytes + entryBytes > maximumTranscriptPayloadBytes) continue
+        semanticIndexes.add(index)
+        semanticBytes += entryBytes
+      }
+      boundedStart = entries.length
+      boundedBytes = semanticBytes
+      while (boundedStart > userBoundary + 1) {
+        const index = boundedStart - 1
+        const entryBytes = semanticIndexes.has(index)
+          ? 0
+          : transcriptPageEncoder.encode(encodeJson(entries[index])).byteLength
+        if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes && boundedStart < entries.length) break
+        boundedStart -= 1
+        boundedBytes += entryBytes
+      }
+      partialCursor = transcriptCursorFor(entries[boundedStart])
+      entries = entries.filter((_, index) => semanticIndexes.has(index) || index >= boundedStart)
+    } else entries = entries.slice(boundedStart)
+  } else entries = entries.slice(turnBoundary)
+  return { entries, ...(partialCursor === undefined ? {} : { partialCursor }), truncated: true, oversizedEntry: false }
+}
 const sameTurnCursor = (left: TurnRepository.PageCursor | undefined, right: TurnRepository.PageCursor | undefined) =>
   left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
 const selectionRepairNodeLimit = 128
@@ -3249,80 +3347,17 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
           const loadedEntries =
             olderPages.length === 0 ? page.entries : olderPages.toReversed().flat().concat(page.entries)
           let storedEntries = initialBoundary <= 0 ? loadedEntries : loadedEntries.slice(initialBoundary)
-          let boundedStart = storedEntries.length
-          let boundedBytes = 0
-          let oversizedEntry = false
-          let partialCursor: TranscriptRepository.PageCursor | undefined
-          while (boundedStart > 0) {
-            const entryBytes = transcriptPageEncoder.encode(encodeJson(storedEntries[boundedStart - 1])).byteLength
-            if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes) {
-              oversizedEntry = boundedStart === storedEntries.length
-              break
-            }
-            boundedStart -= 1
-            boundedBytes += entryBytes
-          }
-          if (oversizedEntry) return yield* operationError("Transcript entry exceeds the transcript event limit")
-          if (boundedStart > 0) {
-            const turnBoundary = storedEntries.findIndex(
-              (entry, index) => index >= boundedStart && entry.unit.key === `turn:${entry.turn.id}:user`,
-            )
-            if (turnBoundary < 0) {
-              const newest = storedEntries.at(-1)
-              const userBoundary =
-                newest === undefined
-                  ? -1
-                  : storedEntries.findIndex((entry) => entry.unit.key === `turn:${newest.turn.id}:user`)
-              if (userBoundary >= 0) {
-                const userEntry = storedEntries[userBoundary]!
-                const semanticIndexes = new Set([userBoundary])
-                let semanticBytes = transcriptPageEncoder.encode(encodeJson(userEntry)).byteLength
-                for (let index = storedEntries.length - 1; index >= 0; index -= 1) {
-                  if (index === userBoundary) continue
-                  const entry = storedEntries[index]!
-                  if (entry.unit.parentId !== undefined || entry.unit.content._tag !== "Entry") continue
-                  const entryBytes = transcriptPageEncoder.encode(encodeJson(entry)).byteLength
-                  if (semanticBytes + entryBytes > maximumTranscriptPayloadBytes) continue
-                  semanticIndexes.add(index)
-                  semanticBytes += entryBytes
-                }
-                boundedStart = storedEntries.length
-                boundedBytes = semanticBytes
-                while (boundedStart > userBoundary + 1) {
-                  const index = boundedStart - 1
-                  const entryBytes = semanticIndexes.has(index)
-                    ? 0
-                    : transcriptPageEncoder.encode(encodeJson(storedEntries[index])).byteLength
-                  if (boundedBytes + entryBytes > maximumTranscriptPayloadBytes && boundedStart < storedEntries.length)
-                    break
-                  boundedStart -= 1
-                  boundedBytes += entryBytes
-                }
-                const cursorEntry = storedEntries[boundedStart]
-                storedEntries = storedEntries.filter((_, index) => semanticIndexes.has(index) || index >= boundedStart)
-                if (cursorEntry !== undefined)
-                  partialCursor = {
-                    createdAt: cursorEntry.turn.createdAt,
-                    turnId: cursorEntry.turn.id,
-                    sequence: cursorEntry.unit.order.sequence,
-                    part: cursorEntry.unit.order.part,
-                    key: cursorEntry.unit.key,
-                  }
-              } else storedEntries = storedEntries.slice(boundedStart)
-            } else storedEntries = storedEntries.slice(turnBoundary)
+          const bounded = boundTranscriptEntries(storedEntries)
+          if (bounded.oversizedEntry)
+            return yield* operationError("Transcript entry exceeds the transcript event limit")
+          storedEntries = bounded.entries
+          if (bounded.truncated) {
             initialBoundary = 1
           }
           if (initialBoundary > 0) {
             const oldest = storedEntries[0]
-            if (partialCursor !== undefined) oldestCursor = partialCursor
-            else if (oldest !== undefined)
-              oldestCursor = {
-                createdAt: oldest.turn.createdAt,
-                turnId: oldest.turn.id,
-                sequence: oldest.unit.order.sequence,
-                part: oldest.unit.order.part,
-                key: oldest.unit.key,
-              }
+            if (bounded.partialCursor !== undefined) oldestCursor = bounded.partialCursor
+            else oldestCursor = transcriptCursorFor(oldest)
             storedHasOlder = true
           }
           if (before === undefined) {
@@ -3523,7 +3558,8 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                       projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
                     ),
                   )
-                  if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes) {
+                  const bounded = boundTranscriptEntries(entries)
+                  if (bounded.oversizedEntry) {
                     dispatch({
                       _tag: "ExecutionFailed",
                       selectionEpoch: state.epoch,
@@ -3531,13 +3567,24 @@ export const productLayer = <ThreadError, TurnError, BackendError, ThreadSummary
                     })
                     return true
                   }
-                  for (const entry of entries) state.loadedKeys.add(entry.unit.key)
                   if (activeSelectionState !== state) return false
+                  if (bounded.truncated) {
+                    for (const unit of projection.units) state.loadedKeys.delete(unit.key)
+                    for (const entry of bounded.entries) state.loadedKeys.add(entry.unit.key)
+                    const partialCursor = bounded.partialCursor ?? transcriptCursorFor(bounded.entries[0])
+                    if (
+                      partialCursor !== undefined &&
+                      (state.transcriptCursor === undefined ||
+                        compareTranscriptCursors(partialCursor, state.transcriptCursor) > 0)
+                    )
+                      state.transcriptCursor = partialCursor
+                    state.hasOlder = true
+                  } else for (const entry of bounded.entries) state.loadedKeys.add(entry.unit.key)
                   dispatch({
                     _tag: "TranscriptReplaced",
                     selectionEpoch: state.epoch,
                     threadId: state.thread.id,
-                    entries,
+                    entries: bounded.entries,
                     hasOlder: state.hasOlder,
                     ...(state.transcriptCursor === undefined ? {} : { oldestCursor: state.transcriptCursor }),
                   })
