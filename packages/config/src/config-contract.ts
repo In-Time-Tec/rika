@@ -296,7 +296,7 @@ export const resolveModelRoute: {
 
 export const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
 
-export const resolveAgentRoute = (
+const resolveAgentRouteImpl = (
   settings: Settings,
   mode: ModeId,
   agent: AgentId,
@@ -313,6 +313,11 @@ export const resolveAgentRoute = (
     `Agent ${agent}`,
   )
 }
+
+export const resolveAgentRoute: {
+  (mode: ModeId, agent: AgentId, tuning?: { readonly fastMode?: boolean }): (settings: Settings) => ResolvedModelRoute
+  (settings: Settings, mode: ModeId, agent: AgentId, tuning?: { readonly fastMode?: boolean }): ResolvedModelRoute
+} = Function.dual((args) => typeof args[0] === "object", resolveAgentRouteImpl)
 
 export interface ModeRouteLabel {
   readonly name: string
@@ -491,7 +496,10 @@ export const decodeSettingsInput: {
         throw ConfigFileError.make({ path, message: `Model alias ${name} candidates must be non-empty strings` })
       if (alias.base !== undefined && (typeof alias.base !== "string" || !(alias.base in modelDefaults)))
         throw ConfigFileError.make({ path, message: `Model alias ${name} base must reference a built-in model alias` })
-      if (alias.preset !== undefined && (typeof alias.preset !== "string" || !presetIds.includes(alias.preset as never)))
+      if (
+        alias.preset !== undefined &&
+        (typeof alias.preset !== "string" || !presetIds.includes(alias.preset as never))
+      )
         throw ConfigFileError.make({
           path,
           message: `Model alias ${name} preset must be one of ${presetIds.join(", ")}`,
@@ -529,7 +537,9 @@ export const decodeSettingsInput: {
         if (!object(alias.efforts))
           throw ConfigFileError.make({ path, message: `Model alias ${name} efforts must be an object` })
         const protocol = providerDefaults[alias.provider as ProviderId].protocol
-        const allowed = presetIds.flatMap((id) => (presets[id].protocols.includes(protocol) ? presets[id].optionKeys : []))
+        const allowed = presetIds.flatMap((id) =>
+          presets[id].protocols.includes(protocol) ? presets[id].optionKeys : [],
+        )
         for (const [effort, variants] of Object.entries(alias.efforts)) {
           if (!supportedEfforts.includes(effort as never))
             throw ConfigFileError.make({

@@ -337,13 +337,13 @@ const ModeRoutesSchema = Schema.Record(
 export type ModeRouteLabel = typeof ModeRouteLabelSchema.Type
 export type ModeRoutes = typeof ModeRoutesSchema.Type
 
-const label = (name: string, effort: string): ModeRouteLabel => ({ name, effort, fast: false })
+const modeLabel = (name: string, effort: string): ModeRouteLabel => ({ name, effort, fast: false })
 
 export const defaultModeRoutes: ModeRoutes = {
-  low: { main: label("GPT-5.6 Luna", "xhigh"), oracle: label("GPT-5.6 Terra", "xhigh") },
-  medium: { main: label("GPT-5.6 Terra", "xhigh"), oracle: label("GPT-5.6 Sol", "medium") },
-  high: { main: label("GPT-5.6 Sol", "medium"), oracle: label("GPT-5.6 Sol", "high") },
-  ultra: { main: label("GPT-5.6 Sol", "xhigh"), oracle: label("GPT-5.6 Sol", "max") },
+  low: { main: modeLabel("GPT-5.6 Luna", "xhigh"), oracle: modeLabel("GPT-5.6 Terra", "xhigh") },
+  medium: { main: modeLabel("GPT-5.6 Terra", "xhigh"), oracle: modeLabel("GPT-5.6 Sol", "medium") },
+  high: { main: modeLabel("GPT-5.6 Sol", "medium"), oracle: modeLabel("GPT-5.6 Sol", "high") },
+  ultra: { main: modeLabel("GPT-5.6 Sol", "xhigh"), oracle: modeLabel("GPT-5.6 Sol", "max") },
 }
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,

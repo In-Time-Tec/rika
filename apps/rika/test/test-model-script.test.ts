@@ -259,17 +259,7 @@ test("pins aliases, variants, candidates, specialists, titles, and summaries as 
     },
   }
   const resolved = modelRoutesForExecution(settings, "high", { fastMode: true })
-  expect(resolved.map((route) => route.alias)).toEqual([
-    "sol",
-    "sol",
-    "luna",
-    "sol",
-    "sol",
-    "sol",
-    "sol",
-    "sol",
-    "sol",
-  ])
+  expect(resolved.map((route) => route.alias)).toEqual(["sol", "sol", "luna", "sol", "sol", "sol", "sol", "sol", "sol"])
   expect(resolved.map((route) => route.model)).toEqual(resolved.map((route) => route.candidates[0]))
 
   const pin = executionRoutePin(settings, "high", { fastMode: true })
@@ -916,8 +906,8 @@ test("renders configured model display names in the mode picker", () =>
   Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
-        const config = yield* ConfigService.effective().pipe(
-          Effect.provide(
+        const config = yield* Effect.scopedWith((scope) =>
+          Layer.buildWithScope(
             ConfigService.memoryLayer({
               global: {
                 modelAliases: {
@@ -939,7 +929,8 @@ test("renders configured model display names in the mode picker", () =>
                 },
               },
             }),
-          ),
+            scope,
+          ).pipe(Effect.flatMap((context) => ConfigService.effective().pipe(Effect.provide(context)))),
         )
         const settings = config.settings
         const setup = yield* Effect.acquireRelease(
