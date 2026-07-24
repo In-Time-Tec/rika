@@ -7,7 +7,7 @@ import { ChildFanOutHost, Client, Content, Execution, Ids, WorkflowDefinitionHos
 import { ThreadTools } from "@rika/tools"
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, Schema, Stream, Tracer } from "effect"
 import { TestClock } from "effect/testing"
-import { AiError, Toolkit } from "effect/unstable/ai"
+import { AiError, Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, currentExecutionRoute, start } from "./current-execution-route"
@@ -338,9 +338,9 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
   return { implementation, registrations, starts, lookups, replays, pages, cancellations }
 })
 
-const provideConfiguredBackend = (
+const provideConfiguredBackend = <AdditionalTools extends Record<string, Tool.Any> = {}>(
   implementation: Client.Interface,
-  options: Parameters<typeof RelayExecutionBackend.layerFromClient>[0],
+  options: Parameters<typeof RelayExecutionBackend.layerFromClient<AdditionalTools>>[0],
   additionalLayer: Layer.Layer<never> = Layer.empty,
 ) => {
   const contextLayer = Layer.merge(
