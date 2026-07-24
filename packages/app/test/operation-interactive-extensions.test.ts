@@ -28,6 +28,7 @@ const baseBackend = ExecutionBackend.Service.of({
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.void,
   resolvePermission: () => Effect.void,
+  resolveInvocationSource: () => Effect.die("unused"),
 })
 
 const thread = (id: string): Thread.Thread => ({
@@ -37,6 +38,7 @@ const thread = (id: string): Thread.Thread => ({
   labels: [],
   pinned: false,
   archived: false,
+  lineage: { _tag: "Original" },
   createdAt: 1,
   updatedAt: 1,
 })
@@ -110,6 +112,8 @@ const terminalTransitionScenario = (
         id: Turn.TurnId.make(`turn-${selected.id}`),
         threadId: selected.id,
         prompt: "terminal transition",
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
         executionRoute: Turn.testExecutionRoute(),
         status: oversizedProjection ? inspectedStatus : "completed",
         lastCursor: "terminal-cursor",
@@ -382,6 +386,8 @@ describe("interactive session extensions", () => {
           id: Turn.TurnId.make("historical-turn"),
           threadId: selected.id,
           prompt: "historical",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "completed",
           createdAt: 1,
@@ -462,6 +468,8 @@ describe("interactive session extensions", () => {
           id: Turn.TurnId.make("turn-priced"),
           threadId: selected.id,
           prompt: "priced",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "completed",
           createdAt: 1,
@@ -542,6 +550,8 @@ describe("interactive session extensions", () => {
           id: Turn.TurnId.make("selection-commit-race-turn"),
           threadId: selected.id,
           prompt: "race",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "running",
           lastCursor: "cursor-old",
@@ -654,6 +664,8 @@ describe("interactive session extensions", () => {
           id: Turn.TurnId.make("selection-a-turn"),
           threadId: first.id,
           prompt: "a",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "running",
           createdAt: 1,
@@ -740,6 +752,8 @@ describe("interactive session extensions", () => {
             id: Turn.TurnId.make("turn-first"),
             threadId: first.id,
             prompt: "first",
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
             executionRoute: Turn.testExecutionRoute(),
             status: "completed",
             createdAt: 1,
@@ -749,6 +763,8 @@ describe("interactive session extensions", () => {
             id: Turn.TurnId.make("turn-second"),
             threadId: second.id,
             prompt: "second",
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
             executionRoute: Turn.testExecutionRoute(),
             status: "completed",
             createdAt: 2,
@@ -823,6 +839,8 @@ describe("interactive session extensions", () => {
             id: Turn.TurnId.make("turn-synth"),
             threadId: selected.id,
             prompt: "synth",
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
             executionRoute: Turn.testExecutionRoute(),
             status: "completed",
             createdAt: 1,
@@ -927,6 +945,8 @@ describe("interactive session extensions", () => {
             id: Turn.TurnId.make("queued"),
             threadId: previous.id,
             prompt: "queued",
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
             executionRoute: Turn.testExecutionRoute(),
             status: "queued",
             createdAt: 1,
@@ -1311,6 +1331,7 @@ describe("interactive session extensions", () => {
               }
             }),
           follow: (executionId, afterCursor, onEvent) => {
+            const cursor = typeof afterCursor === "string" ? afterCursor : afterCursor?.cursor
             if (executionId === "parent-turn")
               return Effect.succeed({ turnId: executionId, status: "running" as const, events: [] })
             const waiting: ExecutionBackend.Event = {
@@ -1324,7 +1345,7 @@ describe("interactive session extensions", () => {
               { cursor: "answer", sequence: 1, type: "model.output.delta", createdAt: 3, text: "resumed" },
               { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 4 },
             ]
-            return Ref.update(childFollows, (cursors) => [...cursors, afterCursor]).pipe(
+            return Ref.update(childFollows, (cursors) => [...cursors, cursor]).pipe(
               Effect.andThen(Ref.getAndUpdate(childFollowCount, (count) => count + 1)),
               Effect.flatMap((count) => {
                 const events = count === 0 ? [waiting] : completed
@@ -1418,7 +1439,12 @@ describe("interactive session extensions", () => {
           },
           follow: (executionId, afterCursor, onEvent) =>
             executionId.includes(":child:")
-              ? Queue.offer(followed, { executionId, ...(afterCursor === undefined ? {} : { afterCursor }) }).pipe(
+              ? Queue.offer(followed, {
+                  executionId,
+                  ...(afterCursor === undefined
+                    ? {}
+                    : { afterCursor: typeof afterCursor === "string" ? afterCursor : afterCursor.cursor }),
+                }).pipe(
                   Effect.tap(() =>
                     afterCursor === undefined
                       ? Effect.sync(() =>

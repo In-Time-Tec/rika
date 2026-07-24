@@ -235,6 +235,15 @@ const settleSteering = (
   if (matching.length === 0 || model.input.length > 0) return { pendingSteering }
   return { pendingSteering, restoredInput: matching.map((row) => row.text).join("\n") }
 }
+
+const cancelTranscriptBlocks = (blocks: ReadonlyArray<TranscriptBlock>): ReadonlyArray<TranscriptBlock> =>
+  blocks.map((block) => {
+    if ((block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running")
+      return { ...block, status: "cancelled" as const }
+    if (block._tag === "Permission" && block.status === "pending") return { ...block, status: "denied" as const }
+    return block
+  })
+
 export interface PastedTextAttachment {
   readonly type: "text" | "image"
   readonly token: string
@@ -1580,6 +1589,8 @@ export const update: {
             : {}),
           submittedDrafts: taken.rest,
           pendingSteering: settleSteering(model, turnId).pendingSteering,
+          blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
+          permissionSelection: 0,
           cancelPending: model.activeTurnId === turnId ? false : model.cancelPending,
           busy: model.activeTurnId === turnId ? false : model.busy,
           activity: model.activeTurnId === turnId ? undefined : model.activity,
@@ -1622,12 +1633,8 @@ export const update: {
         ...(cancelSettled.restoredInput === undefined
           ? {}
           : { input: cancelSettled.restoredInput, cursor: cancelSettled.restoredInput.length }),
-        blocks: model.blocks.map((candidate) => {
-          const block = candidate as TranscriptBlock
-          return (block._tag === "ToolCall" || block._tag === "ChildAgent") && block.status === "running"
-            ? { ...block, status: "cancelled" as const }
-            : candidate
-        }),
+        blocks: cancelTranscriptBlocks(model.blocks as ReadonlyArray<TranscriptBlock>),
+        permissionSelection: 0,
         busy: false,
         activity: undefined,
         activeTurnId: undefined,

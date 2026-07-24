@@ -88,9 +88,7 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
     if (name === "Oracle" || name === "Review") return [AgentTools.readThreadTool]
     return Object.values(AgentTools.modelToolkit.tools)
   })()
-  const recoveryTools =
-    name === "ReadThread" ? [] : [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool]
-  const toolkit = Toolkit.make(...definition.tools, ...delegationTools, ...recoveryTools)
+  const toolkit = Toolkit.make(...definition.tools, ...delegationTools)
   const relayModel = {
     provider: model.provider,
     model: model.model,
@@ -151,6 +149,12 @@ export const parentPermissions = [...new Set(names.flatMap((name) => definitions
   name,
   value: true,
 }))
+
+export const rootPermissions = [
+  ...parentPermissions,
+  { name: "thread.coordinate", value: true },
+  { name: "thread.control", value: true },
+]
 
 export const childRunSpawnPermission = { name: "relay.child_run.spawn", value: true }
 

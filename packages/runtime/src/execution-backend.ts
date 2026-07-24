@@ -6,6 +6,7 @@ import {
   ProcessRegistry,
   ReadWebPage,
   Runtime as RikaToolRuntime,
+  ToolInvocation,
   WebSearch,
 } from "@rika/tools"
 import {
@@ -29,6 +30,7 @@ import {
   Crypto,
   Deferred,
   Duration,
+  Encoding,
   Effect,
   Fiber,
   Function,
@@ -52,6 +54,7 @@ import {
   type AgentProfile,
   BackendError,
   Event,
+  type ExecutionCheckpoint,
   type ExecutionReference,
   type ExecutionRoutePin,
   type EventScope,
@@ -60,7 +63,7 @@ import {
   type StartInput,
   Status,
 } from "./execution-contract"
-import { mainInstructions, parentPermissions, presets, resolve, resolveTitle } from "./agent-profiles"
+import { mainInstructions, parentPermissions, presets, resolve, resolveTitle, rootPermissions } from "./agent-profiles"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
 import { definitions, idFor } from "./workflow-definitions"
@@ -173,7 +176,11 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly permissionPolicy?: Permissions.Ruleset
   readonly permissionPolicyForExecution?: (executionId: string) => Effect.Effect<Permissions.Ruleset, BackendError>
   readonly additionalToolkit?: Toolkit.Toolkit<AdditionalTools>
-  readonly additionalHandlerLayer?: Layer.Layer<Tool.HandlersFor<AdditionalTools>, BackendError, never>
+  readonly additionalHandlerLayer?: Layer.Layer<
+    Tool.HandlersFor<AdditionalTools>,
+    BackendError,
+    Tool.HandlerServices<AdditionalTools[keyof AdditionalTools]>
+  >
   readonly toolRuntimeLayer?: Layer.Layer<RikaToolRuntime.Service, BackendError, RuntimeRequirements>
   readonly toolRuntimeLayerForWorkspace?: (
     workspace: string,
@@ -453,6 +460,21 @@ const threadIdFromMetadata = (metadata: Readonly<Record<string, unknown>> | unde
   const threadId = metadata?.rika_thread_id
   return typeof threadId === "string" && threadId.length > 0 ? threadId : undefined
 }
+
+const cursorOf = (checkpoint: string | ExecutionCheckpoint | undefined) =>
+  typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
+
+const checkpointForExecution = (client: Client.Interface, id: Ids.ExecutionId) =>
+  Effect.gen(function* () {
+    const inspection = yield* client.executions.inspect(id)
+    if (inspection.last_event_cursor === undefined) return undefined
+    const page = yield* client.executions.pageEvents({ execution_id: id, direction: "backward", limit: 1 })
+    const cursor = inspection.last_event_cursor
+    const item = page.events.findLast((event) => event.cursor === cursor)
+    if (item === undefined)
+      return yield* BackendError.make({ message: `Execution ${String(id)} checkpoint is not replayable` })
+    return { cursor, sequence: item.sequence }
+  })
 const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.Execution) =>
   Effect.gen(function* () {
     let current: Execution.Execution | undefined = execution
@@ -817,7 +839,7 @@ const traceWithoutResult = <A, E, R>(name: string, effect: Effect.Effect<A, E, R
 const followExecution = (
   client: Client.Interface,
   turnId: string,
-  afterCursor: string | undefined,
+  afterCursor: string | ExecutionCheckpoint | undefined,
   onEvent: ((item: Event) => void) | undefined,
   stopAtActionableWait = true,
   reference?: ExecutionReference,
@@ -828,6 +850,7 @@ const followExecution = (
       const startedAt = yield* Clock.currentTimeMillis
       yield* Effect.logInfo("execution.follow.started")
       const rootExecutionId = executionId(turnId, reference)
+      const committedSequence = typeof afterCursor === "string" ? undefined : afterCursor?.sequence
       const events: Array<Event> = []
       const followed = new Set<string>()
       const tracedDeltas = new Set<string>()
@@ -856,6 +879,7 @@ const followExecution = (
         cursor?: string,
       ) => Effect.Effect<void, never, Scope.Scope>
       const followOne = (execution: Ids.ExecutionId, root: boolean, cursor: string | undefined) => {
+        let replayingFromBeginning = false
         const consume = (nextCursor: string | undefined) =>
           Stream.runForEachWhile(
             client.executions.follow({
@@ -886,6 +910,13 @@ const followExecution = (
                   actionable: false,
                 }).pipe(Effect.as(false))
               }
+              if (
+                root &&
+                replayingFromBeginning &&
+                committedSequence !== undefined &&
+                item.event.sequence <= committedSequence
+              )
+                return Effect.succeed(true)
               const spawnedChild = childExecutionIdFromEvent(item.event)
               const mapped = attributedEvent(item.event, root ? undefined : String(execution))
               let terminal: Status | undefined
@@ -926,13 +957,32 @@ const followExecution = (
               times: 100,
             }),
           )
+          if (root && cursor !== undefined && inspection.last_event_cursor === cursor) {
+            if (terminalExecutionStatus(inspection.status)) {
+              yield* Queue.offer(updates, {
+                _tag: "stopped",
+                status: Status.make(inspection.status),
+                actionable: false,
+              })
+              return
+            }
+            if (stopAtActionableWait && inspection.waiting_on.length > 0) {
+              yield* Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true })
+              return
+            }
+          }
           if (eventScope === "tree")
             yield* Effect.forEach(
               inspection.child_runs,
               (child) => launch(Ids.ExecutionId.make(String(child.child_execution_id)), false),
               { discard: true },
             )
-          yield* consume(cursor).pipe(Effect.catchTag("EventLogCursorNotFound", () => consume(undefined)))
+          yield* consume(cursor).pipe(
+            Effect.catchTag("EventLogCursorNotFound", () => {
+              replayingFromBeginning = true
+              return consume(undefined)
+            }),
+          )
         }).pipe(
           Effect.catchCause((cause) =>
             root
@@ -958,7 +1008,7 @@ const followExecution = (
           followed.add(key)
           return followOne(execution, root, cursor).pipe(Effect.forkScoped, Effect.asVoid)
         })
-      yield* launch(rootExecutionId, true, afterCursor)
+      yield* launch(rootExecutionId, true, cursorOf(afterCursor))
       let stoppedAtActionableWait = false
       let stoppedStatus: Status | undefined
       while (stoppedStatus === undefined) {
@@ -1004,10 +1054,12 @@ const followExecution = (
       if (stoppedAtActionableWait && (status === "running" || status === "queued")) {
         finalStatus = Status.make("waiting")
       }
+      const checkpoint = yield* checkpointForExecution(client, rootExecutionId)
       return {
         turnId,
         status: finalStatus,
         events,
+        ...(checkpoint === undefined ? {} : { checkpoint }),
       }
     }),
   ).pipe(
@@ -1436,11 +1488,9 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 options.modelVariantPolicy === "fixed-selection"
                   ? options.oracleSelection
                   : pinnedSelection(input.executionRoute.oracle)
-              const childDepth = 1
               const childRunPresets = Object.fromEntries(
-                Object.entries(presets({ model: selection, oracleModel: oracleSelection }))
-                  .filter(([name]) => name !== "ReadThread")
-                  .map(([name, preset]) => {
+                [1, 2].flatMap((childDepth) =>
+                  Object.entries(presets({ model: selection, oracleModel: oracleSelection })).map(([name, preset]) => {
                     const profile = name as AgentProfile
                     const profileRoute =
                       profile === "Task" ? input.executionRoute.main : routeForProfile(input.executionRoute, profile)
@@ -1456,7 +1506,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                           )
                         : pinnedCompactionPolicy(profileRoute, input.executionRoute.compactionSummary)
                     return [
-                      name,
+                      `${name}:${childDepth}`,
                       {
                         ...preset,
                         model: {
@@ -1481,6 +1531,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                       },
                     ]
                   }),
+                ),
               )
               yield* Effect.logInfo("execution.starting").pipe(
                 Effect.annotateLogs({
@@ -1489,15 +1540,18 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 }),
               )
               const agentName = `rika-${encodeURIComponent(input.turnId)}`
+              const rootTools = Object.values(toolkitFor(executionToolOptions).tools).filter(
+                (tool) => tool.name !== "search_threads" && tool.name !== "read_thread_transcript",
+              )
               const registered = yield* client.agents.register({
                 id: agentId,
                 address: addressId,
                 name: agentName,
                 instructions: mainInstructions,
                 model: relayModelSelection(selection),
-                tools: Object.values(toolkitFor(executionToolOptions).tools).map((tool) => ({ name: tool.name })),
+                tools: rootTools.map((tool) => ({ name: tool.name })),
                 tool_execution: toolExecutionPolicy,
-                permissions: parentPermissions,
+                permissions: rootPermissions,
                 ...(permissionPolicy === undefined ? {} : { permission_rules: permissionPolicy }),
                 metadata,
                 ...(rootCompaction === undefined ? {} : { compaction_policy: rootCompaction }),
@@ -1587,15 +1641,25 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           (effect) => traceWithoutResult("ExecutionBackend.follow", effect),
         ),
         replay: Effect.fn("ExecutionBackend.replay")(function* (turnId, afterCursor, reference) {
+          const id = executionId(turnId, reference)
+          const cursor = cursorOf(afterCursor)
           return yield* client.executions
             .replay({
-              execution_id: executionId(turnId, reference),
-              ...(afterCursor === undefined ? {} : { after_cursor: afterCursor }),
+              execution_id: id,
+              ...(cursor === undefined ? {} : { after_cursor: cursor }),
             })
             .pipe(
-              Effect.map((result) => {
+              Effect.flatMap((result) =>
+                checkpointForExecution(client, id).pipe(Effect.map((checkpoint) => ({ result, checkpoint }))),
+              ),
+              Effect.map(({ result, checkpoint }) => {
                 const events = result.events.map(event)
-                return { turnId, status: statusFromEvents(events), events }
+                return {
+                  turnId,
+                  status: statusFromEvents(events),
+                  events,
+                  ...(checkpoint === undefined ? {} : { checkpoint }),
+                }
               }),
               Effect.mapError(error),
             )
@@ -1641,7 +1705,13 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             })
             const replay = yield* client.executions.replay({ execution_id: id })
             const events = replay.events.map(event)
-            return { turnId, status: Status.make(accepted.status), events }
+            const checkpoint = yield* checkpointForExecution(client, id)
+            return {
+              turnId,
+              status: Status.make(accepted.status),
+              events,
+              ...(checkpoint === undefined ? {} : { checkpoint }),
+            }
           }).pipe(Effect.mapError(error))
         }),
         inspect: Effect.fn("ExecutionBackend.inspect")(function* (turnId, reference) {
@@ -1671,17 +1741,88 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             })),
           )
         }, Effect.mapError(error)),
-        steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, createdAt, reference) {
+        resolveInvocationSource: Effect.fn("ExecutionBackend.resolveInvocationSource")(function* (requestedId) {
+          return yield* Effect.gen(function* () {
+            const visited = new Set<string>()
+            const found = yield* client.executions.get(Ids.ExecutionId.make(requestedId))
+            if (found === undefined) return yield* BackendError.make({ message: "ExecutionNotFound" })
+            const source = found
+            let current: Execution.Execution = found
+            while (true) {
+              const id = String(current.id)
+              if (visited.has(id)) return yield* BackendError.make({ message: "Malformed execution ancestry" })
+              visited.add(id)
+              const parentId: unknown = current.metadata?.parent_execution_id
+              if (typeof parentId !== "string") break
+              const parent: Execution.Execution | undefined = yield* client.executions.get(
+                Ids.ExecutionId.make(parentId),
+              )
+              if (parent === undefined)
+                return yield* BackendError.make({ message: `Missing parent execution ${parentId}` })
+              current = parent
+            }
+            const rootExecution =
+              current.metadata?.rika_execution_id ??
+              current.agent_snapshot?.metadata?.rika_execution_id ??
+              current.agent_snapshot?.model.metadata?.rika_execution_id
+            const threadId =
+              threadIdFromMetadata(current.metadata) ?? threadIdFromMetadata(current.agent_snapshot?.metadata)
+            const depth = source.metadata?.rika_agent_depth ?? source.agent_snapshot?.metadata?.rika_agent_depth
+            const profile = source.metadata?.product_profile ?? source.agent_snapshot?.metadata?.product_profile
+            if (
+              typeof rootExecution !== "string" ||
+              !rootExecution.startsWith("execution:") ||
+              threadId === undefined ||
+              typeof depth !== "number" ||
+              !Number.isInteger(depth) ||
+              depth < 0 ||
+              (depth > 0 && typeof profile !== "string") ||
+              source.agent_snapshot === undefined
+            )
+              return yield* BackendError.make({ message: `Malformed invocation provenance for ${requestedId}` })
+            const callerProfile: unknown = depth === 0 ? "Root" : profile
+            if (
+              typeof callerProfile !== "string" ||
+              !["Root", "Title", "Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"].includes(
+                callerProfile,
+              )
+            )
+              return yield* BackendError.make({ message: `Malformed invocation profile for ${requestedId}` })
+            return {
+              rootTurnId: rootExecution.slice("execution:".length),
+              threadId,
+              callerProfile: callerProfile as AgentProfile | "Root" | "Title",
+              threadCreationDepth: depth,
+              permissions: source.agent_snapshot.permissions.map((permission) => ({
+                name: permission.name,
+                value: permission.value,
+              })),
+            }
+          }).pipe(Effect.mapError(error))
+        }),
+        steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, idempotencyIdentity, createdAt, reference) {
           const accepted = yield* client.executions
             .steer({
               execution_id: executionId(turnId, reference),
+              idempotency_key: idempotencyIdentity,
               kind: "steering",
               content: [Content.text(text)],
               created_at: createdAt,
             })
-            .pipe(Effect.mapError(error))
+            .pipe(
+              Effect.mapError((cause) =>
+                cause !== null &&
+                typeof cause === "object" &&
+                "_tag" in cause &&
+                cause._tag === "SteeringIdempotencyConflict"
+                  ? BackendError.make({
+                      message: "Steering idempotency identity was already used with a different semantic payload",
+                    })
+                  : error(cause),
+              ),
+            )
           return {
-            steeringMessageId: `${String(accepted.execution_id)}:${accepted.kind}:${accepted.sequence}`,
+            steeringMessageId: String(accepted.steering_message_id),
             sequence: accepted.sequence,
           }
         }),
@@ -1815,6 +1956,32 @@ export const layer = <
                 },
           )
           const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
+          const runnerToolkitWithInvocation = Effect.gen(function* () {
+            const crypto = yield* Crypto.Crypto
+            const handled = yield* runnerToolkit
+            return {
+              ...handled,
+              handle: (name: keyof typeof handled.tools, input: never) =>
+                Effect.gen(function* () {
+                  const call = yield* RelayToolRuntime.ToolCallInfo
+                  const idempotencyKeyDigest = yield* crypto.digest(
+                    "SHA-256",
+                    new TextEncoder().encode(call.idempotencyKey),
+                  )
+                  const invocation = ToolInvocation.ToolInvocation.of({
+                    executionId: String(call.executionId),
+                    callId: String(call.call.id),
+                    toolName: String(call.call.name),
+                    eventSequence: Number(call.eventSequence),
+                    createdAt: call.createdAt,
+                    idempotencyKeyDigest: Encoding.encodeHex(idempotencyKeyDigest),
+                  })
+                  return yield* handled
+                    .handle(name, input)
+                    .pipe(Effect.provideService(ToolInvocation.ToolInvocation, invocation))
+                }),
+            } as Toolkit.WithHandler<typeof handled.tools>
+          }) as unknown as Toolkit.Toolkit<typeof runnerToolkit.tools>
           const toolOptionsForExecution = (execution: string) =>
             Effect.gen(function* () {
               const workspace =
@@ -1828,7 +1995,7 @@ export const layer = <
           const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
             toolName: AgentTools.DelegationToolName,
             profile: AgentProfile,
-            input: AgentTools.TaskInput | { readonly prompt: string },
+            input: AgentTools.TaskInput | AgentTools.ReadThreadInput,
           ) {
             const call = yield* RelayToolRuntime.ToolCallInfo
             const parentDepth = childExecutionDepth(String(call.executionId))
@@ -1866,71 +2033,29 @@ export const layer = <
                 message: "The parent execution does not have a pinned model route",
               })
             }
-            const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
-              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
-            )
-            const executionToolOptions = yield* toolOptionsForExecution(String(call.executionId)).pipe(
-              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
-            )
             const threadId =
               threadIdFromMetadata(parent.metadata) ??
               threadIdFromMetadata(snapshot.metadata) ??
               threadIdFromMetadata(snapshot.model.metadata)
+            const requestedPrompt =
+              "question" in input
+                ? `${input.threadId === undefined ? "" : `Requested thread ID: ${input.threadId}\n\n`}Question: ${input.question}`
+                : input.prompt
             const calls = [
               {
                 callId: String(call.call.id),
                 prompt:
                   profile === "ReadThread" && threadId !== undefined
-                    ? `Current thread ID: ${threadId}\n\n${input.prompt}`
-                    : input.prompt,
+                    ? `Current thread ID: ${threadId}\n\n${requestedPrompt}`
+                    : requestedPrompt,
               },
             ]
-            const children = yield* Effect.forEach(calls, (childCall) => {
-              const base = {
-                child_execution_id: makeChildExecutionId(String(call.executionId), childCall.callId),
-                address_id: addressId,
-                input: [Content.text(childCall.prompt)],
-              }
-              const profileRoute = routeForProfile(routePin, profile)
-              let selection = pinnedSelection(profileRoute)
-              if (options.modelVariantPolicy === "fixed-selection")
-                selection = profile === "Task" ? options.selection : (options.oracleSelection ?? options.selection)
-              const selected = { selection, effort: profileRoute.effort }
-              const childDepth = parentDepth + 1
-              const preset = resolve(profile, selected.selection).preset
-              const policy =
-                options.modelVariantPolicy === "fixed-selection"
-                  ? snapshot.compaction_policy
-                  : pinnedCompactionPolicy(profileRoute, routePin.compactionSummary)
-              return Effect.succeed(
-                buildChildRunInput(base, {
-                  _tag: "override",
-                  definition: {
-                    instructions: preset.instructions,
-                    model: {
-                      ...relayModelSelection(selected.selection),
-                      metadata: {
-                        rika_execution_route: durableRoute,
-                        ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
-                        rika_agent_depth: childDepth,
-                        rika_reasoning_effort: selected.effort,
-                      },
-                    },
-                    tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, childDepth)),
-                    permissions: preset.permissions,
-                    ...(policy === undefined ? {} : { compaction_policy: policy }),
-                    metadata: {
-                      product_profile: profile,
-                      steering_enabled: true,
-                      ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
-                      rika_agent_depth: childDepth,
-                      rika_reasoning_effort: selected.effort,
-                      rika_execution_route: durableRoute,
-                    },
-                  },
-                }),
-              )
-            })
+            const children = calls.map((childCall) => ({
+              child_execution_id: makeChildExecutionId(String(call.executionId), childCall.callId),
+              address_id: addressId,
+              input: [Content.text(childCall.prompt)],
+              preset_name: `${profile}:${parentDepth + 1}`,
+            }))
             yield* Effect.forEach(
               children,
               (child) =>
@@ -1969,7 +2094,7 @@ export const layer = <
           const runDelegation = delegation as unknown as (
             toolName: AgentTools.DelegationToolName,
             profile: AgentProfile,
-            input: AgentTools.TaskInput | { readonly prompt: string },
+            input: AgentTools.TaskInput | AgentTools.ReadThreadInput,
           ) => Effect.Effect<AgentTools.Result, AgentTools.AgentToolError>
           const delegationHandlerLayer: Layer.Layer<Tool.HandlersFor<typeof AgentTools.modelToolkit.tools>> =
             AgentTools.modelToolkit.toLayer({
@@ -2016,7 +2141,7 @@ export const layer = <
             yield* Effect.logWarning("web_search.unsupported_provider").pipe(
               Effect.annotateLogs("rika.web_search.provider_ids", search.unsupportedIds.join(",")),
             )
-          const toolRuntimeLayer = RelayToolRuntime.layerFromToolkit(runnerToolkit, (tool) => ({
+          const toolRuntimeLayer = RelayToolRuntime.layerFromToolkit(runnerToolkitWithInvocation, (tool) => ({
             needsApproval:
               tool.name === ThreadHost.promoteTurnTool.name
                 ? false

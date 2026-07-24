@@ -7,6 +7,12 @@ export const TaskInput = Schema.Struct({
 })
 export type TaskInput = typeof TaskInput.Type
 
+export const ReadThreadInput = Schema.Union([
+  Schema.Struct({ question: Schema.String, threadId: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ prompt: Schema.String }),
+])
+export type ReadThreadInput = typeof ReadThreadInput.Type
+
 export const Result = Schema.Struct({
   childExecutionId: Schema.String,
   status: Schema.Literals(["completed", "failed", "cancelled"]),
@@ -57,10 +63,14 @@ export const reviewTool = specialist(
   "review",
   "Delegate a focused correctness and regression review to the read-only Review product agent and wait for its result",
 )
-export const readThreadTool = specialist(
-  "read_thread",
-  "Delegate recovery of exact current or historical Rika thread context to the ReadThread agent and wait for its answer",
-)
+export const readThreadTool = Tool.make("read_thread", {
+  description:
+    "Ask the ReadThread agent a focused question about one Rika Thread, or let it find relevant Threads when threadId is omitted",
+  parameters: ReadThreadInput,
+  success: Result,
+  failure: Failure,
+  failureMode: "return",
+})
 
 export const delegationToolNames = ["task", "oracle", "librarian", "review", "read_thread"] as const
 export type DelegationToolName = (typeof delegationToolNames)[number]

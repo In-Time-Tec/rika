@@ -60,6 +60,7 @@ export interface TuiApp {
   readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitTerminalTitle: (predicate: (title: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
   readonly reload: Effect.Effect<void>
+  readonly waitModelRequests: (count: number) => Effect.Effect<void>
   readonly close: () => void
   readonly done: Effect.Effect<void>
   readonly quit: Effect.Effect<void>
@@ -219,6 +220,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
       yield* session?.reopenThread(100).pipe(Effect.orDie) ?? Effect.die("TUI session is unavailable")
       yield* Deferred.await(reloadLoaded)
     }),
+    waitModelRequests: (count) => fixture.awaitRequests(count).pipe(Effect.asVoid),
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {

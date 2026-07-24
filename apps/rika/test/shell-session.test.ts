@@ -156,6 +156,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
       let nextTurn = 0
       const backend = ExecutionBackend.Service.of({
         invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+        resolveInvocationSource: () => Effect.die("unused"),
         createFanOut: () => Effect.die("unused"),
         inspectFanOut: () => Effect.die("unused"),
         cancelFanOut: () => Effect.die("unused"),

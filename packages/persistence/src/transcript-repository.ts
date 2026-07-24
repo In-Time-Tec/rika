@@ -2,7 +2,16 @@ import * as Transcript from "@rika/transcript"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "./thread-schema"
-import { ExecutionExtensionPin, ExecutionRoutePin, PromptPart, Status, Turn, TurnId } from "./turn-schema"
+import {
+  ExecutionExtensionPin,
+  ExecutionRoutePin,
+  PromptPart,
+  Status,
+  Turn,
+  TurnAuthor,
+  TurnId,
+  TurnLineage,
+} from "./turn-schema"
 import { EntrySchema, PageCursor, type Entry } from "./transcript-page"
 
 export { EntrySchema, PageCursor }
@@ -59,6 +68,8 @@ const CheckpointRow = Schema.Struct({
   last_cursor: Schema.NullOr(Schema.String),
   extension_pin_json: Schema.NullOr(Schema.String),
   review_fan_out_id: Schema.NullOr(Schema.String),
+  author_json: Schema.String,
+  lineage_json: Schema.String,
   status: Schema.String,
   model_phase: Schema.Finite,
   revision: Schema.Finite,
@@ -83,10 +94,14 @@ const UnitRow = Schema.Struct({
   last_cursor: Schema.NullOr(Schema.String),
   extension_pin_json: Schema.NullOr(Schema.String),
   review_fan_out_id: Schema.NullOr(Schema.String),
+  author_json: Schema.String,
+  lineage_json: Schema.String,
   status: Schema.String,
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
+const AuthorJson = Schema.fromJsonString(TurnAuthor)
+const LineageJson = Schema.fromJsonString(TurnLineage)
 
 const UnitJson = Schema.fromJsonString(Transcript.Unit)
 const UsageCursorsJson = Schema.fromJsonString(Schema.Array(Schema.String))
@@ -231,6 +246,8 @@ export const layer = Layer.effect(
         row.extension_pin_json === null
           ? undefined
           : yield* Schema.decodeUnknownEffect(ExtensionPinJson)(row.extension_pin_json)
+      const author = yield* Schema.decodeUnknownEffect(AuthorJson)(row.author_json)
+      const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(row.lineage_json)
       return {
         id: TurnId.make(row.turn_id),
         threadId: ThreadId.make(row.thread_id),
@@ -241,6 +258,8 @@ export const layer = Layer.effect(
         ...(extensionPin === undefined ? {} : { extensionPin }),
         executionRoute,
         ...(row.review_fan_out_id === null ? {} : { reviewFanOutId: row.review_fan_out_id }),
+        author,
+        lineage,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       } satisfies Turn
@@ -248,7 +267,7 @@ export const layer = Layer.effect(
     const get = Effect.fn("TranscriptRepository.get")(function* (turnId: TurnId) {
       const checkpointRows = yield* sql`
         SELECT c.*, t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
-          t.extension_pin_json, t.review_fan_out_id, t.status, t.created_at
+          t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.created_at
         FROM rika_transcript_checkpoints c
         JOIN rika_turns t ON t.id = c.turn_id
         WHERE c.turn_id = ${turnId}
@@ -356,7 +375,7 @@ export const layer = Layer.effect(
           options.before === undefined
             ? yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
-                  t.extension_pin_json, t.review_fan_out_id, t.status, t.created_at, t.updated_at
+                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.created_at, t.updated_at
                 FROM rika_transcript_units u
                 JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
                 JOIN rika_turns t ON t.id = u.turn_id
@@ -365,7 +384,7 @@ export const layer = Layer.effect(
                 LIMIT ${limit + 1}`.pipe(Effect.mapError(error))
             : yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
-                  t.extension_pin_json, t.review_fan_out_id, t.status, t.created_at, t.updated_at
+                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.created_at, t.updated_at
                 FROM rika_transcript_units u
                 JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
                 JOIN rika_turns t ON t.id = u.turn_id
@@ -401,6 +420,8 @@ export const layer = Layer.effect(
                       ...(extensionPin === undefined ? {} : { extensionPin }),
                       executionRoute,
                       ...(row.review_fan_out_id === null ? {} : { reviewFanOutId: row.review_fan_out_id }),
+                      author: yield* Schema.decodeUnknownEffect(AuthorJson)(row.author_json),
+                      lineage: yield* Schema.decodeUnknownEffect(LineageJson)(row.lineage_json),
                       createdAt: row.created_at,
                       updatedAt: row.updated_at,
                     },

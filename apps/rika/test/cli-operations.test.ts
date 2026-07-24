@@ -45,6 +45,7 @@ const DoctorReport = Schema.fromJsonString(
 
 const backend = ExecutionBackend.Service.of({
   invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+  resolveInvocationSource: () => Effect.die("unused"),
   createFanOut: () => Effect.die("unused"),
   inspectFanOut: () => Effect.die("unused"),
   cancelFanOut: () => Effect.die("unused"),

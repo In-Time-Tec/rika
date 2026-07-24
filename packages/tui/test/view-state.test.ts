@@ -524,6 +524,25 @@ describe("ViewState", () => {
     expect(repeated).toBe(cancelled)
   })
 
+  test("settles pending tool approvals when their turn is cancelled", () => {
+    const running: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn",
+      blocks: [
+        readCall("read", "src/a.ts"),
+        { _tag: "Permission", id: "approval", kind: "tool-approval", title: "Read", detail: "{}", status: "pending" },
+      ],
+    }
+
+    const cancelled = ViewState.update(running, { _tag: "ExecutionCancelled", turnId: "turn" })
+
+    expect(cancelled.blocks).toMatchObject([
+      { id: "read", status: "cancelled" },
+      { id: "approval", status: "denied" },
+    ])
+  })
+
   test("submitting while a turn is active stays an ordinary submission", () => {
     const busy: ViewState.Model = {
       ...ViewState.initial("/work"),

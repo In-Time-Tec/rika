@@ -179,7 +179,7 @@ const executionIntervals = (
       continue
     }
     if (event.type === "execution.started") {
-      if (terminal || activeSince !== undefined) return undefined
+      if (terminal || (activeSince !== undefined && resumedAt === undefined)) return undefined
       started = true
       activeSince = createdAt
       activeSequence = event.sequence
@@ -201,6 +201,8 @@ const executionIntervals = (
     if (event.type === "wait.woken" || event.type === "wait.timed_out") {
       if (activeSince !== undefined || resumedAt !== undefined) return undefined
       resumedAt = event.createdAt
+      activeSince = event.createdAt
+      activeSequence = event.sequence
       continue
     }
     if (activeSince !== undefined) {

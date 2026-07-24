@@ -1,225 +1,399 @@
 import * as ThreadRepository from "@rika/persistence/repository"
+import * as ThreadInteractionRepository from "@rika/persistence/thread-interaction-repository"
+import * as ThreadSearchRepository from "@rika/persistence/thread-search-repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import type * as Transcript from "@rika/transcript"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, DateTime, Effect, Layer, Schema } from "effect"
+
+export const schemaVersion = 2 as const
+export const transcriptBudget = 36_000
 
 export interface FindInput {
   readonly query: string
   readonly includeArchived?: boolean
   readonly limit?: number
 }
-
-export interface ReadInput {
+export interface LegacyReadInput {
   readonly threadId: string
   readonly includeArchived?: boolean
   readonly maxTurns?: number
   readonly maxChars?: number
 }
-
 export interface Result {
   readonly text: string
   readonly truncated: boolean
 }
-
-export interface Interface {
-  readonly find: (input: FindInput) => Effect.Effect<Result, QueryError>
-  readonly read: (input: ReadInput) => Effect.Effect<Result, QueryError | ThreadNotFoundError | ArchivedThreadError>
+export type Selector =
+  | { readonly _tag: "overview" }
+  | { readonly _tag: "recent"; readonly limit?: number; readonly before?: TurnRepository.PageCursor }
+  | {
+      readonly _tag: "relevant"
+      readonly query: string
+      readonly limit?: number
+      readonly before?: TranscriptRepository.PageCursor
+    }
+  | {
+      readonly _tag: "subtree"
+      readonly childExecutionId: string
+      readonly before?: TranscriptRepository.PageCursor
+    }
+  | {
+      readonly _tag: "related"
+      readonly before?: ThreadInteractionRepository.RelationshipCursor
+    }
+export interface ReadInput {
+  readonly threadId: string
+  readonly includeArchived?: boolean
+  readonly selector: Selector
 }
-
+export interface Omission {
+  readonly reason: "olderTurns" | "responseBudget" | "unavailableChild" | "relationshipsUnavailable"
+  readonly continuation: Selector
+}
+export interface ReadItem {
+  readonly turnId: string
+  readonly author: "human" | "agent"
+  readonly createdAt: string
+  readonly status: string
+  readonly messages: ReadonlyArray<Message>
+}
+export interface Message {
+  readonly role: "user" | "assistant" | "notice" | "child"
+  readonly text: string
+  readonly childExecutionId?: string
+  readonly children?: ReadonlyArray<Message>
+}
+export interface RelatedThread {
+  readonly kind: "created" | "message" | "reply" | "fork"
+  readonly direction: "incoming" | "outgoing"
+  readonly threadId: string
+  readonly turnId: string
+  readonly title: string
+  readonly archived: boolean
+  readonly available: boolean
+  readonly createdAt: string
+}
+export interface ReadSuccess {
+  readonly schemaVersion: 2
+  readonly threadId: string
+  readonly title: string
+  readonly selector: Selector
+  readonly items: ReadonlyArray<ReadItem>
+  readonly relatedThreads: ReadonlyArray<RelatedThread>
+  readonly nextCursor?: TurnRepository.PageCursor | TranscriptRepository.PageCursor
+  readonly omissions: ReadonlyArray<Omission>
+  readonly truncated: boolean
+}
+export interface FindSuccess {
+  readonly schemaVersion: 2
+  readonly threads: ReadonlyArray<{
+    readonly threadId: string
+    readonly state: "idle" | "queued" | "running" | "awaiting-approval" | "error"
+    readonly archived: boolean
+    readonly title: string
+    readonly updatedAt: string
+    readonly summary: string
+    readonly truncated: boolean
+  }>
+  readonly truncated: boolean
+}
+export interface Interface {
+  readonly find: (input: FindInput) => Effect.Effect<FindSuccess, QueryError>
+  readonly search: (input: FindInput) => Effect.Effect<Result, QueryError>
+  readonly readStructured: (
+    input: ReadInput,
+  ) => Effect.Effect<ReadSuccess, QueryError | ThreadNotFoundError | ArchivedThreadError>
+  readonly read: (
+    input: LegacyReadInput,
+  ) => Effect.Effect<Result, QueryError | ThreadNotFoundError | ArchivedThreadError>
+}
 export class Service extends Context.Service<Service, Interface>()("@rika/app/thread-query/Service") {}
-
-export class QueryError extends Schema.TaggedErrorClass<QueryError>()("ThreadQueryError", {
-  message: Schema.String,
-}) {}
-
+export class QueryError extends Schema.TaggedErrorClass<QueryError>()("ThreadQueryError", { message: Schema.String }) {}
 export class ThreadNotFoundError extends Schema.TaggedErrorClass<ThreadNotFoundError>()("ThreadNotFoundError", {
   threadId: Schema.String,
 }) {}
-
 export class ArchivedThreadError extends Schema.TaggedErrorClass<ArchivedThreadError>()("ArchivedThreadError", {
   threadId: Schema.String,
 }) {}
 
-type Term = { readonly key: string; readonly value: string }
-const supported = new Set(["workspace", "repo", "ref", "author", "label", "file", "after", "before"])
-const date = (value: string) => {
-  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (parts === null) return undefined
-  const year = Number(parts[1])
-  const month = Number(parts[2])
-  const day = Number(parts[3])
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
-  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]!) return undefined
-  return Date.parse(value)
-}
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const iso = (timestamp: number) => DateTime.formatIso(DateTime.makeUnsafe(timestamp))
 
-const parse = Effect.fn("ThreadQuery.parse")(function* (query: string) {
-  const terms: Array<Term> = []
-  const text: Array<string> = []
-  for (const token of query.trim().split(/\s+/).filter(Boolean)) {
-    const separator = token.indexOf(":")
-    if (separator < 0) {
-      text.push(token)
-      continue
-    }
-    const key = token.slice(0, separator).toLowerCase()
-    const value = token.slice(separator + 1)
-    if (!supported.has(key) || value.length === 0)
-      return yield* QueryError.make({ message: `Invalid Thread query filter: ${token}` })
-    if ((key === "after" || key === "before") && date(value) === undefined)
-      return yield* QueryError.make({ message: `Invalid Thread query date: ${value}` })
-    terms.push({ key, value })
-  }
-  return { terms, text: text.join(" ") }
-})
-
-const boundedInteger = Effect.fn("ThreadQuery.boundedInteger")(function* (
-  name: string,
-  value: number | undefined,
-  fallback: number,
-  maximum: number,
-) {
-  const resolved = value ?? fallback
-  if (!Number.isInteger(resolved) || resolved < 1 || resolved > maximum)
-    return yield* QueryError.make({ message: `${name} must be an integer from 1 to ${maximum}` })
-  return resolved
-})
-
-const matches = (
-  thread: {
-    readonly workspace: string
-    readonly title: string
-    readonly labels: ReadonlyArray<string>
-    readonly createdAt: number
-  },
-  terms: ReadonlyArray<Term>,
-) =>
-  terms.every(({ key, value }) => {
-    const normalized = value.toLowerCase()
-    if (key === "workspace" || key === "repo") return thread.workspace.toLowerCase().includes(normalized)
-    if (key === "label") return thread.labels.some((label) => label.toLowerCase() === normalized)
-    if (key === "after") return (date(value) ?? Number.POSITIVE_INFINITY) <= thread.createdAt
-    if (key === "before") return thread.createdAt < (date(value) ?? Number.NEGATIVE_INFINITY)
-    return [thread.title, thread.workspace, ...thread.labels].some((field) =>
-      field.toLowerCase().includes(`${key}:${normalized}`),
-    )
-  })
-
-const bound = (text: string, maximum: number, truncated = false): Result => ({
-  text: text.slice(0, maximum),
-  truncated: truncated || text.length > maximum,
-})
-
-const renderUnit = (unit: Transcript.Unit): string | undefined => {
-  const content = unit.content
-  if (content._tag === "Entry") {
-    if (content.role === "user") return `User: ${content.text}`
-    if (content.role === "assistant") return `Assistant: ${content.text}`
-    return `Notice: ${content.text}`
-  }
-  const block = content.block
-  if (block._tag === "Reasoning") return undefined
-  if (block._tag === "ToolCall")
-    return `Tool call: ${block.name} (${block.status})\nInput: ${block.input}${block.output === undefined ? "" : `\nOutput: ${block.output}`}`
-  if (block._tag === "ToolResult") return `Tool result${block.failed ? " (failed)" : ""}: ${block.output}`
-  if (block._tag === "ChildAgent")
-    return `Child agent ${block.name} (${block.status}): ${block.summary}${block.activity.length === 0 ? "" : `\nActivity: ${block.activity.join("; ")}`}`
-  if (block._tag === "Compaction") return `Compaction (${block.status ?? "complete"}): ${block.summary}`
-  if (block._tag === "Error")
-    return `Error: ${block.title}\n${block.detail}${block.recovery === undefined ? "" : `\nRecovery: ${block.recovery}`}`
-  if (block._tag === "Notification") return `Notice: ${block.title}\n${block.detail}`
-  if (block._tag === "Diff") return `Diff ${block.path}:\n${block.patch}`
-  if (block._tag === "Permission") return `Permission (${block.status}): ${block.title}\n${block.detail}`
-  if (block._tag === "Workflow") return `Workflow ${block.name} (${block.status}): ${block.step}`
-  if (block._tag === "ImageAttachment") return `Image: ${block.name} (${block.mediaType})`
-  if (block._tag === "ContextUsage") return `Context usage: ${block.text}`
-  return undefined
-}
-
-export const layer = Layer.effect(
-  Service,
+const bounded = (name: string, value: number | undefined, fallback: number, maximum: number) =>
   Effect.gen(function* () {
-    const threads = yield* ThreadRepository.Service
-    const turns = yield* TurnRepository.Service
-    const transcripts = yield* TranscriptRepository.Service
-    return Service.of({
-      find: Effect.fn("ThreadQuery.find")(function* (input) {
-        const parsed = yield* parse(input.query)
-        const limit = yield* boundedInteger("limit", input.limit, 20, 100)
-        const found = yield* threads
-          .list({
-            includeArchived: input.includeArchived === true,
-            limit: 100,
-            ...(parsed.text.length > 0 ? { query: parsed.text } : {}),
-          })
-          .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
-        const matched = found.filter((thread) => matches(thread, parsed.terms))
-        const selected = matched.slice(0, limit)
-        return bound(
-          selected
-            .map((thread) =>
-              JSON.stringify({
-                id: thread.id,
-                title: thread.title,
-                workspace: thread.workspace,
-                labels: thread.labels,
-                pinned: thread.pinned,
-                archived: thread.archived,
-                createdAt: thread.createdAt,
-                updatedAt: thread.updatedAt,
-              }),
-            )
-            .join("\n"),
-          20_000,
-          matched.length > limit || matched.length === 100,
+    const result = value ?? fallback
+    if (!Number.isInteger(result) || result < 1 || result > maximum)
+      return yield* QueryError.make({ message: `${name} must be an integer from 1 to ${maximum}` })
+    return result
+  })
+const safeText = (text: string, limit: number) => [...text].slice(0, limit).join("")
+const threadState = (
+  threadTurns: ReadonlyArray<TurnRepository.PageResult["turns"][number]>,
+): FindSuccess["threads"][number]["state"] => {
+  if (threadTurns.some((turn) => turn.status === "waiting")) return "awaiting-approval"
+  if (threadTurns.some((turn) => turn.status === "running" || turn.status === "accepted")) return "running"
+  if (threadTurns.some((turn) => turn.status === "queued")) return "queued"
+  return threadTurns.at(-1)?.status === "failed" ? "error" : "idle"
+}
+const message = (unit: Transcript.Unit, all: ReadonlyArray<Transcript.Unit>): Message | undefined => {
+  if (unit.content._tag === "Entry") return { role: unit.content.role, text: unit.content.text }
+  const block = unit.content.block
+  if (block._tag !== "ChildAgent") return undefined
+  const children = all
+    .filter((candidate) => candidate.parentId === block.id)
+    .flatMap((candidate) => {
+      const rendered = message(candidate, all)
+      return rendered === undefined ? [] : [rendered]
+    })
+  return {
+    role: "child",
+    text: block.summary,
+    childExecutionId: block.id,
+    ...(children.length === 0 ? {} : { children }),
+  }
+}
+const item = (turn: TurnRepository.PageResult["turns"][number], units: ReadonlyArray<Transcript.Unit>): ReadItem => ({
+  turnId: turn.id,
+  author: turn.author._tag === "Human" ? "human" : "agent",
+  createdAt: iso(turn.createdAt),
+  status: turn.status,
+  messages: units
+    .filter((unit) => unit.parentId === undefined)
+    .flatMap((unit) => {
+      const value = message(unit, units)
+      return value === undefined ? [] : [value]
+    }),
+})
+const encodeBounded = (
+  base: Omit<ReadSuccess, "items" | "omissions" | "truncated">,
+  candidates: ReadonlyArray<ReadItem>,
+  omissions: ReadonlyArray<Omission>,
+  maximum = transcriptBudget,
+): ReadSuccess => {
+  const selected: Array<ReadItem> = []
+  let budgetOmitted = false
+  for (const candidate of candidates) {
+    const trial: ReadSuccess = { ...base, items: [...selected, candidate], omissions, truncated: omissions.length > 0 }
+    if (encodeJson(trial).length > maximum) {
+      budgetOmitted = true
+      break
+    }
+    selected.push(candidate)
+  }
+  const finalOmissions = budgetOmitted
+    ? [...omissions, { reason: "responseBudget" as const, continuation: base.selector }]
+    : omissions
+  return { ...base, items: selected, omissions: finalOmissions, truncated: finalOmissions.length > 0 }
+}
+const mapError = (error: { readonly message: string }) => QueryError.make({ message: error.message })
+
+export const layerForWorkspace = (workspace: string) =>
+  Layer.effect(
+    Service,
+    Effect.gen(function* () {
+      const threadRepository = yield* ThreadRepository.Service
+      const searches = yield* ThreadSearchRepository.Service
+      const interactions = yield* ThreadInteractionRepository.Service
+      const turns = yield* TurnRepository.Service
+      const transcripts = yield* TranscriptRepository.Service
+      const rebuildWorkspaceSearch = Effect.fn("ThreadQuery.rebuildWorkspaceSearch")(function* () {
+        const workspaceThreads = (yield* threadRepository.listAll).filter((thread) => thread.workspace === workspace)
+        yield* Effect.forEach(
+          workspaceThreads,
+          (thread) =>
+            Effect.gen(function* () {
+              const threadTurns = yield* turns.list(thread.id)
+              const units = yield* Effect.forEach(threadTurns, (turn) => transcripts.get(turn.id), {
+                concurrency: 8,
+              }).pipe(Effect.map((projections) => projections.flatMap((projection) => projection?.units ?? [])))
+              yield* searches.rebuildThread({ thread, turns: threadTurns, units })
+            }),
+          { concurrency: 4, discard: true },
         )
-      }),
-      read: Effect.fn("ThreadQuery.read")(function* (input) {
+      })
+      const find = Effect.fn("ThreadQuery.find")(function* (input: FindInput) {
+        if (input.query.trim().length === 0) return yield* QueryError.make({ message: "query must be non-empty" })
+        const limit = yield* bounded("limit", input.limit, 10, 50)
+        yield* rebuildWorkspaceSearch().pipe(Effect.mapError(mapError))
+        const page = yield* searches
+          .search({
+            workspace,
+            query: input.query,
+            limit,
+            ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
+          })
+          .pipe(Effect.mapError(mapError))
+        const results = yield* Effect.forEach(
+          page.results,
+          (result) =>
+            Effect.gen(function* () {
+              const threadTurns = yield* turns.list(result.threadId).pipe(Effect.mapError(mapError))
+              const summary = safeText(result.snippets.map((snippet) => snippet.text).join(" · ") || result.title, 128)
+              return {
+                threadId: result.threadId,
+                state: threadState(threadTurns),
+                archived: result.archived,
+                title: safeText(result.title, 128),
+                updatedAt: iso(result.updatedAt),
+                summary,
+                truncated:
+                  summary !== result.snippets.map((snippet) => snippet.text).join(" · ") ||
+                  result.omissionReasons.length > 0,
+              }
+            }),
+          { concurrency: 8 },
+        )
+        return { schemaVersion, threads: results, truncated: page.nextCursor !== undefined }
+      })
+      const readStructured = Effect.fn("ThreadQuery.readStructured")(function* (input: ReadInput) {
         if (input.threadId.trim().length === 0 || input.threadId.trim() !== input.threadId)
           return yield* QueryError.make({ message: "threadId must be a non-empty identifier" })
-        const maxTurns = yield* boundedInteger("maxTurns", input.maxTurns, 50, 200)
-        const maxChars = yield* boundedInteger("maxChars", input.maxChars, 40_000, 40_000)
         const threadId = Thread.ThreadId.make(input.threadId)
-        const thread = yield* threads
-          .get(threadId)
-          .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
-        if (thread === undefined) return yield* ThreadNotFoundError.make({ threadId: input.threadId })
+        const thread = yield* threadRepository.get(threadId).pipe(Effect.mapError(mapError))
+        if (thread === undefined || thread.workspace !== workspace)
+          return yield* ThreadNotFoundError.make({ threadId: input.threadId })
         if (thread.archived && input.includeArchived !== true)
           return yield* ArchivedThreadError.make({ threadId: input.threadId })
-        const allTurns = yield* turns
-          .list(threadId)
-          .pipe(Effect.mapError((error) => QueryError.make({ message: error.message })))
-        const selected = allTurns.slice(0, maxTurns)
-        const sections = yield* Effect.forEach(selected, (turn) =>
-          transcripts.get(turn.id).pipe(
-            Effect.mapError((error) => QueryError.make({ message: error.message })),
-            Effect.map((projection) => {
-              const rendered =
-                projection?.units.flatMap((unit) => {
-                  const text = renderUnit(unit)
-                  return text === undefined ? [] : [text]
-                }) ?? []
-              const hasUser = projection?.units.some(
-                (unit) => unit.content._tag === "Entry" && unit.content.role === "user",
-              )
-              return [
-                `## Turn ${turn.id} (${turn.status})`,
-                ...(hasUser === true ? [] : [`User: ${turn.prompt}`]),
-                ...rendered,
-              ].join("\n")
+        const base = {
+          schemaVersion,
+          threadId: input.threadId,
+          title: thread.title,
+          selector: input.selector,
+          relatedThreads: [],
+        }
+        if (input.selector._tag === "overview") return encodeBounded(base, [], [])
+        if (input.selector._tag === "related") {
+          const relationships = yield* interactions
+            .listRelationships(threadId, 21, input.selector.before)
+            .pipe(Effect.mapError(mapError))
+          const page = relationships.slice(0, 20)
+          const relatedThreads = yield* Effect.forEach(page, (relationship) =>
+            Effect.gen(function* () {
+              const outgoing = relationship.sourceThreadId === threadId
+              const relatedThreadId = outgoing ? relationship.targetThreadId : relationship.sourceThreadId
+              const relatedTurnId = outgoing ? relationship.targetTurnId : relationship.sourceTurnId
+              const related = yield* threadRepository.get(relatedThreadId).pipe(Effect.mapError(mapError))
+              const available = related !== undefined && related.workspace === workspace
+              return {
+                kind: relationship.kind,
+                direction: outgoing ? ("outgoing" as const) : ("incoming" as const),
+                threadId: relatedThreadId,
+                turnId: relatedTurnId,
+                title: available ? related.title : "Unavailable Thread",
+                archived: available ? related.archived : false,
+                available,
+                createdAt: iso(relationship.createdAt),
+              }
             }),
+          )
+          const last = page.at(-1)
+          const omissions: ReadonlyArray<Omission> =
+            relationships.length > page.length && last !== undefined
+              ? [
+                  {
+                    reason: "relationshipsUnavailable",
+                    continuation: {
+                      _tag: "related",
+                      before: { createdAt: last.createdAt, targetTurnId: last.targetTurnId },
+                    },
+                  },
+                ]
+              : []
+          return encodeBounded({ ...base, relatedThreads }, [], omissions)
+        }
+        if (input.selector._tag === "subtree") {
+          const childExecutionId = input.selector.childExecutionId
+          const page = yield* transcripts
+            .page(threadId, { before: input.selector.before, limit: 200 })
+            .pipe(Effect.mapError(mapError))
+          const root = page.entries.find(
+            (entry) =>
+              entry.unit.content._tag === "Block" &&
+              entry.unit.content.block._tag === "ChildAgent" &&
+              entry.unit.content.block.id === childExecutionId,
+          )
+          if (root === undefined) {
+            const continuation =
+              page.hasOlder && page.oldestCursor !== undefined
+                ? { ...input.selector, before: page.oldestCursor }
+                : input.selector
+            return encodeBounded(
+              base,
+              [],
+              [{ reason: page.hasOlder ? "olderTurns" : "unavailableChild", continuation }],
+            )
+          }
+          const projection = yield* transcripts.get(root.turn.id).pipe(Effect.mapError(mapError))
+          return encodeBounded(base, [item(root.turn, projection?.units ?? [root.unit])], [])
+        }
+        if (input.selector._tag === "relevant") {
+          const limit = yield* bounded("limit", input.selector.limit, 10, 20)
+          const page = yield* transcripts
+            .page(threadId, { before: input.selector.before, limit: 200 })
+            .pipe(Effect.mapError(mapError))
+          const needle = input.selector.query.toLocaleLowerCase()
+          const entries = page.entries
+            .filter(
+              (entry) =>
+                entry.unit.content._tag === "Entry" && entry.unit.content.text.toLocaleLowerCase().includes(needle),
+            )
+            .slice(-limit)
+          const grouped = new Map<string, typeof entries>()
+          for (const entry of entries) grouped.set(entry.turn.id, [...(grouped.get(entry.turn.id) ?? []), entry])
+          const candidates = [...grouped.values()].map((values) =>
+            item(
+              values[0]!.turn,
+              values.map((value) => value.unit),
+            ),
+          )
+          const omissions: ReadonlyArray<Omission> =
+            page.hasOlder && page.oldestCursor !== undefined
+              ? [{ reason: "olderTurns", continuation: { ...input.selector, before: page.oldestCursor } }]
+              : []
+          return encodeBounded(
+            { ...base, ...(page.oldestCursor === undefined ? {} : { nextCursor: page.oldestCursor }) },
+            candidates,
+            omissions,
+          )
+        }
+        const limit = yield* bounded("limit", input.selector.limit, 10, 20)
+        const page = yield* turns
+          .page(threadId, { before: input.selector.before, limit })
+          .pipe(Effect.mapError(mapError))
+        const candidates = yield* Effect.forEach(page.turns, (turn) =>
+          transcripts.get(turn.id).pipe(
+            Effect.mapError(mapError),
+            Effect.map((projection) => item(turn, projection?.units ?? [])),
           ),
         )
-        const text = [`# ${thread.title}`, `Thread: ${thread.id}`, `Workspace: ${thread.workspace}`, ...sections].join(
-          "\n\n",
+        const omissions: ReadonlyArray<Omission> =
+          page.hasOlder && page.oldestCursor !== undefined
+            ? [{ reason: "olderTurns", continuation: { ...input.selector, before: page.oldestCursor } }]
+            : []
+        return encodeBounded(
+          { ...base, ...(page.oldestCursor === undefined ? {} : { nextCursor: page.oldestCursor }) },
+          candidates,
+          omissions,
         )
-        return bound(text, maxChars, allTurns.length > maxTurns)
-      }),
-    })
-  }),
-)
-
+      })
+      const search = Effect.fn("ThreadQuery.search")(function* (input: FindInput) {
+        const result = yield* find(input)
+        return { text: encodeJson(result), truncated: result.truncated }
+      })
+      const read = Effect.fn("ThreadQuery.read")(function* (input: LegacyReadInput) {
+        const limit = yield* bounded("maxTurns", input.maxTurns, 10, 20)
+        yield* bounded("maxChars", input.maxChars, transcriptBudget, transcriptBudget)
+        const result = yield* readStructured({
+          threadId: input.threadId,
+          selector: { _tag: "recent", limit },
+          ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
+        })
+        return { text: encodeJson(result), truncated: result.truncated }
+      })
+      return Service.of({ find, search, readStructured, read })
+    }),
+  )
+export const layer = layerForWorkspace("")
 export const testLayer = (service: Interface) => Layer.succeed(Service, Service.of(service))

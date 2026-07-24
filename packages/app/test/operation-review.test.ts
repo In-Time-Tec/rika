@@ -28,6 +28,7 @@ const backend = ExecutionBackend.Service.of({
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.die("unused"),
   resolvePermission: () => Effect.die("unused"),
+  resolveInvocationSource: () => Effect.die("unused"),
 })
 
 const input = (overrides: Partial<Extract<Operation.Input, { readonly _tag: "Review" }>> = {}) => ({

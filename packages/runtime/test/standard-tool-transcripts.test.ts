@@ -1,6 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { TestModel } from "@batonfx/test"
-import { Catalog, Runtime, ThreadTools } from "@rika/tools"
+import { Catalog, Runtime } from "@rika/tools"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import * as ExecutionBackend from "../src/execution-contract"
@@ -17,21 +17,12 @@ const cases = [
   ["web_search", { objective: "deterministic research", searchQueries: ["fixture"] }, "objective"],
   ["read_web_page", { url: "https://example.test/page", fullContent: true }, "url"],
   ["view_media", { path: "fixture.png" }, "path"],
-  ["search_threads", { query: "workspace:fixture", limit: 1 }, "query"],
-  ["read_thread_transcript", { threadId: "thread-fixture", maxTurns: 1, maxChars: 100 }, "threadId"],
 ] as const
 
 const caseNames = new Set<string>(cases.map(([name]) => name))
 const standardNames = Catalog.definitions
   .map(({ name }) => name)
   .filter((name): name is (typeof cases)[number][0] => caseNames.has(name))
-
-const threadHandlers = ThreadTools.toolkit.toLayer(
-  Effect.succeed({
-    search_threads: () => Effect.succeed({ text: "thread result", truncated: false }),
-    read_thread_transcript: () => Effect.succeed({ text: "thread transcript", truncated: false }),
-  }),
-)
 
 test("standard catalog transcript matrix is complete", () => {
   expect(cases.map(([name]) => name).toSorted()).toEqual(standardNames.toSorted())
@@ -64,8 +55,6 @@ for (const [name, parameters, malformedField] of cases) {
           selection: fixture.selection,
           modelVariantPolicy: "fixed-selection",
           webSearchCredentials: { parallel: Redacted.make("web-test-key") },
-          additionalToolkit: ThreadTools.toolkit,
-          additionalHandlerLayer: threadHandlers,
           toolRuntimeLayer: runtimeLayer,
           toolNeedsApproval: () => false,
           permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
@@ -102,8 +91,7 @@ for (const [name, parameters, malformedField] of cases) {
               expect(result.replay.events).toEqual(result.completed.events)
               expect(definition.permission).toBe("allow")
               expect(transcript).not.toContain("rika-tool-matrix-")
-              if (name !== "read" && name !== "search_threads" && name !== "read_thread_transcript")
-                expect(transcript).toContain('"truncated":true')
+              if (name !== "read") expect(transcript).toContain('"truncated":true')
               if (name === "read") expect(transcript).toContain("[REDACTED]")
             })
           }),
@@ -137,8 +125,6 @@ for (const [name, parameters, malformedField] of cases) {
                     selection: fixture.selection,
                     modelVariantPolicy: "fixed-selection",
                     webSearchCredentials: { parallel: Redacted.make("web-test-key") },
-                    additionalToolkit: ThreadTools.toolkit,
-                    additionalHandlerLayer: threadHandlers,
                     toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "unexpected", truncated: false })),
                     toolNeedsApproval: () => false,
                     permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },

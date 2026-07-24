@@ -1433,7 +1433,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           }),
           inspection: yield* backend.inspect("parent-1"),
           approvals: yield* backend.listApprovals("parent-1"),
-          steer: yield* backend.steer("parent-1", "continue", 5),
+          steer: yield* backend.steer("parent-1", "continue", "steer-parent-1", 5),
           approval: yield* backend.resolveToolApproval("wait-1", true, 6, "ok"),
           permission: yield* backend.resolvePermission("wait-1", "Approved", 7, "safe"),
         }
@@ -1811,6 +1811,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           oracleSelection,
           compaction: mainCompaction,
           oracleCompaction,
+          additionalToolkit: ThreadTools.allToolkit,
           resolveWorkspace: (execution) => Effect.succeed(execution.includes("other-turn") ? "/configured" : "/plain"),
           webSearchCredentialsForWorkspace: (workspace) =>
             Effect.succeed(workspace === "/configured" ? { parallel: Redacted.make("secret") } : {}),
@@ -1832,7 +1833,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           registration_key: "terra:low:normal",
         },
       })
-      expect(registered.child_run_presets.Task).toMatchObject({
+      expect(registered.child_run_presets["Task:1"]).toMatchObject({
         model: {
           provider: selection.provider,
           model: selection.model,
@@ -1841,8 +1842,25 @@ describe("ExecutionBackend Relay client adapter", () => {
         },
         metadata: { product_profile: "Task", rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
-      expect(registered.child_run_presets.Task.tool_names).toContain("web_search")
-      expect(registered.child_run_presets.Oracle).toMatchObject({
+      expect(registered.child_run_presets["Task:1"].tool_names).toContain("web_search")
+      const rootToolNames = registered.tools.map((tool: { readonly name: string }) => tool.name)
+      expect(rootToolNames).toEqual(
+        expect.arrayContaining(["find_thread", "create_thread", "thread_interact", "wait_for_threads"]),
+      )
+      expect(rootToolNames).not.toContain("search_threads")
+      expect(rootToolNames).not.toContain("read_thread_transcript")
+      expect(registered.permissions).toEqual(
+        expect.arrayContaining([
+          { name: "thread.read", value: true },
+          { name: "thread.coordinate", value: true },
+          { name: "thread.control", value: true },
+        ]),
+      )
+      expect(registered.child_run_presets["ReadThread:1"]).toMatchObject({
+        permissions: ["thread.read"],
+        tool_names: ["search_threads", "read_thread_transcript"],
+      })
+      expect(registered.child_run_presets["Oracle:1"]).toMatchObject({
         model: {
           provider: oracleSelection.provider,
           model: oracleSelection.model,

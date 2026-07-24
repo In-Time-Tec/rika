@@ -34,6 +34,7 @@ describe("ProductAgent", () => {
         listApprovals: () => Effect.die("unused"),
         resolveToolApproval: () => Effect.die("unused"),
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))
       yield* Effect.gen(function* () {
@@ -107,6 +108,7 @@ describe("ProductAgent", () => {
         listApprovals: () => Effect.die("unused"),
         resolveToolApproval: () => Effect.die("unused"),
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
         const agents = yield* ProductAgent.Service
@@ -150,6 +152,7 @@ describe("ProductAgent", () => {
         listApprovals: () => Effect.die("unused"),
         resolveToolApproval: () => Effect.die("unused"),
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
         const agents = yield* ProductAgent.Service
@@ -208,6 +211,7 @@ describe("ProductAgent", () => {
         listApprovals: () => Effect.die("unused"),
         resolveToolApproval: () => Effect.die("unused"),
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
         const agents = yield* ProductAgent.Service
@@ -245,6 +249,7 @@ describe("ProductAgent", () => {
         listApprovals: () => Effect.die("unused"),
         resolveToolApproval: () => Effect.die("unused"),
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = ProductAgent.layer.pipe(Layer.provide(Layer.succeed(ExecutionBackend.Service, backend)))
       yield* Effect.gen(function* () {
@@ -320,6 +325,7 @@ describe("ProductAgent", () => {
         listApprovals: () => Effect.die("unused"),
         resolveToolApproval: () => Effect.die("unused"),
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const result = yield* Effect.gen(function* () {
         const agents = yield* ProductAgent.Service
