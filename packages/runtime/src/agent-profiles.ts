@@ -14,6 +14,11 @@ import titlePrompt from "./prompts/title.prompt.txt"
 export const names = ["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"] as const
 export type Name = (typeof names)[number]
 
+export type AgentKey = "librarian" | "painter" | "review" | "readThread" | "task"
+
+export const agentKeyForName = (name: Name): AgentKey | undefined =>
+  name === "Oracle" ? undefined : ((name.charAt(0).toLowerCase() + name.slice(1)) as AgentKey)
+
 export class PainterUnavailableError extends Schema.TaggedErrorClass<PainterUnavailableError>()(
   "PainterUnavailableError",
   { message: Schema.String, provider: Schema.String, model: Schema.String },
@@ -139,11 +144,15 @@ export const resolvePainter = Effect.fn("AgentProfiles.resolvePainter")(function
 export const presets = (options: {
   readonly model: ModelRegistry.ModelSelection
   readonly oracleModel?: ModelRegistry.ModelSelection | undefined
+  readonly agentModels?: Partial<Readonly<Record<Name, ModelRegistry.ModelSelection>>> | undefined
 }): Record<string, ResolvedProfile["preset"]> =>
   Object.fromEntries(
     names.map((name) => [
       name,
-      resolve(name, name === "Task" ? options.model : (options.oracleModel ?? options.model)).preset,
+      resolve(
+        name,
+        options.agentModels?.[name] ?? (name === "Task" ? options.model : (options.oracleModel ?? options.model)),
+      ).preset,
     ]),
   )
 

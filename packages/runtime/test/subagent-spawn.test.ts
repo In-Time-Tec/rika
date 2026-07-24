@@ -420,7 +420,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
   )
 }, 60_000)
 
-test("parallel Task calls use the pinned main Sol route despite legacy per-agent routes", () => {
+test("parallel Task calls fall back to the pinned main Sol route when no agent routes are pinned", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -449,25 +449,6 @@ test("parallel Task calls use the pinned main Sol route despite legacy per-agent
         ),
         title: executionModelRoute("title", { provider: "legacy", model: "luna" }, "low"),
         compactionSummary: executionModelRoute("compaction", { provider: "legacy", model: "terra" }, "medium"),
-        agents: {
-          librarian: executionModelRoute(
-            "librarian",
-            { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-high" },
-            "high",
-          ),
-          painter: executionModelRoute(
-            "painter",
-            { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-high" },
-            "high",
-          ),
-          review: executionModelRoute(
-            "review",
-            { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-high" },
-            "high",
-          ),
-          readThread: executionModelRoute("readThread", { provider: "legacy", model: "terra" }, "medium"),
-          task: executionModelRoute("task", { provider: "legacy", model: "terra" }, "medium"),
-        },
       }
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/relay.db`,
@@ -612,13 +593,6 @@ test("depth-one agents route Task to main and specialists to oracle without dept
         main: executionModelRoute("main", terra.selection),
         oracle: executionModelRoute("oracle", sol.selection),
         title: executionModelRoute("title", terra.selection),
-        agents: {
-          librarian: executionModelRoute("librarian", terra.selection),
-          painter: executionModelRoute("painter", terra.selection),
-          review: executionModelRoute("review", terra.selection),
-          readThread: executionModelRoute("readThread", terra.selection),
-          task: executionModelRoute("task", terra.selection),
-        },
       }
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/relay.db`,

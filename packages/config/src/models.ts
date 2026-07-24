@@ -93,6 +93,7 @@ const limits = (model: CatalogModel, keepRecentTokens: number) => ({
 
 const gpt = (model: CatalogModel): ModelAlias => ({
   displayName: model.displayName,
+  supportsMedia: true,
   provider: "openai",
   candidates: [model.id],
   limits: limits(model, presets.openai.limits.keepRecentTokens),
@@ -101,6 +102,7 @@ const gpt = (model: CatalogModel): ModelAlias => ({
 
 const claude = (model: CatalogModel, candidates: ReadonlyArray<string>): ModelAlias => ({
   displayName: model.displayName,
+  supportsMedia: true,
   provider: "anthropic",
   candidates,
   limits: limits(model, presets.claude.limits.keepRecentTokens),

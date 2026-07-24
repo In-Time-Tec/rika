@@ -1,6 +1,7 @@
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
 import { presetForBase, type PresetId, presets } from "./models"
 import {
+  ConfigFileError,
   defaults,
   type Diagnostic,
   type ModelAlias,
@@ -40,6 +41,7 @@ const aliasFromInput = (name: string, input: ModelAliasInput): ModelAlias => {
   const inherited = input.base === undefined ? undefined : defaults.models[input.base]
   return {
     displayName: input.displayName ?? name,
+    supportsMedia: input.supportsMedia ?? preset !== undefined,
     provider: input.provider,
     candidates: input.candidates,
     limits: input.limits ?? inherited?.limits ?? preset!.limits,
@@ -48,6 +50,17 @@ const aliasFromInput = (name: string, input: ModelAliasInput): ModelAlias => {
         ? (preset!.variants(preset!.efforts) as ModelAlias["variants"])
         : (input.efforts as ModelAlias["variants"]),
   }
+}
+
+const assertPainterSupportsMedia = (settings: Settings) => {
+  const painter = settings.agents.painter
+  if (painter === undefined) return
+  const alias = settings.models[painter.alias]
+  if (alias !== undefined && !alias.supportsMedia)
+    throw ConfigFileError.make({
+      path: "modelRoutes.agents.painter",
+      message: `Model alias ${painter.alias} does not support media, which the Painter agent requires. Set supportsMedia on the alias if the model accepts images.`,
+    })
 }
 
 const roleRoute = (configured: RoleRoute, override: string | RoleRouteInput | undefined): RoleRoute => {
@@ -96,7 +109,7 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
       ...(streamingOnly === undefined ? {} : { streamingOnly }),
     }
   }
-  return {
+  const merged: Settings = {
     providers: Object.fromEntries(
       (Object.keys(defaults.providers) as Array<ProviderId>).map((id) => [id, provider(id)]),
     ) as Readonly<Record<ProviderId, Settings["providers"][ProviderId]>>,
@@ -143,6 +156,8 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
       providers: Object.fromEntries(Object.keys(webSearchProviders).map((id) => [id, { configured: true as const }])),
     },
   }
+  assertPainterSupportsMedia(merged)
+  return merged
 }
 
 const withWebSearchProviders = (settings: Settings, credentials: Environment["webSearchCredentials"]): Settings => ({

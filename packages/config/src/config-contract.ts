@@ -61,6 +61,7 @@ export interface ModelAliasInput {
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
   readonly displayName?: string
+  readonly supportsMedia?: boolean
   readonly limits?: {
     readonly maxInputTokens: number
     readonly maxOutputTokens: number
@@ -96,6 +97,7 @@ export interface ModelVariant {
 
 export interface ModelAlias {
   readonly displayName: string
+  readonly supportsMedia: boolean
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
   readonly limits: {
@@ -294,17 +296,20 @@ export const resolveModelRoute: {
 
 export const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
 
-export const resolveAgentRoute = (settings: Settings, mode: ModeId, agent: AgentId): ResolvedModelRoute => {
-  const inherited = settings.modes[mode][agent === "task" ? "main" : "oracle"]
+export const resolveAgentRoute = (
+  settings: Settings,
+  mode: ModeId,
+  agent: AgentId,
+  tuning?: { readonly fastMode?: boolean },
+): ResolvedModelRoute => {
+  const role = agent === "task" ? "main" : "oracle"
+  const inherited = settings.modes[mode][role]
   const configured = settings.agents[agent]
-  if (configured === undefined) return resolveRoute(settings, inherited, `Agent ${agent}`)
+  const fast = tuning?.fastMode ?? configured?.fast ?? inherited.fast ?? false
+  if (configured === undefined) return resolveRoute(settings, { ...inherited, fast }, `Agent ${agent}`)
   return resolveRoute(
     settings,
-    {
-      alias: configured.alias,
-      effort: configured.effort ?? inherited.effort,
-      ...(configured.fast ?? inherited.fast === true ? { fast: configured.fast ?? inherited.fast === true } : {}),
-    },
+    { alias: configured.alias, effort: configured.effort ?? inherited.effort, fast },
     `Agent ${agent}`,
   )
 }
@@ -470,9 +475,12 @@ export const decodeSettingsInput: {
         "provider",
         "candidates",
         "displayName",
+        "supportsMedia",
         "limits",
         "efforts",
       ])
+      if (alias.supportsMedia !== undefined && typeof alias.supportsMedia !== "boolean")
+        throw ConfigFileError.make({ path, message: `Model alias ${name} supportsMedia must be true or false` })
       if (typeof alias.provider !== "string" || !(alias.provider in providerDefaults))
         throw ConfigFileError.make({ path, message: `Model alias ${name} provider is unknown` })
       if (

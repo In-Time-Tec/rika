@@ -60,7 +60,15 @@ import {
   type StartInput,
   Status,
 } from "./execution-contract"
-import { mainInstructions, parentPermissions, presets, resolve, resolveTitle } from "./agent-profiles"
+import {
+  agentKeyForName,
+  mainInstructions,
+  names as agentProfileNames,
+  parentPermissions,
+  presets,
+  resolve,
+  resolveTitle,
+} from "./agent-profiles"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
 import { definitions, idFor } from "./workflow-definitions"
@@ -514,7 +522,18 @@ const reconcileUnsafeRecovery = (
       }),
     )
   })
-const routeForProfile = (pin: ExecutionRoutePin, profile: AgentProfile) => (profile === "Task" ? pin.main : pin.oracle)
+const routeForProfile = (pin: ExecutionRoutePin, profile: AgentProfile) => {
+  const key = agentKeyForName(profile)
+  const configured = key === undefined ? undefined : pin.agents?.[key]
+  return configured ?? (profile === "Task" ? pin.main : pin.oracle)
+}
+
+const agentSelections = (pin: ExecutionRoutePin) =>
+  pin.agents === undefined
+    ? undefined
+    : (Object.fromEntries(
+        agentProfileNames.map((name) => [name, pinnedSelection(routeForProfile(pin, name))]),
+      ) as Partial<Readonly<Record<AgentProfile, ModelRegistry.ModelSelection>>>)
 const recoveredDeltaOutput = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
   const groups = new Map<string, { order: number; deltas: Array<{ index: number; delta: string }> }>()
   for (const event of events) {
@@ -1438,7 +1457,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   : pinnedSelection(input.executionRoute.oracle)
               const childDepth = 1
               const childRunPresets = Object.fromEntries(
-                Object.entries(presets({ model: selection, oracleModel: oracleSelection }))
+                Object.entries(
+                  presets({
+                    model: selection,
+                    oracleModel: oracleSelection,
+                    ...(options.modelVariantPolicy === "fixed-selection"
+                      ? {}
+                      : { agentModels: agentSelections(input.executionRoute) }),
+                  }),
+                )
                   .filter(([name]) => name !== "ReadThread")
                   .map(([name, preset]) => {
                     const profile = name as AgentProfile
