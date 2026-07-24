@@ -197,6 +197,33 @@ it.effect("memory terminal status is immutable against every stale lifecycle upd
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
+it.effect("memory accepted start and cancellation claims are mutually exclusive", () =>
+  Effect.gen(function* () {
+    const repository = yield* TurnRepository.Service
+    const started = yield* create(repository, {
+      id: Turn.TurnId.make("start-wins"),
+      threadId: Thread.ThreadId.make("claim-thread"),
+      prompt: "start",
+      now: 1,
+    })
+    expect(yield* repository.startAccepted(started.id, 2)).toBe(true)
+    expect(yield* repository.cancelAccepted(started.id, 3)).toBe(false)
+    expect(yield* repository.startAccepted(started.id, 4)).toBe(false)
+    expect(yield* repository.get(started.id)).toMatchObject({ status: "running", updatedAt: 2 })
+
+    const cancelled = yield* create(repository, {
+      id: Turn.TurnId.make("cancel-wins"),
+      threadId: Thread.ThreadId.make("other-claim-thread"),
+      prompt: "cancel",
+      now: 5,
+    })
+    expect(yield* repository.cancelAccepted(cancelled.id, 6)).toBe(true)
+    expect(yield* repository.startAccepted(cancelled.id, 7)).toBe(false)
+    expect(yield* repository.cancelAccepted(cancelled.id, 8)).toBe(false)
+    expect(yield* repository.get(cancelled.id)).toMatchObject({ status: "cancelled", updatedAt: 6 })
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
+)
+
 it.effect("memory cursor repair compares status and cursor without changing activity time", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service

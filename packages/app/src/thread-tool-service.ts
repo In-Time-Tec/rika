@@ -239,8 +239,10 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
               invocation.idempotencyKeyDigest,
               invocation.createdAt,
             )
-          if (input.action !== "steer" && bound.targetTurnId !== undefined)
-            yield* backend.cancel(bound.targetTurnId, invocation.createdAt)
+          if (input.action !== "steer" && bound.targetTurnId !== undefined) {
+            const cancelledBeforeStart = yield* turns.cancelAccepted(bound.targetTurnId, invocation.createdAt)
+            if (!cancelledBeforeStart) yield* backend.cancel(bound.targetTurnId, invocation.createdAt)
+          }
           return {
             schemaVersion: 2 as const,
             action: input.action,
@@ -256,6 +258,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
           const inspectTargets = Effect.forEach(input.targets, (target) =>
             Effect.gen(function* () {
               const turnId = Turn.TurnId.make(target.turnId)
+              if (turnId === sourceTurnId) return yield* Effect.fail({ _tag: "ThreadWaitSelfTarget" } as const)
               const thread = yield* interactions.getStatus(Thread.ThreadId.make(target.threadId))
               const sourceThread = yield* interactions.getStatus(sourceThreadId)
               const items = thread === undefined ? [] : yield* interactions.getMessages(thread.id)

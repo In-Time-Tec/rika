@@ -138,6 +138,7 @@ export interface Interface {
     lastCursor: string | undefined,
     now: number,
   ) => Effect.Effect<Turn, RepositoryError>
+  readonly startAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
   readonly cancelAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
   readonly repairCursor: (
     id: TurnId,
@@ -705,6 +706,14 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           })
         return updated.turn
       }),
+      startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
+        return yield* Ref.modify(state, (currentState) => {
+          const current = currentState.turns.get(id)
+          if (current === undefined || current.status !== "accepted") return [false, currentState]
+          const next: Turn = { ...current, status: "running", updatedAt: now }
+          return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
+        })
+      }),
       cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
         return yield* Ref.modify(state, (currentState) => {
           const current = currentState.turns.get(id)
@@ -1160,6 +1169,12 @@ export const layer = Layer.effect(
             }),
           )
           .pipe(Effect.mapError(repositoryError))
+      }),
+      startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
+        const rows = yield* sql`UPDATE rika_turns SET status = 'running', updated_at = ${now}
+          WHERE id = ${id} AND status = 'accepted'
+          RETURNING id`.pipe(Effect.mapError(repositoryError))
+        return rows[0] !== undefined
       }),
       cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
         const rows = yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${now}

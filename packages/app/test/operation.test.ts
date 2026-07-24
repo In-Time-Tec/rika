@@ -792,6 +792,63 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("does not start an accepted Turn when cancellation wins the durable claim", () =>
+    Effect.gen(function* () {
+      const thread = selectionThread("cancelled-restart-thread")
+      const turn: Turn.Turn = {
+        id: Turn.TurnId.make("cancelled-restart-turn"),
+        ...turnProvenance,
+        threadId: thread.id,
+        prompt: "do not resume",
+        executionRoute: executionRoute(),
+        status: "accepted",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const turns = yield* TurnRepository.makeMemory([turn])
+      const claimEntered = yield* Deferred.make<void>()
+      const releaseClaim = yield* Deferred.make<void>()
+      const delayedTurns = TurnRepository.Service.of({
+        ...turns,
+        startAccepted: (id, now) =>
+          Deferred.succeed(claimEntered, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseClaim)),
+            Effect.andThen(turns.startAccepted(id, now)),
+          ),
+      })
+      const starts = yield* Ref.make(0)
+      const restartBackend = ExecutionBackend.Service.of({
+        ...backend,
+        start: (input) =>
+          Ref.update(starts, (count) => count + 1).pipe(
+            Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+          ),
+      })
+      const repair = yield* Effect.forkChild(
+        Operation.reconcile(unusedExtensions, (current) =>
+          Effect.succeed({ prompt: current.prompt, promptParts: undefined, extensionPin: undefined }),
+        ).pipe(
+          provideLayer(
+            Layer.mergeAll(
+              reconcileDependencies(unusedExtensions),
+              ThreadRepository.memoryLayer([thread]),
+              Layer.succeed(TurnRepository.Service, delayedTurns),
+              Layer.succeed(ExecutionBackend.Service, restartBackend),
+            ),
+          ),
+        ),
+      )
+
+      yield* Deferred.await(claimEntered)
+      expect(yield* turns.cancelAccepted(turn.id, 2)).toBe(true)
+      yield* Deferred.succeed(releaseClaim, undefined)
+      yield* Fiber.join(repair)
+
+      expect(yield* Ref.get(starts)).toBe(0)
+      expect(yield* turns.get(turn.id)).toMatchObject({ status: "cancelled", updatedAt: 2 })
+    }),
+  )
+
   it.effect("does not restart a turn dequeued after the reconcile scan", () =>
     Effect.gen(function* () {
       const turnId = Turn.TurnId.make("stale-reconcile-turn")

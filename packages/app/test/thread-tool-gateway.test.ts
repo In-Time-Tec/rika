@@ -100,7 +100,7 @@ const serviceHarness = Effect.gen(function* () {
     Effect.provideService(TurnRepository.Service, turns),
     Effect.provideService(ExecutionBackend.Service, backend),
   )
-  return { service, interactions, scheduled, controls }
+  return { service, interactions, turns, scheduled, controls }
 })
 
 describe("ThreadToolService gateway", () => {
@@ -149,8 +149,16 @@ describe("ThreadToolService gateway", () => {
 
   it.effect("creates once, queues messages, previews with a cursor, and binds controls", () =>
     Effect.gen(function* () {
-      const { service, scheduled, controls } = yield* serviceHarness
+      const { service, turns, scheduled, controls } = yield* serviceHarness
       const created = yield* service.createThread(invocation, input)
+      yield* turns.createForSubmission({
+        id: Turn.TurnId.make(created.turnId),
+        threadId: Thread.ThreadId.make(created.threadId),
+        prompt: input.prompt,
+        executionRoute: Turn.testExecutionRoute(),
+        queueCapacity: 64,
+        now: 1,
+      })
       const duplicate = yield* service.createThread({ ...invocation, createdAt: 99 }, input)
       expect(duplicate).toEqual(created)
       expect(created).toMatchObject({ threadId: "target", turnId: "target-turn", resultDelivery: "reply" })
@@ -194,10 +202,10 @@ describe("ThreadToolService gateway", () => {
         { ...invocation, callId: "cancel", idempotencyKeyDigest: "cancel-key", toolName: "thread_interact" },
         { action: "cancel", threadId: "target" },
       )
-      expect(yield* Ref.get(controls)).toEqual([
-        ["steer", "target-turn", "Focus", "steer-key", 1],
-        ["cancel", "target-turn", 1],
-      ])
+      expect(yield* Ref.get(controls)).toEqual([["steer", "target-turn", "Focus", "steer-key", 1]])
+      expect(yield* turns.get(Turn.TurnId.make("target-turn"))).toEqual(
+        expect.objectContaining({ id: "target-turn", status: "cancelled" }),
+      )
     }),
   )
 
@@ -248,6 +256,14 @@ describe("ThreadToolService gateway", () => {
           ),
         ),
       ).toMatchObject({ _tag: "Failure", failure: { _tag: "ThreadWorkspaceMismatch" } })
+      expect(
+        yield* Effect.result(
+          service.waitForThreads(
+            { ...invocation, idempotencyKeyDigest: "wait-self", toolName: "wait_for_threads" },
+            { targets: [{ threadId: sourceThread.id, turnId: sourceTurn.id }], timeoutSeconds: 1 },
+          ),
+        ),
+      ).toMatchObject({ _tag: "Failure", failure: { _tag: "ThreadWaitSelfTarget" } })
     }),
   )
 })

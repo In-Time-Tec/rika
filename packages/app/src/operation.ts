@@ -477,6 +477,9 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
                                     : prepare(turn, thread.workspace),
                                 ),
                               )
+                      if (turn.status === "accepted") {
+                        if (!(yield* turns.startAccepted(turn.id, now))) return
+                      } else if ((yield* turns.get(turn.id))?.status !== turn.status) return
                       const result = yield* backend.start({
                         threadId: turn.threadId,
                         turnId: turn.id,

@@ -1956,32 +1956,6 @@ export const layer = <
                 },
           )
           const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
-          const runnerToolkitWithInvocation = Effect.gen(function* () {
-            const crypto = yield* Crypto.Crypto
-            const handled = yield* runnerToolkit
-            return {
-              ...handled,
-              handle: (name: keyof typeof handled.tools, input: never) =>
-                Effect.gen(function* () {
-                  const call = yield* RelayToolRuntime.ToolCallInfo
-                  const idempotencyKeyDigest = yield* crypto.digest(
-                    "SHA-256",
-                    new TextEncoder().encode(call.idempotencyKey),
-                  )
-                  const invocation = ToolInvocation.ToolInvocation.of({
-                    executionId: String(call.executionId),
-                    callId: String(call.call.id),
-                    toolName: String(call.call.name),
-                    eventSequence: Number(call.eventSequence),
-                    createdAt: call.createdAt,
-                    idempotencyKeyDigest: Encoding.encodeHex(idempotencyKeyDigest),
-                  })
-                  return yield* handled
-                    .handle(name, input)
-                    .pipe(Effect.provideService(ToolInvocation.ToolInvocation, invocation))
-                }),
-            } as Toolkit.WithHandler<typeof handled.tools>
-          }) as unknown as Toolkit.Toolkit<typeof runnerToolkit.tools>
           const toolOptionsForExecution = (execution: string) =>
             Effect.gen(function* () {
               const workspace =
@@ -2141,12 +2115,39 @@ export const layer = <
             yield* Effect.logWarning("web_search.unsupported_provider").pipe(
               Effect.annotateLogs("rika.web_search.provider_ids", search.unsupportedIds.join(",")),
             )
-          const toolRuntimeLayer = RelayToolRuntime.layerFromToolkit(runnerToolkitWithInvocation, (tool) => ({
-            needsApproval:
-              tool.name === ThreadHost.promoteTurnTool.name
-                ? false
-                : (options.toolNeedsApproval?.(tool.name) ?? ToolCatalog.get(tool.name)?.permission === "ask"),
-          })).pipe(
+          const toolRuntimeLayer = RelayToolRuntime.layerFromHandledToolkit(runnerToolkit, {
+            tools: (tool) => ({
+              needsApproval:
+                tool.name === ThreadHost.promoteTurnTool.name
+                  ? false
+                  : (options.toolNeedsApproval?.(tool.name) ?? ToolCatalog.get(tool.name)?.permission === "ask"),
+            }),
+            invocation: {
+              make: (context) =>
+                Effect.gen(function* () {
+                  const crypto = yield* Crypto.Crypto
+                  const idempotencyKeyDigest = yield* crypto
+                    .digest("SHA-256", new TextEncoder().encode(context.idempotencyKey))
+                    .pipe(
+                      Effect.mapError((cause) =>
+                        RelayToolRuntime.ToolExecutionFailed.make({
+                          tool_name: context.call.name,
+                          message: String(cause),
+                        }),
+                      ),
+                    )
+                  const invocation = ToolInvocation.ToolInvocation.of({
+                    executionId: String(context.executionId),
+                    callId: String(context.call.id),
+                    toolName: String(context.call.name),
+                    eventSequence: Number(context.eventSequence),
+                    createdAt: context.createdAt,
+                    idempotencyKeyDigest: Encoding.encodeHex(idempotencyKeyDigest),
+                  })
+                  return Context.make(ToolInvocation.ToolInvocation, invocation)
+                }),
+            },
+          }).pipe(
             Layer.provide(handlerLayer),
             Layer.provide(
               rikaToolRuntimeLayer.pipe(

@@ -435,12 +435,15 @@ export const decodeSettingsInput: {
         throw ConfigFileError.make({ path, message: `Model alias ${name} candidates must be non-empty strings` })
       if (alias.base !== undefined && (typeof alias.base !== "string" || !(alias.base in modelDefaults)))
         throw ConfigFileError.make({ path, message: `Model alias ${name} base must reference a built-in model alias` })
-      if (alias.preset !== undefined && (typeof alias.preset !== "string" || !presetIds.includes(alias.preset as never)))
+      if (
+        alias.preset !== undefined &&
+        (typeof alias.preset !== "string" || !presetIds.includes(alias.preset as never))
+      )
         throw ConfigFileError.make({
           path,
           message: `Model alias ${name} preset must be one of ${presetIds.join(", ")}`,
         })
-      const sources = [alias.base, alias.preset, alias.efforts].filter((value) => value !== undefined).length
+      const sources = [alias.base, alias.preset, alias.efforts].filter((source) => source !== undefined).length
       if (sources === 0)
         throw ConfigFileError.make({
           path,
@@ -473,7 +476,9 @@ export const decodeSettingsInput: {
         if (!object(alias.efforts))
           throw ConfigFileError.make({ path, message: `Model alias ${name} efforts must be an object` })
         const protocol = providerDefaults[alias.provider as ProviderId].protocol
-        const allowed = presetIds.flatMap((id) => (presets[id].protocols.includes(protocol) ? presets[id].optionKeys : []))
+        const allowed = presetIds.flatMap((id) =>
+          presets[id].protocols.includes(protocol) ? presets[id].optionKeys : [],
+        )
         for (const [effort, variants] of Object.entries(alias.efforts)) {
           if (!supportedEfforts.includes(effort as never))
             throw ConfigFileError.make({

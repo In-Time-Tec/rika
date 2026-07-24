@@ -923,6 +923,9 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
           turn: { id: third.id, prompt: "c" },
           queue: { change: { _tag: "Removed", turnId: third.id } },
         })
+        expect(yield* turns.startAccepted(active.id, 7)).toBe(true)
+        expect(yield* turns.cancelAccepted(active.id, 8)).toBe(false)
+        expect(yield* turns.startAccepted(active.id, 9)).toBe(false)
         yield* turns.setStatus(active.id, "completed", "terminal-cursor", 7)
         for (const [index, staleStatus] of Turn.Status.literals.filter((candidate) => candidate !== "queued").entries())
           expect(yield* turns.setStatus(active.id, staleStatus, `stale-${staleStatus}`, index + 8)).toMatchObject({
@@ -930,8 +933,21 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
             lastCursor: "terminal-cursor",
             updatedAt: 7,
           })
-        expect((yield* turns.claimNextQueued(id, 8))?.turn.id).toBe(second.id)
+        const claimed = yield* turns.claimNextQueued(id, 8)
+        expect(claimed?.turn.id).toBe(second.id)
         expect((yield* turns.list(id)).map((turn) => turn.id)).toEqual([active.id, second.id])
+
+        const cancellationThreadId = Thread.ThreadId.make("cancellation-claim-thread")
+        yield* threads.create({ id: cancellationThreadId, workspace: "/work", title: "Cancellation", now: 9 })
+        const cancellation = yield* create(turns, {
+          id: Turn.TurnId.make("cancellation-claim"),
+          threadId: cancellationThreadId,
+          prompt: "cancel",
+          now: 10,
+        })
+        expect(yield* turns.cancelAccepted(cancellation.id, 11)).toBe(true)
+        expect(yield* turns.startAccepted(cancellation.id, 12)).toBe(false)
+        expect(yield* turns.cancelAccepted(cancellation.id, 13)).toBe(false)
       }).pipe(provideLayer(layer))
     }),
   )

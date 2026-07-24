@@ -692,7 +692,7 @@ export const layer = Layer.effect(
                   readonly revision: number
                 }>`UPDATE rika_thread_queue_state SET revision = revision + 1, queued_count = 0 WHERE thread_id = ${input.targetThreadId} RETURNING revision`
                 queueRevision = revisions[0]!.revision
-                yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${input.now} WHERE thread_id = ${input.targetThreadId} AND status = 'queued'`
+                yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${input.now}, queue_claim_token = NULL WHERE thread_id = ${input.targetThreadId} AND status = 'queued'`
               } else {
                 const revisions = yield* sql<{
                   readonly revision: number

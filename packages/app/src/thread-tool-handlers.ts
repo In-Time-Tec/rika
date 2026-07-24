@@ -41,8 +41,14 @@ const publicSelection = (selector: ThreadQuery.Selector) => {
     }
   if (selector._tag === "subtree") {
     const cursor = (() => {
+      if (selector.offset !== undefined)
+        return {
+          cursor: {
+            offset: selector.offset,
+            ...(selector.before === undefined ? {} : { before: selector.before }),
+          },
+        }
       if (selector.before !== undefined) return { cursor: { before: selector.before } }
-      if (selector.offset !== undefined) return { cursor: { offset: selector.offset } }
       return {}
     })()
     return {
@@ -103,7 +109,7 @@ export const handlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
                           return {
                             _tag: "subtree" as const,
                             childExecutionId: selection.childExecutionId,
-                            ...(selection.cursor === undefined || !("before" in selection.cursor)
+                            ...(selection.cursor?.before === undefined
                               ? {}
                               : {
                                   before: {

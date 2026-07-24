@@ -301,10 +301,20 @@ describe("ThreadQuery", () => {
         entry("second-answer", "root-agent", 7),
         child("sibling-agent", undefined, 8),
         entry("sibling-answer", "sibling-agent", 9),
+        ...Array.from(
+          { length: 201 },
+          (_, index): Transcript.Unit => ({
+            key: `newer:${index}`,
+            turnId: storedTurn.id,
+            order: { sequence: index + 10, part: 0 },
+            revision: index + 10,
+            content: { _tag: "Entry", role: "assistant", text: `unrelated-${index}` },
+          }),
+        ),
       ]
       yield* transcripts.replace(storedTurn, {
         units,
-        revision: 9,
+        revision: 210,
         modelPhase: 0,
       })
 
@@ -354,8 +364,11 @@ describe("ThreadQuery", () => {
         if (!("selection" in nextInput) || nextInput.selection.mode !== "subtree")
           return yield* Effect.die("missing structured continuation")
         const cursor = nextInput.selection.cursor
-        if (cursor === undefined || !("offset" in cursor)) return yield* Effect.die("missing subtree offset")
-        offsets.push(cursor.offset)
+        if (cursor === undefined) return yield* Effect.die("missing subtree cursor")
+        if ("offset" in cursor) {
+          offsets.push(cursor.offset)
+          expect(cursor.before).toBeDefined()
+        } else expect(cursor.before).toBeDefined()
         const next = yield* read(nextInput.selection).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Page)))
         expect(next.items).not.toEqual(pages.at(-1)?.items)
         pages.push(next)
@@ -372,6 +385,10 @@ describe("ThreadQuery", () => {
       expect(rendered).not.toContain("sibling-answer")
       expect(pages.at(-1)?.omissions).toEqual([])
       expect(firstText.length).toBeLessThanOrEqual(ThreadQuery.transcriptBudget)
+      for (const page of pages)
+        expect((yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(page)).length).toBeLessThanOrEqual(
+          ThreadQuery.transcriptBudget,
+        )
     }).pipe(provideLayer(queryLayer)),
   )
 

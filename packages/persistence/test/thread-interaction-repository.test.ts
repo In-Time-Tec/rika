@@ -292,4 +292,73 @@ describe("thread interaction repository", () => {
       }).pipe(provideBun),
     ),
   )
+
+  it.effect("releases a queued claim when SQLite stop cancels the claimed Turn", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-interaction-stop-" })
+        const database = Database.layer(`${directory}/rika.db`)
+        const context = yield* Layer.build(
+          Layer.mergeAll(
+            database,
+            Repository.layer.pipe(Layer.provide(database)),
+            ThreadRepository.layer.pipe(Layer.provide(database)),
+            TurnRepository.layer.pipe(Layer.provide(database)),
+          ),
+        )
+        const threads = yield* ThreadRepository.Service.pipe(Effect.provide(context))
+        const turns = yield* TurnRepository.Service.pipe(Effect.provide(context))
+        const repository = yield* Repository.Service.pipe(Effect.provide(context))
+        const targetThreadId = Thread.ThreadId.make("stop-claim-target")
+        yield* threads.create({ id: sourceThreadId, workspace: "/workspace", title: "Source", now: 1 })
+        yield* threads.create({ id: targetThreadId, workspace: "/workspace", title: "Target", now: 1 })
+        yield* turns.copy(sourceTurn, 1)
+        const active = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-active"),
+          threadId: targetThreadId,
+          prompt: "active",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 2,
+        })
+        const queued = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-queued"),
+          threadId: targetThreadId,
+          prompt: "queued",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 3,
+        })
+        yield* turns.setStatus(active.id, "completed", undefined, 4)
+        const staleClaim = yield* turns.claimNextQueued(targetThreadId, 5)
+        if (staleClaim === undefined) return yield* Effect.die("Missing queued claim")
+
+        yield* repository.bindStop({ ...invocation("stop-claim", "stop-claim", 6), targetThreadId })
+
+        expect(yield* turns.get(queued.id)).toMatchObject({ status: "cancelled" })
+        expect(yield* turns.finishQueuedClaim(staleClaim, "running", undefined, undefined, 7)).toEqual({
+          _tag: "Unavailable",
+        })
+        const replacement = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-replacement"),
+          threadId: targetThreadId,
+          prompt: "replacement",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 8,
+        })
+        const later = yield* turns.createForSubmission({
+          id: Turn.TurnId.make("stop-claim-later"),
+          threadId: targetThreadId,
+          prompt: "later",
+          executionRoute: route,
+          queueCapacity: 2,
+          now: 9,
+        })
+        yield* turns.setStatus(replacement.id, "completed", undefined, 10)
+        expect((yield* turns.claimNextQueued(targetThreadId, 11))?.turn.id).toBe(later.id)
+      }).pipe(provideBun),
+    ),
+  )
 })
