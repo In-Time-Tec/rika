@@ -142,19 +142,23 @@ const threadState = (
   if (threadTurns.some((turn) => turn.status === "queued")) return "queued"
   return threadTurns.at(-1)?.status === "failed" ? "error" : "idle"
 }
-const message = (unit: Transcript.Unit, all: ReadonlyArray<Transcript.Unit>): Message | undefined => {
-  if (unit.content._tag === "Entry") return { role: unit.content.role, text: safeText(unit.content.text, 12_000) }
+const message = (
+  unit: Transcript.Unit,
+  all: ReadonlyArray<Transcript.Unit>,
+  textLimit = 12_000,
+): Message | undefined => {
+  if (unit.content._tag === "Entry") return { role: unit.content.role, text: safeText(unit.content.text, textLimit) }
   const block = unit.content.block
   if (block._tag !== "ChildAgent") return undefined
   const children = all
     .filter((candidate) => candidate.parentId === block.id)
     .flatMap((candidate) => {
-      const rendered = message(candidate, all)
+      const rendered = message(candidate, all, textLimit)
       return rendered === undefined ? [] : [rendered]
     })
   return {
     role: "child",
-    text: safeText(block.summary, 12_000),
+    text: safeText(block.summary, textLimit),
     childExecutionId: block.id,
     ...(children.length === 0 ? {} : { children }),
   }
@@ -176,13 +180,36 @@ const subtreeItem = (
   root: Transcript.Unit,
   descendants: ReadonlyArray<Transcript.Unit>,
 ): ReadItem => {
-  const rendered = message(root, [root, ...descendants])
+  const rendered = message(root, [root, ...descendants], 8_000)
   return {
     turnId: turn.id,
     author: turn.author._tag === "Human" ? "human" : "agent",
     createdAt: iso(turn.createdAt),
     status: turn.status,
     messages: rendered === undefined ? [] : [rendered],
+  }
+}
+
+const boundedSubtreeItem = (
+  turn: TurnRepository.PageResult["turns"][number],
+  root: Transcript.Unit,
+  candidate: Transcript.Unit,
+): ReadItem => {
+  const renderedRoot = message(root, [root], 4_000)
+  const renderedCandidate = message(candidate, [candidate], 4_000)
+  return {
+    turnId: turn.id,
+    author: turn.author._tag === "Human" ? "human" : "agent",
+    createdAt: iso(turn.createdAt),
+    status: turn.status,
+    messages:
+      renderedRoot === undefined
+        ? []
+        : [
+            renderedCandidate === undefined || renderedRoot.role !== "child"
+              ? renderedRoot
+              : { ...renderedRoot, children: [renderedCandidate] },
+          ],
   }
 }
 const encodeBounded = (
@@ -358,6 +385,7 @@ export const makeForWorkspace = (workspace: string) =>
         )
         const selected = new Set<Transcript.Unit>()
         let nextOffset = offset
+        let forcedItem: ReadItem | undefined
         for (let index = offset; index < descendants.length; index += 1) {
           const candidate = descendants[index]!
           const trial = new Set(selected).add(candidate)
@@ -380,7 +408,14 @@ export const makeForWorkspace = (workspace: string) =>
             omissions: [],
             truncated: false,
           }
-          if (encodeJson(result).length > transcriptBudget) break
+          if (encodeJson(result).length > transcriptBudget) {
+            if (selected.size === 0) {
+              selected.add(candidate)
+              nextOffset = index + 1
+              forcedItem = boundedSubtreeItem(root.turn, root.unit, candidate)
+            }
+            break
+          }
           for (const unit of trial) selected.add(unit)
           nextOffset = index + 1
         }
@@ -391,11 +426,12 @@ export const makeForWorkspace = (workspace: string) =>
         return {
           ...base,
           items: [
-            subtreeItem(
-              root.turn,
-              root.unit,
-              descendants.filter((unit) => selected.has(unit)),
-            ),
+            forcedItem ??
+              subtreeItem(
+                root.turn,
+                root.unit,
+                descendants.filter((unit) => selected.has(unit)),
+              ),
           ],
           omissions: continuation,
           truncated: continuation.length > 0,

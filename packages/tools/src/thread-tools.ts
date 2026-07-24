@@ -58,8 +58,11 @@ const TranscriptCursor = Schema.Struct({
   sequence: Schema.Finite,
   part: Schema.Finite,
   key: Schema.String,
-  offset: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
 })
+const SubtreeCursor = Schema.Union([
+  Schema.Struct({ before: TranscriptCursor }),
+  Schema.Struct({ offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }),
+])
 const RelationshipCursor = Schema.Struct({ createdAt: Schema.Finite, targetTurnId: NonEmptyString })
 const ReadSelection = Schema.Union([
   Schema.Struct({ mode: Schema.tag("overview") }),
@@ -77,7 +80,7 @@ const ReadSelection = Schema.Union([
   Schema.Struct({
     mode: Schema.tag("subtree"),
     childExecutionId: NonEmptyString,
-    cursor: Schema.optionalKey(TranscriptCursor),
+    cursor: Schema.optionalKey(SubtreeCursor),
   }),
   Schema.Struct({ mode: Schema.tag("related"), cursor: Schema.optionalKey(RelationshipCursor) }),
 ])

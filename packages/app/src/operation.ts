@@ -756,6 +756,27 @@ export const rootExecutionEvents: {
     ),
 )
 
+const completeRootExecutionEvents = Effect.fn("Operation.completeRootExecutionEvents")(function* (
+  backend: ExecutionBackend.Interface,
+  turnId: Turn.TurnId,
+  replayed: ReadonlyArray<ExecutionBackend.Event>,
+) {
+  if (backend.pageEvents === undefined) return rootExecutionEvents(turnId, replayed)
+  const events: Array<ExecutionBackend.Event> = []
+  const cursors = new Set<string>()
+  let after: string | undefined
+  while (true) {
+    const page = yield* backend.pageEvents(turnId, "forward", after, 200)
+    events.push(...rootExecutionEvents(turnId, page.events))
+    if (!page.hasMore) return events.toSorted((left, right) => left.sequence - right.sequence)
+    const next = page.newestCursor
+    if (next === undefined || cursors.has(next))
+      return yield* operationError(`Thread result event cursor did not advance for Turn ${turnId}`)
+    cursors.add(next)
+    after = next
+  }
+})
+
 const rootCheckpointCursor = (turnId: string, cursor: string | undefined): string | undefined =>
   cursor === undefined ||
   cursor.startsWith("child:") ||
@@ -1903,10 +1924,21 @@ export const productLayer = <
                   continue
                 }
                 checkpoint = replay.value.checkpoint
-                replayedEvents = rootExecutionEvents(turn.id, replay.value.events)
-                if (replay.value.events.length > 0) projection = yield* transcripts.appendAll(turn, replayedEvents)
+                const complete = yield* Effect.exit(
+                  completeRootExecutionEvents(acquiredBackend, turn.id, replay.value.events),
+                )
+                if (complete._tag === "Failure") {
+                  retry = true
+                  continue
+                }
+                replayedEvents = complete.value
+                if (replayedEvents.length > 0) projection = yield* transcripts.appendAll(turn, replayedEvents)
               }
               const output = ThreadActivity.finalAssistantOutput(replayedEvents)?.slice(0, 8_000)
+              if (!(turn.status === "cancelled" && projection === undefined) && output === undefined) {
+                retry = true
+                continue
+              }
               const sequence = checkpoint?.sequence ?? projection?.revision
               const readiness: ThreadInteractionRepository.RootProjectionReadiness =
                 turn.status === "cancelled" && projection === undefined
@@ -4190,8 +4222,17 @@ export const productLayer = <
                 }
                 if (pending.status !== "queued") return yield* operationError("Pending turn was not queued")
                 if (pending.queue !== undefined) emit(sessionDispatch, queueMutationEvent(pending.queue))
-                if (turn.status !== "accepted") yield* backend.cancel(turn.id, yield* Clock.currentTimeMillis)
-                yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+                const cancelledAt = yield* Clock.currentTimeMillis
+                const cancelledBeforeStart =
+                  turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, cancelledAt))
+                if (cancelledBeforeStart) {
+                  const cancelled = yield* turns.get(turn.id)
+                  yield* notifyThreadSummaries
+                  if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
+                } else {
+                  yield* backend.cancel(turn.id, cancelledAt)
+                  yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+                }
                 yield* drainQueued(thread, sessionDispatch)
               }),
             ),
@@ -4216,14 +4257,20 @@ export const productLayer = <
               }
               const thread = yield* threadForTurn(turn)
               const cancelledAt = yield* Clock.currentTimeMillis
-              const childIds =
-                turn.status === "accepted"
-                  ? []
-                  : yield* activeDescendantExecutionIds(backend, turn.id).pipe(Effect.orElseSucceed(() => []))
-              const result =
-                turn.status === "accepted"
-                  ? { turnId: turn.id, status: "cancelled" as const, events: [] }
-                  : yield* backend.cancel(turn.id, cancelledAt)
+              const childIds = yield* activeDescendantExecutionIds(backend, turn.id).pipe(
+                Effect.orElseSucceed(() => []),
+              )
+              const turns = yield* TurnRepository.Service
+              const cancelledBeforeStart =
+                turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, cancelledAt))
+              const result = cancelledBeforeStart
+                ? { turnId: turn.id, status: "cancelled" as const, events: [] }
+                : yield* backend.cancel(turn.id, cancelledAt)
+              if (cancelledBeforeStart) {
+                const cancelled = yield* turns.get(turn.id)
+                yield* notifyThreadSummaries
+                if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
+              }
               const cancellationOrder = childIds.toReversed()
               const childOutcomes = yield* Effect.forEach(
                 cancellationOrder,

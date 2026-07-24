@@ -6,6 +6,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
+import * as Transcript from "@rika/transcript"
 import { ThreadTools, ToolInvocation } from "@rika/tools"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "../src"
@@ -258,6 +259,119 @@ describe("ThreadQuery", () => {
           available: true,
         }),
       ])
+    }).pipe(provideLayer(queryLayer)),
+  )
+
+  it.effect("returns schema-valid subtree continuations that advance through oversized nested output", () =>
+    Effect.gen(function* () {
+      const transcripts = yield* TranscriptRepository.Service
+      const child = (id: string, parentId: string | undefined, sequence: number): Transcript.Unit => ({
+        key: `child:${id}`,
+        turnId: storedTurn.id,
+        ...(parentId === undefined ? {} : { parentId }),
+        order: { sequence, part: 0 },
+        revision: sequence,
+        content: {
+          _tag: "Block",
+          block: {
+            _tag: "ChildAgent",
+            id,
+            name: id,
+            summary: `${id}:${"x".repeat(12_000)}`,
+            status: "complete",
+            activity: [],
+          },
+        },
+      })
+      const entry = (id: string, parentId: string, sequence: number): Transcript.Unit => ({
+        key: `entry:${id}`,
+        turnId: storedTurn.id,
+        parentId,
+        order: { sequence, part: 0 },
+        revision: sequence,
+        content: { _tag: "Entry", role: "assistant", text: `${id}:${"y".repeat(12_000)}` },
+      })
+      const units = [
+        child("root-agent", undefined, 1),
+        child("nested-one", "root-agent", 2),
+        child("nested-two", "nested-one", 3),
+        child("nested-three", "nested-two", 4),
+        child("nested-four", "nested-three", 5),
+        entry("deep-answer", "nested-four", 6),
+        entry("second-answer", "root-agent", 7),
+        child("sibling-agent", undefined, 8),
+        entry("sibling-answer", "sibling-agent", 9),
+      ]
+      yield* transcripts.replace(storedTurn, {
+        units,
+        revision: 9,
+        modelPhase: 0,
+      })
+
+      const query = yield* ThreadQuery.Service
+      type StructuredRead = Extract<typeof ThreadTools.ReadThreadInput.Type, { readonly selection: object }>
+      const read = (selection: StructuredRead["selection"]) =>
+        query
+          .readStructured({
+            threadId: storedThread.id,
+            selector:
+              selection.mode === "subtree"
+                ? {
+                    _tag: "subtree",
+                    childExecutionId: selection.childExecutionId,
+                    ...(selection.cursor === undefined || !("before" in selection.cursor)
+                      ? {}
+                      : {
+                          before: {
+                            ...selection.cursor.before,
+                            turnId: Turn.TurnId.make(selection.cursor.before.turnId),
+                          },
+                        }),
+                    ...(selection.cursor !== undefined && "offset" in selection.cursor
+                      ? { offset: selection.cursor.offset }
+                      : {}),
+                  }
+                : { _tag: "overview" },
+          })
+          .pipe(Effect.map(ThreadToolHandlers.publicReadResult))
+      const Page = Schema.Struct({
+        items: Schema.Array(Schema.Unknown),
+        omissions: Schema.Array(Schema.Struct({ continuation: Schema.Unknown })),
+      })
+      const first = yield* read({ mode: "subtree", childExecutionId: "root-agent" }).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Page)),
+      )
+      const pages = [first]
+      const offsets: Array<number> = []
+      while (true) {
+        const omission = pages.at(-1)?.omissions[0]
+        if (omission === undefined) break
+        const continuation = omission.continuation
+        const nextInput = yield* Schema.decodeUnknownEffect(ThreadTools.ReadThreadInput)({
+          threadId: storedThread.id,
+          selection: continuation,
+        })
+        if (!("selection" in nextInput) || nextInput.selection.mode !== "subtree")
+          return yield* Effect.die("missing structured continuation")
+        const cursor = nextInput.selection.cursor
+        if (cursor === undefined || !("offset" in cursor)) return yield* Effect.die("missing subtree offset")
+        offsets.push(cursor.offset)
+        const next = yield* read(nextInput.selection).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Page)))
+        expect(next.items).not.toEqual(pages.at(-1)?.items)
+        pages.push(next)
+        if (pages.length > units.length + 1) return yield* Effect.die("subtree continuation did not terminate")
+      }
+
+      const rendered = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(pages)
+      const firstText = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(first)
+      expect(first.omissions[0]).toBeDefined()
+      expect(offsets).toEqual([...new Set(offsets)].toSorted((left, right) => left - right))
+      expect(rendered).toContain("nested-four")
+      expect(rendered).toContain("deep-answer")
+      expect(rendered).toContain("second-answer")
+      expect(rendered).not.toContain("sibling-answer")
+      expect(pages.at(-1)?.omissions).toEqual([])
+      expect(firstText.length).toBeLessThanOrEqual(ThreadQuery.transcriptBudget)
     }).pipe(provideLayer(queryLayer)),
   )
 

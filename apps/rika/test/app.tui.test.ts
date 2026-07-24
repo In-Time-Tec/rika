@@ -585,6 +585,7 @@ test(
         yield* Effect.promise(() => app.type("Begin interruptible work."))
         app.pressEnter()
         yield* app.waitFrame("Begin interruptible work.")
+        yield* app.waitModelRequests(1)
         yield* Effect.promise(() => app.type("Run the replacement prompt."))
         yield* app.waitFrame("Run the replacement prompt.")
         app.pressKey("\u001b[13;5u")

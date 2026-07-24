@@ -24,6 +24,48 @@ const queryForInvocation = (factory: ThreadQuery.Factory["Service"], resolveWork
     return yield* factory.forWorkspace(workspace)
   })
 
+const publicSelection = (selector: ThreadQuery.Selector) => {
+  if (selector._tag === "overview") return { mode: "overview" as const }
+  if (selector._tag === "recent")
+    return {
+      mode: "recent" as const,
+      ...(selector.limit === undefined ? {} : { limit: selector.limit }),
+      ...(selector.before === undefined ? {} : { cursor: selector.before }),
+    }
+  if (selector._tag === "relevant")
+    return {
+      mode: "relevant" as const,
+      query: selector.query,
+      ...(selector.limit === undefined ? {} : { limit: selector.limit }),
+      ...(selector.before === undefined ? {} : { cursor: selector.before }),
+    }
+  if (selector._tag === "subtree") {
+    const cursor = (() => {
+      if (selector.before !== undefined) return { cursor: { before: selector.before } }
+      if (selector.offset !== undefined) return { cursor: { offset: selector.offset } }
+      return {}
+    })()
+    return {
+      mode: "subtree" as const,
+      childExecutionId: selector.childExecutionId,
+      ...cursor,
+    }
+  }
+  return {
+    mode: "related" as const,
+    ...(selector.before === undefined ? {} : { cursor: selector.before }),
+  }
+}
+
+export const publicReadResult = (result: ThreadQuery.ReadSuccess) => ({
+  ...result,
+  selector: publicSelection(result.selector),
+  omissions: result.omissions.map((omission) => ({
+    ...omission,
+    continuation: publicSelection(omission.continuation),
+  })),
+})
+
 export const handlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
   ThreadTools.toolkit.toLayer(
     Effect.gen(function* () {
@@ -61,12 +103,17 @@ export const handlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
                           return {
                             _tag: "subtree" as const,
                             childExecutionId: selection.childExecutionId,
-                            ...(selection.cursor === undefined
+                            ...(selection.cursor === undefined || !("before" in selection.cursor)
                               ? {}
                               : {
-                                  before: { ...selection.cursor, turnId: Turn.TurnId.make(selection.cursor.turnId) },
-                                  ...(selection.cursor.offset === undefined ? {} : { offset: selection.cursor.offset }),
+                                  before: {
+                                    ...selection.cursor.before,
+                                    turnId: Turn.TurnId.make(selection.cursor.before.turnId),
+                                  },
                                 }),
+                            ...(selection.cursor !== undefined && "offset" in selection.cursor
+                              ? { offset: selection.cursor.offset }
+                              : {}),
                           }
                         if (selection.mode === "recent")
                           return {
@@ -86,7 +133,12 @@ export const handlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
                         }
                       })(),
                     })
-                    .pipe(Effect.map((result) => ({ text: JSON.stringify(result), truncated: result.truncated })))
+                    .pipe(
+                      Effect.map((result) => ({
+                        text: JSON.stringify(publicReadResult(result)),
+                        truncated: result.truncated,
+                      })),
+                    )
                 : query.read(input),
             ),
             Effect.mapError((cause) => error("read_thread_transcript", cause)),

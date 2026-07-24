@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigContract } from "@rika/config"
 import * as ThreadRepository from "@rika/persistence/repository"
+import * as ThreadInteractionRepository from "@rika/persistence/thread-interaction-repository"
 import * as Thread from "@rika/persistence/thread"
+import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
@@ -4942,6 +4944,144 @@ describe("Operation", () => {
         return [workflow, update, skill]
       }).pipe(provideLayer(workflowLayer))
       expect(result.every((value) => value._tag === "Failure")).toBe(true)
+    }),
+  )
+
+  it.effect("delivers a durable child result only after paging to a completed root answer", () =>
+    Effect.gen(function* () {
+      const source = selectionThread("result-source")
+      const target = selectionThread("result-target")
+      const sourceTurn: Turn.Turn = {
+        id: Turn.TurnId.make("result-source-turn"),
+        ...turnProvenance,
+        threadId: source.id,
+        prompt: "create an Agent",
+        executionRoute: executionRoute(),
+        status: "completed",
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      const targetTurn: Turn.Turn = {
+        id: Turn.TurnId.make("result-target-turn"),
+        threadId: target.id,
+        prompt: "finish delegated work",
+        executionRoute: executionRoute(),
+        author: {
+          _tag: "Agent",
+          sourceThreadId: source.id,
+          sourceRootTurnId: sourceTurn.id,
+          threadCreationDepth: 1,
+        },
+        lineage: { _tag: "Original" },
+        status: "completed",
+        createdAt: 2,
+        updatedAt: 3,
+      }
+      const interactions = yield* ThreadInteractionRepository.makeMemory({ threads: [source], turns: [sourceTurn] })
+      yield* interactions.createThread({
+        invocationDigest: "result-create",
+        schemaInputDigest: "result-create",
+        sourceThreadId: source.id,
+        sourceRootTurnId: sourceTurn.id,
+        now: 2,
+        maximumDepth: 3,
+        maximumAdmissions: 8,
+        maximumWorkspaceActive: 8,
+        queueCapacity: 8,
+        threadId: target.id,
+        turnId: targetTurn.id,
+        prompt: targetTurn.prompt,
+        title: target.title,
+        executionRoute: targetTurn.executionRoute,
+        resultDelivery: "reply",
+        threadCreationDepth: 1,
+      })
+      const finalAvailable = yield* Ref.make(false)
+      const pageRequests = yield* Ref.make<ReadonlyArray<string | undefined>>([])
+      const rootEvent = (cursor: string, sequence: number, type: string, text?: string): ExecutionBackend.Event => ({
+        executionId: `execution:${targetTurn.id}`,
+        cursor: `execution:${targetTurn.id}:${cursor}`,
+        sequence,
+        type,
+        createdAt: sequence,
+        ...(text === undefined ? {} : { text }),
+      })
+      const resultBackend = ExecutionBackend.Service.of({
+        ...backend,
+        replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
+        pageEvents: (_turnId, _direction, cursor) =>
+          Ref.update(pageRequests, (requests) => [...requests, cursor]).pipe(
+            Effect.andThen(
+              cursor === undefined
+                ? Effect.succeed({
+                    events: [
+                      rootEvent("stale", 1, "model.output.completed", "stale answer"),
+                      rootEvent("tool", 2, "tool.call.requested"),
+                      {
+                        cursor: "child:result-target-turn:agent:model:100",
+                        executionId: "child-agent",
+                        sequence: 100,
+                        type: "model.output.completed",
+                        createdAt: 2,
+                        text: "child answer must not escape",
+                      },
+                    ],
+                    hasMore: true,
+                    newestCursor: "page-one",
+                  })
+                : Ref.get(finalAvailable).pipe(
+                    Effect.map((available) => ({
+                      events: [
+                        ...(available ? [rootEvent("final", 3, "model.output.completed", "proven final answer")] : []),
+                        rootEvent("complete", 4, "execution.completed"),
+                        {
+                          cursor: "child:result-target-turn:agent:model:200",
+                          executionId: "child-agent",
+                          sequence: 200,
+                          type: "model.output.completed",
+                          createdAt: 4,
+                          text: "later child answer must not escape",
+                        },
+                      ],
+                      hasMore: false,
+                      newestCursor: "page-two",
+                    })),
+                  ),
+            ),
+          ),
+      })
+      const turns = yield* TurnRepository.makeMemory([sourceTurn, targetTurn])
+      const layer = Operation.productLayer({
+        repositoryLayer: ThreadRepository.memoryLayer([source, target]),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        transcriptRepositoryLayer: TranscriptRepository.memoryLayer,
+        threadInteractionRepositoryLayer: Layer.succeed(ThreadInteractionRepository.Service, interactions),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, resultBackend),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.die("unused"),
+        makeTurnId: Effect.die("unused"),
+      })
+
+      yield* Effect.gen(function* () {
+        yield* Operation.Service
+        yield* settleEvents
+        expect(yield* interactions.getResultRoute(targetTurn.id)).toMatchObject({ delivery: "awaiting-result" })
+        expect(yield* interactions.getReadiness(targetTurn.id)).toBeUndefined()
+
+        yield* Ref.set(finalAvailable, true)
+        yield* TestClock.adjust("1 second")
+        yield* settleEvents
+
+        expect(yield* interactions.getReadiness(targetTurn.id)).toMatchObject({
+          _tag: "TerminalReady",
+          output: "proven final answer",
+        })
+        expect(yield* interactions.getResultRoute(targetTurn.id)).toMatchObject({ delivery: "delivered" })
+        expect(
+          (yield* interactions.getMessages(source.id)).filter((turn) => turn.prompt === "proven final answer"),
+        ).toHaveLength(1)
+        expect(yield* Ref.get(pageRequests)).toEqual([undefined, "page-one", undefined, "page-one"])
+      }).pipe(provideLayer(layer))
     }),
   )
 })
