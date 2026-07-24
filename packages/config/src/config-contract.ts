@@ -76,7 +76,7 @@ export interface RoleRouteInput {
 export interface ModelRoutesInput {
   readonly modes?: Partial<Readonly<Record<ModeId, Partial<Readonly<Record<Role, string | RoleRouteInput>>>>>>
   readonly title?: string | RoleRouteInput
-  readonly agents?: Partial<Readonly<Record<AgentId, string>>>
+  readonly agents?: Partial<Readonly<Record<AgentId, string | RoleRouteInput>>>
   readonly compaction?: string
 }
 
@@ -140,6 +140,7 @@ export interface Settings {
   readonly models: Readonly<Record<string, ModelAlias>>
   readonly modes: Readonly<Record<ModeId, ModeConfig>>
   readonly threadTitle: RoleRoute
+  readonly agents: Partial<Readonly<Record<AgentId, RoleRouteInput>>>
   readonly compaction: { readonly summaryModel: RoleRoute }
   readonly keymap: Readonly<Record<string, string>>
   readonly permissions: Readonly<Record<string, PermissionDecision>>
@@ -290,6 +291,23 @@ export const resolveModelRoute: {
   (settings: Settings, mode: ModeId, role: Role = "main") =>
     resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
 )
+
+export const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
+
+export const resolveAgentRoute = (settings: Settings, mode: ModeId, agent: AgentId): ResolvedModelRoute => {
+  const inherited = settings.modes[mode][agent === "task" ? "main" : "oracle"]
+  const configured = settings.agents[agent]
+  if (configured === undefined) return resolveRoute(settings, inherited, `Agent ${agent}`)
+  return resolveRoute(
+    settings,
+    {
+      alias: configured.alias,
+      effort: configured.effort ?? inherited.effort,
+      ...(configured.fast ?? inherited.fast === true ? { fast: configured.fast ?? inherited.fast === true } : {}),
+    },
+    `Agent ${agent}`,
+  )
+}
 
 export interface ModeRouteLabel {
   readonly name: string
@@ -572,8 +590,8 @@ export const decodeSettingsInput: {
         "readThread",
         "task",
       ])
-      if (Object.values(value.modelRoutes.agents).some((alias) => typeof alias !== "string" || alias.length === 0))
-        throw ConfigFileError.make({ path, message: "Model route agent aliases must be non-empty" })
+      for (const [agent, route] of Object.entries(value.modelRoutes.agents))
+        roleRoute(`Model route agent ${agent}`, route)
     }
     if (
       value.modelRoutes.compaction !== undefined &&
@@ -666,6 +684,7 @@ export const defaults: Settings = {
     ultra: { main: { alias: "sol", effort: "xhigh" }, oracle: { alias: "sol", effort: "max" } },
   },
   threadTitle: { alias: "luna", effort: "low" },
+  agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
   permissions: { read: "allow", search: "allow", write: "allow", shell: "allow", external: "allow" },

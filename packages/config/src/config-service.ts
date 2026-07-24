@@ -126,6 +126,12 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
             }),
           ) as Settings["modes"]),
     threadTitle: roleRoute(defaults.threadTitle, workspace.modelRoutes?.title ?? global.modelRoutes?.title),
+    agents: Object.fromEntries(
+      Object.entries({ ...global.modelRoutes?.agents, ...workspace.modelRoutes?.agents }).map(([agent, override]) => [
+        agent,
+        typeof override === "string" ? { alias: override } : override,
+      ]),
+    ) as Settings["agents"],
     compaction: defaults.compaction,
     keymap: { ...defaults.keymap, ...global.keymap, ...workspace.keymap },
     permissions: { ...defaults.permissions, ...global.permissions, ...workspace.permissions },
@@ -161,6 +167,16 @@ const diagnostics = (
     ["global", global],
     ["workspace", workspace],
   ] as const)
+    if (input.modelRoutes?.agents !== undefined)
+      entries.push({
+        path: "modelRoutes.agents",
+        source,
+        message: "agent routes resolve but are not yet applied to execution",
+      })
+  for (const [source, input] of [
+    ["global", global],
+    ["workspace", workspace],
+  ] as const)
     for (const [name, alias] of Object.entries(input.modelAliases ?? {}))
       if (alias.base !== undefined)
         entries.push({
@@ -168,10 +184,6 @@ const diagnostics = (
           source,
           message: `deprecated base "${alias.base}"; replace with preset "${presetForBase(alias.base)}" and set displayName`,
         })
-  if (global.modelRoutes?.agents !== undefined)
-    entries.push({ path: "modelRoutes.agents", source: "global", message: "legacy agent routes ignored" })
-  if (workspace.modelRoutes?.agents !== undefined)
-    entries.push({ path: "modelRoutes.agents", source: "workspace", message: "legacy agent routes ignored" })
   if (global.modelRoutes?.compaction !== undefined)
     entries.push({ path: "modelRoutes.compaction", source: "global", message: "legacy compaction route ignored" })
   if (workspace.modelRoutes?.compaction !== undefined)

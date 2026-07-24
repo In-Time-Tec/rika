@@ -1662,8 +1662,27 @@ export const settleTuiInitialization: {
   ): Effect.Effect<T | undefined, E | E2>
 } = Function.dual(3, settleTuiInitializationImpl)
 
+export const modeRoutesFromConfig = Effect.fn("Main.modeRoutesFromConfig")(function* (
+  globalConfigPath: string,
+  workspace: string,
+) {
+  const globalSettings = yield* loadSettingsFile(globalConfigPath)
+  const workspaceSettings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+  const config = yield* ConfigService.effective().pipe(
+    provideLayerScoped(
+      ConfigService.liveEnvironmentLayer({
+        webProviders: WebSearch.providerRegistry,
+        global: globalSettings,
+        workspace: workspaceSettings,
+      }),
+    ),
+  )
+  return ConfigContract.modeRouteLabels(config.settings) as ViewState.ModeRoutes
+})
+
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
+  readonly globalConfigPath?: string | undefined
   readonly modeRoutes?: ViewState.ModeRoutes | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
@@ -1679,9 +1698,10 @@ export const interactiveTui =
       if (options.makeRenderer === undefined && (!process.stdin.isTTY || !process.stdout.isTTY)) return
       const context = yield* Effect.context<never>()
       const fork = Effect.runForkWith(context)
+      const resolvedModeRoutes = options.modeRoutes
       return yield* Effect.callback<void, Operation.OperationUnavailable>((resume) => {
         let model = ViewState.initial(input.workspace ?? process.cwd(), input.mode ?? "medium")
-        if (options.modeRoutes !== undefined) model = ViewState.withModeRoutes(model, options.modeRoutes)
+        if (resolvedModeRoutes !== undefined) model = ViewState.withModeRoutes(model, resolvedModeRoutes)
         let workingFrame: string | undefined
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))
         const refreshTerminalTitle = () => {

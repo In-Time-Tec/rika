@@ -122,7 +122,7 @@ describe("ConfigService", () => {
       expect(config.diagnostics).toContainEqual({
         path: "modelRoutes.agents",
         source: "workspace",
-        message: "legacy agent routes ignored",
+        message: "agent routes resolve but are not yet applied to execution",
       })
     }).pipe(
       provideLayer(
