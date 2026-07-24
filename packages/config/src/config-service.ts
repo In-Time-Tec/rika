@@ -1,7 +1,12 @@
 import { Config, Context, Effect, Layer, Redacted, Schema } from "effect"
+import { presetForBase, type PresetId, presets } from "./models"
 import {
   defaults,
   type Diagnostic,
+  type ModelAlias,
+  type ModelAliasInput,
+  type RoleRoute,
+  type RoleRouteInput,
   type EffectiveConfig,
   type Environment,
   type HttpProviderConnection,
@@ -28,6 +33,33 @@ export class WebProviderConfigurationError extends Schema.TaggedErrorClass<WebPr
   "WebProviderConfigurationError",
   { message: Schema.String },
 ) {}
+
+const aliasFromInput = (name: string, input: ModelAliasInput): ModelAlias => {
+  const presetId = input.preset ?? (input.base === undefined ? undefined : presetForBase(input.base))
+  const preset = presetId === undefined ? undefined : presets[presetId as PresetId]
+  const inherited = input.base === undefined ? undefined : defaults.models[input.base]
+  return {
+    displayName: input.displayName ?? name,
+    provider: input.provider,
+    candidates: input.candidates,
+    limits: input.limits ?? inherited?.limits ?? preset!.limits,
+    variants:
+      input.efforts === undefined
+        ? (preset!.variants(preset!.efforts) as ModelAlias["variants"])
+        : (input.efforts as ModelAlias["variants"]),
+  }
+}
+
+const roleRoute = (configured: RoleRoute, override: string | RoleRouteInput | undefined): RoleRoute => {
+  if (override === undefined) return configured
+  if (typeof override === "string") return { ...configured, alias: override }
+  return {
+    ...configured,
+    alias: override.alias,
+    ...(override.effort === undefined ? {} : { effort: override.effort }),
+    ...(override.fast === undefined ? {} : { fast: override.fast }),
+  }
+}
 
 const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Settings => {
   const webSearchProviders = { ...global.webSearch?.providers, ...workspace.webSearch?.providers }
@@ -73,8 +105,7 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
         ? defaults.models
         : Object.fromEntries(
             Object.entries({ ...global.modelAliases, ...workspace.modelAliases }).reduce((all, [name, input]) => {
-              const base = defaults.models[input.base]!
-              all.push([name, { ...base, provider: input.provider, candidates: input.candidates }])
+              all.push([name, aliasFromInput(name, input)])
               return all
             }, Object.entries(defaults.models)),
           ),
@@ -88,15 +119,13 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
               return [
                 mode,
                 {
-                  main: { ...configured.main, alias: workspaceMode?.main ?? globalMode?.main ?? configured.main.alias },
-                  oracle: {
-                    ...configured.oracle,
-                    alias: workspaceMode?.oracle ?? globalMode?.oracle ?? configured.oracle.alias,
-                  },
+                  main: roleRoute(configured.main, workspaceMode?.main ?? globalMode?.main),
+                  oracle: roleRoute(configured.oracle, workspaceMode?.oracle ?? globalMode?.oracle),
                 },
               ]
             }),
           ) as Settings["modes"]),
+    threadTitle: roleRoute(defaults.threadTitle, workspace.modelRoutes?.title ?? global.modelRoutes?.title),
     compaction: defaults.compaction,
     keymap: { ...defaults.keymap, ...global.keymap, ...workspace.keymap },
     permissions: { ...defaults.permissions, ...global.permissions, ...workspace.permissions },
@@ -128,6 +157,17 @@ const diagnostics = (
   }
   record(global, "global")
   record(workspace, "workspace")
+  for (const [source, input] of [
+    ["global", global],
+    ["workspace", workspace],
+  ] as const)
+    for (const [name, alias] of Object.entries(input.modelAliases ?? {}))
+      if (alias.base !== undefined)
+        entries.push({
+          path: `modelAliases.${name}.base`,
+          source,
+          message: `deprecated base "${alias.base}"; replace with preset "${presetForBase(alias.base)}" and set displayName`,
+        })
   if (global.modelRoutes?.agents !== undefined)
     entries.push({ path: "modelRoutes.agents", source: "global", message: "legacy agent routes ignored" })
   if (workspace.modelRoutes?.agents !== undefined)

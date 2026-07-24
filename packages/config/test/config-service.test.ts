@@ -111,8 +111,9 @@ describe("ConfigService", () => {
       const alias = config.settings.models["bedrock-terra"]!
       expect(alias.provider).toBe("bedrock")
       expect(alias.candidates).toEqual(["workspace-model"])
-      expect(alias.limits).toBe(ConfigContract.defaults.models.sol!.limits)
-      expect(alias.variants).toBe(ConfigContract.defaults.models.sol!.variants)
+      expect(alias.limits).toEqual(ConfigContract.defaults.models.sol!.limits)
+      expect(alias.variants).toEqual(ConfigContract.defaults.models.sol!.variants)
+      expect(alias.displayName).toBe("bedrock-terra")
       expect(config.settings.modes.medium).toEqual({
         main: { alias: "bedrock-terra", effort: "xhigh" },
         oracle: { alias: "bedrock-terra", effort: "medium" },
@@ -400,6 +401,134 @@ describe("ConfigService", () => {
             providers: {
               openai: { baseUrl: "https://chatgpt.com/backend-api/codex", streamingOnly: false },
               anthropic: { streamingOnly: true },
+            },
+          },
+        }),
+      ),
+    ),
+  )
+
+  it.effect("builds a self-described alias from a preset without naming a built-in base", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      const alias = config.settings.models["gate-sonnet"]!
+      expect(alias.displayName).toBe("Sonnet 5")
+      expect(alias.provider).toBe("anthropic")
+      expect(alias.candidates).toEqual(["claude-sonnet-5"])
+      expect(alias.limits.keepRecentTokens).toBe(64_000)
+      expect(alias.variants.high?.normal.options).toEqual({ output_config: { effort: "high" } })
+      expect(alias.variants.high?.fast).toBeUndefined()
+      const route = ConfigContract.resolveModelRoute(config.settings, "high")
+      expect(route.displayName).toBe("Sonnet 5")
+      expect(route.effort).toBe("max")
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            modelAliases: {
+              "gate-sonnet": {
+                preset: "claude",
+                provider: "anthropic",
+                candidates: ["claude-sonnet-5"],
+                displayName: "Sonnet 5",
+              },
+            },
+            modelRoutes: { modes: { high: { main: { alias: "gate-sonnet", effort: "max" } } } },
+          },
+        }),
+      ),
+    ),
+  )
+
+  it.effect("accepts an alias that declares its own limits and efforts", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      const alias = config.settings.models["gate-custom"]!
+      expect(alias.limits).toEqual({ maxInputTokens: 900_000, maxOutputTokens: 32_000, keepRecentTokens: 48_000 })
+      expect(alias.variants.medium?.normal.options).toEqual({ output_config: { effort: "medium" } })
+      expect(alias.displayName).toBe("gate-custom")
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            modelAliases: {
+              "gate-custom": {
+                provider: "anthropic",
+                candidates: ["some-new-model"],
+                limits: { maxInputTokens: 900_000, maxOutputTokens: 32_000, keepRecentTokens: 48_000 },
+                efforts: { medium: { normal: { options: { output_config: { effort: "medium" } } } } },
+              },
+            },
+          },
+        }),
+      ),
+    ),
+  )
+
+  it.effect("lets a mode route set its own reasoning effort", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      expect(config.settings.modes.high).toEqual({
+        main: { alias: "sol", effort: "high" },
+        oracle: { alias: "opus", effort: "max" },
+      })
+      expect(ConfigContract.resolveModelRoute(config.settings, "high", "oracle").effort).toBe("max")
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            modelRoutes: {
+              modes: { high: { main: { alias: "sol", effort: "high" }, oracle: { alias: "opus", effort: "max" } } },
+            },
+          },
+        }),
+      ),
+    ),
+  )
+
+  it.effect("routes thread titles to a configured alias instead of the fixed default", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      const route = ConfigContract.resolveThreadTitleRoute(config.settings)
+      expect(route.alias).toBe("gate-sonnet")
+      expect(route.displayName).toBe("Sonnet 5")
+      expect(route.effort).toBe("low")
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            modelAliases: {
+              "gate-sonnet": {
+                preset: "claude",
+                provider: "anthropic",
+                candidates: ["claude-sonnet-5"],
+                displayName: "Sonnet 5",
+              },
+            },
+            modelRoutes: { title: "gate-sonnet" },
+          },
+        }),
+      ),
+    ),
+  )
+
+  it.effect("keeps base-derived aliases working and reports them as deprecated", () =>
+    Effect.gen(function* () {
+      const config = yield* ConfigService.effective()
+      const alias = config.settings.models["legacy-sonnet"]!
+      expect(alias.limits).toEqual(ConfigContract.defaults.models.fable!.limits)
+      expect(alias.displayName).toBe("legacy-sonnet")
+      expect(config.diagnostics).toContainEqual({
+        path: "modelAliases.legacy-sonnet.base",
+        source: "global",
+        message: 'deprecated base "fable"; replace with preset "claude" and set displayName',
+      })
+    }).pipe(
+      provideLayer(
+        ConfigService.memoryLayer({
+          global: {
+            modelAliases: {
+              "legacy-sonnet": { base: "fable", provider: "bedrock", candidates: ["us.anthropic.claude-sonnet-5"] },
             },
           },
         }),

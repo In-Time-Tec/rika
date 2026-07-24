@@ -1,5 +1,5 @@
 import { Function, Schema, type Redacted } from "effect"
-import { defaults as modelDefaults } from "./models"
+import { defaults as modelDefaults, presetIds, presets, supportedEfforts } from "./models"
 
 export type ModeId = "low" | "medium" | "high" | "ultra"
 export type Role = "main" | "oracle"
@@ -56,12 +56,26 @@ export interface HttpProviderOverride {
 export type ProviderOverride = HttpProviderOverride | Omit<AmazonBedrockProviderConnection, "protocol">
 
 export interface ModelAliasInput {
-  readonly base: string
+  readonly base?: string
+  readonly preset?: string
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
+  readonly displayName?: string
+  readonly limits?: {
+    readonly maxInputTokens: number
+    readonly maxOutputTokens: number
+    readonly keepRecentTokens: number
+  }
+  readonly efforts?: Readonly<Record<string, { readonly normal: ModelVariant; readonly fast?: ModelVariant }>>
+}
+export interface RoleRouteInput {
+  readonly alias: string
+  readonly effort?: Effort
+  readonly fast?: boolean
 }
 export interface ModelRoutesInput {
-  readonly modes?: Partial<Readonly<Record<ModeId, Partial<Readonly<Record<Role, string>>>>>>
+  readonly modes?: Partial<Readonly<Record<ModeId, Partial<Readonly<Record<Role, string | RoleRouteInput>>>>>>
+  readonly title?: string | RoleRouteInput
   readonly agents?: Partial<Readonly<Record<AgentId, string>>>
   readonly compaction?: string
 }
@@ -81,6 +95,7 @@ export interface ModelVariant {
 }
 
 export interface ModelAlias {
+  readonly displayName: string
   readonly provider: ProviderId
   readonly candidates: ReadonlyArray<string>
   readonly limits: {
@@ -124,6 +139,7 @@ export interface Settings {
   readonly providers: Readonly<Record<ProviderId, ProviderConnection>>
   readonly models: Readonly<Record<string, ModelAlias>>
   readonly modes: Readonly<Record<ModeId, ModeConfig>>
+  readonly threadTitle: RoleRoute
   readonly compaction: { readonly summaryModel: RoleRoute }
   readonly keymap: Readonly<Record<string, string>>
   readonly permissions: Readonly<Record<string, PermissionDecision>>
@@ -180,6 +196,7 @@ export class ModelRouteError extends Schema.TaggedErrorClass<ModelRouteError>()(
 
 export interface ResolvedModelRoute {
   readonly alias: string
+  readonly displayName: string
   readonly effort: Effort
   readonly fast: boolean
   readonly providerId: ProviderId
@@ -248,6 +265,7 @@ const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): Reso
     })
   return {
     alias: route.alias,
+    displayName: alias.displayName,
     effort: route.effort,
     fast: route.fast === true,
     providerId: alias.provider,
@@ -274,7 +292,7 @@ export const resolveModelRoute: {
 )
 
 export const resolveThreadTitleRoute = (settings: Settings): ResolvedModelRoute =>
-  resolveRoute(settings, { alias: "luna", effort: "low", fast: false }, "Thread title model")
+  resolveRoute(settings, settings.threadTitle, "Thread title model")
 
 export const resolveCompactionSummaryRoute = (settings: Settings): ResolvedModelRoute =>
   resolveRoute(settings, settings.compaction.summaryModel, "Compaction summary model")
@@ -398,9 +416,15 @@ export const decodeSettingsInput: {
         throw ConfigFileError.make({ path, message: "Model alias names must be non-empty" })
       if (name in modelDefaults)
         throw ConfigFileError.make({ path, message: `Model alias ${name} cannot replace a built-in model alias` })
-      exactKeys(path, `Model alias ${name}`, alias, ["base", "provider", "candidates"])
-      if (typeof alias.base !== "string" || alias.base.length === 0 || !(alias.base in modelDefaults))
-        throw ConfigFileError.make({ path, message: `Model alias ${name} base must reference a built-in model alias` })
+      exactKeys(path, `Model alias ${name}`, alias, [
+        "base",
+        "preset",
+        "provider",
+        "candidates",
+        "displayName",
+        "limits",
+        "efforts",
+      ])
       if (typeof alias.provider !== "string" || !(alias.provider in providerDefaults))
         throw ConfigFileError.make({ path, message: `Model alias ${name} provider is unknown` })
       if (
@@ -409,11 +433,94 @@ export const decodeSettingsInput: {
         alias.candidates.some((candidate) => typeof candidate !== "string" || candidate.length === 0)
       )
         throw ConfigFileError.make({ path, message: `Model alias ${name} candidates must be non-empty strings` })
+      if (alias.base !== undefined && (typeof alias.base !== "string" || !(alias.base in modelDefaults)))
+        throw ConfigFileError.make({ path, message: `Model alias ${name} base must reference a built-in model alias` })
+      if (alias.preset !== undefined && (typeof alias.preset !== "string" || !presetIds.includes(alias.preset as never)))
+        throw ConfigFileError.make({
+          path,
+          message: `Model alias ${name} preset must be one of ${presetIds.join(", ")}`,
+        })
+      const sources = [alias.base, alias.preset, alias.efforts].filter((value) => value !== undefined).length
+      if (sources === 0)
+        throw ConfigFileError.make({
+          path,
+          message: `Model alias ${name} must set preset or efforts. Presets: ${presetIds.join(", ")}`,
+        })
+      if (sources > 1)
+        throw ConfigFileError.make({
+          path,
+          message: `Model alias ${name} must set only one of base, preset, or efforts`,
+        })
+      if (alias.displayName !== undefined && (typeof alias.displayName !== "string" || alias.displayName.length === 0))
+        throw ConfigFileError.make({ path, message: `Model alias ${name} displayName must be a non-empty string` })
+      if (alias.efforts !== undefined && alias.limits === undefined)
+        throw ConfigFileError.make({ path, message: `Model alias ${name} must set limits when it sets efforts` })
+      if (alias.limits !== undefined) {
+        if (!object(alias.limits))
+          throw ConfigFileError.make({ path, message: `Model alias ${name} limits must be an object` })
+        exactKeys(path, `Model alias ${name} limits`, alias.limits, [
+          "maxInputTokens",
+          "maxOutputTokens",
+          "keepRecentTokens",
+        ])
+        for (const key of ["maxInputTokens", "maxOutputTokens", "keepRecentTokens"]) {
+          const limit = alias.limits[key]
+          if (typeof limit !== "number" || !Number.isFinite(limit) || limit <= 0)
+            throw ConfigFileError.make({ path, message: `Model alias ${name} limits ${key} must be a positive number` })
+        }
+      }
+      if (alias.efforts !== undefined) {
+        if (!object(alias.efforts))
+          throw ConfigFileError.make({ path, message: `Model alias ${name} efforts must be an object` })
+        const protocol = providerDefaults[alias.provider as ProviderId].protocol
+        const allowed = presetIds.flatMap((id) => (presets[id].protocols.includes(protocol) ? presets[id].optionKeys : []))
+        for (const [effort, variants] of Object.entries(alias.efforts)) {
+          if (!supportedEfforts.includes(effort as never))
+            throw ConfigFileError.make({
+              path,
+              message: `Model alias ${name} effort ${effort} must be one of ${supportedEfforts.join(", ")}`,
+            })
+          if (!object(variants))
+            throw ConfigFileError.make({ path, message: `Model alias ${name} effort ${effort} must be an object` })
+          exactKeys(path, `Model alias ${name} effort ${effort}`, variants, ["normal", "fast"])
+          for (const [speed, variant] of Object.entries(variants)) {
+            if (!object(variant) || !object((variant as Record<string, unknown>).options))
+              throw ConfigFileError.make({
+                path,
+                message: `Model alias ${name} effort ${effort} ${speed} must set options`,
+              })
+            const options = (variant as { options: Record<string, unknown> }).options
+            const rejected = Object.keys(options).find((key) => !allowed.includes(key))
+            if (rejected !== undefined)
+              throw ConfigFileError.make({
+                path,
+                message: `Model alias ${name} effort ${effort} sets ${rejected}, which provider ${alias.provider} (${protocol}) does not accept. Accepted: ${allowed.join(", ")}`,
+              })
+          }
+        }
+      }
     }
   }
   if (value.modelRoutes !== undefined) {
     if (!object(value.modelRoutes)) throw ConfigFileError.make({ path, message: "Model routes must be an object" })
-    exactKeys(path, "Model routes", value.modelRoutes, ["modes", "agents", "compaction"])
+    exactKeys(path, "Model routes", value.modelRoutes, ["modes", "title", "agents", "compaction"])
+    const roleRoute = (owner: string, route: unknown) => {
+      if (typeof route === "string") {
+        if (route.length === 0) throw ConfigFileError.make({ path, message: `${owner} alias must be non-empty` })
+        return
+      }
+      if (!object(route)) throw ConfigFileError.make({ path, message: `${owner} must be an alias or an object` })
+      exactKeys(path, owner, route, ["alias", "effort", "fast"])
+      if (typeof route.alias !== "string" || route.alias.length === 0)
+        throw ConfigFileError.make({ path, message: `${owner} alias must be non-empty` })
+      if (route.effort !== undefined && !supportedEfforts.includes(route.effort as never))
+        throw ConfigFileError.make({
+          path,
+          message: `${owner} effort must be one of ${supportedEfforts.join(", ")}`,
+        })
+      if (route.fast !== undefined && typeof route.fast !== "boolean")
+        throw ConfigFileError.make({ path, message: `${owner} fast must be true or false` })
+    }
     if (value.modelRoutes.modes !== undefined) {
       if (!object(value.modelRoutes.modes))
         throw ConfigFileError.make({ path, message: "Model route modes must be an object" })
@@ -421,10 +528,10 @@ export const decodeSettingsInput: {
       for (const [mode, roles] of Object.entries(value.modelRoutes.modes)) {
         if (!object(roles)) throw ConfigFileError.make({ path, message: `Model route mode ${mode} must be an object` })
         exactKeys(path, `Model route mode ${mode}`, roles, ["main", "oracle"])
-        if (Object.values(roles).some((alias) => typeof alias !== "string" || alias.length === 0))
-          throw ConfigFileError.make({ path, message: `Model route mode ${mode} aliases must be non-empty` })
+        for (const [role, route] of Object.entries(roles)) roleRoute(`Model route mode ${mode} ${role}`, route)
       }
     }
+    if (value.modelRoutes.title !== undefined) roleRoute("Model route title", value.modelRoutes.title)
     if (value.modelRoutes.agents !== undefined) {
       if (!object(value.modelRoutes.agents))
         throw ConfigFileError.make({ path, message: "Model route agents must be an object" })
@@ -528,6 +635,7 @@ export const defaults: Settings = {
     high: { main: { alias: "sol", effort: "medium" }, oracle: { alias: "sol", effort: "high" } },
     ultra: { main: { alias: "sol", effort: "xhigh" }, oracle: { alias: "sol", effort: "max" } },
   },
+  threadTitle: { alias: "luna", effort: "low" },
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
   permissions: { read: "allow", search: "allow", write: "allow", shell: "allow", external: "allow" },
