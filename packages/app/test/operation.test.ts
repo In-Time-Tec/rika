@@ -306,6 +306,41 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("authorizes replacement when terminal Relay executions retain stale pending tool records", () =>
+    Effect.gen(function* () {
+      const turn = replacementTurn()
+      const turns = yield* TurnRepository.makeMemory([turn])
+      const child = AgentDepth.childExecutionId(turn.id, "terminal-child")
+      const staleTool = {
+        callId: "stale-tool",
+        name: "task",
+        input: {},
+        requestedAt: 1,
+      }
+      const inspectedBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (turnId) =>
+          Effect.succeed({
+            turnId,
+            status: "completed" as const,
+            waits: [],
+            pendingTools: [staleTool],
+            children: turnId === turn.id ? [{ executionId: child, status: "completed" as const }] : [],
+          }),
+      })
+      const result = yield* Operation.hasActiveExecutionWork().pipe(
+        provideLayer(
+          Layer.merge(
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(ExecutionBackend.Service, inspectedBackend),
+          ),
+        ),
+      )
+      expect(result).toBe(false)
+      expect((yield* turns.get(turn.id))?.status).toBe("completed")
+    }),
+  )
+
   it.effect(
     "authorizes replacement after a terminal child is pruned and retries after descendant inspection errors",
     () =>
