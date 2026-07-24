@@ -1664,6 +1664,7 @@ export const settleTuiInitialization: {
 
 export interface InteractiveTuiOptions {
   readonly editor?: string | undefined
+  readonly modeRoutes?: ViewState.ModeRoutes | undefined
   readonly makeRenderer?: NonNullable<Parameters<typeof createTui>[0]["makeRenderer"]>
   readonly writeTerminalTitle?: (sequence: string) => void
 }
@@ -1680,6 +1681,7 @@ export const interactiveTui =
       const fork = Effect.runForkWith(context)
       return yield* Effect.callback<void, Operation.OperationUnavailable>((resume) => {
         let model = ViewState.initial(input.workspace ?? process.cwd(), input.mode ?? "medium")
+        if (options.modeRoutes !== undefined) model = ViewState.withModeRoutes(model, options.modeRoutes)
         let workingFrame: string | undefined
         const writeTerminalTitle = options.writeTerminalTitle ?? ((sequence: string) => process.stdout.write(sequence))
         const refreshTerminalTitle = () => {

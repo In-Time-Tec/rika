@@ -291,6 +291,36 @@ export const resolveModelRoute: {
     resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
 )
 
+export interface ModeRouteLabel {
+  readonly name: string
+  readonly effort: string
+  readonly fast: boolean
+}
+
+const routeLabel = (settings: Settings, mode: ModeId, role: Role): ModeRouteLabel => {
+  const configured = settings.modes[mode][role]
+  try {
+    const route = resolveRoute(settings, configured, `Mode ${mode} ${role}`)
+    return { name: route.displayName, effort: route.effort, fast: route.fast }
+  } catch {
+    return {
+      name: settings.models[configured.alias]?.displayName ?? configured.alias,
+      effort: configured.effort,
+      fast: configured.fast === true,
+    }
+  }
+}
+
+export const modeRouteLabels = (
+  settings: Settings,
+): Readonly<Record<ModeId, { readonly main: ModeRouteLabel; readonly oracle: ModeRouteLabel }>> =>
+  Object.fromEntries(
+    (Object.keys(settings.modes) as ReadonlyArray<ModeId>).map((mode) => [
+      mode,
+      { main: routeLabel(settings, mode, "main"), oracle: routeLabel(settings, mode, "oracle") },
+    ]),
+  ) as Readonly<Record<ModeId, { readonly main: ModeRouteLabel; readonly oracle: ModeRouteLabel }>>
+
 export const resolveThreadTitleRoute = (settings: Settings): ResolvedModelRoute =>
   resolveRoute(settings, settings.threadTitle, "Thread title model")
 

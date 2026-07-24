@@ -289,6 +289,7 @@ const configuredFromPin = (
   runtime: ProviderRuntimePin,
 ): ConfigContract.ResolvedModelRoute => ({
   alias: route.alias,
+  displayName: route.alias,
   effort: route.effort as ConfigContract.Effort,
   fast: route.fast,
   providerId: route.provider as ConfigContract.ProviderId,

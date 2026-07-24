@@ -324,6 +324,27 @@ const WorkspaceFilesSchema = Schema.Union([
 
 const PaletteStateSchema = Schema.Struct({ open: Schema.Boolean, query: Schema.String, selected: Schema.Finite })
 const ModePickerStateSchema = Schema.Struct({ open: Schema.Boolean, selected: Schema.Finite })
+
+const ModeRouteLabelSchema = Schema.Struct({
+  name: Schema.String,
+  effort: Schema.String,
+  fast: Schema.Boolean,
+})
+const ModeRoutesSchema = Schema.Record(
+  Schema.String,
+  Schema.Struct({ main: ModeRouteLabelSchema, oracle: ModeRouteLabelSchema }),
+)
+export type ModeRouteLabel = typeof ModeRouteLabelSchema.Type
+export type ModeRoutes = typeof ModeRoutesSchema.Type
+
+const label = (name: string, effort: string): ModeRouteLabel => ({ name, effort, fast: false })
+
+export const defaultModeRoutes: ModeRoutes = {
+  low: { main: label("GPT-5.6 Luna", "xhigh"), oracle: label("GPT-5.6 Terra", "xhigh") },
+  medium: { main: label("GPT-5.6 Terra", "xhigh"), oracle: label("GPT-5.6 Sol", "medium") },
+  high: { main: label("GPT-5.6 Sol", "medium"), oracle: label("GPT-5.6 Sol", "high") },
+  ultra: { main: label("GPT-5.6 Sol", "xhigh"), oracle: label("GPT-5.6 Sol", "max") },
+}
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
@@ -392,6 +413,7 @@ export const Model = Schema.Struct({
   workspace: Schema.String,
   branch: Schema.optional(Schema.String),
   mode: Mode,
+  modeRoutes: ModeRoutesSchema,
   entries: Schema.Array(Entry),
   blocks: Schema.Array(Schema.Unknown),
   items: Schema.Array(Schema.Unknown),
@@ -682,6 +704,7 @@ export const initial: {
   (workspace: string, mode: Mode = "medium"): Model => ({
     workspace,
     mode,
+    modeRoutes: defaultModeRoutes,
     entries: [],
     blocks: [],
     items: [],
@@ -2250,3 +2273,8 @@ export const update: {
     }
   }
 })
+
+export const withModeRoutes: {
+  (routes: ModeRoutes): (model: Model) => Model
+  (model: Model, routes: ModeRoutes): Model
+} = Function.dual(2, (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes }))
