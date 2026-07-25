@@ -84,6 +84,7 @@ import {
   type ViewportMetrics,
   type ViewportAnchor,
 } from "./transcript-viewport"
+import { escapeControlCharacters, formatTokens, plural, truncateToWidth } from "./format"
 import { renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
 import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
@@ -337,18 +338,6 @@ interface ChangedFileRow {
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
 
-const truncateToWidth = (text: string, width: number): string => {
-  let truncated = ""
-  let used = 0
-  for (const { segment } of graphemeSegmenter.segment(text)) {
-    const cells = stringWidth(segment)
-    if (used + cells > width) break
-    truncated += segment
-    used += cells
-  }
-  return truncated
-}
-
 const wrapTextToWidth = (text: string, width: number): ReadonlyArray<string> => {
   const lines: Array<string> = []
   for (const hardLine of text.split("\n")) {
@@ -382,18 +371,7 @@ const wrapBodyText = (text: string, width: number, indent: string): string =>
     .map((line) => `${indent}${line}`)
     .join("\n")
 
-const escapeChangedPathSegment = (text: string): string =>
-  [...text]
-    .map((character) => {
-      const code = character.codePointAt(0)!
-      if (character === "\n") return "\\n"
-      if (character === "\r") return "\\r"
-      if (character === "\t") return "\\t"
-      if (code < 32 || (code >= 127 && code <= 159))
-        return code <= 255 ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u{${code.toString(16)}}`
-      return character
-    })
-    .join("")
+const escapeChangedPathSegment = escapeControlCharacters
 
 const fileTreeRows = (
   files: ReadonlyArray<import("./view-state").ChangedFile>,
@@ -551,8 +529,6 @@ const exploreChildLabel = (unit: ToolUnit): string => {
   const pattern = inputString(value, ["pattern", "query", "glob", "path"])
   return `${unit.block.presentation.action === "grep" ? "Grep" : "Searched"} ${unit.block.detail || pattern || ""}`.trimEnd()
 }
-
-const plural = (count: number, singular: string): string => `${count} ${singular}${count === 1 ? "" : "s"}`
 
 const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string => {
   if (running) return frame
@@ -966,11 +942,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       const counter = unit.block.presentation.counter ?? (unit.kind === "read" ? "file" : "search")
       counters.set(counter, (counters.get(counter) ?? 0) + 1)
     }
-    const counts = [...counters]
-      .map(([counter, count]) =>
-        counter === "search" ? plural(count, counter).replace("searchs", "searches") : plural(count, counter),
-      )
-      .join(", ")
+    const counts = [...counters].map(([counter, count]) => plural(count, counter)).join(", ")
     if (selected)
       highlight(
         `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
@@ -3974,12 +3946,7 @@ const formatCost = (usd: number): string =>
 
 const modeLabelWidth = (text: string): number => stringWidth(text.replaceAll(activeTimeIcon, "x"))
 
-export const formatTokens = (tokens: number): string => {
-  if (tokens < 1_000) return `${tokens.toLocaleString("en-US")} tok`
-  const divisor = tokens >= 1_000_000 ? 1_000_000 : 1_000
-  const suffix = divisor === 1_000_000 ? "M" : "K"
-  return `${(tokens / divisor).toFixed(1).replace(/\.0$/, "")}${suffix} tok`
-}
+export { formatTokens } from "./format"
 
 const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
   "                                        ",

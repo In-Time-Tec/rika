@@ -1,0 +1,37 @@
+import stringWidth from "string-width"
+import { describe, expect, test } from "vitest"
+import { clipToWidth, escapeControlCharacters, formatBytes, formatTokens, plural } from "../src/format"
+
+describe("format", () => {
+  test("abbreviates token counts with one owner", () => {
+    expect(formatTokens(1)).toBe("1 tok")
+    expect(formatTokens(999)).toBe("999 tok")
+    expect(formatTokens(1_234)).toBe("1.2K tok")
+    expect(formatTokens(2_000)).toBe("2K tok")
+    expect(formatTokens(12_345)).toBe("12.3K tok")
+    expect(formatTokens(1_234_567)).toBe("1.2M tok")
+  })
+
+  test("clips by terminal cell width, not code units", () => {
+    expect(stringWidth(clipToWidth("界界界界界", 6))).toBeLessThanOrEqual(6)
+    expect(clipToWidth("界界界界界", 6)).toBe("界界…")
+    expect(clipToWidth("abc", 10)).toBe("abc")
+    expect(clipToWidth("abcdef", 1)).toBe("…")
+  })
+
+  test("escapes control characters in one notation", () => {
+    expect(escapeControlCharacters("a\nb")).toBe("a\\nb")
+    expect(escapeControlCharacters("ab")).toBe("a\\u{1b}b")
+  })
+
+  test("pluralizes including -ch nouns", () => {
+    expect(plural(1, "file")).toBe("1 file")
+    expect(plural(2, "file")).toBe("2 files")
+    expect(plural(2, "search")).toBe("2 searches")
+  })
+
+  test("formats byte sizes across tiers", () => {
+    expect(formatBytes(512)).toBe("512 B")
+    expect(formatBytes(4_823_117)).toBe("4.8 MB")
+  })
+})

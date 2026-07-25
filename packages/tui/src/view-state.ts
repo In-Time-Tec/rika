@@ -1,6 +1,7 @@
 import type * as Transcript from "@rika/transcript"
 import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
+import { formatTokens, plural } from "./format"
 import type { Key } from "./keys"
 import { isPrintable } from "./keys"
 import { filter, type PaletteAction } from "./palette"
@@ -81,23 +82,14 @@ export const utf8ByteLength = (value: string): number => {
   return bytes
 }
 
-export const formatActivityCounter = (tokens: number): string => {
-  if (tokens < 1_000) return `${tokens} tok`
-  if (tokens < 10_000) return `${(tokens / 1_000).toFixed(2)}k tok`
-  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k tok`
-  return `${(tokens / 1_000_000).toFixed(1)}M tok`
-}
+export const formatActivityCounter = formatTokens
 
 export const formatActivity = (activity: Activity | undefined): string | undefined => {
   if (activity === undefined) return undefined
   if (activity._tag === "RunningTools") {
     const labels = [
-      ...(activity.subagents === undefined || activity.subagents === 0
-        ? []
-        : [`${activity.subagents} ${activity.subagents === 1 ? "subagent" : "subagents"}`]),
-      ...(activity.tools === undefined || activity.tools === 0
-        ? []
-        : [`${activity.tools} ${activity.tools === 1 ? "tool" : "tools"}`]),
+      ...(activity.subagents === undefined || activity.subagents === 0 ? [] : [plural(activity.subagents, "subagent")]),
+      ...(activity.tools === undefined || activity.tools === 0 ? [] : [plural(activity.tools, "tool")]),
     ]
     return labels.length === 0 ? "Running tools" : `Running ${labels.join(", ")}`
   }

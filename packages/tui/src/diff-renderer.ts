@@ -1,10 +1,7 @@
 import { Function } from "effect"
+import { clipToWidth } from "./format"
 
-const clip = (text: string, width: number): string => {
-  if (text.length <= width) return text
-  if (width <= 1) return "…"
-  return `${text.slice(0, width - 1)}…`
-}
+const clip = clipToWidth
 
 const renderDiffCache = new Map<string, string>()
 const styledDiffCache = new Map<string, ReadonlyArray<TextChunk> | null>()
