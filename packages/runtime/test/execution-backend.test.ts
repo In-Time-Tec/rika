@@ -21,7 +21,7 @@ const native = vi.hoisted(() => ({
 }))
 
 const routeFor = (
-  role: "main" | "oracle" | "compaction" | "librarian" | "painter" | "review" | "readThread" | "task",
+  role: "main" | "oracle" | "compaction" | "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task",
   model: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
   compaction: { readonly contextWindow: number; readonly reserveTokens: number; readonly keepRecentTokens: number },
 ) => ({
@@ -1782,6 +1782,7 @@ describe("ExecutionBackend Relay client adapter", () => {
             painter: routeFor("painter", selection, mainCompaction),
             review: routeFor("review", selection, mainCompaction),
             readThread: routeFor("readThread", selection, mainCompaction),
+            surgeon: routeFor("surgeon", selection, mainCompaction),
             task: routeFor("task", selection, mainCompaction),
           },
         }
@@ -1889,6 +1890,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           painter: routeFor("painter", selection, mainCompaction),
           review: routeFor("review", selection, mainCompaction),
           readThread: routeFor("readThread", selection, mainCompaction),
+          surgeon: routeFor("surgeon", selection, mainCompaction),
           task: routeFor("task", selection, mainCompaction),
         },
       })

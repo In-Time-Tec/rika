@@ -2004,6 +2004,7 @@ export const layer = <
               oracle: (input) => runDelegation("oracle", "Oracle", input),
               librarian: (input) => runDelegation("librarian", "Librarian", input),
               review: (input) => runDelegation("review", "Review", input),
+              surgeon: (input) => runDelegation("surgeon", "Surgeon", input),
               read_thread: (input) => runDelegation("read_thread", "ReadThread", input),
             })
           const handlerLayer = Layer.mergeAll(

@@ -8,13 +8,14 @@ import painterPrompt from "./prompts/painter.prompt.txt"
 import readThreadPrompt from "./prompts/read-thread.prompt.txt"
 import reviewPrompt from "./prompts/review.prompt.txt"
 import rootPrompt from "./prompts/root.prompt.txt"
+import surgeonPrompt from "./prompts/surgeon.prompt.txt"
 import taskPrompt from "./prompts/task.prompt.txt"
 import titlePrompt from "./prompts/title.prompt.txt"
 
-export const names = ["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"] as const
+export const names = ["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Surgeon", "Task"] as const
 export type Name = (typeof names)[number]
 
-export type AgentKey = "librarian" | "painter" | "review" | "readThread" | "task"
+export type AgentKey = "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task"
 
 export const agentKeyForName = (name: Name): AgentKey | undefined =>
   name === "Oracle" ? undefined : ((name.charAt(0).toLowerCase() + name.slice(1)) as AgentKey)
@@ -71,6 +72,18 @@ const definitions = {
     tools: [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool],
     permissions: ["thread.read"],
   },
+  Surgeon: {
+    instructions: instructions("Surgeon", surgeonPrompt),
+    tools: [
+      Tools.grepTool,
+      Tools.readTool,
+      Tools.writeTool,
+      Tools.editTool,
+      Tools.bashTool,
+      Tools.shellCommandStatusTool,
+    ],
+    permissions: ["workspace.read", "workspace.write", "process.run", "thread.read"],
+  },
   Task: {
     instructions: instructions("Task", taskPrompt),
     tools: [
@@ -90,7 +103,7 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   const definition = definitions[name]
   const delegationTools = (() => {
     if (name === "ReadThread") return []
-    if (name === "Oracle" || name === "Review") return [AgentTools.readThreadTool]
+    if (name === "Oracle" || name === "Review" || name === "Surgeon") return [AgentTools.readThreadTool]
     return Object.values(AgentTools.modelToolkit.tools)
   })()
   const recoveryTools =
@@ -151,7 +164,8 @@ export const presets = (options: {
       name,
       resolve(
         name,
-        options.agentModels?.[name] ?? (name === "Task" ? options.model : (options.oracleModel ?? options.model)),
+        options.agentModels?.[name] ??
+          (name === "Task" || name === "Surgeon" ? options.model : (options.oracleModel ?? options.model)),
       ).preset,
     ]),
   )
@@ -168,5 +182,6 @@ export const subagentHandoffTargets = [
   { name: "librarian", preset_name: "Librarian" },
   { name: "review", preset_name: "Review" },
   { name: "read_thread", preset_name: "ReadThread" },
+  { name: "surgeon", preset_name: "Surgeon" },
   { name: "task", preset_name: "Task" },
 ] as const

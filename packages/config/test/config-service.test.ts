@@ -28,7 +28,7 @@ describe("ConfigService", () => {
       expect(config.settings.providers).toEqual(ConfigContract.defaults.providers)
       expect(config.settings.models).toBe(ConfigContract.defaults.models)
       expect(config.settings.modes).toBe(ConfigContract.defaults.modes)
-      expect(config.settings.compaction).toBe(ConfigContract.defaults.compaction)
+      expect(config.settings.compaction).toEqual(ConfigContract.defaults.compaction)
       expect(config.environment.providerCredentials).toEqual({})
       expect(config.environment.webSearchCredentials).toEqual({})
     }).pipe(provideLayer(ConfigService.memoryLayer())),
@@ -118,7 +118,9 @@ describe("ConfigService", () => {
         main: { alias: "bedrock-terra", effort: "xhigh" },
         oracle: { alias: "bedrock-terra", effort: "medium" },
       })
-      expect(config.settings.compaction).toBe(ConfigContract.defaults.compaction)
+      expect(config.settings.compaction).toEqual({
+        summaryModel: { alias: "bedrock-fable", effort: ConfigContract.defaults.compaction.summaryModel.effort },
+      })
       expect(config.diagnostics).toContainEqual({
         path: "modelRoutes.agents",
         source: "workspace",

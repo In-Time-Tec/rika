@@ -145,7 +145,12 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
         typeof override === "string" ? { alias: override } : override,
       ]),
     ) as Settings["agents"],
-    compaction: defaults.compaction,
+    compaction: {
+      summaryModel: roleRoute(
+        defaults.compaction.summaryModel,
+        workspace.modelRoutes?.compaction ?? global.modelRoutes?.compaction,
+      ),
+    },
     keymap: { ...defaults.keymap, ...global.keymap, ...workspace.keymap },
     permissions: { ...defaults.permissions, ...global.permissions, ...workspace.permissions },
     extensionRoots: workspace.extensionRoots ?? global.extensionRoots ?? defaults.extensionRoots,
@@ -199,10 +204,6 @@ const diagnostics = (
           source,
           message: `deprecated base "${alias.base}"; replace with preset "${presetForBase(alias.base)}" and set displayName`,
         })
-  if (global.modelRoutes?.compaction !== undefined)
-    entries.push({ path: "modelRoutes.compaction", source: "global", message: "legacy compaction route ignored" })
-  if (workspace.modelRoutes?.compaction !== undefined)
-    entries.push({ path: "modelRoutes.compaction", source: "workspace", message: "legacy compaction route ignored" })
   for (const providerId of Object.keys(environment.webSearchCredentials).toSorted())
     entries.push({
       path: `webSearchCredentials.${providerId}`,
