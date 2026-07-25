@@ -259,7 +259,18 @@ test("pins aliases, variants, candidates, specialists, titles, and summaries as 
     },
   }
   const resolved = modelRoutesForExecution(settings, "high", { fastMode: true })
-  expect(resolved.map((route) => route.alias)).toEqual(["sol", "sol", "luna", "sol", "sol", "sol", "sol", "sol", "sol"])
+  expect(resolved.map((route) => route.alias)).toEqual([
+    "sol",
+    "sol",
+    "luna",
+    "sol",
+    "sol",
+    "sol",
+    "sol",
+    "sol",
+    "sol",
+    "sol",
+  ])
   expect(resolved.map((route) => route.model)).toEqual(resolved.map((route) => route.candidates[0]))
 
   const pin = executionRoutePin(settings, "high", { fastMode: true })

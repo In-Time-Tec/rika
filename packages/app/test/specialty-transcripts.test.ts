@@ -196,6 +196,7 @@ describe("specialty durable transcripts", () => {
         "oracle",
         "librarian",
         "review",
+        "surgeon",
         "read_thread",
         "search_threads",
         "read_thread_transcript",

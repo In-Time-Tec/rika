@@ -99,6 +99,7 @@ describe("product agent profiles", () => {
         "oracle",
         "librarian",
         "review",
+        "surgeon",
         "read_thread",
         ...threadRecoveryTools,
       ],
@@ -155,6 +156,7 @@ describe("product agent profiles", () => {
         "oracle",
         "librarian",
         "review",
+        "surgeon",
         "read_thread",
         ...threadRecoveryTools,
       ],
@@ -177,7 +179,7 @@ describe("product agent profiles", () => {
     }
   })
 
-  it("routes Task to main and every specialist to oracle", () => {
+  it("routes Task and Surgeon to main and every read-only specialist to oracle", () => {
     const oracleModel = { provider: "oracle", model: "reasoning" }
 
     for (const registered of [presets({ model, oracleModel })]) {
@@ -188,6 +190,7 @@ describe("product agent profiles", () => {
       expect(registered.Painter?.model).toEqual(relayModel(oracleModel))
       expect(registered.Review?.model).toEqual(relayModel(oracleModel))
       expect(registered.ReadThread?.model).toEqual(relayModel(oracleModel))
+      expect(registered.Surgeon?.model).toEqual(relayModel(model))
     }
 
     expect(presets({ model, oracleModel }).Oracle?.model).toEqual(relayModel(oracleModel))
@@ -206,6 +209,7 @@ describe("product agent profiles", () => {
       "librarian",
       "review",
       "read_thread",
+      "surgeon",
       "task",
     ])
     expect(childRunSpawnPermission).toEqual({ name: "relay.child_run.spawn", value: true })
@@ -223,6 +227,7 @@ describe("product agent profiles", () => {
         "oracle",
         "librarian",
         "review",
+        "surgeon",
         "read_thread",
         ...threadRecoveryTools,
       ])
