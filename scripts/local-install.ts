@@ -1,6 +1,7 @@
 import { Config, Console, Data, Effect, FileSystem, Option, Path, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { validatePackageArchive } from "./archive-contract"
+import { binDirEnv, binDirSegments, commandName, installRootEnv, installRootSegments } from "./install-contract"
 
 export class LocalInstallError extends Data.TaggedError("LocalInstallError")<{
   readonly operation: string
@@ -18,13 +19,17 @@ export const installPaths = Effect.fn("LocalInstall.installPaths")(() =>
   Effect.gen(function* () {
     const path = yield* Path.Path
     const home = yield* Config.string("HOME")
-    const configuredInstallRoot = yield* Config.option(Config.string("RIKA_INSTALL_ROOT"))
-    const configuredBinDir = yield* Config.option(Config.string("RIKA_BIN_DIR"))
+    const configuredInstallRoot = yield* Config.option(Config.string(installRootEnv))
+    const configuredBinDir = yield* Config.option(Config.string(binDirEnv))
     const installRoot = path.resolve(
-      Option.getOrElse(configuredInstallRoot, () => path.join(home, ".local", "share", "rika", "current")),
+      Option.getOrElse(configuredInstallRoot, () => path.join(home, ...installRootSegments)),
     )
-    const binDir = path.resolve(Option.getOrElse(configuredBinDir, () => path.join(home, ".local", "bin")))
-    return { installRoot, command: path.join(binDir, "rika"), binary: path.join(installRoot, "bin", "rika") }
+    const binDir = path.resolve(Option.getOrElse(configuredBinDir, () => path.join(home, ...binDirSegments)))
+    return {
+      installRoot,
+      command: path.join(binDir, commandName),
+      binary: path.join(installRoot, "bin", commandName),
+    }
   }),
 )
 

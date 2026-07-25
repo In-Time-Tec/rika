@@ -122,6 +122,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-sqlite-bun": "catalog:",
+        "@rika/config": "workspace:*",
         "@rika/tools": "workspace:*",
         "@rika/transcript": "workspace:*",
         "effect": "catalog:",
@@ -140,6 +141,7 @@
       "dependencies": {
         "@batonfx/core": "catalog:",
         "@relayfx/sdk": "catalog:",
+        "@rika/config": "workspace:*",
         "@rika/tools": "workspace:*",
         "effect": "catalog:",
       },
@@ -157,6 +159,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@ff-labs/fff-bun": "catalog:",
+        "@rika/config": "workspace:*",
         "effect": "catalog:",
         "parallel-web": "catalog:",
       },

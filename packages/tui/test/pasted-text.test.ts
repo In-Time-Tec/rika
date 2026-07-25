@@ -22,6 +22,19 @@ describe("pasted text attachments", () => {
     expect(unicodeBoundary.pastedText).toEqual([])
   })
 
+  it("collapses a short paste that looks like a mention and marks its prompt parts pasted", () => {
+    const model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "thanks @Copilot and @ipedro" })
+    expect(model.input).toHaveLength(1)
+    expect(ViewState.displayInput(model)).toBe("[Pasted text #1]")
+    expect(ViewState.promptParts(model.input, model.pastedText)).toEqual([
+      { type: "text", text: "thanks @Copilot and @ipedro", pasted: true },
+    ])
+
+    const address = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "mail dallen@example.com" })
+    expect(address.input).toBe("mail dallen@example.com")
+    expect(address.pastedText).toEqual([])
+  })
+
   it("does not reuse a pasted-text token after an earlier token is deleted", () => {
     let model = ViewState.update(ViewState.initial("/work"), { _tag: "Pasted", text: "delete\nthis" })
     model = ViewState.update(model, { _tag: "Pasted", text: "keep\nthis" })
@@ -54,7 +67,11 @@ describe("pasted text attachments", () => {
       },
       { _tag: "Submit", prompt: model.input, parts, mode: "ultra" },
     )
-    expect(parts).toEqual([{ type: "text", text: "before line one\r\nline two after" }])
+    expect(parts).toEqual([
+      { type: "text", text: "before " },
+      { type: "text", text: "line one\r\nline two", pasted: true },
+      { type: "text", text: " after" },
+    ])
     expect(submitted).toEqual([{ prompt: model.input, parts }])
   })
 
@@ -87,7 +104,7 @@ describe("pasted text attachments", () => {
       { type: "image", path: "screen shot.png" },
       { type: "text", text: " and " },
       { type: "image", path: "/tmp/other shot.webp" },
-      { type: "text", text: "x".repeat(121) },
+      { type: "text", text: "x".repeat(121), pasted: true },
     ])
   })
 

@@ -164,7 +164,7 @@ export interface ThreadItem {
 
 export type PermissionDecision = "allow" | "always" | "deny"
 export type PromptPart =
-  | { readonly type: "text"; readonly text: string }
+  | { readonly type: "text"; readonly text: string; readonly pasted?: boolean }
   | { readonly type: "image"; readonly path: string }
 export type ComposerAttachment =
   | {
@@ -832,20 +832,23 @@ export const classifyPrompt = (input: string): PromptSubmission => {
 const imagePathPattern =
   /@image:(?:"([^"]+\.(?:png|jpe?g|gif|webp))"|'([^']+\.(?:png|jpe?g|gif|webp))'|([^\s,;]+\.(?:png|jpe?g|gif|webp)))|\[([^\]\n]+\.(?:png|jpe?g|gif|webp))\]|(?:file:\/\/[^\s]+\.(?:png|jpe?g|gif|webp))|(?:(?:\\ |[^\s[\]])+\.(?:png|jpe?g|gif|webp))/gi
 
+const textPart = (text: string, pasted: boolean): PromptPart =>
+  pasted ? { type: "text", text, pasted } : { type: "text", text }
+
 const appendPromptPart = (parts: Array<PromptPart>, part: PromptPart): void => {
   const previous = parts.at(-1)
-  if (part.type === "text" && previous?.type === "text") {
-    parts[parts.length - 1] = { type: "text", text: previous.text + part.text }
+  if (part.type === "text" && previous?.type === "text" && (previous.pasted ?? false) === (part.pasted ?? false)) {
+    parts[parts.length - 1] = textPart(previous.text + part.text, part.pasted ?? false)
     return
   }
   parts.push(part)
 }
 
-const appendParsedText = (parts: Array<PromptPart>, text: string): void => {
+const appendParsedText = (parts: Array<PromptPart>, text: string, pasted: boolean): void => {
   let offset = 0
   for (const match of text.matchAll(imagePathPattern)) {
     const index = match.index
-    if (index > offset) appendPromptPart(parts, { type: "text", text: text.slice(offset, index) })
+    if (index > offset) appendPromptPart(parts, textPart(text.slice(offset, index), pasted))
     const value = match[1] ?? match[2] ?? match[3] ?? match[4] ?? match[0]
     let path = value
     if (path.startsWith("file://")) {
@@ -856,7 +859,7 @@ const appendParsedText = (parts: Array<PromptPart>, text: string): void => {
     appendPromptPart(parts, { type: "image", path: path.replace(/\\ /g, " ") })
     offset = index + match[0].length
   }
-  if (offset < text.length) appendPromptPart(parts, { type: "text", text: text.slice(offset) })
+  if (offset < text.length) appendPromptPart(parts, textPart(text.slice(offset), pasted))
 }
 
 export const promptParts: {
@@ -869,7 +872,8 @@ export const promptParts: {
     for (const value of input.split(/([\uE000-\uF8FF])/u)) {
       const attachment = pastedText.find((candidate) => candidate.token === value)
       if (attachment?.type === "image") appendPromptPart(parts, { type: "image", path: attachment.path })
-      else appendParsedText(parts, attachment?.type === "text" ? attachment.value : value)
+      else if (attachment?.type === "text") appendParsedText(parts, attachment.value, true)
+      else appendParsedText(parts, value, false)
     }
     return parts.length === 0 ? [{ type: "text", text: "" }] : parts
   },
@@ -950,10 +954,13 @@ const pastedImagePath = (value: string): string | undefined => {
   return unquoted.replace(/\\ /g, " ")
 }
 
+const pastedMention = /(?:^|\s)@[^\s,;]/
+
 const insertPaste = (model: Model, value: string): Model => {
   const imagePath = pastedImagePath(value)
   if (imagePath !== undefined) return insertImage(model, imagePath)
-  if (!value.includes("\n") && !value.includes("\r") && [...value].length <= 120) return insert(model, value)
+  if (!value.includes("\n") && !value.includes("\r") && !pastedMention.test(value) && [...value].length <= 120)
+    return insert(model, value)
   const token = String.fromCharCode(0xe000 + model.pastedText.length)
   const lines = value.split(/\r\n|\r|\n/).length
   const label =

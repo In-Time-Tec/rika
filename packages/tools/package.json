@@ -13,6 +13,7 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
+    "@rika/config": "workspace:*",
     "@ff-labs/fff-bun": "catalog:",
     "effect": "catalog:",
     "parallel-web": "catalog:"

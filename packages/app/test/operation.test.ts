@@ -3914,6 +3914,38 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("resolves mentions typed in the composer while ignoring mentions inside pasted text", () =>
+    Effect.gen(function* () {
+      const repository = yield* ThreadRepository.makeMemory()
+      const turns = yield* TurnRepository.makeMemory()
+      const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+      const inputs = yield* Ref.make<ReadonlyArray<ResolvedContext.Input>>([])
+      const layer = Operation.productLayer({
+        repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        resolvedContextLayer: ResolvedContext.testLayer({
+          resolve: (input) =>
+            Ref.update(inputs, (all) => [...all, input]).pipe(Effect.as({ sources: [], diagnostics: [], digest: "" })),
+        }),
+        defaultWorkspace: "/work",
+        makeThreadId: Effect.succeed(Thread.ThreadId.make("pasted-mention-thread")),
+        makeTurnId: Effect.succeed(Turn.TurnId.make("pasted-mention-turn")),
+        interactive: holdSession(sessions),
+      })
+      yield* Effect.gen(function* () {
+        const session = yield* openInteractiveSession(sessions, { _tag: "Interactive", prompt: [], ephemeral: false })
+        yield* session.submit("review @src/a.ts thanks @Copilot and @ipedro", undefined, [
+          { type: "text", text: "review @src/a.ts " },
+          { type: "text", text: "thanks @Copilot and @ipedro", pasted: true },
+        ])
+        yield* settleEvents
+      }).pipe(provideLayer(layer))
+
+      expect((yield* Ref.get(inputs)).map((input) => input.references)).toEqual([["src/a.ts"]])
+    }),
+  )
+
   it.effect("titles a new thread through its pinned GPT 5.6 Luna route", () =>
     Effect.gen(function* () {
       const repository = yield* ThreadRepository.makeMemory()
