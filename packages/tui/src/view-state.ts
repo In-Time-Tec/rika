@@ -1,12 +1,15 @@
 import type * as Transcript from "@rika/transcript"
 import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
+import { formatTokens, plural } from "./format"
 import type { Key } from "./keys"
 import { isPrintable } from "./keys"
 import { filter, type PaletteAction } from "./palette"
 import { expandableRowIds, rows as transcriptUnits, unitId as transcriptUnitId } from "./transcript-presenter"
+import { ModeId, modeIds } from "@rika/config/modes"
+import { defaults as configDefaults, resolveModelRoute } from "@rika/config"
 
-export const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
+export const Mode = ModeId
 export type Mode = typeof Mode.Type
 
 export const Activity = Schema.Union([
@@ -36,10 +39,7 @@ export type UsageTime = typeof UsageTime.Type
 export const UsageDisplay = Schema.Literals(["cost", "tokens", "time"])
 export type UsageDisplay = typeof UsageDisplay.Type
 
-export const nextMode = (mode: Mode): Mode => {
-  const modes = ["low", "medium", "high", "ultra"] as const
-  return modes[(modes.indexOf(mode) + 1) % modes.length]!
-}
+export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
 
 export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
   if (display === "cost" || display === undefined) return "tokens"
@@ -81,23 +81,14 @@ export const utf8ByteLength = (value: string): number => {
   return bytes
 }
 
-export const formatActivityCounter = (tokens: number): string => {
-  if (tokens < 1_000) return `${tokens} tok`
-  if (tokens < 10_000) return `${(tokens / 1_000).toFixed(2)}k tok`
-  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k tok`
-  return `${(tokens / 1_000_000).toFixed(1)}M tok`
-}
+export const formatActivityCounter = formatTokens
 
 export const formatActivity = (activity: Activity | undefined): string | undefined => {
   if (activity === undefined) return undefined
   if (activity._tag === "RunningTools") {
     const labels = [
-      ...(activity.subagents === undefined || activity.subagents === 0
-        ? []
-        : [`${activity.subagents} ${activity.subagents === 1 ? "subagent" : "subagents"}`]),
-      ...(activity.tools === undefined || activity.tools === 0
-        ? []
-        : [`${activity.tools} ${activity.tools === 1 ? "tool" : "tools"}`]),
+      ...(activity.subagents === undefined || activity.subagents === 0 ? [] : [plural(activity.subagents, "subagent")]),
+      ...(activity.tools === undefined || activity.tools === 0 ? [] : [plural(activity.tools, "tool")]),
     ]
     return labels.length === 0 ? "Running tools" : `Running ${labels.join(", ")}`
   }
@@ -157,13 +148,15 @@ export type Entry = typeof Entry.Type
 
 export type TranscriptBlock = Transcript.Block
 
+export const isThreadBusy = (status: ThreadItem["status"]): boolean => status !== "idle" && status !== "error"
+
 export interface ThreadItem {
   readonly id: string
   readonly title: string
   readonly workspace: string
   readonly pinned: boolean
   readonly archived: boolean
-  readonly status: "idle" | "queued" | "running" | "waiting"
+  readonly status: "idle" | "error" | "queued" | "running" | "awaiting-approval"
   readonly unread: boolean
   readonly lastActivityAt: number
   readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }
@@ -351,14 +344,18 @@ const ModeRoutesSchema = Schema.Record(
 export type ModeRouteLabel = typeof ModeRouteLabelSchema.Type
 export type ModeRoutes = typeof ModeRoutesSchema.Type
 
-const modeLabel = (name: string, effort: string): ModeRouteLabel => ({ name, effort, fast: false })
+const modeLabel = (route: { readonly displayName: string; readonly effort: string; readonly fast: boolean }) =>
+  ({ name: route.displayName, effort: route.effort, fast: route.fast }) satisfies ModeRouteLabel
 
-export const defaultModeRoutes: ModeRoutes = {
-  low: { main: modeLabel("GPT-5.6 Luna", "xhigh"), oracle: modeLabel("GPT-5.6 Terra", "xhigh") },
-  medium: { main: modeLabel("GPT-5.6 Terra", "xhigh"), oracle: modeLabel("GPT-5.6 Sol", "medium") },
-  high: { main: modeLabel("GPT-5.6 Sol", "medium"), oracle: modeLabel("GPT-5.6 Sol", "high") },
-  ultra: { main: modeLabel("GPT-5.6 Sol", "xhigh"), oracle: modeLabel("GPT-5.6 Sol", "max") },
-}
+export const defaultModeRoutes: ModeRoutes = Object.fromEntries(
+  modeIds.map((mode) => [
+    mode,
+    {
+      main: modeLabel(resolveModelRoute(configDefaults, mode, "main")),
+      oracle: modeLabel(resolveModelRoute(configDefaults, mode, "oracle")),
+    },
+  ]),
+)
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,
@@ -1951,7 +1948,7 @@ export const update: {
           ...model,
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
-          modePicker: { open: true, selected: ["low", "medium", "high", "ultra"].indexOf(model.mode) },
+          modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
           filePicker: { ...model.filePicker, open: false },
           shortcutsOpen: false,
         }
@@ -2019,7 +2016,7 @@ export const update: {
         if (key.name === "return")
           return {
             ...model,
-            mode: (["low", "medium", "high", "ultra"] as const)[selected]!,
+            mode: modeIds[selected]!,
             modePicker: { open: false, selected },
           }
         return { ...model, modePicker: { open: true, selected } }
@@ -2045,7 +2042,7 @@ export const update: {
                   ...model,
                   paletteOpen: false,
                   palette: { open: false, query: "", selected: 0 },
-                  modePicker: { open: true, selected: ["low", "medium", "high", "ultra"].indexOf(model.mode) },
+                  modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
                 }
           if (action._tag === "SwitchThread")
             return {

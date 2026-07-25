@@ -11,12 +11,13 @@ import { dispatch } from "./commands/shared"
 import { command as ThreadsCommand } from "./commands/threads"
 import { command as ToolsCommand } from "./commands/tools"
 import { command as WorkflowsCommand } from "./commands/workflows"
+import { modeIds, type ModeId } from "@rika/config/modes"
 
 declare const RIKA_VERSION: string | undefined
 
 export const version = typeof RIKA_VERSION === "string" ? RIKA_VERSION : "0.0.0"
 
-const mode = Flag.choice("mode", ["low", "medium", "high", "ultra"]).pipe(Flag.withAlias("m"), Flag.optional)
+const mode = Flag.choice("mode", modeIds).pipe(Flag.withAlias("m"), Flag.optional)
 const workspace = Flag.directory("workspace").pipe(Flag.optional)
 const thread = Flag.string("thread").pipe(Flag.optional)
 const ephemeral = Flag.boolean("ephemeral")
@@ -32,7 +33,7 @@ type RunOperation = Extract<Operation.Input, { readonly _tag: "Run" }>
 const JsonLine = Schema.UnknownFromJsonString
 
 const runInput = (values: {
-  readonly mode: Option.Option<"low" | "medium" | "high" | "ultra">
+  readonly mode: Option.Option<ModeId>
   readonly workspace: Option.Option<string>
   readonly thread: Option.Option<string>
   readonly ephemeral: boolean

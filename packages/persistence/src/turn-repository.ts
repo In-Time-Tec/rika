@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "./thread-schema"
+import { ExecutionStatus } from "@rika/tools"
 import {
   ExecutionExtensionPin,
   ExecutionRoutePin,
@@ -150,7 +151,7 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@rika/persistence/turn-repository/Service") {}
 
-const isTerminalStatus = (status: Status) => status === "completed" || status === "failed" || status === "cancelled"
+const isTerminalStatus = ExecutionStatus.isTerminalStatus
 
 const Row = Schema.Struct({
   id: Schema.String,
@@ -295,8 +296,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         const result = yield* Ref.modify(state, (current): readonly [MemorySubmissionResult, MemoryState] => {
           if (current.turns.has(input.id)) return [{ _tag: "Duplicate" as const }, current] as const
           const active = [...current.turns.values()].some(
-            (turn) =>
-              turn.threadId === input.threadId && ["queued", "accepted", "running", "waiting"].includes(turn.status),
+            (turn) => turn.threadId === input.threadId && ExecutionStatus.occupiesQueue(turn.status),
           )
           const previousQueue = queueState(current, input.threadId)
           if (active && previousQueue.queuedCount >= input.queueCapacity)
@@ -415,7 +415,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       }),
       findActive: Effect.fn("TurnRepository.findActive")(function* (threadId) {
         return [...(yield* Ref.get(state)).turns.values()]
-          .filter((turn) => turn.threadId === threadId && ["accepted", "running", "waiting"].includes(turn.status))
+          .filter((turn) => turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status))
           .toSorted((left, right) => left.createdAt - right.createdAt)[0]
       }),
       readQueue: Effect.fn("TurnRepository.readQueue")(function* (threadId) {
@@ -429,14 +429,14 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       }),
       listNonterminal: Effect.gen(function* () {
         return [...(yield* Ref.get(state)).turns.values()]
-          .filter((turn) => ["queued", "accepted", "running", "waiting"].includes(turn.status))
+          .filter((turn) => ExecutionStatus.occupiesQueue(turn.status))
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
       claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
         return yield* Ref.modify(state, (current) => {
           const hasActive = [...current.turns.values()].some(
-            (turn) => turn.threadId === threadId && ["accepted", "running", "waiting"].includes(turn.status),
+            (turn) => turn.threadId === threadId && ExecutionStatus.isActiveStatus(turn.status),
           )
           const queued = [...current.turns.values()]
             .filter((turn) => turn.threadId === threadId && turn.status === "queued" && !current.claims.has(turn.id))
@@ -594,7 +594,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             (candidate) =>
               candidate.id !== id &&
               candidate.threadId === turn.threadId &&
-              ["accepted", "running", "waiting"].includes(candidate.status),
+              ExecutionStatus.isActiveStatus(candidate.status),
           )
           if (hasOtherActive) return [{ _tag: "Unavailable" as const }, current]
           const previousQueue = queueState(current, turn.threadId)

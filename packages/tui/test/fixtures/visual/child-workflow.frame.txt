@@ -13,7 +13,7 @@
 
 
 
- ⠭ Review working ▸
+ ⠭ Reviewing code ▸
 
  ◫ Workflow release [waiting]
    verify

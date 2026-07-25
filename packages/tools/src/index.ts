@@ -1,4 +1,6 @@
 export * as Catalog from "./tool-catalog"
+export * as ExecutionId from "./execution-id"
+export * as ExecutionStatus from "./execution-status"
 export * as ToolPolicy from "./tool-policy"
 export * as ParallelSearch from "./parallel-search"
 export * as WebSearch from "./web-search"

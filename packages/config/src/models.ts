@@ -2,27 +2,29 @@ import type { Effort, ModelAlias } from "./config-contract"
 
 const source = "https://models.dev"
 
+export const supportedEfforts = ["low", "medium", "high", "xhigh", "max"] as const satisfies ReadonlyArray<Effort>
+
 export const catalog = {
   gpt56Luna: {
     source,
     id: "gpt-5.6-luna",
     displayName: "GPT-5.6 Luna",
     limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
-    efforts: ["low", "medium", "high", "xhigh", "max"],
+    efforts: supportedEfforts,
   },
   gpt56Terra: {
     source,
     id: "gpt-5.6-terra",
     displayName: "GPT-5.6 Terra",
     limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
-    efforts: ["low", "medium", "high", "xhigh", "max"],
+    efforts: supportedEfforts,
   },
   gpt56Sol: {
     source,
     id: "gpt-5.6-sol",
     displayName: "GPT-5.6 Sol",
     limits: { contextWindow: 1_050_000, maxInputTokens: 922_000, maxOutputTokens: 128_000 },
-    efforts: ["low", "medium", "high", "xhigh", "max"],
+    efforts: supportedEfforts,
   },
   gpt55: {
     source,
@@ -36,21 +38,21 @@ export const catalog = {
     id: "claude-fable-5",
     displayName: "Claude Fable 5",
     limits: { contextWindow: 1_000_000, maxInputTokens: 872_000, maxOutputTokens: 128_000 },
-    efforts: ["low", "medium", "high", "xhigh", "max"],
+    efforts: supportedEfforts,
   },
   claudeOpus5: {
     source,
     id: "claude-opus-5",
     displayName: "Claude Opus 5",
     limits: { contextWindow: 1_000_000, maxInputTokens: 872_000, maxOutputTokens: 128_000 },
-    efforts: ["low", "medium", "high", "xhigh", "max"],
+    efforts: supportedEfforts,
   },
   claudeOpus48: {
     source,
     id: "claude-opus-4-8",
     displayName: "Claude Opus 4.8",
     limits: { contextWindow: 1_000_000, maxInputTokens: 872_000, maxOutputTokens: 128_000 },
-    efforts: ["low", "medium", "high", "xhigh", "max"],
+    efforts: supportedEfforts,
   },
 } as const
 
@@ -79,14 +81,14 @@ export const presets = {
   openai: {
     protocols: ["openai"] as ReadonlyArray<string>,
     optionKeys: ["reasoning", "service_tier"] as ReadonlyArray<string>,
-    efforts: ["low", "medium", "high", "xhigh", "max"] as ReadonlyArray<Effort>,
+    efforts: supportedEfforts as ReadonlyArray<Effort>,
     limits: { maxInputTokens: 922_000, maxOutputTokens: 128_000, keepRecentTokens: 32_000 },
     variants: gptVariants,
   },
   claude: {
     protocols: ["anthropic", "amazon-bedrock"] as ReadonlyArray<string>,
     optionKeys: ["output_config"] as ReadonlyArray<string>,
-    efforts: ["low", "medium", "high", "xhigh", "max"] as ReadonlyArray<Effort>,
+    efforts: supportedEfforts as ReadonlyArray<Effort>,
     limits: { maxInputTokens: 872_000, maxOutputTokens: 128_000, keepRecentTokens: 64_000 },
     variants: claudeVariants,
   },
@@ -133,5 +135,3 @@ export const defaultCompaction = {
   reserveTokens: catalog.gpt56Luna.limits.maxOutputTokens,
   keepRecentTokens: 32_000,
 }
-
-export const supportedEfforts = ["low", "medium", "high", "xhigh", "max"] as const satisfies ReadonlyArray<Effort>

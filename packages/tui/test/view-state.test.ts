@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest"
 import { it } from "@effect/vitest"
 import { Duration, Effect } from "effect"
 import { Keys, Palette, ViewState } from "../src"
+import * as Adapter from "../src/adapter"
 
 const key = (input: Partial<Keys.Key> & Pick<Keys.Key, "name">): Keys.Key => ({
   name: input.name,
@@ -115,9 +116,11 @@ describe("ViewState", () => {
     expect(ViewState.formatActivity({ _tag: "Thinking", bytes: 0 })).toBe("Thinking 0 tok")
     expect(ViewState.formatActivityCounter(1)).toBe("1 tok")
     expect(ViewState.formatActivityCounter(999)).toBe("999 tok")
-    expect(ViewState.formatActivityCounter(1_234)).toBe("1.23k tok")
-    expect(ViewState.formatActivityCounter(12_345)).toBe("12.3k tok")
+    expect(ViewState.formatActivityCounter(1_234)).toBe("1.2K tok")
+    expect(ViewState.formatActivityCounter(2_000)).toBe("2K tok")
+    expect(ViewState.formatActivityCounter(12_345)).toBe("12.3K tok")
     expect(ViewState.formatActivityCounter(1_234_567)).toBe("1.2M tok")
+    expect(ViewState.formatActivityCounter(1_234)).toBe(Adapter.formatTokens(1_234))
   })
 
   test("summarizes top-level subagents separately from all other running tools", () => {

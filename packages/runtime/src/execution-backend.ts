@@ -75,13 +75,15 @@ import {
 } from "./agent-profiles"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
-import { definitions, idFor } from "./workflow-definitions"
+import { definitions, idFor, workflowDefinitionName } from "./workflow-definitions"
 import {
   childExecutionDepth,
   childExecutionId as encodeChildExecutionId,
+  decodeParentExecutionId,
   delegationAvailableAtDepth,
   toolsAtDepth,
 } from "./agent-depth"
+import { ExecutionId, ExecutionStatus } from "@rika/tools"
 import * as DataBlobStore from "./data-blob-store"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"
@@ -499,8 +501,7 @@ const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.
     return undefined
   })
 
-const terminalExecutionStatus = (status: string) =>
-  status === "completed" || status === "failed" || status === "cancelled"
+const terminalExecutionStatus = ExecutionStatus.isTerminalStatus
 
 const retryRecoveryPersistence = <A, E, R>(effect: Effect.Effect<A, E, R>, execution: string) =>
   effect.pipe(
@@ -655,16 +656,7 @@ const attachedWorkflow = (value: string) => {
     return undefined
   }
 }
-const childParentExecutionId = (value: string) => {
-  if (!value.startsWith("child:")) return undefined
-  const separator = value.indexOf(":", "child:".length)
-  if (separator < 0) return undefined
-  try {
-    return decodeURIComponent(value.slice("child:".length, separator))
-  } catch {
-    return undefined
-  }
-}
+const childParentExecutionId = decodeParentExecutionId
 const standaloneWorkflow = (value: string) => {
   const match = /^workflow:workspace:([^:]+):run:(.+)$/.exec(value)
   if (match === null) return undefined
@@ -728,7 +720,7 @@ const executionInput = (input: { readonly prompt: string; readonly promptParts?:
 }
 
 const mapFanOut = (value: any) => {
-  const parentTurnId = String(value.parent_execution_id).replace(/^execution:/, "")
+  const parentTurnId = ExecutionId.executionKey(String(value.parent_execution_id))
   return {
     fanOutId: String(value.fan_out_id),
     parentTurnId,
@@ -758,9 +750,7 @@ const workflow = (value: any) => {
   return {
     runId: attached?.runId ?? standalone?.runId ?? execution.replace(/^workflow:/, ""),
     ...(attached === undefined ? {} : { ownerTurnId: attached.ownerTurnId }),
-    workflow: String(value.pin.workflow_definition_id)
-      .replace(/^rika:/, "")
-      .replace(/:v1$/, ""),
+    workflow: workflowDefinitionName(String(value.pin.workflow_definition_id)),
     revision: value.pin.workflow_definition_revision,
     digest: value.pin.workflow_definition_digest,
     status: value.status,
@@ -943,10 +933,7 @@ const followExecution = (
                 return Effect.succeed(true)
               const spawnedChild = childExecutionIdFromEvent(item.event)
               const mapped = attributedEvent(item.event, root ? undefined : String(execution))
-              let terminal: Status | undefined
-              if (mapped.type === "execution.completed") terminal = Status.make("completed")
-              else if (mapped.type === "execution.failed") terminal = Status.make("failed")
-              else if (mapped.type === "execution.cancelled") terminal = Status.make("cancelled")
+              const terminal: Status | undefined = ExecutionStatus.terminalEventStatus(mapped.type)
               const inspectActionable =
                 stopAtActionableWait && isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
                   ? client.executions

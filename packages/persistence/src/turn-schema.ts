@@ -1,5 +1,6 @@
 import { Schema } from "effect"
 import { ThreadId } from "./thread-schema"
+import { RouteModeId } from "@rika/config/modes"
 
 export const TurnId = Schema.String.pipe(Schema.brand("RikaTurnId"))
 export type TurnId = typeof TurnId.Type
@@ -77,7 +78,7 @@ export const ExecutionModelRoute = Schema.Struct({
 export type ExecutionModelRoute = typeof ExecutionModelRoute.Type
 
 export const ExecutionRoutePin = Schema.Struct({
-  mode: Schema.Literals(["low", "medium", "high", "ultra", "test"]),
+  mode: RouteModeId,
   tokenBudget: Schema.optionalKey(Schema.Finite),
   title: Schema.optionalKey(ExecutionModelRoute),
   compactionSummary: Schema.optionalKey(ExecutionModelRoute),
@@ -96,7 +97,7 @@ export const ExecutionRoutePin = Schema.Struct({
 })
 export type ExecutionRoutePin = typeof ExecutionRoutePin.Type
 
-export const testExecutionRoute = (mode: "low" | "medium" | "high" | "ultra" | "test" = "test"): ExecutionRoutePin => {
+export const testExecutionRoute = (mode: RouteModeId = "test"): ExecutionRoutePin => {
   const route = {
     alias: "test",
     provider: "test",

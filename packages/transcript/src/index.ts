@@ -1,4 +1,4 @@
-import { Catalog } from "@rika/tools"
+import { Catalog, ExecutionId } from "@rika/tools"
 import { Function, Option, Schema } from "effect"
 import { pricingVersion, usageCostUsd, usageTokens } from "./model-cost"
 import { partialInputRecord } from "./partial-input"
@@ -7,6 +7,10 @@ import type { Block, Content, Presentation, Projection, SourceEvent, ToolFile, T
 export * from "./schema"
 export { pricingVersion, usageTokens, type UsageTokens } from "./model-cost"
 export { partialInputRecord } from "./partial-input"
+
+export const agentPresentation = (name: string): Presentation => Catalog.resolveAgentPresentation(name)
+
+export const agentPhrase = (input: Catalog.AgentPhrase): string => Catalog.agentPhrase(input)
 
 const record = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {}
@@ -36,7 +40,7 @@ const outputText = (output: unknown): string => {
 
 const eventId = (turnId: string, id: string): string => (turnId.length === 0 ? id : `${turnId}:${id}`)
 
-const executionKey = (value: string): string => value.replace(/^execution:/, "")
+export const executionKey = ExecutionId.executionKey
 
 const rawToolId = (event: SourceEvent): string => {
   const value = event.type === "tool.result.received" ? resultPayload(event) : callPayload(event)
@@ -253,9 +257,7 @@ const providerCallId = (id: string): string => {
   if (match === null) return id
   try {
     const namespace = decodeURIComponent(match[1]!)
-    return namespace.startsWith("execution:") || namespace.startsWith("child:") || namespace.startsWith("workflow:")
-      ? id.slice(match[0].length)
-      : id
+    return ExecutionId.isExecutionNamespace(namespace) ? id.slice(match[0].length) : id
   } catch {
     return id
   }
@@ -354,13 +356,6 @@ const linkedToolFor = (
   return parsed === undefined ? undefined : toolAt(projection, eventId(turnId, parsed.rawCallId))
 }
 
-const agentPresentationFor = (name: string): Presentation => {
-  const profile = name.toLowerCase()
-  if (profile === "task" || profile === "child" || profile === "subagent") return Catalog.resolvePresentation("task")
-  if (profile === "oracle" || profile === "librarian") return Catalog.resolvePresentation(profile)
-  return Catalog.resolvePresentation(`transfer_to_${profile}`)
-}
-
 export const ensureChildTool: {
   (
     projection: Projection,
@@ -390,7 +385,7 @@ export const ensureChildTool: {
       name,
       input: "",
       status: "running",
-      presentation: agentPresentationFor(name),
+      presentation: Catalog.resolveAgentPresentation(name),
       detail: "",
       files: [],
       childId: childExecutionId,
@@ -493,8 +488,6 @@ const applyAssistant = (projection: Projection, turnId: string, event: SourceEve
   )
 }
 
-const agentName = (value: string): string => value.replace(/:\d+$/, "")
-
 const childStatus = (
   event: SourceEvent,
   value: Record<string, unknown>,
@@ -527,8 +520,8 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
   if (linkedTool !== undefined) {
     const id = linkedTool.id
     const childState = childStatus(event, value)
-    const profile = string(value.profile ?? value.preset_name ?? value.name).toLowerCase()
-    const presentation = profile.length === 0 ? linkedTool.presentation : agentPresentationFor(profile)
+    const profile = Catalog.agentProfile(string(value.profile ?? value.preset_name ?? value.name))
+    const presentation = profile.length === 0 ? linkedTool.presentation : Catalog.resolveAgentPresentation(profile)
     const updated = updateTool(projection, id, event.sequence, (tool) => ({
       ...tool,
       childId,
@@ -555,7 +548,7 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
   const block: Extract<Block, { _tag: "ChildAgent" }> = {
     _tag: "ChildAgent",
     id: childId,
-    name: agentName(string(value.profile ?? value.preset_name ?? value.name, previous?.name ?? "child")),
+    name: Catalog.agentProfile(string(value.profile ?? value.preset_name ?? value.name, previous?.name ?? "child")),
     summary: string(value.summary ?? value.output ?? value.error, previous?.summary ?? ""),
     status: childStatus(event, value),
     activity: activity.length === 0 ? (previous?.activity ?? []) : [...(previous?.activity ?? []), activity],

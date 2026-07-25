@@ -1,4 +1,5 @@
-export type GoodbyeMode = "low" | "medium" | "high" | "ultra"
+import type { ModeId } from "@rika/config/modes"
+export type GoodbyeMode = ModeId
 
 export interface GoodbyeInput {
   readonly mode: GoodbyeMode

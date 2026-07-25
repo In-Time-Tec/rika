@@ -4,9 +4,12 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { ThreadTools, ToolInvocation } from "@rika/tools"
+import { ExecutionStatus, ThreadTools, ToolInvocation } from "@rika/tools"
 import { Clock, Context, Effect, Ref, Schema } from "effect"
 import type * as RootTurnOwner from "./root-turn-owner"
+import { clampThreadTitle } from "./thread-title"
+import * as ThreadState from "@rika/persistence/thread-state"
+import { ModeId } from "@rika/config/modes"
 
 export interface Options {
   readonly scheduler: Pick<RootTurnOwner.Interface, "accepted">
@@ -84,15 +87,9 @@ export const makeGateway = Effect.gen(function* () {
 const limits = { maximumDepth: 3, maximumAdmissions: 8, maximumWorkspaceActive: 8, queueCapacity: 8 }
 const delivery = (value: "reply" | "manual" | undefined) => value ?? "reply"
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
-const terminal = (status: Turn.Status) => status === "completed" || status === "failed" || status === "cancelled"
-const state = (turns: ReadonlyArray<Turn.Turn>): ThreadTools.ThreadState => {
-  const active = turns.find((turn) => !terminal(turn.status) && turn.status !== "queued")
-  if (active?.status === "waiting") return "awaiting-approval"
-  if (active !== undefined) return "running"
-  if (turns.some((turn) => turn.status === "queued")) return "queued"
-  if (turns.at(-1)?.status === "failed") return "error"
-  return "idle"
-}
+const terminal = ExecutionStatus.isTerminalStatus
+const state = (turns: ReadonlyArray<Turn.Turn>): ThreadTools.ThreadState =>
+  ThreadState.threadState(turns.map((turn) => turn.status))
 
 export const make = Effect.fn("ThreadToolService.make")(function* (options: Options) {
   const interactions = yield* ThreadInteractionRepository.Service
@@ -121,7 +118,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
         sourceRootTurnId: sourceTurnId,
         now: invocation.createdAt,
       })
-      const executionRoute = (mode?: "low" | "medium" | "high" | "ultra") =>
+      const executionRoute = (mode?: ModeId) =>
         mode === undefined ? sourceTurn.executionRoute : { ...sourceTurn.executionRoute, mode }
       const schedule = (accepted: ThreadInteractionRepository.AcceptedThreadTurn) =>
         accepted.status === "accepted"
@@ -139,7 +136,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
             threadId: Thread.ThreadId.make(id()),
             turnId: Turn.TurnId.make(id()),
             prompt: input.prompt,
-            title: input.prompt.slice(0, 128),
+            title: clampThreadTitle(input.prompt),
             executionRoute: executionRoute(input.mode),
             resultDelivery,
             threadCreationDepth: source.threadCreationDepth + 1,

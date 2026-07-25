@@ -95,6 +95,46 @@ const agentPresentation = (action: string, activeLabel: string, completeLabel: s
   completeLabel,
 })
 
+const genericAgentNames = new Set(["", "child", "task", "subagent"])
+
+const agentToolName = (profile: string): string => {
+  if (genericAgentNames.has(profile)) return "task"
+  return profile === "readthread" ? "read_thread" : profile
+}
+
+export const agentProfile = (name: string): string =>
+  name
+    .trim()
+    .replace(/^rika-/, "")
+    .replace(/:\d+$/, "")
+    .trim()
+
+export const agentDisplay = (name: string): string => {
+  const profile = agentProfile(name)
+  return genericAgentNames.has(profile.toLowerCase()) ? "Subagent" : profile.charAt(0).toUpperCase() + profile.slice(1)
+}
+
+export const resolveAgentPresentation = (name: string): ToolPolicy.Presentation => {
+  const profile = agentProfile(name).toLowerCase()
+  const toolName = agentToolName(profile)
+  const defined = AgentTools.isDelegationToolName(toolName) ? get(toolName)?.presentation : undefined
+  if (defined !== undefined) return defined
+  const display = agentDisplay(name)
+  return agentPresentation(profile, `${display} working`, `${display} finished`)
+}
+
+export interface AgentPhrase {
+  readonly name: string
+  readonly status: "running" | "complete" | "failed" | "cancelled"
+}
+
+export const agentPhrase = ({ name, status }: AgentPhrase): string => {
+  const presentation = resolveAgentPresentation(name)
+  if (status === "running") return presentation.activeLabel
+  if (status === "complete") return presentation.completeLabel
+  return `${agentDisplay(name)} ${status}`
+}
+
 export const resolvePresentation = (rawName: string): ToolPolicy.Presentation => {
   const name = rawName.toLowerCase()
   const defined = get(name)?.presentation
@@ -119,16 +159,8 @@ export const resolvePresentation = (rawName: string): ToolPolicy.Presentation =>
     return agentPresentation("finder", "Searching codebase", "Searched codebase")
   if (name === "review" || name.includes("review"))
     return agentPresentation("review", "Reviewing code", "Reviewed code")
-  if (name.startsWith("transfer_to_")) {
-    const profile = name.slice("transfer_to_".length)
-    if (profile === "oracle") return agentPresentation("oracle", "Oracle exploring", "Oracle has spoken")
-    if (profile === "librarian") return agentPresentation("librarian", "Librarian researching", "Librarian researched")
-    if (profile.length === 0 || profile === "task" || profile === "child" || profile === "subagent")
-      return agentPresentation("task", "Subagent working", "Subagent finished")
-    const display = profile.charAt(0).toUpperCase() + profile.slice(1)
-    return agentPresentation(profile, `${display} working`, `${display} finished`)
-  }
-  if (name === "spawn_child_run") return agentPresentation("task", "Subagent working", "Subagent finished")
+  if (name.startsWith("transfer_to_")) return resolveAgentPresentation(name.slice("transfer_to_".length))
+  if (name === "spawn_child_run") return resolveAgentPresentation("task")
   if (name === "skill")
     return { family: "explore", action: "skill", activeLabel: "Exploring", completeLabel: "Explored", counter: "skill" }
   if (name === "list_agent_modes")

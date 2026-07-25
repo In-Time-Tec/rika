@@ -1,5 +1,6 @@
 import { partialInputRecord } from "@rika/transcript"
 import { Function, Option, Schema } from "effect"
+import { escapeControlCharacters } from "../format"
 import type { Model, TranscriptBlock, TranscriptItem } from "../view-state"
 
 export type ToolGroupKind = "explore" | "edit" | "shell" | "other"
@@ -33,7 +34,7 @@ export type TranscriptUnit =
 
 export type TranscriptUnitId = string
 
-const readToolNames = new Set(["read", "view_file"])
+const readToolNames = new Set(["read", "view_file", "get_diagnostics"])
 const searchToolNames = new Set(["grep", "glob", "list_dir", "codebase_search"])
 const editToolNames = new Set(["edit", "write"])
 const shellToolNames = new Set(["bash", "run_command"])
@@ -86,17 +87,7 @@ export const agentToolSummary = (label: string): ToolSummary => {
   return suffix === undefined ? summary(label) : { primary: label.slice(0, -suffix.length), secondary: suffix }
 }
 
-export const escapePathTarget = (path: string): string =>
-  [...path]
-    .map((character) => {
-      const code = character.codePointAt(0) ?? 0
-      if (character === "\n") return "\\n"
-      if (character === "\r") return "\\r"
-      if (character === "\t") return "\\t"
-      if (code < 0x20 || (code >= 0x7f && code <= 0x9f)) return `\\u{${code.toString(16)}}`
-      return character
-    })
-    .join("")
+export const escapePathTarget = escapeControlCharacters
 
 const inputValue = (input: string): Record<string, unknown> =>
   Option.getOrElse(Schema.decodeUnknownOption(ToolInputJson)(input), () => partialInputRecord(input))

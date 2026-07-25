@@ -133,7 +133,7 @@ test("rejects an image attachment larger than the size limit with an actionable 
       expect(error._tag).toBe("PromptAttachmentError")
       expect(error.index).toBe(0)
       expect(error.path).toBe("huge.png")
-      expect(error.message).toBe("Image attachment is too large (6.0 MB; the limit is 5.0 MB): huge.png")
+      expect(error.message).toBe("Image attachment is too large (6 MB; the limit is 5 MB): huge.png")
     }),
   ))
 

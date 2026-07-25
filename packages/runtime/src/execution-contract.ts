@@ -1,5 +1,6 @@
 import { Context, Effect, Schema } from "effect"
 import type { ModelRegistry } from "@batonfx/core"
+import type { RouteModeId } from "@rika/config/modes"
 
 export const Status = Schema.Literals(["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"])
 export type Status = typeof Status.Type
@@ -59,7 +60,7 @@ export interface ExecutionModelRoute {
 }
 
 export interface ExecutionRoutePin {
-  readonly mode: "low" | "medium" | "high" | "ultra" | "test"
+  readonly mode: RouteModeId
   readonly tokenBudget?: number
   readonly title?: ExecutionModelRoute
   readonly compactionSummary?: ExecutionModelRoute

@@ -1,7 +1,7 @@
 import { AgentTools } from "@rika/tools"
 import { Function } from "effect"
 
-const decodeParentExecutionId = (value: string) => {
+export const decodeParentExecutionId = (value: string) => {
   if (!value.startsWith("child:")) return undefined
   const separator = value.indexOf(":", "child:".length)
   if (separator < 0) return undefined

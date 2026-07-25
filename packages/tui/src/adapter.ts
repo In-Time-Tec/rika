@@ -56,6 +56,7 @@ import {
   type Model,
   type QueueItem,
   type TranscriptItem,
+  isThreadBusy,
 } from "./view-state"
 import type { ModeRouteLabel, ThreadItem, TranscriptBlock } from "./view-state"
 import { applyTurnUnits as projectUnits, type Event } from "./transcript-presenter"
@@ -84,13 +85,22 @@ import {
   type ViewportMetrics,
   type ViewportAnchor,
 } from "./transcript-viewport"
-import { renderMarkdown, renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
+import {
+  escapeControlCharacters,
+  formatBytes,
+  formatTokens,
+  homeRelativePath,
+  plural,
+  relativeTime,
+  truncateToWidth,
+} from "./format"
+import { renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
 import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
 import { highlightShellCommand } from "./syntax-highlight"
 import { wrapStyledLine } from "./styled-text"
 import { renderToolSummary } from "./tool-summary"
-import { renderTool } from "./tool-renderer"
+import { modeIds } from "@rika/config/modes"
 import {
   agentToolSummary,
   escapePathTarget,
@@ -235,12 +245,8 @@ export const renderBlock: {
       case "Reasoning":
         return `◇ Reasoning\n${body(block.text)}`
       case "ToolCall": {
-        if (isToolOutputDisplayed(block)) return renderTool(block, width)
         const running = block.status === "running"
-        let icon = "✗"
-        if (running) icon = "⠿"
-        else if (block.status === "complete") icon = "✓"
-        else if (block.status === "cancelled") icon = "⊘"
+        const icon = iconChar(block.status === "failed", running, "⠿", block.status === "cancelled")
         const label = running ? block.presentation.activeLabel : block.presentation.completeLabel
         return `${icon} ${label}${block.detail.length === 0 ? "" : ` ${block.detail}`}`
       }
@@ -274,7 +280,7 @@ export const renderBlock: {
       case "ImageAttachment": {
         const dimensions =
           block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""
-        const size = block.bytes === undefined ? "" : ` · ${block.bytes} bytes`
+        const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
         return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
       }
     }
@@ -299,7 +305,7 @@ export const renderSidebar: {
         const selected = model.threadSidebar.focused && index === model.threadSidebar.selected
         let marker = " "
         if (thread.id === model.currentThreadId) marker = "*"
-        else if (thread.status !== "idle") marker = spinnerFrame
+        else if (isThreadBusy(thread.status)) marker = spinnerFrame
         else if (thread.unread) marker = "○"
         const title = truncateToWidth(thread.title, sidebarWidth - 4)
         const padding = " ".repeat(Math.max(0, sidebarWidth - 4 - stringWidth(title)))
@@ -309,7 +315,7 @@ export const renderSidebar: {
           chunks.push(fg(colors.text)(" "))
           let styledMarker = fg(colors.text)(marker)
           if (thread.id === model.currentThreadId) styledMarker = fg(colors.green)(marker)
-          else if (thread.status !== "idle") styledMarker = fg(colors.blue)(marker)
+          else if (isThreadBusy(thread.status)) styledMarker = fg(colors.blue)(marker)
           else if (thread.unread) styledMarker = dim(fg(colors.blue)(marker))
           chunks.push(styledMarker)
           chunks.push(fg(colors.text)(` ${title}${padding}`))
@@ -341,18 +347,6 @@ interface ChangedFileRow {
 }
 
 const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" })
-
-const truncateToWidth = (text: string, width: number): string => {
-  let truncated = ""
-  let used = 0
-  for (const { segment } of graphemeSegmenter.segment(text)) {
-    const cells = stringWidth(segment)
-    if (used + cells > width) break
-    truncated += segment
-    used += cells
-  }
-  return truncated
-}
 
 const wrapTextToWidth = (text: string, width: number): ReadonlyArray<string> => {
   const lines: Array<string> = []
@@ -387,18 +381,7 @@ const wrapBodyText = (text: string, width: number, indent: string): string =>
     .map((line) => `${indent}${line}`)
     .join("\n")
 
-const escapeChangedPathSegment = (text: string): string =>
-  [...text]
-    .map((character) => {
-      const code = character.codePointAt(0)!
-      if (character === "\n") return "\\n"
-      if (character === "\r") return "\\r"
-      if (character === "\t") return "\\t"
-      if (code < 32 || (code >= 127 && code <= 159))
-        return code <= 255 ? `\\x${code.toString(16).padStart(2, "0")}` : `\\u{${code.toString(16)}}`
-      return character
-    })
-    .join("")
+const escapeChangedPathSegment = escapeControlCharacters
 
 const fileTreeRows = (
   files: ReadonlyArray<import("./view-state").ChangedFile>,
@@ -505,35 +488,6 @@ export const renderChangedFiles: {
     renderFileRows(fileTreeRows(readyOr(model.changedFiles, []), innerWidth, true), hoveredRow),
 )
 
-export const renderTranscript = (model: Model): string => {
-  const welcome = model.entries.length === 0 ? `Rika\nLocal durable coding agent\n\n` : ""
-  const renderEntry = (entry: Model["entries"][number]): string => {
-    if (entry.role === "user") return `┃ ${entry.text}`
-    if (entry.role === "notice") return `! ${entry.text}`
-    return renderMarkdown(entry.text, transcriptWrapWidth(model.width))
-  }
-  const entries = model.entries.map(renderEntry).join("\n\n")
-  const blocks = (model.blocks as ReadonlyArray<TranscriptBlock>)
-    .map((block) => {
-      if (block._tag === "Permission" && block.status === "pending") {
-        const options = ["Allow once", "Always", "Deny"]
-          .map((option, index) => `${index === model.permissionSelection ? "›" : " "} ${option}`)
-          .join("   ")
-        return `${renderBlock(block, model.width)}\n  ${options}`
-      }
-      return renderBlock(block, model.width)
-    })
-    .join("\n\n")
-  if (model.items.length === 0)
-    return welcome + entries + (blocks.length === 0 ? "" : `${model.entries.length === 0 ? "" : "\n\n"}${blocks}`)
-  const ordered = (model.items as ReadonlyArray<TranscriptItem>).map((item) => {
-    if (item._tag === "Block") return renderBlock(model.blocks[item.index] as TranscriptBlock, model.width)
-    const entry = model.entries[item.index]!
-    return renderEntry(entry)
-  })
-  return welcome + ordered.join("\n\n")
-}
-
 const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 
 const toolInputValue = (input: string): Record<string, unknown> =>
@@ -585,8 +539,6 @@ const exploreChildLabel = (unit: ToolUnit): string => {
   const pattern = inputString(value, ["pattern", "query", "glob", "path"])
   return `${unit.block.presentation.action === "grep" ? "Grep" : "Searched"} ${unit.block.detail || pattern || ""}`.trimEnd()
 }
-
-const plural = (count: number, singular: string): string => `${count} ${singular}${count === 1 ? "" : "s"}`
 
 const iconChar = (failed: boolean, running: boolean, frame = idleSpinnerFrame, cancelled = false): string => {
   if (running) return frame
@@ -1000,11 +952,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       const counter = unit.block.presentation.counter ?? (unit.kind === "read" ? "file" : "search")
       counters.set(counter, (counters.get(counter) ?? 0) + 1)
     }
-    const counts = [...counters]
-      .map(([counter, count]) =>
-        counter === "search" ? plural(count, counter).replace("searchs", "searches") : plural(count, counter),
-      )
-      .join(", ")
+    const counts = [...counters].map(([counter, count]) => plural(count, counter)).join(", ")
     if (selected)
       highlight(
         `${iconChar(failed, running, spinnerFrame, cancelled)} ${running ? "Exploring" : "Explored"} ${counts.length > 0 ? counts : "workspace"}${markerText(expanded)}`,
@@ -1469,22 +1417,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
   }
   const renderChildAgentBody = (block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded: boolean) => {
     const running = block.status === "running"
-    const name = block.name.replace(/^rika-/, "")
-    const normalized = name.toLowerCase()
-    const display =
-      normalized.length === 0 || normalized === "child" || normalized === "task" || normalized === "subagent"
-        ? "Subagent"
-        : name.charAt(0).toUpperCase() + name.slice(1)
-    let phrase: string
-    if (block.status === "cancelled") phrase = `${display} cancelled`
-    else if (display === "Oracle") phrase = running ? "Oracle exploring" : "Oracle has spoken"
-    else if (display === "Librarian") phrase = running ? "Librarian is researching" : "Librarian researched"
-    else {
-      let status = "finished"
-      if (running) status = "working"
-      else if (block.status === "failed") status = "failed"
-      phrase = `${display} ${status}`
-    }
+    const phrase = Transcript.agentPhrase({ name: block.name, status: block.status })
     append(statusIcon(block.status === "failed", running, block.status === "cancelled"))
     for (const chunk of renderToolSummary(agentToolSummary(phrase), { leading: " " })[0]!) append(chunk)
     append(marker(expanded))
@@ -3391,7 +3324,7 @@ export class Surface {
         model.usageTime?._tag === "Available" &&
         model.usageTime.activeSince !== undefined) ||
       (model.threadSidebar.open &&
-        (model.threads as ReadonlyArray<ThreadItem>).some((thread) => thread.status !== "idle"))
+        (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
       this.loaderTimer = this.clock.setInterval(() => this.tickLoader(), spinnerInterval)
     } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {
@@ -3687,7 +3620,7 @@ const modeDescription = {
 } as const
 
 const modePickerContent = (model: Model, innerWidth: number): StyledText => {
-  const modes = ["low", "medium", "high", "ultra"] as const
+  const modes = modeIds
   const selected = modes[model.modePicker.selected] ?? model.mode
   if (innerWidth < 40)
     return new StyledText([
@@ -3721,15 +3654,8 @@ const modePickerContent = (model: Model, innerWidth: number): StyledText => {
   return new StyledText(chunks)
 }
 
-const threadAge = (updatedAt: number | undefined, now: number): string => {
-  if (updatedAt === undefined || updatedAt <= 0) return ""
-  const minutes = Math.floor(Math.max(0, now - updatedAt) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
+const threadAge = (updatedAt: number | undefined, now: number): string =>
+  updatedAt === undefined || updatedAt <= 0 ? "" : relativeTime(now - updatedAt)
 
 const splitStyledLines = (styled: StyledText): Array<Array<TextChunk>> => {
   const lines: Array<Array<TextChunk>> = [[]]
@@ -4007,7 +3933,7 @@ const panelLoading = (model: Model): string | undefined => {
 }
 
 const compactWorkspace = (workspace: string): string => {
-  const home = workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")
+  const home = homeRelativePath(workspace)
   const segments = home.split("/").filter((segment) => segment.length > 0)
   if (segments.length <= 5) return home
   return [segments.slice(0, 2).join("/"), "…", segments.slice(-2).join("/")].join("/")
@@ -4023,12 +3949,7 @@ const formatCost = (usd: number): string =>
 
 const modeLabelWidth = (text: string): number => stringWidth(text.replaceAll(activeTimeIcon, "x"))
 
-export const formatTokens = (tokens: number): string => {
-  if (tokens < 1_000) return `${tokens.toLocaleString("en-US")} tok`
-  const divisor = tokens >= 1_000_000 ? 1_000_000 : 1_000
-  const suffix = divisor === 1_000_000 ? "M" : "K"
-  return `${(tokens / divisor).toFixed(1).replace(/\.0$/, "")}${suffix} tok`
-}
+export { formatTokens } from "./format"
 
 const welcomeMarkFrame = (rows: ReadonlyArray<string>): ReadonlyArray<string> => [
   "                                        ",

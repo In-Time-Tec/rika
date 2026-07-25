@@ -304,7 +304,6 @@ import {
   renderBlock,
   renderChangedFiles,
   renderSidebar,
-  renderTranscript,
   renderTranscriptStyled,
 } from "../src/adapter"
 import { initial, ready, update, type Mode, type Model, type ThreadItem } from "../src/view-state"
@@ -790,13 +789,12 @@ describe("Surface", () => {
     expect(renderedBlocks).toContain(
       "✖ ERROR: Execution failed · Turn turn-4\n  Model unavailable\n  Next: Press Enter to retry.",
     )
-    expect(renderedBlocks).toContain("2×3 · 4 bytes")
+    expect(renderedBlocks).toContain("2×3 · 4 B")
     const state = model({
       blocks: [...blocks],
       currentThreadId: "a",
       threads: [thread({ id: "a", title: "One", unread: true }), thread({ id: "b", title: "Two" })],
     })
-    expect(renderTranscript(state)).toContain("Reasoning")
     const styledTranscript = renderTranscriptStyled(state)
       .chunks.map((chunk) => chunk.text)
       .join("")
@@ -830,10 +828,12 @@ describe("Surface", () => {
     }
     const state = model({ blocks: [block] })
 
+    const transcript = renderTranscriptStyled(state)
+      .chunks.map((chunk) => chunk.text)
+      .join("")
     expect(renderBlock(block)).toBe("✓ Web Search Find current documentation")
-    expect(renderTranscript(state)).toContain("✓ Web Search Find current documentation")
-    expect(renderTranscript(state)).not.toContain("HIDDEN SEARCH RESULT")
-    expect(renderTranscript(state)).not.toContain("▸")
+    expect(transcript).toContain("Web Search")
+    expect(transcript).not.toContain("HIDDEN SEARCH RESULT")
   })
 
   test("keeps tool cards generic without removed activity assumptions", () => {
@@ -848,7 +848,7 @@ describe("Surface", () => {
       files: [],
     })
 
-    expect(rendered).toBe("⠿ Plugin-defined tool [running] ▸")
+    expect(rendered).toBe("⠿ Running tool opaque input")
     expect(rendered).not.toMatch(/rivet|semantic[- ]search|ast[- ]grep[- ]outline/i)
   })
 

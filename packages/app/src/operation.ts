@@ -8,12 +8,13 @@ import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { AgentDepth } from "@rika/runtime"
 import * as Transcript from "@rika/transcript"
+import { clampThreadTitle, threadTitleLimit } from "./thread-title"
 import * as ProductAgent from "./product-agent"
 import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
 import * as ExtensionOperations from "./extension-operations"
 import * as OpenAiAuth from "./openai-auth"
-import { Catalog as ToolCatalog, Runtime as ToolRuntime } from "@rika/tools"
+import { Catalog as ToolCatalog, ExecutionStatus, Runtime as ToolRuntime } from "@rika/tools"
 import {
   Cause,
   Clock,
@@ -51,6 +52,7 @@ import {
   Service,
   unavailableLayer,
 } from "./operation-contract"
+import { ModeId } from "@rika/config/modes"
 import type {
   Interface,
   InteractiveCommand,
@@ -76,9 +78,7 @@ const executionStartFailureMessage =
 const operationFailureMessage =
   "Rika could not complete that action. Run rika diagnostics status if it keeps happening."
 
-const isTerminalStatus = (
-  status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
-) => status === "completed" || status === "failed" || status === "cancelled"
+const isTerminalStatus = ExecutionStatus.isTerminalStatus
 
 const isAgentResponseEvent = (event: ExecutionBackend.Event): boolean =>
   event.type.includes("reasoning") ||
@@ -106,7 +106,7 @@ const interactiveEventThreadId = (event: InteractiveEvent): string | undefined =
 
 const ignoreInteractiveEvent = (_event: InteractiveEvent) => {}
 
-const temporaryThreadTitle = (prompt: string) => [...prompt].slice(0, 80).join("") || "New thread"
+const temporaryThreadTitle = (prompt: string) => clampThreadTitle(prompt) || "New thread"
 
 const titleExecutionId = (turnId: Turn.TurnId) => AgentDepth.childExecutionId(String(turnId), "title")
 
@@ -119,7 +119,7 @@ const sanitizeThreadTitle = (text: string) =>
       .replace(/^["'#\s]+/, "")
       .replace(/["'\s]+$/, ""),
   ]
-    .slice(0, 80)
+    .slice(0, threadTitleLimit)
     .join("")
     .trimEnd()
 
@@ -296,7 +296,7 @@ export interface ProductLayerOptions<
   readonly threadToolGateway?: ThreadToolService.Gateway
   readonly backendLayer: Layer.Layer<ExecutionBackend.Service, BackendError>
   readonly resolveExecutionRoute?: (
-    mode: "low" | "medium" | "high" | "ultra",
+    mode: ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => Effect.Effect<Turn.ExecutionRoutePin, OperationError, ExecutionBackend.Service>
@@ -439,9 +439,7 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
                 Effect.gen(function* () {
                   let status: Turn.Status = "failed"
                   if (inspection !== undefined) {
-                    if (inspection.state === "joining") status = "running"
-                    else if (inspection.state === "satisfied") status = "completed"
-                    else status = inspection.state
+                    status = fanOutTurnStatus(inspection.state)
                   }
                   yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
                   if (inspection?.state === "joining" && watchReviewOwner !== undefined)
@@ -684,7 +682,12 @@ export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
   )
 })
 
-const normalizeChildExecutionId = (executionId: string): string => executionId.replace(/^execution:/, "")
+const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled"): Turn.Status => {
+  if (state === "joining") return "running"
+  return state === "satisfied" ? "completed" : state
+}
+
+const normalizeChildExecutionId = Transcript.executionKey
 
 const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number | undefined =>
   totals.complete ? totals.globalCostUsd : undefined
@@ -1160,7 +1163,7 @@ export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWor
         if (!(yield* executionTreeQuiescent(backend, executionId, true))) return true
       }
       if (!terminal) {
-        const status = fanOut.state === "satisfied" ? "completed" : fanOut.state
+        const status = fanOutTurnStatus(fanOut.state)
         yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
       }
       continue
@@ -1772,7 +1775,7 @@ export const productLayer = <
         }
         yield* setTurnStatus(
           turn.id,
-          inspection.state === "satisfied" ? "completed" : inspection.state,
+          fanOutTurnStatus(inspection.state),
           turn.lastCursor,
           yield* Clock.currentTimeMillis,
         )
@@ -1800,7 +1803,7 @@ export const productLayer = <
           }),
         )
       })
-      const testRoute = (mode: "low" | "medium" | "high" | "ultra") => Effect.succeed(Turn.testExecutionRoute(mode))
+      const testRoute = (mode: ModeId) => Effect.succeed(Turn.testExecutionRoute(mode))
       const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
       const executionPrompt = Effect.fn("Operation.executionPrompt")(function* (workspace: string, prompt: string) {
         const context = yield* ResolvedContext.Service
@@ -2518,7 +2521,7 @@ export const productLayer = <
         const submit = Effect.fn("Operation.interactive.submit")(function* (
           prompt: string,
           dispatch: (event: InteractiveEvent) => void,
-          mode: "low" | "medium" | "high" | "ultra" = "medium",
+          mode: ModeId = "medium",
           promptParts?: ReadonlyArray<Turn.PromptPart>,
           modelTuning?: { readonly fastMode?: boolean },
           submissionId?: string,
@@ -4059,7 +4062,7 @@ export const productLayer = <
                   thread = yield* threads.create({
                     id: yield* options.makeThreadId,
                     workspace,
-                    title: `$ ${command}`.slice(0, 80),
+                    title: clampThreadTitle(`$ ${command}`),
                     now,
                   })
                   yield* Ref.set(interactiveThread, thread)
@@ -4693,7 +4696,7 @@ export const productLayer = <
                   ? yield* threads.create({
                       id: yield* options.makeThreadId,
                       workspace: input.workspace ?? options.defaultWorkspace,
-                      title: input.prompt.join(" ").slice(0, 80) || "New thread",
+                      title: clampThreadTitle(input.prompt.join(" ")) || "New thread",
                       now,
                     })
                   : yield* threads

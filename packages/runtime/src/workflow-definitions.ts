@@ -80,7 +80,12 @@ export const DynamicDefinition = Schema.Struct({
 export type DynamicDefinition = typeof DynamicDefinition.Type
 
 const operationId = (value: string) => Ids.WorkflowOperationId.make(value)
-const workflowId = (value: string) => Ids.WorkflowDefinitionId.make(`rika:${value}:v1`)
+export const workflowDefinitionVersion = "v1"
+
+export const workflowDefinitionName = (id: string): string =>
+  id.replace(/^rika:/, "").replace(new RegExp(`:${workflowDefinitionVersion}$`), "")
+
+const workflowId = (value: string) => Ids.WorkflowDefinitionId.make(`rika:${value}:${workflowDefinitionVersion}`)
 const addressId = Ids.AddressId.make("address:rika")
 
 export const compile = (input: DynamicDefinition): Workflow.RegisterDefinitionPayload => {

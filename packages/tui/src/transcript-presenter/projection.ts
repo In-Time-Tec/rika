@@ -1,4 +1,4 @@
-import { childParentMatch, type Block, type Unit } from "@rika/transcript"
+import { agentPresentation, childParentMatch, executionKey, type Block, type Unit } from "@rika/transcript"
 import { Function } from "effect"
 import type { Model, TranscriptItem } from "../view-state"
 
@@ -14,8 +14,6 @@ export interface Event {
 
 type ToolCall = Extract<Block, { readonly _tag: "ToolCall" }>
 type ExecutionOutcome = NonNullable<Unit["executionOutcome"]>
-
-const executionKey = (value: string): string => value.replace(/^execution:/, "")
 
 const isCancellationNotice = (unit: Unit): boolean =>
   unit.key.startsWith("execution:") &&
@@ -148,42 +146,10 @@ const rememberExecutionOutcomes = (
   return projected
 }
 
-const childLabels = (name: string, presentation: ToolCall["presentation"]): ToolCall["presentation"] => {
-  const normalized = name.replace(/^rika-/, "").trim()
-  const lower = normalized.toLowerCase()
-  if (lower === "oracle")
-    return {
-      ...presentation,
-      family: "agent",
-      action: "oracle",
-      activeLabel: "Oracle exploring",
-      completeLabel: "Oracle has spoken",
-    }
-  if (lower === "librarian")
-    return {
-      ...presentation,
-      family: "agent",
-      action: "librarian",
-      activeLabel: "Librarian researching",
-      completeLabel: "Librarian researched",
-    }
-  if (lower.length === 0 || lower === "child" || lower === "task" || lower === "subagent")
-    return {
-      ...presentation,
-      family: "agent",
-      action: "task",
-      activeLabel: "Subagent working",
-      completeLabel: "Subagent finished",
-    }
-  const display = normalized.charAt(0).toUpperCase() + normalized.slice(1)
-  return {
-    ...presentation,
-    family: "agent",
-    action: lower,
-    activeLabel: `${display} working`,
-    completeLabel: `${display} finished`,
-  }
-}
+const childLabels = (name: string, presentation: ToolCall["presentation"]): ToolCall["presentation"] => ({
+  ...presentation,
+  ...agentPresentation(name),
+})
 
 const mergeChildAgentImpl = (tool: Unit, child: Unit): Unit => {
   if (
@@ -324,20 +290,13 @@ const reconcileSubagentUnits = (
 
 type ChildAgentBlock = Extract<Block, { readonly _tag: "ChildAgent" }>
 
-const agentPresentationBase: ToolCall["presentation"] = {
-  family: "agent",
-  action: "task",
-  activeLabel: "Subagent working",
-  completeLabel: "Subagent finished",
-}
-
 const childAgentToolBlock = (block: ChildAgentBlock): ToolCall => ({
   _tag: "ToolCall",
   id: block.id,
   name: block.name,
   input: "",
   status: block.status,
-  presentation: childLabels(block.name, agentPresentationBase),
+  presentation: agentPresentation(block.name),
   detail: block.summary,
   files: [],
   childId: block.id,
