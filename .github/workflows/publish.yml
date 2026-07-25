@@ -57,15 +57,16 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: |
-          echo "@opentui:"; ls node_modules/@opentui 2>/dev/null || echo "  (none)"
-          echo "@ff-labs:"; ls node_modules/@ff-labs 2>/dev/null || echo "  (none)"
-          if [ ! -d "node_modules/@opentui/core-$TARGET" ]; then
-            echo "::warning::@opentui/core-$TARGET missing after --frozen-lockfile; optional dependencies install silently, retrying unfrozen"
+          resolves() { (cd apps/rika && bun -e "require.resolve('@opentui/core-$TARGET/package.json')") >/dev/null 2>&1; }
+          if ! resolves; then
+            echo "::warning::@opentui/core-$TARGET did not resolve after --frozen-lockfile; optional dependency installs fail silently, retrying unfrozen"
             bun install
-            echo "@opentui:"; ls node_modules/@opentui 2>/dev/null || echo "  (none)"
-            echo "@ff-labs:"; ls node_modules/@ff-labs 2>/dev/null || echo "  (none)"
           fi
-          test -d "node_modules/@opentui/core-$TARGET"
+          resolves || {
+            echo "::error::@opentui/core-$TARGET is unavailable on this runner"
+            exit 1
+          }
+          (cd apps/rika && bun -e "console.log(require.resolve('@opentui/core-$TARGET/package.json'))")
       - name: Prepare Linux login shells
         if: runner.os == 'Linux'
         run: |
