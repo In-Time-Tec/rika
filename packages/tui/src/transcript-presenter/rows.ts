@@ -33,7 +33,7 @@ export type TranscriptUnit =
 
 export type TranscriptUnitId = string
 
-const readToolNames = new Set(["read", "view_file"])
+const readToolNames = new Set(["read", "view_file", "get_diagnostics"])
 const searchToolNames = new Set(["grep", "glob", "list_dir", "codebase_search"])
 const editToolNames = new Set(["edit", "write"])
 const shellToolNames = new Set(["bash", "run_command"])
