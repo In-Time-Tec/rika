@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { expect, test } from "vitest"
 
 const root = fileURLToPath(new URL("../..", import.meta.url))
-const version = "0.0.0"
+const version: string = (await Bun.file(join(root, "apps", "rika", "package.json")).json()).version
 const target = "install-test"
 const archive = join(root, "artifacts", `rika-${version}-${target}.tar.gz`)
 
@@ -53,7 +53,7 @@ test("installs, upgrades, and uninstalls a versioned two-executable package with
   try {
     await makeArchive(home, "first")
     await run("scripts/install-local.ts", environment)
-    expect(await readlink(join(binDir, "rika"))).toBe(join(installRoot, "bin", "rika"))
+    expect(await readlink(join(binDir, "rika-dev"))).toBe(join(installRoot, "bin", "rika"))
     expect(await readFile(join(installRoot, "bin", "rika"), "utf8")).toBe("first")
     expect(await readFile(join(installRoot, "bin", ".rika-runtime"), "utf8")).toBe("runtime-first")
 
@@ -63,7 +63,7 @@ test("installs, upgrades, and uninstalls a versioned two-executable package with
     expect(await readFile(state, "utf8")).toBe("preserve")
 
     await run("scripts/uninstall-local.ts", environment)
-    await expect(stat(join(binDir, "rika"))).rejects.toThrow()
+    await expect(stat(join(binDir, "rika-dev"))).rejects.toThrow()
     await expect(stat(installRoot)).rejects.toThrow()
     expect(await readFile(state, "utf8")).toBe("preserve")
   } finally {
