@@ -48,16 +48,17 @@ const main = Effect.gen(function* () {
     TestModel.text(`recovered child ${index}`),
   )
   if (phase === "recovered-delayed")
-    turns = Array.from({ length: 6 }, (_, index) =>
-      TestModel.turn([TestModel.text(`delayed recovered child ${index}`)], { delay: "5 minutes" }),
-    )
-  if (phase === "recovered-stuck")
     turns = [
-      ...Array.from({ length: 3 }, (_, index) =>
-        TestModel.turn([TestModel.text(`stuck recovered child ${index}`)], { delay: "5 minutes" }),
+      TestModel.text("recovered child 0"),
+      TestModel.text("recovered child 1"),
+      ...Array.from({ length: 4 }, (_, index) =>
+        TestModel.turn([TestModel.text(`delayed recovered child ${index + 2}`)], { delay: "5 minutes" }),
       ),
-      ...Array.from({ length: 9 }, (_, index) => TestModel.text(`recovered child ${index}`)),
     ]
+  if (phase === "recovered-stuck")
+    turns = Array.from({ length: 9 }, (_, index) =>
+      TestModel.turn([TestModel.text(`stuck recovered child ${index}`)], { delay: "5 minutes" }),
+    )
   if (phase === "initial")
     turns = [
       initial,

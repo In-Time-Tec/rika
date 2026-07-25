@@ -1,6 +1,7 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as Policy from "./tool-policy"
+import * as ToolInvocation from "./tool-invocation"
 
 export const TaskInput = Schema.Struct({
   prompt: Schema.String,
@@ -40,7 +41,7 @@ export const taskTool = Tool.make("task", {
   success: Result,
   failure: Failure,
   failureMode: "return",
-})
+}).addDependency(ToolInvocation.ToolInvocation)
 
 const specialist = <const Name extends string>(name: Name, description: string) =>
   Tool.make(name, {
@@ -49,7 +50,7 @@ const specialist = <const Name extends string>(name: Name, description: string) 
     success: Result,
     failure: Failure,
     failureMode: "return",
-  })
+  }).addDependency(ToolInvocation.ToolInvocation)
 
 export const oracleTool = specialist(
   "oracle",
@@ -70,7 +71,7 @@ export const readThreadTool = Tool.make("read_thread", {
   success: Result,
   failure: Failure,
   failureMode: "return",
-})
+}).addDependency(ToolInvocation.ToolInvocation)
 
 export const delegationToolNames = ["task", "oracle", "librarian", "review", "read_thread"] as const
 export type DelegationToolName = (typeof delegationToolNames)[number]

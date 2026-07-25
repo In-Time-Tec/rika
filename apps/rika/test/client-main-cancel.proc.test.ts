@@ -24,7 +24,7 @@ test(
           [
             { after: "Welcome to Rika", write: "cancel this turn\r" },
             { after: "› Allow once", write: "\u0003" },
-            { after: "⊘", write: "\u0003", checkRunning: true },
+            { after: "(cancelled)", write: "\u0003", checkRunning: true },
           ],
           script,
           ["bash"],
@@ -33,7 +33,7 @@ test(
         expect(result.actionsCompleted).toBe(3)
         expect(result.runningChecks).toEqual([true])
         expect(result.exitCode, result.output).toBe(0)
-        expect(result.output).toContain("⊘")
+        expect(result.output).toContain("(cancelled)")
         expect(result.output).toContain(".#*+:")
         expect(result.clientLogs).not.toContain('"message":"process.failed"')
         expect(result.names.filter((name) => name.endsWith(".open.jsonl"))).toEqual([])

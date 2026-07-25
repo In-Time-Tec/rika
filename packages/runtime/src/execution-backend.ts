@@ -1999,8 +1999,9 @@ export const layer = <
             profile: AgentProfile,
             input: AgentTools.TaskInput | AgentTools.ReadThreadInput,
           ) {
-            const call = yield* RelayToolRuntime.ToolCallInfo
-            const parentDepth = childExecutionDepth(String(call.executionId))
+            const invocation = yield* ToolInvocation.ToolInvocation
+            const parentExecutionId = Ids.ExecutionId.make(invocation.executionId)
+            const parentDepth = childExecutionDepth(invocation.executionId)
             if (!delegationAvailableAtDepth(parentDepth)) {
               return yield* AgentTools.AgentToolError.make({
                 tool: toolName,
@@ -2009,14 +2010,14 @@ export const layer = <
             }
             const client = yield* Deferred.await(relayClient)
             const parent = yield* client.executions
-              .get(call.executionId)
+              .get(parentExecutionId)
               .pipe(
                 Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
               )
             if (parent === undefined) {
               return yield* AgentTools.AgentToolError.make({
                 tool: toolName,
-                message: `Execution ${call.executionId} was not found`,
+                message: `Execution ${invocation.executionId} was not found`,
               })
             }
             const snapshot = parent?.agent_snapshot
@@ -2026,7 +2027,7 @@ export const layer = <
             if (snapshot === undefined) {
               return yield* AgentTools.AgentToolError.make({
                 tool: toolName,
-                message: `Execution ${call.executionId} does not have an agent snapshot`,
+                message: `Execution ${invocation.executionId} does not have an agent snapshot`,
               })
             }
             if (routePin === undefined) {
@@ -2045,7 +2046,7 @@ export const layer = <
                 : input.prompt
             const calls = [
               {
-                callId: String(call.call.id),
+                callId: invocation.callId,
                 prompt:
                   profile === "ReadThread" && threadId !== undefined
                     ? `Current thread ID: ${threadId}\n\n${requestedPrompt}`
@@ -2053,7 +2054,7 @@ export const layer = <
               },
             ]
             const children = calls.map((childCall) => ({
-              child_execution_id: makeChildExecutionId(String(call.executionId), childCall.callId),
+              child_execution_id: makeChildExecutionId(invocation.executionId, childCall.callId),
               address_id: addressId,
               input: [Content.text(childCall.prompt)],
               preset_name: `${profile}:${parentDepth + 1}`,
@@ -2062,7 +2063,7 @@ export const layer = <
               children,
               (child) =>
                 client.childRuns.spawn({
-                  execution_id: call.executionId,
+                  execution_id: parentExecutionId,
                   ...child,
                   wait: false,
                 }),
@@ -2070,18 +2071,18 @@ export const layer = <
             ).pipe(
               Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
             )
-            const currentCall = calls.find((childCall) => childCall.callId === String(call.call.id))
+            const currentCall = calls.find((childCall) => childCall.callId === invocation.callId)
             const current =
               currentCall === undefined
                 ? undefined
                 : children.find(
                     (child) =>
-                      child.child_execution_id === makeChildExecutionId(String(call.executionId), currentCall.callId),
+                      child.child_execution_id === makeChildExecutionId(invocation.executionId, currentCall.callId),
                   )
             if (current === undefined) {
               return yield* AgentTools.AgentToolError.make({
                 tool: toolName,
-                message: `The child for tool call ${call.call.id} is not in its fan-out batch`,
+                message: `The child for tool call ${invocation.callId} is not in its fan-out batch`,
               })
             }
             const result = yield* awaitChildResult(client, String(current.child_execution_id)).pipe(
@@ -2093,19 +2094,13 @@ export const layer = <
               output: [...result.output],
             }
           })
-          const runDelegation = delegation as unknown as (
-            toolName: AgentTools.DelegationToolName,
-            profile: AgentProfile,
-            input: AgentTools.TaskInput | AgentTools.ReadThreadInput,
-          ) => Effect.Effect<AgentTools.Result, AgentTools.AgentToolError>
-          const delegationHandlerLayer: Layer.Layer<Tool.HandlersFor<typeof AgentTools.modelToolkit.tools>> =
-            AgentTools.modelToolkit.toLayer({
-              task: (input) => runDelegation("task", "Task", input),
-              oracle: (input) => runDelegation("oracle", "Oracle", input),
-              librarian: (input) => runDelegation("librarian", "Librarian", input),
-              review: (input) => runDelegation("review", "Review", input),
-              read_thread: (input) => runDelegation("read_thread", "ReadThread", input),
-            })
+          const delegationHandlerLayer = AgentTools.modelToolkit.toLayer({
+            task: (input) => delegation("task", "Task", input),
+            oracle: (input) => delegation("oracle", "Oracle", input),
+            librarian: (input) => delegation("librarian", "Librarian", input),
+            review: (input) => delegation("review", "Review", input),
+            read_thread: (input) => delegation("read_thread", "ReadThread", input),
+          })
           const handlerLayer = Layer.mergeAll(
             options.additionalHandlerLayer === undefined
               ? RikaToolRuntime.handlerLayer

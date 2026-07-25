@@ -7,9 +7,13 @@ import { FixtureProcessError, spawnFixtureProcess } from "./process-protocol"
 const script = new URL("./recovery-process.ts", import.meta.url).pathname
 const rootId = "execution:turn-recovery"
 const nextRootId = "execution:turn-after-recovery"
+const alphaChildId = `child:${encodeURIComponent(rootId)}:call-alpha`
+const betaChildId = `child:${encodeURIComponent(rootId)}:call-beta`
+const gammaChildId = `child:${encodeURIComponent(rootId)}:call-gamma`
 const promptSecret = "PROMPT_SECRET_SENTINEL_206_207_209"
 const initialSystemSecret = "SYSTEM_SECRET_SENTINEL_INITIAL_206_207_209"
 const recoveredSystemSecret = "SYSTEM_SECRET_SENTINEL_RECOVERED_206_207_209"
+const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
 
 const baselineHashAnnotations = (lines: ReadonlyArray<string>) =>
   lines.flatMap((line) => {
@@ -42,7 +46,8 @@ function waitFor<A>(
   return Effect.gen(function* () {
     const value = yield* read
     if (accept(value)) return value
-    if (remaining === 0) return yield* FixtureProcessError.make({ message: `recovery state did not settle` })
+    if (remaining === 0)
+      return yield* FixtureProcessError.make({ message: `recovery state did not settle: ${encodeJson(value)}` })
     yield* Effect.sleep("20 millis")
     return yield* Effect.suspend(() => waitFor(read, accept, remaining - 1))
   })
@@ -100,19 +105,31 @@ test(
           yield* host.kill
           host = yield* startHost("recovered-delayed")
           expect(yield* host.ready).not.toBe(firstPid)
-          yield* waitFor(
-            Effect.all({
-              starts: query<{ count: number }>(
-                `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.started'`,
-              ),
-              prepared: query<{ count: number }>(
-                `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'model.input.prepared'`,
-              ),
-            }),
-            ({ starts, prepared }) => starts[0]?.count === 2 && prepared[0]?.count === 2,
-          )
           const repeatedRecoveryLogs = yield* waitFor(host.request(Schema.Array(Schema.String), "logs"), (lines) =>
             baselineHashes(lines).some((hash) => /^[a-f0-9]{64}$/.test(hash)),
+          )
+          yield* waitFor(
+            Effect.all({
+              children: query<{ id: string; status: string }>(
+                `select id, status from relay_executions where id in ('${alphaChildId}', '${betaChildId}', '${gammaChildId}') order by id`,
+              ),
+              childRuns: query<{ id: string; status: string }>(
+                `select id, status from relay_child_executions where execution_id = '${rootId}' order by id`,
+              ),
+            }),
+            ({ children, childRuns }) =>
+              children[0]?.id === alphaChildId &&
+              children[0]?.status === "completed" &&
+              children[1]?.id === betaChildId &&
+              children[1]?.status === "completed" &&
+              children[2]?.id === gammaChildId &&
+              ["queued", "running", "waiting"].includes(children[2]?.status ?? "") &&
+              childRuns[0]?.id === alphaChildId &&
+              childRuns[0]?.status === "completed" &&
+              childRuns[1]?.id === betaChildId &&
+              childRuns[1]?.status === "completed" &&
+              childRuns[2]?.id === gammaChildId &&
+              ["queued", "running", "waiting"].includes(childRuns[2]?.status ?? ""),
           )
           const repeatedRecoveryHash = baselineHashes(repeatedRecoveryLogs).at(-1)
           yield* host.kill
@@ -124,18 +141,35 @@ test(
               children: query<{ id: string; status: string }>(
                 `select id, status from relay_executions where id like 'child:%' order by id`,
               ),
+              childRuns: query<{ id: string; status: string }>(
+                `select id, status from relay_child_executions where execution_id = '${rootId}' order by id`,
+              ),
               cancelled: query<{ count: number }>(
                 `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.cancelled'`,
               ),
             }),
-            ({ root, children, cancelled }) =>
+            ({ root, children, childRuns, cancelled }) =>
               root[0]?.status === "cancelled" &&
               children.length === 3 &&
-              children.every((child) => child.status === "completed" || child.status === "cancelled") &&
+              children.filter((child) => child.status === "completed").length === 2 &&
+              children.filter((child) => child.status === "cancelled").length === 1 &&
+              childRuns.length === 3 &&
+              childRuns.filter((child) => child.status === "completed").length === 2 &&
+              childRuns.filter((child) => child.status === "cancelled").length === 1 &&
               cancelled[0]?.count === 1,
           )
           expect(settled.children).toHaveLength(3)
-          expect(new Set(settled.children.map((child) => child.id)).size).toBe(3)
+          expect(settled.children).toEqual([
+            { id: alphaChildId, status: "completed" },
+            { id: betaChildId, status: "completed" },
+            { id: gammaChildId, status: "cancelled" },
+          ])
+          expect(settled.childRuns).toHaveLength(3)
+          expect(settled.childRuns).toEqual([
+            { id: alphaChildId, status: "completed" },
+            { id: betaChildId, status: "completed" },
+            { id: gammaChildId, status: "cancelled" },
+          ])
           const starts = yield* query<{ count: number }>(
             `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.started'`,
           )
@@ -163,22 +197,32 @@ test(
           const epochFailures = yield* query<{ count: number }>(
             `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.failed'`,
           )
-          expect(starts[0]?.count).toBeGreaterThanOrEqual(3)
-          expect(prepared[0]?.count).toBeGreaterThanOrEqual(3)
-          expect(delegationCalls).toHaveLength(3)
-          expect(delegationCalls.every((call) => call.name === "task")).toBe(true)
-          expect(delegationCalls.every((call) => ["completed", "failed", "cancelled"].includes(call.state))).toBe(true)
+          expect(starts[0]?.count).toBe(1)
+          expect(prepared[0]?.count).toBe(1)
+          expect(delegationCalls).toEqual([
+            { id: "call-alpha", name: "task", state: "failed" },
+            { id: "call-beta", name: "task", state: "failed" },
+            { id: "call-gamma", name: "task", state: "failed" },
+          ])
           expect(pendingDelegationCalls[0]?.count).toBe(0)
           expect(delegationResults.map((result) => result.tool_call_id)).toEqual(delegationCalls.map((call) => call.id))
-          expect(attempts).toHaveLength(3)
-          expect(attempts.every((attempt) => attempt.state !== "running" && attempt.completed_at !== null)).toBe(true)
-          expect(childOutcomes.length).toBeGreaterThanOrEqual(2)
+          expect(delegationResults.map((result) => result.error)).toEqual([
+            "Tool execution cancelled",
+            "Tool execution cancelled",
+            "Tool execution cancelled",
+          ])
+          expect(attempts.map((attempt) => attempt.state)).toEqual(["failed", "failed", "failed"])
+          expect(attempts.every((attempt) => attempt.completed_at !== null)).toBe(true)
+          expect(childOutcomes.map((outcome) => outcome.execution_id)).toEqual([alphaChildId, betaChildId])
           expect(childOutcomes.every((outcome) => outcome.content_json.includes("recovered child"))).toBe(true)
           expect(recoveredBaseline).toBe(baseline)
           expect(epochFailures[0]?.count).toBe(0)
           expect(settled.cancelled[0]?.count).toBe(1)
           const containedRecoveryLogs = yield* host.request(Schema.Array(Schema.String), "logs")
           const recoveredHash = baselineHashes(containedRecoveryLogs).at(-1)
+          yield* host.kill
+          host = yield* startHost("after-recovery")
+          expect(yield* host.ready).not.toBe(firstPid)
           expect(yield* host.request(Schema.String, "start", "turn-after-recovery")).toBe("completed")
           const sessions = yield* query<{ id: string; session_id: string | null }>(
             `select id, session_id from relay_executions where id in ('${rootId}', '${nextRootId}') order by id`,
