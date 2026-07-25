@@ -39,10 +39,7 @@ export type UsageTime = typeof UsageTime.Type
 export const UsageDisplay = Schema.Literals(["cost", "tokens", "time"])
 export type UsageDisplay = typeof UsageDisplay.Type
 
-export const nextMode = (mode: Mode): Mode => {
-  const modes = ["low", "medium", "high", "ultra"] as const
-  return modes[(modes.indexOf(mode) + 1) % modes.length]!
-}
+export const nextMode = (mode: Mode): Mode => modeIds[(modeIds.indexOf(mode) + 1) % modeIds.length]!
 
 export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
   if (display === "cost" || display === undefined) return "tokens"
@@ -1951,7 +1948,7 @@ export const update: {
           ...model,
           paletteOpen: false,
           palette: { open: false, query: "", selected: 0 },
-          modePicker: { open: true, selected: ["low", "medium", "high", "ultra"].indexOf(model.mode) },
+          modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
           filePicker: { ...model.filePicker, open: false },
           shortcutsOpen: false,
         }
@@ -2019,7 +2016,7 @@ export const update: {
         if (key.name === "return")
           return {
             ...model,
-            mode: (["low", "medium", "high", "ultra"] as const)[selected]!,
+            mode: modeIds[selected]!,
             modePicker: { open: false, selected },
           }
         return { ...model, modePicker: { open: true, selected } }
@@ -2045,7 +2042,7 @@ export const update: {
                   ...model,
                   paletteOpen: false,
                   palette: { open: false, query: "", selected: 0 },
-                  modePicker: { open: true, selected: ["low", "medium", "high", "ultra"].indexOf(model.mode) },
+                  modePicker: { open: true, selected: modeIds.indexOf(model.mode) },
                 }
           if (action._tag === "SwitchThread")
             return {
