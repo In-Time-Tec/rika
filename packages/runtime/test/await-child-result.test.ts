@@ -23,7 +23,11 @@ const modelTurn = (finishReason?: string): ReadonlyArray<EventInput> => [
 ]
 
 const resolve = (values: ReadonlyArray<EventInput>, reconciled?: "completed" | "failed" | "cancelled") =>
-  resolveChildResult(child, events(values), reconciled)
+  resolveChildResult({
+    childExecutionId: child,
+    events: events(values),
+    ...(reconciled === undefined ? {} : { reconciled }),
+  })
 
 describe("resolveChildResult", () => {
   it("reports no report when a child completes with an empty final model output", () => {

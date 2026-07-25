@@ -892,3 +892,63 @@ describe("ExecutionEvents.projectUnits", () => {
     expect(twice.items).not.toContainEqual(expect.objectContaining({ id: "execution:turn:cancelled", turnId: "turn" }))
   })
 })
+
+describe("ExecutionEvents delegation verdicts", () => {
+  const delegation = (output: unknown) => {
+    const parent = Transcript.project("turn", "delegate", [
+      event("agent", 0, "tool.call.requested", {
+        data: { tool_call_id: "agent", tool_name: "task", input: { prompt: "Inspect the child" } },
+      }),
+      event("spawned", 1, "child_run.spawned", {
+        data: { tool_call_id: "agent", child_execution_id: "execution:child" },
+      }),
+      event("parent-result", 2, "tool.result.received", { data: { tool_call_id: "agent", output } }),
+    ])
+    const child = Transcript.project("child", "", [event("child-done", 0, "execution.completed")])
+    let model = ExecutionEvents.projectUnits(ViewState.initial("/work"), parent.units)
+    model = ExecutionEvents.projectChildUnits(model, "turn:agent", child.units)
+    return (model.blocks as ReadonlyArray<Transcript.Block>).find(
+      (block) => block._tag === "ToolCall" && block.id === "turn:agent",
+    ) as Extract<Transcript.Block, { _tag: "ToolCall" }>
+  }
+
+  it("keeps a NoReport verdict when the child execution completes", () => {
+    const tool = delegation({
+      _tag: "NoReport",
+      childExecutionId: "execution:child",
+      status: "failed",
+      reason: "The subagent finished its run without writing a final report.",
+      recovery: "Re-run this delegation once with the same prompt.",
+    })
+    expect(tool.status).toBe("failed")
+    expect(tool.output).toContain("NoReport")
+  })
+
+  it("keeps a truncated Failed verdict and its partial work when the child execution completes", () => {
+    const tool = delegation({
+      _tag: "Failed",
+      childExecutionId: "execution:child",
+      status: "failed",
+      reason: "The subagent's final model turn ended before the provider reported why it stopped.",
+      output: [{ type: "text", text: "Partial finding" }],
+    })
+    expect(tool.status).toBe("failed")
+    expect(tool.output).toContain("Partial finding")
+  })
+
+  it("lets a completed child execution override a stale plain-text tool error", () => {
+    const tool = delegation("stale parent failure")
+    expect(tool.status).toBe("complete")
+    expect(tool.output ?? "").not.toContain("stale parent failure")
+  })
+
+  it("lets a completed child execution override a Report verdict without losing the answer", () => {
+    const tool = delegation({
+      _tag: "Report",
+      childExecutionId: "execution:child",
+      status: "completed",
+      output: [{ type: "text", text: "The finding" }],
+    })
+    expect(tool.status).toBe("complete")
+  })
+})

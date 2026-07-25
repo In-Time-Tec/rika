@@ -55,14 +55,14 @@ export type Result = typeof Result.Type
 export const noReportRecovery =
   "Nothing came back, so there is no finding to report or act on. Re-run this delegation once with the same prompt, or do the work yourself. Never present this to the user as the subagent having found nothing."
 
-export const report = (childExecutionId: string, output: Report["output"]): Report => ({
+export const report = ({ childExecutionId, output }: Pick<Report, "childExecutionId" | "output">): Report => ({
   _tag: "Report",
   childExecutionId,
   status: "completed",
   output,
 })
 
-export const noReport = (childExecutionId: string, reason: string): NoReport => ({
+export const noReport = ({ childExecutionId, reason }: Pick<NoReport, "childExecutionId" | "reason">): NoReport => ({
   _tag: "NoReport",
   childExecutionId,
   status: "failed",
@@ -70,7 +70,11 @@ export const noReport = (childExecutionId: string, reason: string): NoReport => 
   recovery: noReportRecovery,
 })
 
-export const failed = (childExecutionId: string, reason: string, output: Failed["output"]): Failed => ({
+export const failed = ({
+  childExecutionId,
+  reason,
+  output,
+}: Pick<Failed, "childExecutionId" | "reason" | "output">): Failed => ({
   _tag: "Failed",
   childExecutionId,
   status: "failed",
@@ -78,7 +82,11 @@ export const failed = (childExecutionId: string, reason: string, output: Failed[
   output,
 })
 
-export const cancelled = (childExecutionId: string, reason: string, output: Cancelled["output"]): Cancelled => ({
+export const cancelled = ({
+  childExecutionId,
+  reason,
+  output,
+}: Pick<Cancelled, "childExecutionId" | "reason" | "output">): Cancelled => ({
   _tag: "Cancelled",
   childExecutionId,
   status: "cancelled",

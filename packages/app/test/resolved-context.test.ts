@@ -26,25 +26,38 @@ const globRegex = (pattern: string) =>
       .replaceAll("\u0000", ".*")}$`,
   )
 const globFor =
-  (fixture: Readonly<Record<string, string>>): ResolvedContext.GlobLookup =>
-  (workspace, pattern, maximumFiles) =>
-    Effect.succeed(
-      Object.keys(fixture)
-        .filter((name) => name.startsWith(`${workspace}/`))
-        .map((name) => name.slice(`${workspace}/`.length))
-        .filter((name) => globRegex(pattern).test(name))
-        .toSorted()
-        .slice(0, maximumFiles),
-    )
+  (fixture: Readonly<Record<string, string>>, order: "sorted" | "reversed" = "sorted"): ResolvedContext.GlobLookup =>
+  (workspace, pattern, maximumFiles) => {
+    const matched = Object.keys(fixture)
+      .filter((name) => name.startsWith(`${workspace}/`))
+      .map((name) => name.slice(`${workspace}/`.length))
+      .filter((name) => globRegex(pattern).test(name))
+      .toSorted()
+    return Effect.succeed((order === "sorted" ? matched : matched.toReversed()).slice(0, maximumFiles))
+  }
 const layerFor = (
   fixtureFiles: Readonly<Record<string, string>>,
   fixtureDirectories: Readonly<Record<string, ReadonlyArray<string>>>,
+  order: "sorted" | "reversed" = "sorted",
 ) =>
-  ResolvedContext.layer(globFor(fixtureFiles)).pipe(
+  ResolvedContext.layer(globFor(fixtureFiles, order)).pipe(
     Layer.provide(ContextFileSystem.testLayer(fixtureFiles, fixtureDirectories).pipe(Layer.provide(Path.layer))),
     Layer.provide(Path.layer),
     Layer.provide(FileSystem.layerNoop({})),
   )
+const spreadFiles = Object.fromEntries(
+  ["a", "b"].flatMap((directory) =>
+    Array.from({ length: 600 }, (_, index) => [
+      `/spread/${directory}/${String(index).padStart(4, "0")}.txt`,
+      `${directory}-${index}`,
+    ]),
+  ),
+)
+const spreadDirectories = {
+  "/spread": ["a", "b"],
+  "/spread/a": Array.from({ length: 600 }, (_, index) => `${String(index).padStart(4, "0")}.txt`),
+  "/spread/b": Array.from({ length: 600 }, (_, index) => `${String(index).padStart(4, "0")}.txt`),
+}
 const contextLayer = layerFor(files, directories)
 
 describe("ResolvedContext", () => {
@@ -196,6 +209,25 @@ describe("ResolvedContext", () => {
         ),
       ),
     ),
+  )
+
+  it.effect("caps glob references by sorted path, not by enumeration order", () =>
+    Effect.gen(function* () {
+      const paths = (order: "sorted" | "reversed") =>
+        Effect.gen(function* () {
+          const resolver = yield* ResolvedContext.Service
+          const result = yield* resolver.resolve({ workspace: "/spread", references: ["a/*.txt", "b/*.txt"] })
+          return result.sources.map((source) => source.path)
+        }).pipe(provideLayer(layerFor(spreadFiles, spreadDirectories, order)))
+      const forward = yield* paths("sorted")
+      const reversed = yield* paths("reversed")
+
+      expect(reversed).toEqual(forward)
+      expect(forward).toHaveLength(1_000)
+      expect(forward.at(0)).toBe("a/0000.txt")
+      expect(forward.at(-1)).toBe("b/0399.txt")
+      expect(forward).not.toContain("b/0400.txt")
+    }),
   )
 
   it.effect("rejects reference symlinks that escape the workspace", () =>

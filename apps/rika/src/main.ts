@@ -1390,15 +1390,6 @@ export const configuredBackendLayer = ({
           compaction: providerPlans?.routePlan.compaction ?? productionCompaction(route),
           oracleCompaction: providerPlans?.oracleRoutePlan.compaction ?? productionCompaction(resolvedOracleRoute),
           ...(providerPlans === undefined ? {} : { modelResilience: RelayExecutionBackend.defaultModelResilience }),
-          webSearchCredentialsForWorkspace: (runtimeWorkspace) =>
-            effectiveConfigForWorkspace(runtimeWorkspace).pipe(
-              Effect.flatMap((config) =>
-                validateWebSearchProviders(config.environment.webSearchCredentials).pipe(
-                  Effect.as(config.environment.webSearchCredentials),
-                ),
-              ),
-              Effect.mapError((error) => ExecutionBackend.BackendError.make({ message: String(error) })),
-            ),
           toolRuntimeLayerForWorkspace: (runtimeWorkspace) =>
             Layer.unwrap(
               effectiveConfigForWorkspace(runtimeWorkspace).pipe(

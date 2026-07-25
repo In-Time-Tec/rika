@@ -1759,8 +1759,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           oracleCompaction,
           additionalToolkit: ThreadTools.allToolkit,
           resolveWorkspace: (execution) => Effect.succeed(execution.includes("other-turn") ? "/configured" : "/plain"),
-          webSearchCredentialsForWorkspace: (workspace) =>
-            Effect.succeed(workspace === "/configured" ? { parallel: Redacted.make("secret") } : {}),
         }),
       )
       const registered = (yield* Ref.get(fixture.registrations)).at(-1) as any
@@ -1831,7 +1829,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         metadata: { rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
       expect(fanOutInputs[0].children[0].override.compaction_policy).toEqual(oraclePolicy)
-      expect(fanOutInputs[0].children[0].override.tool_names).not.toContain("web_search")
+      expect(fanOutInputs[0].children[0].override.tool_names).toContain("web_search")
       expect(fanOutInputs[0].children[0].override.tool_names).not.toContain("read_web_page")
       expect(fanOutInputs[0].children[1].override.model).toMatchObject({
         provider: selection.provider,
@@ -1930,27 +1928,11 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it("gates web tools by configured provider credentials", () => {
-    const unavailable = RelayExecutionBackend.toolkitFor({})
-    expect(Object.keys(unavailable.tools)).not.toContain("web_search")
-    expect(Object.keys(unavailable.tools)).not.toContain("read_web_page")
+  it("always offers the web tools so the emitted tool list keeps one shape", () => {
+    const tools = Object.keys(RelayExecutionBackend.toolkitFor({}).tools)
 
-    const unsupported = RelayExecutionBackend.toolkitFor({
-      webSearchCredentials: { custom: Redacted.make("custom") },
-    })
-    expect(Object.keys(unsupported.tools)).not.toContain("web_search")
-
-    const exa = RelayExecutionBackend.toolkitFor({
-      webSearchCredentials: { exa: Redacted.make("exa") },
-    })
-    expect(Object.keys(exa.tools)).toContain("web_search")
-    expect(Object.keys(exa.tools)).not.toContain("read_web_page")
-
-    const parallel = RelayExecutionBackend.toolkitFor({
-      webSearchCredentials: { parallel: Redacted.make("parallel") },
-    })
-    expect(Object.keys(parallel.tools)).toContain("web_search")
-    expect(Object.keys(parallel.tools)).toContain("read_web_page")
+    expect(tools).toContain("web_search")
+    expect(tools).toContain("read_web_page")
   })
 
   it("composes supported provider factories and reports unknown IDs", () => {

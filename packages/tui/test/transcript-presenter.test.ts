@@ -1,7 +1,12 @@
 import * as Transcript from "@rika/transcript"
 import { describe, expect, it } from "vitest"
 import { ExecutionEvents, TranscriptPresenter, ViewState } from "../src"
-import { agentResponseState, unitId as transcriptUnitId, rows as transcriptUnits } from "../src/transcript-presenter"
+import {
+  agentOutputText,
+  agentResponseState,
+  unitId as transcriptUnitId,
+  rows as transcriptUnits,
+} from "../src/transcript-presenter"
 
 const event = (
   cursor: string,
@@ -533,5 +538,49 @@ describe("row window math", () => {
     expect(TranscriptPresenter.includeRowEnd(400, 450, 500, limit)).toBe(451)
     expect(TranscriptPresenter.includeRowEnd(400, 10, 500, limit)).toBe(240)
     expect(TranscriptPresenter.includeRowEnd(400, -1, 500, limit)).toBe(400)
+  })
+})
+
+describe("agentOutputText", () => {
+  const noReport = JSON.stringify({
+    _tag: "NoReport",
+    childExecutionId: "child:one",
+    status: "failed",
+    reason: "The subagent finished its run without writing a final report.",
+    recovery: "Re-run this delegation once with the same prompt, or do the work yourself.",
+  })
+
+  it("renders a NoReport as its reason followed by its recovery", () => {
+    expect(agentOutputText(noReport)).toBe(
+      "The subagent finished its run without writing a final report.\n\nRe-run this delegation once with the same prompt, or do the work yourself.",
+    )
+  })
+
+  it("renders a Report as its text alone", () => {
+    const report = JSON.stringify({
+      _tag: "Report",
+      childExecutionId: "child:one",
+      status: "completed",
+      output: [{ type: "text", text: "The bug is in rows.ts." }],
+    })
+    expect(agentOutputText(report)).toBe("The bug is in rows.ts.")
+  })
+
+  it("renders a Failed as its partial output followed by its reason", () => {
+    const failed = JSON.stringify({
+      _tag: "Failed",
+      childExecutionId: "child:one",
+      status: "failed",
+      reason: "Subagent execution failed: HTTP 400",
+      output: [{ type: "text", text: "Partial finding" }],
+    })
+    expect(agentOutputText(failed)).toBe("Partial finding\n\nSubagent execution failed: HTTP 400")
+  })
+
+  it("passes plain text through and drops an unrecognised object", () => {
+    expect(agentOutputText("plain failure text")).toBe("plain failure text")
+    expect(agentOutputText(JSON.stringify({ some: "shape" }))).toBeUndefined()
+    expect(agentOutputText(undefined)).toBeUndefined()
+    expect(agentOutputText("   ")).toBeUndefined()
   })
 })

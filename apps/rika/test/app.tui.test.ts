@@ -11,6 +11,8 @@ const settled = (app: TuiApp.TuiApp) =>
     yield* app.waitGone("Thinking")
   })
 
+const emptyFallback = "The subagent finished without a final message."
+
 const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colors.text): boolean =>
   app
     .spans()
@@ -277,6 +279,60 @@ test(
         app.pressEnter()
         expanded = yield* app.waitFrame("NESTED_AGENT_FINAL")
         assertTree(expanded)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "distinguishes a reported, an unreported, and a failed subagent in the transcript",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [
+            TuiApp.model.toolCall("task", { prompt: "REPORTING_AGENT_PROMPT" }, "reporting-agent"),
+            TuiApp.model.text("REPORTING_AGENT_FINDING"),
+            TuiApp.model.text("ROOT_AFTER_REPORT"),
+            TuiApp.model.toolCall("task", { prompt: "SILENT_AGENT_PROMPT" }, "silent-agent"),
+            TuiApp.model.turn([]),
+            TuiApp.model.text("ROOT_AFTER_NO_REPORT"),
+            TuiApp.model.toolCall("task", { prompt: "FAILING_AGENT_PROMPT" }, "failing-agent"),
+            TuiApp.model.failure("CHILD_STREAM_FAILED"),
+            TuiApp.model.text("ROOT_AFTER_FAILURE"),
+          ],
+          width: 100,
+          height: 64,
+        })
+
+        const delegate = (prompt: string, marker: string) =>
+          Effect.gen(function* () {
+            yield* Effect.promise(() => app.type(prompt))
+            app.pressEnter()
+            yield* app.waitFrame(marker)
+            yield* settled(app)
+            app.pressKey("\t")
+            app.pressEnter()
+          })
+
+        yield* delegate("Delegate work that reports back.", "ROOT_AFTER_REPORT")
+        const reported = yield* app.waitFrame("REPORTING_AGENT_FINDING")
+        expect(reported).toContain("Subagent finished")
+        expect(reported).not.toContain(emptyFallback)
+
+        yield* delegate("Delegate work that reports nothing.", "ROOT_AFTER_NO_REPORT")
+        const unreported = yield* app.waitFrame("SILENT_AGENT_PROMPT")
+        expect(unreported).toContain("Subagent failed")
+        expect(unreported).toContain("The subagent finished its run without writing a final report.")
+        expect(unreported).toContain("Re-run this delegation once")
+        expect(unreported).not.toContain(emptyFallback)
+
+        yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
+        const failed = yield* app.waitFrame("FAILING_AGENT_PROMPT")
+        expect(failed).toContain("Subagent failed")
+        expect(failed).toContain("CHILD_STREAM_FAILED")
+        expect(failed).not.toContain(emptyFallback)
         yield* app.quit
       }),
     ),

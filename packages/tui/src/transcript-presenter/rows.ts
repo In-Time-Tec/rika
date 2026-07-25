@@ -208,9 +208,13 @@ const decodedOutput = (output: string | undefined): object | undefined => {
   }
 }
 
-export const isNoReportOutput = (output: string | undefined): boolean => {
+const failedDelegationTags = new Set(["NoReport", "Failed"])
+
+export const isFailedDelegationOutput = (output: string | undefined): boolean => {
   const decoded = decodedOutput(output)
-  return decoded !== undefined && stringField(decoded, "_tag") === "NoReport"
+  if (decoded === undefined) return false
+  const tag = stringField(decoded, "_tag")
+  return tag !== undefined && failedDelegationTags.has(tag) && stringField(decoded, "status") === "failed"
 }
 
 const noReportText = (decoded: object): string | undefined => {
@@ -231,7 +235,10 @@ export const agentOutputText = (output: string | undefined): string | undefined 
   if ("output" in decoded && Array.isArray((decoded as { readonly output: unknown }).output)) {
     const text = (decoded as { readonly output: ReadonlyArray<unknown> }).output
       .flatMap((part) =>
-        typeof part === "object" && part !== null && "text" in part && typeof (part as { text: unknown }).text === "string"
+        typeof part === "object" &&
+        part !== null &&
+        "text" in part &&
+        typeof (part as { text: unknown }).text === "string"
           ? [(part as { readonly text: string }).text]
           : [],
       )

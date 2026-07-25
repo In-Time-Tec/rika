@@ -93,6 +93,7 @@ export const layer = (glob: GlobLookup) =>
           const candidates = globPattern(reference)
             ? (yield* glob(root, reference, maximumReferenceFiles).pipe(Effect.provideContext(platform)))
                 .map((candidate) => path.resolve(root, candidate))
+                .toSorted()
                 .filter((candidate) => {
                   if (globCandidates.has(candidate)) return true
                   if (globCandidates.size >= maximumReferenceFiles) return false

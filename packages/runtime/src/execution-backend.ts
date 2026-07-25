@@ -172,9 +172,6 @@ export interface LayerOptions<AdditionalTools extends Record<string, Tool.Any> =
   readonly filename: string
   readonly workspace: string
   readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
-  readonly webSearchCredentialsForWorkspace?: (
-    workspace: string,
-  ) => Effect.Effect<Readonly<Record<string, Redacted.Redacted<string>>>, BackendError>
   readonly registration: ModelRegistry.Registration
   readonly additionalRegistrations?: ReadonlyArray<ModelRegistry.Registration>
   readonly selection: ModelRegistry.ModelSelection
@@ -406,20 +403,16 @@ const pinnedSelection = (route: ExecutionRoutePin["main"]): ModelRegistry.ModelS
 })
 
 export const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
-  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit" | "webSearchCredentials">,
+  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit">,
 ) =>
   Toolkit.make(
-    ...Object.values(RikaToolRuntime.toolkit.tools).filter(
-      (tool) =>
-        (tool.name !== "web_search" || WebSearch.providerAvailability(options.webSearchCredentials ?? {}).search) &&
-        (tool.name !== "read_web_page" || WebSearch.providerAvailability(options.webSearchCredentials ?? {}).readPage),
-    ),
+    ...Object.values(RikaToolRuntime.toolkit.tools),
     ...Object.values(AgentTools.modelToolkit.tools),
     ...Object.values(options.additionalToolkit?.tools ?? {}),
   )
 
 const availableTools = <AdditionalTools extends Record<string, Tool.Any>>(
-  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit" | "webSearchCredentials">,
+  options: Pick<LayerOptions<AdditionalTools>, "additionalToolkit">,
   names: ReadonlyArray<string>,
 ) => {
   const available = toolkitFor(options).tools
@@ -625,11 +618,13 @@ const silentChildReason = "The subagent finished its run without writing a final
 const unreconciledReason = (status: string) =>
   `Relay reconciled the subagent's execution as ${status}, but its terminal event never reached Rika, so no report was recovered.`
 
-export const resolveChildResult = (
-  childExecutionId: string,
-  events: ReadonlyArray<Execution.ExecutionEvent>,
-  reconciled?: "completed" | "failed" | "cancelled",
-): AgentTools.Result => {
+export interface ChildResultInput {
+  readonly childExecutionId: string
+  readonly events: ReadonlyArray<Execution.ExecutionEvent>
+  readonly reconciled?: "completed" | "failed" | "cancelled"
+}
+
+export const resolveChildResult = ({ childExecutionId, events, reconciled }: ChildResultInput): AgentTools.Result => {
   const terminal = events.findLast(
     (executionEvent) =>
       executionEvent.type === "execution.completed" ||
@@ -663,15 +658,20 @@ export const resolveChildResult = (
   else if (terminal?.type === "execution.failed") status = "failed"
   else if (terminal?.type === "execution.cancelled") status = "cancelled"
   if (status === "cancelled")
-    return AgentTools.cancelled(childExecutionId, failure ?? unreconciledReason(status), primary)
+    return AgentTools.cancelled({
+      childExecutionId,
+      reason: failure ?? unreconciledReason(status),
+      output: primary,
+    })
   if (!Arr.isReadonlyArrayNonEmpty(primary)) {
-    if (failure !== undefined) return AgentTools.noReport(childExecutionId, failure)
-    if (terminal === undefined) return AgentTools.noReport(childExecutionId, unreconciledReason(status))
-    return AgentTools.noReport(childExecutionId, truncated ? truncatedStreamReason : silentChildReason)
+    if (failure !== undefined) return AgentTools.noReport({ childExecutionId, reason: failure })
+    if (terminal === undefined) return AgentTools.noReport({ childExecutionId, reason: unreconciledReason(status) })
+    return AgentTools.noReport({ childExecutionId, reason: truncated ? truncatedStreamReason : silentChildReason })
   }
-  if (truncated) return AgentTools.failed(childExecutionId, failure ?? truncatedStreamReason, primary)
-  if (status === "completed") return AgentTools.report(childExecutionId, primary)
-  return AgentTools.failed(childExecutionId, failure ?? unreconciledReason(status), primary)
+  if (truncated)
+    return AgentTools.failed({ childExecutionId, reason: failure ?? truncatedStreamReason, output: primary })
+  if (status === "completed") return AgentTools.report({ childExecutionId, output: primary })
+  return AgentTools.failed({ childExecutionId, reason: failure ?? unreconciledReason(status), output: primary })
 }
 const awaitChildResult = (client: Client.Interface, childId: string) => {
   const childExecutionId = Ids.ExecutionId.make(childId)
@@ -683,11 +683,11 @@ const awaitChildResult = (client: Client.Interface, childId: string) => {
         (item): item is Extract<typeof item, { _tag: "stopped" }> => item._tag === "stopped",
       )
       const reconciled = stopped?.reason._tag === "terminal" ? stopped.reason.status : undefined
-      return resolveChildResult(
-        childId,
-        collected.flatMap((item) => (item._tag === "event" ? [item.event] : [])),
-        reconciled === "completed" || reconciled === "failed" || reconciled === "cancelled" ? reconciled : undefined,
-      )
+      return resolveChildResult({
+        childExecutionId: childId,
+        events: collected.flatMap((item) => (item._tag === "event" ? [item.event] : [])),
+        ...(reconciled === "completed" || reconciled === "failed" || reconciled === "cancelled" ? { reconciled } : {}),
+      })
     }),
   )
 }
@@ -1153,7 +1153,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     readonly workspace?: string
     readonly resolveWorkspace?: LayerOptions["resolveWorkspace"]
     readonly webSearchCredentials?: LayerOptions["webSearchCredentials"]
-    readonly webSearchCredentialsForWorkspace?: LayerOptions["webSearchCredentialsForWorkspace"]
     readonly registerModels?: (registrations: ReadonlyArray<ModelRegistry.Registration>) => Effect.Effect<void>
     readonly onClientReady?: (client: Client.Interface) => Effect.Effect<void>
   },
@@ -1169,18 +1168,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           : options
               .permissionPolicyForExecution(execution)
               .pipe(Effect.map((policy) => policy as Permissions.Ruleset | undefined))
-      const toolOptionsForExecution = (execution: string) =>
-        Effect.gen(function* () {
-          const workspace =
-            options.resolveWorkspace === undefined
-              ? (options.workspace ?? "")
-              : yield* options.resolveWorkspace(execution)
-          const credentials =
-            options.webSearchCredentialsForWorkspace === undefined
-              ? options.webSearchCredentials
-              : yield* options.webSearchCredentialsForWorkspace(workspace)
-          return { ...options, webSearchCredentials: credentials ?? {} }
-        })
       const registry =
         Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
       const hostInstances = new Map<string, Resident.Instance>()
@@ -1346,7 +1333,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             const threadId =
               threadIdFromMetadata(parent?.metadata) ?? threadIdFromMetadata(parent?.agent_snapshot?.metadata)
             const depth = childExecutionDepth(String(parentExecutionId)) + 1
-            const executionToolOptions = yield* toolOptionsForExecution(String(parentExecutionId))
             const children = yield* Effect.forEach(input.children, (child) => {
               const profile = child.profile ?? "Task"
               const profileRoute = routeForProfile(routePin, profile)
@@ -1377,7 +1363,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                       rika_reasoning_effort: effort,
                     },
                   },
-                  tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, depth)),
+                  tool_names: availableTools(options, toolsAtDepth(preset.tool_names, depth)),
                   ...(policy === undefined ? {} : { compaction_policy: policy }),
                 },
                 metadata: {
@@ -1473,7 +1459,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               ? resolveTitle(pinnedSelection(route))
               : resolve(input.profile, pinnedSelection(route)).preset
           const depth = childExecutionDepth(String(parentExecutionId)) + 1
-          const executionToolOptions = yield* toolOptionsForExecution(String(parentExecutionId))
           const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
           const threadId = threadIdFromMetadata(parent.metadata) ?? threadIdFromMetadata(parent.agent_snapshot.metadata)
           yield* client.childRuns
@@ -1493,9 +1478,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 },
               },
               tool_names:
-                input.profile === "Title"
-                  ? []
-                  : availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, depth)),
+                input.profile === "Title" ? [] : availableTools(options, toolsAtDepth(preset.tool_names, depth)),
               permissions: preset.permissions,
               ...(input.profile === "Title"
                 ? {}
@@ -1524,7 +1507,6 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               const startedAt = yield* Clock.currentTimeMillis
               const id = executionId(input.turnId)
               const permissionPolicy = yield* permissionPolicyFor(String(id))
-              const executionToolOptions = yield* toolOptionsForExecution(String(id))
               const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(input.executionRoute)
               const metadata = {
                 steering_enabled: true,
@@ -1588,7 +1570,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                             rika_reasoning_effort: effort,
                           },
                         },
-                        tool_names: availableTools(executionToolOptions, toolsAtDepth(preset.tool_names, childDepth)),
+                        tool_names: availableTools(options, toolsAtDepth(preset.tool_names, childDepth)),
                         ...(policy === undefined ? {} : { compaction_policy: policy }),
                         metadata: {
                           ...preset.metadata,
@@ -1610,7 +1592,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 }),
               )
               const agentName = rootAgentName
-              const rootTools = Object.values(toolkitFor(executionToolOptions).tools).filter(
+              const rootTools = Object.values(toolkitFor(options).tools).filter(
                 (tool) => tool.name !== "search_threads" && tool.name !== "read_thread_transcript",
               )
               const registered = yield* client.agents.register({
@@ -2010,27 +1992,8 @@ export const layer = <
                 return assembled
               }),
           })
-          const toolkit = toolkitFor(
-            options.webSearchCredentialsForWorkspace === undefined
-              ? options
-              : {
-                  ...options,
-                  webSearchCredentials: Object.fromEntries(
-                    WebSearch.providerRegistry.map((provider) => [provider.id, Redacted.make("")]),
-                  ),
-                },
-          )
+          const toolkit = toolkitFor(options)
           const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
-          const toolOptionsForExecution = (execution: string) =>
-            Effect.gen(function* () {
-              const workspace =
-                options.resolveWorkspace === undefined ? options.workspace : yield* options.resolveWorkspace(execution)
-              const credentials =
-                options.webSearchCredentialsForWorkspace === undefined
-                  ? options.webSearchCredentials
-                  : yield* options.webSearchCredentialsForWorkspace(workspace)
-              return { ...options, webSearchCredentials: credentials ?? {} }
-            })
           const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
             toolName: AgentTools.DelegationToolName,
             profile: AgentProfile,
@@ -2373,9 +2336,8 @@ export const layer = <
                   Effect.flatMap((client) =>
                     Effect.gen(function* () {
                       const startedAt = yield* Clock.currentTimeMillis
-                      const executionToolOptions = yield* toolOptionsForExecution(parentExecutionId)
                       const childToolkit = Toolkit.make(
-                        ...Object.values(toolkitFor(executionToolOptions).tools).filter((tool) =>
+                        ...Object.values(toolkitFor(options).tools).filter((tool) =>
                           preset.tool_names.includes(tool.name),
                         ),
                       )

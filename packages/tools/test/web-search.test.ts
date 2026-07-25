@@ -81,6 +81,14 @@ describe("WebSearch registry", () => {
     }),
   )
 
+  it.effect("refuses at call time when no provider is configured", () =>
+    Effect.gen(function* () {
+      const unconfigured = yield* Effect.flip(WebSearch.make([]).search(input))
+      expect(unconfigured._tag).toBe("WebSearchSelectionError")
+      expect(unconfigured.message).toContain("No configured web search provider supports 'web' searches")
+    }),
+  )
+
   it.effect("reports partial failures and fails when every automatically selected provider fails", () =>
     Effect.gen(function* () {
       const failed = makeProvider("failed", 2, ["web"], () =>

@@ -5180,18 +5180,13 @@ describe("Operation", () => {
   it.effect("projects a truncated subagent as a failed delegation instead of a silent completion", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const noReport = AgentTools.noReport(
-          "child:execution%3Atruncated-turn:call-1",
-          "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
-        )
+        const noReport = AgentTools.noReport({
+          childExecutionId: "child:execution%3Atruncated-turn:call-1",
+          reason:
+            "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
+        })
         const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
-        const delegationEvent = (
-          cursor: string,
-          sequence: number,
-          type: string,
-          data: Record<string, unknown>,
-        ): ExecutionBackend.Event => ({ cursor, sequence, type, createdAt: sequence, data })
         const truncatedBackend = ExecutionBackend.Service.of({
           ...backend,
           start: (input) =>
@@ -5252,6 +5247,13 @@ describe("Operation", () => {
     ),
   )
 })
+
+const delegationEvent = (
+  cursor: string,
+  sequence: number,
+  type: string,
+  data: Record<string, unknown>,
+): ExecutionBackend.Event => ({ cursor, sequence, type, createdAt: sequence, data })
 
 const usageEventAt = (cursor: string, sequence: number): ExecutionBackend.Event => ({
   cursor,
