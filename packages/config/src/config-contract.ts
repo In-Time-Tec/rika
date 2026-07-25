@@ -504,7 +504,7 @@ export const decodeSettingsInput: {
           path,
           message: `Model alias ${name} preset must be one of ${presetIds.join(", ")}`,
         })
-      const sources = [alias.base, alias.preset, alias.efforts].filter((value) => value !== undefined).length
+      const sources = [alias.base, alias.preset, alias.efforts].filter((source) => source !== undefined).length
       if (sources === 0)
         throw ConfigFileError.make({
           path,
