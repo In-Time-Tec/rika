@@ -1,4 +1,4 @@
-import { agentPresentation, childParentMatch, type Block, type Unit } from "@rika/transcript"
+import { agentPresentation, childParentMatch, executionKey, type Block, type Unit } from "@rika/transcript"
 import { Function } from "effect"
 import type { Model, TranscriptItem } from "../view-state"
 
@@ -14,8 +14,6 @@ export interface Event {
 
 type ToolCall = Extract<Block, { readonly _tag: "ToolCall" }>
 type ExecutionOutcome = NonNullable<Unit["executionOutcome"]>
-
-const executionKey = (value: string): string => value.replace(/^execution:/, "")
 
 const isCancellationNotice = (unit: Unit): boolean =>
   unit.key.startsWith("execution:") &&

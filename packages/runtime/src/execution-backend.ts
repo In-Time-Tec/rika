@@ -79,9 +79,11 @@ import { definitions, idFor } from "./workflow-definitions"
 import {
   childExecutionDepth,
   childExecutionId as encodeChildExecutionId,
+  decodeParentExecutionId,
   delegationAvailableAtDepth,
   toolsAtDepth,
 } from "./agent-depth"
+import { ExecutionId } from "@rika/tools"
 import * as DataBlobStore from "./data-blob-store"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"
@@ -655,16 +657,7 @@ const attachedWorkflow = (value: string) => {
     return undefined
   }
 }
-const childParentExecutionId = (value: string) => {
-  if (!value.startsWith("child:")) return undefined
-  const separator = value.indexOf(":", "child:".length)
-  if (separator < 0) return undefined
-  try {
-    return decodeURIComponent(value.slice("child:".length, separator))
-  } catch {
-    return undefined
-  }
-}
+const childParentExecutionId = decodeParentExecutionId
 const standaloneWorkflow = (value: string) => {
   const match = /^workflow:workspace:([^:]+):run:(.+)$/.exec(value)
   if (match === null) return undefined
@@ -728,7 +721,7 @@ const executionInput = (input: { readonly prompt: string; readonly promptParts?:
 }
 
 const mapFanOut = (value: any) => {
-  const parentTurnId = String(value.parent_execution_id).replace(/^execution:/, "")
+  const parentTurnId = ExecutionId.executionKey(String(value.parent_execution_id))
   return {
     fanOutId: String(value.fan_out_id),
     parentTurnId,

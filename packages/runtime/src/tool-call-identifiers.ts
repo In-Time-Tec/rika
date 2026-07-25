@@ -1,11 +1,9 @@
+import { ExecutionId } from "@rika/tools"
 import { Function } from "effect"
 import { Prompt, Response } from "effect/unstable/ai"
 
 const toolCallPrefix = (namespace: string) => `rika:${encodeURIComponent(namespace)}:`
-const executionNamespacePrefixes = ["execution:", "child:", "workflow:"] as const
-
-export const isExecutionNamespace = (value: string) =>
-  executionNamespacePrefixes.some((prefix) => value.startsWith(prefix))
+export const isExecutionNamespace = ExecutionId.isExecutionNamespace
 
 export const durableToolCallId: {
   (id: string): (namespace: string) => string

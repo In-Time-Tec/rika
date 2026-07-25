@@ -684,7 +684,7 @@ export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
   )
 })
 
-const normalizeChildExecutionId = (executionId: string): string => executionId.replace(/^execution:/, "")
+const normalizeChildExecutionId = Transcript.executionKey
 
 const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number | undefined =>
   totals.complete ? totals.globalCostUsd : undefined

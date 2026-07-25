@@ -1,4 +1,4 @@
-import { Catalog } from "@rika/tools"
+import { Catalog, ExecutionId } from "@rika/tools"
 import { Function, Option, Schema } from "effect"
 import { pricingVersion, usageCostUsd, usageTokens } from "./model-cost"
 import { partialInputRecord } from "./partial-input"
@@ -40,7 +40,7 @@ const outputText = (output: unknown): string => {
 
 const eventId = (turnId: string, id: string): string => (turnId.length === 0 ? id : `${turnId}:${id}`)
 
-const executionKey = (value: string): string => value.replace(/^execution:/, "")
+export const executionKey = ExecutionId.executionKey
 
 const rawToolId = (event: SourceEvent): string => {
   const value = event.type === "tool.result.received" ? resultPayload(event) : callPayload(event)
@@ -257,9 +257,7 @@ const providerCallId = (id: string): string => {
   if (match === null) return id
   try {
     const namespace = decodeURIComponent(match[1]!)
-    return namespace.startsWith("execution:") || namespace.startsWith("child:") || namespace.startsWith("workflow:")
-      ? id.slice(match[0].length)
-      : id
+    return ExecutionId.isExecutionNamespace(namespace) ? id.slice(match[0].length) : id
   } catch {
     return id
   }
