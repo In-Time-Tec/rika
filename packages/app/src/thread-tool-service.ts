@@ -7,6 +7,7 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { ThreadTools, ToolInvocation } from "@rika/tools"
 import { Clock, Context, Effect, Ref, Schema } from "effect"
 import type * as RootTurnOwner from "./root-turn-owner"
+import { clampThreadTitle } from "./thread-title"
 
 export interface Options {
   readonly scheduler: Pick<RootTurnOwner.Interface, "accepted">
@@ -139,7 +140,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
             threadId: Thread.ThreadId.make(id()),
             turnId: Turn.TurnId.make(id()),
             prompt: input.prompt,
-            title: input.prompt.slice(0, 128),
+            title: clampThreadTitle(input.prompt),
             executionRoute: executionRoute(input.mode),
             resultDelivery,
             threadCreationDepth: source.threadCreationDepth + 1,

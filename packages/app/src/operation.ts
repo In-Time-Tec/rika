@@ -8,6 +8,7 @@ import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { AgentDepth } from "@rika/runtime"
 import * as Transcript from "@rika/transcript"
+import { clampThreadTitle, threadTitleLimit } from "./thread-title"
 import * as ProductAgent from "./product-agent"
 import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
@@ -106,7 +107,7 @@ const interactiveEventThreadId = (event: InteractiveEvent): string | undefined =
 
 const ignoreInteractiveEvent = (_event: InteractiveEvent) => {}
 
-const temporaryThreadTitle = (prompt: string) => [...prompt].slice(0, 80).join("") || "New thread"
+const temporaryThreadTitle = (prompt: string) => clampThreadTitle(prompt) || "New thread"
 
 const titleExecutionId = (turnId: Turn.TurnId) => AgentDepth.childExecutionId(String(turnId), "title")
 
@@ -119,7 +120,7 @@ const sanitizeThreadTitle = (text: string) =>
       .replace(/^["'#\s]+/, "")
       .replace(/["'\s]+$/, ""),
   ]
-    .slice(0, 80)
+    .slice(0, threadTitleLimit)
     .join("")
     .trimEnd()
 
@@ -4059,7 +4060,7 @@ export const productLayer = <
                   thread = yield* threads.create({
                     id: yield* options.makeThreadId,
                     workspace,
-                    title: `$ ${command}`.slice(0, 80),
+                    title: clampThreadTitle(`$ ${command}`),
                     now,
                   })
                   yield* Ref.set(interactiveThread, thread)
@@ -4693,7 +4694,7 @@ export const productLayer = <
                   ? yield* threads.create({
                       id: yield* options.makeThreadId,
                       workspace: input.workspace ?? options.defaultWorkspace,
-                      title: input.prompt.join(" ").slice(0, 80) || "New thread",
+                      title: clampThreadTitle(input.prompt.join(" ")) || "New thread",
                       now,
                     })
                   : yield* threads
