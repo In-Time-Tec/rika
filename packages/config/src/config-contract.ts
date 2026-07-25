@@ -1,7 +1,8 @@
 import { Function, Schema, type Redacted } from "effect"
 import { defaults as modelDefaults, presetIds, presets, supportedEfforts } from "./models"
+import * as Modes from "./modes"
 
-export type ModeId = "low" | "medium" | "high" | "ultra"
+export type ModeId = Modes.ModeId
 export type Role = "main" | "oracle"
 export type AgentId = "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task"
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
@@ -590,7 +591,7 @@ export const decodeSettingsInput: {
     if (value.modelRoutes.modes !== undefined) {
       if (!object(value.modelRoutes.modes))
         throw ConfigFileError.make({ path, message: "Model route modes must be an object" })
-      exactKeys(path, "Model route modes", value.modelRoutes.modes, ["low", "medium", "high", "ultra"])
+      exactKeys(path, "Model route modes", value.modelRoutes.modes, Modes.modeIds)
       for (const [mode, roles] of Object.entries(value.modelRoutes.modes)) {
         if (!object(roles)) throw ConfigFileError.make({ path, message: `Model route mode ${mode} must be an object` })
         exactKeys(path, `Model route mode ${mode}`, roles, ["main", "oracle"])

@@ -52,6 +52,7 @@ import {
   Service,
   unavailableLayer,
 } from "./operation-contract"
+import { ModeId } from "@rika/config/modes"
 import type {
   Interface,
   InteractiveCommand,
@@ -295,7 +296,7 @@ export interface ProductLayerOptions<
   readonly threadToolGateway?: ThreadToolService.Gateway
   readonly backendLayer: Layer.Layer<ExecutionBackend.Service, BackendError>
   readonly resolveExecutionRoute?: (
-    mode: "low" | "medium" | "high" | "ultra",
+    mode: ModeId,
     tuning?: { readonly fastMode?: boolean },
     workspace?: string,
   ) => Effect.Effect<Turn.ExecutionRoutePin, OperationError, ExecutionBackend.Service>
@@ -1799,7 +1800,7 @@ export const productLayer = <
           }),
         )
       })
-      const testRoute = (mode: "low" | "medium" | "high" | "ultra") => Effect.succeed(Turn.testExecutionRoute(mode))
+      const testRoute = (mode: ModeId) => Effect.succeed(Turn.testExecutionRoute(mode))
       const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
       const executionPrompt = Effect.fn("Operation.executionPrompt")(function* (workspace: string, prompt: string) {
         const context = yield* ResolvedContext.Service
@@ -2517,7 +2518,7 @@ export const productLayer = <
         const submit = Effect.fn("Operation.interactive.submit")(function* (
           prompt: string,
           dispatch: (event: InteractiveEvent) => void,
-          mode: "low" | "medium" | "high" | "ultra" = "medium",
+          mode: ModeId = "medium",
           promptParts?: ReadonlyArray<Turn.PromptPart>,
           modelTuning?: { readonly fastMode?: boolean },
           submissionId?: string,

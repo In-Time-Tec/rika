@@ -2,6 +2,7 @@ import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as Policy from "./tool-policy"
 import { ToolInvocation } from "./tool-invocation"
+import { ModeId } from "@rika/config/modes"
 
 const NonEmptyString = Schema.String.check(Schema.isMinLength(1))
 const PublicInputText = NonEmptyString.check(Schema.isMaxLength(200_000))
@@ -13,7 +14,7 @@ const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 const FindLimit = PositiveInt.check(Schema.isLessThanOrEqualTo(50))
 const PreviewLimit = PositiveInt.check(Schema.isLessThanOrEqualTo(20))
 const TimeoutSeconds = PositiveInt.check(Schema.isLessThanOrEqualTo(600))
-const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
+const Mode = ModeId
 const ResultDelivery = Schema.Literals(["reply", "manual"])
 export const ThreadState = Schema.Literals(["idle", "queued", "running", "awaiting-approval", "error"])
 export type ThreadState = typeof ThreadState.Type

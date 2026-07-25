@@ -1,22 +1,19 @@
 import { Argument, Command, Flag } from "effect/unstable/cli"
 import { Option } from "effect"
 import { dispatch } from "./shared"
+import { modeIds } from "@rika/config/modes"
 
 export const command = Command.make("tools").pipe(
   Command.withDescription("Inspect the static built-in tool catalog"),
   Command.withSubcommands([
-    Command.make(
-      "list",
-      { mode: Flag.choice("mode", ["low", "medium", "high", "ultra"]).pipe(Flag.optional) },
-      ({ mode }) => {
-        const selectedMode = Option.getOrUndefined(mode)
-        return dispatch({
-          _tag: "ToolCatalog",
-          action: "list",
-          ...(selectedMode === undefined ? {} : { mode: selectedMode }),
-        })
-      },
-    ),
+    Command.make("list", { mode: Flag.choice("mode", modeIds).pipe(Flag.optional) }, ({ mode }) => {
+      const selectedMode = Option.getOrUndefined(mode)
+      return dispatch({
+        _tag: "ToolCatalog",
+        action: "list",
+        ...(selectedMode === undefined ? {} : { mode: selectedMode }),
+      })
+    }),
     Command.make("show", { name: Argument.string("name") }, ({ name }) =>
       dispatch({ _tag: "ToolCatalog", action: "show", name }),
     ),

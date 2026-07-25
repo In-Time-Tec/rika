@@ -6,8 +6,9 @@ import type { Key } from "./keys"
 import { isPrintable } from "./keys"
 import { filter, type PaletteAction } from "./palette"
 import { expandableRowIds, rows as transcriptUnits, unitId as transcriptUnitId } from "./transcript-presenter"
+import { ModeId } from "@rika/config/modes"
 
-export const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
+export const Mode = ModeId
 export type Mode = typeof Mode.Type
 
 export const Activity = Schema.Union([

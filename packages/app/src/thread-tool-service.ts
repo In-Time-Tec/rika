@@ -9,6 +9,7 @@ import { Clock, Context, Effect, Ref, Schema } from "effect"
 import type * as RootTurnOwner from "./root-turn-owner"
 import { clampThreadTitle } from "./thread-title"
 import * as ThreadState from "@rika/persistence/thread-state"
+import { ModeId } from "@rika/config/modes"
 
 export interface Options {
   readonly scheduler: Pick<RootTurnOwner.Interface, "accepted">
@@ -117,7 +118,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
         sourceRootTurnId: sourceTurnId,
         now: invocation.createdAt,
       })
-      const executionRoute = (mode?: "low" | "medium" | "high" | "ultra") =>
+      const executionRoute = (mode?: ModeId) =>
         mode === undefined ? sourceTurn.executionRoute : { ...sourceTurn.executionRoute, mode }
       const schedule = (accepted: ThreadInteractionRepository.AcceptedThreadTurn) =>
         accepted.status === "accepted"

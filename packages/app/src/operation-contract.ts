@@ -4,8 +4,9 @@ import * as TranscriptPage from "@rika/persistence/transcript-page"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Context, Effect, Function, Layer, Runtime, Schema } from "effect"
+import { ModeId } from "@rika/config/modes"
 
-const Mode = Schema.Literals(["low", "medium", "high", "ultra"])
+const Mode = ModeId
 const ClientWorkspace = { clientWorkspace: Schema.optionalKey(Schema.String) }
 
 const Interactive = Schema.Struct({
@@ -691,7 +692,7 @@ export interface InteractiveSession {
   readonly events: (dispatch: (event: InteractiveEvent) => void) => Effect.Effect<void, OperationUnavailable>
   readonly submit: (
     prompt: string,
-    mode?: "low" | "medium" | "high" | "ultra",
+    mode?: ModeId,
     promptParts?: ReadonlyArray<Turn.PromptPart>,
     modelTuning?: { readonly fastMode?: boolean },
     submissionId?: string,

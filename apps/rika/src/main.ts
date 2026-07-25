@@ -73,6 +73,7 @@ import { layer as residentLayer } from "./resident-client-transport"
 import { maxClientMessageBytes } from "./resident-wire"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
+import { modeIds } from "@rika/config/modes"
 
 InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
 
@@ -832,7 +833,6 @@ export const makeReloadingTestModel = Effect.fn("Main.makeReloadingTestModel")(f
   }
 })
 
-const modeIds = ["low", "medium", "high", "ultra"] as const
 const resolveTunedModeRoute = (
   settings: ConfigContract.Settings,
   mode: ConfigContract.ModeId,

@@ -92,6 +92,7 @@ import { renderPierreDiff } from "./pierre-diff"
 import { highlightShellCommand } from "./syntax-highlight"
 import { wrapStyledLine } from "./styled-text"
 import { renderToolSummary } from "./tool-summary"
+import { modeIds } from "@rika/config/modes"
 import {
   agentToolSummary,
   escapePathTarget,
@@ -3611,7 +3612,7 @@ const modeDescription = {
 } as const
 
 const modePickerContent = (model: Model, innerWidth: number): StyledText => {
-  const modes = ["low", "medium", "high", "ultra"] as const
+  const modes = modeIds
   const selected = modes[model.modePicker.selected] ?? model.mode
   if (innerWidth < 40)
     return new StyledText([
