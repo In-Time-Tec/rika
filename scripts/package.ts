@@ -4,6 +4,11 @@ import { Data, Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { dual } from "effect/Function"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
+const buildFailure = (cause: unknown): string => {
+  const errors = cause instanceof AggregateError ? cause.errors : []
+  return errors.length === 0 ? String(cause) : `${String(cause)}\n${errors.map(String).join("\n")}`
+}
+
 export const targets = {
   "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "", fffLibc: "gnu" },
   "darwin-x64": { bun: "bun-darwin-x64", opentuiLibc: "", fffLibc: "gnu" },
@@ -118,7 +123,7 @@ const program = Effect.gen(function* () {
           })
         },
         catch: (cause) =>
-          packageError("build", `build ${target} ${path.basename(outfile)} failed: ${String(cause)}`, cause),
+          packageError("build", `build ${target} ${path.basename(outfile)} failed: ${buildFailure(cause)}`, cause),
       }).pipe(
         Effect.flatMap((result) => {
           if (!result.success)
