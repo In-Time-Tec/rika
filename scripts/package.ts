@@ -112,6 +112,7 @@ const program = Effect.gen(function* () {
             entrypoints: [path.join(root, "apps/rika/src", entrypoint)],
             compile: { target: metadata.bun, outfile },
             minify: true,
+            external: ["msgpackr-extract"],
             loader: { ".txt": "text" },
             define: {
               RIKA_VERSION: `"${manifest.version}"`,
