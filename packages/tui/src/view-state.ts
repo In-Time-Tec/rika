@@ -36,6 +36,11 @@ export type UsageTime = typeof UsageTime.Type
 export const UsageDisplay = Schema.Literals(["cost", "tokens", "time"])
 export type UsageDisplay = typeof UsageDisplay.Type
 
+export const nextMode = (mode: Mode): Mode => {
+  const modes = ["low", "medium", "high", "ultra"] as const
+  return modes[(modes.indexOf(mode) + 1) % modes.length]!
+}
+
 export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => {
   if (display === "cost" || display === undefined) return "tokens"
   if (display === "tokens") return "time"

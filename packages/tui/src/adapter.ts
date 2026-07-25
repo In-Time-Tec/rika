@@ -1666,6 +1666,7 @@ export interface Handlers {
   readonly expandPaste?: (token: string) => void
   readonly clickToggle?: (unit: string) => void
   readonly usageToggle?: () => void
+  readonly modeToggle?: () => void
   readonly composerResize?: (height: number) => void
   readonly sidebarResize?: (width: number) => void
   readonly threadSidebarSelect?: (index: number) => void
@@ -1839,6 +1840,8 @@ export class Surface {
   private toastTimer: Fiber.Fiber<void> | undefined
   private usageLabelWidth = 0
   private usageLabelHovered = false
+  private modeLabelHovered = false
+  private modeSegmentStart = 0
   private usagePointerX: number | undefined
   private usageLayoutFrame: (() => void) | undefined
   private lastPaste: { readonly text: string; readonly at: number } | undefined
@@ -2021,14 +2024,17 @@ export class Surface {
     this.modeLabel.onMouseDown = (event) => {
       const column = event.x - this.modeLabel.screenX
       if (column >= 0 && column < this.usageLabelWidth) this.handlers.usageToggle?.()
+      else if (column >= this.modeSegmentStart && column < this.modeLabel.width) this.handlers.modeToggle?.()
     }
     const updateUsageHover = (event: MouseEvent) => {
       this.usagePointerX = event.x
       const column = event.x - this.modeLabel.screenX
       const hovered = column >= 0 && column < this.usageLabelWidth
-      if (hovered === this.usageLabelHovered) return
+      const modeHovered = column >= this.modeSegmentStart && column < this.modeLabel.width
+      if (hovered === this.usageLabelHovered && modeHovered === this.modeLabelHovered) return
       this.usageLabelHovered = hovered
-      this.renderer.setMousePointer(hovered ? "pointer" : "default")
+      this.modeLabelHovered = modeHovered
+      this.renderer.setMousePointer(hovered || modeHovered ? "pointer" : "default")
       if (this.model !== undefined) this.renderModeLabel(this.model)
       this.renderer.requestRender()
     }
@@ -2036,8 +2042,9 @@ export class Surface {
     this.modeLabel.onMouseMove = updateUsageHover
     this.modeLabel.onMouseOut = () => {
       this.usagePointerX = undefined
-      if (!this.usageLabelHovered) return
+      if (!this.usageLabelHovered && !this.modeLabelHovered) return
       this.usageLabelHovered = false
+      this.modeLabelHovered = false
       this.renderer.setMousePointer("default")
       if (this.model !== undefined) this.renderModeLabel(this.model)
       this.renderer.requestRender()
@@ -2501,9 +2508,11 @@ export class Surface {
       modeChunks.push(this.usageLabelHovered ? usage : dim(usage))
       modeChunks.push(fg(colors.text)("─"))
     }
+    this.modeSegmentStart = usageText.length === 0 ? 0 : this.usageLabelWidth + 1
     modeChunks.push(fg(colors.text)(" "))
     if (model.fastMode) modeChunks.push(fg(colors.amber)("↯"))
-    modeChunks.push(fg(colors[model.mode])(model.mode))
+    const modeText = fg(colors[model.mode])(model.mode)
+    modeChunks.push(this.modeLabelHovered ? bold(modeText) : modeText)
     modeChunks.push(fg(colors.text)(" "))
     const width = modeChunks.reduce((total, chunk) => total + modeLabelWidth(chunk.text), 0)
     if (this.usagePointerX !== undefined && this.modeLabel.width > 0) {
