@@ -1,6 +1,8 @@
 export * as Database from "./product-database"
 export * as Thread from "./thread-schema"
+export * as ThreadInteractionRepository from "./thread-interaction-repository"
 export * as ThreadRepository from "./thread-repository"
+export * as ThreadSearchRepository from "./thread-search-repository"
 export * as ThreadSummary from "./thread-summary-schema"
 export * as ThreadSummaryRepository from "./thread-summary-repository"
 export * as Turn from "./turn-schema"

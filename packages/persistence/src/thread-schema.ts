@@ -3,6 +3,15 @@ import { Schema } from "effect"
 export const ThreadId = Schema.String.pipe(Schema.brand("RikaThreadId"))
 export type ThreadId = typeof ThreadId.Type
 
+export const ThreadLineage = Schema.Union([
+  Schema.TaggedStruct("Original", {}),
+  Schema.TaggedStruct("Fork", {
+    sourceThreadId: ThreadId,
+    sourceTurnId: Schema.optionalKey(Schema.String.pipe(Schema.brand("RikaTurnId"))),
+  }),
+])
+export type ThreadLineage = typeof ThreadLineage.Type
+
 export const Thread = Schema.Struct({
   id: ThreadId,
   workspace: Schema.String,
@@ -10,6 +19,7 @@ export const Thread = Schema.Struct({
   labels: Schema.Array(Schema.String),
   pinned: Schema.Boolean,
   archived: Schema.Boolean,
+  lineage: ThreadLineage,
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
 })

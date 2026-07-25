@@ -197,6 +197,33 @@ it.effect("memory terminal status is immutable against every stale lifecycle upd
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
+it.effect("memory accepted start and cancellation claims are mutually exclusive", () =>
+  Effect.gen(function* () {
+    const repository = yield* TurnRepository.Service
+    const started = yield* create(repository, {
+      id: Turn.TurnId.make("start-wins"),
+      threadId: Thread.ThreadId.make("claim-thread"),
+      prompt: "start",
+      now: 1,
+    })
+    expect(yield* repository.startAccepted(started.id, 2)).toBe(true)
+    expect(yield* repository.cancelAccepted(started.id, 3)).toBe(false)
+    expect(yield* repository.startAccepted(started.id, 4)).toBe(false)
+    expect(yield* repository.get(started.id)).toMatchObject({ status: "running", updatedAt: 2 })
+
+    const cancelled = yield* create(repository, {
+      id: Turn.TurnId.make("cancel-wins"),
+      threadId: Thread.ThreadId.make("other-claim-thread"),
+      prompt: "cancel",
+      now: 5,
+    })
+    expect(yield* repository.cancelAccepted(cancelled.id, 6)).toBe(true)
+    expect(yield* repository.startAccepted(cancelled.id, 7)).toBe(false)
+    expect(yield* repository.cancelAccepted(cancelled.id, 8)).toBe(false)
+    expect(yield* repository.get(cancelled.id)).toMatchObject({ status: "cancelled", updatedAt: 6 })
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
+)
+
 it.effect("memory cursor repair compares status and cursor without changing activity time", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
@@ -286,6 +313,8 @@ it.effect("memory claims stay queued and edit or dequeue invalidate preparation"
         threadId,
         prompt: "before",
         executionRoute: Turn.testExecutionRoute(),
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
         status: "queued",
         createdAt: 1,
         updatedAt: 1,
@@ -418,6 +447,8 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
         threadId,
         prompt: "copied",
         executionRoute: Turn.testExecutionRoute(),
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
         status: "queued",
         createdAt: 1,
         updatedAt: 1,
@@ -432,6 +463,8 @@ it.effect("memory copies exact queue status and requeues an unowned accepted cla
           threadId,
           prompt: "overflow",
           executionRoute: Turn.testExecutionRoute(),
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           status: "queued",
           createdAt: 2,
           updatedAt: 2,
@@ -535,6 +568,8 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "b",
           executionRoute: Turn.testExecutionRoute(),
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           status: "waiting",
           createdAt: 1,
           updatedAt: 1,
@@ -544,6 +579,8 @@ it.effect("memory lists nonterminal turns and rejects a missing extension pin", 
           threadId: Thread.ThreadId.make("thread-a"),
           prompt: "a",
           executionRoute: Turn.testExecutionRoute(),
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           status: "running",
           createdAt: 1,
           updatedAt: 1,
@@ -628,6 +665,8 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           prompt: "one",
           status: "queued",
           executionRoute: Turn.testExecutionRoute(),
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           createdAt: 1,
           updatedAt: 1,
         },
@@ -637,6 +676,8 @@ it.effect("memory seeds queue revision to match the seeded queued count", () =>
           prompt: "two",
           status: "queued",
           executionRoute: Turn.testExecutionRoute(),
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           createdAt: 2,
           updatedAt: 2,
         },
@@ -650,6 +691,8 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   thread_id: "thread-a",
   prompt: "hello",
   execution_route_json: JSON.stringify(Turn.testExecutionRoute()),
+  author_json: '{"_tag":"Human"}',
+  lineage_json: '{"_tag":"Original"}',
   status: "accepted",
   last_cursor: null,
   created_at: 1,
@@ -705,7 +748,7 @@ it.effect("sql turns create, get, list, and decode cursor variants", () =>
       expect(parameters.slice(0, 4)).toEqual(["turn-a", "thread-a", "hello", null])
       const executionRoute = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(String(parameters[4]))
       expect(executionRoute).toEqual(Turn.testExecutionRoute())
-      expect(parameters.slice(5)).toEqual([null, "thread-a", 1, 1])
+      expect(parameters.slice(5)).toEqual([null, '{"_tag":"Human"}', '{"_tag":"Original"}', "thread-a", 1, 1])
       expect(sql.statements.at(-1)).toEqual({
         sql: "SELECT * FROM rika_turns WHERE thread_id = ? ORDER BY created_at ASC, rowid ASC",
         parameters: ["thread-a"],

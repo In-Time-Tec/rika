@@ -98,6 +98,7 @@ const row = (overrides: Partial<Record<string, unknown>> = {}) => ({
   labels_json: "[]",
   pinned: 0,
   archived: 0,
+  lineage_json: '{"_tag":"Original"}',
   created_at: 1,
   updated_at: 1,
   ...overrides,
@@ -129,10 +130,10 @@ describe("sql layer", () => {
         expect(created.labels).toEqual([])
         expect(sql.statements.map((statement) => statement.sql)).toEqual([
           "INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?) ON CONFLICT(path) DO NOTHING",
-          "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?)",
+          "INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at) VALUES (?, ?, ?, '[]', 0, 0, ?, ?, ?)",
           "SELECT * FROM rika_threads WHERE id = ?",
         ])
-        expect(sql.statements[1]?.parameters).toEqual(["thread-a", "/work/a", "First", 1, 1])
+        expect(sql.statements[1]?.parameters).toEqual(["thread-a", "/work/a", "First", '{"_tag":"Original"}', 1, 1])
       }),
     ),
   )

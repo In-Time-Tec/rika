@@ -290,7 +290,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 16, name: "pricing_version_checkpoints" })
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 18, name: "durable_thread_coordination" })
           expect(yield* sql`SELECT COUNT(*) AS count FROM rika_transcript_entries`).toEqual([{ count: 1 }])
         }).pipe(provideLayer(layer)),
       )
@@ -313,7 +313,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             units: [{ content: { _tag: "Entry", text: "completed prompt" } }],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 16 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 18 }])
         }).pipe(provideLayer(reopened)),
       )
     }),
@@ -923,6 +923,9 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
           turn: { id: third.id, prompt: "c" },
           queue: { change: { _tag: "Removed", turnId: third.id } },
         })
+        expect(yield* turns.startAccepted(active.id, 7)).toBe(true)
+        expect(yield* turns.cancelAccepted(active.id, 8)).toBe(false)
+        expect(yield* turns.startAccepted(active.id, 9)).toBe(false)
         yield* turns.setStatus(active.id, "completed", "terminal-cursor", 7)
         for (const [index, staleStatus] of Turn.Status.literals.filter((candidate) => candidate !== "queued").entries())
           expect(yield* turns.setStatus(active.id, staleStatus, `stale-${staleStatus}`, index + 8)).toMatchObject({
@@ -930,8 +933,21 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
             lastCursor: "terminal-cursor",
             updatedAt: 7,
           })
-        expect((yield* turns.claimNextQueued(id, 8))?.turn.id).toBe(second.id)
+        const claimed = yield* turns.claimNextQueued(id, 8)
+        expect(claimed?.turn.id).toBe(second.id)
         expect((yield* turns.list(id)).map((turn) => turn.id)).toEqual([active.id, second.id])
+
+        const cancellationThreadId = Thread.ThreadId.make("cancellation-claim-thread")
+        yield* threads.create({ id: cancellationThreadId, workspace: "/work", title: "Cancellation", now: 9 })
+        const cancellation = yield* create(turns, {
+          id: Turn.TurnId.make("cancellation-claim"),
+          threadId: cancellationThreadId,
+          prompt: "cancel",
+          now: 10,
+        })
+        expect(yield* turns.cancelAccepted(cancellation.id, 11)).toBe(true)
+        expect(yield* turns.startAccepted(cancellation.id, 12)).toBe(false)
+        expect(yield* turns.cancelAccepted(cancellation.id, 13)).toBe(false)
       }).pipe(provideLayer(layer))
     }),
   )
@@ -1037,6 +1053,8 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
             threadId: copyThread,
             prompt: "copied",
             executionRoute: Turn.testExecutionRoute(),
+            author: { _tag: "Human" },
+            lineage: { _tag: "Original" },
             status: "queued",
             createdAt: 2,
             updatedAt: 2,
@@ -1053,6 +1071,8 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
                 threadId: copyThread,
                 prompt: "overflow",
                 executionRoute: Turn.testExecutionRoute(),
+                author: { _tag: "Human" },
+                lineage: { _tag: "Original" },
                 status: "queued",
                 createdAt: 3,
                 updatedAt: 3,

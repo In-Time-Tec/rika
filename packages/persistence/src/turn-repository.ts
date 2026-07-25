@@ -1,7 +1,16 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "./thread-schema"
-import { ExecutionExtensionPin, ExecutionRoutePin, PromptPart, Status, Turn, TurnId } from "./turn-schema"
+import {
+  ExecutionExtensionPin,
+  ExecutionRoutePin,
+  PromptPart,
+  Status,
+  Turn,
+  TurnAuthor,
+  TurnId,
+  TurnLineage,
+} from "./turn-schema"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("TurnRepositoryError", {
   message: Schema.String,
@@ -25,6 +34,8 @@ export interface CreateInput {
   readonly promptParts?: ReadonlyArray<PromptPart>
   readonly executionRoute: ExecutionRoutePin
   readonly reviewFanOutId?: string
+  readonly author?: TurnAuthor
+  readonly lineage?: TurnLineage
   readonly queueCapacity: number
   readonly now: number
 }
@@ -127,6 +138,8 @@ export interface Interface {
     lastCursor: string | undefined,
     now: number,
   ) => Effect.Effect<Turn, RepositoryError>
+  readonly startAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
+  readonly cancelAccepted: (id: TurnId, now: number) => Effect.Effect<boolean, RepositoryError>
   readonly repairCursor: (
     id: TurnId,
     status: Status,
@@ -149,6 +162,8 @@ const Row = Schema.Struct({
   execution_route_json: Schema.String,
   review_fan_out_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   prompt_parts_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  author_json: Schema.String,
+  lineage_json: Schema.String,
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
@@ -164,6 +179,8 @@ const QueueStateRow = Schema.Struct({
 const ExtensionPinJson = Schema.fromJsonString(ExecutionExtensionPin)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
+const AuthorJson = Schema.fromJsonString(TurnAuthor)
+const LineageJson = Schema.fromJsonString(TurnLineage)
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
 const submissionError = (error: unknown) => (Schema.is(QueueFull)(error) ? error : repositoryError(error))
 const takeQueuedError = (error: unknown) => (Schema.is(QueuedTurnUnavailable)(error) ? error : repositoryError(error))
@@ -228,6 +245,8 @@ const decode = (row: unknown) =>
         ? undefined
         : yield* Schema.decodeUnknownEffect(PromptPartsJson)(value.prompt_parts_json)
     const executionRoute = yield* Schema.decodeUnknownEffect(ExecutionRouteJson)(value.execution_route_json)
+    const author = yield* Schema.decodeUnknownEffect(AuthorJson)(value.author_json)
+    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
     return {
       id: TurnId.make(value.id),
       threadId: ThreadId.make(value.thread_id),
@@ -238,6 +257,8 @@ const decode = (row: unknown) =>
       ...(extensionPin === undefined ? {} : { extensionPin }),
       executionRoute,
       ...(value.review_fan_out_id == null ? {} : { reviewFanOutId: value.review_fan_out_id }),
+      author,
+      lineage,
       createdAt: value.created_at,
       updatedAt: value.updated_at,
     }
@@ -294,6 +315,8 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           void queueCapacity
           const turn: Turn = {
             ...submission,
+            author: input.author ?? { _tag: "Human" },
+            lineage: input.lineage ?? { _tag: "Original" },
             status: active ? "queued" : "accepted",
             createdAt: now,
             updatedAt: now,
@@ -683,6 +706,22 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
           })
         return updated.turn
       }),
+      startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
+        return yield* Ref.modify(state, (currentState) => {
+          const current = currentState.turns.get(id)
+          if (current === undefined || current.status !== "accepted") return [false, currentState]
+          const next: Turn = { ...current, status: "running", updatedAt: now }
+          return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
+        })
+      }),
+      cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
+        return yield* Ref.modify(state, (currentState) => {
+          const current = currentState.turns.get(id)
+          if (current === undefined || current.status !== "accepted") return [false, currentState]
+          const next: Turn = { ...current, status: "cancelled", updatedAt: now }
+          return [true, { ...currentState, turns: new Map(currentState.turns).set(id, next) }]
+        })
+      }),
       repairCursor: Effect.fn("TurnRepository.repairCursor")(function* (id, status, expectedCursor, cursor) {
         return yield* Ref.modify(state, (currentState) => {
           const current = currentState.turns.get(id)
@@ -716,11 +755,17 @@ export const layer = Layer.effect(
         const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(input.executionRoute).pipe(
           Effect.mapError(repositoryError),
         )
+        const author = yield* Schema.encodeEffect(AuthorJson)(input.author ?? { _tag: "Human" }).pipe(
+          Effect.mapError(repositoryError),
+        )
+        const lineage = yield* Schema.encodeEffect(LineageJson)(input.lineage ?? { _tag: "Original" }).pipe(
+          Effect.mapError(repositoryError),
+        )
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, prompt_parts_json, execution_route_json, review_fan_out_id, status, created_at, updated_at)
-                VALUES (${input.id}, ${input.threadId}, ${input.prompt}, ${promptParts}, ${executionRoute}, ${input.reviewFanOutId ?? null},
+              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, prompt_parts_json, execution_route_json, review_fan_out_id, author_json, lineage_json, status, created_at, updated_at)
+                VALUES (${input.id}, ${input.threadId}, ${input.prompt}, ${promptParts}, ${executionRoute}, ${input.reviewFanOutId ?? null}, ${author}, ${lineage},
                   CASE WHEN EXISTS (SELECT 1 FROM rika_turns WHERE thread_id = ${input.threadId} AND status IN ('queued', 'accepted', 'running', 'waiting')) THEN 'queued' ELSE 'accepted' END,
                   ${input.now}, ${input.now})`
               const rows = yield* sql`SELECT * FROM rika_turns WHERE id = ${input.id}`
@@ -770,11 +815,13 @@ export const layer = Layer.effect(
         const executionRoute = yield* Schema.encodeEffect(ExecutionRouteJson)(turn.executionRoute).pipe(
           Effect.mapError(repositoryError),
         )
+        const author = yield* Schema.encodeEffect(AuthorJson)(turn.author).pipe(Effect.mapError(repositoryError))
+        const lineage = yield* Schema.encodeEffect(LineageJson)(turn.lineage).pipe(Effect.mapError(repositoryError))
         return yield* sql
           .withTransaction(
             Effect.gen(function* () {
-              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, prompt_parts_json, status, last_cursor, extension_pin_json, execution_route_json, review_fan_out_id, created_at, updated_at)
-                VALUES (${turn.id}, ${turn.threadId}, ${turn.prompt}, ${promptParts}, ${turn.status}, ${turn.lastCursor ?? null}, ${extensionPin}, ${executionRoute}, ${turn.reviewFanOutId ?? null}, ${turn.createdAt}, ${turn.updatedAt})`
+              yield* sql`INSERT INTO rika_turns (id, thread_id, prompt, prompt_parts_json, status, last_cursor, extension_pin_json, execution_route_json, review_fan_out_id, author_json, lineage_json, created_at, updated_at)
+                VALUES (${turn.id}, ${turn.threadId}, ${turn.prompt}, ${promptParts}, ${turn.status}, ${turn.lastCursor ?? null}, ${extensionPin}, ${executionRoute}, ${turn.reviewFanOutId ?? null}, ${author}, ${lineage}, ${turn.createdAt}, ${turn.updatedAt})`
               if (turn.status !== "queued") return turn
               yield* sql`INSERT INTO rika_thread_queue_state (thread_id) VALUES (${turn.threadId}) ON CONFLICT (thread_id) DO NOTHING`
               const queueRows = yield* sql`UPDATE rika_thread_queue_state
@@ -1122,6 +1169,18 @@ export const layer = Layer.effect(
             }),
           )
           .pipe(Effect.mapError(repositoryError))
+      }),
+      startAccepted: Effect.fn("TurnRepository.startAccepted")(function* (id, now) {
+        const rows = yield* sql`UPDATE rika_turns SET status = 'running', updated_at = ${now}
+          WHERE id = ${id} AND status = 'accepted'
+          RETURNING id`.pipe(Effect.mapError(repositoryError))
+        return rows[0] !== undefined
+      }),
+      cancelAccepted: Effect.fn("TurnRepository.cancelAccepted")(function* (id, now) {
+        const rows = yield* sql`UPDATE rika_turns SET status = 'cancelled', updated_at = ${now}
+          WHERE id = ${id} AND status = 'accepted'
+          RETURNING id`.pipe(Effect.mapError(repositoryError))
+        return rows[0] !== undefined
       }),
       repairCursor: Effect.fn("TurnRepository.repairCursor")(function* (id, status, expectedCursor, cursor) {
         const rows = yield* sql`UPDATE rika_turns SET last_cursor = ${cursor ?? null}

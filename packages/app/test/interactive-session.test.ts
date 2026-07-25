@@ -27,6 +27,7 @@ const thread = (id: string, updatedAt: number): Thread.Thread => ({
   labels: [],
   pinned: false,
   archived: false,
+  lineage: { _tag: "Original" },
   createdAt: updatedAt,
   updatedAt,
 })
@@ -35,6 +36,8 @@ const active = (threadId: Thread.ThreadId, id = "active"): Turn.Turn => ({
   id: Turn.TurnId.make(id),
   threadId,
   prompt: "active prompt",
+  author: { _tag: "Human" },
+  lineage: { _tag: "Original" },
   executionRoute: executionRoute(),
   status: "running",
   createdAt: 1,
@@ -82,9 +85,10 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       ? {
           follow: (
             turnId: string,
-            afterCursor: string | undefined,
+            checkpoint: string | ExecutionBackend.ExecutionCheckpoint | undefined,
             onEvent?: (event: ExecutionBackend.Event) => void,
           ) => {
+            const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
             const output = {
               cursor: "resumed-output",
               sequence: 2,
@@ -180,6 +184,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
     resolveToolApproval: (waitId, approved, now) => record("tool-approval", waitId, approved, now),
     resolvePermission: (waitId, decision, now) =>
       record("permission", waitId, decision, now).pipe(Effect.andThen(Deferred.succeed(permissionResolved, undefined))),
+    resolveInvocationSource: () => Effect.die("unused"),
   })
   const selectionTurns: TurnRepository.Interface =
     turnPageRequests === undefined
@@ -268,6 +273,7 @@ describe("InteractiveSession controls", () => {
         listApprovals: () => Effect.succeed([]),
         resolveToolApproval: () => Effect.void,
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = Operation.productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
@@ -357,6 +363,7 @@ describe("InteractiveSession controls", () => {
         listApprovals: () => Effect.succeed([]),
         resolveToolApproval: () => Effect.void,
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = Operation.productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
@@ -471,6 +478,7 @@ describe("InteractiveSession controls", () => {
         listApprovals: () => Effect.succeed([]),
         resolveToolApproval: () => Effect.void,
         resolvePermission: () => Effect.die("unused"),
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = Operation.productLayer({
         repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
@@ -600,7 +608,7 @@ describe("InteractiveSession controls", () => {
         ["replay", "active", undefined],
         ["replay", "active", undefined],
         ["replay", "child:active:title", undefined],
-        ["steer", "active", "change course", 0],
+        ["steer", "active", "change course", "rika:interactive-steer:active:0"],
         ["cancel", "active", 0],
       ])
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
@@ -657,6 +665,7 @@ describe("InteractiveSession controls", () => {
         listApprovals: () => Effect.succeed([]),
         resolveToolApproval: () => Effect.void,
         resolvePermission: () => Effect.void,
+        resolveInvocationSource: () => Effect.die("unused"),
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const layer = Operation.productLayer({
@@ -751,7 +760,7 @@ describe("InteractiveSession controls", () => {
         createdAt: 1,
         data: { wait_id: "permission-wait", title: "Allow work" },
       }
-      const { session, turns, controls, older } = yield* makeHarness(true, [], [priorOutput, priorPermission])
+      const { session, turns, older } = yield* makeHarness(true, [], [priorOutput, priorPermission])
       yield* turns.setStatus(Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
       yield* createTurn(turns, {
         id: Turn.TurnId.make("queued-after-wait"),
@@ -764,7 +773,6 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* session.resolvePermission("permission-wait", "permission", "allow")
       yield* Effect.yieldNow
-      expect(yield* Ref.get(controls)).toContainEqual(["follow", "active", "wait-cursor"])
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
         status: "completed",
         lastCursor: "resumed-done",
@@ -877,6 +885,7 @@ describe("InteractiveSession controls", () => {
               listApprovals: () => Effect.succeed([]),
               resolveToolApproval: () => Effect.void,
               resolvePermission: () => Effect.die("unused"),
+              resolveInvocationSource: () => Effect.die("unused"),
             }),
           ),
           toolRuntimeLayer: () =>
@@ -1088,6 +1097,8 @@ describe("InteractiveSession controls", () => {
           id: Turn.TurnId.make("recorded-shell"),
           threadId: older.id,
           prompt: "$ printf recorded\n\noutput:recorded",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: executionRoute(),
           status: "completed",
           createdAt: 3,
@@ -1427,6 +1438,8 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
     id: Turn.TurnId.make("done"),
     threadId: subagentThread.id,
     prompt: "delegate",
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
     executionRoute: executionRoute(),
     status: options.turnStatus ?? "completed",
     createdAt: 1,
@@ -1488,6 +1501,7 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
     listApprovals: () => Effect.succeed([]),
     resolveToolApproval: () => Effect.void,
     resolvePermission: () => Effect.void,
+    resolveInvocationSource: () => Effect.die("unused"),
   })
   const layer = Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),

@@ -121,11 +121,6 @@ describe("ConfigService", () => {
       expect(config.settings.compaction).toEqual({
         summaryModel: { alias: "bedrock-fable", effort: ConfigContract.defaults.compaction.summaryModel.effort },
       })
-      expect(config.diagnostics).toContainEqual({
-        path: "modelRoutes.agents",
-        source: "workspace",
-        message: "agent routes resolve but are not yet applied to execution",
-      })
     }).pipe(
       provideLayer(
         ConfigService.memoryLayer({

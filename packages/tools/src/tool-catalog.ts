@@ -4,12 +4,14 @@ import * as ThreadTools from "./thread-tools"
 import * as Runtime from "./tool-runtime"
 import * as ToolPolicy from "./tool-policy"
 
-export { Idempotency, Permission, Presentation } from "./tool-policy"
+export { Idempotency, Permission, Presentation, ProductPermission } from "./tool-policy"
 
 export const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   permission: ToolPolicy.Permission,
+  productPermission: Schema.optionalKey(ToolPolicy.ProductPermission),
+  permissionRules: Schema.optionalKey(Schema.Array(ToolPolicy.PermissionRule)),
   idempotency: ToolPolicy.Idempotency,
   timeoutMillis: Schema.Int.check(Schema.isGreaterThan(0)),
   outputLimit: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -20,7 +22,7 @@ export type Definition = typeof Definition.Type
 const tools: ReadonlyArray<ToolPolicy.RegisteredTool> = [
   ...Object.values(Runtime.toolkit.tools),
   ...Object.values(AgentTools.modelToolkit.tools),
-  ...Object.values(ThreadTools.toolkit.tools),
+  ...Object.values(ThreadTools.allToolkit.tools),
 ]
 
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
@@ -144,13 +146,6 @@ export const resolvePresentation = (rawName: string): ToolPolicy.Presentation =>
       action: "archive-thread",
       activeLabel: "Archiving this thread",
       completeLabel: "Archived this thread",
-    }
-  if (name === "create_thread")
-    return {
-      family: "direct",
-      action: "create-thread",
-      activeLabel: "Creating thread",
-      completeLabel: "Created thread",
     }
   if (name === "send_message_to_thread")
     return {

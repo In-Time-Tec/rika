@@ -237,6 +237,7 @@ describe("resident service protocol", () => {
         activitySequence: 0,
         thread: {
           id: "thread",
+          lineage: { _tag: "Original" },
           workspace: "/work",
           title: "Thread",
           labels: [],

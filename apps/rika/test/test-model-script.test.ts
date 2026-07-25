@@ -3,10 +3,12 @@ import { LanguageModel, type ModelRegistry } from "@batonfx/core"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
-import { OpenAiAuth, Operation } from "@rika/app"
+import { OpenAiAuth, Operation, ThreadToolService } from "@rika/app"
 import { ConfigContract, ConfigService } from "@rika/config"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
+import * as ThreadInteractionRepository from "@rika/persistence/thread-interaction-repository"
+import * as ThreadSearchRepository from "@rika/persistence/thread-search-repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
@@ -76,6 +78,7 @@ const recordingBackend = (starts: Array<ExecutionBackend.StartInput>, registrati
             }),
         }),
     invokeChild: () => Effect.die("unused"),
+    resolveInvocationSource: () => Effect.die("unused"),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
     cancelFanOut: () => Effect.die("unused"),
@@ -599,8 +602,11 @@ test("builds the configured backend with duplicate persisted routes and one unav
               repositoryLayer,
               turnRepositoryLayer,
               transcriptRepositoryLayer: TranscriptRepository.memoryLayer,
+              threadSearchRepositoryLayer: ThreadSearchRepository.memoryLayer,
+              threadInteractionRepositoryLayer: ThreadInteractionRepository.memoryLayer(),
               settings,
               persistedModelRoutes: [restored, restored, stale],
+              threadToolGateway: yield* ThreadToolService.makeGateway,
             }).pipe(Layer.provide(providerLayer)),
             yield* Effect.scope,
           )
@@ -721,6 +727,8 @@ test("restores every pinned role from a nonterminal turn into the restart regist
     id: Turn.TurnId.make("review-owner"),
     threadId: "review-thread" as Turn.Turn["threadId"],
     prompt: "Review workspace changes",
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
     status: "running",
     executionRoute: {
       ...route,

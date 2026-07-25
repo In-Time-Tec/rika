@@ -13,6 +13,7 @@ import {
   ResolvedContext,
   ThreadQuery,
   ThreadToolHandlers,
+  ThreadToolService,
 } from "@rika/app"
 import { ConfigContract, ConfigService, Models } from "@rika/config"
 import { McpOAuth, SkillRegistry } from "@rika/extensions"
@@ -20,6 +21,8 @@ import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
 import * as ThreadSummaryRepository from "@rika/persistence/thread-summary-repository"
+import * as ThreadInteractionRepository from "@rika/persistence/thread-interaction-repository"
+import * as ThreadSearchRepository from "@rika/persistence/thread-search-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
@@ -622,19 +625,52 @@ export const persistPastedImage: {
 
 const relayBackendLayerImpl = (
   options: Omit<
-    RelayExecutionBackend.LayerOptions<typeof ThreadTools.toolkit.tools>,
+    RelayExecutionBackend.LayerOptions<typeof ThreadTools.allToolkit.tools>,
     "additionalToolkit" | "additionalHandlerLayer"
   >,
   repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
   turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
   transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service, TranscriptRepository.RepositoryError, never>,
-): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadTools.toolkit.tools>> =>
+  threadSearchRepositoryLayer: Layer.Layer<
+    ThreadSearchRepository.Service,
+    ThreadSearchRepository.RepositoryError,
+    never
+  >,
+  threadInteractionRepositoryLayer: Layer.Layer<
+    ThreadInteractionRepository.Service,
+    ThreadInteractionRepository.RepositoryError,
+    never
+  >,
+  gateway: ThreadToolService.Gateway,
+): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadTools.allToolkit.tools>> =>
   RelayExecutionBackend.layer({
     ...options,
-    additionalToolkit: ThreadTools.toolkit,
-    additionalHandlerLayer: ThreadToolHandlers.handlerLayer.pipe(
-      Layer.provide(ThreadQuery.layer),
-      Layer.provide(Layer.mergeAll(repositoryLayer, turnRepositoryLayer, transcriptRepositoryLayer)),
+    additionalToolkit: ThreadTools.allToolkit,
+    additionalHandlerLayer: Layer.merge(
+      Layer.merge(
+        ThreadToolHandlers.handlerLayerForWorkspace(
+          options.resolveWorkspace ?? (() => Effect.succeed(options.workspace ?? "")),
+        ),
+        ThreadToolHandlers.findHandlerLayerForWorkspace(
+          options.resolveWorkspace ?? (() => Effect.succeed(options.workspace ?? "")),
+        ),
+      ).pipe(
+        Layer.provide(
+          ThreadQuery.factoryLayer.pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                repositoryLayer,
+                turnRepositoryLayer,
+                transcriptRepositoryLayer,
+                threadSearchRepositoryLayer,
+                threadInteractionRepositoryLayer,
+              ),
+            ),
+          ),
+        ),
+      ),
+      ThreadToolHandlers.coordinationHandlerLayer(gateway),
+    ).pipe(
       Layer.catchCause((cause) =>
         Layer.effectContext(Effect.fail(ExecutionBackend.BackendError.make({ message: Cause.pretty(cause) }))),
       ),
@@ -646,22 +682,44 @@ export const relayBackendLayer: {
     repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
     turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
     transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service, TranscriptRepository.RepositoryError, never>,
+    threadSearchRepositoryLayer: Layer.Layer<
+      ThreadSearchRepository.Service,
+      ThreadSearchRepository.RepositoryError,
+      never
+    >,
+    threadInteractionRepositoryLayer: Layer.Layer<
+      ThreadInteractionRepository.Service,
+      ThreadInteractionRepository.RepositoryError,
+      never
+    >,
+    gateway: ThreadToolService.Gateway,
   ): (
     options: Omit<
-      RelayExecutionBackend.LayerOptions<typeof ThreadTools.toolkit.tools>,
+      RelayExecutionBackend.LayerOptions<typeof ThreadTools.allToolkit.tools>,
       "additionalToolkit" | "additionalHandlerLayer"
     >,
   ) => ReturnType<typeof relayBackendLayerImpl>
   (
     options: Omit<
-      RelayExecutionBackend.LayerOptions<typeof ThreadTools.toolkit.tools>,
+      RelayExecutionBackend.LayerOptions<typeof ThreadTools.allToolkit.tools>,
       "additionalToolkit" | "additionalHandlerLayer"
     >,
     repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
     turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnRepository.RepositoryError, never>,
     transcriptRepositoryLayer: Layer.Layer<TranscriptRepository.Service, TranscriptRepository.RepositoryError, never>,
+    threadSearchRepositoryLayer: Layer.Layer<
+      ThreadSearchRepository.Service,
+      ThreadSearchRepository.RepositoryError,
+      never
+    >,
+    threadInteractionRepositoryLayer: Layer.Layer<
+      ThreadInteractionRepository.Service,
+      ThreadInteractionRepository.RepositoryError,
+      never
+    >,
+    gateway: ThreadToolService.Gateway,
   ): ReturnType<typeof relayBackendLayerImpl>
-} = Function.dual(4, relayBackendLayerImpl)
+} = Function.dual(7, relayBackendLayerImpl)
 
 const testModelPartSchema = Schema.Union([
   Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
@@ -1126,6 +1184,16 @@ export interface ConfiguredBackendOptions {
     TranscriptRepository.RepositoryError,
     never
   >
+  readonly threadSearchRepositoryLayer: Layer.Layer<
+    ThreadSearchRepository.Service,
+    ThreadSearchRepository.RepositoryError,
+    never
+  >
+  readonly threadInteractionRepositoryLayer: Layer.Layer<
+    ThreadInteractionRepository.Service,
+    ThreadInteractionRepository.RepositoryError,
+    never
+  >
   readonly settings?: ConfigContract.Settings
   readonly persistedModelRoutes?: ReadonlyArray<Turn.ExecutionModelRoute>
   readonly webSearchCredentials?: Readonly<Record<string, Redacted.Redacted<string>>>
@@ -1138,6 +1206,7 @@ export interface ConfiguredBackendOptions {
   >
   readonly shellPermission?: ConfigContract.PermissionDecision
   readonly globalSettings?: ConfigContract.SettingsInput
+  readonly threadToolGateway: ThreadToolService.Gateway
 }
 
 export const configuredBackendLayer = ({
@@ -1146,12 +1215,15 @@ export const configuredBackendLayer = ({
   repositoryLayer,
   turnRepositoryLayer,
   transcriptRepositoryLayer,
+  threadSearchRepositoryLayer,
+  threadInteractionRepositoryLayer,
   settings = ConfigContract.defaults,
   persistedModelRoutes = [],
   webSearchCredentials = {},
   resolveLegacyRoute,
   shellPermission,
   globalSettings = {},
+  threadToolGateway,
 }: ConfiguredBackendOptions) =>
   Layer.unwrap(
     Effect.gen(function* () {
@@ -1405,6 +1477,9 @@ export const configuredBackendLayer = ({
         repositoryLayer,
         turnRepositoryLayer,
         transcriptRepositoryLayer,
+        threadSearchRepositoryLayer,
+        threadInteractionRepositoryLayer,
+        threadToolGateway,
       ).pipe(Layer.provide(BunCrypto.layer))
       if (testScript._tag === "Some" || testResponse._tag === "Some") return backendLayer
       return Layer.effect(
@@ -1463,6 +1538,8 @@ export const lazyBackendLayer = (
             ),
           ),
         invokeChild: (input) => load.pipe(Effect.flatMap((backend) => backend.invokeChild(input))),
+        resolveInvocationSource: (executionId) =>
+          load.pipe(Effect.flatMap((backend) => backend.resolveInvocationSource(executionId))),
         createFanOut: (input) => load.pipe(Effect.flatMap((backend) => backend.createFanOut(input))),
         inspectFanOut: (fanOutId) => load.pipe(Effect.flatMap((backend) => backend.inspectFanOut(fanOutId))),
         cancelFanOut: (fanOutId, cancelledAt, reason) =>
@@ -1513,8 +1590,10 @@ export const lazyBackendLayer = (
         cancel: (turnId, cancelledAt, reference) =>
           load.pipe(Effect.flatMap((backend) => backend.cancel(turnId, cancelledAt, reference))),
         inspect: (turnId, reference) => load.pipe(Effect.flatMap((backend) => backend.inspect(turnId, reference))),
-        steer: (turnId, text, createdAt, reference) =>
-          load.pipe(Effect.flatMap((backend) => backend.steer(turnId, text, createdAt, reference))),
+        steer: (turnId, text, idempotencyIdentity, createdAt, reference) =>
+          load.pipe(
+            Effect.flatMap((backend) => backend.steer(turnId, text, idempotencyIdentity, createdAt, reference)),
+          ),
         listApprovals: (turnId, reference) =>
           load.pipe(Effect.flatMap((backend) => backend.listApprovals(turnId, reference))),
         resolveToolApproval: (waitId, approved, resolvedAt, comment) =>
@@ -2765,6 +2844,22 @@ if (import.meta.main) {
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
   )
+  const threadInteractionRepositoryLayer = ThreadInteractionRepository.layer.pipe(
+    Layer.provide(productDatabase),
+    Layer.provide(BunServices.layer),
+    Layer.catchCause((cause) =>
+      Layer.effectContext(
+        Effect.fail(ThreadInteractionRepository.RepositoryError.make({ message: Cause.pretty(cause) })),
+      ),
+    ),
+  )
+  const threadSearchRepositoryLayer = ThreadSearchRepository.layer.pipe(
+    Layer.provide(productDatabase),
+    Layer.provide(BunServices.layer),
+    Layer.catchCause((cause) =>
+      Layer.effectContext(Effect.fail(ThreadSearchRepository.RepositoryError.make({ message: Cause.pretty(cause) }))),
+    ),
+  )
   const resolvedContextLayer = ResolvedContext.layer(fffGlob).pipe(
     Layer.provide(ContextFileSystem.liveLayer),
     Layer.provide(BunServices.layer),
@@ -2780,6 +2875,7 @@ if (import.meta.main) {
   ) =>
     Layer.unwrap(
       Effect.gen(function* () {
+        const threadToolGateway = yield* ThreadToolService.makeGateway
         const globalSettings = yield* loadSettingsFile(globalConfig)
         const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
         const applicationConfigLayer = ConfigService.liveEnvironmentLayer({
@@ -2889,6 +2985,8 @@ if (import.meta.main) {
           repositoryLayer: repositories,
           turnRepositoryLayer: repositories,
           transcriptRepositoryLayer: repositories,
+          threadSearchRepositoryLayer,
+          threadInteractionRepositoryLayer,
           settings: effectiveConfig.settings,
           persistedModelRoutes,
           webSearchCredentials,
@@ -2897,6 +2995,7 @@ if (import.meta.main) {
             ? {}
             : { shellPermission: effectiveConfig.settings.permissions.shell }),
           globalSettings,
+          threadToolGateway,
         }).pipe(
           Layer.provide(Layer.succeedContext(providerRuntimeContext)),
           Layer.provide(BunServices.layer),
@@ -2942,6 +3041,8 @@ if (import.meta.main) {
           turnRepositoryLayer: repositories,
           threadSummaryRepositoryLayer: repositories,
           transcriptRepositoryLayer: repositories,
+          threadInteractionRepositoryLayer,
+          threadToolGateway,
           resolvedContextLayer,
           backendLayer: lazyBackendLayer(backendLayer).pipe(
             Layer.catchCause((cause) =>

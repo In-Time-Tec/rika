@@ -1,6 +1,6 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { Thread, ThreadId } from "./thread-schema"
+import { Thread, ThreadId, ThreadLineage } from "./thread-schema"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadRepositoryError", {
   message: Schema.String,
@@ -10,6 +10,7 @@ export interface CreateInput {
   readonly id: ThreadId
   readonly workspace: string
   readonly title: string
+  readonly lineage?: ThreadLineage
   readonly now: number
 }
 
@@ -46,11 +47,13 @@ const Row = Schema.Struct({
   labels_json: Schema.String,
   pinned: Schema.Finite,
   archived: Schema.Finite,
+  lineage_json: Schema.String,
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
 
 const LabelsJson = Schema.fromJsonString(Schema.Array(Schema.String))
+const LineageJson = Schema.fromJsonString(ThreadLineage)
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 50, 1), 100)
 const missing = (id: ThreadId) => RepositoryError.make({ message: `Thread ${id} does not exist` })
@@ -76,6 +79,7 @@ const decode = (row: unknown) =>
   Effect.gen(function* () {
     const value = yield* Schema.decodeUnknownEffect(Row)(row)
     const labels = yield* Schema.decodeUnknownEffect(LabelsJson)(value.labels_json)
+    const lineage = yield* Schema.decodeUnknownEffect(LineageJson)(value.lineage_json)
     return {
       id: ThreadId.make(value.id),
       workspace: value.workspace,
@@ -83,6 +87,7 @@ const decode = (row: unknown) =>
       labels,
       pinned: value.pinned === 1,
       archived: value.archived === 1,
+      lineage,
       createdAt: value.created_at,
       updatedAt: value.updated_at,
     }
@@ -119,6 +124,7 @@ export const makeMemory = (initial: ReadonlyArray<Thread> = []) =>
           labels: [],
           pinned: false,
           archived: false,
+          lineage: input.lineage ?? { _tag: "Original" },
           createdAt: input.now,
           updatedAt: input.now,
         }
@@ -200,8 +206,11 @@ export const layer = Layer.effect(
               yield* sql`INSERT INTO rika_workspaces (path, created_at) VALUES (${input.workspace}, ${input.now}) ON CONFLICT(path) DO NOTHING`.pipe(
                 Effect.mapError(repositoryError),
               )
-              yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, created_at, updated_at)
-                VALUES (${input.id}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${input.now}, ${input.now})`.pipe(
+              const lineage = yield* Schema.encodeEffect(LineageJson)(input.lineage ?? { _tag: "Original" }).pipe(
+                Effect.mapError(repositoryError),
+              )
+              yield* sql`INSERT INTO rika_threads (id, workspace, title, labels_json, pinned, archived, lineage_json, created_at, updated_at)
+                VALUES (${input.id}, ${input.workspace}, ${input.title}, '[]', 0, 0, ${lineage}, ${input.now}, ${input.now})`.pipe(
                 Effect.mapError(repositoryError),
               )
               return yield* requireThread(input.id)

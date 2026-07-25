@@ -1,7 +1,7 @@
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Context, Effect, Layer, Schema } from "effect"
 
-export const Profile = Schema.Literals(["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"])
+export const Profile = ExecutionBackend.AgentProfile
 export type Profile = typeof Profile.Type
 
 export interface InvokeInput {

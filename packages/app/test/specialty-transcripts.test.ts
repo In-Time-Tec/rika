@@ -79,6 +79,7 @@ const backendLayer = (failProfile?: ExecutionBackend.AgentProfile) =>
       listApprovals: () => Effect.die("unused"),
       resolveToolApproval: () => Effect.die("unused"),
       resolvePermission: () => Effect.die("unused"),
+      resolveInvocationSource: () => Effect.die("unused"),
     }),
   )
 

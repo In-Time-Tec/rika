@@ -1,11 +1,18 @@
 import { Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as Policy from "./tool-policy"
+import * as ToolInvocation from "./tool-invocation"
 
 export const TaskInput = Schema.Struct({
   prompt: Schema.String,
 })
 export type TaskInput = typeof TaskInput.Type
+
+export const ReadThreadInput = Schema.Union([
+  Schema.Struct({ question: Schema.String, threadId: Schema.optionalKey(Schema.String) }),
+  Schema.Struct({ prompt: Schema.String }),
+])
+export type ReadThreadInput = typeof ReadThreadInput.Type
 
 export const Result = Schema.Struct({
   childExecutionId: Schema.String,
@@ -34,7 +41,7 @@ export const taskTool = Tool.make("task", {
   success: Result,
   failure: Failure,
   failureMode: "return",
-})
+}).addDependency(ToolInvocation.ToolInvocation)
 
 const specialist = <const Name extends string>(name: Name, description: string) =>
   Tool.make(name, {
@@ -43,7 +50,7 @@ const specialist = <const Name extends string>(name: Name, description: string) 
     success: Result,
     failure: Failure,
     failureMode: "return",
-  })
+  }).addDependency(ToolInvocation.ToolInvocation)
 
 export const oracleTool = specialist(
   "oracle",
@@ -61,10 +68,14 @@ export const surgeonTool = specialist(
   "surgeon",
   "Delegate reproducing and isolating a specific defect to the Surgeon product agent, which may run commands and add temporary instrumentation, and wait for its diagnosis",
 )
-export const readThreadTool = specialist(
-  "read_thread",
-  "Delegate recovery of exact current or historical Rika thread context to the ReadThread agent and wait for its answer",
-)
+export const readThreadTool = Tool.make("read_thread", {
+  description:
+    "Ask the ReadThread agent a focused question about one Rika Thread, or let it find relevant Threads when threadId is omitted",
+  parameters: ReadThreadInput,
+  success: Result,
+  failure: Failure,
+  failureMode: "return",
+}).addDependency(ToolInvocation.ToolInvocation)
 
 export const delegationToolNames = ["task", "oracle", "librarian", "review", "surgeon", "read_thread"] as const
 export type DelegationToolName = (typeof delegationToolNames)[number]

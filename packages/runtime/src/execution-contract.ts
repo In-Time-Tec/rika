@@ -109,7 +109,16 @@ export interface ExecutionExtensionPin {
   readonly resolvedContextDigest: string
 }
 
-export type AgentProfile = "Oracle" | "Librarian" | "Painter" | "Review" | "ReadThread" | "Surgeon" | "Task"
+export const AgentProfile = Schema.Literals([
+  "Oracle",
+  "Librarian",
+  "Painter",
+  "Review",
+  "ReadThread",
+  "Surgeon",
+  "Task",
+])
+export type AgentProfile = typeof AgentProfile.Type
 
 export type JoinPolicy = "all" | "first-success" | "quorum" | "best-effort"
 export interface FanOutInput {
@@ -179,6 +188,20 @@ export interface Result {
   readonly turnId: string
   readonly status: Status
   readonly events: ReadonlyArray<Event>
+  readonly checkpoint?: ExecutionCheckpoint
+}
+
+export interface ExecutionCheckpoint {
+  readonly cursor: string
+  readonly sequence: number
+}
+
+export interface InvocationSource {
+  readonly rootTurnId: string
+  readonly threadId: string
+  readonly callerProfile: AgentProfile | "Root" | "Title"
+  readonly threadCreationDepth: number
+  readonly permissions: ReadonlyArray<{ readonly name: string; readonly value: unknown }>
 }
 
 export interface SteerReceipt {
@@ -270,14 +293,14 @@ export interface Interface {
   readonly start: (input: StartInput) => Effect.Effect<Result, BackendError>
   readonly follow?: (
     turnId: string,
-    afterCursor: string | undefined,
+    afterCursor: string | ExecutionCheckpoint | undefined,
     onEvent?: (event: Event) => void,
     reference?: ExecutionReference,
     eventScope?: EventScope,
   ) => Effect.Effect<Result, BackendError>
   readonly replay: (
     turnId: string,
-    afterCursor?: string,
+    afterCursor?: string | ExecutionCheckpoint,
     reference?: ExecutionReference,
   ) => Effect.Effect<Result, BackendError>
   readonly pageEvents?: (
@@ -296,9 +319,11 @@ export interface Interface {
     turnId: string,
     reference?: ExecutionReference,
   ) => Effect.Effect<Inspection | undefined, BackendError>
+  readonly resolveInvocationSource: (executionId: string) => Effect.Effect<InvocationSource, BackendError>
   readonly steer: (
     turnId: string,
     text: string,
+    idempotencyIdentity: string,
     createdAt: number,
     reference?: ExecutionReference,
   ) => Effect.Effect<SteerReceipt, BackendError>

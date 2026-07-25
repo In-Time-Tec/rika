@@ -48,9 +48,9 @@ test(
         app.pressKey("\t")
         app.pressEnter()
         const nested = yield* app.waitFrame("NESTED_RELOAD_COMPLETE")
-        expect(nested).toContain("Subagent finished")
-        expect(nested).not.toContain("Subagent working")
-        expect(nested).not.toContain("Subagent failed")
+        expect(nested).toContain("Task:2 finished")
+        expect(nested).not.toContain("Task:2 working")
+        expect(nested).not.toContain("Task:2 failed")
         expect(nested).not.toContain("Running 1 subagent")
         yield* app.quit
       }),
@@ -124,8 +124,8 @@ test(
             app.pressEnter()
             yield* app.waitFrame("PERSISTED_TIMER_COMPLETE")
             yield* settled(app)
-            yield* Effect.sleep("1100 millis")
-            elapsed = app.frame().match(/◷ ([1-9][0-9]*s)/u)?.[1] ?? ""
+            const completed = yield* app.waitFrame("◷ 1s")
+            elapsed = completed.match(/◷ ([1-9][0-9]*s)/u)?.[1] ?? ""
             expect(elapsed).not.toBe("")
             yield* app.quit
           }),
@@ -150,7 +150,7 @@ test(
 )
 
 test(
-  "preserves primary and muted nested tool summary spans through the real app stack",
+  "renders depth-labelled Oracle and nested tool output through the real app stack",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -167,15 +167,14 @@ test(
         yield* Effect.promise(() => app.type("Ask Oracle to inspect the fixture."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_STYLE_RESULT")
-        expect(spanHasColor(app, "Oracle", Theme.colors.text), "Oracle primary span").toBe(true)
-        expect(spanHasColor(app, " has spoken", Theme.colors.muted), "Oracle lifecycle span").toBe(true)
+        yield* settled(app)
         app.pressKey("\t")
-        yield* app.waitFrame("Oracle has spoken")
+        yield* app.waitFrame("Oracle:1 finished")
         app.pressEnter()
         yield* app.waitFrame("Read nested.txt")
         yield* settled(app)
         const completed = app.frame()
-        expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
+        expect(completed.match(/Oracle:1 finished/g) ?? []).toHaveLength(1)
         expect(completed.match(/Read nested\.txt/g) ?? []).toHaveLength(1)
         expect(completed).toContain("Oracle result")
         expect(completed).toContain("ORACLE_STYLE_RESULT")
@@ -183,6 +182,67 @@ test(
         expect(completed).not.toContain("The subagent finished without a final message.")
         expect(spanHasColor(app, "Read", Theme.colors.text), "Read primary span").toBe(true)
         expect(spanHasColor(app, " nested.txt", Theme.colors.muted), "Read path span").toBe(true)
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "keeps nested Agent prompts, tools, and final output aligned through collapse and expand",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
+          script: [
+            TuiApp.model.toolCall("task", { prompt: "PARENT_AGENT_PROMPT" }, "parent-agent"),
+            TuiApp.model.toolCall("task", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
+            TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
+            TuiApp.model.text("NESTED_AGENT_FINAL"),
+            TuiApp.model.text("PARENT_AGENT_FINAL"),
+            TuiApp.model.text("ROOT_AGENT_FINAL"),
+          ],
+          width: 80,
+          height: 64,
+        })
+
+        yield* Effect.promise(() => app.type("ROOT_USER_PROMPT"))
+        app.pressEnter()
+        yield* app.waitFrame("ROOT_AGENT_FINAL")
+        yield* settled(app)
+        app.pressKey("\t")
+        app.pressEnter()
+        yield* app.waitFrame("PARENT_AGENT_PROMPT")
+        app.pressKey("\t")
+        app.pressEnter()
+        let expanded = yield* app.waitFrame("NESTED_AGENT_FINAL")
+        const assertTree = (frame: string) => {
+          const lines = frame.split("\n")
+          const rootRow = lines.findIndex((line) => line.includes("ROOT_USER_PROMPT"))
+          const parentPromptRow = lines.findIndex((line) => line.includes("PARENT_AGENT_PROMPT"))
+          const nestedHeader = lines.find((line) => line.includes("Task:2 finished"))
+          const nestedPrompt = lines.find((line) => line.includes("NESTED_AGENT_PROMPT"))
+          const nestedTool = lines.find((line) => line.includes("Read nested.txt"))
+          const nestedFinal = lines.find((line) => line.includes("NESTED_AGENT_FINAL"))
+          expect(rootRow).toBeGreaterThan(-1)
+          expect(parentPromptRow).toBeGreaterThan(rootRow)
+          expect(nestedHeader, frame).toBeDefined()
+          expect(nestedTool, frame).toBeDefined()
+          expect(nestedHeader?.indexOf("├")).toBe(parentPromptRow < 0 ? -1 : lines[parentPromptRow]?.indexOf("P"))
+          expect(nestedPrompt?.indexOf("│")).toBe(nestedHeader?.indexOf("├"))
+          expect(nestedTool?.indexOf("├")).toBe(nestedPrompt?.indexOf("N"))
+          expect(nestedFinal?.indexOf("╰")).toBe(nestedPrompt?.indexOf("N"))
+          expect(frame.match(/ROOT_USER_PROMPT/g) ?? []).toHaveLength(1)
+          expect(frame.match(/NESTED_AGENT_PROMPT/g) ?? []).toHaveLength(1)
+        }
+        assertTree(expanded)
+
+        app.pressEnter()
+        yield* app.waitGone("NESTED_AGENT_FINAL")
+        app.pressEnter()
+        expanded = yield* app.waitFrame("NESTED_AGENT_FINAL")
+        assertTree(expanded)
         yield* app.quit
       }),
     ),
@@ -394,7 +454,8 @@ test(
         app.pressEnter()
         yield* app.waitFrame("? bash [pending]")
         app.close()
-        yield* app.waitFrame("⊘")
+        const cancelled = yield* app.waitFrame("(cancelled)")
+        expect(cancelled).not.toContain("? bash [pending]")
         expect(yield* fileSystem.exists(path.join(app.workspace, "cancel-proof.txt"))).toBe(false)
 
         app.close()
@@ -420,15 +481,17 @@ test(
         yield* Effect.promise(() => app.type("Restore this submitted prompt."))
         app.pressEnter()
         yield* app.waitFrame("Restore this submitted prompt.")
-        yield* app.waitFrame("Waiting")
+        yield* app.waitModelRequests(1)
         app.close()
-        const restored = yield* app.waitFrame("Restore this submitted prompt.")
+        const restored = yield* app.waitFrame("│ Restore this submitted prompt.")
         expect(restored).not.toContain("⊘")
         expect(restored).not.toContain("cancelled")
         yield* Effect.promise(() => app.type(" again"))
         app.pressEnter()
         yield* app.waitFrame("RESTORED_PROMPT_SENT")
-        yield* app.quit
+        yield* settled(app)
+        app.close()
+        yield* app.done
       }),
     ),
   240_000,
@@ -522,6 +585,7 @@ test(
         yield* Effect.promise(() => app.type("Begin interruptible work."))
         app.pressEnter()
         yield* app.waitFrame("Begin interruptible work.")
+        yield* app.waitModelRequests(1)
         yield* Effect.promise(() => app.type("Run the replacement prompt."))
         yield* app.waitFrame("Run the replacement prompt.")
         app.pressKey("\u001b[13;5u")

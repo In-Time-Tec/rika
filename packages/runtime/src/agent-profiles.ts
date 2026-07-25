@@ -175,6 +175,12 @@ export const parentPermissions = [...new Set(names.flatMap((name) => definitions
   value: true,
 }))
 
+export const rootPermissions = [
+  ...parentPermissions,
+  { name: "thread.coordinate", value: true },
+  { name: "thread.control", value: true },
+]
+
 export const childRunSpawnPermission = { name: "relay.child_run.spawn", value: true }
 
 export const subagentHandoffTargets = [

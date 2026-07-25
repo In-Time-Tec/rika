@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import { Tool } from "effect/unstable/ai"
-import { AgentTools, Catalog, ParallelSearch, ProcessRegistry, Runtime, ThreadTools } from "../src"
+import { AgentTools, Catalog, ParallelSearch, ProcessRegistry, Runtime, ThreadTools, ToolInvocation } from "../src"
 import { provide } from "./test-layer"
 
 describe("tool contracts", () => {
@@ -58,19 +58,141 @@ describe("tool contracts", () => {
       "review",
       "surgeon",
       "read_thread",
+      "create_thread",
+      "thread_interact",
     ])
   })
+
+  it.effect("defines bounded public thread coordination contracts and policies", () =>
+    Effect.gen(function* () {
+      expect(Object.keys(ThreadTools.toolkit.tools)).toEqual(["search_threads", "read_thread_transcript"])
+      expect(Object.keys(ThreadTools.findToolkit.tools)).toEqual(["find_thread"])
+      expect(Object.keys(ThreadTools.coordinationToolkit.tools)).toEqual([
+        "create_thread",
+        "thread_interact",
+        "wait_for_threads",
+      ])
+      expect(Object.keys(ThreadTools.publicToolkit.tools)).toEqual([
+        "find_thread",
+        "create_thread",
+        "thread_interact",
+        "wait_for_threads",
+      ])
+      expect(Object.keys(ThreadTools.allToolkit.tools)).toEqual([
+        "search_threads",
+        "read_thread_transcript",
+        "find_thread",
+        "create_thread",
+        "thread_interact",
+        "wait_for_threads",
+      ])
+      expect(
+        yield* Schema.decodeUnknownEffect(ThreadTools.CreateThreadInput)({
+          prompt: "Investigate",
+          mode: "ultra",
+          resultDelivery: "manual",
+        }),
+      ).toEqual({ prompt: "Investigate", mode: "ultra", resultDelivery: "manual" })
+      yield* Effect.flip(Schema.decodeUnknownEffect(ThreadTools.CreateThreadInput)({ prompt: "x", mode: "max" }))
+      yield* Effect.flip(Schema.decodeUnknownEffect(ThreadTools.CreateThreadInput)({ prompt: "😀".repeat(100_001) }))
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.ThreadInteractInput)({
+          action: "status",
+          message: "not valid for status",
+        }),
+      )
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.ThreadInteractInput)({ action: "steer", threadId: "thread-1" }),
+      )
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.WaitForThreadsInput)({ targets: [], timeoutSeconds: 1 }),
+      )
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.WaitForThreadsInput)({
+          targets: Array.from({ length: 11 }, (_, index) => ({ threadId: `t-${index}`, turnId: `r-${index}` })),
+        }),
+      )
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.WaitForThreadsInput)({
+          targets: [{ threadId: "t", turnId: "r" }],
+          timeoutSeconds: 601,
+        }),
+      )
+      expect(Catalog.get("find_thread")).toMatchObject({ productPermission: "thread.read", idempotency: "safe" })
+      expect(Catalog.get("create_thread")).toMatchObject({
+        productPermission: "thread.coordinate",
+        idempotency: "unsafe",
+      })
+      expect(Catalog.get("thread_interact")?.permissionRules).toEqual([
+        { actions: ["status", "preview_messages"], productPermission: "thread.read", idempotency: "safe" },
+        { actions: ["message"], productPermission: "thread.coordinate", idempotency: "unsafe" },
+        { actions: ["steer", "cancel", "stop"], productPermission: "thread.control", idempotency: "unsafe" },
+      ])
+      expect(Catalog.get("wait_for_threads")).toMatchObject({
+        productPermission: "thread.read",
+        idempotency: "safe",
+        outputLimit: 40_000,
+      })
+      expect(ThreadTools.waitHandlerOutputBudget).toBe(36_000)
+      expect(ThreadTools.findDefaultLimit).toBe(10)
+      expect(ThreadTools.findMaximumLimit).toBe(50)
+      expect(ThreadTools.previewDefaultLimit).toBe(10)
+      expect(ThreadTools.previewMaximumLimit).toBe(20)
+      yield* Effect.flip(Schema.decodeUnknownEffect(ThreadTools.FindThreadInput)({ query: "all", limit: 51 }))
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.ThreadInteractInput)({
+          action: "preview_messages",
+          threadId: "thread-1",
+          limit: 21,
+        }),
+      )
+      expect(
+        yield* Schema.decodeUnknownEffect(ThreadTools.AcceptedSuccess)({
+          schemaVersion: 2,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          resultDelivery: "reply",
+          state: "awaiting-approval",
+        }),
+      ).toMatchObject({ schemaVersion: 2, state: "awaiting-approval" })
+      yield* Effect.flip(
+        Schema.decodeUnknownEffect(ThreadTools.AcceptedSuccess)({
+          schemaVersion: 2,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          resultDelivery: "reply",
+          state: "stopped",
+        }),
+      )
+    }),
+  )
 
   it("builds the catalog from every registered built-in tool contract", () => {
     const tools = [
       ...Object.values(Runtime.toolkit.tools),
       ...Object.values(AgentTools.modelToolkit.tools),
-      ...Object.values(ThreadTools.toolkit.tools),
+      ...Object.values(ThreadTools.allToolkit.tools),
     ]
     expect(Catalog.definitions.map(({ name, description }) => ({ name, description }))).toEqual(
       tools.map(({ name, description }) => ({ name, description })),
     )
   })
+
+  it.effect("preserves Relay invocation time and derives one absolute deadline", () =>
+    Effect.gen(function* () {
+      const invocation = yield* Schema.decodeUnknownEffect(ToolInvocation.ValueSchema)({
+        executionId: "execution-1",
+        callId: "call-1",
+        toolName: "wait_for_threads",
+        eventSequence: 12,
+        createdAt: 1_721_234_567_890.5,
+        idempotencyKeyDigest: "digest",
+      })
+      expect(invocation.createdAt).toBe(1_721_234_567_890.5)
+      expect(ToolInvocation.absoluteDeadline(invocation.createdAt, 600_000)).toBe(1_721_235_167_890.5)
+      expect(() => ToolInvocation.absoluteDeadline(invocation.createdAt, -1)).toThrow("Invalid tool deadline")
+    }),
+  )
 
   it("rejects duplicated tools and incomplete registration", () => {
     const registration = Runtime.registrations.find(({ tool }) => tool.name === "read")!

@@ -368,6 +368,23 @@ describe("UsageCost", () => {
     })
   })
 
+  it("resumes active time when Relay continues directly from a durable wake", () => {
+    const snapshot = [
+      lifecycle("execution", "start", "execution.started", 1_000, 1),
+      lifecycle("execution", "wait", "wait.created", 2_000, 7),
+      lifecycle("execution", "wake", "wait.woken", 10_000, 12),
+      lifecycle("execution", "complete", "execution.completed", 12_000, 27),
+    ].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(UsageCost.activeTime(snapshot, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(3),
+    })
+  })
+
   it("does not rebuild active intervals for each appended streaming delta", () => {
     const resumed = [
       lifecycle("execution", "start-1", "execution.started", 1_000, 1),

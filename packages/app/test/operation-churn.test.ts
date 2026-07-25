@@ -26,6 +26,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       labels: [],
       pinned: false,
       archived: false,
+      lineage: { _tag: "Original" },
       createdAt: 1,
       updatedAt: 1,
     }
@@ -89,6 +90,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
       listApprovals: () => Effect.succeed([]),
       resolveToolApproval: () => Effect.void,
       resolvePermission: () => Effect.void,
+      resolveInvocationSource: () => Effect.die("unused"),
     })
     const registrations = yield* Queue.unbounded<{
       readonly session: Operation.InteractiveSession

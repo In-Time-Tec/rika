@@ -44,6 +44,7 @@ const backend = ExecutionBackend.Service.of({
   listApprovals: () => Effect.die("unused"),
   resolveToolApproval: () => Effect.die("unused"),
   resolvePermission: () => Effect.die("unused"),
+  resolveInvocationSource: () => Effect.die("unused"),
 })
 
 const layer = Layer.succeed(ExecutionBackend.Service, backend)

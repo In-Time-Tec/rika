@@ -187,16 +187,6 @@ const diagnostics = (
     ["global", global],
     ["workspace", workspace],
   ] as const)
-    if (input.modelRoutes?.agents !== undefined)
-      entries.push({
-        path: "modelRoutes.agents",
-        source,
-        message: "agent routes resolve but are not yet applied to execution",
-      })
-  for (const [source, input] of [
-    ["global", global],
-    ["workspace", workspace],
-  ] as const)
     for (const [name, alias] of Object.entries(input.modelAliases ?? {}))
       if (alias.base !== undefined)
         entries.push({

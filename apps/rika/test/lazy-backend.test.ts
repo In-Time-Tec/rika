@@ -9,6 +9,7 @@ const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
   const record = (...call: ReadonlyArray<unknown>) => Effect.sync(() => calls.push(call))
   return ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+    resolveInvocationSource: () => Effect.die("unused"),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
     cancelFanOut: () => Effect.die("unused"),
@@ -27,8 +28,8 @@ const recordingBackend = (calls: Array<ReadonlyArray<unknown>>) => {
       record("inspect", turnId, reference).pipe(
         Effect.as({ turnId, status: "completed" as const, waits: [], pendingTools: [], children: [] }),
       ),
-    steer: (turnId, text, createdAt, reference) =>
-      record("steer", turnId, text, createdAt, reference).pipe(
+    steer: (turnId, text, idempotencyIdentity, createdAt, reference) =>
+      record("steer", turnId, text, idempotencyIdentity, createdAt, reference).pipe(
         Effect.as({ steeringMessageId: `steering:${turnId}`, sequence: 0 }),
       ),
     listApprovals: (turnId, reference) => record("listApprovals", turnId, reference).pipe(Effect.as([])),
@@ -51,7 +52,7 @@ describe("lazyBackendLayer", () => {
         yield* backend.inspect(childId, reference)
         yield* backend.replay(childId, "cursor-1", reference)
         yield* backend.cancel(childId, 7, reference)
-        yield* backend.steer(childId, "steer", 8, reference)
+        yield* backend.steer(childId, "steer", "steer-child-1", 8, reference)
         yield* backend.listApprovals(childId, reference)
         expect(backend.pageEvents).toBeDefined()
         yield* backend.pageEvents!(childId, "forward", "cursor-2", 200, reference)
@@ -59,7 +60,7 @@ describe("lazyBackendLayer", () => {
           ["inspect", childId, reference],
           ["replay", childId, "cursor-1", reference],
           ["cancel", childId, 7, reference],
-          ["steer", childId, "steer", 8, reference],
+          ["steer", childId, "steer", "steer-child-1", 8, reference],
           ["listApprovals", childId, reference],
           ["pageEvents", childId, "forward", "cursor-2", 200, reference],
         ])

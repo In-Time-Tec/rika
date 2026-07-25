@@ -259,6 +259,8 @@ const program = Effect.gen(function* () {
                     id: Turn.TurnId.make("timed-tool-turn"),
                     threadId,
                     prompt: "timed tools",
+                    author: { _tag: "Human" } as const,
+                    lineage: { _tag: "Original" } as const,
                     executionRoute: Turn.testExecutionRoute(),
                     status: "running" as const,
                     createdAt: startedAt,

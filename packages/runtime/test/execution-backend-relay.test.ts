@@ -2,10 +2,11 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { AiError, ModelRegistry, ModelResilience, Response } from "@batonfx/core"
 import { classifyFailure as classifyOpenAiFailure } from "@batonfx/providers/openai"
 import { TestModel } from "@batonfx/test"
-import { Runtime as RikaToolRuntime } from "@rika/tools"
+import { Runtime as RikaToolRuntime, ToolInvocation } from "@rika/tools"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Clock, Duration, Effect, Fiber, FileSystem, Layer, Schedule, Schema } from "effect"
+import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, start } from "./current-execution-route"
@@ -49,15 +50,20 @@ const decodeToolExecution = Schema.decodeUnknownSync(
   ),
 )
 
-const withBackend = <A, E>(
+const withBackend = <A, E, AdditionalTools extends Record<string, Tool.Any> = {}>(
   script: Parameters<typeof TestModel.make>[0],
   run: (
     fixture: TestModel.Fixture,
     directory: string,
   ) => Effect.Effect<A, E, ExecutionBackend.Service | FileSystem.FileSystem>,
   options?: Pick<
-    RelayExecutionBackend.LayerOptions,
-    "modelResilience" | "compaction" | "permissionPolicy" | "modelVariantPolicy"
+    RelayExecutionBackend.LayerOptions<AdditionalTools>,
+    | "modelResilience"
+    | "compaction"
+    | "permissionPolicy"
+    | "modelVariantPolicy"
+    | "additionalToolkit"
+    | "additionalHandlerLayer"
   > & {
     readonly registration?: (fixture: TestModel.Fixture) => ModelRegistry.Registration
   },
@@ -104,7 +110,19 @@ test(
             const replay = yield* backend.replay(input.turnId)
             const cursor = replay.events.at(1)?.cursor
             const after = yield* backend.replay(input.turnId, cursor)
-            return { first, duplicate, replay, after, cursor, streamed, requests: yield* fixture.requests }
+            const followed = yield* backend.follow!(input.turnId, first.checkpoint)
+            const source = yield* backend.resolveInvocationSource("execution:turn-a")
+            return {
+              first,
+              duplicate,
+              replay,
+              after,
+              followed,
+              source,
+              cursor,
+              streamed,
+              requests: yield* fixture.requests,
+            }
           }),
         )
         const result = yield* program
@@ -127,7 +145,75 @@ test(
             .slice(result.replay.events.findIndex((event) => event.cursor === result.cursor) + 1)
             .map((event) => event.cursor),
         )
+        expect(result.first.checkpoint).toEqual(result.replay.checkpoint)
+        expect(result.followed.events).toEqual([])
+        expect(result.followed.checkpoint).toEqual(result.first.checkpoint)
+        expect(result.source).toMatchObject({
+          rootTurnId: "turn-a",
+          threadId: "thread-a",
+          callerProfile: "Root",
+          threadCreationDepth: 0,
+        })
         expect(result.requests).toHaveLength(1)
+      }),
+    ),
+  30_000,
+)
+
+test(
+  "provides the exact Relay invocation context to an additional tool without exposing its raw key",
+  () =>
+    runNative(
+      Effect.gen(function* () {
+        const observed: Array<ToolInvocation.Value> = []
+        const probe = Tool.make("invocation_probe", {
+          description: "Observe invocation context",
+          parameters: Schema.Struct({ value: Schema.String }),
+          success: Schema.String,
+        })
+        const additionalToolkit = Toolkit.make(probe)
+        const result = yield* withBackend(
+          [
+            TestModel.turn([
+              TestModel.toolCall("invocation_probe", { value: "first" }, { id: "probe-first" }),
+              TestModel.toolCall("invocation_probe", { value: "second" }, { id: "probe-second" }),
+            ]),
+            TestModel.text("done"),
+          ],
+          () =>
+            Effect.gen(function* () {
+              const backend = yield* ExecutionBackend.Service
+              return yield* start(backend, {
+                threadId: "thread-invocation",
+                turnId: "turn-invocation",
+                prompt: "probe",
+                startedAt: 1,
+              })
+            }),
+          {
+            additionalToolkit,
+            additionalHandlerLayer: additionalToolkit.toLayer({
+              invocation_probe: () =>
+                Effect.gen(function* () {
+                  const invocation = yield* ToolInvocation.ToolInvocation
+                  observed.push(invocation)
+                  yield* Effect.yieldNow
+                  expect((yield* ToolInvocation.ToolInvocation).callId).toBe(invocation.callId)
+                  return invocation.idempotencyKeyDigest
+                }) as unknown as Effect.Effect<string>,
+            }),
+          },
+        )
+        expect(result.status).toBe("completed")
+        expect(observed).toHaveLength(2)
+        expect(observed.map((invocation) => invocation.callId).toSorted()).toEqual(["probe-first", "probe-second"])
+        expect(observed.every((invocation) => invocation.executionId === "execution:turn-invocation")).toBe(true)
+        expect(observed.every((invocation) => invocation.toolName === "invocation_probe")).toBe(true)
+        expect(observed.map((invocation) => invocation.eventSequence).toSorted()).toEqual([6, 7])
+        expect(observed.every((invocation) => typeof invocation.createdAt === "number")).toBe(true)
+        expect(observed.every((invocation) => /^[a-f0-9]{64}$/.test(invocation.idempotencyKeyDigest))).toBe(true)
+        expect(observed[0]?.idempotencyKeyDigest).not.toBe(observed[1]?.idempotencyKeyDigest)
+        expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(observed)).not.toContain("tool:")
       }),
     ),
   30_000,
@@ -1117,15 +1203,25 @@ test(
                   start(backend, { threadId: "thread-steer", turnId: "turn-steer", prompt: "start", startedAt: 1 }),
                 )
                 yield* fixture.awaitRequests(1)
-                const receipt = yield* backend.steer("turn-steer", "focus on the fixture", 2)
+                const receipt = yield* backend.steer("turn-steer", "focus on the fixture", "steer-request-1", 2)
+                const retriedReceipt = yield* backend.steer("turn-steer", "focus on the fixture", "steer-request-1", 2)
+                const conflict = yield* Effect.flip(
+                  backend.steer("turn-steer", "use a different fixture", "steer-request-1", 2),
+                )
                 const result = yield* Fiber.join(fiber)
-                return { result, receipt, requests: yield* fixture.requests }
+                return { result, receipt, retriedReceipt, conflict, requests: yield* fixture.requests }
               }),
             ),
         )
         const result = yield* program
         expect(result.result.status).toBe("completed")
         expect(result.requests).toHaveLength(2)
+        expect(result.retriedReceipt).toEqual(result.receipt)
+        expect(result.conflict).toBeInstanceOf(ExecutionBackend.BackendError)
+        expect(result.conflict.message).toBe(
+          "Steering idempotency identity was already used with a different semantic payload",
+        )
+        expect(result.conflict.message).not.toContain("steer-request-1")
         expect(encodeJson(result.requests[0])).not.toContain("focus on the fixture")
         expect(encodeJson(result.requests[1]).match(/focus on the fixture/g)).toHaveLength(1)
         expect(result.receipt.sequence).toBe(0)
@@ -1264,6 +1360,9 @@ test(
         const result = yield* program
         expect(result.accepted.status).toBe("cancelled")
         expect(result.accepted.events.filter((event) => event.type === "execution.cancelled")).toHaveLength(1)
+        expect(result.accepted.checkpoint?.cursor).toBe(
+          result.accepted.events.findLast((event) => event.type === "execution.cancelled")?.cursor,
+        )
         expect(result.completed.status).toBe("cancelled")
         expect(result.completed.events.filter((event) => event.type === "execution.cancelled")).toHaveLength(1)
       }),

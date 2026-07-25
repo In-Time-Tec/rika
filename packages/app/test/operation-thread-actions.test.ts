@@ -31,6 +31,7 @@ const backend = ExecutionBackend.Service.of({
   listApprovals: () => Effect.succeed([]),
   resolveToolApproval: () => Effect.die("unused"),
   resolvePermission: () => Effect.die("unused"),
+  resolveInvocationSource: () => Effect.die("unused"),
 })
 
 const thread = (id: string, overrides: Partial<Thread.Thread> = {}): Thread.Thread => ({
@@ -40,6 +41,7 @@ const thread = (id: string, overrides: Partial<Thread.Thread> = {}): Thread.Thre
   labels: [],
   pinned: false,
   archived: false,
+  lineage: { _tag: "Original" },
   createdAt: 1,
   updatedAt: 1,
   ...overrides,
@@ -66,6 +68,8 @@ describe("Operation thread actions", () => {
           id: Turn.TurnId.make(status),
           threadId: alpha.id,
           prompt: `${status} prompt`,
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status,
           createdAt: index + 1,
@@ -148,6 +152,8 @@ describe("Operation thread actions", () => {
           id: Turn.TurnId.make("one"),
           threadId: labeled.id,
           prompt: "one",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "completed",
           createdAt: 1,
@@ -158,6 +164,8 @@ describe("Operation thread actions", () => {
           id: Turn.TurnId.make("two"),
           threadId: labeled.id,
           prompt: "two",
+          author: { _tag: "Human" },
+          lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "failed",
           createdAt: 3,

@@ -31,7 +31,7 @@ describe("product agent profiles", () => {
       const profile = resolve(name, model)
       expect(profile.preset.instructions.length).toBeGreaterThan(0)
       expect(profile.preset.instructions).toContain(
-        name === "ReadThread" ? "checking later turns" : "read_thread subagent selectively",
+        name === "ReadThread" ? "Check later Turns" : "read_thread subagent selectively",
       )
       expect(profile.agent.instructions).toBe(profile.preset.instructions)
     }

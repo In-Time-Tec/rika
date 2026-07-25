@@ -4,8 +4,10 @@ import { Effect, Function } from "effect"
 
 export const executionRoute = () => Turn.testExecutionRoute()
 
-type CreateInput = Omit<TurnRepository.CreateInput, "executionRoute" | "queueCapacity"> & {
+type CreateInput = Omit<TurnRepository.CreateInput, "author" | "executionRoute" | "lineage" | "queueCapacity"> & {
+  readonly author?: Turn.TurnAuthor
   readonly executionRoute?: Turn.ExecutionRoutePin
+  readonly lineage?: Turn.TurnLineage
 }
 
 export const createTurn: {
@@ -19,5 +21,11 @@ export const createTurn: {
     input: CreateInput,
   ): Effect.Effect<TurnRepository.Submission, TurnRepository.QueueFull | TurnRepository.RepositoryError>
 } = Function.dual(2, (repository: TurnRepository.Interface, input: CreateInput) =>
-  repository.createForSubmission({ executionRoute: executionRoute(), queueCapacity: 128, ...input }),
+  repository.createForSubmission({
+    author: { _tag: "Human" },
+    executionRoute: executionRoute(),
+    lineage: { _tag: "Original" },
+    queueCapacity: 128,
+    ...input,
+  }),
 )

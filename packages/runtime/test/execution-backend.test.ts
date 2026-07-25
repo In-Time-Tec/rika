@@ -7,7 +7,7 @@ import { ChildFanOutHost, Client, Content, Execution, Ids, WorkflowDefinitionHos
 import { ThreadTools } from "@rika/tools"
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, Schema, Stream, Tracer } from "effect"
 import { TestClock } from "effect/testing"
-import { AiError, Toolkit } from "effect/unstable/ai"
+import { AiError, Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, currentExecutionRoute, start } from "./current-execution-route"
@@ -338,9 +338,9 @@ const makeClient = Effect.fn("ExecutionBackendTest.makeClient")(function* (optio
   return { implementation, registrations, starts, lookups, replays, pages, cancellations }
 })
 
-const provideConfiguredBackend = (
+const provideConfiguredBackend = <AdditionalTools extends Record<string, Tool.Any> = {}>(
   implementation: Client.Interface,
-  options: Parameters<typeof RelayExecutionBackend.layerFromClient>[0],
+  options: Parameters<typeof RelayExecutionBackend.layerFromClient<AdditionalTools>>[0],
   additionalLayer: Layer.Layer<never> = Layer.empty,
 ) => {
   const contextLayer = Layer.merge(
@@ -1433,7 +1433,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           }),
           inspection: yield* backend.inspect("parent-1"),
           approvals: yield* backend.listApprovals("parent-1"),
-          steer: yield* backend.steer("parent-1", "continue", 5),
+          steer: yield* backend.steer("parent-1", "continue", "steer-parent-1", 5),
           approval: yield* backend.resolveToolApproval("wait-1", true, 6, "ok"),
           permission: yield* backend.resolvePermission("wait-1", "Approved", 7, "safe"),
         }
@@ -1812,6 +1812,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           oracleSelection,
           compaction: mainCompaction,
           oracleCompaction,
+          additionalToolkit: ThreadTools.allToolkit,
           resolveWorkspace: (execution) => Effect.succeed(execution.includes("other-turn") ? "/configured" : "/plain"),
           webSearchCredentialsForWorkspace: (workspace) =>
             Effect.succeed(workspace === "/configured" ? { parallel: Redacted.make("secret") } : {}),
@@ -1833,7 +1834,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           registration_key: "terra:low:normal",
         },
       })
-      expect(registered.child_run_presets.Task).toMatchObject({
+      expect(registered.child_run_presets["Task:1"]).toMatchObject({
         model: {
           provider: selection.provider,
           model: selection.model,
@@ -1842,8 +1843,25 @@ describe("ExecutionBackend Relay client adapter", () => {
         },
         metadata: { product_profile: "Task", rika_agent_depth: 1, rika_reasoning_effort: "medium" },
       })
-      expect(registered.child_run_presets.Task.tool_names).toContain("web_search")
-      expect(registered.child_run_presets.Oracle).toMatchObject({
+      expect(registered.child_run_presets["Task:1"].tool_names).toContain("web_search")
+      const rootToolNames = registered.tools.map((tool: { readonly name: string }) => tool.name)
+      expect(rootToolNames).toEqual(
+        expect.arrayContaining(["find_thread", "create_thread", "thread_interact", "wait_for_threads"]),
+      )
+      expect(rootToolNames).not.toContain("search_threads")
+      expect(rootToolNames).not.toContain("read_thread_transcript")
+      expect(registered.permissions).toEqual(
+        expect.arrayContaining([
+          { name: "thread.read", value: true },
+          { name: "thread.coordinate", value: true },
+          { name: "thread.control", value: true },
+        ]),
+      )
+      expect(registered.child_run_presets["ReadThread:1"]).toMatchObject({
+        permissions: ["thread.read"],
+        tool_names: ["search_threads", "read_thread_transcript"],
+      })
+      expect(registered.child_run_presets["Oracle:1"]).toMatchObject({
         model: {
           provider: oracleSelection.provider,
           model: oracleSelection.model,
@@ -1892,6 +1910,76 @@ describe("ExecutionBackend Relay client adapter", () => {
           readThread: routeFor("readThread", selection, mainCompaction),
           surgeon: routeFor("surgeon", selection, mainCompaction),
           task: routeFor("task", selection, mainCompaction),
+        },
+      })
+    }),
+  )
+
+  it.effect("keeps Surgeon on the main route when Agent routes are omitted in fixed-selection mode", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      const fanOutInputs: Array<any> = []
+      Object.assign(fixture.implementation.childRuns, {
+        createFanOut: (input: any) => {
+          fanOutInputs.push(input)
+          return Effect.succeed({
+            fan_out_id: input.fan_out_id,
+            parent_execution_id: input.parent_execution_id,
+            state: "running",
+            max_concurrency: input.max_concurrency,
+            join: input.join,
+            members: [],
+          })
+        },
+      })
+      const mainSelection = { provider: "main-provider", model: "main-model" }
+      const oracleSelection = { provider: "oracle-provider", model: "oracle-model" }
+      const mainCompaction = { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 }
+      const oracleCompaction = { contextWindow: 1_000_000, reserveTokens: 128_000, keepRecentTokens: 64_000 }
+      const route = {
+        mode: "test" as const,
+        main: routeFor("main", mainSelection, mainCompaction),
+        oracle: routeFor("oracle", oracleSelection, oracleCompaction),
+      }
+
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* createFanOut(backend, {
+          fanOutId: "surgeon-route",
+          parentTurnId: "turn",
+          executionRoute: route,
+          children: [
+            { childId: "surgeon", profile: "Surgeon", prompt: "diagnose" },
+            { childId: "oracle", profile: "Oracle", prompt: "review" },
+          ],
+          maxConcurrency: 2,
+          join: "all",
+          createdAt: 2,
+        })
+      }).pipe(
+        provideConfiguredBackend(fixture.implementation, {
+          selection: mainSelection,
+          oracleSelection,
+          modelVariantPolicy: "fixed-selection",
+          compaction: mainCompaction,
+          oracleCompaction,
+        }),
+      )
+
+      expect(fanOutInputs[0].children[0].override).toMatchObject({
+        model: { provider: "main-provider", model: "main-model" },
+        compaction_policy: {
+          context_window: mainCompaction.contextWindow,
+          reserve_tokens: mainCompaction.reserveTokens,
+          keep_recent_tokens: mainCompaction.keepRecentTokens,
+        },
+      })
+      expect(fanOutInputs[0].children[1].override).toMatchObject({
+        model: { provider: "oracle-provider", model: "oracle-model" },
+        compaction_policy: {
+          context_window: oracleCompaction.contextWindow,
+          reserve_tokens: oracleCompaction.reserveTokens,
+          keep_recent_tokens: oracleCompaction.keepRecentTokens,
         },
       })
     }),

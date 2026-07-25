@@ -4,6 +4,25 @@ import { ThreadId } from "./thread-schema"
 export const TurnId = Schema.String.pipe(Schema.brand("RikaTurnId"))
 export type TurnId = typeof TurnId.Type
 
+export const TurnAuthor = Schema.Union([
+  Schema.TaggedStruct("Human", {}),
+  Schema.TaggedStruct("Agent", {
+    sourceThreadId: ThreadId,
+    sourceRootTurnId: TurnId,
+    threadCreationDepth: Schema.Int,
+  }),
+])
+export type TurnAuthor = typeof TurnAuthor.Type
+
+export const TurnLineage = Schema.Union([
+  Schema.TaggedStruct("Original", {}),
+  Schema.TaggedStruct("ForkCopy", {
+    sourceThreadId: ThreadId,
+    sourceTurnId: TurnId,
+  }),
+])
+export type TurnLineage = typeof TurnLineage.Type
+
 export const Status = Schema.Literals(["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"])
 export type Status = typeof Status.Type
 
@@ -128,6 +147,8 @@ export const Turn = Schema.Struct({
   extensionPin: Schema.optionalKey(ExecutionExtensionPin),
   executionRoute: ExecutionRoutePin,
   reviewFanOutId: Schema.optionalKey(Schema.String),
+  author: TurnAuthor,
+  lineage: TurnLineage,
   createdAt: Schema.Finite,
   updatedAt: Schema.Finite,
 })
