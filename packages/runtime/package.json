@@ -15,6 +15,7 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
+    "@rika/config": "workspace:*",
     "@batonfx/core": "catalog:",
     "@rika/tools": "workspace:*",
     "@relayfx/sdk": "catalog:",

@@ -48,9 +48,10 @@ test(
         app.pressKey("\t")
         app.pressEnter()
         const nested = yield* app.waitFrame("NESTED_RELOAD_COMPLETE")
-        expect(nested).toContain("Task:2 finished")
-        expect(nested).not.toContain("Task:2 working")
-        expect(nested).not.toContain("Task:2 failed")
+        expect(nested).toContain("Subagent finished")
+        expect(nested).not.toContain("Subagent working")
+        expect(nested).not.toContain("Subagent failed")
+        expect(nested).not.toMatch(/:\d+ (?:working|finished|failed)/)
         expect(nested).not.toContain("Running 1 subagent")
         yield* app.quit
       }),
@@ -150,7 +151,7 @@ test(
 )
 
 test(
-  "renders depth-labelled Oracle and nested tool output through the real app stack",
+  "renders the Oracle label and nested tool output through the real app stack",
   () =>
     TuiApp.run(
       Effect.gen(function* () {
@@ -169,12 +170,12 @@ test(
         yield* app.waitFrame("ROOT_STYLE_RESULT")
         yield* settled(app)
         app.pressKey("\t")
-        yield* app.waitFrame("Oracle:1 finished")
+        yield* app.waitFrame("Oracle has spoken")
         app.pressEnter()
         yield* app.waitFrame("Read nested.txt")
         yield* settled(app)
         const completed = app.frame()
-        expect(completed.match(/Oracle:1 finished/g) ?? []).toHaveLength(1)
+        expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
         expect(completed.match(/Read nested\.txt/g) ?? []).toHaveLength(1)
         expect(completed).toContain("Oracle result")
         expect(completed).toContain("ORACLE_STYLE_RESULT")
@@ -221,7 +222,10 @@ test(
           const lines = frame.split("\n")
           const rootRow = lines.findIndex((line) => line.includes("ROOT_USER_PROMPT"))
           const parentPromptRow = lines.findIndex((line) => line.includes("PARENT_AGENT_PROMPT"))
-          const nestedHeader = lines.find((line) => line.includes("Task:2 finished"))
+          const nestedHeaderRow = lines.findIndex(
+            (line, index) => index > parentPromptRow && line.includes("Subagent finished"),
+          )
+          const nestedHeader = nestedHeaderRow < 0 ? undefined : lines[nestedHeaderRow]
           const nestedPrompt = lines.find((line) => line.includes("NESTED_AGENT_PROMPT"))
           const nestedTool = lines.find((line) => line.includes("Read nested.txt"))
           const nestedFinal = lines.find((line) => line.includes("NESTED_AGENT_FINAL"))
