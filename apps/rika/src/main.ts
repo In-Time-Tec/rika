@@ -2542,6 +2542,11 @@ export const interactiveTui =
                 }
                 render()
               },
+              modeToggle: () => {
+                if (model.busy) return
+                model = { ...model, mode: ViewState.nextMode(model.mode) }
+                render()
+              },
               key: (key) => {
                 if (key.ctrl && key.name === "c" && !model.busy) {
                   close()

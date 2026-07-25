@@ -1,7 +1,7 @@
 import type { Cost, Model, ModelCost } from "@opencode-ai/models"
 import { generatedAt, providers } from "@opencode-ai/models/snapshot"
 
-export const pricingVersion = `models.dev:${generatedAt}:calculator-1`
+export const pricingVersion = `models.dev:${generatedAt}:calculator-2`
 
 const record = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {}
@@ -23,10 +23,18 @@ export const usageTokens = (value: Record<string, unknown>): UsageTokens => {
 const hasMalformedToken = (value: Record<string, unknown>, keys: ReadonlyArray<string>): boolean =>
   keys.some((key) => value[key] !== undefined && value[key] !== null && token(value, key) === undefined)
 
+const supplementalPricing: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  anthropic: { "claude-opus-5": "claude-opus-4-8" },
+}
+
 const modelFor = (provider: string, model: string, modelSnapshot: string): Model | undefined => {
   const catalog = providers[provider]?.models
   if (catalog === undefined) return undefined
-  return catalog[modelSnapshot] ?? catalog[model]
+  const published = catalog[modelSnapshot] ?? catalog[model]
+  if (published !== undefined) return published
+  const shared = supplementalPricing[provider]
+  const equivalent = shared?.[modelSnapshot] ?? shared?.[model]
+  return equivalent === undefined ? undefined : catalog[equivalent]
 }
 
 const modeCost = (model: Model, serviceTier: string): Cost | undefined =>

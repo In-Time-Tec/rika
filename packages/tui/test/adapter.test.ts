@@ -2170,10 +2170,34 @@ describe("Surface", () => {
         (surface.modeLabel.content as { chunks: ReadonlyArray<{ attributes?: number }> }).chunks[0]?.attributes,
       ).toBeUndefined()
       surface.modeLabel.onMouseMove?.({ x: 31 } as never)
-      expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
+      expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("pointer")
       surface.modeLabel.onMouseOver?.({ x: 20 } as never)
       surface.modeLabel.onMouseOut?.({} as never)
       expect(opentui.renderer.setMousePointer).toHaveBeenLastCalledWith("default")
+    }),
+  )
+
+  it.effect("routes clicks on the usage and mode segments to their own handlers", () =>
+    Effect.gen(function* () {
+      const usageToggle = vi.fn()
+      const modeToggle = vi.fn()
+      const { surface } = yield* createScoped({ ...handlers(), usageToggle, modeToggle })
+      surface.update(
+        model({
+          mode: "medium",
+          usageDisplay: "time",
+          usageTime: { _tag: "Available", accumulatedMillis: 103_000 },
+        }),
+      )
+      Object.assign(surface.modeLabel, { screenX: 20 })
+
+      surface.modeLabel.onMouseDown?.({ x: 20 } as never)
+      expect(usageToggle).toHaveBeenCalledTimes(1)
+      expect(modeToggle).toHaveBeenCalledTimes(0)
+
+      surface.modeLabel.onMouseDown?.({ x: 31 } as never)
+      expect(modeToggle).toHaveBeenCalledTimes(1)
+      expect(usageToggle).toHaveBeenCalledTimes(1)
     }),
   )
 
