@@ -3181,7 +3181,7 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
         yield* openTui(() => setup.renderOnce())
         const metadataFrame = setup.captureCharFrame()
         expect(metadataFrame).toContain("Workflow release")
-        expect(metadataFrame).toContain("screen.png · image/png · 800×600 · 1200 bytes")
+        expect(metadataFrame).toContain("screen.png · image/png · 800×600 · 1.2 KB")
         setup.resize(50, 12)
         yield* openTui(() => setup.renderOnce())
         expect([model.width, model.height]).toEqual([50, 12])

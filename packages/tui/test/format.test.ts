@@ -1,6 +1,13 @@
 import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
-import { clipToWidth, escapeControlCharacters, formatBytes, formatTokens, plural } from "../src/format"
+import {
+  clipToWidth,
+  escapeControlCharacters,
+  formatBytes,
+  formatTokens,
+  homeRelativePath,
+  plural,
+} from "../src/format"
 
 describe("format", () => {
   test("abbreviates token counts with one owner", () => {
@@ -28,6 +35,14 @@ describe("format", () => {
     expect(plural(1, "file")).toBe("1 file")
     expect(plural(2, "file")).toBe("2 files")
     expect(plural(2, "search")).toBe("2 searches")
+  })
+
+  test("shortens paths under any home directory, not just macOS", () => {
+    expect(homeRelativePath("/home/ada/projects")).toBe("~/projects")
+    expect(homeRelativePath("/Users/ada/projects")).toBe("~/projects")
+    expect(homeRelativePath("/var/home/ada/projects")).toBe("~/projects")
+    expect(homeRelativePath("/home/ada")).toBe("~")
+    expect(homeRelativePath("/srv/app")).toBe("/srv/app")
   })
 
   test("formats byte sizes across tiers", () => {

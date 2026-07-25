@@ -74,6 +74,7 @@ import { maxClientMessageBytes } from "./resident-wire"
 import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { modeIds } from "@rika/config/modes"
+import { Format } from "@rika/tui"
 
 InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
 
@@ -330,7 +331,7 @@ class OperationProductError extends Schema.TaggedErrorClass<OperationProductErro
 
 export const maxAttachmentBytes = 5_000_000
 const maxPromptPartsBytes = maxClientMessageBytes - 65_536
-const attachmentMegabytes = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`
+const attachmentMegabytes = Format.formatBytes
 
 const materializePromptPartsImpl = (parts: ReadonlyArray<ViewState.PromptPart>, workspace: string) =>
   Effect.forEach(

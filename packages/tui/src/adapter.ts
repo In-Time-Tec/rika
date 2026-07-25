@@ -85,7 +85,7 @@ import {
   type ViewportMetrics,
   type ViewportAnchor,
 } from "./transcript-viewport"
-import { escapeControlCharacters, formatTokens, plural, truncateToWidth } from "./format"
+import { escapeControlCharacters, formatBytes, formatTokens, homeRelativePath, plural, truncateToWidth } from "./format"
 import { renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
 import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
@@ -272,7 +272,7 @@ export const renderBlock: {
       case "ImageAttachment": {
         const dimensions =
           block.width !== undefined && block.height !== undefined ? ` · ${block.width}×${block.height}` : ""
-        const size = block.bytes === undefined ? "" : ` · ${block.bytes} bytes`
+        const size = block.bytes === undefined ? "" : ` · ${formatBytes(block.bytes)}`
         return `▧ ${block.name} · ${block.mediaType}${dimensions}${size}`
       }
     }
@@ -3932,7 +3932,7 @@ const panelLoading = (model: Model): string | undefined => {
 }
 
 const compactWorkspace = (workspace: string): string => {
-  const home = workspace.replace(/^\/Users\/[^/]+(?=\/|$)/, "~")
+  const home = homeRelativePath(workspace)
   const segments = home.split("/").filter((segment) => segment.length > 0)
   if (segments.length <= 5) return home
   return [segments.slice(0, 2).join("/"), "…", segments.slice(-2).join("/")].join("/")

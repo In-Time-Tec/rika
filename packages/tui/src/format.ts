@@ -60,3 +60,7 @@ export const escapeControlCharacters = (text: string): string =>
       return character
     })
     .join("")
+
+const homeRoot = /^(?:\/Users|\/home|\/var\/home)\/[^/]+(?=\/|$)/
+
+export const homeRelativePath = (path: string): string => path.replace(homeRoot, "~")

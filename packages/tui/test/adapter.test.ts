@@ -789,7 +789,7 @@ describe("Surface", () => {
     expect(renderedBlocks).toContain(
       "✖ ERROR: Execution failed · Turn turn-4\n  Model unavailable\n  Next: Press Enter to retry.",
     )
-    expect(renderedBlocks).toContain("2×3 · 4 bytes")
+    expect(renderedBlocks).toContain("2×3 · 4 B")
     const state = model({
       blocks: [...blocks],
       currentThreadId: "a",
