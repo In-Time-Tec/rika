@@ -38,10 +38,10 @@ Build and install an explicit host target:
 ```bash
 bun run package -- --target linux-x64
 bun run install-local
-rika --version
+rika-dev --version
 ```
 
-`install-local` installs the existing versioned host archive under `~/.local/share/rika/current` with a command at `~/.local/bin/rika`. Set `RIKA_PACKAGE_TARGET`, `RIKA_INSTALL_ROOT`, or `RIKA_BIN_DIR` to override the target or locations. `uninstall-local` removes the installed program but keeps Rika state and configuration.
+`install-local` installs the existing versioned host archive under `~/.local/share/rika-dev/current` with a command at `~/.local/bin/rika-dev`. A source build is deliberately named `rika-dev` and kept in its own directory so it never overwrites a released `rika` from npm or the installer — the two can be installed side by side. Set `RIKA_PACKAGE_TARGET`, `RIKA_INSTALL_ROOT`, or `RIKA_BIN_DIR` to override the target or locations. `uninstall-local` removes the source build but keeps Rika state and configuration.
 
 ## Configuration
 

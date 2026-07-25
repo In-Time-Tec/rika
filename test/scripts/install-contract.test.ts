@@ -1,10 +1,14 @@
 import { describe, expect, test } from "vitest"
 import {
+  archiveCommandName,
   binDirEnv,
-  commandName,
   defaultBinDir,
   defaultInstallRoot,
+  devCommandName,
+  devRootSegments,
   installRootEnv,
+  releaseCommandName,
+  releaseRootSegments,
   validateInstallerScript,
 } from "../../scripts/install-contract"
 import { launcherManifest, packedName, platformConstraints, platformPackageName } from "../../scripts/npm-package"
@@ -19,6 +23,19 @@ describe("install contract", () => {
     expect(installer).toContain(`${binDirEnv}:-${defaultBinDir}`)
     expect(defaultInstallRoot).toBe("$HOME/.local/share/rika/current")
     expect(defaultBinDir).toBe("$HOME/.local/bin")
+  })
+
+  test("keeps a source build from colliding with a released install", () => {
+    expect(devCommandName).toBe("rika-dev")
+    expect(releaseCommandName).toBe("rika")
+    expect(devCommandName).not.toBe(releaseCommandName)
+    expect(devRootSegments).not.toEqual(releaseRootSegments)
+    expect(archiveCommandName).toBe("rika")
+  })
+
+  test("install.sh installs the released command only", () => {
+    expect(installer).not.toContain(devCommandName)
+    expect(() => validateInstallerScript(`${installer}\n# ${devCommandName}`)).toThrow(devCommandName)
   })
 
   test("install.sh rejects a drifted default", () => {
@@ -45,7 +62,7 @@ describe("install contract", () => {
       targetNames.map(platformPackageName).toSorted(),
     )
     for (const version of Object.values(manifest.optionalDependencies)) expect(version).toBe("1.2.3")
-    expect(manifest.bin[commandName]).toBe("bin/rika.js")
+    expect(manifest.bin[releaseCommandName]).toBe("bin/rika.js")
   })
 
   test("platform packages constrain os and cpu", () => {
