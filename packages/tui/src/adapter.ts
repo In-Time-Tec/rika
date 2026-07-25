@@ -1469,22 +1469,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
   }
   const renderChildAgentBody = (block: Extract<TranscriptBlock, { _tag: "ChildAgent" }>, expanded: boolean) => {
     const running = block.status === "running"
-    const name = block.name.replace(/^rika-/, "")
-    const normalized = name.toLowerCase()
-    const display =
-      normalized.length === 0 || normalized === "child" || normalized === "task" || normalized === "subagent"
-        ? "Subagent"
-        : name.charAt(0).toUpperCase() + name.slice(1)
-    let phrase: string
-    if (block.status === "cancelled") phrase = `${display} cancelled`
-    else if (display === "Oracle") phrase = running ? "Oracle exploring" : "Oracle has spoken"
-    else if (display === "Librarian") phrase = running ? "Librarian is researching" : "Librarian researched"
-    else {
-      let status = "finished"
-      if (running) status = "working"
-      else if (block.status === "failed") status = "failed"
-      phrase = `${display} ${status}`
-    }
+    const phrase = Transcript.agentPhrase({ name: block.name, status: block.status })
     append(statusIcon(block.status === "failed", running, block.status === "cancelled"))
     for (const chunk of renderToolSummary(agentToolSummary(phrase), { leading: " " })[0]!) append(chunk)
     append(marker(expanded))

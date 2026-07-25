@@ -517,6 +517,58 @@ describe("Transcript projection", () => {
     })
   })
 
+  it("strips the relay depth suffix from a linked child spawn", () => {
+    const callId = "rika:execution%3Aparent:spawn-task"
+    const childId = `execution:parent:child:${callId}`
+    const projection = project("turn-a", "delegate", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: {
+          tool_call_id: callId,
+          tool_name: "task",
+          input: { input: [{ type: "text", text: "Investigate the failure." }] },
+        },
+      },
+      {
+        cursor: "spawned",
+        sequence: 2,
+        type: "child_run.spawned",
+        createdAt: 2,
+        data: { child_execution_id: childId, preset_name: "Task:1" },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          childId,
+          presentation: { activeLabel: "Subagent working", completeLabel: "Subagent finished" },
+        },
+      },
+    })
+  })
+
+  it("strips the relay depth suffix from an unlinked child block name", () => {
+    const projection = project("turn-a", "delegate", [
+      {
+        cursor: "spawned",
+        sequence: 1,
+        type: "child_run.spawned",
+        createdAt: 1,
+        data: { child_execution_id: "execution:parent:child:orphan", preset_name: "Task:2" },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "ChildAgent", name: "Task" } },
+    })
+  })
+
   it("links a child spawn with a percent-encoded parent execution id to the requesting tool", () => {
     const childId = "child:execution%3Aturn-a:call_1"
     const projection = project("turn-a", "delegate", [
