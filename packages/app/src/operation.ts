@@ -439,9 +439,7 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
                 Effect.gen(function* () {
                   let status: Turn.Status = "failed"
                   if (inspection !== undefined) {
-                    if (inspection.state === "joining") status = "running"
-                    else if (inspection.state === "satisfied") status = "completed"
-                    else status = inspection.state
+                    status = fanOutTurnStatus(inspection.state)
                   }
                   yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
                   if (inspection?.state === "joining" && watchReviewOwner !== undefined)
@@ -683,6 +681,11 @@ export const reconcile = Effect.fn("Operation.reconcilePublic")(function* (
     Effect.mapError((error) => operationError(String(error))),
   )
 })
+
+const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled"): Turn.Status => {
+  if (state === "joining") return "running"
+  return state === "satisfied" ? "completed" : state
+}
 
 const normalizeChildExecutionId = Transcript.executionKey
 
@@ -1160,7 +1163,7 @@ export const hasActiveExecutionWork = Effect.fn("Operation.hasActiveExecutionWor
         if (!(yield* executionTreeQuiescent(backend, executionId, true))) return true
       }
       if (!terminal) {
-        const status = fanOut.state === "satisfied" ? "completed" : fanOut.state
+        const status = fanOutTurnStatus(fanOut.state)
         yield* turns.setStatus(turn.id, status, turn.lastCursor, yield* Clock.currentTimeMillis)
       }
       continue
@@ -1772,7 +1775,7 @@ export const productLayer = <
         }
         yield* setTurnStatus(
           turn.id,
-          inspection.state === "satisfied" ? "completed" : inspection.state,
+          fanOutTurnStatus(inspection.state),
           turn.lastCursor,
           yield* Clock.currentTimeMillis,
         )

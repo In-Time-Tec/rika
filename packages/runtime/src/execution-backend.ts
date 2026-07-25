@@ -75,7 +75,7 @@ import {
 } from "./agent-profiles"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
-import { definitions, idFor } from "./workflow-definitions"
+import { definitions, idFor, workflowDefinitionName } from "./workflow-definitions"
 import {
   childExecutionDepth,
   childExecutionId as encodeChildExecutionId,
@@ -750,9 +750,7 @@ const workflow = (value: any) => {
   return {
     runId: attached?.runId ?? standalone?.runId ?? execution.replace(/^workflow:/, ""),
     ...(attached === undefined ? {} : { ownerTurnId: attached.ownerTurnId }),
-    workflow: String(value.pin.workflow_definition_id)
-      .replace(/^rika:/, "")
-      .replace(/:v1$/, ""),
+    workflow: workflowDefinitionName(String(value.pin.workflow_definition_id)),
     revision: value.pin.workflow_definition_revision,
     digest: value.pin.workflow_definition_digest,
     status: value.status,
