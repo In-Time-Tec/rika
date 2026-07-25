@@ -34,6 +34,10 @@ detect_target() {
     x86_64 | amd64) architecture="x64" ;;
     *) fail "unsupported architecture: $machine (supported: arm64, x86_64)" ;;
   esac
+  case "${os}-${architecture}" in
+    darwin-arm64 | linux-arm64 | linux-x64) ;;
+    *) fail "no Rika build for ${os}-${architecture} (supported: darwin-arm64, linux-arm64, linux-x64)" ;;
+  esac
   echo "${os}-${architecture}"
 }
 
