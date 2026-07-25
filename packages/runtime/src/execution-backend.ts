@@ -2040,8 +2040,8 @@ export const layer = <
               threadIdFromMetadata(snapshot.metadata) ??
               threadIdFromMetadata(snapshot.model.metadata)
             const requestedPrompt =
-              "question" in input
-                ? `${input.threadId === undefined ? "" : `Requested thread ID: ${input.threadId}\n\n`}Question: ${input.question}`
+              "threadId" in input && input.threadId !== undefined
+                ? `Requested thread ID: ${input.threadId}\n\n${input.prompt}`
                 : input.prompt
             const calls = [
               {

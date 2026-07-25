@@ -160,6 +160,9 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
           if (input.action === "steer" || input.action === "cancel" || input.action === "stop")
             permission = "thread.control"
           yield* requirePermission(permission)
+          if ((input.action === "message" || input.action === "steer") && input.message === undefined)
+            return yield* Effect.fail({ _tag: "ThreadInteractMessageRequired" } as const)
+          const messageText = input.message ?? ""
           const threadId = Thread.ThreadId.make(input.threadId)
           if (input.action === "message") {
             const resultDelivery = delivery(input.resultDelivery)
@@ -168,7 +171,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
               ...limits,
               targetThreadId: threadId,
               turnId: Turn.TurnId.make(id()),
-              prompt: input.message,
+              prompt: messageText,
               executionRoute: executionRoute(input.mode),
               resultDelivery,
               threadCreationDepth: source.threadCreationDepth + 1,
@@ -233,12 +236,7 @@ export const make = Effect.fn("ThreadToolService.make")(function* (options: Opti
           else control = interactions.bindStop(controlInput)
           const bound = yield* control
           if (input.action === "steer" && bound.targetTurnId !== undefined)
-            yield* backend.steer(
-              bound.targetTurnId,
-              input.message,
-              invocation.idempotencyKeyDigest,
-              invocation.createdAt,
-            )
+            yield* backend.steer(bound.targetTurnId, messageText, invocation.idempotencyKeyDigest, invocation.createdAt)
           if (input.action !== "steer" && bound.targetTurnId !== undefined) {
             const cancelledBeforeStart = yield* turns.cancelAccepted(bound.targetTurnId, invocation.createdAt)
             if (!cancelledBeforeStart) yield* backend.cancel(bound.targetTurnId, invocation.createdAt)

@@ -45,12 +45,6 @@ export const FindThreadInput = Schema.Struct({
   limit: Schema.optionalKey(FindLimit),
 })
 
-const LegacyReadThreadInput = Schema.Struct({
-  threadId: Schema.String,
-  includeArchived: Schema.optionalKey(Schema.Boolean),
-  maxTurns: Schema.optionalKey(PositiveInt),
-  maxChars: Schema.optionalKey(PositiveInt),
-})
 const TurnCursor = Schema.Struct({ createdAt: Schema.Finite, id: NonEmptyString })
 const TranscriptCursor = Schema.Struct({
   createdAt: Schema.Finite,
@@ -87,12 +81,13 @@ const ReadSelection = Schema.Union([
   }),
   Schema.Struct({ mode: Schema.tag("related"), cursor: Schema.optionalKey(RelationshipCursor) }),
 ])
-const StructuredReadThreadInput = Schema.Struct({
+export const ReadThreadInput = Schema.Struct({
   threadId: NonEmptyString,
   includeArchived: Schema.optionalKey(Schema.Boolean),
-  selection: ReadSelection,
+  selection: Schema.optionalKey(ReadSelection),
+  maxTurns: Schema.optionalKey(PositiveInt),
+  maxChars: Schema.optionalKey(PositiveInt),
 })
-export const ReadThreadInput = Schema.Union([StructuredReadThreadInput, LegacyReadThreadInput])
 
 export const FindThreadSuccess = Schema.Struct({
   schemaVersion: Schema.Literal(2),
@@ -142,7 +137,7 @@ const SteerAction = Schema.Struct({ action: Schema.tag("steer"), threadId: NonEm
 const CancelAction = Schema.Struct({ action: Schema.tag("cancel"), threadId: NonEmptyString })
 const StopAction = Schema.Struct({ action: Schema.tag("stop"), threadId: NonEmptyString })
 
-export const ThreadInteractInput = Schema.Union([
+export const ThreadInteractAction = Schema.Union([
   StatusAction,
   PreviewMessagesAction,
   MessageAction,
@@ -150,6 +145,21 @@ export const ThreadInteractInput = Schema.Union([
   CancelAction,
   StopAction,
 ])
+
+export const ThreadInteractInput = Schema.Struct({
+  action: Schema.Literals(["status", "preview_messages", "message", "steer", "cancel", "stop"]),
+  threadId: NonEmptyString,
+  cursor: Schema.optionalKey(NonEmptyString),
+  limit: Schema.optionalKey(PreviewLimit),
+  message: Schema.optionalKey(PublicInputText),
+  mode: Schema.optionalKey(Mode),
+  resultDelivery: Schema.optionalKey(ResultDelivery),
+}).check(
+  Schema.makeFilter(
+    (input) => (input.action === "message" || input.action === "steer" ? input.message !== undefined : true),
+    { expected: "message to be present when action is message or steer" },
+  ),
+)
 
 const ThreadSelector = Schema.Struct({ threadId: NonEmptyString, turnId: Schema.optionalKey(NonEmptyString) })
 const StatusSuccess = Schema.Struct({
