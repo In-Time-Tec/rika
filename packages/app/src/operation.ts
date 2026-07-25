@@ -1805,11 +1805,21 @@ export const productLayer = <
       })
       const testRoute = (mode: ModeId) => Effect.succeed(Turn.testExecutionRoute(mode))
       const resolveExecutionRoute = options.resolveExecutionRoute ?? testRoute
-      const executionPrompt = Effect.fn("Operation.executionPrompt")(function* (workspace: string, prompt: string) {
+      const executionPrompt = Effect.fn("Operation.executionPrompt")(function* (
+        workspace: string,
+        prompt: string,
+        promptParts?: ReadonlyArray<Turn.PromptPart>,
+      ) {
         const context = yield* ResolvedContext.Service
         const threads = yield* ThreadRepository.Service
-        const structured = ContextMentions.parse(prompt)
-        const bareMentions = [...new Set(FileMentions.parse(prompt))].filter(
+        const authored =
+          promptParts === undefined
+            ? prompt
+            : promptParts
+                .flatMap((part) => (part.type === "text" && part.pasted !== true ? [part.text] : []))
+                .join("\n")
+        const structured = ContextMentions.parse(authored)
+        const bareMentions = [...new Set(FileMentions.parse(authored))].filter(
           (value) => !/^(?:file|ref|guidance|image):/.test(value),
         )
         const mentionKinds = yield* Effect.forEach(
@@ -1867,7 +1877,7 @@ export const productLayer = <
         workspace: string,
         persistExtensionPin: boolean = true,
       ) {
-        const resolved = yield* executionPrompt(workspace, turn.prompt)
+        const resolved = yield* executionPrompt(workspace, turn.prompt, turn.promptParts)
         let promptParts = turn.promptParts
         if (promptParts !== undefined && resolved.prompt !== turn.prompt) {
           promptParts = [...promptParts, { type: "text" as const, text: resolved.prompt.slice(turn.prompt.length) }]

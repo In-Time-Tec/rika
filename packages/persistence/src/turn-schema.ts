@@ -128,7 +128,7 @@ export const testExecutionRoute = (mode: RouteModeId = "test"): ExecutionRoutePi
 }
 
 export const PromptPart = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
+  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String, pasted: Schema.optionalKey(Schema.Boolean) }),
   Schema.Struct({
     type: Schema.Literal("image"),
     mediaType: Schema.String,

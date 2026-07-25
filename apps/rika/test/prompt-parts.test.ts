@@ -178,7 +178,11 @@ test("preserves expanded text-only paste parts instead of falling back to the co
       expect(completed.input).toBe(`before ${token} after`)
       expect(
         yield* materializePromptParts(ViewState.promptParts(completed.input, completed.pastedText), "/work"),
-      ).toEqual([{ type: "text", text: "before first line\nsecond line after" }])
+      ).toEqual([
+        { type: "text", text: "before " },
+        { type: "text", text: "first line\nsecond line", pasted: true },
+        { type: "text", text: " after" },
+      ])
     }),
   ))
 
