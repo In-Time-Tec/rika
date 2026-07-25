@@ -2,7 +2,26 @@
 
 Rika is a local coding-agent CLI and terminal application. It uses Baton for the agent loop, Relay for durable execution, Effect SQL for local product state, and OpenTUI for rendering.
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/In-Time-Tec/rika/main/install.sh | sh
+```
+
+Or from npm:
+
+```bash
+npm install -g @rikafx/cli
+```
+
+Both install the same binaries and give you a `rika` command. The curl installer puts them under
+`~/.local/share/rika/current` with a link at `~/.local/bin/rika`; set `RIKA_VERSION`,
+`RIKA_INSTALL_ROOT`, or `RIKA_BIN_DIR` to change the version or locations. macOS and Linux on arm64
+and x86_64 are supported.
+
 ## Setup
+
+Only needed to work on Rika itself.
 
 ```bash
 bun install
@@ -12,7 +31,7 @@ bun run dev
 
 The standard repository commands are `build`, `check`, `dev`, `format`, `test`, and `typecheck`.
 
-## Package and install
+## Package and install from source
 
 Build and install an explicit host target:
 

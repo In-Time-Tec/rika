@@ -2,6 +2,12 @@ name: publish
 
 on:
   workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Run publish validation without publishing to npm
+        required: true
+        type: boolean
+        default: true
   push:
     tags: ["v*"]
 
@@ -153,6 +159,85 @@ jobs:
             artifacts/SHA256SUMS
             artifacts/release-evidence.json
           if-no-files-found: error
+
+  npm:
+    name: publish-npm
+    needs: aggregate
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Download archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: rika-*
+          path: artifacts
+          merge-multiple: true
+      - name: Download release metadata
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: release-metadata
+          path: artifacts
+      - name: Verify checksums
+        working-directory: artifacts
+        run: sha256sum --check SHA256SUMS
+      - name: Build npm packages
+        run: bun run npm-package
+      - name: Pack npm packages
+        id: pack
+        run: |
+          version="$(bun -e 'console.log((await Bun.file("apps/rika/package.json").json()).version)')"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          for directory in artifacts/npm/*/; do
+            (cd "$directory" && npm pack)
+          done
+          test "$(find artifacts/npm -name '*.tgz' | wc -l)" -eq 5
+      - name: Verify every platform package carries both binaries
+        run: |
+          for archive in artifacts/npm/cli-*/*.tgz; do
+            tar -tzf "$archive" | grep -qx 'package/bin/rika'
+            tar -tzf "$archive" | grep -qx 'package/bin/.rika-runtime'
+          done
+      - name: Dry-run publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for archive in artifacts/npm/cli-*/*.tgz artifacts/npm/cli/*.tgz; do
+            npm publish --access public --dry-run "$archive"
+          done
+      - name: Upload npm packages
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: npm-packages-${{ steps.pack.outputs.version }}
+          path: artifacts/npm/*/*.tgz
+          if-no-files-found: error
+      - name: Publish platform packages
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for archive in artifacts/npm/cli-*/*.tgz; do
+            npm publish --access public --provenance "$archive"
+          done
+      - name: Publish launcher
+        if: startsWith(github.ref, 'refs/tags/') && inputs.dry_run != true
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance artifacts/npm/cli/*.tgz
 
   publish:
     name: publish-release

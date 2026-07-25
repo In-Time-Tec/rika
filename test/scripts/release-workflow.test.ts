@@ -47,5 +47,27 @@ test("publishes only unchanged, attested native archives from a validated tag", 
     2,
   )
   expect(actionReferences.some((reference) => reference.startsWith("actions/attest@"))).toBe(false)
-  expect(JSON.stringify(workflow)).not.toMatch(/npm (?:publish|pack)/)
+  for (const job of ["package", "aggregate", "publish"]) expect(commands(job), job).not.toMatch(/npm (?:publish|pack)/)
+})
+
+test("publishes npm packages built from the same attested archives", () => {
+  expect(jobs.npm?.permissions).toEqual({ contents: "read", "id-token": "write" })
+
+  // The npm job must repackage the downloaded archives, never rebuild the binaries.
+  expect(commands("npm")).not.toMatch(/bun run package(?! -- --aggregate)/)
+  expect(commands("npm")).toContain("sha256sum --check SHA256SUMS")
+  expect(commands("npm")).toContain("bun run npm-package")
+
+  // Both binaries must be present in every platform package.
+  expect(commands("npm")).toContain("package/bin/rika")
+  expect(commands("npm")).toContain("package/bin/.rika-runtime")
+
+  const npmCommands = commands("npm")
+  expect(npmCommands.indexOf("--dry-run")).toBeGreaterThan(-1)
+  expect(npmCommands.indexOf("--dry-run")).toBeLessThan(npmCommands.indexOf("--provenance"))
+
+  const publishSteps = steps("npm").filter((step) => (step.run ?? "").includes("npm publish"))
+  const guarded = publishSteps.filter((step) => (step.run ?? "").includes("--provenance"))
+  expect(guarded.length).toBe(2)
+  for (const step of guarded) expect((step as { readonly if?: string }).if).toContain("dry_run != true")
 })
