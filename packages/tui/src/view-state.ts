@@ -462,14 +462,14 @@ export const Model = Schema.Struct({
     Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Loading") }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
-      Schema.Struct({ _tag: Schema.tag("Available"), total: Schema.Finite }),
+      Schema.Struct({ _tag: Schema.tag("Available"), total: Schema.Finite, uncountedAttempts: Schema.Int }),
     ]),
   ),
   usageCost: Schema.optional(
     Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Loading") }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
-      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite }),
+      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite, unpricedAttempts: Schema.Int }),
     ]),
   ),
   paletteOpen: Schema.Boolean,

@@ -33,6 +33,7 @@ export interface HttpProviderConnection {
   readonly baseUrl: string
   readonly apiKeyEnv?: string | undefined
   readonly streamingOnly?: boolean | undefined
+  readonly promptCaching?: boolean | undefined
 }
 export interface BedrockAuthRefresh {
   readonly command: string
@@ -43,6 +44,7 @@ export interface AmazonBedrockProviderConnection {
   readonly baseUrl?: undefined
   readonly apiKeyEnv?: undefined
   readonly streamingOnly?: undefined
+  readonly promptCaching?: undefined
   readonly region?: string
   readonly profile?: string
   readonly endpoint?: string
@@ -54,6 +56,7 @@ export interface HttpProviderOverride {
   readonly baseUrl?: string
   readonly apiKeyEnv?: string
   readonly streamingOnly?: boolean
+  readonly promptCaching?: boolean
 }
 export type ProviderOverride = HttpProviderOverride | Omit<AmazonBedrockProviderConnection, "protocol">
 
@@ -437,9 +440,11 @@ export const decodeSettingsInput: {
       }
       continue
     }
-    exactKeys(path, `Provider ${name}`, providerConnection, ["baseUrl", "apiKeyEnv", "streamingOnly"])
+    exactKeys(path, `Provider ${name}`, providerConnection, ["baseUrl", "apiKeyEnv", "streamingOnly", "promptCaching"])
     if (providerConnection.streamingOnly !== undefined && typeof providerConnection.streamingOnly !== "boolean")
       throw ConfigFileError.make({ path, message: `Provider ${name} streamingOnly must be a boolean` })
+    if (providerConnection.promptCaching !== undefined && typeof providerConnection.promptCaching !== "boolean")
+      throw ConfigFileError.make({ path, message: `Provider ${name} promptCaching must be a boolean` })
     if (
       providerConnection.apiKeyEnv !== undefined &&
       (typeof providerConnection.apiKeyEnv !== "string" || !/^[A-Z_][A-Z0-9_]*$/.test(providerConnection.apiKeyEnv))

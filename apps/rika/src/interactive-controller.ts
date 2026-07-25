@@ -286,7 +286,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "ThreadUsageUpdated") {
     if (event.selectionEpoch !== state.selectionEpoch || event.threadId !== state.model.currentThreadId)
       return { state, preserveAnchor: false }
-    const threadCostUsd = event.cost._tag === "Available" ? event.cost.usd : undefined
+    const threadCostUsd = event.cost._tag === "Available" ? event.cost.usd : state.threadCostUsd
     const { costUsd: _, ...withoutCost } = state.model
     return {
       state: {
@@ -354,10 +354,11 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       },
       threadPreview: ViewState.idle,
     })
+    const selectedCostUsd = event.threadCostUsd ?? (sameSelection ? state.threadCostUsd : undefined)
     return {
       state: {
         selectionEpoch: event.selectionEpoch,
-        model: project(model, entries, event.threadCostUsd),
+        model: project(model, entries, selectedCostUsd),
         replayTurns: new Map([
           ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
           ...(event.activeTurn === undefined ? [] : [[event.activeTurn.id, event.activeTurn] as const]),
@@ -365,7 +366,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
         projections: projections(entries),
-        ...(event.threadCostUsd === undefined ? {} : { threadCostUsd: event.threadCostUsd }),
+        ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
       },
       preserveAnchor: false,
     }
@@ -384,11 +385,12 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ...replacement.filter((entry) => !staleTurns.has(entry.turn.id)),
       ...state.entries.filter((entry) => staleTurns.has(entry.turn.id) || !replacementTurns.has(entry.turn.id)),
     ])
+    const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
     return {
       state: {
         ...stateWithoutCost,
-        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, event.threadCostUsd)),
+        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, threadCostUsd)),
         replayTurns: new Map([
           ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
           ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
@@ -396,7 +398,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
         projections: projections(entries),
-        ...(event.threadCostUsd === undefined ? {} : { threadCostUsd: event.threadCostUsd }),
+        ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
       },
       preserveAnchor: true,
     }
@@ -405,11 +407,12 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
     if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false }
     const entries = normalizeEntries([...state.entries, ...event.entries])
+    const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
     return {
       state: {
         ...stateWithoutCost,
-        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, event.threadCostUsd)),
+        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, threadCostUsd)),
         replayTurns: new Map([
           ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
           ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
@@ -417,7 +420,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
         projections: projections(entries),
-        ...(event.threadCostUsd === undefined ? {} : { threadCostUsd: event.threadCostUsd }),
+        ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
       },
       preserveAnchor: true,
     }
@@ -426,11 +429,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
     if (state.model.currentThreadId !== undefined && state.model.currentThreadId !== event.threadId)
       return { state, preserveAnchor: false }
-    const costBearing = event.event.type === "model.usage.reported" || event.event.type === "model.attempt.completed"
-    const threadCostUsd = costBearing ? event.threadCostUsd : state.threadCostUsd
+    const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
     if (event.revision <= (state.revisions.get(event.turnId) ?? -1)) {
-      if (!costBearing) return { state, preserveAnchor: false }
+      if (event.threadCostUsd === undefined) return { state, preserveAnchor: false }
       const { costUsd: _costUsd, ...modelWithoutCost } = state.model
       return {
         state: {

@@ -19,6 +19,16 @@ const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
   },
 })
 
+const attemptCompleted = (cursor: string, attemptId: string, executionId = "execution"): ExecutionBackend.Event => ({
+  id: cursor,
+  executionId,
+  cursor,
+  sequence: 0,
+  type: "model.attempt.completed",
+  createdAt: 1,
+  data: { model_call_id: `call-${cursor}`, model_attempt_id: attemptId, attempt: 1 },
+})
+
 const reportedTokens = (
   cursor: string,
   model: string,
@@ -782,9 +792,9 @@ describe("UsageCost", () => {
     const recovered = UsageCost.observe(replayed, { threadId: "thread", turnId: "turn", event })
 
     expect(recovered).toBe(replayed)
-    expect(recovered.turnCostUsd.get("turn")).toBe(2.5)
-    expect(recovered.threadCostUsd.get("thread")).toBe(2.5)
-    expect(recovered.globalCostUsd).toBe(2.5)
+    expect(UsageCost.turnTotals(recovered, "turn").costUsd).toBe(2.5)
+    expect(UsageCost.threadTotals(recovered, "thread").costUsd).toBe(2.5)
+    expect(recovered.global.costUsd).toBe(2.5)
   })
 
   it("totals input and output once while ignoring reasoning and input breakdowns", () => {
@@ -796,8 +806,8 @@ describe("UsageCost", () => {
     })
     const snapshot = UsageCost.observe(UsageCost.empty, { threadId: "thread", turnId: "turn", event })
 
-    expect(snapshot.threadTokens.get("thread")).toBe(40_100_000)
-    expect(snapshot.tokenCompleteThreads.has("thread")).toBe(true)
+    expect(UsageCost.threadTotals(snapshot, "thread").tokens).toBe(40_100_000)
+    expect(UsageCost.threadTotals(snapshot, "thread").uncountedAttempts === 0).toBe(true)
   })
 
   it("keeps token and provider-cost completeness independent", () => {
@@ -811,10 +821,10 @@ describe("UsageCost", () => {
       UsageCost.empty,
     )
 
-    expect(snapshot.threadCostUsd.get("thread")).toBe(2)
-    expect(snapshot.costCompleteThreads.has("thread")).toBe(true)
-    expect(snapshot.threadTokens.get("thread")).toBe(15)
-    expect(snapshot.tokenCompleteThreads.has("thread")).toBe(true)
+    expect(UsageCost.threadTotals(snapshot, "thread").costUsd).toBe(2)
+    expect(UsageCost.threadTotals(snapshot, "thread").unpricedAttempts === 0).toBe(true)
+    expect(UsageCost.threadTotals(snapshot, "thread").tokens).toBe(15)
+    expect(UsageCost.threadTotals(snapshot, "thread").uncountedAttempts === 0).toBe(true)
   })
 
   it("marks tokens unavailable when the exact input total is missing", () => {
@@ -827,7 +837,7 @@ describe("UsageCost", () => {
       }),
     })
 
-    expect(snapshot.tokenCompleteThreads.has("thread")).toBe(false)
+    expect(UsageCost.threadTotals(snapshot, "thread").uncountedAttempts === 0).toBe(false)
   })
 
   it("requires released identity and attempt fields only for cost-bearing events", () => {
@@ -849,8 +859,8 @@ describe("UsageCost", () => {
     })
 
     expect(unrelated).toBe(UsageCost.empty)
-    expect(missingIdentity.complete).toBe(false)
-    expect(missingAttempt.complete).toBe(false)
+    expect(missingIdentity.global.unpricedAttempts === 0).toBe(false)
+    expect(missingAttempt.global.unpricedAttempts === 0).toBe(false)
   })
 
   it("replaces an attempt estimate with provider USD cost in either arrival order", () => {
@@ -871,8 +881,8 @@ describe("UsageCost", () => {
         (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
         UsageCost.empty,
       )
-      expect(snapshot.globalCostUsd).toBe(2.5)
-      expect(snapshot.complete).toBe(true)
+      expect(snapshot.global.costUsd).toBe(2.5)
+      expect(snapshot.global.unpricedAttempts === 0).toBe(true)
     }
   })
 
@@ -889,8 +899,8 @@ describe("UsageCost", () => {
     const estimated = UsageCost.observe(UsageCost.empty, { threadId: "thread", turnId: "turn", event: report })
     const snapshot = UsageCost.observe(estimated, { threadId: "thread", turnId: "turn", event: completed })
 
-    expect(snapshot.globalCostUsd).toBe(0)
-    expect(snapshot.complete).toBe(false)
+    expect(snapshot.global.costUsd).toBe(0)
+    expect(snapshot.global.unpricedAttempts === 0).toBe(false)
   })
 
   it("keeps an estimate when completed provider cost is absent", () => {
@@ -908,11 +918,11 @@ describe("UsageCost", () => {
       UsageCost.empty,
     )
 
-    expect(snapshot.globalCostUsd).toBeCloseTo(0.0125, 10)
-    expect(snapshot.complete).toBe(true)
+    expect(snapshot.global.costUsd).toBeCloseTo(0.0125, 10)
+    expect(snapshot.global.unpricedAttempts === 0).toBe(true)
   })
 
-  it("does not estimate nested completed usage and marks partial totals incomplete", () => {
+  it("does not estimate nested completed usage and counts it unpriced once it settles", () => {
     const nested = {
       ...usage("nested", 0),
       data: {
@@ -922,13 +932,106 @@ describe("UsageCost", () => {
         usage: { provider: "openai", model: "gpt-5.6-sol", input_tokens: 1_000, output_tokens: 0 },
       },
     }
-    const snapshot = [usage("priced", 1), nested].reduce(
+    const announced = [usage("priced", 1), nested].reduce(
       (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
       UsageCost.empty,
     )
+    const settled = UsageCost.observe(announced, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "done", "execution.completed", 2, 9),
+    })
 
-    expect(snapshot.globalCostUsd).toBe(1)
-    expect(snapshot.complete).toBe(false)
+    expect(announced.global).toMatchObject({ costUsd: 1, unpricedAttempts: 0 })
+    expect(settled.global).toMatchObject({ costUsd: 1, unpricedAttempts: 1 })
+  })
+
+  it("keeps a thread total while a completed attempt waits for its usage report", () => {
+    const priced = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: usage("first", 2),
+    })
+    const awaiting = UsageCost.observe(priced, {
+      threadId: "thread",
+      turnId: "turn",
+      event: attemptCompleted("second", "attempt-second"),
+    })
+    const reported = UsageCost.observe(awaiting, {
+      threadId: "thread",
+      turnId: "turn",
+      event: reportedTokens("second-usage", "gpt-5.6-sol", 100, 0, {
+        model_attempt_id: "attempt-second",
+        input_tokens_uncached: 100,
+      }),
+    })
+
+    expect(UsageCost.threadTotals(awaiting, "thread")).toMatchObject({ costUsd: 2, unpricedAttempts: 0 })
+    expect(UsageCost.threadTotals(reported, "thread").costUsd).toBeCloseTo(2.0005, 10)
+    expect(UsageCost.threadTotals(reported, "thread").unpricedAttempts).toBe(0)
+  })
+
+  it("counts an attempt as unpriced only once it settles without usage", () => {
+    const awaiting = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: attemptCompleted("truncated", "attempt-truncated"),
+    })
+    const settled = UsageCost.observe(awaiting, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "done", "execution.completed", 2, 9),
+    })
+
+    expect(UsageCost.threadTotals(awaiting, "thread")).toEqual(UsageCost.noTotals)
+    expect(awaiting.threads).toBe(UsageCost.empty.threads)
+    expect(awaiting.turns).toBe(UsageCost.empty.turns)
+    expect(awaiting.global).toBe(UsageCost.empty.global)
+    expect(UsageCost.threadTotals(settled, "thread")).toMatchObject({
+      costUsd: 0,
+      unpricedAttempts: 1,
+      uncountedAttempts: 1,
+    })
+  })
+
+  it("keeps other threads and the global total priced when one thread has an unpriced attempt", () => {
+    const priced = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread-b",
+      turnId: "turn-b",
+      event: { ...usage("b", 3), executionId: "execution-b" },
+    })
+    const awaiting = UsageCost.observe(priced, {
+      threadId: "thread-a",
+      turnId: "turn-a",
+      event: attemptCompleted("a", "attempt-a", "execution-a"),
+    })
+    const settled = UsageCost.observe(awaiting, {
+      threadId: "thread-a",
+      turnId: "turn-a",
+      event: lifecycle("execution-a", "done", "execution.completed", 2, 9),
+    })
+
+    expect(UsageCost.threadTotals(settled, "thread-a")).toMatchObject({ costUsd: 0, unpricedAttempts: 1 })
+    expect(UsageCost.threadTotals(settled, "thread-b")).toMatchObject({ costUsd: 3, unpricedAttempts: 0 })
+    expect(settled.global).toMatchObject({ costUsd: 3, unpricedAttempts: 1 })
+  })
+
+  it("prices a retry that follows a truncated attempt", () => {
+    const failed = [
+      attemptCompleted("truncated", "attempt-1"),
+      { ...attemptCompleted("truncated-failed", "attempt-1"), type: "model.attempt.failed" },
+    ].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+    const retried = UsageCost.observe(failed, {
+      threadId: "thread",
+      turnId: "turn",
+      event: { ...usage("retry", 1.75), data: { ...usage("retry", 1.75).data, model_attempt_id: "attempt-2" } },
+    })
+
+    expect(UsageCost.threadTotals(failed, "thread")).toMatchObject({ costUsd: 0, unpricedAttempts: 1 })
+    expect(UsageCost.threadTotals(retried, "thread")).toMatchObject({ costUsd: 1.75, unpricedAttempts: 1 })
   })
 
   it("deduplicates values by attempt and deliveries by execution and event id", () => {
@@ -943,8 +1046,8 @@ describe("UsageCost", () => {
       UsageCost.empty,
     )
 
-    expect(snapshot.globalCostUsd).toBe(0)
-    expect(snapshot.complete).toBe(false)
+    expect(snapshot.global.costUsd).toBe(0)
+    expect(snapshot.global.unpricedAttempts === 0).toBe(false)
   })
 
   it("scopes reused event and attempt ids to their execution", () => {
@@ -955,7 +1058,7 @@ describe("UsageCost", () => {
       UsageCost.empty,
     )
 
-    expect(snapshot.globalCostUsd).toBe(3)
+    expect(snapshot.global.costUsd).toBe(3)
   })
 
   it("does not require dense or arrival-ordered execution sequences", () => {
@@ -966,7 +1069,7 @@ describe("UsageCost", () => {
       UsageCost.empty,
     )
 
-    expect(snapshot.globalCostUsd).toBe(3)
+    expect(snapshot.global.costUsd).toBe(3)
   })
 
   it.effect("rolls two children and a grandchild into the parent turn and thread total", () =>
@@ -981,9 +1084,9 @@ describe("UsageCost", () => {
         [{ threadId: "thread-a", turnId: "parent" }],
       )
 
-      expect(snapshot.turnCostUsd.get("parent")).toBe(10)
-      expect(snapshot.threadCostUsd.get("thread-a")).toBe(10)
-      expect(snapshot.globalCostUsd).toBe(10)
+      expect(UsageCost.turnTotals(snapshot, "parent").costUsd).toBe(10)
+      expect(UsageCost.threadTotals(snapshot, "thread-a").costUsd).toBe(10)
+      expect(snapshot.global.costUsd).toBe(10)
     }),
   )
 
@@ -1001,9 +1104,9 @@ describe("UsageCost", () => {
         ],
       )
 
-      expect(snapshot.threadCostUsd.get("thread-a")).toBe(2)
-      expect(snapshot.threadCostUsd.get("thread-b")).toBe(3.5)
-      expect(snapshot.globalCostUsd).toBe(5.5)
+      expect(UsageCost.threadTotals(snapshot, "thread-a").costUsd).toBe(2)
+      expect(UsageCost.threadTotals(snapshot, "thread-b").costUsd).toBe(3.5)
+      expect(snapshot.global.costUsd).toBe(5.5)
     }),
   )
 
@@ -1019,10 +1122,10 @@ describe("UsageCost", () => {
       const snapshot = yield* UsageCost.collect(reader(executions), roots)
 
       expect(UsageCost.maximumGlobalThreads).toBe(100)
-      expect(snapshot.threadCostUsd).toHaveLength(100)
-      expect(snapshot.threadCostUsd.get("thread-0")).toBe(1)
-      expect(snapshot.threadCostUsd.has("thread-100")).toBe(false)
-      expect(snapshot.globalCostUsd).toBe(100)
+      expect(snapshot.threads).toHaveLength(100)
+      expect(UsageCost.threadTotals(snapshot, "thread-0").costUsd).toBe(1)
+      expect(snapshot.threads.has("thread-100")).toBe(false)
+      expect(snapshot.global.costUsd).toBe(100)
     }),
   )
 
@@ -1034,9 +1137,9 @@ describe("UsageCost", () => {
       const roots = Array.from({ length: 201 }, (_, index) => ({ threadId: "thread", turnId: `turn-${index}` }))
       const snapshot = yield* UsageCost.collect(reader(executions), roots)
 
-      expect(snapshot.turnCostUsd).toHaveLength(201)
-      expect(snapshot.threadCostUsd.get("thread")).toBe(201)
-      expect(snapshot.globalCostUsd).toBe(201)
+      expect(snapshot.turns).toHaveLength(201)
+      expect(UsageCost.threadTotals(snapshot, "thread").costUsd).toBe(201)
+      expect(snapshot.global.costUsd).toBe(201)
     }),
   )
 
@@ -1053,9 +1156,9 @@ describe("UsageCost", () => {
         ],
       )
 
-      expect(snapshot.turnCostUsd.get("turn-first")).toBe(2.25)
-      expect(snapshot.threadCostUsd.get("thread-a")).toBe(2.25)
-      expect(snapshot.globalCostUsd).toBe(2.25)
+      expect(UsageCost.turnTotals(snapshot, "turn-first").costUsd).toBe(2.25)
+      expect(UsageCost.threadTotals(snapshot, "thread-a").costUsd).toBe(2.25)
+      expect(snapshot.global.costUsd).toBe(2.25)
     }),
   )
 
@@ -1080,13 +1183,11 @@ describe("UsageCost", () => {
         ],
       )
 
-      expect(snapshot.turnCostUsd.get("turn-a")).toBe(1.5)
-      expect(snapshot.threadCostUsd.get("thread-b")).toBe(3)
-      expect(snapshot.globalCostUsd).toBe(4.5)
-      expect(snapshot.costCompleteThreads.has("thread-a")).toBe(false)
-      expect(snapshot.tokenCompleteThreads.has("thread-a")).toBe(false)
-      expect(snapshot.costCompleteThreads.has("thread-b")).toBe(true)
-      expect(snapshot.tokenCompleteThreads.has("thread-b")).toBe(false)
+      expect(UsageCost.turnTotals(snapshot, "turn-a").costUsd).toBe(1.5)
+      expect(UsageCost.threadTotals(snapshot, "thread-b").costUsd).toBe(3)
+      expect(snapshot.global.costUsd).toBe(4.5)
+      expect(UsageCost.threadTotals(snapshot, "thread-a").unpricedAttempts).toBe(1)
+      expect(UsageCost.threadTotals(snapshot, "thread-b").unpricedAttempts).toBe(0)
     }),
   )
 
@@ -1103,9 +1204,9 @@ describe("UsageCost", () => {
         ],
       )
 
-      expect(snapshot.turnCostUsd.has("turn-b")).toBe(false)
-      expect(snapshot.threadCostUsd.has("thread-b")).toBe(false)
-      expect(snapshot.turnCostUsd.get("turn-a")).toBe(2)
+      expect(snapshot.turns.has("turn-b")).toBe(false)
+      expect(snapshot.threads.has("thread-b")).toBe(false)
+      expect(UsageCost.turnTotals(snapshot, "turn-a").costUsd).toBe(2)
     }),
   )
 })

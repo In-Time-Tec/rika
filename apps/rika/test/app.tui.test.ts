@@ -60,6 +60,36 @@ test(
 )
 
 test(
+  "keeps the accumulated cost visible after an attempt settles without usage",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [TuiApp.model.text("PRICED_TURN_COMPLETE"), TuiApp.model.failure("UNPRICED_TURN_FAILED")],
+        })
+
+        yield* Effect.promise(() => app.type("Price this turn."))
+        app.pressEnter()
+        yield* app.waitFrame("PRICED_TURN_COMPLETE")
+        yield* settled(app)
+        const priced = app.frame()
+        expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00+")
+        expect(priced).not.toContain("$\u2014")
+
+        yield* Effect.promise(() => app.type("Fail this turn."))
+        app.pressEnter()
+        yield* app.waitFrame("UNPRICED_TURN_FAILED")
+        yield* settled(app)
+        const settledFrame = app.frame()
+        expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00+")
+        expect(settledFrame).not.toContain("$\u2014")
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
   "shows elapsed active time for the first turn of a new session",
   () =>
     TuiApp.run(

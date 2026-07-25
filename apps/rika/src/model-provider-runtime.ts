@@ -1,5 +1,6 @@
 import { ConfigContract, Models } from "@rika/config"
 import type * as Turn from "@rika/persistence/turn"
+import { PromptCache } from "@rika/runtime"
 import { withStreamingOnlyModel } from "@rika/runtime/relay"
 import { Compaction, ModelRegistry } from "@batonfx/core"
 import * as Anthropic from "@batonfx/providers/anthropic"
@@ -181,6 +182,9 @@ const streamingOnlyRegistration =
   (registration: ModelRegistry.Registration): ModelRegistry.Registration =>
     streamingOnly ? withStreamingOnlyModel(registration) : registration
 
+export const routeAcceptsPromptCacheRetention = (route: ConfigContract.ResolvedModelRoute): boolean =>
+  route.providerConnection.promptCaching ?? isNativeOpenAiRoute(route)
+
 const routeStreamingOnly = (route: ConfigContract.ResolvedModelRoute): boolean =>
   route.providerConnection.protocol !== "amazon-bedrock" &&
   (route.providerConnection.streamingOnly ?? ConfigContract.isStreamingOnlyBaseUrl(route.providerConnection.baseUrl))
@@ -223,7 +227,9 @@ const registerBedrock = (
   if (connection.protocol !== "amazon-bedrock")
     return Effect.fail(RuntimeError.make({ message: "Invalid Amazon Bedrock connection" }))
   return provideScoped(
-    ModelRegistry.registrations().pipe(Effect.map((items) => ({ ...items[0]!, provider: route.providerId }))),
+    ModelRegistry.registrations().pipe(
+      Effect.map((items) => ({ ...PromptCache.withPromptCaching(items[0]!), provider: route.providerId })),
+    ),
     AmazonBedrock.layer({
       model: route.model,
       registrationKey: resolution.registrationKey,
@@ -265,7 +271,9 @@ const registerAnthropic = (route: ConfigContract.ResolvedModelRoute, resolution:
     Effect.flatMap((apiKey) =>
       provideScoped(
         ModelRegistry.registrations().pipe(
-          Effect.map((items) => streamingOnlyRegistration(routeStreamingOnly(route))(items[0]!)),
+          Effect.map((items) =>
+            streamingOnlyRegistration(routeStreamingOnly(route))(PromptCache.withPromptCaching(items[0]!)),
+          ),
         ),
         Anthropic.layer({
           model: route.model,
@@ -413,7 +421,11 @@ const adapters = (
         ? {}
         : { credentialIdentity: route.providerConnection.apiKeyEnv }),
     }),
-    options: (route) => ({ ...route.options, max_output_tokens: route.maxOutputTokens }),
+    options: (route) => ({
+      ...route.options,
+      max_output_tokens: route.maxOutputTokens,
+      ...(routeAcceptsPromptCacheRetention(route) ? { prompt_cache_retention: "24h" } : {}),
+    }),
     register: registerOpenAi,
     restore: (route, runtime) =>
       registerOpenAi(configuredFromPin(route, runtime), {

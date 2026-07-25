@@ -54,8 +54,8 @@ describe("interactive feed overflow", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 7,
         threadId: Thread.ThreadId.make("thread"),
-        cost: { _tag: "Available", usd: index },
-        tokens: { _tag: "Available", total: index },
+        cost: { _tag: "Available", usd: index, unpricedAttempts: 0 },
+        tokens: { _tag: "Available", total: index, uncountedAttempts: 0 },
         time: { _tag: "Available", accumulatedMillis: index },
       })
 
@@ -65,8 +65,8 @@ describe("interactive feed overflow", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 7,
         threadId: "thread",
-        cost: { _tag: "Available", usd: InteractiveFeedOverflow.capacity + 19 },
-        tokens: { _tag: "Available", total: InteractiveFeedOverflow.capacity + 19 },
+        cost: { _tag: "Available", usd: InteractiveFeedOverflow.capacity + 19, unpricedAttempts: 0 },
+        tokens: { _tag: "Available", total: InteractiveFeedOverflow.capacity + 19, uncountedAttempts: 0 },
         time: { _tag: "Available", accumulatedMillis: InteractiveFeedOverflow.capacity + 19 },
       },
     ])

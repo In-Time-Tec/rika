@@ -305,8 +305,12 @@ export type InteractiveEvent =
       readonly _tag: "ThreadUsageUpdated"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
-      readonly cost: { readonly _tag: "Available"; readonly usd: number } | { readonly _tag: "Unavailable" }
-      readonly tokens: { readonly _tag: "Available"; readonly total: number } | { readonly _tag: "Unavailable" }
+      readonly cost:
+        | { readonly _tag: "Available"; readonly usd: number; readonly unpricedAttempts: number }
+        | { readonly _tag: "Unavailable" }
+      readonly tokens:
+        | { readonly _tag: "Available"; readonly total: number; readonly uncountedAttempts: number }
+        | { readonly _tag: "Unavailable" }
       readonly time:
         | {
             readonly _tag: "Available"
@@ -454,11 +458,11 @@ export const InteractiveEventSchema = Schema.Union([
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
     cost: Schema.Union([
-      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite }),
+      Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite, unpricedAttempts: Schema.Int }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
     ]),
     tokens: Schema.Union([
-      Schema.Struct({ _tag: Schema.tag("Available"), total: Schema.Finite }),
+      Schema.Struct({ _tag: Schema.tag("Available"), total: Schema.Finite, uncountedAttempts: Schema.Int }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
     ]),
     time: Schema.Union([

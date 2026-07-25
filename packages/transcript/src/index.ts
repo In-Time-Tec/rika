@@ -936,6 +936,12 @@ const hasResponseEvidence = (projection: Projection, turnId: string): boolean =>
       candidate.turnId === turnId && candidate.content._tag === "Entry" && candidate.content.role === "assistant",
   )
 
+const isTruncatedStream = (event: SourceEvent) => {
+  const payload = sourcePayload(event)
+  if (payload.category === "truncated-stream") return true
+  return record(payload.details).failure_classification === "truncated-stream"
+}
+
 const hasUsableFinalResponse = (projection: Projection, turnId: string) => {
   const latestToolRevision = projection.units.reduce(
     (latest, candidate) =>
@@ -992,13 +998,27 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   if (event.type === "tool.result.received") return applyToolResult(projection, turnId, event)
   if (event.type === "steering.delivered") return applySteeringDelivered(projection, turnId, event)
   if (event.type === "model.usage.reported") return applyUsage(projection, event)
-  if (event.type === "model.attempt.failed" || event.type === "model.call.failed") return projection
+  if (event.type === "model.attempt.failed" || event.type === "model.call.failed") {
+    if (!isTruncatedStream(event)) return projection
+    const block: Block = {
+      _tag: "Notification",
+      title: "Model response was cut off",
+      detail: "The provider ended the response before it finished. Rika is retrying that step.",
+    }
+    return upsertUnit(
+      projection,
+      makeUnit(`truncated:${turnId}:${event.sequence}`, turnId, event.sequence, 0, event.sequence, {
+        _tag: "Block",
+        block,
+      }),
+    )
+  }
   if (event.type === "execution.completed")
     return applyExecutionOutcome(settleRunningImpl(projection, "cancelled", event.sequence), turnId, event.sequence, {
       status: "complete",
     })
   if (event.type === "execution.failed") {
-    if (hasUsableFinalResponse(projection, turnId))
+    if (!isTruncatedStream(event) && hasUsableFinalResponse(projection, turnId))
       return applyExecutionOutcome(settleRunningImpl(projection, "cancelled", event.sequence), turnId, event.sequence, {
         status: "complete",
       })

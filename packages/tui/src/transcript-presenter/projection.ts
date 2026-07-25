@@ -107,6 +107,7 @@ const applyExecutionOutcome = (model: Model, parentId: string, outcome: Executio
   )
   const block = blocks[index]
   if (block?._tag !== "ToolCall") return model
+  if (outcome.status === "complete" && block.status === "failed") return model
   const { output: _, ...withoutOutput } = block
   const applied = {
     ...withoutOutput,

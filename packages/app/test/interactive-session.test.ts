@@ -430,8 +430,8 @@ describe("InteractiveSession controls", () => {
           _tag: "ThreadUsageUpdated",
           selectionEpoch: 0,
           threadId: "created",
-          cost: { _tag: "Unavailable" },
-          tokens: { _tag: "Unavailable" },
+          cost: { _tag: "Available", usd: 0, unpricedAttempts: 0 },
+          tokens: { _tag: "Available", total: 0, uncountedAttempts: 0 },
           time: { _tag: "Unavailable" },
         },
       ])
@@ -1001,8 +1001,8 @@ describe("InteractiveSession controls", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 2,
         threadId: "latest",
-        cost: { _tag: "Unavailable" },
-        tokens: { _tag: "Unavailable" },
+        cost: { _tag: "Available", usd: 0, unpricedAttempts: 0 },
+        tokens: { _tag: "Available", total: 0, uncountedAttempts: 0 },
         time: { _tag: "Unavailable" },
       })
       expect(yield* Ref.get(controls)).toEqual([
@@ -1833,8 +1833,8 @@ describe("InteractiveSession subagent reload", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 1,
         threadId: "subagent-thread",
-        cost: { _tag: "Available", usd: 1.25 },
-        tokens: { _tag: "Available", total: 30 },
+        cost: { _tag: "Available", usd: 1.25, unpricedAttempts: 0 },
+        tokens: { _tag: "Available", total: 30, uncountedAttempts: 0 },
         time: { _tag: "Unavailable" },
       })
     }),

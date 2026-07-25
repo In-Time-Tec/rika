@@ -2425,14 +2425,20 @@ export class Surface {
       else if (model.usageTime?._tag === "Unavailable") usageText = `${activeTimeIcon} —`
       else usageText = `${activeTimeIcon} ····`
     } else if (model.usageDisplay === "tokens") {
-      if (model.usageTokens?._tag === "Available") usageText = formatTokens(model.usageTokens.total)
+      if (model.usageTokens?._tag === "Available")
+        usageText =
+          model.usageTokens.uncountedAttempts > 0
+            ? formatTokens(model.usageTokens.total).replace(/ tok$/, "+ tok")
+            : formatTokens(model.usageTokens.total)
       else if (model.usageTokens?._tag === "Unavailable") usageText = "— tok"
       else usageText = "···· tok"
-    } else if (model.costUsd !== undefined && model.usageCost?._tag !== "Unavailable")
-      usageText = formatCost(model.costUsd)
-    else if (model.usageCost?._tag === "Available") usageText = formatCost(model.usageCost.usd)
-    else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
-    else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
+    } else {
+      const partial = model.usageCost?._tag === "Available" && model.usageCost.unpricedAttempts > 0 ? "+" : ""
+      if (model.costUsd !== undefined) usageText = `${formatCost(model.costUsd)}${partial}`
+      else if (model.usageCost?._tag === "Available") usageText = `${formatCost(model.usageCost.usd)}${partial}`
+      else if (model.usageCost?._tag === "Unavailable") usageText = "$—"
+      else if (model.usageCost?._tag === "Loading" || model.busy) usageText = "$····"
+    }
     const modeChunks: Array<TextChunk> = []
     const previousRight = this.modeLabel.screenX + this.modeLabel.width
     this.usageLabelWidth = usageText.length === 0 ? 0 : modeLabelWidth(` ${usageText} `)

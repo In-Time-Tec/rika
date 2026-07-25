@@ -689,8 +689,15 @@ const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled
 
 const normalizeChildExecutionId = Transcript.executionKey
 
-const displayGlobalCostUsd = (totals: UsageCost.Snapshot): number | undefined =>
-  totals.complete ? totals.globalCostUsd : undefined
+const threadUsage = (totals: UsageCost.Snapshot, threadId: string): ThreadUsageEvent["cost"] => {
+  const thread = UsageCost.threadTotals(totals, threadId)
+  return { _tag: "Available", usd: thread.costUsd, unpricedAttempts: thread.unpricedAttempts }
+}
+
+const threadUsageTokens = (totals: UsageCost.Snapshot, threadId: string): ThreadUsageEvent["tokens"] => {
+  const thread = UsageCost.threadTotals(totals, threadId)
+  return { _tag: "Available", total: thread.tokens, uncountedAttempts: thread.uncountedAttempts }
+}
 
 const displayActiveTime = (totals: UsageCost.Snapshot, threadId: string) => {
   const time = UsageCost.activeTime(totals, threadId)
@@ -1522,11 +1529,12 @@ export const productLayer = <
         return { roots, snapshot: yield* UsageCost.collect(acquiredBackend, roots) }
       })
       const usageCostAdmission = yield* Semaphore.make(1)
-      let usageSnapshot: UsageCost.Snapshot = { ...UsageCost.empty, complete: false, collectionComplete: false }
+      let usageSnapshot: UsageCost.Snapshot = { ...UsageCost.empty }
       let usageCostsLoaded = false
       const deletedUsageThreads = new Set<string>()
       const pendingUsageEvents: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }> = []
       const currentUsageCosts = (): UsageCost.Snapshot => usageSnapshot
+      const usageCostsRead = (): boolean => usageCostsLoaded
       const observeUsage = (input: UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }) => {
         if (deletedUsageThreads.has(input.threadId)) return usageSnapshot
         if (!usageCostsLoaded) pendingUsageEvents.push(input)
@@ -1543,18 +1551,17 @@ export const productLayer = <
                 usageSnapshot = pendingUsageEvents.reduce(UsageCost.observe, snapshot)
                 pendingUsageEvents.length = 0
                 usageCostsLoaded = true
-                if (!usageSnapshot.complete) return
                 const threadByTurn = new Map(roots.map((root) => [root.turnId, root.threadId]))
-                for (const [turnId, turnCostUsd] of usageSnapshot.turnCostUsd) {
+                for (const [turnId, turn] of usageSnapshot.turns) {
                   const threadId = threadByTurn.get(turnId)
                   if (threadId === undefined) continue
                   publishInteractiveActivity(0, {
                     _tag: "TitleCostUpdated",
                     threadId: Thread.ThreadId.make(threadId),
                     turnId: Turn.TurnId.make(turnId),
-                    turnCostUsd,
-                    threadCostUsd: usageSnapshot.threadCostUsd.get(threadId)!,
-                    globalCostUsd: usageSnapshot.globalCostUsd,
+                    turnCostUsd: turn.costUsd,
+                    threadCostUsd: UsageCost.threadTotals(usageSnapshot, threadId).costUsd,
+                    globalCostUsd: usageSnapshot.global.costUsd,
                   })
                 }
               }),
@@ -1585,6 +1592,8 @@ export const productLayer = <
         publishInteractiveActivity(0, { _tag: "ThreadsListed", threads: yield* summaries.list() })
       })
       const settledTitleExecutions = new Set<string>()
+      const titleAttempts = new Map<string, number>()
+      const maximumTitleAttempts = 3
       const titleThread = Effect.fn("Operation.titleThread")(function* (
         thread: Thread.Thread,
         firstTurn: Turn.Turn,
@@ -1598,7 +1607,7 @@ export const productLayer = <
           if (current === undefined || current.title !== temporaryThreadTitle(firstTurn.prompt)) return
           const executionId = titleExecutionId(firstTurn.id)
           if (settledTitleExecutions.has(executionId)) return
-          const inspection = yield* backend.inspect(executionId)
+          const inspection = yield* backend.inspect(executionId, ExecutionBackend.executionReference)
           if (inspection?.status === "failed" || inspection?.status === "cancelled") {
             settledTitleExecutions.add(executionId)
             return
@@ -1611,16 +1620,18 @@ export const productLayer = <
               profile: "Title",
               prompt: firstTurn.prompt.slice(0, 2000),
             })
-            const spawned = yield* backend.inspect(executionId)
-            if (spawned !== undefined && isTerminalStatus(spawned.status)) result = yield* backend.replay(executionId)
-            else if (backend.follow !== undefined) result = yield* backend.follow(executionId, undefined)
+            const spawned = yield* backend.inspect(executionId, ExecutionBackend.executionReference)
+            if (spawned !== undefined && isTerminalStatus(spawned.status))
+              result = yield* backend.replay(executionId, undefined, ExecutionBackend.executionReference)
+            else if (backend.follow !== undefined)
+              result = yield* backend.follow(executionId, undefined, undefined, ExecutionBackend.executionReference)
           } else if (isTerminalStatus(inspection.status)) {
-            result = yield* backend.replay(executionId)
+            result = yield* backend.replay(executionId, undefined, ExecutionBackend.executionReference)
           } else if (backend.follow !== undefined) {
-            result = yield* backend.follow(executionId, undefined)
+            result = yield* backend.follow(executionId, undefined, undefined, ExecutionBackend.executionReference)
           }
           if (result === undefined) return
-          const previousGlobalCostUsd = currentUsageCosts().globalCostUsd
+          const previousGlobalCostUsd = currentUsageCosts().global.costUsd
           for (const event of result.events)
             observeUsage({
               threadId: String(thread.id),
@@ -1628,14 +1639,14 @@ export const productLayer = <
               event,
             })
           const totals = currentUsageCosts()
-          if (totals.complete && totals.globalCostUsd !== previousGlobalCostUsd)
+          if (totals.global.costUsd !== previousGlobalCostUsd)
             announce({
               _tag: "TitleCostUpdated",
               threadId: thread.id,
               turnId: firstTurn.id,
-              turnCostUsd: totals.turnCostUsd.get(firstTurn.id) ?? 0,
-              threadCostUsd: totals.threadCostUsd.get(thread.id)!,
-              globalCostUsd: totals.globalCostUsd,
+              turnCostUsd: UsageCost.turnTotals(totals, firstTurn.id).costUsd,
+              threadCostUsd: UsageCost.threadTotals(totals, thread.id).costUsd,
+              globalCostUsd: totals.global.costUsd,
             })
           if (!isTerminalStatus(result.status)) return
           settledTitleExecutions.add(executionId)
@@ -1656,7 +1667,20 @@ export const productLayer = <
           announce({ _tag: "ThreadTitled", threadId: String(thread.id), title })
           yield* notifyThreadSummaries
         })
-        yield* withExecutionAdmission(program).pipe(Effect.orElseSucceed(() => undefined))
+        yield* withExecutionAdmission(program).pipe(
+          Effect.catchCause((cause) => {
+            const executionId = titleExecutionId(firstTurn.id)
+            const attempts = (titleAttempts.get(executionId) ?? 0) + 1
+            if (attempts >= maximumTitleAttempts) {
+              settledTitleExecutions.add(executionId)
+              titleAttempts.delete(executionId)
+            } else titleAttempts.set(executionId, attempts)
+            return Effect.logWarning("thread-title.failed").pipe(
+              Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+              Effect.annotateLogs("rika.title.attempts", attempts),
+            )
+          }),
+        )
       })
       const notifyTurnChanged = (_turn: Pick<Turn.Turn, "id" | "threadId">) =>
         PubSub.publish(turnChanges, undefined).pipe(Effect.asVoid)
@@ -2109,17 +2133,14 @@ export const productLayer = <
           const totals = selectedTotals ?? currentUsageCosts()
           const costBearing =
             event.event.type === "model.usage.reported" || event.event.type === "model.attempt.completed"
-          const threadComplete = totals.costCompleteThreads.has(String(event.threadId))
           const patched = {
             ...event,
             ...(costBearing ? { rootTurnId } : {}),
-            ...(costBearing && totals.turnCostUsd.has(rootTurnId)
-              ? { rootTurnCostUsd: totals.turnCostUsd.get(rootTurnId)! }
+            ...(costBearing && totals.turns.has(rootTurnId)
+              ? { rootTurnCostUsd: UsageCost.turnTotals(totals, rootTurnId).costUsd }
               : {}),
-            ...(costBearing && threadComplete
-              ? { threadCostUsd: totals.threadCostUsd.get(String(event.threadId)) ?? 0 }
-              : {}),
-            ...(costBearing && totals.complete ? { globalCostUsd: totals.globalCostUsd } : {}),
+            ...(costBearing ? { threadCostUsd: UsageCost.threadTotals(totals, String(event.threadId)).costUsd } : {}),
+            ...(costBearing && usageCostsRead() ? { globalCostUsd: currentUsageCosts().global.costUsd } : {}),
           }
           if (selectedTotals === undefined || selection === undefined) return { event: patched }
           const threadId = String(event.threadId)
@@ -2129,12 +2150,8 @@ export const productLayer = <
               _tag: "ThreadUsageUpdated",
               selectionEpoch: selection.request,
               threadId: event.threadId,
-              cost: selectedTotals.costCompleteThreads.has(threadId)
-                ? { _tag: "Available", usd: selectedTotals.threadCostUsd.get(threadId) ?? 0 }
-                : { _tag: "Unavailable" },
-              tokens: selectedTotals.tokenCompleteThreads.has(threadId)
-                ? { _tag: "Available", total: selectedTotals.threadTokens.get(threadId) ?? 0 }
-                : { _tag: "Unavailable" },
+              cost: threadUsage(selectedTotals, threadId),
+              tokens: threadUsageTokens(selectedTotals, threadId),
               time: displayActiveTime(selectedTotals, threadId),
             },
           }
@@ -3516,7 +3533,7 @@ export const productLayer = <
               authoritativeTurn === undefined
                 ? storedEntry
                 : Object.assign({}, storedEntry, { turn: authoritativeTurn })
-            const costUsd = usageCosts.turnCostUsd.get(entry.turn.id)
+            const costUsd = usageCosts.turns.get(entry.turn.id)?.costUsd
             return [
               costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
                 ? entry
@@ -3534,8 +3551,8 @@ export const productLayer = <
           state.transcriptCursor = oldestCursor
           state.hasOlder = hasOlder
           if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
-          const threadCostUsd = usageCosts.complete ? (usageCosts.threadCostUsd.get(thread.id) ?? 0) : undefined
-          const globalCostUsd = displayGlobalCostUsd(usageCosts)
+          const threadCostUsd = usageCostsRead() ? UsageCost.threadTotals(usageCosts, thread.id).costUsd : undefined
+          const globalCostUsd = usageCostsRead() ? usageCosts.global.costUsd : undefined
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const storedActiveTurn = yield* turns.findActive(thread.id)
@@ -3777,12 +3794,8 @@ export const productLayer = <
                     _tag: "ThreadUsageUpdated",
                     selectionEpoch: state.epoch,
                     threadId: state.thread.id,
-                    cost: selectedSnapshot.costCompleteThreads.has(threadId)
-                      ? { _tag: "Available", usd: selectedSnapshot.threadCostUsd.get(threadId) ?? 0 }
-                      : { _tag: "Unavailable" },
-                    tokens: selectedSnapshot.tokenCompleteThreads.has(threadId)
-                      ? { _tag: "Available", total: selectedSnapshot.threadTokens.get(threadId) ?? 0 }
-                      : { _tag: "Unavailable" },
+                    cost: threadUsage(selectedSnapshot, threadId),
+                    tokens: threadUsageTokens(selectedSnapshot, threadId),
                     time: displayActiveTime(selectedSnapshot, threadId),
                   })
                 }).pipe(Effect.provide(executionDependencies)),
@@ -3905,9 +3918,7 @@ export const productLayer = <
             thread,
             entries: [],
             hasOlder: false,
-            ...(currentUsageCosts().complete
-              ? { threadCostUsd: 0, globalCostUsd: currentUsageCosts().globalCostUsd }
-              : {}),
+            ...(usageCostsRead() ? { threadCostUsd: 0, globalCostUsd: currentUsageCosts().global.costUsd } : {}),
             queueRevision: queue.revision,
             queuedCount: queue.queuedCount,
             queue: queue.turns.map(queueItem),
@@ -5256,7 +5267,7 @@ export const productLayer = <
                   Effect.gen(function* () {
                     yield* repository.remove(Thread.ThreadId.make(input.threadId))
                     deletedUsageThreads.add(input.threadId)
-                    usageSnapshot = { ...UsageCost.empty, complete: false, collectionComplete: false }
+                    usageSnapshot = { ...UsageCost.empty }
                     usageCostsLoaded = false
                     usageCostLoadStarted = false
                     pendingUsageEvents.length = 0

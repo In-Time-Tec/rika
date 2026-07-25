@@ -190,35 +190,57 @@ const agentFailureFallback = "The subagent failed without a reported reason."
 const agentEmptyFallback = "The subagent finished without a final message."
 const agentCancelledFallback = "The subagent was cancelled."
 
+const stringField = (value: object, key: string): string | undefined => {
+  if (!(key in value)) return undefined
+  const field = (value as Record<string, unknown>)[key]
+  return typeof field === "string" && field.trim().length > 0 ? field : undefined
+}
+
+const decodedOutput = (output: string | undefined): object | undefined => {
+  if (output === undefined) return undefined
+  const value = output.trim()
+  if (!(value.startsWith("{") || value.startsWith("["))) return undefined
+  try {
+    const decoded: unknown = JSON.parse(value)
+    return typeof decoded === "object" && decoded !== null ? decoded : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export const isNoReportOutput = (output: string | undefined): boolean => {
+  const decoded = decodedOutput(output)
+  return decoded !== undefined && stringField(decoded, "_tag") === "NoReport"
+}
+
+const noReportText = (decoded: object): string | undefined => {
+  if (stringField(decoded, "_tag") !== "NoReport") return undefined
+  const reason = stringField(decoded, "reason") ?? agentEmptyFallback
+  const recovery = stringField(decoded, "recovery")
+  return recovery === undefined ? reason : `${reason}\n\n${recovery}`
+}
+
 export const agentOutputText = (output: string | undefined): string | undefined => {
   if (output === undefined) return undefined
   const value = output.trim()
   if (value.length === 0) return undefined
-  if (!(value.startsWith("{") || value.startsWith("["))) return output
-  try {
-    const decoded: unknown = JSON.parse(value)
-    if (
-      typeof decoded === "object" &&
-      decoded !== null &&
-      "output" in decoded &&
-      Array.isArray((decoded as { readonly output: unknown }).output)
-    ) {
-      const text = (decoded as { readonly output: ReadonlyArray<unknown> }).output
-        .flatMap((part) =>
-          typeof part === "object" &&
-          part !== null &&
-          "text" in part &&
-          typeof (part as { text: unknown }).text === "string"
-            ? [(part as { readonly text: string }).text]
-            : [],
-        )
-        .join("\n")
-      if (text.trim().length > 0) return text
-    }
-    return typeof decoded === "object" && decoded !== null ? undefined : output
-  } catch {
-    return output
+  const decoded = decodedOutput(output)
+  if (decoded === undefined) return output
+  const noReport = noReportText(decoded)
+  if (noReport !== undefined) return noReport
+  if ("output" in decoded && Array.isArray((decoded as { readonly output: unknown }).output)) {
+    const text = (decoded as { readonly output: ReadonlyArray<unknown> }).output
+      .flatMap((part) =>
+        typeof part === "object" && part !== null && "text" in part && typeof (part as { text: unknown }).text === "string"
+          ? [(part as { readonly text: string }).text]
+          : [],
+      )
+      .join("\n")
+    const reason = stringField(decoded, "reason")
+    if (text.trim().length > 0) return reason === undefined ? text : `${text}\n\n${reason}`
+    if (reason !== undefined) return reason
   }
+  return undefined
 }
 
 const lastAnswerEntry = (model: Model, children: ReadonlyArray<TranscriptItem>): number | undefined =>

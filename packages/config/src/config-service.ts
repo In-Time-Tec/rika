@@ -101,12 +101,14 @@ const mergeSettings = (global: SettingsInput, workspace: SettingsInput): Setting
     const baseUrl = httpOverride?.baseUrl ?? httpBuiltIn.baseUrl
     const streamingOnly =
       httpOverride?.streamingOnly ?? httpBuiltIn.streamingOnly ?? (isStreamingOnlyBaseUrl(baseUrl) ? true : undefined)
+    const promptCaching = httpOverride?.promptCaching ?? httpBuiltIn.promptCaching
     if (override === undefined) return streamingOnly === undefined ? httpBuiltIn : { ...httpBuiltIn, streamingOnly }
     return {
       protocol: httpBuiltIn.protocol,
       baseUrl,
       ...(httpOverride?.apiKeyEnv === undefined ? {} : { apiKeyEnv: httpOverride.apiKeyEnv }),
       ...(streamingOnly === undefined ? {} : { streamingOnly }),
+      ...(promptCaching === undefined ? {} : { promptCaching }),
     }
   }
   const merged: Settings = {

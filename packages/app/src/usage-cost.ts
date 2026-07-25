@@ -16,19 +16,31 @@ export interface ExecutionReader {
   readonly pageEvents?: ExecutionBackend.Interface["pageEvents"]
 }
 
+export interface Totals {
+  readonly costUsd: number
+  readonly pricedAttempts: number
+  readonly unpricedAttempts: number
+  readonly tokens: number
+  readonly countedAttempts: number
+  readonly uncountedAttempts: number
+}
+
+export const noTotals: Totals = {
+  costUsd: 0,
+  pricedAttempts: 0,
+  unpricedAttempts: 0,
+  tokens: 0,
+  countedAttempts: 0,
+  uncountedAttempts: 0,
+}
+
 export interface Snapshot {
-  readonly turnCostUsd: ReadonlyMap<string, number>
-  readonly threadCostUsd: ReadonlyMap<string, number>
-  readonly globalCostUsd: number
+  readonly turns: ReadonlyMap<string, Totals>
+  readonly threads: ReadonlyMap<string, Totals>
+  readonly global: Totals
   readonly usageCursors: ReadonlySet<string>
-  readonly complete: boolean
   readonly attempts: ReadonlyMap<string, AttemptCost>
-  readonly collectionComplete: boolean
-  readonly turnTokens: ReadonlyMap<string, number>
-  readonly threadTokens: ReadonlyMap<string, number>
-  readonly tokenCompleteThreads: ReadonlySet<string>
-  readonly costCompleteThreads: ReadonlySet<string>
-  readonly incompleteThreads: ReadonlySet<string>
+  readonly executionAttempts: ReadonlyMap<string, ReadonlySet<string>>
   readonly activeEvents: ReadonlyMap<string, ActiveEvent>
   readonly activeObservedThreads: ReadonlySet<string>
   readonly timeMalformedThreads: ReadonlySet<string>
@@ -64,15 +76,40 @@ type ActiveEventType =
   | "execution.failed"
   | "execution.cancelled"
 
-interface AttemptCost {
+export type UnpriceableReason =
+  | "attempt-failed"
+  | "settled-without-usage"
+  | "usage-unpriceable"
+  | "cost-conflict"
+  | "provider-cost-malformed"
+  | "execution-unreadable"
+  | "delivery-malformed"
+
+export type UncountableReason =
+  | "attempt-failed"
+  | "settled-without-usage"
+  | "usage-uncountable"
+  | "token-conflict"
+  | "execution-unreadable"
+  | "delivery-malformed"
+
+export type SettlementReason = "attempt-failed" | "settled-without-usage"
+
+export type AttemptPricing =
+  | { readonly _tag: "Announced" }
+  | { readonly _tag: "Priced"; readonly usd: number; readonly source: "provider" | "estimate" }
+  | { readonly _tag: "Unpriceable"; readonly reason: UnpriceableReason }
+
+export type AttemptTokens =
+  | { readonly _tag: "Announced" }
+  | { readonly _tag: "Counted"; readonly total: number }
+  | { readonly _tag: "Uncounted"; readonly reason: UncountableReason }
+
+export interface AttemptCost {
   readonly threadId: string
   readonly turnId: string
-  readonly estimate: "absent" | "valid" | "invalid"
-  readonly estimateAmount?: number
-  readonly provider: "absent" | "valid" | "invalid"
-  readonly providerAmount?: number
-  readonly tokens: "absent" | "valid" | "invalid"
-  readonly tokenAmount?: number
+  readonly cost: AttemptPricing
+  readonly tokens: AttemptTokens
 }
 
 interface WorkEvidence {
@@ -89,18 +126,12 @@ export const maximumGlobalThreads = 100
 const collectionConcurrency = 1
 
 export const empty: Snapshot = {
-  turnCostUsd: new Map(),
-  threadCostUsd: new Map(),
-  globalCostUsd: 0,
+  turns: new Map(),
+  threads: new Map(),
+  global: noTotals,
   usageCursors: new Set(),
-  complete: true,
   attempts: new Map(),
-  collectionComplete: true,
-  turnTokens: new Map(),
-  threadTokens: new Map(),
-  tokenCompleteThreads: new Set(),
-  costCompleteThreads: new Set(),
-  incompleteThreads: new Set(),
+  executionAttempts: new Map(),
   activeEvents: new Map(),
   activeObservedThreads: new Set(),
   timeMalformedThreads: new Set(),
@@ -121,7 +152,10 @@ const activeEventTypes = new Set<string>([
 ])
 
 export const isRelevantEvent = (event: ExecutionBackend.Event): boolean =>
-  activeEventTypes.has(event.type) || event.type === "model.usage.reported" || event.type === "model.attempt.completed"
+  activeEventTypes.has(event.type) ||
+  event.type === "model.usage.reported" ||
+  event.type === "model.attempt.completed" ||
+  event.type === "model.attempt.failed"
 
 const isActiveEventType = (type: string): type is ActiveEventType => activeEventTypes.has(type)
 
@@ -390,86 +424,234 @@ const stringField = (data: Readonly<Record<string, unknown>> | undefined, name: 
   return typeof value === "string" && value.length > 0 ? value : undefined
 }
 
-const pricedAttempt = (attempt: AttemptCost): number | undefined => {
-  if (attempt.provider === "valid") return attempt.providerAmount
-  if (attempt.provider !== "absent" || attempt.estimate !== "valid") return undefined
-  return attempt.estimateAmount
+const settledWithoutUsage = (reason: UnpriceableReason | UncountableReason): boolean =>
+  reason === "settled-without-usage" || reason === "attempt-failed"
+
+const revisableCost = (reason: UnpriceableReason): boolean =>
+  settledWithoutUsage(reason) || reason === "usage-unpriceable"
+
+const revisableTokens = (reason: UncountableReason): boolean => settledWithoutUsage(reason)
+
+const providerPriced = (cost: AttemptPricing, usd: number): AttemptPricing => {
+  if (cost._tag === "Priced" && cost.source === "provider" && cost.usd !== usd)
+    return { _tag: "Unpriceable", reason: "cost-conflict" }
+  if (cost._tag === "Unpriceable" && !revisableCost(cost.reason)) return cost
+  return { _tag: "Priced", usd, source: "provider" }
 }
 
-const invalidEstimate = (previous: AttemptCost): AttemptCost => {
-  const { estimateAmount: _, ...attempt } = previous
-  return { ...attempt, estimate: "invalid" }
+const estimatePriced = (cost: AttemptPricing, usd: number): AttemptPricing => {
+  if (cost._tag === "Priced")
+    return cost.source === "provider" || cost.usd === usd ? cost : { _tag: "Unpriceable", reason: "cost-conflict" }
+  if (cost._tag === "Unpriceable" && !settledWithoutUsage(cost.reason)) return cost
+  return { _tag: "Priced", usd, source: "estimate" }
 }
 
-const mergeEstimate = (previous: AttemptCost, estimateAmount: number | undefined): AttemptCost => {
-  if (previous.estimate === "invalid" || estimateAmount === undefined) return invalidEstimate(previous)
-  if (previous.estimate === "absent") return { ...previous, estimate: "valid", estimateAmount }
-  return previous.estimateAmount === estimateAmount ? previous : invalidEstimate(previous)
+const unpriceable = (cost: AttemptPricing, reason: UnpriceableReason): AttemptPricing => {
+  if (cost._tag === "Priced" && cost.source === "provider") return cost
+  if (cost._tag === "Unpriceable" && !revisableCost(cost.reason)) return cost
+  return { _tag: "Unpriceable", reason }
 }
 
-const invalidProvider = (previous: AttemptCost): AttemptCost => {
-  const { providerAmount: _, ...attempt } = previous
-  return { ...attempt, provider: "invalid" }
+const countedTokens = (tokens: AttemptTokens, total: number): AttemptTokens => {
+  if (tokens._tag === "Counted")
+    return tokens.total === total ? tokens : { _tag: "Uncounted", reason: "token-conflict" }
+  if (tokens._tag === "Uncounted" && !revisableTokens(tokens.reason)) return tokens
+  return { _tag: "Counted", total }
 }
 
-const mergeProvider = (previous: AttemptCost, providerAmount: number | undefined): AttemptCost => {
-  if (previous.provider === "invalid" || providerAmount === undefined) return invalidProvider(previous)
-  if (previous.provider === "absent") return { ...previous, provider: "valid", providerAmount }
-  return previous.providerAmount === providerAmount ? previous : invalidProvider(previous)
-}
+const uncountable = (tokens: AttemptTokens, reason: UncountableReason): AttemptTokens =>
+  tokens._tag === "Uncounted" && !revisableTokens(tokens.reason) ? tokens : { _tag: "Uncounted", reason }
 
-const totals = (
-  attempts: ReadonlyMap<string, AttemptCost>,
-  collectionComplete: boolean,
-  incompleteThreads: ReadonlySet<string>,
-) => {
-  const turnCostUsd = new Map<string, number>()
-  const threadCostUsd = new Map<string, number>()
-  let globalCostUsd = 0
-  let complete = collectionComplete
-  const turnTokens = new Map<string, number>()
-  const threadTokens = new Map<string, number>()
-  const incompleteCostThreads = new Set(incompleteThreads)
-  const incompleteTokenThreads = new Set(incompleteThreads)
-  const observedThreads = new Set(incompleteThreads)
-  for (const attempt of attempts.values()) {
-    observedThreads.add(attempt.threadId)
-    const cost = pricedAttempt(attempt)
-    if (cost === undefined) {
-      complete = false
-      incompleteCostThreads.add(attempt.threadId)
-    } else {
-      turnCostUsd.set(attempt.turnId, (turnCostUsd.get(attempt.turnId) ?? 0) + cost)
-      threadCostUsd.set(attempt.threadId, (threadCostUsd.get(attempt.threadId) ?? 0) + cost)
-      globalCostUsd += cost
-    }
-    if (attempt.tokens !== "valid") incompleteTokenThreads.add(attempt.threadId)
-    else {
-      turnTokens.set(attempt.turnId, (turnTokens.get(attempt.turnId) ?? 0) + attempt.tokenAmount!)
-      threadTokens.set(attempt.threadId, (threadTokens.get(attempt.threadId) ?? 0) + attempt.tokenAmount!)
-    }
-  }
-  return {
-    turnCostUsd,
-    threadCostUsd,
-    globalCostUsd,
-    complete,
-    turnTokens,
-    threadTokens,
-    tokenCompleteThreads: new Set([...observedThreads].filter((thread) => !incompleteTokenThreads.has(thread))),
-    costCompleteThreads: new Set([...observedThreads].filter((thread) => !incompleteCostThreads.has(thread))),
-  }
-}
+const settle = (attempt: AttemptCost, reason: SettlementReason): AttemptCost =>
+  attempt.cost._tag !== "Announced" && attempt.tokens._tag !== "Announced"
+    ? attempt
+    : {
+        ...attempt,
+        cost: attempt.cost._tag === "Announced" ? { _tag: "Unpriceable", reason } : attempt.cost,
+        tokens: attempt.tokens._tag === "Announced" ? { _tag: "Uncounted", reason } : attempt.tokens,
+      }
 
-const incomplete = (snapshot: Snapshot, threadId: string): Snapshot => {
-  const incompleteThreads = new Set(snapshot.incompleteThreads).add(threadId)
+const contribution = (attempt: AttemptCost): Totals => ({
+  costUsd: attempt.cost._tag === "Priced" ? attempt.cost.usd : 0,
+  pricedAttempts: attempt.cost._tag === "Priced" ? 1 : 0,
+  unpricedAttempts: attempt.cost._tag === "Unpriceable" ? 1 : 0,
+  tokens: attempt.tokens._tag === "Counted" ? attempt.tokens.total : 0,
+  countedAttempts: attempt.tokens._tag === "Counted" ? 1 : 0,
+  uncountedAttempts: attempt.tokens._tag === "Uncounted" ? 1 : 0,
+})
+
+const difference = (next: Totals, previous: Totals): Totals => ({
+  costUsd: next.costUsd - previous.costUsd,
+  pricedAttempts: next.pricedAttempts - previous.pricedAttempts,
+  unpricedAttempts: next.unpricedAttempts - previous.unpricedAttempts,
+  tokens: next.tokens - previous.tokens,
+  countedAttempts: next.countedAttempts - previous.countedAttempts,
+  uncountedAttempts: next.uncountedAttempts - previous.uncountedAttempts,
+})
+
+const shifts = (delta: Totals): boolean =>
+  delta.costUsd !== 0 ||
+  delta.pricedAttempts !== 0 ||
+  delta.unpricedAttempts !== 0 ||
+  delta.tokens !== 0 ||
+  delta.countedAttempts !== 0 ||
+  delta.uncountedAttempts !== 0
+
+const accumulate = (left: Totals, right: Totals): Totals => ({
+  costUsd: left.costUsd + right.costUsd,
+  pricedAttempts: left.pricedAttempts + right.pricedAttempts,
+  unpricedAttempts: left.unpricedAttempts + right.unpricedAttempts,
+  tokens: left.tokens + right.tokens,
+  countedAttempts: left.countedAttempts + right.countedAttempts,
+  uncountedAttempts: left.uncountedAttempts + right.uncountedAttempts,
+})
+
+const addScope = (scope: ReadonlyMap<string, Totals>, key: string, delta: Totals): ReadonlyMap<string, Totals> =>
+  new Map(scope).set(key, accumulate(scope.get(key) ?? noTotals, delta))
+
+export const turnTotals: {
+  (snapshot: Snapshot, turnId: string): Totals
+  (turnId: string): (snapshot: Snapshot) => Totals
+} = Function.dual(2, (snapshot: Snapshot, turnId: string): Totals => snapshot.turns.get(turnId) ?? noTotals)
+
+export const threadTotals: {
+  (snapshot: Snapshot, threadId: string): Totals
+  (threadId: string): (snapshot: Snapshot) => Totals
+} = Function.dual(2, (snapshot: Snapshot, threadId: string): Totals => snapshot.threads.get(threadId) ?? noTotals)
+
+const writeAttempt = (
+  snapshot: Snapshot,
+  executionId: string | undefined,
+  attemptKey: string,
+  previous: AttemptCost | undefined,
+  next: AttemptCost,
+): Snapshot => {
+  if (previous === next) return snapshot
+  const attempts = new Map(snapshot.attempts).set(attemptKey, next)
+  const executionAttempts =
+    executionId === undefined || snapshot.executionAttempts.get(executionId)?.has(attemptKey) === true
+      ? snapshot.executionAttempts
+      : new Map(snapshot.executionAttempts).set(
+          executionId,
+          new Set([...(snapshot.executionAttempts.get(executionId) ?? []), attemptKey]),
+        )
+  const delta = difference(contribution(next), previous === undefined ? noTotals : contribution(previous))
+  if (!shifts(delta)) return { ...snapshot, attempts, executionAttempts }
   return {
     ...snapshot,
-    collectionComplete: false,
-    incompleteThreads,
-    activeObservedThreads: new Set(snapshot.activeObservedThreads).add(threadId),
-    timeMalformedThreads: new Set(snapshot.timeMalformedThreads).add(threadId),
-    ...totals(snapshot.attempts, false, incompleteThreads),
+    attempts,
+    executionAttempts,
+    turns: addScope(snapshot.turns, next.turnId, delta),
+    threads: addScope(snapshot.threads, next.threadId, delta),
+    global: accumulate(snapshot.global, delta),
+  }
+}
+
+const settleExecution = (snapshot: Snapshot, executionId: string, reason: SettlementReason): Snapshot => {
+  const attemptKeys = snapshot.executionAttempts.get(executionId)
+  if (attemptKeys === undefined) return snapshot
+  let settled = snapshot
+  for (const attemptKey of attemptKeys) {
+    const previous = settled.attempts.get(attemptKey)
+    if (previous === undefined) continue
+    settled = writeAttempt(settled, executionId, attemptKey, previous, settle(previous, reason))
+  }
+  return settled
+}
+
+const unreadableKey = (key: string) => `unreadable\u0000${key}`
+
+const unreadable = (
+  snapshot: Snapshot,
+  input: RootExecution,
+  key: string,
+  reason: UnpriceableReason & UncountableReason,
+): Snapshot => {
+  const attemptKey = unreadableKey(key)
+  return writeAttempt(
+    {
+      ...snapshot,
+      activeObservedThreads: new Set(snapshot.activeObservedThreads).add(input.threadId),
+      timeMalformedThreads: new Set(snapshot.timeMalformedThreads).add(input.threadId),
+    },
+    undefined,
+    attemptKey,
+    snapshot.attempts.get(attemptKey),
+    {
+      threadId: input.threadId,
+      turnId: input.turnId,
+      cost: { _tag: "Unpriceable", reason },
+      tokens: { _tag: "Uncounted", reason },
+    },
+  )
+}
+
+const providerCostUsd = (data: Readonly<Record<string, unknown>>): number | undefined => {
+  const cost = data.cost
+  const valid =
+    cost !== null &&
+    typeof cost === "object" &&
+    typeof (cost as { amount?: unknown }).amount === "number" &&
+    Number.isFinite((cost as { amount: number }).amount) &&
+    (cost as { amount: number }).amount >= 0 &&
+    (cost as { currency?: unknown }).currency === "USD"
+  return valid ? (cost as { amount: number }).amount : undefined
+}
+
+const observeAttempt = (
+  snapshot: Snapshot,
+  input: RootExecution & { readonly event: ExecutionBackend.Event },
+): Snapshot => {
+  const event = input.event
+  if (
+    event.executionId === undefined ||
+    event.executionId.length === 0 ||
+    event.id === undefined ||
+    event.id.length === 0
+  )
+    return unreadable(snapshot, input, `${event.cursor ?? ""}\u0000${event.sequence}`, "delivery-malformed")
+  const deliveryKey = `${event.executionId}\u0000${event.id}`
+  if (snapshot.usageCursors.has(deliveryKey)) return snapshot
+  const attemptId = stringField(event.data, "model_attempt_id")
+  if (attemptId === undefined) return unreadable(snapshot, input, deliveryKey, "delivery-malformed")
+  const attemptKey = `${event.executionId}\u0000${attemptId}`
+  const previous = snapshot.attempts.get(attemptKey)
+  const current: AttemptCost = previous ?? {
+    threadId: input.threadId,
+    turnId: input.turnId,
+    cost: { _tag: "Announced" },
+    tokens: { _tag: "Announced" },
+  }
+  let next = current
+  if (event.type === "model.usage.reported") {
+    const decoded = Transcript.usageTokens(event.data ?? {})
+    const estimate = eventCostUsd(event)
+    next = {
+      ...current,
+      cost:
+        estimate === undefined
+          ? unpriceable(current.cost, "usage-unpriceable")
+          : estimatePriced(current.cost, estimate),
+      tokens:
+        decoded._tag === "Available"
+          ? countedTokens(current.tokens, decoded.total)
+          : uncountable(current.tokens, "usage-uncountable"),
+    }
+  } else if (event.type === "model.attempt.failed") {
+    next = settle(current, "attempt-failed")
+  } else if (event.data !== undefined && Object.hasOwn(event.data, "cost")) {
+    const amount = providerCostUsd(event.data)
+    next = {
+      ...current,
+      cost:
+        amount === undefined
+          ? unpriceable(current.cost, "provider-cost-malformed")
+          : providerPriced(current.cost, amount),
+    }
+  }
+  return {
+    ...writeAttempt(snapshot, event.executionId, attemptKey, previous, next),
+    usageCursors: new Set(snapshot.usageCursors).add(deliveryKey),
   }
 }
 
@@ -480,63 +662,21 @@ export const observe: {
   2,
   (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionBackend.Event }): Snapshot => {
     const withWorkTimestamp = observeWorkTimestamp(snapshot, input)
-    if (isActiveEventType(input.event.type)) return observeActive(withWorkTimestamp, input)
-    if (input.event.type !== "model.usage.reported" && input.event.type !== "model.attempt.completed")
-      return withWorkTimestamp
+    if (isActiveEventType(input.event.type)) {
+      const active = observeActive(withWorkTimestamp, input)
+      return isTerminalEventType(input.event.type) &&
+        input.event.executionId !== undefined &&
+        input.event.executionId.length > 0
+        ? settleExecution(active, input.event.executionId, "settled-without-usage")
+        : active
+    }
     if (
-      input.event.executionId === undefined ||
-      input.event.executionId.length === 0 ||
-      input.event.id === undefined ||
-      input.event.id.length === 0
+      input.event.type !== "model.usage.reported" &&
+      input.event.type !== "model.attempt.completed" &&
+      input.event.type !== "model.attempt.failed"
     )
-      return incomplete(withWorkTimestamp, input.threadId)
-    const deliveryKey = `${input.event.executionId}\u0000${input.event.id}`
-    if (withWorkTimestamp.usageCursors.has(deliveryKey)) return withWorkTimestamp
-    const attemptId = stringField(input.event.data, "model_attempt_id")
-    if (attemptId === undefined) return incomplete(withWorkTimestamp, input.threadId)
-    const attemptKey = `${input.event.executionId}\u0000${attemptId}`
-    const previous = withWorkTimestamp.attempts.get(attemptKey) ?? {
-      threadId: input.threadId,
-      turnId: input.turnId,
-      estimate: "absent" as const,
-      provider: "absent" as const,
-      tokens: "absent" as const,
-    }
-    let attempt: AttemptCost
-    if (input.event.type === "model.usage.reported") {
-      const decoded = Transcript.usageTokens(input.event.data ?? {})
-      const tokens = decoded._tag === "Available" ? decoded.total : undefined
-      const invalidTokens = (): AttemptCost => {
-        const { tokenAmount: _, ...withoutAmount } = previous
-        return { ...withoutAmount, tokens: "invalid" }
-      }
-      let tokenAttempt: AttemptCost
-      if (previous.tokens === "invalid" || tokens === undefined) tokenAttempt = invalidTokens()
-      else if (previous.tokens === "absent") tokenAttempt = { ...previous, tokens: "valid", tokenAmount: tokens }
-      else if (previous.tokenAmount === tokens) tokenAttempt = previous
-      else tokenAttempt = invalidTokens()
-      attempt = mergeEstimate(tokenAttempt, eventCostUsd(input.event))
-    } else if (input.event.data !== undefined && Object.hasOwn(input.event.data, "cost")) {
-      const cost = input.event.data.cost
-      const valid =
-        cost !== null &&
-        typeof cost === "object" &&
-        typeof (cost as { amount?: unknown }).amount === "number" &&
-        Number.isFinite((cost as { amount: number }).amount) &&
-        (cost as { amount: number }).amount >= 0 &&
-        (cost as { currency?: unknown }).currency === "USD"
-      const providerAmount = valid ? (cost as { amount: number }).amount : undefined
-      attempt = mergeProvider(previous, providerAmount)
-    } else {
-      attempt = previous
-    }
-    const attempts = new Map(withWorkTimestamp.attempts).set(attemptKey, attempt)
-    return {
-      ...withWorkTimestamp,
-      ...totals(attempts, withWorkTimestamp.collectionComplete, withWorkTimestamp.incompleteThreads),
-      attempts,
-      usageCursors: new Set(withWorkTimestamp.usageCursors).add(deliveryKey),
-    }
+      return withWorkTimestamp
+    return observeAttempt(withWorkTimestamp, input)
   },
 )
 
@@ -579,8 +719,8 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
   let snapshot: Snapshot = { ...empty }
   const pending = roots.map((root) => ({ ...root, executionId: root.executionId ?? root.turnId, reference: false }))
   const seenExecutions = new Set<string>()
-  const markIncomplete = (threadId: string) => {
-    snapshot = incomplete(snapshot, threadId)
+  const markUnreadable = (current: RootExecution & { readonly executionId: string }) => {
+    snapshot = unreadable(snapshot, current, current.executionId, "execution-unreadable")
   }
   while (pending.length > 0) {
     const batch = pending.splice(0).filter((current) => {
@@ -605,11 +745,11 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
     )
     for (const { current, inspection, replay } of results) {
       if (inspection === undefined) {
-        if (current.optional !== true) markIncomplete(current.threadId)
+        if (current.optional !== true) markUnreadable(current)
         continue
       }
       if (replay === undefined) {
-        if (current.optional !== true) markIncomplete(current.threadId)
+        if (current.optional !== true) markUnreadable(current)
         continue
       }
       for (const event of replay.events)
@@ -635,6 +775,8 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
           inspection.status !== "queued")
       )
         snapshot = malformedTime(snapshot, current.threadId)
+      if (ExecutionStatus.isTerminalStatus(inspection.status))
+        snapshot = settleExecution(snapshot, current.executionId, "settled-without-usage")
       for (const child of inspection.children)
         pending.push({ ...current, executionId: child.executionId, reference: true })
     }

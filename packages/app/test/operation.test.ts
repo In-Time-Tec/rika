@@ -8,7 +8,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { AgentDepth } from "@rika/runtime"
-import { Catalog as ToolCatalog } from "@rika/tools"
+import { AgentTools, Catalog as ToolCatalog } from "@rika/tools"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
@@ -3703,23 +3703,26 @@ describe("Operation", () => {
         ...backend,
         invokeChild: (input) =>
           Ref.update(childInputs, (all) => [...all, input]).pipe(Effect.as({ ...input, type: "accepted" as const })),
-        follow: (executionId) =>
-          executionId === "child:turn-interactive:title"
-            ? Effect.succeed({
-                turnId: executionId,
-                status: "completed" as const,
-                events: [
-                  {
-                    cursor: "title-a",
-                    sequence: 1,
-                    type: "model.output.completed" as const,
-                    createdAt: 3,
-                    text: "answer",
-                  },
-                  { cursor: "title-b", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
-                ],
-              })
-            : backend.follow!(executionId, undefined),
+        follow: (executionId, afterCursor, onEvent, reference) => {
+          if (executionId !== "child:turn-interactive:title")
+            return backend.follow!(executionId, afterCursor, onEvent, reference)
+          if (reference !== ExecutionBackend.executionReference)
+            return Effect.die(new Error("title execution addressed without the execution reference"))
+          return Effect.succeed({
+            turnId: executionId,
+            status: "completed" as const,
+            events: [
+              {
+                cursor: "title-a",
+                sequence: 1,
+                type: "model.output.completed" as const,
+                createdAt: 3,
+                text: "answer",
+              },
+              { cursor: "title-b", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
+            ],
+          })
+        },
         start: (input) =>
           Ref.update(startInputs, (all) => [...all, input]).pipe(
             Effect.andThen(
@@ -5172,6 +5175,81 @@ describe("Operation", () => {
         expect(yield* Ref.get(pageRequests)).toEqual([undefined, "page-one", undefined, "page-one"])
       }).pipe(provideLayer(layer))
     }),
+  )
+
+  it.effect("projects a truncated subagent as a failed delegation instead of a silent completion", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const noReport = AgentTools.noReport(
+          "child:execution%3Atruncated-turn:call-1",
+          "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
+        )
+        const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
+        const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
+        const delegationEvent = (
+          cursor: string,
+          sequence: number,
+          type: string,
+          data: Record<string, unknown>,
+        ): ExecutionBackend.Event => ({ cursor, sequence, type, createdAt: sequence, data })
+        const truncatedBackend = ExecutionBackend.Service.of({
+          ...backend,
+          start: (input) =>
+            Effect.succeed({
+              turnId: input.turnId,
+              status: "completed" as const,
+              events: [
+                delegationEvent("cursor-call", 1, "tool.call.requested", {
+                  tool_call_id: "call-1",
+                  tool_name: "oracle",
+                  input: { prompt: "review the plan" },
+                }),
+                delegationEvent("cursor-result", 2, "tool.result.received", {
+                  tool_call_id: "call-1",
+                  tool_name: "oracle",
+                  output: noReport,
+                }),
+                delegationEvent("cursor-done", 3, "execution.completed", {}),
+              ],
+            }),
+        })
+        const layer = Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer(),
+          turnRepositoryLayer: TurnRepository.memoryLayer(),
+          transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, truncatedBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.succeed(Thread.ThreadId.make("truncated-thread")),
+          makeTurnId: Effect.succeed(Turn.TurnId.make("truncated-turn")),
+          interactive: (_, session) =>
+            Effect.gen(function* () {
+              yield* session.submit("delegate the review")
+              const terminal = yield* Queue.unbounded<void>()
+              const runSync = Effect.runSyncWith(yield* Effect.context<never>())
+              yield* Effect.raceFirst(
+                session.events((event) => {
+                  if (event._tag === "TranscriptPatched" && event.event.type === "execution.completed")
+                    runSync(Queue.offer(terminal, undefined))
+                }),
+                Queue.take(terminal),
+              )
+            }),
+        })
+        yield* Effect.gen(function* () {
+          const operation = yield* Operation.Service
+          yield* operation.run({ _tag: "Interactive", prompt: [], ephemeral: false })
+        }).pipe(provideLayer(layer))
+
+        const projection = yield* transcripts.get(Turn.TurnId.make("truncated-turn"))
+        const delegation = projection?.units.flatMap((unit) =>
+          unit.content._tag === "Block" && unit.content.block._tag === "ToolCall" ? [unit.content.block] : [],
+        )
+        expect(delegation).toHaveLength(1)
+        expect(delegation?.[0]?.status).toBe("failed")
+        expect(delegation?.[0]?.output).toContain(noReport.reason)
+        expect(delegation?.[0]?.output).toContain(AgentTools.noReportRecovery)
+      }),
+    ),
   )
 })
 

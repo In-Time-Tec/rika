@@ -24,6 +24,7 @@ import {
   WorkflowDefinitionHost,
 } from "@relayfx/sdk"
 import {
+  Array as Arr,
   Cause,
   Clock,
   Context,
@@ -445,6 +446,7 @@ const variantSelection = (
 
 const agentId = Ids.AgentId.make("agent:rika")
 const addressId = Ids.AddressId.make("address:rika")
+const rootAgentName = "rika"
 const fanOutAgentId = (fanOutId: unknown, childExecutionId: unknown) =>
   Ids.AgentId.make(`agent:rika:fan-out:${String(fanOutId)}:${String(childExecutionId)}`)
 const executionId = (turnId: string, reference?: ExecutionReference) =>
@@ -562,10 +564,10 @@ const agentSelections = (pin: ExecutionRoutePin) =>
     : (Object.fromEntries(
         agentProfileNames.map((name) => [name, pinnedSelection(routeForProfile(pin, name))]),
       ) as Partial<Readonly<Record<AgentProfile, ModelRegistry.ModelSelection>>>)
-const recoveredDeltaOutput = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
+const recoveredDeltaOutput = (events: ReadonlyArray<Execution.ExecutionEvent>, afterSequence: number) => {
   const groups = new Map<string, { order: number; deltas: Array<{ index: number; delta: string }> }>()
   for (const event of events) {
-    if (event.type !== "model.output.delta") continue
+    if (event.type !== "model.output.delta" || event.sequence <= afterSequence) continue
     const delta = event.data?.delta
     if (typeof delta !== "string" || delta.length === 0) continue
     const partId = typeof event.data?.part_id === "string" ? event.data.part_id : ""
@@ -594,7 +596,40 @@ const childFailureText = (terminal: Execution.ExecutionEvent | undefined) => {
   return typeof message === "string" && message.length > 0 ? `${outcome}: ${message}` : outcome
 }
 
-export const resolveChildResult = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
+const truncatedStreamClassification = "truncated-stream"
+
+const classifiedTruncated = (event: Execution.ExecutionEvent) => {
+  if (event.data?.category === truncatedStreamClassification) return true
+  const details = event.data?.details
+  return (
+    typeof details === "object" &&
+    details !== null &&
+    (details as Record<string, unknown>).failure_classification === truncatedStreamClassification
+  )
+}
+
+const truncatedModelStream = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
+  if (events.some(classifiedTruncated)) return true
+  const lastCall = events.findLast((executionEvent) => executionEvent.type === "model.call.started")
+  if (lastCall === undefined) return false
+  return !events.some((executionEvent) => {
+    if (executionEvent.type !== "model.usage.reported" || executionEvent.sequence <= lastCall.sequence) return false
+    const finishReason = executionEvent.data?.finish_reason
+    return typeof finishReason === "string" && finishReason.length > 0
+  })
+}
+
+const truncatedStreamReason =
+  "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced."
+const silentChildReason = "The subagent finished its run without writing a final report."
+const unreconciledReason = (status: string) =>
+  `Relay reconciled the subagent's execution as ${status}, but its terminal event never reached Rika, so no report was recovered.`
+
+export const resolveChildResult = (
+  childExecutionId: string,
+  events: ReadonlyArray<Execution.ExecutionEvent>,
+  reconciled?: "completed" | "failed" | "cancelled",
+): AgentTools.Result => {
   const terminal = events.findLast(
     (executionEvent) =>
       executionEvent.type === "execution.completed" ||
@@ -606,38 +641,54 @@ export const resolveChildResult = (events: ReadonlyArray<Execution.ExecutionEven
       (executionEvent) =>
         executionEvent.type === "tool.call.requested" || executionEvent.type === "tool.result.received",
     )?.sequence ?? -1
-  const finalResponse = events.findLast(
-    (executionEvent) =>
-      executionEvent.type === "model.output.completed" &&
-      executionEvent.sequence > lastToolSequence &&
-      executionEvent.content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true,
-  )
+  const truncated = truncatedModelStream(events)
+  const finalResponse = truncated
+    ? undefined
+    : events.findLast(
+        (executionEvent) =>
+          executionEvent.type === "model.output.completed" &&
+          executionEvent.sequence > lastToolSequence &&
+          executionEvent.content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true,
+      )
   const recovered = terminal?.type === "execution.failed" && finalResponse !== undefined
   const terminalContent =
-    terminal?.content === undefined || terminal.content.length === 0 ? undefined : terminal.content
-  const primary =
+    truncated || terminal?.content === undefined || terminal.content.length === 0 ? undefined : terminal.content
+  const primary: ReadonlyArray<unknown> =
     recovered || terminalContent === undefined
-      ? (finalResponse?.content ?? recoveredDeltaOutput(events))
+      ? (finalResponse?.content ?? recoveredDeltaOutput(events, lastToolSequence))
       : terminalContent
-  const failure =
-    recovered || terminalContent !== undefined || finalResponse !== undefined ? undefined : childFailureText(terminal)
-  let status: "completed" | "cancelled" | "failed" = "failed"
+  const failure = childFailureText(terminal)
+  let status: "completed" | "cancelled" | "failed" = reconciled ?? "failed"
   if (terminal?.type === "execution.completed" || recovered) status = "completed"
+  else if (terminal?.type === "execution.failed") status = "failed"
   else if (terminal?.type === "execution.cancelled") status = "cancelled"
-  return {
-    status,
-    output: failure === undefined ? primary : [...primary, { type: "text", text: failure }],
+  if (status === "cancelled")
+    return AgentTools.cancelled(childExecutionId, failure ?? unreconciledReason(status), primary)
+  if (!Arr.isReadonlyArrayNonEmpty(primary)) {
+    if (failure !== undefined) return AgentTools.noReport(childExecutionId, failure)
+    if (terminal === undefined) return AgentTools.noReport(childExecutionId, unreconciledReason(status))
+    return AgentTools.noReport(childExecutionId, truncated ? truncatedStreamReason : silentChildReason)
   }
+  if (truncated) return AgentTools.failed(childExecutionId, failure ?? truncatedStreamReason, primary)
+  if (status === "completed") return AgentTools.report(childExecutionId, primary)
+  return AgentTools.failed(childExecutionId, failure ?? unreconciledReason(status), primary)
 }
 const awaitChildResult = (client: Client.Interface, childId: string) => {
   const childExecutionId = Ids.ExecutionId.make(childId)
-  return client.executions.stream({ execution_id: childExecutionId }).pipe(
-    Stream.takeUntil(
-      (item) =>
-        item.type === "execution.completed" || item.type === "execution.failed" || item.type === "execution.cancelled",
-    ),
-    Stream.runCollect,
-    Effect.map((events) => resolveChildResult([...events])),
+  return awaitExecutionAvailable(client, childExecutionId).pipe(
+    Effect.andThen(Stream.runCollect(client.executions.follow({ execution_id: childExecutionId }))),
+    Effect.map((items) => {
+      const collected = [...items]
+      const stopped = collected.find(
+        (item): item is Extract<typeof item, { _tag: "stopped" }> => item._tag === "stopped",
+      )
+      const reconciled = stopped?.reason._tag === "terminal" ? stopped.reason.status : undefined
+      return resolveChildResult(
+        childId,
+        collected.flatMap((item) => (item._tag === "event" ? [item.event] : [])),
+        reconciled === "completed" || reconciled === "failed" || reconciled === "cancelled" ? reconciled : undefined,
+      )
+    }),
   )
 }
 const workflowExecutionId = (runId: string, ownerTurnId?: string, workspace?: string) => {
@@ -1558,7 +1609,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   "rika.model.provider": selection.provider,
                 }),
               )
-              const agentName = `rika-${encodeURIComponent(input.turnId)}`
+              const agentName = rootAgentName
               const rootTools = Object.values(toolkitFor(executionToolOptions).tools).filter(
                 (tool) => tool.name !== "search_threads" && tool.name !== "read_thread_transcript",
               )
@@ -2071,14 +2122,9 @@ export const layer = <
                 message: `The child for tool call ${invocation.callId} is not in its fan-out batch`,
               })
             }
-            const result = yield* awaitChildResult(client, String(current.child_execution_id)).pipe(
+            return yield* awaitChildResult(client, String(current.child_execution_id)).pipe(
               Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
             )
-            return {
-              childExecutionId: String(current.child_execution_id),
-              status: result.status,
-              output: [...result.output],
-            }
           })
           const delegationHandlerLayer = AgentTools.modelToolkit.toLayer({
             task: (input) => delegation("task", "Task", input),
