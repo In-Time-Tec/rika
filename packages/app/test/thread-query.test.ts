@@ -319,7 +319,7 @@ describe("ThreadQuery", () => {
       })
 
       const query = yield* ThreadQuery.Service
-      type StructuredRead = Extract<typeof ThreadTools.ReadThreadInput.Type, { readonly selection: object }>
+      type StructuredRead = { readonly selection: NonNullable<(typeof ThreadTools.ReadThreadInput.Type)["selection"]> }
       const read = (selection: StructuredRead["selection"]) =>
         query
           .readStructured({

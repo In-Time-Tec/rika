@@ -8,10 +8,10 @@ export const TaskInput = Schema.Struct({
 })
 export type TaskInput = typeof TaskInput.Type
 
-export const ReadThreadInput = Schema.Union([
-  Schema.Struct({ question: Schema.String, threadId: Schema.optionalKey(Schema.String) }),
-  Schema.Struct({ prompt: Schema.String }),
-])
+export const ReadThreadInput = Schema.Struct({
+  prompt: Schema.String,
+  threadId: Schema.optionalKey(Schema.String),
+})
 export type ReadThreadInput = typeof ReadThreadInput.Type
 
 export const Result = Schema.Struct({

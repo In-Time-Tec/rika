@@ -493,6 +493,8 @@ const applyAssistant = (projection: Projection, turnId: string, event: SourceEve
   )
 }
 
+const agentName = (value: string): string => value.replace(/:\d+$/, "")
+
 const childStatus = (
   event: SourceEvent,
   value: Record<string, unknown>,
@@ -553,7 +555,7 @@ const applyChild = (projection: Projection, turnId: string, event: SourceEvent):
   const block: Extract<Block, { _tag: "ChildAgent" }> = {
     _tag: "ChildAgent",
     id: childId,
-    name: string(value.profile ?? value.preset_name ?? value.name, previous?.name ?? "child"),
+    name: agentName(string(value.profile ?? value.preset_name ?? value.name, previous?.name ?? "child")),
     summary: string(value.summary ?? value.output ?? value.error, previous?.summary ?? ""),
     status: childStatus(event, value),
     activity: activity.length === 0 ? (previous?.activity ?? []) : [...(previous?.activity ?? []), activity],
