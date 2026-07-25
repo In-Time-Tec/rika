@@ -33,10 +33,6 @@ jobs:
             target: darwin-arm64
             kernel: Darwin
             architecture: arm64
-          - runner: macos-15-intel
-            target: darwin-x64
-            kernel: Darwin
-            architecture: x86_64
           - runner: blacksmith-4vcpu-ubuntu-2404-arm
             target: linux-arm64
             kernel: Linux
@@ -57,6 +53,19 @@ jobs:
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       - name: Install dependencies
         run: bun install --frozen-lockfile
+      - name: Ensure native packages for the target
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          echo "@opentui:"; ls node_modules/@opentui 2>/dev/null || echo "  (none)"
+          echo "@ff-labs:"; ls node_modules/@ff-labs 2>/dev/null || echo "  (none)"
+          if [ ! -d "node_modules/@opentui/core-$TARGET" ]; then
+            echo "::warning::@opentui/core-$TARGET missing after --frozen-lockfile; optional dependencies install silently, retrying unfrozen"
+            bun install
+            echo "@opentui:"; ls node_modules/@opentui 2>/dev/null || echo "  (none)"
+            echo "@ff-labs:"; ls node_modules/@ff-labs 2>/dev/null || echo "  (none)"
+          fi
+          test -d "node_modules/@opentui/core-$TARGET"
       - name: Prepare Linux login shells
         if: runner.os == 'Linux'
         run: |
@@ -205,7 +214,7 @@ jobs:
           for directory in artifacts/npm/*/; do
             (cd "$directory" && npm pack)
           done
-          test "$(find artifacts/npm -name '*.tgz' | wc -l)" -eq 5
+          test "$(find artifacts/npm -name '*.tgz' | wc -l)" -eq 4
       - name: Verify every platform package carries both binaries
         run: |
           for archive in artifacts/npm/cli-*/*.tgz; do
@@ -266,7 +275,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          test "$(find artifacts -maxdepth 1 -type f | wc -l)" -eq 6
+          test "$(find artifacts -maxdepth 1 -type f | wc -l)" -eq 5
           gh release create "$GITHUB_REF_NAME" artifacts/* --draft --generate-notes --verify-tag
-          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 6
+          test "$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets | length')" -eq 5
           gh release edit "$GITHUB_REF_NAME" --draft=false

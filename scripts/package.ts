@@ -11,7 +11,6 @@ const buildFailure = (cause: unknown): string => {
 
 export const targets = {
   "darwin-arm64": { bun: "bun-darwin-arm64", opentuiLibc: "", fffLibc: "gnu" },
-  "darwin-x64": { bun: "bun-darwin-x64", opentuiLibc: "", fffLibc: "gnu" },
   "linux-arm64": { bun: "bun-linux-arm64", opentuiLibc: "glibc", fffLibc: "gnu" },
   "linux-x64": { bun: "bun-linux-x64", opentuiLibc: "glibc", fffLibc: "gnu" },
 } as const

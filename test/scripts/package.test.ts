@@ -70,8 +70,8 @@ const clientSourceGraph = async () => {
 }
 
 describe("release target construction", () => {
-  test("constructs the four supported OpenTUI platform mappings", () => {
-    expect(Object.keys(targets)).toEqual(["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"])
+  test("constructs the supported OpenTUI platform mappings", () => {
+    expect(Object.keys(targets)).toEqual(["darwin-arm64", "linux-arm64", "linux-x64"])
     for (const [name, target] of Object.entries(targets)) {
       expect(target.bun).toBe(`bun-${name}`)
       expect(target.fffLibc).toBe("gnu")
