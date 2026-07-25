@@ -1,6 +1,7 @@
 import { McpConfig, McpOAuth, SkillRegistry } from "@rika/extensions"
 import { Console, Context, Effect, FileSystem, Layer, Path, PlatformError, Schema, Semaphore } from "effect"
 import type * as Operation from "./operation"
+import { workspacePaths } from "@rika/config/paths"
 
 export interface Options {
   readonly globalRoot: string
@@ -154,9 +155,9 @@ export const run = Effect.fn("ExtensionOperations.run")(function* (
       ? service.options
       : {
           ...service.options,
-          workspaceRoot: path.join(workspace, ".rika", "skills"),
-          configPath: path.join(workspace, ".rika", "mcp.json"),
-          generationsPath: path.join(workspace, ".rika", "extensions.json"),
+          workspaceRoot: workspacePaths(workspace).skills,
+          configPath: workspacePaths(workspace).mcpConfig,
+          generationsPath: workspacePaths(workspace).extensionGenerations,
         }
   if (input._tag === "Skill") {
     if (input.action === "list") {

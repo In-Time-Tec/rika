@@ -75,6 +75,7 @@ import { serve as serveResident } from "./resident-host-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
 import { modeIds } from "@rika/config/modes"
 import { Format } from "@rika/tui"
+import { globalPaths, workspaceDirectory, workspacePaths } from "@rika/config/paths"
 
 InteractiveController.installPaletteCommands(Palette.commands as Array<InteractiveController.PaletteCommand>)
 
@@ -571,9 +572,9 @@ const pasteClipboardPngImpl = (
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
-    const relative = `.rika/pasted/paste-${now()}.png`
+    const relative = `${workspaceDirectory}/pasted/paste-${now()}.png`
     const absolute = `${workspace}/${relative}`
-    yield* mkdir(`${workspace}/.rika/pasted`, { recursive: true })
+    yield* mkdir(workspacePaths(workspace).pasted, { recursive: true })
     yield* fileSystem.writeFile(absolute, new Uint8Array())
     const script = `on run argv\nset pngData to (the clipboard as «class PNGf»)\nset theFile to (POSIX file (item 1 of argv))\nset fh to open for access theFile with write permission\nset eof fh to 0\nwrite pngData to fh\nclose access fh\nend run`
     const exit = yield* extract(script, absolute).pipe(Effect.orElseSucceed(() => -1))
@@ -595,7 +596,7 @@ const pastedImagePathImpl = (
   id = crypto.randomUUID,
 ): string | undefined => {
   const format = pastedImageFormat(bytes, mediaType)
-  return format === undefined ? undefined : `.rika/pasted/paste-${now()}-${id()}.${format.extension}`
+  return format === undefined ? undefined : `${workspaceDirectory}/pasted/paste-${now()}-${id()}.${format.extension}`
 }
 
 export const pastedImagePath: {
@@ -615,7 +616,7 @@ export const pastedImagePath: {
 const persistPastedImageImpl = (workspace: string, relative: string, bytes: Uint8Array) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem
-    yield* mkdir(`${workspace}/.rika/pasted`, { recursive: true })
+    yield* mkdir(workspacePaths(workspace).pasted, { recursive: true })
     yield* fileSystem.writeFile(`${workspace}/${relative}`, bytes)
     return true
   }).pipe(Effect.orElseSucceed(() => false))
@@ -1240,7 +1241,7 @@ export const configuredBackendLayer = ({
       const testMediaAnalyzerError = yield* Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_ERROR"))
       const effectiveConfigForWorkspace = (runtimeWorkspace: string) =>
         Effect.gen(function* () {
-          const runtimeSettings = yield* loadSettingsFile(`${runtimeWorkspace}/.rika/settings.json`)
+          const runtimeSettings = yield* loadSettingsFile(workspacePaths(runtimeWorkspace).settings)
           return yield* ConfigService.effective().pipe(
             provideLayerScoped(
               ConfigService.liveEnvironmentLayer({
@@ -1450,7 +1451,7 @@ export const configuredBackendLayer = ({
                 repositoryLayer,
                 turnRepositoryLayer,
               )
-              const workspaceSettings = yield* loadSettingsFile(`${executionWorkspace}/.rika/settings.json`)
+              const workspaceSettings = yield* loadSettingsFile(workspacePaths(executionWorkspace).settings)
               const layer = ConfigService.liveEnvironmentLayer({
                 webProviders: WebSearch.providerRegistry,
                 global: globalSettings,
@@ -2354,7 +2355,7 @@ export const interactiveTui =
                   renderer?.surface.showToast("Set VISUAL or EDITOR to edit the prompt", "#e06c75")
                   return
                 }
-                const relative = `.rika/compose-${now}.md`
+                const relative = `${workspaceDirectory}/compose-${now}.md`
                 const file = `${model.workspace}/${relative}`
                 yield* mkdir(`${model.workspace}/.rika`, { recursive: true })
                 yield* fileSystem.writeFileString(file, ViewState.displayInput(model))
@@ -2773,20 +2774,22 @@ if (import.meta.main) {
     database = join(hostDataRoot, "rika.db")
     relayDatabase = join(hostDataRoot, "relay.db")
   }
-  const globalConfig = `${home}/.config/rika/settings.json`
-  const workspaceConfig = `${process.cwd()}/.rika/settings.json`
+  const globalLayout = globalPaths(home)
+  const workspaceLayout = workspacePaths(process.cwd())
+  const globalConfig = globalLayout.settings
+  const workspaceConfig = workspaceLayout.settings
   const extensionLayer = Layer.mergeAll(
     ExtensionOperations.layer({
-      globalRoot: `${home}/.config/rika/skills`,
-      workspaceRoot: `${process.cwd()}/.rika/skills`,
-      configPath: `${process.cwd()}/.rika/mcp.json`,
-      trustPath: `${home}/.config/rika/mcp-trust.json`,
-      generationsPath: `${process.cwd()}/.rika/extensions.json`,
+      globalRoot: globalLayout.skills,
+      workspaceRoot: workspaceLayout.skills,
+      configPath: workspaceLayout.mcpConfig,
+      trustPath: globalLayout.mcpTrust,
+      generationsPath: workspaceLayout.extensionGenerations,
     }),
     SkillRegistry.fileSystemLayer,
     McpOAuth.layer.pipe(
       Layer.provide(McpOAuth.hostLayer),
-      Layer.provide(McpOAuth.tokenStoreLayer(`${home}/.config/rika/mcp-oauth.json`)),
+      Layer.provide(McpOAuth.tokenStoreLayer(globalLayout.mcpOAuth)),
     ),
   ).pipe(Layer.provide(BunServices.layer), Layer.merge(BunServices.layer), Layer.merge(FetchHttpClient.layer))
   const profile = environment.residentProfile._tag === "Some" ? environment.residentProfile.value : "default"
@@ -2805,7 +2808,7 @@ if (import.meta.main) {
     assertOpenAiDirect: (workspace) =>
       Effect.gen(function* () {
         const globalSettings = yield* loadSettingsFile(globalConfig)
-        const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+        const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
         const workspaceConfigLayer = ConfigService.liveEnvironmentLayer({
           webProviders: WebSearch.providerRegistry,
           global: globalSettings,
@@ -2903,7 +2906,7 @@ if (import.meta.main) {
         const modelProviders = Context.get(providerRuntimeContext, ModelProviderRuntime.Service)
         const effectiveConfigForWorkspace = (workspace: string) =>
           Effect.gen(function* () {
-            const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+            const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
             return yield* ConfigService.effective().pipe(
               provideLayerScoped(
                 ConfigService.liveEnvironmentLayer({
@@ -3089,7 +3092,7 @@ if (import.meta.main) {
           defaultWorkspace: process.cwd(),
           shellPermission: (workspace) =>
             Effect.gen(function* () {
-              const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+              const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
               const layer = ConfigService.liveEnvironmentLayer({
                 webProviders: WebSearch.providerRegistry,
                 global: globalSettings,
@@ -3129,7 +3132,7 @@ if (import.meta.main) {
             },
             forWorkspace: (workspace) =>
               Effect.gen(function* () {
-                const settings = yield* loadSettingsFile(`${workspace}/.rika/settings.json`)
+                const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
                 return {
                   layer: Layer.merge(
                     configAdapter,
@@ -3146,7 +3149,7 @@ if (import.meta.main) {
                   ),
                   options: {
                     globalConfigPath: globalConfig,
-                    workspaceConfigPath: `${workspace}/.rika/settings.json`,
+                    workspaceConfigPath: workspacePaths(workspace).settings,
                     productDatabasePath: database,
                     relayDatabasePath: relayDatabase,
                     upstream: [

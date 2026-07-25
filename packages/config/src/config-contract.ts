@@ -1,6 +1,7 @@
 import { Function, Schema, type Redacted } from "effect"
 import { defaults as modelDefaults, presetIds, presets, supportedEfforts } from "./models"
 import * as Modes from "./modes"
+import * as Paths from "./paths"
 
 export type ModeId = Modes.ModeId
 export type Role = "main" | "oracle"
@@ -704,7 +705,7 @@ export const defaults: Settings = {
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
   permissions: { read: "allow", search: "allow", write: "allow", shell: "allow", external: "allow" },
-  extensionRoots: ["~/.config/rika/extensions", ".rika/extensions"],
+  extensionRoots: [`~/${Paths.globalDirectory}/extensions`, `${Paths.workspaceDirectory}/extensions`],
   mcp: {},
   notifications: { enabled: true },
   logging: { level: "info" },
