@@ -1,3 +1,4 @@
+import { ExecutionStatus } from "@rika/tools"
 import type * as Operation from "@rika/app/operation"
 import type * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import type * as Turn from "@rika/persistence/turn"
@@ -498,10 +499,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       ...attached.model,
       activity: activityAfter(state.model.activity, event.event, next, attached.model),
     }
-    let terminalStatus: "completed" | "failed" | "cancelled" | undefined
-    if (event.event.type === "execution.completed") terminalStatus = "completed"
-    else if (event.event.type === "execution.failed") terminalStatus = "failed"
-    else if (event.event.type === "execution.cancelled") terminalStatus = "cancelled"
+    const terminalStatus = ExecutionStatus.terminalEventStatus(event.event.type)
     const model = terminal
       ? { ...projectedModel, activeTurnId: undefined, busy: false, activity: undefined }
       : projectedModel

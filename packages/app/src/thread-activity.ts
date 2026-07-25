@@ -1,3 +1,4 @@
+import { ExecutionStatus } from "@rika/tools"
 import type { ThreadSummary, ThreadSummaryRepository } from "@rika/persistence"
 import type * as Thread from "@rika/persistence/thread"
 import * as Turn from "@rika/persistence/turn"
@@ -127,7 +128,7 @@ export const projectionInput: {
       turnId: Turn.TurnId.make(result.turnId),
       threadId,
       ...(projectedCursor === undefined ? {} : { projectedCursor }),
-      complete: result.status === "completed" || result.status === "failed" || result.status === "cancelled",
+      complete: ExecutionStatus.isTerminalStatus(result.status),
       editTotals: editTotals(result.events),
       ...(result.events.length === 0
         ? {}

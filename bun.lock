@@ -122,6 +122,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@effect/sql-sqlite-bun": "catalog:",
+        "@rika/tools": "workspace:*",
         "@rika/transcript": "workspace:*",
         "effect": "catalog:",
       },

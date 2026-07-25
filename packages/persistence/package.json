@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@effect/sql-sqlite-bun": "catalog:",
+    "@rika/tools": "workspace:*",
     "@rika/transcript": "workspace:*",
     "effect": "catalog:"
   },

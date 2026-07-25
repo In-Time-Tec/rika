@@ -14,7 +14,7 @@ import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
 import * as ExtensionOperations from "./extension-operations"
 import * as OpenAiAuth from "./openai-auth"
-import { Catalog as ToolCatalog, Runtime as ToolRuntime } from "@rika/tools"
+import { Catalog as ToolCatalog, ExecutionStatus, Runtime as ToolRuntime } from "@rika/tools"
 import {
   Cause,
   Clock,
@@ -77,9 +77,7 @@ const executionStartFailureMessage =
 const operationFailureMessage =
   "Rika could not complete that action. Run rika diagnostics status if it keeps happening."
 
-const isTerminalStatus = (
-  status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
-) => status === "completed" || status === "failed" || status === "cancelled"
+const isTerminalStatus = ExecutionStatus.isTerminalStatus
 
 const isAgentResponseEvent = (event: ExecutionBackend.Event): boolean =>
   event.type.includes("reasoning") ||

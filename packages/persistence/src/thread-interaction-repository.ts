@@ -1,7 +1,8 @@
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId } from "./thread-schema"
-import { ExecutionRoutePin, Status, Turn, TurnId } from "./turn-schema"
+import { ExecutionRoutePin, Turn, TurnId } from "./turn-schema"
+import { ExecutionStatus } from "@rika/tools"
 
 export const ReceiptKind = Schema.Literals(["create", "message", "steer", "cancel", "stop"])
 export type ReceiptKind = typeof ReceiptKind.Type
@@ -181,7 +182,7 @@ interface State {
   readonly revisions: ReadonlyMap<ThreadId, number>
 }
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
-const terminal = (status: Status) => status === "completed" || status === "failed" || status === "cancelled"
+const terminal = ExecutionStatus.isTerminalStatus
 const active = (turn: Turn) => !terminal(turn.status) && turn.status !== "queued"
 const clone = <A>(value: A): A => structuredClone(value)
 const initialState = (threads: ReadonlyArray<Thread>, turns: ReadonlyArray<Turn>): State => ({

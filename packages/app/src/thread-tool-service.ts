@@ -4,7 +4,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { ThreadTools, ToolInvocation } from "@rika/tools"
+import { ExecutionStatus, ThreadTools, ToolInvocation } from "@rika/tools"
 import { Clock, Context, Effect, Ref, Schema } from "effect"
 import type * as RootTurnOwner from "./root-turn-owner"
 import { clampThreadTitle } from "./thread-title"
@@ -85,7 +85,7 @@ export const makeGateway = Effect.gen(function* () {
 const limits = { maximumDepth: 3, maximumAdmissions: 8, maximumWorkspaceActive: 8, queueCapacity: 8 }
 const delivery = (value: "reply" | "manual" | undefined) => value ?? "reply"
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
-const terminal = (status: Turn.Status) => status === "completed" || status === "failed" || status === "cancelled"
+const terminal = ExecutionStatus.isTerminalStatus
 const state = (turns: ReadonlyArray<Turn.Turn>): ThreadTools.ThreadState => {
   const active = turns.find((turn) => !terminal(turn.status) && turn.status !== "queued")
   if (active?.status === "waiting") return "awaiting-approval"

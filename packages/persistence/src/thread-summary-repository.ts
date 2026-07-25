@@ -1,3 +1,4 @@
+import { ExecutionStatus } from "@rika/tools"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as ThreadRepository from "./thread-repository"
@@ -151,8 +152,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           const activity = activityValues.get(turn.id)
           return activity !== undefined &&
             activity.projectedCursor === turn.lastCursor &&
-            (!(["completed", "failed", "cancelled"] as ReadonlyArray<Status>).includes(turn.status) ||
-              activity.complete)
+            (!ExecutionStatus.isTerminalStatus(turn.status) || activity.complete)
             ? [activity]
             : []
         })
@@ -236,7 +236,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           return (
             activity === undefined ||
             activity.projectedCursor !== turn.lastCursor ||
-            (["completed", "failed", "cancelled"].includes(turn.status) && !activity.complete)
+            (ExecutionStatus.isTerminalStatus(turn.status) && !activity.complete)
           )
         })
         .slice(0, listLimit(limit))

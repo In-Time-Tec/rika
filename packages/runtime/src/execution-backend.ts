@@ -83,7 +83,7 @@ import {
   delegationAvailableAtDepth,
   toolsAtDepth,
 } from "./agent-depth"
-import { ExecutionId } from "@rika/tools"
+import { ExecutionId, ExecutionStatus } from "@rika/tools"
 import * as DataBlobStore from "./data-blob-store"
 
 export { streamingOnlyLanguageModel, withStreamingOnlyModel } from "./streaming-only-model"
@@ -501,8 +501,7 @@ const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.
     return undefined
   })
 
-const terminalExecutionStatus = (status: string) =>
-  status === "completed" || status === "failed" || status === "cancelled"
+const terminalExecutionStatus = ExecutionStatus.isTerminalStatus
 
 const retryRecoveryPersistence = <A, E, R>(effect: Effect.Effect<A, E, R>, execution: string) =>
   effect.pipe(
@@ -936,10 +935,7 @@ const followExecution = (
                 return Effect.succeed(true)
               const spawnedChild = childExecutionIdFromEvent(item.event)
               const mapped = attributedEvent(item.event, root ? undefined : String(execution))
-              let terminal: Status | undefined
-              if (mapped.type === "execution.completed") terminal = Status.make("completed")
-              else if (mapped.type === "execution.failed") terminal = Status.make("failed")
-              else if (mapped.type === "execution.cancelled") terminal = Status.make("cancelled")
+              const terminal: Status | undefined = ExecutionStatus.terminalEventStatus(mapped.type)
               const inspectActionable =
                 stopAtActionableWait && isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
                   ? client.executions

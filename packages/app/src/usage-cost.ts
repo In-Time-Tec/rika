@@ -1,3 +1,4 @@
+import { ExecutionStatus } from "@rika/tools"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
 import { Duration, Effect, Function, HashMap, Option } from "effect"
@@ -124,8 +125,7 @@ export const isRelevantEvent = (event: ExecutionBackend.Event): boolean =>
 
 const isActiveEventType = (type: string): type is ActiveEventType => activeEventTypes.has(type)
 
-const isTerminalEventType = (type: ActiveEventType): boolean =>
-  type === "execution.completed" || type === "execution.failed" || type === "execution.cancelled"
+const isTerminalEventType = (type: ActiveEventType): boolean => ExecutionStatus.isTerminalEventType(type)
 
 interface Interval {
   readonly start: number
