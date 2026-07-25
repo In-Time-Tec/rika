@@ -3,7 +3,6 @@ import stringWidth from "string-width"
 import { describe, expect, test } from "vitest"
 import { renderMarkdown, renderMarkdownStyled } from "../src/markdown-renderer"
 import { renderDiff } from "../src/diff-renderer"
-import { renderTool } from "../src/tool-renderer"
 import { colors } from "../src/theme"
 
 const chunkFor = (chunks: ReadonlyArray<TextChunk>, text: string): TextChunk => {
@@ -176,13 +175,5 @@ describe("transcript renderers", () => {
     expect(rendered).toContain("10    -old value …")
     expect(rendered).toContain("   20 +new value …")
     expect(rendered.split("\n").every((line) => line.length <= 18)).toBe(true)
-  })
-
-  test("labels status and bounds tool output", () => {
-    const output = Array.from({ length: 15 }, (_, index) => `line ${index}`).join("\n")
-    const rendered = renderTool({ name: "Shell", input: "run", output, status: "complete", expanded: true }, 20)
-    expect(rendered).toContain("✓ Shell [succeeded] ▾")
-    expect(rendered).toContain("… 3 lines omitted")
-    expect(rendered).not.toContain("line 14")
   })
 })

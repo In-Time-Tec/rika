@@ -84,13 +84,12 @@ import {
   type ViewportMetrics,
   type ViewportAnchor,
 } from "./transcript-viewport"
-import { renderMarkdown, renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
+import { renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
 import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
 import { highlightShellCommand } from "./syntax-highlight"
 import { wrapStyledLine } from "./styled-text"
 import { renderToolSummary } from "./tool-summary"
-import { renderTool } from "./tool-renderer"
 import {
   agentToolSummary,
   escapePathTarget,
@@ -235,12 +234,8 @@ export const renderBlock: {
       case "Reasoning":
         return `◇ Reasoning\n${body(block.text)}`
       case "ToolCall": {
-        if (isToolOutputDisplayed(block)) return renderTool(block, width)
         const running = block.status === "running"
-        let icon = "✗"
-        if (running) icon = "⠿"
-        else if (block.status === "complete") icon = "✓"
-        else if (block.status === "cancelled") icon = "⊘"
+        const icon = iconChar(block.status === "failed", running, "⠿", block.status === "cancelled")
         const label = running ? block.presentation.activeLabel : block.presentation.completeLabel
         return `${icon} ${label}${block.detail.length === 0 ? "" : ` ${block.detail}`}`
       }
@@ -504,35 +499,6 @@ export const renderChangedFiles: {
   (model: Model, innerWidth: number, hoveredRow?: number): StyledText =>
     renderFileRows(fileTreeRows(readyOr(model.changedFiles, []), innerWidth, true), hoveredRow),
 )
-
-export const renderTranscript = (model: Model): string => {
-  const welcome = model.entries.length === 0 ? `Rika\nLocal durable coding agent\n\n` : ""
-  const renderEntry = (entry: Model["entries"][number]): string => {
-    if (entry.role === "user") return `┃ ${entry.text}`
-    if (entry.role === "notice") return `! ${entry.text}`
-    return renderMarkdown(entry.text, transcriptWrapWidth(model.width))
-  }
-  const entries = model.entries.map(renderEntry).join("\n\n")
-  const blocks = (model.blocks as ReadonlyArray<TranscriptBlock>)
-    .map((block) => {
-      if (block._tag === "Permission" && block.status === "pending") {
-        const options = ["Allow once", "Always", "Deny"]
-          .map((option, index) => `${index === model.permissionSelection ? "›" : " "} ${option}`)
-          .join("   ")
-        return `${renderBlock(block, model.width)}\n  ${options}`
-      }
-      return renderBlock(block, model.width)
-    })
-    .join("\n\n")
-  if (model.items.length === 0)
-    return welcome + entries + (blocks.length === 0 ? "" : `${model.entries.length === 0 ? "" : "\n\n"}${blocks}`)
-  const ordered = (model.items as ReadonlyArray<TranscriptItem>).map((item) => {
-    if (item._tag === "Block") return renderBlock(model.blocks[item.index] as TranscriptBlock, model.width)
-    const entry = model.entries[item.index]!
-    return renderEntry(entry)
-  })
-  return welcome + ordered.join("\n\n")
-}
 
 const ToolInputJson = Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
 
