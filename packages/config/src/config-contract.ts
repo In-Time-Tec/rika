@@ -612,8 +612,7 @@ export const decodeSettingsInput: {
       for (const [agent, route] of Object.entries(value.modelRoutes.agents))
         roleRoute(`Model route agent ${agent}`, route)
     }
-    if (value.modelRoutes.compaction !== undefined)
-      roleRoute("Model route compaction", value.modelRoutes.compaction)
+    if (value.modelRoutes.compaction !== undefined) roleRoute("Model route compaction", value.modelRoutes.compaction)
   }
   if (value.keymap !== undefined) stringMap(path, "Keymap", value.keymap)
   if (value.permissions !== undefined) {
