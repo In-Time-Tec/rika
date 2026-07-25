@@ -56,6 +56,7 @@ import {
   type Model,
   type QueueItem,
   type TranscriptItem,
+  isThreadBusy,
 } from "./view-state"
 import type { ModeRouteLabel, ThreadItem, TranscriptBlock } from "./view-state"
 import { applyTurnUnits as projectUnits, type Event } from "./transcript-presenter"
@@ -295,7 +296,7 @@ export const renderSidebar: {
         const selected = model.threadSidebar.focused && index === model.threadSidebar.selected
         let marker = " "
         if (thread.id === model.currentThreadId) marker = "*"
-        else if (thread.status !== "idle") marker = spinnerFrame
+        else if (isThreadBusy(thread.status)) marker = spinnerFrame
         else if (thread.unread) marker = "○"
         const title = truncateToWidth(thread.title, sidebarWidth - 4)
         const padding = " ".repeat(Math.max(0, sidebarWidth - 4 - stringWidth(title)))
@@ -305,7 +306,7 @@ export const renderSidebar: {
           chunks.push(fg(colors.text)(" "))
           let styledMarker = fg(colors.text)(marker)
           if (thread.id === model.currentThreadId) styledMarker = fg(colors.green)(marker)
-          else if (thread.status !== "idle") styledMarker = fg(colors.blue)(marker)
+          else if (isThreadBusy(thread.status)) styledMarker = fg(colors.blue)(marker)
           else if (thread.unread) styledMarker = dim(fg(colors.blue)(marker))
           chunks.push(styledMarker)
           chunks.push(fg(colors.text)(` ${title}${padding}`))
@@ -3314,7 +3315,7 @@ export class Surface {
         model.usageTime?._tag === "Available" &&
         model.usageTime.activeSince !== undefined) ||
       (model.threadSidebar.open &&
-        (model.threads as ReadonlyArray<ThreadItem>).some((thread) => thread.status !== "idle"))
+        (model.threads as ReadonlyArray<ThreadItem>).some((thread) => isThreadBusy(thread.status)))
     if (this.options.animate !== false && loaderActive && this.loaderTimer === undefined) {
       this.loaderTimer = this.clock.setInterval(() => this.tickLoader(), spinnerInterval)
     } else if ((this.options.animate === false || !loaderActive) && this.loaderTimer !== undefined) {

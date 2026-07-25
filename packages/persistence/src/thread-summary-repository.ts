@@ -3,9 +3,10 @@ import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as ThreadRepository from "./thread-repository"
 import { ThreadId } from "./thread-schema"
-import { EditTotals, RepairCandidate, SummaryStatus, ThreadSummary } from "./thread-summary-schema"
+import { EditTotals, RepairCandidate, ThreadSummary } from "./thread-summary-schema"
 import * as TurnRepository from "./turn-repository"
 import { Status, TurnId } from "./turn-schema"
+import * as ThreadState from "./thread-state"
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("ThreadSummaryRepositoryError", {
   message: Schema.String,
@@ -55,6 +56,7 @@ const SummaryRow = Schema.Struct({
   pinned: Schema.Finite,
   archived: Schema.Finite,
   status_rank: Schema.Finite,
+  last_status: Schema.NullOr(Schema.String),
   last_activity_at: Schema.Finite,
   last_read_at: Schema.NullOr(Schema.Finite),
   turn_count: Schema.Finite,
@@ -73,18 +75,6 @@ const RepairRow = Schema.Struct({
 
 const repositoryError = (error: unknown) => RepositoryError.make({ message: String(error) })
 const listLimit = (value: number | undefined) => Math.min(Math.max(value ?? 100, 1), 100)
-const statusRank = (status: Status): number => {
-  if (status === "accepted" || status === "running") return 3
-  if (status === "waiting") return 2
-  if (status === "queued") return 1
-  return 0
-}
-const summaryStatus = (rank: number): SummaryStatus => {
-  if (rank >= 3) return "running"
-  if (rank === 2) return "waiting"
-  if (rank === 1) return "queued"
-  return "idle"
-}
 
 const decodeSummary = (row: unknown) =>
   Schema.decodeUnknownEffect(SummaryRow)(row).pipe(
@@ -103,7 +93,10 @@ const decodeSummary = (row: unknown) =>
         title: value.title,
         pinned: value.pinned === 1,
         archived: value.archived === 1,
-        status: summaryStatus(value.status_rank),
+        status: ThreadState.threadStateFromRank({
+          rank: value.status_rank,
+          lastStatus: value.last_status ?? undefined,
+        }),
         unread: value.last_activity_at > (value.last_read_at ?? 0),
         lastActivityAt: value.last_activity_at,
         ...(editTotals === undefined ? {} : { editTotals }),
@@ -156,7 +149,6 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
             ? [activity]
             : []
         })
-        const rank = history.reduce((maximum, turn) => Math.max(maximum, statusRank(turn.status)), 0)
         const lastActivityAt = Math.max(
           thread.createdAt,
           ...history.map((turn) => turn.updatedAt),
@@ -176,7 +168,7 @@ export const makeMemory = Effect.fn("ThreadSummaryRepository.makeMemory")(functi
           title: thread.title,
           pinned: thread.pinned,
           archived: thread.archived,
-          status: summaryStatus(rank),
+          status: ThreadState.threadState(history.map((turn) => turn.status)),
           unread: lastActivityAt > (readValues.get(thread.id) ?? 0),
           lastActivityAt,
           ...(history.length > 0 && currentProjected.length === history.length ? { editTotals: totals } : {}),
@@ -266,12 +258,10 @@ export const layer = Layer.effect(
           thread.title,
           thread.pinned,
           thread.archived,
-          MAX(CASE
-            WHEN turn.status IN ('accepted', 'running') THEN 3
-            WHEN turn.status = 'waiting' THEN 2
-            WHEN turn.status = 'queued' THEN 1
-            ELSE 0
-          END) AS status_rank,
+          MAX(${sql.unsafe(ThreadState.rankCase("turn.status"))}) AS status_rank,
+          (SELECT last.status FROM rika_turns AS last
+            WHERE last.thread_id = thread.id
+            ORDER BY last.created_at DESC, last.id DESC LIMIT 1) AS last_status,
           MAX(
             thread.created_at,
             COALESCE(MAX(turn.updated_at), thread.created_at),

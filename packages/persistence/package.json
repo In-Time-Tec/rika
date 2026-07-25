@@ -10,6 +10,7 @@
     "./repository": "./src/thread-repository.ts",
     "./thread": "./src/thread-schema.ts",
     "./thread-interaction-repository": "./src/thread-interaction-repository.ts",
+    "./thread-state": "./src/thread-state.ts",
     "./thread-summary": "./src/thread-summary-schema.ts",
     "./thread-summary-repository": "./src/thread-summary-repository.ts",
     "./thread-search-repository": "./src/thread-search-repository.ts",

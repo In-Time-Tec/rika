@@ -166,7 +166,7 @@ describe("memory thread summaries", () => {
       yield* turns.finishQueuedClaim(claimed, "running", undefined, undefined, 5)
       expect((yield* summaries.list())[0]?.status).toBe("running")
       yield* turns.setStatus(claimed.turn.id, "waiting", undefined, 6)
-      expect((yield* summaries.list())[0]?.status).toBe("waiting")
+      expect((yield* summaries.list())[0]?.status).toBe("awaiting-approval")
       yield* turns.setStatus(claimed.turn.id, "completed", undefined, 7)
       expect((yield* summaries.list())[0]?.status).toBe("idle")
     }).pipe(provideLayer(layer)),

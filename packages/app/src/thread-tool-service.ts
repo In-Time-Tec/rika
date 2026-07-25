@@ -8,6 +8,7 @@ import { ExecutionStatus, ThreadTools, ToolInvocation } from "@rika/tools"
 import { Clock, Context, Effect, Ref, Schema } from "effect"
 import type * as RootTurnOwner from "./root-turn-owner"
 import { clampThreadTitle } from "./thread-title"
+import * as ThreadState from "@rika/persistence/thread-state"
 
 export interface Options {
   readonly scheduler: Pick<RootTurnOwner.Interface, "accepted">
@@ -86,14 +87,8 @@ const limits = { maximumDepth: 3, maximumAdmissions: 8, maximumWorkspaceActive: 
 const delivery = (value: "reply" | "manual" | undefined) => value ?? "reply"
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex")
 const terminal = ExecutionStatus.isTerminalStatus
-const state = (turns: ReadonlyArray<Turn.Turn>): ThreadTools.ThreadState => {
-  const active = turns.find((turn) => !terminal(turn.status) && turn.status !== "queued")
-  if (active?.status === "waiting") return "awaiting-approval"
-  if (active !== undefined) return "running"
-  if (turns.some((turn) => turn.status === "queued")) return "queued"
-  if (turns.at(-1)?.status === "failed") return "error"
-  return "idle"
-}
+const state = (turns: ReadonlyArray<Turn.Turn>): ThreadTools.ThreadState =>
+  ThreadState.threadState(turns.map((turn) => turn.status))
 
 export const make = Effect.fn("ThreadToolService.make")(function* (options: Options) {
   const interactions = yield* ThreadInteractionRepository.Service

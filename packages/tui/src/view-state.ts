@@ -149,13 +149,15 @@ export type Entry = typeof Entry.Type
 
 export type TranscriptBlock = Transcript.Block
 
+export const isThreadBusy = (status: ThreadItem["status"]): boolean => status !== "idle" && status !== "error"
+
 export interface ThreadItem {
   readonly id: string
   readonly title: string
   readonly workspace: string
   readonly pinned: boolean
   readonly archived: boolean
-  readonly status: "idle" | "queued" | "running" | "waiting"
+  readonly status: "idle" | "error" | "queued" | "running" | "awaiting-approval"
   readonly unread: boolean
   readonly lastActivityAt: number
   readonly editTotals?: { readonly added: number; readonly modified: number; readonly removed: number }

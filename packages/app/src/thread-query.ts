@@ -6,6 +6,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import type * as Transcript from "@rika/transcript"
 import { Context, DateTime, Effect, Layer, Schema } from "effect"
+import * as ThreadState from "@rika/persistence/thread-state"
 
 export const schemaVersion = 2 as const
 export const transcriptBudget = 36_000
@@ -136,12 +137,7 @@ const bounded = (name: string, value: number | undefined, fallback: number, maxi
 const safeText = (text: string, limit: number) => [...text].slice(0, limit).join("")
 const threadState = (
   threadTurns: ReadonlyArray<TurnRepository.PageResult["turns"][number]>,
-): FindSuccess["threads"][number]["state"] => {
-  if (threadTurns.some((turn) => turn.status === "waiting")) return "awaiting-approval"
-  if (threadTurns.some((turn) => turn.status === "running" || turn.status === "accepted")) return "running"
-  if (threadTurns.some((turn) => turn.status === "queued")) return "queued"
-  return threadTurns.at(-1)?.status === "failed" ? "error" : "idle"
-}
+): FindSuccess["threads"][number]["state"] => ThreadState.threadState(threadTurns.map((turn) => turn.status))
 const message = (
   unit: Transcript.Unit,
   all: ReadonlyArray<Transcript.Unit>,

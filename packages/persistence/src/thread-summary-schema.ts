@@ -1,8 +1,9 @@
 import { Schema } from "effect"
 import { ThreadId } from "./thread-schema"
 import { TurnId } from "./turn-schema"
+import { ThreadState } from "./thread-state"
 
-export const SummaryStatus = Schema.Literals(["idle", "queued", "running", "waiting"])
+export const SummaryStatus = ThreadState
 export type SummaryStatus = typeof SummaryStatus.Type
 
 export const EditTotals = Schema.Struct({
