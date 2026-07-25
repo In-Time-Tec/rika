@@ -85,7 +85,15 @@ import {
   type ViewportMetrics,
   type ViewportAnchor,
 } from "./transcript-viewport"
-import { escapeControlCharacters, formatBytes, formatTokens, homeRelativePath, plural, truncateToWidth } from "./format"
+import {
+  escapeControlCharacters,
+  formatBytes,
+  formatTokens,
+  homeRelativePath,
+  plural,
+  relativeTime,
+  truncateToWidth,
+} from "./format"
 import { renderMarkdownLines, renderMarkdownStyled } from "./markdown-renderer"
 import { renderDiff, renderDiffStyled, renderPartialDiffStyled } from "./diff-renderer"
 import { renderPierreDiff } from "./pierre-diff"
@@ -3646,15 +3654,8 @@ const modePickerContent = (model: Model, innerWidth: number): StyledText => {
   return new StyledText(chunks)
 }
 
-const threadAge = (updatedAt: number | undefined, now: number): string => {
-  if (updatedAt === undefined || updatedAt <= 0) return ""
-  const minutes = Math.floor(Math.max(0, now - updatedAt) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes}m ago`
-  const hours = Math.floor(minutes / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.floor(hours / 24)}d ago`
-}
+const threadAge = (updatedAt: number | undefined, now: number): string =>
+  updatedAt === undefined || updatedAt <= 0 ? "" : relativeTime(now - updatedAt)
 
 const splitStyledLines = (styled: StyledText): Array<Array<TextChunk>> => {
   const lines: Array<Array<TextChunk>> = [[]]

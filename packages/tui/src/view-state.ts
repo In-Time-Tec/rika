@@ -6,7 +6,8 @@ import type { Key } from "./keys"
 import { isPrintable } from "./keys"
 import { filter, type PaletteAction } from "./palette"
 import { expandableRowIds, rows as transcriptUnits, unitId as transcriptUnitId } from "./transcript-presenter"
-import { ModeId } from "@rika/config/modes"
+import { ModeId, modeIds } from "@rika/config/modes"
+import { defaults as configDefaults, resolveModelRoute } from "@rika/config"
 
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -346,14 +347,18 @@ const ModeRoutesSchema = Schema.Record(
 export type ModeRouteLabel = typeof ModeRouteLabelSchema.Type
 export type ModeRoutes = typeof ModeRoutesSchema.Type
 
-const modeLabel = (name: string, effort: string): ModeRouteLabel => ({ name, effort, fast: false })
+const modeLabel = (route: { readonly displayName: string; readonly effort: string; readonly fast: boolean }) =>
+  ({ name: route.displayName, effort: route.effort, fast: route.fast }) satisfies ModeRouteLabel
 
-export const defaultModeRoutes: ModeRoutes = {
-  low: { main: modeLabel("GPT-5.6 Luna", "xhigh"), oracle: modeLabel("GPT-5.6 Terra", "xhigh") },
-  medium: { main: modeLabel("GPT-5.6 Terra", "xhigh"), oracle: modeLabel("GPT-5.6 Sol", "medium") },
-  high: { main: modeLabel("GPT-5.6 Sol", "medium"), oracle: modeLabel("GPT-5.6 Sol", "high") },
-  ultra: { main: modeLabel("GPT-5.6 Sol", "xhigh"), oracle: modeLabel("GPT-5.6 Sol", "max") },
-}
+export const defaultModeRoutes: ModeRoutes = Object.fromEntries(
+  modeIds.map((mode) => [
+    mode,
+    {
+      main: modeLabel(resolveModelRoute(configDefaults, mode, "main")),
+      oracle: modeLabel(resolveModelRoute(configDefaults, mode, "oracle")),
+    },
+  ]),
+)
 const FilePickerStateSchema = Schema.Struct({
   open: Schema.Boolean,
   query: Schema.String,

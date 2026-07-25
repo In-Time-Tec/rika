@@ -7,6 +7,7 @@ import {
   formatTokens,
   homeRelativePath,
   plural,
+  relativeTime,
 } from "../src/format"
 
 describe("format", () => {
@@ -43,6 +44,15 @@ describe("format", () => {
     expect(homeRelativePath("/var/home/ada/projects")).toBe("~/projects")
     expect(homeRelativePath("/home/ada")).toBe("~")
     expect(homeRelativePath("/srv/app")).toBe("/srv/app")
+  })
+
+  test("renders relative time on one ladder", () => {
+    expect(relativeTime(0)).toBe("now")
+    expect(relativeTime(30_000)).toBe("now")
+    expect(relativeTime(5 * 60_000)).toBe("5m ago")
+    expect(relativeTime(3 * 3_600_000)).toBe("3h ago")
+    expect(relativeTime(2 * 86_400_000)).toBe("2d ago")
+    expect(relativeTime(-5_000)).toBe("now")
   })
 
   test("formats byte sizes across tiers", () => {
