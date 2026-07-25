@@ -1,11 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Effect, Exit, Layer } from "effect"
+import { Effect, Exit, Layer, Schema } from "effect"
 import { ProductAgent } from "../src/index"
 import { provideLayer } from "./layer"
 import { executionRoute } from "./current-state"
 
 describe("ProductAgent", () => {
+  it("accepts every canonical runtime Agent profile", () => {
+    expect(ProductAgent.Profile.literals).toEqual(ExecutionBackend.AgentProfile.literals)
+    expect(Schema.is(ProductAgent.Profile)("Surgeon")).toBe(true)
+  })
+
   it.effect("delegates every service operation, maps failures, and selects every profile", () =>
     Effect.gen(function* () {
       const failure = ExecutionBackend.BackendError.make({ message: "nope" })

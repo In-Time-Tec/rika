@@ -64,6 +64,10 @@ export const reviewTool = specialist(
   "review",
   "Delegate a focused correctness and regression review to the read-only Review product agent and wait for its result",
 )
+export const surgeonTool = specialist(
+  "surgeon",
+  "Delegate reproducing and isolating a specific defect to the Surgeon product agent, which may run commands and add temporary instrumentation, and wait for its diagnosis",
+)
 export const readThreadTool = Tool.make("read_thread", {
   description:
     "Ask the ReadThread agent a focused question about one Rika Thread, or let it find relevant Threads when threadId is omitted",
@@ -73,12 +77,12 @@ export const readThreadTool = Tool.make("read_thread", {
   failureMode: "return",
 }).addDependency(ToolInvocation.ToolInvocation)
 
-export const delegationToolNames = ["task", "oracle", "librarian", "review", "read_thread"] as const
+export const delegationToolNames = ["task", "oracle", "librarian", "review", "surgeon", "read_thread"] as const
 export type DelegationToolName = (typeof delegationToolNames)[number]
 export const isDelegationToolName = (name: string): name is DelegationToolName =>
   delegationToolNames.includes(name as DelegationToolName)
 
-export const modelToolkit = Toolkit.make(taskTool, oracleTool, librarianTool, reviewTool, readThreadTool)
+export const modelToolkit = Toolkit.make(taskTool, oracleTool, librarianTool, reviewTool, surgeonTool, readThreadTool)
 
 export const registrations: ReadonlyArray<Policy.Registration> = [
   Policy.register(
@@ -116,6 +120,15 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
       activeLabel: "Reviewing code",
       completeLabel: "Reviewed code",
       counter: "review",
+    }),
+  ),
+  Policy.register(
+    surgeonTool,
+    Policy.allow("unsafe", 120_000, 40_000, {
+      family: "agent",
+      action: "surgeon",
+      activeLabel: "Surgeon operating",
+      completeLabel: "Surgeon closed up",
     }),
   ),
   Policy.register(

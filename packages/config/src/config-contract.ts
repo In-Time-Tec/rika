@@ -3,7 +3,7 @@ import { defaults as modelDefaults, presetIds, presets, supportedEfforts } from 
 
 export type ModeId = "low" | "medium" | "high" | "ultra"
 export type Role = "main" | "oracle"
-export type AgentId = "librarian" | "painter" | "review" | "readThread" | "task"
+export type AgentId = "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task"
 export type Effort = "low" | "medium" | "high" | "xhigh" | "max"
 export type PermissionDecision = "allow" | "ask" | "deny"
 export type LogLevel = "debug" | "info" | "warning" | "error"
@@ -78,7 +78,7 @@ export interface ModelRoutesInput {
   readonly modes?: Partial<Readonly<Record<ModeId, Partial<Readonly<Record<Role, string | RoleRouteInput>>>>>>
   readonly title?: string | RoleRouteInput
   readonly agents?: Partial<Readonly<Record<AgentId, string | RoleRouteInput>>>
-  readonly compaction?: string
+  readonly compaction?: string | RoleRouteInput
 }
 
 export const isStreamingOnlyBaseUrl = (baseUrl: string): boolean => {
@@ -294,7 +294,7 @@ export const resolveModelRoute: {
     resolveRoute(settings, settings.modes[mode][role], `Mode ${mode} ${role}`),
 )
 
-export const agentIds = ["librarian", "painter", "review", "readThread", "task"] as const
+export const agentIds = ["librarian", "painter", "review", "readThread", "surgeon", "task"] as const
 
 const resolveAgentRouteImpl = (
   settings: Settings,
@@ -302,7 +302,7 @@ const resolveAgentRouteImpl = (
   agent: AgentId,
   tuning?: { readonly fastMode?: boolean },
 ): ResolvedModelRoute => {
-  const role = agent === "task" ? "main" : "oracle"
+  const role = agent === "task" || agent === "surgeon" ? "main" : "oracle"
   const inherited = settings.modes[mode][role]
   const configured = settings.agents[agent]
   const fast = tuning?.fastMode ?? configured?.fast ?? inherited.fast ?? false
@@ -606,16 +606,13 @@ export const decodeSettingsInput: {
         "painter",
         "review",
         "readThread",
+        "surgeon",
         "task",
       ])
       for (const [agent, route] of Object.entries(value.modelRoutes.agents))
         roleRoute(`Model route agent ${agent}`, route)
     }
-    if (
-      value.modelRoutes.compaction !== undefined &&
-      (typeof value.modelRoutes.compaction !== "string" || value.modelRoutes.compaction.length === 0)
-    )
-      throw ConfigFileError.make({ path, message: "Model route compaction must be a non-empty alias" })
+    if (value.modelRoutes.compaction !== undefined) roleRoute("Model route compaction", value.modelRoutes.compaction)
   }
   if (value.keymap !== undefined) stringMap(path, "Keymap", value.keymap)
   if (value.permissions !== undefined) {

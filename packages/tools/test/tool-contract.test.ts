@@ -56,6 +56,7 @@ describe("tool contracts", () => {
       "oracle",
       "librarian",
       "review",
+      "surgeon",
       "read_thread",
       "create_thread",
       "thread_interact",

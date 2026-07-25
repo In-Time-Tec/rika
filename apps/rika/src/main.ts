@@ -921,8 +921,8 @@ const executionRoutePinFromPreparedImpl = (
 ): Turn.ExecutionRoutePin => {
   const routes = prepared.routes
   const plans = prepared.plans
-  if (routes.length !== 9 || plans.length !== routes.length)
-    throw new Error(`Expected nine prepared execution routes, received ${routes.length}`)
+  if (routes.length !== 10 || plans.length !== routes.length)
+    throw new Error(`Expected ten prepared execution routes, received ${routes.length}`)
   const main = executionModelRoute(routes[0]!, plans[0]!, "main")
   const oracle = executionModelRoute(routes[1]!, plans[1]!, "oracle")
   const agents = {
@@ -930,10 +930,11 @@ const executionRoutePinFromPreparedImpl = (
     painter: executionModelRoute(routes[5]!, plans[5]!, "painter"),
     review: executionModelRoute(routes[6]!, plans[6]!, "review"),
     readThread: executionModelRoute(routes[7]!, plans[7]!, "readThread"),
-    task: executionModelRoute(routes[8]!, plans[8]!, "task"),
+    surgeon: executionModelRoute(routes[8]!, plans[8]!, "surgeon"),
+    task: executionModelRoute(routes[9]!, plans[9]!, "task"),
   }
   const inherited = (agent: keyof typeof agents) =>
-    agents[agent].registrationKey === (agent === "task" ? main : oracle).registrationKey
+    agents[agent].registrationKey === (agent === "task" || agent === "surgeon" ? main : oracle).registrationKey
   const allInherited = (Object.keys(agents) as Array<keyof typeof agents>).every(inherited)
   return {
     mode,

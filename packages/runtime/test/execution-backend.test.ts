@@ -21,7 +21,7 @@ const native = vi.hoisted(() => ({
 }))
 
 const routeFor = (
-  role: "main" | "oracle" | "compaction" | "librarian" | "painter" | "review" | "readThread" | "task",
+  role: "main" | "oracle" | "compaction" | "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task",
   model: { readonly provider: string; readonly model: string; readonly registrationKey?: string },
   compaction: { readonly contextWindow: number; readonly reserveTokens: number; readonly keepRecentTokens: number },
 ) => ({
@@ -1782,6 +1782,7 @@ describe("ExecutionBackend Relay client adapter", () => {
             painter: routeFor("painter", selection, mainCompaction),
             review: routeFor("review", selection, mainCompaction),
             readThread: routeFor("readThread", selection, mainCompaction),
+            surgeon: routeFor("surgeon", selection, mainCompaction),
             task: routeFor("task", selection, mainCompaction),
           },
         }
@@ -1907,7 +1908,78 @@ describe("ExecutionBackend Relay client adapter", () => {
           painter: routeFor("painter", selection, mainCompaction),
           review: routeFor("review", selection, mainCompaction),
           readThread: routeFor("readThread", selection, mainCompaction),
+          surgeon: routeFor("surgeon", selection, mainCompaction),
           task: routeFor("task", selection, mainCompaction),
+        },
+      })
+    }),
+  )
+
+  it.effect("keeps Surgeon on the main route when Agent routes are omitted in fixed-selection mode", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      const fanOutInputs: Array<any> = []
+      Object.assign(fixture.implementation.childRuns, {
+        createFanOut: (input: any) => {
+          fanOutInputs.push(input)
+          return Effect.succeed({
+            fan_out_id: input.fan_out_id,
+            parent_execution_id: input.parent_execution_id,
+            state: "running",
+            max_concurrency: input.max_concurrency,
+            join: input.join,
+            members: [],
+          })
+        },
+      })
+      const mainSelection = { provider: "main-provider", model: "main-model" }
+      const oracleSelection = { provider: "oracle-provider", model: "oracle-model" }
+      const mainCompaction = { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 }
+      const oracleCompaction = { contextWindow: 1_000_000, reserveTokens: 128_000, keepRecentTokens: 64_000 }
+      const route = {
+        mode: "test" as const,
+        main: routeFor("main", mainSelection, mainCompaction),
+        oracle: routeFor("oracle", oracleSelection, oracleCompaction),
+      }
+
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* createFanOut(backend, {
+          fanOutId: "surgeon-route",
+          parentTurnId: "turn",
+          executionRoute: route,
+          children: [
+            { childId: "surgeon", profile: "Surgeon", prompt: "diagnose" },
+            { childId: "oracle", profile: "Oracle", prompt: "review" },
+          ],
+          maxConcurrency: 2,
+          join: "all",
+          createdAt: 2,
+        })
+      }).pipe(
+        provideConfiguredBackend(fixture.implementation, {
+          selection: mainSelection,
+          oracleSelection,
+          modelVariantPolicy: "fixed-selection",
+          compaction: mainCompaction,
+          oracleCompaction,
+        }),
+      )
+
+      expect(fanOutInputs[0].children[0].override).toMatchObject({
+        model: { provider: "main-provider", model: "main-model" },
+        compaction_policy: {
+          context_window: mainCompaction.contextWindow,
+          reserve_tokens: mainCompaction.reserveTokens,
+          keep_recent_tokens: mainCompaction.keepRecentTokens,
+        },
+      })
+      expect(fanOutInputs[0].children[1].override).toMatchObject({
+        model: { provider: "oracle-provider", model: "oracle-model" },
+        compaction_policy: {
+          context_window: oracleCompaction.contextWindow,
+          reserve_tokens: oracleCompaction.reserveTokens,
+          keep_recent_tokens: oracleCompaction.keepRecentTokens,
         },
       })
     }),

@@ -38,6 +38,13 @@ export const catalog = {
     limits: { contextWindow: 1_000_000, maxInputTokens: 872_000, maxOutputTokens: 128_000 },
     efforts: ["low", "medium", "high", "xhigh", "max"],
   },
+  claudeOpus5: {
+    source,
+    id: "claude-opus-5",
+    displayName: "Claude Opus 5",
+    limits: { contextWindow: 1_000_000, maxInputTokens: 872_000, maxOutputTokens: 128_000 },
+    efforts: ["low", "medium", "high", "xhigh", "max"],
+  },
   claudeOpus48: {
     source,
     id: "claude-opus-4-8",
@@ -115,6 +122,7 @@ export const defaults = {
   sol: gpt(catalog.gpt56Sol),
   review: gpt(catalog.gpt55),
   fable: claude(catalog.claudeFable5, [catalog.claudeFable5.id, catalog.claudeOpus48.id]),
+  opus5: claude(catalog.claudeOpus5, [catalog.claudeOpus5.id, catalog.claudeFable5.id]),
   opus: claude(catalog.claudeOpus48, [catalog.claudeOpus48.id]),
 } satisfies Readonly<Record<string, ModelAlias>>
 

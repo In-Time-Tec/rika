@@ -12,6 +12,7 @@ import {
 } from "../src/agent-profiles"
 
 const model = { provider: "test", model: "deterministic" }
+const threadRecoveryTools = ["search_threads", "read_thread_transcript"]
 const relayModel = (selection: {
   readonly provider: string
   readonly model: string
@@ -49,7 +50,7 @@ describe("product agent profiles", () => {
       expect(registered[name]).not.toHaveProperty("output_schema_ref")
     }
     expect(registered.Oracle).toMatchObject({
-      tool_names: ["grep", "read", "web_search", "read_thread"],
+      tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
     expect(registered.Oracle?.instructions).toContain(
@@ -91,7 +92,17 @@ describe("product agent profiles", () => {
     expect(mainInstructions).not.toContain("parallel delegation")
     expect(mainInstructions).not.toContain("same tool-call batch")
     expect(registered.Librarian).toMatchObject({
-      tool_names: ["web_search", "read_web_page", "task", "oracle", "librarian", "review", "read_thread"],
+      tool_names: [
+        "web_search",
+        "read_web_page",
+        "task",
+        "oracle",
+        "librarian",
+        "review",
+        "surgeon",
+        "read_thread",
+        ...threadRecoveryTools,
+      ],
       permissions: ["network.read", "thread.read"],
     })
     expect(registered.Librarian?.instructions).toContain("one to three focused queries")
@@ -116,7 +127,7 @@ describe("product agent profiles", () => {
     expect(registered.Librarian?.instructions).toContain("distinguish sourced facts from your conclusions")
     expect(registered.Librarian?.instructions).toContain("Stop when the evidence is sufficient")
     expect(registered.Review).toMatchObject({
-      tool_names: ["grep", "read", "web_search", "read_thread"],
+      tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
     expect(registered.Oracle?.tool_names).not.toContain("task")
@@ -145,7 +156,9 @@ describe("product agent profiles", () => {
         "oracle",
         "librarian",
         "review",
+        "surgeon",
         "read_thread",
+        ...threadRecoveryTools,
       ],
       permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
     })
@@ -166,7 +179,7 @@ describe("product agent profiles", () => {
     }
   })
 
-  it("routes Task to main and every specialist to oracle", () => {
+  it("routes Task and Surgeon to main and every read-only specialist to oracle", () => {
     const oracleModel = { provider: "oracle", model: "reasoning" }
 
     for (const registered of [presets({ model, oracleModel })]) {
@@ -177,6 +190,7 @@ describe("product agent profiles", () => {
       expect(registered.Painter?.model).toEqual(relayModel(oracleModel))
       expect(registered.Review?.model).toEqual(relayModel(oracleModel))
       expect(registered.ReadThread?.model).toEqual(relayModel(oracleModel))
+      expect(registered.Surgeon?.model).toEqual(relayModel(model))
     }
 
     expect(presets({ model, oracleModel }).Oracle?.model).toEqual(relayModel(oracleModel))
@@ -195,6 +209,7 @@ describe("product agent profiles", () => {
       "librarian",
       "review",
       "read_thread",
+      "surgeon",
       "task",
     ])
     expect(childRunSpawnPermission).toEqual({ name: "relay.child_run.spawn", value: true })
@@ -206,7 +221,16 @@ describe("product agent profiles", () => {
     Effect.gen(function* () {
       const painter = yield* resolvePainter(model, true)
       expect(painter.preset.model).toEqual(relayModel(model))
-      expect(painter.preset.tool_names).toEqual(["view_media", "task", "oracle", "librarian", "review", "read_thread"])
+      expect(painter.preset.tool_names).toEqual([
+        "view_media",
+        "task",
+        "oracle",
+        "librarian",
+        "review",
+        "surgeon",
+        "read_thread",
+        ...threadRecoveryTools,
+      ])
       expect(painter.preset.permissions).toEqual(["workspace.read", "thread.read"])
       const unavailable = yield* Effect.flip(resolvePainter(model, false))
       expect(unavailable._tag).toBe("PainterUnavailableError")

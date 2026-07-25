@@ -23,7 +23,17 @@ export type PromptPart =
   | { readonly type: "image"; readonly mediaType: string; readonly data: string; readonly filename?: string }
 
 export interface ExecutionModelRoute {
-  readonly role: "main" | "oracle" | "title" | "compaction" | "librarian" | "painter" | "review" | "readThread" | "task"
+  readonly role:
+    | "main"
+    | "oracle"
+    | "title"
+    | "compaction"
+    | "librarian"
+    | "painter"
+    | "review"
+    | "readThread"
+    | "surgeon"
+    | "task"
   readonly alias: string
   readonly provider: string
   readonly model: string
@@ -60,6 +70,7 @@ export interface ExecutionRoutePin {
     readonly painter: ExecutionModelRoute
     readonly review: ExecutionModelRoute
     readonly readThread: ExecutionModelRoute
+    readonly surgeon: ExecutionModelRoute
     readonly task: ExecutionModelRoute
   }
 }
@@ -98,7 +109,16 @@ export interface ExecutionExtensionPin {
   readonly resolvedContextDigest: string
 }
 
-export type AgentProfile = "Oracle" | "Librarian" | "Painter" | "Review" | "ReadThread" | "Task"
+export const AgentProfile = Schema.Literals([
+  "Oracle",
+  "Librarian",
+  "Painter",
+  "Review",
+  "ReadThread",
+  "Surgeon",
+  "Task",
+])
+export type AgentProfile = typeof AgentProfile.Type
 
 export type JoinPolicy = "all" | "first-success" | "quorum" | "best-effort"
 export interface FanOutInput {

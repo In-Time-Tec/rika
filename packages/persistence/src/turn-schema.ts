@@ -46,6 +46,7 @@ export const ExecutionModelRoute = Schema.Struct({
     "painter",
     "review",
     "readThread",
+    "surgeon",
     "task",
   ]),
   alias: Schema.String,
@@ -88,6 +89,7 @@ export const ExecutionRoutePin = Schema.Struct({
       painter: ExecutionModelRoute,
       review: ExecutionModelRoute,
       readThread: ExecutionModelRoute,
+      surgeon: ExecutionModelRoute,
       task: ExecutionModelRoute,
     }),
   ),
@@ -118,6 +120,7 @@ export const testExecutionRoute = (mode: "low" | "medium" | "high" | "ultra" | "
       painter: { ...route, role: "painter" },
       review: { ...route, role: "review" },
       readThread: { ...route, role: "readThread" },
+      surgeon: { ...route, role: "surgeon" },
       task: { ...route, role: "task" },
     },
   }

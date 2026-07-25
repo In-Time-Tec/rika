@@ -51,7 +51,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { createHash } from "node:crypto"
 import {
-  type AgentProfile,
+  AgentProfile,
   BackendError,
   Event,
   type ExecutionCheckpoint,
@@ -548,8 +548,12 @@ const reconcileUnsafeRecovery = (
 const routeForProfile = (pin: ExecutionRoutePin, profile: AgentProfile) => {
   const key = agentKeyForName(profile)
   const configured = key === undefined ? undefined : pin.agents?.[key]
-  return configured ?? (profile === "Task" ? pin.main : pin.oracle)
+  return configured ?? (usesMainRoute(profile) ? pin.main : pin.oracle)
 }
+
+const usesMainRoute = (profile: AgentProfile) => profile === "Task" || profile === "Surgeon"
+
+const InvocationProfile = Schema.Literals(["Root", "Title", ...AgentProfile.literals])
 
 const agentSelections = (pin: ExecutionRoutePin) =>
   pin.agents === undefined
@@ -1308,14 +1312,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             const children = yield* Effect.forEach(input.children, (child) => {
               const profile = child.profile ?? "Task"
               const profileRoute = routeForProfile(routePin, profile)
+              const mainRoute = usesMainRoute(profile)
               let selected = pinnedSelection(profileRoute)
               if (options.modelVariantPolicy === "fixed-selection")
-                selected = profile === "Task" ? options.selection : (options.oracleSelection ?? options.selection)
+                selected = mainRoute ? options.selection : (options.oracleSelection ?? options.selection)
               const preset = resolve(profile, selected).preset
               const policy =
                 options.modelVariantPolicy === "fixed-selection"
                   ? compactionPolicy(
-                      profile === "Task" ? options.compaction : (options.oracleCompaction ?? options.compaction),
+                      mainRoute ? options.compaction : (options.oracleCompaction ?? options.compaction),
                       options.compactionSummarySelection,
                     )
                   : pinnedCompactionPolicy(profileRoute, summaryModel)
@@ -1520,16 +1525,15 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                     }),
                   ).map(([name, preset]) => {
                     const profile = name as AgentProfile
-                    const profileRoute =
-                      profile === "Task" ? input.executionRoute.main : routeForProfile(input.executionRoute, profile)
-                    const effort =
-                      profile === "Task"
-                        ? (input.reasoningEffort ?? input.executionRoute.main.effort)
-                        : profileRoute.effort
+                    const mainRoute = usesMainRoute(profile)
+                    const profileRoute = routeForProfile(input.executionRoute, profile)
+                    const effort = mainRoute
+                      ? (input.reasoningEffort ?? input.executionRoute.main.effort)
+                      : profileRoute.effort
                     const policy =
                       options.modelVariantPolicy === "fixed-selection"
                         ? compactionPolicy(
-                            profile === "Task" ? options.compaction : (options.oracleCompaction ?? options.compaction),
+                            mainRoute ? options.compaction : (options.oracleCompaction ?? options.compaction),
                             options.compactionSummarySelection,
                           )
                         : pinnedCompactionPolicy(profileRoute, input.executionRoute.compactionSummary)
@@ -1809,17 +1813,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             )
               return yield* BackendError.make({ message: `Malformed invocation provenance for ${requestedId}` })
             const callerProfile: unknown = depth === 0 ? "Root" : profile
-            if (
-              typeof callerProfile !== "string" ||
-              !["Root", "Title", "Oracle", "Librarian", "Painter", "Review", "ReadThread", "Task"].includes(
-                callerProfile,
-              )
-            )
+            if (!Schema.is(InvocationProfile)(callerProfile))
               return yield* BackendError.make({ message: `Malformed invocation profile for ${requestedId}` })
             return {
               rootTurnId: rootExecution.slice("execution:".length),
               threadId,
-              callerProfile: callerProfile as AgentProfile | "Root" | "Title",
+              callerProfile,
               threadCreationDepth: depth,
               permissions: source.agent_snapshot.permissions.map((permission) => ({
                 name: permission.name,
@@ -2099,6 +2098,7 @@ export const layer = <
             oracle: (input) => delegation("oracle", "Oracle", input),
             librarian: (input) => delegation("librarian", "Librarian", input),
             review: (input) => delegation("review", "Review", input),
+            surgeon: (input) => delegation("surgeon", "Surgeon", input),
             read_thread: (input) => delegation("read_thread", "ReadThread", input),
           })
           const handlerLayer = Layer.mergeAll(
