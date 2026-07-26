@@ -227,6 +227,33 @@ describe("UsageCost", () => {
     })
   })
 
+  it("admits work evidence that repairs stale Relay timestamps into the observed stream", () => {
+    const work: ExecutionBackend.Event = {
+      id: "tool",
+      executionId: "execution",
+      cursor: "tool",
+      sequence: 2,
+      type: "tool.call.requested",
+      createdAt: 5_000,
+    }
+    const snapshot = [
+      lifecycle("execution", "start", "execution.started", 1_000, 1),
+      work,
+      lifecycle("execution", "wait", "wait.created", 1_000, 3),
+    ]
+      .filter((event) => UsageCost.isObservedEvent(event))
+      .reduce(
+        (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+        UsageCost.empty,
+      )
+
+    expect(UsageCost.isUsageBearingEvent(work)).toBe(false)
+    expect(UsageCost.activeTime(snapshot, "thread")).toEqual({
+      _tag: "Available",
+      accumulated: Duration.seconds(4),
+    })
+  })
+
   it("repairs a stale wait after its earlier work evidence arrives late", () => {
     const events = [
       lifecycle("execution", "start", "execution.started", 1_000, 1),

@@ -151,7 +151,12 @@ const activeEventTypes = new Set<string>([
   "execution.cancelled",
 ])
 
-export const isRelevantEvent = (event: ExecutionBackend.Event): boolean =>
+const isWorkEventType = (type: string): boolean => type.startsWith("model.") || type.startsWith("tool.")
+
+export const isObservedEvent = (event: ExecutionBackend.Event): boolean =>
+  activeEventTypes.has(event.type) || isWorkEventType(event.type)
+
+export const isUsageBearingEvent = (event: ExecutionBackend.Event): boolean =>
   activeEventTypes.has(event.type) ||
   event.type === "model.usage.reported" ||
   event.type === "model.attempt.completed" ||
@@ -318,7 +323,7 @@ const observeWorkTimestamp = (
   input: RootExecution & { readonly event: ExecutionBackend.Event },
 ): Snapshot => {
   const event = input.event
-  if (!event.type.startsWith("model.") && !event.type.startsWith("tool.")) return snapshot
+  if (!isWorkEventType(event.type)) return snapshot
   if (
     event.executionId === undefined ||
     event.executionId.length === 0 ||

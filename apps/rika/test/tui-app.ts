@@ -59,6 +59,7 @@ export interface TuiApp {
   readonly frame: () => string
   readonly spans: () => CapturedSpans
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
+  readonly waitFrameMatch: (predicate: (frame: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitTerminalTitle: (predicate: (title: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
   readonly settled: Effect.Effect<string>
@@ -218,6 +219,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     frame,
     spans: () => setup.captureSpans(),
     waitFrame: (marker, timeoutMillis = 60_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
+    waitFrameMatch: (predicate, timeoutMillis = 60_000) => waitFor(predicate, timeoutMillis),
     waitGone: (marker, timeoutMillis = 60_000) => waitFor((captured) => !captured.includes(marker), timeoutMillis),
     waitTerminalTitle: (predicate, timeoutMillis = 60_000) => waitTerminalTitle(predicate, timeoutMillis),
     settled,

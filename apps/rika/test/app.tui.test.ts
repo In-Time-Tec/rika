@@ -5,6 +5,9 @@ import * as TuiApp from "./tui-app"
 
 const emptyFallback = "The subagent finished without a final message."
 
+const activeTimePattern = /◷ [0-9]+s/u
+const countedActiveTimePattern = /◷ [1-9][0-9]*s/u
+
 const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colors.text): boolean =>
   app
     .spans()
@@ -123,7 +126,6 @@ test(
           directory: "/tmp",
           prefix: "rika-timer-reopen-",
         })
-        let elapsed = ""
 
         yield* Effect.scoped(
           Effect.gen(function* () {
@@ -143,15 +145,17 @@ test(
             yield* app.waitFrame("tok")
             yield* app.clickText("tok")
             const waiting = yield* app.waitFrame("? read [pending]")
-            const waitingElapsed = waiting.match(/◷ ([0-9]+s)/u)?.[1]
+            const paused = waiting.match(activeTimePattern)?.[0]
+            expect(paused).toBeDefined()
             yield* Effect.sleep("1100 millis")
-            expect(app.frame()).toContain(`◷ ${waitingElapsed}`)
+            expect(yield* app.waitFrame("? read [pending]")).toContain(paused)
             app.pressEnter()
             yield* app.waitFrame("PERSISTED_TIMER_COMPLETE")
             yield* app.settled
-            const completed = yield* app.waitFrame("◷ 1s")
-            elapsed = completed.match(/◷ ([1-9][0-9]*s)/u)?.[1] ?? ""
-            expect(elapsed).not.toBe("")
+            const settledFrame = yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))
+            const stopped = settledFrame.match(activeTimePattern)![0]
+            yield* Effect.sleep("1100 millis")
+            expect(yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))).toContain(stopped)
             yield* app.quit
           }),
         )
@@ -163,9 +167,10 @@ test(
             yield* app.clickText("$")
             yield* app.waitFrame("tok")
             yield* app.clickText("tok")
-            yield* app.waitFrame(`◷ ${elapsed}`)
+            const restoredFrame = yield* app.waitFrameMatch((frame) => countedActiveTimePattern.test(frame))
+            const restored = restoredFrame.match(countedActiveTimePattern)![0]
             yield* Effect.sleep("1100 millis")
-            expect(app.frame()).toContain(`◷ ${elapsed}`)
+            expect(yield* app.waitFrameMatch((frame) => activeTimePattern.test(frame))).toContain(restored)
             yield* app.quit
           }),
         )

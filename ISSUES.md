@@ -20,3 +20,14 @@ prompt into a fresh queued turn, leaving the original as a cancelled husk row;
 preserving the same turn id needs either a running-to-queued repository
 transition or a two-phase admission/start contract in the backend, tracked as
 follow-up.
+
+## A starved follow can drop wait.woken and stall the live active timer
+
+Under heavy CPU contention the root execution follow can resume after a tool
+approval without ever delivering the `wait.woken` event, so the live projection
+never reopens the active interval and the status line keeps showing only the
+work measured before the approval. Relay's durable event log is complete, so the
+value is correct again as soon as the thread is reopened, and reopening is what
+`apps/rika/test/app.tui.test.ts` asserts. Fixing this needs the actionable-wait
+stop and resume path in `packages/runtime/src/execution-backend.ts` to prove it
+cannot skip an event between the stop cursor and the resume cursor.
