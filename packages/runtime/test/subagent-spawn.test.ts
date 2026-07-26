@@ -96,7 +96,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
         layer: trackingLayer,
       })
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration,
         selection: fixture.selection,
@@ -115,7 +115,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
           startedAt: 1,
         })
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const children = database
@@ -229,7 +229,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
         registrationKey: "sol-medium",
       })
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
         additionalRegistrations: [oracle.registration],
@@ -259,7 +259,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
           executionRoute: route,
         })
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const child = database
@@ -335,7 +335,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
       )
       const transcriptReads = yield* Ref.make(0)
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
         additionalRegistrations: [oracle.registration],
@@ -368,7 +368,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
           executionRoute: route,
         })
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const children = database
@@ -451,7 +451,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
         compactionSummary: executionModelRoute("compaction", { provider: "legacy", model: "terra" }, "medium"),
       }
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: sol.registration,
         selection: sol.selection,
@@ -470,7 +470,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
           executionRoute,
         })
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const children = database
@@ -595,7 +595,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
         title: executionModelRoute("title", terra.selection),
       }
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: terraRegistration,
         additionalRegistrations: [solRegistration],
@@ -622,7 +622,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
         yield* Deferred.succeed(releaseNested, undefined)
         const settled = yield* Fiber.join(running)
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const children = database
@@ -779,7 +779,7 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
       ])
       const runtimeLayer = Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false }))
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,
         selection: fixture.selection,
@@ -810,7 +810,7 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
         )
         const inspection = yield* backend.inspect("turn-subagent")
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const childExecutionId = `child:${encodeURIComponent("execution:turn-subagent")}:call-oracle`
@@ -891,7 +891,7 @@ test("handoff children resolve real workspace tools through their parent Rika tu
       ])
       const workspaces = new Map([["turn-review", workspace]])
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,
         selection: fixture.selection,
@@ -932,7 +932,7 @@ test("handoff children resolve real workspace tools through their parent Rika tu
           }),
         )
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const toolResult = database
@@ -977,7 +977,7 @@ test("handoff child approval asks surface through the parent and resume after ap
         TestModel.text("Parent received the approved child result."),
       ])
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,
         selection: fixture.selection,
@@ -1044,7 +1044,7 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
         TestModel.text("Parent received the child result."),
       ])
       const backendLayer = RelayExecutionBackend.layer({
-        filename: `${directory}/relay.db`,
+        filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,
         selection: fixture.selection,
@@ -1073,7 +1073,7 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
         })
         const inspection = yield* backend.inspect("turn-shared-call-id")
         const database = yield* Effect.acquireRelease(
-          Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
         )
         const readResult = database

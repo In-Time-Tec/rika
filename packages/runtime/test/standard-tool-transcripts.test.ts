@@ -49,7 +49,7 @@ for (const [name, parameters, malformedField] of cases) {
             : Effect.succeed({ text: bounded, truncated: true }),
         )
         const backendLayer = RelayExecutionBackend.layer({
-          filename: `${directory}/relay.db`,
+          filename: `${directory}/execution.db`,
           workspace: directory,
           registration: fixture.registration,
           selection: fixture.selection,
@@ -119,7 +119,7 @@ for (const [name, parameters, malformedField] of cases) {
                 )
                 const backendContext = yield* Layer.build(
                   RelayExecutionBackend.layer({
-                    filename: `${directory}/relay.db`,
+                    filename: `${directory}/execution.db`,
                     workspace: directory,
                     registration: fixture.registration,
                     selection: fixture.selection,

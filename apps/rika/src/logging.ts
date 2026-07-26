@@ -108,29 +108,6 @@ export const minimumLevel = effectLogLevel
 
 const isLogFile = (name: string) => name.endsWith(".jsonl") || name.endsWith(".bootstrap.log")
 
-export const resolveDataRoot = Effect.fn("Logging.resolveDataRoot")(function* (
-  productDatabase: string,
-  relayDatabase: string,
-) {
-  const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-  if (path.basename(productDatabase) !== "rika.db" || path.basename(relayDatabase) !== "relay.db")
-    return yield* Effect.die("RIKA_DATABASE and RIKA_RELAY_DATABASE must name rika.db and relay.db")
-  const productRoot = path.dirname(path.resolve(productDatabase))
-  const relayRoot = path.dirname(path.resolve(relayDatabase))
-  yield* Effect.all([
-    fs.makeDirectory(productRoot, { recursive: true }),
-    fs.makeDirectory(relayRoot, { recursive: true }),
-  ])
-  const [canonicalProductRoot, canonicalRelayRoot] = yield* Effect.all([
-    fs.realPath(productRoot),
-    fs.realPath(relayRoot),
-  ])
-  if (canonicalProductRoot !== canonicalRelayRoot)
-    return yield* Effect.die("RIKA_DATABASE and RIKA_RELAY_DATABASE must use one data directory")
-  return canonicalProductRoot
-})
-
 export const directory = Effect.fn("Logging.directory")(function* (dataRoot: string) {
   const path = yield* Path.Path
   return path.join(dataRoot, "diagnostics")

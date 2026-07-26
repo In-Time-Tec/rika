@@ -1,5 +1,5 @@
 # Resident service ownership
 
-One Resident Rika Service owns each canonical Profile and data root. It binds the Profile's authenticated loopback listener before opening `rika.db` and `relay.db`, then owns product SQLite, one Relay runtime graph, model registration, admission, reconciliation, and runtime fibers.
+One Resident Rika Service owns each canonical Profile and data root. It binds the Profile's authenticated loopback listener before opening `rika.db` and `execution.db`, then owns product SQLite, one Relay runtime graph, model registration, admission, reconciliation, and runtime fibers.
 
 Stateful CLI and terminal clients attach to that owner. They never open a fallback database or create a second execution graph when the resident is unavailable, incompatible, or still starting.

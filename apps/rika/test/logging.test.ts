@@ -240,22 +240,6 @@ describe("Logging", () => {
       }),
     )
 
-    test.effect("resolves one canonical data root from both database paths", () =>
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const path = yield* Path.Path
-        const parent = yield* fs.makeTempDirectoryScoped({ prefix: "rika-data-root-" })
-        const root = path.join(parent, "data")
-        const link = path.join(parent, "data-link")
-        yield* fs.makeDirectory(root)
-        yield* fs.symlink(root, link)
-        assert.strictEqual(
-          yield* Logging.resolveDataRoot(path.join(link, "rika.db"), path.join(root, "relay.db")),
-          yield* fs.realPath(root),
-        )
-      }),
-    )
-
     test.effect("honors the configured minimum level", () =>
       Effect.gen(function* () {
         const fs = yield* FileSystem.FileSystem

@@ -1,5 +1,5 @@
 import { type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
-import { relayEventHistoryFor } from "@rika/config/paths"
+import { executionEventHistoryFor } from "@rika/config/paths"
 import {
   AgentTools,
   Catalog as ToolCatalog,
@@ -324,7 +324,7 @@ const withResilience = (
 export const eventHistoryOption = (filename: string): { readonly eventHistory?: EventHistory.FileSystemConfig } =>
   filename === memoryDatabaseFilename
     ? {}
-    : { eventHistory: EventHistory.fileSystem({ directory: relayEventHistoryFor(filename) }) }
+    : { eventHistory: EventHistory.fileSystem({ directory: executionEventHistoryFor(filename) }) }
 
 const childExecutionIdFromEvent = (item: Execution.ExecutionEvent) => {
   const value = item.child_execution_id ?? item.data?.child_execution_id
@@ -624,7 +624,7 @@ const truncatedStreamReason =
   "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced."
 const silentChildReason = "The subagent finished its run without writing a final report."
 const unreconciledReason = (status: string) =>
-  `Relay reconciled the subagent's execution as ${status}, but its terminal event never reached Rika, so no report was recovered.`
+  `The subagent's execution finished as ${status}, but its final event never reached Rika, so no report was recovered.`
 
 export interface ChildResultInput {
   readonly childExecutionId: string

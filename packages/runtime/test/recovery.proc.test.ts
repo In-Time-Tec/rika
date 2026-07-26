@@ -62,7 +62,7 @@ test(
           const fileSystem = yield* FileSystem.FileSystem
           const path = yield* Path.Path
           const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-recovery-" })
-          const databaseFile = path.join(directory, "relay.db")
+          const databaseFile = path.join(directory, "execution.db")
           const startHost = (phase: string) =>
             spawnFixtureProcess({
               script,

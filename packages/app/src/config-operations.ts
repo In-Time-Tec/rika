@@ -16,8 +16,7 @@ export interface Options {
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
   readonly productDatabasePath: string
-  readonly relayDatabasePath: string
-  readonly upstream: ReadonlyArray<{ readonly name: string; readonly present: boolean }>
+  readonly executionDatabasePath: string
 }
 
 const json = (value: unknown) => Console.log(JSON.stringify(value, null, 2))
@@ -107,13 +106,15 @@ export const run = Effect.fn("ConfigOperations.run")(function* (
       yield* adapter.edit(input.workspace ? options.workspaceConfigPath : options.globalConfigPath)
     return
   }
-  const [productDatabase, relayDatabase] = yield* Effect.all([
+  const [productDatabase, executionDatabase] = yield* Effect.all([
     adapter.exists(options.productDatabasePath),
-    adapter.exists(options.relayDatabasePath),
+    adapter.exists(options.executionDatabasePath),
   ])
   yield* json({
-    databases: { product: productDatabase ? "present" : "missing", relay: relayDatabase ? "present" : "missing" },
-    upstream: Object.fromEntries(options.upstream.map(({ name, present }) => [name, present ? "present" : "missing"])),
+    databases: {
+      product: productDatabase ? "present" : "missing",
+      execution: executionDatabase ? "present" : "missing",
+    },
     config: {
       diagnostics: config.diagnostics,
       global: (yield* adapter.exists(options.globalConfigPath)) ? "present" : "missing",

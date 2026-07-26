@@ -2165,11 +2165,11 @@ describe("ExecutionBackend Relay client adapter", () => {
 
   it.effect("archives a persistent Relay database into the data root that holds it", () =>
     Effect.gen(function* () {
-      const calls = yield* buildRuntimeLayer("/tmp/rika-profile/relay.db")
+      const calls = yield* buildRuntimeLayer("/tmp/rika-profile/execution.db")
       expect(calls).toEqual([
         {
-          filename: "/tmp/rika-profile/relay.db",
-          eventHistory: { _tag: "FileSystem", directory: "/tmp/rika-profile/relay-event-history" },
+          filename: "/tmp/rika-profile/execution.db",
+          eventHistory: { _tag: "FileSystem", directory: "/tmp/rika-profile/execution-event-history" },
         },
       ])
     }),
@@ -2177,8 +2177,8 @@ describe("ExecutionBackend Relay client adapter", () => {
 
   it.effect("derives the same history directory on every start for one data root", () =>
     Effect.gen(function* () {
-      const first = yield* buildRuntimeLayer("/tmp/rika-profile/relay.db")
-      const second = yield* buildRuntimeLayer("/tmp/rika-profile/relay.db")
+      const first = yield* buildRuntimeLayer("/tmp/rika-profile/execution.db")
+      const second = yield* buildRuntimeLayer("/tmp/rika-profile/execution.db")
       expect(second).toEqual(first)
     }),
   )

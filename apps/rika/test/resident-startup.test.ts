@@ -148,7 +148,7 @@ test("reports an incompatible product database through resident startup without 
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-startup-database-" })
         const databasePath = `${root}/rika.db`
-        const relayPath = `${root}/relay.db`
+        const executionPath = `${root}/execution.db`
         yield* Effect.sync(() => {
           const database = new NativeDatabase(databasePath)
           database.exec("CREATE TABLE old_sessions (id TEXT PRIMARY KEY)")
@@ -165,7 +165,7 @@ test("reports an incompatible product database through resident startup without 
             env: {
               HOME: root,
               RIKA_DATABASE: databasePath,
-              RIKA_RELAY_DATABASE: relayPath,
+              RIKA_EXECUTION_DATABASE: executionPath,
             },
           }),
         )

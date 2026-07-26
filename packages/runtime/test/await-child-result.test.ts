@@ -247,11 +247,12 @@ describe("resolveChildResult", () => {
     expect(result.output).toEqual([{ type: "text", text: "second\n\npart one" }])
   })
 
-  it("classifies a child whose terminal event never arrived from Relay's reconciled status", () => {
+  it("classifies a child whose terminal event never arrived from the reconciled execution status", () => {
     const result = resolve([{ type: "model.output.completed", content: [{ type: "text", text: "partial" }] }], "failed")
     expect(result._tag).toBe("Failed")
     if (result._tag !== "Failed") throw new Error("expected Failed")
-    expect(result.reason).toContain("terminal event never reached Rika")
+    expect(result.reason).toContain("final event never reached Rika")
+    expect(result.reason).not.toMatch(/relay/i)
     expect(result.output).toEqual([{ type: "text", text: "partial" }])
   })
 })

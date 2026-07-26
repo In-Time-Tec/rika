@@ -72,7 +72,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     PATH: path,
     TERM: "xterm-256color",
     RIKA_DATABASE: `${state}/rika.db`,
-    RIKA_RELAY_DATABASE: `${state}/relay.db`,
+    RIKA_EXECUTION_DATABASE: `${state}/execution.db`,
     RIKA_INTERNAL_RESIDENT_GRACE: "100",
     RELAY_EVENT_POLL_INTERVAL_MILLIS: "50",
     RELAY_EVENT_POLL_IDLE_INTERVAL_MILLIS: "250",

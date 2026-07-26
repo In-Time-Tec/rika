@@ -23,7 +23,7 @@ export const globalPaths = (home: string) => ({
 
 export const dataPaths = (home: string) => ({
   database: under(home, workspaceDirectory, "rika.db"),
-  relayDatabase: under(home, workspaceDirectory, "relay.db"),
+  executionDatabase: under(home, workspaceDirectory, "execution.db"),
 })
 
 const parentDirectory = (filename: string): string => {
@@ -33,5 +33,5 @@ const parentDirectory = (filename: string): string => {
   return filename.slice(0, separator)
 }
 
-export const relayEventHistoryFor = (relayDatabase: string): string =>
-  under(parentDirectory(relayDatabase), "relay-event-history")
+export const executionEventHistoryFor = (executionDatabase: string): string =>
+  under(parentDirectory(executionDatabase), "execution-event-history")

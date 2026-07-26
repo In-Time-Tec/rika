@@ -107,7 +107,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
       Layer.orDie,
     )
   const backendLayer = RelayExecutionBackend.layer({
-    filename: path.join(root, "relay.db"),
+    filename: path.join(root, "execution.db"),
     workspace,
     registration: fixture.registration,
     selection: fixture.selection,

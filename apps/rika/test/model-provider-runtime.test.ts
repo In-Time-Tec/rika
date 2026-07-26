@@ -410,7 +410,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
           })
           const backendContext = yield* Layer.build(
             RelayExecutionBackend.layer({
-              filename: `${directory}/relay.db`,
+              filename: `${directory}/execution.db`,
               workspace: directory,
               registration,
               additionalRegistrations: [summaryRegistration],
@@ -437,7 +437,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
             startedAt: 2,
             executionRoute: executionRoutePin(settings, "medium"),
           })
-          const database = new Database(`${directory}/relay.db`, { readonly: true })
+          const database = new Database(`${directory}/execution.db`, { readonly: true })
           const checkpoint = database
             .query("SELECT count(*) AS count FROM relay_agent_compactions WHERE execution_id = ?")
             .get("execution:turn-openai-overflow") as { count: number }

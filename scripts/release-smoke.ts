@@ -77,7 +77,7 @@ const program = Effect.scoped(
     const environment = {
       HOME: home,
       RIKA_DATABASE: path.join(state, "rika.db"),
-      RIKA_RELAY_DATABASE: path.join(state, "relay.db"),
+      RIKA_EXECUTION_DATABASE: path.join(state, "execution.db"),
       RIKA_INTERNAL_RESIDENT_GRACE: "0",
       RIKA_TEST_MODEL_SCRIPT: grepScript,
     }
@@ -117,6 +117,13 @@ const program = Effect.scoped(
     const version = yield* output(["--version"])
     if (!version.includes(manifest.version))
       return yield* failure("version", `Expected version ${manifest.version}, received: ${version}`)
+    const help = yield* output(["--help"])
+    const branded = [
+      { command: "--version", text: version },
+      { command: "--help", text: help },
+    ].find(({ text }) => /relay/i.test(text))
+    if (branded !== undefined)
+      return yield* failure("branding", `${branded.command} output names an upstream framework: ${branded.text}`)
     if (Bun.argv.includes("--boot-only")) {
       yield* Effect.log(`Release boot smoke passed for ${target}`)
       return

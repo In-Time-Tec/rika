@@ -26,6 +26,7 @@ import { command, version } from "./command"
 import * as Logging from "./logging"
 import { layer as residentLayer } from "./resident-client-transport"
 import * as ResidentProcessStartup from "./resident-process-startup"
+import * as DataRoot from "@rika/config/data-root"
 import { dataPaths } from "@rika/config/paths"
 
 const provideLayerScoped =
@@ -127,10 +128,10 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
           return yield* Effect.gen(function* () {
             const home = yield* Config.string("HOME").pipe(Config.withDefault(process.cwd()))
             const database = yield* Config.string("RIKA_DATABASE").pipe(Config.withDefault(dataPaths(home).database))
-            const relayDatabase = yield* Config.string("RIKA_RELAY_DATABASE").pipe(
-              Config.withDefault(dataPaths(home).relayDatabase),
+            const executionDatabase = yield* Config.string("RIKA_EXECUTION_DATABASE").pipe(
+              Config.withDefault(dataPaths(home).executionDatabase),
             )
-            const dataRoot = yield* Logging.resolveDataRoot(database, relayDatabase)
+            const dataRoot = yield* DataRoot.canonicalDataRoot(database, executionDatabase)
             const forwardedArguments = argv ?? (yield* stdio.args)
             return yield* Effect.scoped(
               Effect.gen(function* () {

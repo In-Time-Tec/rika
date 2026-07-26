@@ -2,7 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { AiError, ModelRegistry, ModelResilience, Response } from "@batonfx/core"
 import { classifyFailure as classifyOpenAiFailure } from "@batonfx/providers/openai"
 import { TestModel } from "@batonfx/test"
-import { relayEventHistoryFor } from "@rika/config/paths"
+import { executionEventHistoryFor } from "@rika/config/paths"
 import { Runtime as RikaToolRuntime, ToolInvocation } from "@rika/tools"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
@@ -78,7 +78,7 @@ const withBackend = <A, E, AdditionalTools extends Record<string, Tool.Any> = {}
       return yield* provide(
         run(fixture, directory),
         RelayExecutionBackend.layer({
-          filename: `${directory}/relay.db`,
+          filename: `${directory}/execution.db`,
           workspace: directory,
           registration: registration?.(fixture) ?? fixture.registration,
           selection: fixture.selection,
@@ -427,7 +427,7 @@ test(
                 startedAt: 1,
               })
               const stored = yield* Effect.acquireUseRelease(
-                Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+                Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
                 (database) =>
                   Effect.sync(() =>
                     database
@@ -483,7 +483,7 @@ test(
                 startedAt: 2,
               })
               const calls = yield* Effect.acquireUseRelease(
-                Effect.sync(() => new Database(`${directory}/relay.db`, { readonly: true })),
+                Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
                 (database) =>
                   Effect.sync(() =>
                     database
@@ -603,7 +603,7 @@ test(
             ])
             let runtimeBuilds = 0
             const backendLayer = RelayExecutionBackend.layer({
-              filename: `${directory}/relay.db`,
+              filename: `${directory}/execution.db`,
               workspace: directory,
               registration: fixture.registration,
               selection: fixture.selection,
@@ -679,7 +679,7 @@ test(
               TestModel.object({ summary: "verified", files: [] }),
             ])
             const backendLayer = RelayExecutionBackend.layer({
-              filename: `${directory}/relay.db`,
+              filename: `${directory}/execution.db`,
               workspace: directory,
               registration: fixture.registration,
               selection: fixture.selection,
@@ -714,7 +714,7 @@ test(
                     schedule: Schedule.spaced("20 millis"),
                   }),
                 )
-                const database = new Database(`${directory}/relay.db`, { readonly: true })
+                const database = new Database(`${directory}/execution.db`, { readonly: true })
                 const childSnapshots = database
                   .query<
                     { readonly agent_snapshot_json: string },
@@ -905,7 +905,7 @@ test(
                   schedule: Schedule.spaced("20 millis"),
                 }),
               )
-              const database = new Database(`${directory}/relay.db`, { readonly: true })
+              const database = new Database(`${directory}/execution.db`, { readonly: true })
               const childExecutions = database
                 .query<
                   { readonly id: string; readonly status: string; readonly agent_snapshot_json: string },
@@ -998,7 +998,7 @@ test(
                 }
               }),
               RelayExecutionBackend.layer({
-                filename: `${directory}/relay.db`,
+                filename: `${directory}/execution.db`,
                 workspace: directory,
                 registration: main.registration,
                 additionalRegistrations: [oracle.registration],
@@ -1088,7 +1088,7 @@ test(
                 prompt: "read fixture.txt and finish",
                 startedAt: 1,
               })
-              const database = new Database(`${directory}/relay.db`, { readonly: true })
+              const database = new Database(`${directory}/execution.db`, { readonly: true })
               const checkpoints = database
                 .query("SELECT checkpoint_id, summary FROM relay_agent_compactions WHERE execution_id = ?")
                 .all("execution:turn-overflow-recovery") as ReadonlyArray<{ checkpoint_id: string; summary: string }>
@@ -1153,7 +1153,7 @@ test(
                 prompt: "read fixture.txt and finish",
                 startedAt: 1,
               })
-              const database = new Database(`${directory}/relay.db`, { readonly: true })
+              const database = new Database(`${directory}/execution.db`, { readonly: true })
               const checkpoint = database
                 .query("SELECT count(*) AS count FROM relay_agent_compactions WHERE execution_id = ?")
                 .get("execution:turn-overflow-twice") as { count: number }
@@ -1261,7 +1261,7 @@ test(
               ),
               TestModel.text("compaction complete"),
             ])
-            const filename = `${directory}/relay.db`
+            const filename = `${directory}/execution.db`
             const options = {
               filename,
               workspace: directory,
@@ -1387,7 +1387,7 @@ for (const answer of ["Approved", "Denied", "Always"] as const) {
                 TestModel.text(`${answer} complete`),
               ])
               const options = {
-                filename: `${directory}/relay.db`,
+                filename: `${directory}/execution.db`,
                 workspace: directory,
                 registration: fixture.registration,
                 selection: fixture.selection,
@@ -1523,8 +1523,8 @@ test(
               prompt: "hello",
               startedAt: 1,
             })
-            const history = relayEventHistoryFor(`${directory}/relay.db`)
-            const database = new Database(`${directory}/relay.db`, { readonly: true })
+            const history = executionEventHistoryFor(`${directory}/execution.db`)
+            const database = new Database(`${directory}/execution.db`, { readonly: true })
             const bindings = database
               .query("SELECT store_identity, state FROM relay_event_history_bindings")
               .all() as ReadonlyArray<{ store_identity: string; state: string }>
@@ -1546,7 +1546,9 @@ test(
           }),
         )
         const result = yield* program
-        expect(result.history).toBe(`${result.history.slice(0, result.history.lastIndexOf("/"))}/relay-event-history`)
+        expect(result.history).toBe(
+          `${result.history.slice(0, result.history.lastIndexOf("/"))}/execution-event-history`,
+        )
         expect(result.directoryExists).toBe(true)
         expect(result.markerExists).toBe(true)
         expect(result.bindings).toHaveLength(1)

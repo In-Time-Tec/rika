@@ -18,7 +18,6 @@ import { ViewState } from "@rika/tui"
 import { Surface } from "@rika/tui/adapter"
 import {
   buildTestModelScript,
-  canonicalDatabaseRoot,
   configuredBackendLayer,
   executionModelRoutes,
   executionRoutePin,
@@ -110,37 +109,6 @@ const withBunServices = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       Effect.flatMap((context) => effect.pipe(Effect.provide(context))),
     ),
   )
-
-test("uses one canonical directory for both resident databases", () =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.flatMap(Layer.build(BunServices.layer), (context) =>
-        Effect.provide(
-          Effect.gen(function* () {
-            const fs = yield* FileSystem.FileSystem
-            const path = yield* Path.Path
-            const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-database-root-" })
-            const other = path.join(root, "other")
-            const alias = path.join(root, "alias")
-            yield* fs.makeDirectory(other)
-            yield* fs.symlink(root, alias)
-            expect(yield* canonicalDatabaseRoot(path.join(root, "rika.db"), path.join(alias, "relay.db"))).toBe(
-              yield* fs.realPath(root),
-            )
-            expect(
-              (yield* Effect.exit(canonicalDatabaseRoot(path.join(root, "rika.db"), path.join(other, "relay.db"))))
-                ._tag,
-            ).toBe("Failure")
-            expect(
-              (yield* Effect.exit(canonicalDatabaseRoot(path.join(root, "product.db"), path.join(root, "relay.db"))))
-                ._tag,
-            ).toBe("Failure")
-          }),
-          context,
-        ),
-      ),
-    ),
-  ))
 
 test("uses production compaction defaults and route overrides", () => {
   expect(productionCompaction()).toEqual({
@@ -597,7 +565,7 @@ test("builds the configured backend with duplicate persisted routes and one unav
           )
           const context = yield* Layer.buildWithScope(
             configuredBackendLayer({
-              filename: path.join(root, "relay.db"),
+              filename: path.join(root, "execution.db"),
               workspace: "/work",
               repositoryLayer,
               turnRepositoryLayer,

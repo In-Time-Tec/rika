@@ -16,6 +16,7 @@ import {
   ThreadToolService,
 } from "@rika/app"
 import { ConfigContract, ConfigService, Models } from "@rika/config"
+import * as DataRoot from "@rika/config/data-root"
 import { McpOAuth, SkillRegistry } from "@rika/extensions"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
@@ -82,7 +83,6 @@ InteractiveController.installPaletteCommands(Palette.commands as Array<Interacti
 const pathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe((context) =>
   Context.get(context, Path.Path),
 )
-const basename = pathService.basename
 const dirname = pathService.dirname
 const isAbsolute = pathService.isAbsolute
 const join = pathService.join
@@ -1671,36 +1671,6 @@ export const persistedTitleModelRoutesForStartup = Effect.gen(function* () {
   return routes.flatMap((route) => (route.title === undefined ? [] : [route.title]))
 }).pipe(Effect.withSpan("Main.persistedTitleModelRoutesForStartup"))
 
-const canonicalDatabaseRootImpl = Effect.fn("Main.canonicalDatabaseRoot")(function* (
-  productDatabase: string,
-  relayDatabase: string,
-) {
-  if (basename(productDatabase) !== "rika.db" || basename(relayDatabase) !== "relay.db")
-    return yield* ExternalBoundaryError.make({
-      operation: "canonicalize database root",
-      message: "RIKA_DATABASE and RIKA_RELAY_DATABASE must name rika.db and relay.db in one data directory",
-    })
-  const productRoot = dirname(resolve(productDatabase))
-  const relayRoot = dirname(resolve(relayDatabase))
-  yield* Effect.all([mkdir(productRoot, { recursive: true }), mkdir(relayRoot, { recursive: true })], {
-    concurrency: 2,
-  })
-  const [canonicalProductRoot, canonicalRelayRoot] = yield* Effect.all([realpath(productRoot), realpath(relayRoot)], {
-    concurrency: 2,
-  })
-  if (canonicalProductRoot !== canonicalRelayRoot)
-    return yield* ExternalBoundaryError.make({
-      operation: "canonicalize database root",
-      message: "RIKA_DATABASE and RIKA_RELAY_DATABASE must use one data directory",
-    })
-  return canonicalProductRoot
-})
-
-export const canonicalDatabaseRoot: {
-  (relayDatabase: string): (productDatabase: string) => ReturnType<typeof canonicalDatabaseRootImpl>
-  (productDatabase: string, relayDatabase: string): ReturnType<typeof canonicalDatabaseRootImpl>
-} = Function.dual(2, canonicalDatabaseRootImpl)
-
 export const interruptTrackedFibers = (fibers: Iterable<Fiber.Fiber<void, never>>) =>
   Effect.forEach([...fibers], Fiber.interrupt, { concurrency: "unbounded", discard: true })
 
@@ -2734,7 +2704,7 @@ if (import.meta.main) {
       hostDataRoot: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_DATA_ROOT")),
       home: Config.option(Config.string("HOME")),
       database: Config.option(Config.string("RIKA_DATABASE")),
-      relayDatabase: Config.option(Config.string("RIKA_RELAY_DATABASE")),
+      executionDatabase: Config.option(Config.string("RIKA_EXECUTION_DATABASE")),
       visual: Config.option(Config.string("VISUAL")),
       editor: Config.option(Config.string("EDITOR")),
       testModelResponse: Config.option(Config.string("RIKA_TEST_MODEL_RESPONSE")),
@@ -2756,14 +2726,16 @@ if (import.meta.main) {
   const home = environment.home._tag === "Some" ? environment.home.value : process.cwd()
   const defaultDataRoot = `${home}/.rika`
   let database: string
-  let relayDatabase: string
+  let executionDatabase: string
   if (hostDataRoot === undefined) {
     database = environment.database._tag === "Some" ? environment.database.value : `${defaultDataRoot}/rika.db`
-    relayDatabase =
-      environment.relayDatabase._tag === "Some" ? environment.relayDatabase.value : `${defaultDataRoot}/relay.db`
+    executionDatabase =
+      environment.executionDatabase._tag === "Some"
+        ? environment.executionDatabase.value
+        : `${defaultDataRoot}/execution.db`
   } else {
     database = join(hostDataRoot, "rika.db")
-    relayDatabase = join(hostDataRoot, "relay.db")
+    executionDatabase = join(hostDataRoot, "execution.db")
   }
   const globalLayout = globalPaths(home)
   const workspaceLayout = workspacePaths(process.cwd())
@@ -2825,7 +2797,7 @@ if (import.meta.main) {
   const productDatabase = Layer.unwrap(
     Effect.gen(function* () {
       yield* Effect.all(
-        [mkdir(dirname(database), { recursive: true }), mkdir(dirname(relayDatabase), { recursive: true })],
+        [mkdir(dirname(database), { recursive: true }), mkdir(dirname(executionDatabase), { recursive: true })],
         { concurrency: 2 },
       )
       return Database.layer(database)
@@ -2980,7 +2952,7 @@ if (import.meta.main) {
             ),
           )
         const backendLayer = configuredBackendLayer({
-          filename: relayDatabase,
+          filename: executionDatabase,
           workspace: process.cwd(),
           repositoryLayer: repositories,
           turnRepositoryLayer: repositories,
@@ -3115,11 +3087,7 @@ if (import.meta.main) {
               globalConfigPath: globalConfig,
               workspaceConfigPath: workspaceConfig,
               productDatabasePath: database,
-              relayDatabasePath: relayDatabase,
-              upstream: [
-                { name: "baton", present: true },
-                { name: "relay", present: true },
-              ],
+              executionDatabasePath: executionDatabase,
             },
             forWorkspace: (workspace) =>
               Effect.gen(function* () {
@@ -3142,11 +3110,7 @@ if (import.meta.main) {
                     globalConfigPath: globalConfig,
                     workspaceConfigPath: workspacePaths(workspace).settings,
                     productDatabasePath: database,
-                    relayDatabasePath: relayDatabase,
-                    upstream: [
-                      { name: "baton", present: true },
-                      { name: "relay", present: true },
-                    ],
+                    executionDatabasePath: executionDatabase,
                   },
                 }
               }).pipe(
@@ -3267,7 +3231,7 @@ if (import.meta.main) {
       const resident = yield* ResidentService.Service
       return Operation.Service.of({
         run: Effect.fn("Operation.dispatch")((input) =>
-          Logging.resolveDataRoot(database, relayDatabase).pipe(
+          DataRoot.canonicalDataRoot(database, executionDatabase).pipe(
             Effect.flatMap((dataRoot) =>
               observedProgram(
                 "client",

@@ -9,8 +9,7 @@ const options: ConfigOperations.Options = {
   globalConfigPath: "/home/config.json",
   workspaceConfigPath: "/work/config.json",
   productDatabasePath: "/home/rika.db",
-  relayDatabasePath: "/home/relay.db",
-  upstream: [{ name: "relay", present: true }],
+  executionDatabasePath: "/home/execution.db",
 }
 
 it.effect("prints effective redacted config and keymap", () =>
@@ -110,7 +109,7 @@ it.effect("edits the selected path and reports secret-safe doctor status", () =>
 
 it.effect("lists MCP transports and reports present doctor branches", () =>
   Effect.gen(function* () {
-    const presentOptions = { ...options, upstream: [{ name: "relay", present: false }] }
+    const presentOptions = options
     const layer = Layer.mergeAll(
       TestConsole.layer,
       ConfigService.memoryLayer({
@@ -136,7 +135,7 @@ it.effect("lists MCP transports and reports present doctor branches", () =>
     }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"apiKey": "present"')
     expect(lines[1]).toContain('"transport": "command"')
-    expect(lines[3]).toContain('"relay": "missing"')
+    expect(lines[3]).toContain('"execution": "present"')
     expect(lines[3]).toContain('"parallel": "present"')
     expect(lines[3]).toContain('"apiKey": "present"')
     expect(lines.join("\n")).not.toContain("model-secret")
@@ -150,7 +149,8 @@ it.effect("reports missing config and mixed doctor paths", () =>
       ConfigService.memoryLayer(),
       ConfigOperations.testLayer({
         edit: () => Effect.void,
-        exists: (path) => Effect.succeed(path === options.relayDatabasePath || path === options.workspaceConfigPath),
+        exists: (path) =>
+          Effect.succeed(path === options.executionDatabasePath || path === options.workspaceConfigPath),
       }),
     )
     const lines = yield* Effect.gen(function* () {
@@ -160,7 +160,7 @@ it.effect("reports missing config and mixed doctor paths", () =>
     }).pipe(provideLayer(layer))
     expect(lines[0]).toContain('"webSearchCredentials": {}')
     expect(lines[1]).toContain('"product": "missing"')
-    expect(lines[1]).toContain('"relay": "present"')
+    expect(lines[1]).toContain('"execution": "present"')
     expect(lines[1]).toContain('"global": "missing"')
     expect(lines[1]).toContain('"workspace": "present"')
   }),

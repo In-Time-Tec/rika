@@ -125,7 +125,7 @@ it.effect("renders client help without creating the configured data root", () =>
           env: {
             HOME: path.join(root, "home"),
             RIKA_DATABASE: path.join(dataRoot, "rika.db"),
-            RIKA_RELAY_DATABASE: path.join(dataRoot, "relay.db"),
+            RIKA_EXECUTION_DATABASE: path.join(dataRoot, "execution.db"),
           },
         })
         yield* runClient(["--help"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))
@@ -157,7 +157,7 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
             env: {
               HOME: path.join(root, "home"),
               RIKA_DATABASE: path.join(dataRoot, "rika.db"),
-              RIKA_RELAY_DATABASE: path.join(dataRoot, "relay.db"),
+              RIKA_EXECUTION_DATABASE: path.join(dataRoot, "execution.db"),
             },
           })
           yield* run(["diagnostics", "path"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider))

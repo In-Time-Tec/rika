@@ -28,8 +28,7 @@ const PresenceStatus = Schema.Literals(["present", "missing"])
 const CredentialStatus = Schema.Literals(["present", "missing", "not-configured"])
 const DoctorReport = Schema.fromJsonString(
   Schema.Struct({
-    databases: Schema.Struct({ product: PresenceStatus, relay: PresenceStatus }),
-    upstream: Schema.Record(Schema.String, PresenceStatus),
+    databases: Schema.Struct({ product: PresenceStatus, execution: PresenceStatus }),
     config: Schema.Struct({
       diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, source: Schema.String, message: Schema.String })),
       global: PresenceStatus,
@@ -70,7 +69,7 @@ interface CliSandbox {
   readonly root: string
   readonly workspace: string
   readonly databasePath: string
-  readonly relayDatabasePath: string
+  readonly executionDatabasePath: string
   readonly globalConfigPath: string
   readonly workspaceConfigPath: string
   readonly adapter: ConfigOperations.AdapterInterface
@@ -93,7 +92,7 @@ const sandbox = Effect.gen(function* () {
     root,
     workspace,
     databasePath: path.join(root, "rika.db"),
-    relayDatabasePath: path.join(root, "relay.db"),
+    executionDatabasePath: path.join(root, "execution.db"),
     globalConfigPath: path.join(root, "home", ".config", "rika", "settings.json"),
     workspaceConfigPath: path.join(workspace, ".rika", "settings.json"),
     adapter,
@@ -141,11 +140,7 @@ const operationLayer = (
         globalConfigPath: context.globalConfigPath,
         workspaceConfigPath: context.workspaceConfigPath,
         productDatabasePath: context.databasePath,
-        relayDatabasePath: context.relayDatabasePath,
-        upstream: [
-          { name: "baton", present: true },
-          { name: "relay", present: true },
-        ],
+        executionDatabasePath: context.executionDatabasePath,
       },
     },
     interactive: () => Effect.void,
@@ -253,10 +248,9 @@ it.effect(
         const cli = yield* openCli(operationLayer(context))
         const result = expectSuccess(yield* cli.invoke(["doctor"]))
         const report = yield* Schema.decodeUnknownEffect(DoctorReport)(jsonOutput(result))
-        expect(Object.keys(report).toSorted()).toEqual(["config", "credentials", "databases", "model", "upstream"])
-        expect(report.databases).toEqual({ product: "present", relay: "missing" })
+        expect(Object.keys(report).toSorted()).toEqual(["config", "credentials", "databases", "model"])
+        expect(report.databases).toEqual({ product: "present", execution: "missing" })
         expect(report.config).toMatchObject({ diagnostics: [], global: "missing", workspace: "missing" })
-        expect(report.upstream).toEqual({ baton: "present", relay: "present" })
       }),
     ),
   20_000,
