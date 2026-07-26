@@ -90,10 +90,14 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       yield* Ref.set(graceFiber, fiber)
     })
   const abandonFiber = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined)
-  const scheduleAbandonment = (generation: number, requireActiveWork = false) =>
+  const scheduleAbandonment = (
+    generation: number,
+    requireActiveWork = false,
+    sleepMilliseconds = Math.min(options.abandonMilliseconds, options.graceMilliseconds),
+  ) =>
     Effect.gen(function* () {
       const fiber = yield* Effect.forkIn(
-        Effect.sleep(Math.min(options.abandonMilliseconds, options.graceMilliseconds)).pipe(
+        Effect.sleep(sleepMilliseconds).pipe(
           Effect.andThen(lifecycle.graceHolds(generation)),
           Effect.flatMap((abandoned) =>
             abandoned ? stopAbandonedExecutionWork(generation, requireActiveWork) : Effect.void,
@@ -1109,7 +1113,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const startupGrace = yield* lifecycle.ready
   if (startupGrace !== undefined) {
     yield* scheduleGrace(startupGrace)
-    yield* scheduleAbandonment(startupGrace, true)
+    yield* scheduleAbandonment(startupGrace, true, options.abandonMilliseconds)
   }
   yield* options.onReady
   yield* Effect.logInfo("resident.listener.ready")
