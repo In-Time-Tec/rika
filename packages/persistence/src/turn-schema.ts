@@ -27,6 +27,9 @@ export type TurnLineage = typeof TurnLineage.Type
 export const Status = Schema.Literals(["accepted", "queued", "running", "waiting", "completed", "failed", "cancelled"])
 export type Status = typeof Status.Type
 
+export const StopIntent = Schema.Literals(["none", "requested"])
+export type StopIntent = typeof StopIntent.Type
+
 export const ExecutionExtensionPin = Schema.Struct({
   generation: Schema.String,
   sourceDigest: Schema.String,
@@ -144,6 +147,7 @@ export const Turn = Schema.Struct({
   prompt: Schema.String,
   promptParts: Schema.optionalKey(Schema.Array(PromptPart)),
   status: Status,
+  stopIntent: StopIntent,
   lastCursor: Schema.optionalKey(Schema.String),
   extensionPin: Schema.optionalKey(ExecutionExtensionPin),
   executionRoute: ExecutionRoutePin,

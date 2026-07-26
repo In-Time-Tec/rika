@@ -730,6 +730,7 @@ test("restores every pinned role from a nonterminal turn into the restart regist
     author: { _tag: "Human" },
     lineage: { _tag: "Original" },
     status: "running",
+    stopIntent: "none",
     executionRoute: {
       ...route,
       main: { ...route.main, registrationKey: "workspace-main" },

@@ -7,13 +7,38 @@ export type Status = typeof Status.Type
 
 export const terminalStatuses = ["completed", "failed", "cancelled"] as const satisfies ReadonlyArray<Status>
 
-const terminal: ReadonlySet<string> = new Set(terminalStatuses)
+export const isTerminalStatus = (status: Status): boolean => {
+  switch (status) {
+    case "completed":
+    case "failed":
+    case "cancelled":
+      return true
+    case "accepted":
+    case "queued":
+    case "running":
+    case "waiting":
+      return false
+  }
+}
 
-export const isTerminalStatus = (status: string): boolean => terminal.has(status)
+export const isActiveStatus = (status: Status): boolean => !isTerminalStatus(status) && status !== "queued"
 
-export const isActiveStatus = (status: string): boolean => !terminal.has(status) && status !== "queued"
+export const occupiesQueue = (status: Status): boolean => !isTerminalStatus(status)
 
-export const occupiesQueue = (status: string): boolean => !terminal.has(status)
+export const stopIntents = ["none", "requested"] as const
+
+export const StopIntent = Schema.Literals(stopIntents)
+export type StopIntent = typeof StopIntent.Type
+
+export const defaultStopIntent = "none" satisfies StopIntent
+
+export const isStopRequested = (intent: StopIntent): boolean => intent === "requested"
+
+export const resumesAfterRestart = (status: Status, intent: StopIntent): boolean =>
+  isActiveStatus(status) && !isStopRequested(intent)
+
+export const settlesToCancelledAfterRestart = (status: Status, intent: StopIntent): boolean =>
+  occupiesQueue(status) && isStopRequested(intent)
 
 export const terminalEventStatus = (eventType: string): Status | undefined => {
   if (eventType === "execution.completed") return "completed"

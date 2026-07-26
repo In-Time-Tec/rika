@@ -39,6 +39,7 @@ const entries = (
     lineage: { _tag: "Original" } as const,
     executionRoute: Turn.testExecutionRoute(),
     status: "completed" as const,
+    stopIntent: "none" as const,
     createdAt,
     updatedAt: createdAt,
   }

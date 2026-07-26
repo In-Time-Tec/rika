@@ -24,6 +24,7 @@ const turn = (index: number): Turn.Turn => ({
   prompt: `prompt ${index}`,
   executionRoute: Turn.testExecutionRoute(),
   status: "completed",
+  stopIntent: "none",
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   createdAt: index,

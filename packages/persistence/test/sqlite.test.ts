@@ -290,7 +290,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 18, name: "durable_thread_coordination" })
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 19, name: "turn_stop_intent" })
           expect(yield* sql`SELECT COUNT(*) AS count FROM rika_transcript_entries`).toEqual([{ count: 1 }])
         }).pipe(provideLayer(layer)),
       )
@@ -313,7 +313,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             units: [{ content: { _tag: "Entry", text: "completed prompt" } }],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 18 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 19 }])
         }).pipe(provideLayer(reopened)),
       )
     }),
@@ -1056,6 +1056,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
             author: { _tag: "Human" },
             lineage: { _tag: "Original" },
             status: "queued",
+            stopIntent: "none",
             createdAt: 2,
             updatedAt: 2,
           },
@@ -1074,6 +1075,7 @@ test("SQLite queue copy, take, and accepted rollback stay atomic", () => {
                 author: { _tag: "Human" },
                 lineage: { _tag: "Original" },
                 status: "queued",
+                stopIntent: "none",
                 createdAt: 3,
                 updatedAt: 3,
               },

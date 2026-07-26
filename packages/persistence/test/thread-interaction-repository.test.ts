@@ -27,6 +27,7 @@ const sourceTurn: Turn.Turn = {
   threadId: sourceThreadId,
   prompt: "source",
   status: "running",
+  stopIntent: "none",
   executionRoute: route,
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
@@ -38,6 +39,7 @@ const sourceQueuedTurn: Turn.Turn = {
   id: Turn.TurnId.make("source-queued"),
   prompt: "already queued",
   status: "queued",
+  stopIntent: "none",
   createdAt: 2,
   updatedAt: 2,
 }

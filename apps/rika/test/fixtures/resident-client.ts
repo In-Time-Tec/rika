@@ -263,6 +263,7 @@ const program = Effect.gen(function* () {
                     lineage: { _tag: "Original" } as const,
                     executionRoute: Turn.testExecutionRoute(),
                     status: "running" as const,
+                    stopIntent: "none" as const,
                     createdAt: startedAt,
                     updatedAt: startedAt,
                   }

@@ -7,6 +7,7 @@ import {
   ExecutionRoutePin,
   PromptPart,
   Status,
+  StopIntent,
   Turn,
   TurnAuthor,
   TurnId,
@@ -71,6 +72,7 @@ const CheckpointRow = Schema.Struct({
   author_json: Schema.String,
   lineage_json: Schema.String,
   status: Schema.String,
+  stop_intent: Schema.optionalKey(Schema.NullOr(Schema.String)),
   model_phase: Schema.Finite,
   revision: Schema.Finite,
   oldest_cursor: Schema.NullOr(Schema.String),
@@ -97,6 +99,7 @@ const UnitRow = Schema.Struct({
   author_json: Schema.String,
   lineage_json: Schema.String,
   status: Schema.String,
+  stop_intent: Schema.optionalKey(Schema.NullOr(Schema.String)),
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
@@ -258,6 +261,7 @@ export const layer = Layer.effect(
         ...(extensionPin === undefined ? {} : { extensionPin }),
         executionRoute,
         ...(row.review_fan_out_id === null ? {} : { reviewFanOutId: row.review_fan_out_id }),
+        stopIntent: (row.stop_intent === "requested" ? "requested" : "none") satisfies StopIntent as StopIntent,
         author,
         lineage,
         createdAt: row.created_at,
@@ -267,7 +271,7 @@ export const layer = Layer.effect(
     const get = Effect.fn("TranscriptRepository.get")(function* (turnId: TurnId) {
       const checkpointRows = yield* sql`
         SELECT c.*, t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
-          t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.created_at
+          t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.stop_intent, t.created_at
         FROM rika_transcript_checkpoints c
         JOIN rika_turns t ON t.id = c.turn_id
         WHERE c.turn_id = ${turnId}
@@ -375,7 +379,7 @@ export const layer = Layer.effect(
           options.before === undefined
             ? yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
-                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.created_at, t.updated_at
+                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.stop_intent, t.created_at, t.updated_at
                 FROM rika_transcript_units u
                 JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
                 JOIN rika_turns t ON t.id = u.turn_id
@@ -384,7 +388,7 @@ export const layer = Layer.effect(
                 LIMIT ${limit + 1}`.pipe(Effect.mapError(error))
             : yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
-                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.created_at, t.updated_at
+                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.stop_intent, t.created_at, t.updated_at
                 FROM rika_transcript_units u
                 JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
                 JOIN rika_turns t ON t.id = u.turn_id
@@ -416,6 +420,9 @@ export const layer = Layer.effect(
                       prompt: row.prompt,
                       ...(promptParts === undefined ? {} : { promptParts }),
                       status,
+                      stopIntent: (row.stop_intent === "requested"
+                        ? "requested"
+                        : "none") satisfies StopIntent as StopIntent,
                       ...(row.last_cursor === null ? {} : { lastCursor: row.last_cursor }),
                       ...(extensionPin === undefined ? {} : { extensionPin }),
                       executionRoute,

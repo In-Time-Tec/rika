@@ -7,6 +7,7 @@ import {
   ExecutionRoutePin,
   PromptPart,
   Status,
+  StopIntent,
   Turn,
   TurnAuthor,
   TurnId,
@@ -108,6 +109,8 @@ export interface Interface {
   readonly findActive: (threadId: ThreadId) => Effect.Effect<Turn | undefined, RepositoryError>
   readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
   readonly listNonterminal: Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
+  readonly listStopRequested: Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
+  readonly requestStop: (id: TurnId, now: number) => Effect.Effect<Turn | undefined, RepositoryError>
   readonly claimNextQueued: (threadId: ThreadId, now: number) => Effect.Effect<QueueClaim | undefined, RepositoryError>
   readonly finishQueuedClaim: (
     claim: QueueClaim,
@@ -158,6 +161,7 @@ const Row = Schema.Struct({
   thread_id: Schema.String,
   prompt: Schema.String,
   status: Schema.String,
+  stop_intent: Schema.optionalKey(Schema.NullOr(Schema.String)),
   last_cursor: Schema.NullOr(Schema.String),
   extension_pin_json: Schema.optionalKey(Schema.NullOr(Schema.String)),
   execution_route_json: Schema.String,
@@ -254,6 +258,7 @@ const decode = (row: unknown) =>
       prompt: value.prompt,
       ...(promptParts === undefined ? {} : { promptParts }),
       status,
+      stopIntent: (value.stop_intent === "requested" ? "requested" : "none") satisfies StopIntent as StopIntent,
       ...(value.last_cursor === null ? {} : { lastCursor: value.last_cursor }),
       ...(extensionPin === undefined ? {} : { extensionPin }),
       executionRoute,
@@ -318,6 +323,7 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
             author: input.author ?? { _tag: "Human" },
             lineage: input.lineage ?? { _tag: "Original" },
             status: active ? "queued" : "accepted",
+            stopIntent: "none",
             createdAt: now,
             updatedAt: now,
           }
@@ -429,10 +435,28 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
       }),
       listNonterminal: Effect.gen(function* () {
         return [...(yield* Ref.get(state)).turns.values()]
-          .filter((turn) => ExecutionStatus.occupiesQueue(turn.status))
+          .filter((turn) => ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "none")
           .toSorted((left, right) => left.createdAt - right.createdAt)
           .map(clone)
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
+      listStopRequested: Effect.gen(function* () {
+        return [...(yield* Ref.get(state)).turns.values()]
+          .filter((turn) => ExecutionStatus.occupiesQueue(turn.status) && turn.stopIntent === "requested")
+          .toSorted((left, right) => left.createdAt - right.createdAt)
+          .map(clone)
+      }).pipe(Effect.withSpan("TurnRepository.listStopRequested")),
+      requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
+        return yield* Ref.modify(state, (current) => {
+          const existing = current.turns.get(id)
+          if (existing === undefined || !ExecutionStatus.occupiesQueue(existing.status)) {
+            return [undefined, current] as const
+          }
+          const updated: Turn = { ...existing, stopIntent: "requested", updatedAt: now }
+          const turns = new Map(current.turns)
+          turns.set(id, updated)
+          return [clone(updated), { ...current, turns }] as const
+        })
+      }),
       claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
         return yield* Ref.modify(state, (current) => {
           const hasActive = [...current.turns.values()].some(
@@ -908,11 +932,26 @@ export const layer = Layer.effect(
       }),
       listNonterminal: Effect.gen(function* () {
         const rows =
-          yield* sql`SELECT * FROM rika_turns WHERE status IN ('queued', 'accepted', 'running', 'waiting') ORDER BY created_at ASC, rowid ASC`.pipe(
+          yield* sql`SELECT * FROM rika_turns WHERE status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'none' ORDER BY created_at ASC, rowid ASC`.pipe(
             Effect.mapError(repositoryError),
           )
         return yield* Effect.all(rows.map(decode))
       }).pipe(Effect.withSpan("TurnRepository.listNonterminal")),
+      listStopRequested: Effect.gen(function* () {
+        const rows =
+          yield* sql`SELECT * FROM rika_turns WHERE status IN ('queued', 'accepted', 'running', 'waiting') AND stop_intent = 'requested' ORDER BY created_at ASC, rowid ASC`.pipe(
+            Effect.mapError(repositoryError),
+          )
+        return yield* Effect.all(rows.map(decode))
+      }).pipe(Effect.withSpan("TurnRepository.listStopRequested")),
+      requestStop: Effect.fn("TurnRepository.requestStop")(function* (id, now) {
+        const rows = yield* sql`UPDATE rika_turns SET stop_intent = 'requested', updated_at = ${now}
+          WHERE id = ${id} AND status IN ('queued', 'accepted', 'running', 'waiting') RETURNING *`.pipe(
+          Effect.mapError(repositoryError),
+        )
+        const row = rows[0]
+        return row === undefined ? undefined : yield* decode(row)
+      }),
       claimNextQueued: Effect.fn("TurnRepository.claimNextQueued")(function* (threadId, _now) {
         return yield* sql
           .withTransaction(

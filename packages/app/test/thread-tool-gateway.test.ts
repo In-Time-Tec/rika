@@ -36,6 +36,7 @@ const sourceTurn: Turn.Turn = {
   threadId: sourceThread.id,
   prompt: "Coordinate",
   status: "running",
+  stopIntent: "none",
   executionRoute: Turn.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },

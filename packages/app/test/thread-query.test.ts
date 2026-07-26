@@ -40,6 +40,7 @@ const storedTurn: Turn.Turn = {
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   status: "completed",
+  stopIntent: "none",
   createdAt: 1,
   updatedAt: 2,
 }

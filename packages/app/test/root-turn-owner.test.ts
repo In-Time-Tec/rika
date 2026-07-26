@@ -12,6 +12,7 @@ const turn = (id: string, status: Turn.Status, createdAt = 0): Turn.Turn => ({
   threadId,
   prompt: id,
   status,
+  stopIntent: "none",
   executionRoute: Turn.testExecutionRoute("medium"),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },

@@ -2252,6 +2252,7 @@ export const productLayer = <
                 author: running.author,
                 lineage: running.lineage,
                 status: "queued",
+                stopIntent: "none",
                 executionRoute: running.executionRoute,
                 ...(running.reviewFanOutId === undefined ? {} : { reviewFanOutId: running.reviewFanOutId }),
                 createdAt: now,

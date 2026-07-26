@@ -367,6 +367,12 @@ const durableThreadCoordination = Effect.gen(function* () {
   )`
 })
 
+const turnStopIntent = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_turns ADD COLUMN stop_intent TEXT NOT NULL DEFAULT 'none'
+    CHECK (stop_intent IN ('none', 'requested'))`
+})
+
 const migrationNames = [
   "product_baseline",
   "turns",
@@ -386,6 +392,7 @@ const migrationNames = [
   "pricing_version_checkpoints",
   "thread_search_projection",
   "durable_thread_coordination",
+  "turn_stop_intent",
 ] as const
 
 const migrations = SqliteMigrator.fromRecord({
@@ -407,6 +414,7 @@ const migrations = SqliteMigrator.fromRecord({
   "16_pricing_version_checkpoints": pricingVersionCheckpoints,
   "17_thread_search_projection": threadSearchProjection,
   "18_durable_thread_coordination": durableThreadCoordination,
+  "19_turn_stop_intent": turnStopIntent,
 })
 
 const migrationTableObjects = ["table:rika_migrations"]
@@ -473,6 +481,7 @@ const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   currentObjects,
   currentObjects,
   searchObjects,
+  coordinationObjects,
   coordinationObjects,
 ]
 

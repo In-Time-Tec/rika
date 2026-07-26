@@ -252,6 +252,7 @@ export const makeMemory = (seed: MemoryInput = {}) =>
           threadId: targetId,
           prompt: input.prompt,
           status,
+          stopIntent: "none",
           executionRoute: clone(input.executionRoute),
           author: {
             _tag: "Agent",
@@ -423,6 +424,7 @@ export const makeMemory = (seed: MemoryInput = {}) =>
             threadId: source.id,
             prompt: input.prompt,
             status: running ? "queued" : "accepted",
+            stopIntent: "none",
             executionRoute: target.executionRoute,
             author: {
               _tag: "Agent",
@@ -849,6 +851,7 @@ export const layer = Layer.effect(
                   threadId: ThreadId.make(row.thread_id),
                   prompt: row.prompt,
                   status: row.status,
+                  stopIntent: row.stop_intent === "requested" ? "requested" : "none",
                   executionRoute: yield* decodeJson<any>(row.execution_route_json),
                   author: yield* decodeJson<any>(row.author_json),
                   lineage: yield* decodeJson<any>(row.lineage_json),

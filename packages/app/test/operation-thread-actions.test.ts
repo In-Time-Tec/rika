@@ -67,6 +67,7 @@ describe("Operation thread actions", () => {
         statuses.map((status, index) => ({
           id: Turn.TurnId.make(status),
           threadId: alpha.id,
+          stopIntent: "none" as const,
           prompt: `${status} prompt`,
           author: { _tag: "Human" },
           lineage: { _tag: "Original" },
@@ -156,6 +157,7 @@ describe("Operation thread actions", () => {
           lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "completed",
+          stopIntent: "none",
           createdAt: 1,
           updatedAt: 2,
           lastCursor: "a",
@@ -168,6 +170,7 @@ describe("Operation thread actions", () => {
           lineage: { _tag: "Original" },
           executionRoute: Turn.testExecutionRoute(),
           status: "failed",
+          stopIntent: "none",
           createdAt: 3,
           updatedAt: 4,
         },
