@@ -14,6 +14,13 @@ const promptSecret = "PROMPT_SECRET_SENTINEL_206_207_209"
 const initialSystemSecret = "SYSTEM_SECRET_SENTINEL_INITIAL_206_207_209"
 const recoveredSystemSecret = "SYSTEM_SECRET_SENTINEL_RECOVERED_206_207_209"
 const encodeJson = Schema.encodeSync(Schema.UnknownFromJsonString)
+const childIds = [alphaChildId, betaChildId, gammaChildId]
+const stillPending = (status: string | undefined) => ["queued", "running", "waiting"].includes(status ?? "")
+const settlesWithOneLateChild = (rows: ReadonlyArray<{ id: string; status: string }>) =>
+  rows.length === 3 &&
+  rows.every((row, index) => row.id === childIds[index]) &&
+  rows.filter((row) => row.status === "completed").length === 2 &&
+  rows.filter((row) => stillPending(row.status)).length === 1
 
 const baselineHashAnnotations = (lines: ReadonlyArray<string>) =>
   lines.flatMap((line) => {
@@ -108,7 +115,7 @@ test(
           const repeatedRecoveryLogs = yield* waitFor(host.request(Schema.Array(Schema.String), "logs"), (lines) =>
             baselineHashes(lines).some((hash) => /^[a-f0-9]{64}$/.test(hash)),
           )
-          yield* waitFor(
+          const delayedSettle = yield* waitFor(
             Effect.all({
               children: query<{ id: string; status: string }>(
                 `select id, status from relay_executions where id in ('${alphaChildId}', '${betaChildId}', '${gammaChildId}') order by id`,
@@ -118,19 +125,12 @@ test(
               ),
             }),
             ({ children, childRuns }) =>
-              children[0]?.id === alphaChildId &&
-              children[0]?.status === "completed" &&
-              children[1]?.id === betaChildId &&
-              children[1]?.status === "completed" &&
-              children[2]?.id === gammaChildId &&
-              ["queued", "running", "waiting"].includes(children[2]?.status ?? "") &&
-              childRuns[0]?.id === alphaChildId &&
-              childRuns[0]?.status === "completed" &&
-              childRuns[1]?.id === betaChildId &&
-              childRuns[1]?.status === "completed" &&
-              childRuns[2]?.id === gammaChildId &&
-              ["queued", "running", "waiting"].includes(childRuns[2]?.status ?? ""),
+              settlesWithOneLateChild(children) &&
+              settlesWithOneLateChild(childRuns) &&
+              children.find((row) => stillPending(row.status))?.id ===
+                childRuns.find((row) => stillPending(row.status))?.id,
           )
+          const lateChildId = delayedSettle.children.find((row) => stillPending(row.status))?.id
           const repeatedRecoveryHash = baselineHashes(repeatedRecoveryLogs).at(-1)
           yield* host.kill
           host = yield* startHost("recovered-stuck")
@@ -158,18 +158,14 @@ test(
               childRuns.filter((child) => child.status === "cancelled").length === 1 &&
               cancelled[0]?.count === 1,
           )
+          const expectedDelegatedOutcomes = childIds.map((id) => ({
+            id,
+            status: id === lateChildId ? "cancelled" : "completed",
+          }))
           expect(settled.children).toHaveLength(3)
-          expect(settled.children).toEqual([
-            { id: alphaChildId, status: "completed" },
-            { id: betaChildId, status: "completed" },
-            { id: gammaChildId, status: "cancelled" },
-          ])
+          expect(settled.children).toEqual(expectedDelegatedOutcomes)
           expect(settled.childRuns).toHaveLength(3)
-          expect(settled.childRuns).toEqual([
-            { id: alphaChildId, status: "completed" },
-            { id: betaChildId, status: "completed" },
-            { id: gammaChildId, status: "cancelled" },
-          ])
+          expect(settled.childRuns).toEqual(expectedDelegatedOutcomes)
           const starts = yield* query<{ count: number }>(
             `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'execution.started'`,
           )
@@ -213,7 +209,9 @@ test(
           ])
           expect(attempts.map((attempt) => attempt.state)).toEqual(["failed", "failed", "failed"])
           expect(attempts.every((attempt) => attempt.completed_at !== null)).toBe(true)
-          expect(childOutcomes.map((outcome) => outcome.execution_id)).toEqual([alphaChildId, betaChildId])
+          expect(childOutcomes.map((outcome) => outcome.execution_id)).toEqual(
+            childIds.filter((id) => id !== lateChildId),
+          )
           expect(childOutcomes.every((outcome) => outcome.content_json.includes("recovered child"))).toBe(true)
           expect(recoveredBaseline).toBe(baseline)
           expect(epochFailures[0]?.count).toBe(0)
