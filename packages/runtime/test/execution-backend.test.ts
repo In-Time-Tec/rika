@@ -17,6 +17,7 @@ const MockEffect = vi.hoisted(() => (require("effect") as typeof import("effect"
 const native = vi.hoisted(() => ({
   client: undefined as Client.Interface | undefined,
   databaseAcquisitions: 0,
+  databaseOptions: [] as Array<Record<string, unknown>>,
   runtimeGraphs: 0,
 }))
 
@@ -67,8 +68,9 @@ vi.mock("@relayfx/sdk", (importOriginal) =>
 
 vi.mock("@relayfx/sdk/sqlite", () => ({
   SQLite: {
-    database: () => {
+    database: (options: Record<string, unknown>) => {
       native.databaseAcquisitions += 1
+      native.databaseOptions.push(options)
       return {}
     },
   },
@@ -2139,6 +2141,53 @@ describe("ExecutionBackend Relay client adapter", () => {
         expect(native.databaseAcquisitions).toBe(1)
         expect(native.runtimeGraphs).toBe(1)
       }),
+  )
+
+  const buildRuntimeLayer = Effect.fn("ExecutionBackendTest.buildRuntimeLayer")(function* (filename: string) {
+    const model = yield* TestModel.make([])
+    const fixture = yield* makeClient({})
+    Object.assign(fixture.implementation.executions, { get: () => Effect.succeed({ status: "completed" }) })
+    Object.assign(fixture.implementation.childRuns, {
+      spawn: () => Effect.succeed({}),
+      createFanOut: (definition: unknown) => Effect.succeed(definition),
+      inspectFanOut: () => Effect.succeed({ fan_out: null }),
+    })
+    native.client = fixture.implementation
+    native.databaseOptions = []
+    yield* RelayExecutionBackend.layer({
+      filename,
+      workspace: "/tmp",
+      registration: model.registration,
+      selection: model.selection,
+    }).pipe(Layer.provide(BunServices.layer), Layer.build)
+    return native.databaseOptions
+  })
+
+  it.effect("archives a persistent Relay database into the data root that holds it", () =>
+    Effect.gen(function* () {
+      const calls = yield* buildRuntimeLayer("/tmp/rika-profile/relay.db")
+      expect(calls).toEqual([
+        {
+          filename: "/tmp/rika-profile/relay.db",
+          eventHistory: { _tag: "FileSystem", directory: "/tmp/rika-profile/relay-event-history" },
+        },
+      ])
+    }),
+  )
+
+  it.effect("derives the same history directory on every start for one data root", () =>
+    Effect.gen(function* () {
+      const first = yield* buildRuntimeLayer("/tmp/rika-profile/relay.db")
+      const second = yield* buildRuntimeLayer("/tmp/rika-profile/relay.db")
+      expect(second).toEqual(first)
+    }),
+  )
+
+  it.effect("never sends event history to an in-memory Relay database", () =>
+    Effect.gen(function* () {
+      const calls = yield* buildRuntimeLayer(":memory:")
+      expect(calls).toEqual([{ filename: ":memory:" }])
+    }),
   )
 
   it.effect("does not start fan-out children while assembling the runtime", () =>

@@ -133,7 +133,7 @@ const main = Effect.gen(function* () {
     },
   )
   const relayLayer = Runtime.layerEmbedded({
-    database: SQLite.database({ filename: database }),
+    database: SQLite.database({ filename: database, ...RelayExecutionBackend.eventHistoryOption(database) }),
     languageModelLayer: ModelHub.layer([fixture.registration]),
     toolRuntimeLayer: ToolRuntime.layer(),
     childFanOutHostLayer: handlers,

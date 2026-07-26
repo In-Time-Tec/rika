@@ -1,4 +1,5 @@
 import { type Compaction, ModelRegistry, ModelResilience, type Permissions } from "@batonfx/core"
+import { relayEventHistoryFor } from "@rika/config/paths"
 import {
   AgentTools,
   Catalog as ToolCatalog,
@@ -14,6 +15,7 @@ import {
   Client,
   Content,
   ArtifactStore,
+  EventHistory,
   type Execution,
   Ids,
   ModelHub,
@@ -150,6 +152,7 @@ const observableEventTypes = new Set([
   "execution.cancelled",
 ])
 const toolExecutionPolicy = { concurrency: "unbounded" as const }
+const memoryDatabaseFilename = ":memory:"
 const unsafeRecoveryFailure = "Parent execution stopped before its first durable chat checkpoint"
 const defaultRecoveryChildSettlementGrace = Duration.seconds(30)
 const recoveryRetrySchedule = Schedule.exponential("100 millis").pipe(
@@ -317,6 +320,11 @@ const withResilience = (
   ).pipe(Layer.provideMerge(registration.layer))
   return { ...registration, layer: modelLayer }
 }
+
+export const eventHistoryOption = (filename: string): { readonly eventHistory?: EventHistory.FileSystemConfig } =>
+  filename === memoryDatabaseFilename
+    ? {}
+    : { eventHistory: EventHistory.fileSystem({ directory: relayEventHistoryFor(filename) }) }
 
 const childExecutionIdFromEvent = (item: Execution.ExecutionEvent) => {
   const value = item.child_execution_id ?? item.data?.child_execution_id
@@ -2404,7 +2412,7 @@ export const layer = <
             }),
           )
           const runtimeLayer = Runtime.layerEmbedded({
-            database: SQLite.database({ filename: options.filename }),
+            database: SQLite.database({ filename: options.filename, ...eventHistoryOption(options.filename) }),
             languageModelLayer,
             toolRuntimeLayer,
             blobStoreLayer: DataBlobStore.layer,

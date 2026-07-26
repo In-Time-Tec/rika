@@ -2,6 +2,7 @@ import * as BunServices from "@effect/platform-bun/BunServices"
 import { AiError, ModelRegistry, ModelResilience, Response } from "@batonfx/core"
 import { classifyFailure as classifyOpenAiFailure } from "@batonfx/providers/openai"
 import { TestModel } from "@batonfx/test"
+import { relayEventHistoryFor } from "@rika/config/paths"
 import { Runtime as RikaToolRuntime, ToolInvocation } from "@rika/tools"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
@@ -1502,6 +1503,57 @@ test(
         )
         const promoted = yield* program
         expect(promoted).toEqual([["thread-host-native", 1]])
+      }),
+    ),
+  60_000,
+)
+
+test(
+  "binds a clean data root to its event history store on first start",
+  () =>
+    runNative(
+      Effect.gen(function* () {
+        const program = withBackend([TestModel.text("archived answer")], (_fixture, directory) =>
+          Effect.gen(function* () {
+            const fileSystem = yield* FileSystem.FileSystem
+            const backend = yield* ExecutionBackend.Service
+            yield* start(backend, {
+              threadId: "thread-history",
+              turnId: "turn-history",
+              prompt: "hello",
+              startedAt: 1,
+            })
+            const history = relayEventHistoryFor(`${directory}/relay.db`)
+            const database = new Database(`${directory}/relay.db`, { readonly: true })
+            const bindings = database
+              .query("SELECT store_identity, state FROM relay_event_history_bindings")
+              .all() as ReadonlyArray<{ store_identity: string; state: string }>
+            const manifests = database
+              .query("SELECT count(*) AS count FROM relay_execution_event_archive_manifests")
+              .get() as { count: number }
+            const events = database.query("SELECT count(*) AS count FROM relay_execution_events").get() as {
+              count: number
+            }
+            database.close()
+            return {
+              history,
+              directoryExists: yield* fileSystem.exists(history),
+              markerExists: yield* fileSystem.exists(`${history}/.relay-history-store`),
+              bindings,
+              manifests,
+              events,
+            }
+          }),
+        )
+        const result = yield* program
+        expect(result.history).toBe(`${result.history.slice(0, result.history.lastIndexOf("/"))}/relay-event-history`)
+        expect(result.directoryExists).toBe(true)
+        expect(result.markerExists).toBe(true)
+        expect(result.bindings).toHaveLength(1)
+        expect(result.bindings[0]!.state).toBe("ready")
+        expect(result.bindings[0]!.store_identity).toMatch(/^[0-9a-f]{64}$/)
+        expect(result.manifests.count).toBe(0)
+        expect(result.events.count).toBeGreaterThan(0)
       }),
     ),
   60_000,

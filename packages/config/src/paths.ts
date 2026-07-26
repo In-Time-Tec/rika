@@ -25,3 +25,13 @@ export const dataPaths = (home: string) => ({
   database: under(home, workspaceDirectory, "rika.db"),
   relayDatabase: under(home, workspaceDirectory, "relay.db"),
 })
+
+const parentDirectory = (filename: string): string => {
+  const separator = filename.lastIndexOf("/")
+  if (separator < 0) return "."
+  if (separator === 0) return "/"
+  return filename.slice(0, separator)
+}
+
+export const relayEventHistoryFor = (relayDatabase: string): string =>
+  under(parentDirectory(relayDatabase), "relay-event-history")

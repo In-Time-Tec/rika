@@ -76,7 +76,7 @@ const main = Effect.gen(function* () {
   })
   const fixture = yield* TestModel.make(Array.from({ length: 20 }, () => TestModel.text("unused")))
   const relayLayer = Runtime.layerEmbedded({
-    database: SQLite.database({ filename: database }),
+    database: SQLite.database({ filename: database, ...RelayExecutionBackend.eventHistoryOption(database) }),
     languageModelLayer: ModelHub.layer([fixture.registration]),
     toolRuntimeLayer: ToolRuntime.layerFromToolkit(Toolkit.make()).pipe(Layer.provide(Layer.empty)),
     childFanOutHostLayer: fanOutHandlers,
