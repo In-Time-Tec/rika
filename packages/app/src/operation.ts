@@ -2135,7 +2135,7 @@ export const productLayer = <
         const withUsageCosts = (
           event: InteractiveEvent,
         ): { readonly event: InteractiveEvent; readonly usage?: ThreadUsageEvent } => {
-          if (event._tag !== "TranscriptPatched" || !UsageCost.isRelevantEvent(event.event)) return { event }
+          if (event._tag !== "TranscriptPatched" || !UsageCost.isObservedEvent(event.event)) return { event }
           const rootTurnId = event.rootTurnId ?? event.turnId
           const observation = {
             threadId: String(event.threadId),
@@ -2156,7 +2156,7 @@ export const productLayer = <
           const timeChanged =
             selectedTotals !== undefined &&
             !sameUsageTime(previousTime, displayActiveTime(selectedTotals, String(event.threadId)))
-          if (!UsageCost.isRelevantEvent(event.event) && !timeChanged) return { event }
+          if (!UsageCost.isUsageBearingEvent(event.event) && !timeChanged) return { event }
           const totals = selectedTotals ?? currentUsageCosts()
           const costBearing =
             event.event.type === "model.usage.reported" || event.event.type === "model.attempt.completed"
