@@ -179,6 +179,29 @@ it.effect("inspects and exports malformed crash evidence without dispatching an 
   }),
 )
 
+it.effect("updates the install in this process instead of dispatching to the resident", () =>
+  Effect.gen(function* () {
+    const calls = yield* Ref.make<ReadonlyArray<Operation.Input>>([])
+    const layer = Layer.mergeAll(BunServices.layer, TestConsole.layer, Operation.testLayer(calls))
+    yield* execute(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem
+          const path = yield* Path.Path
+          const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-update-command-" })
+          const provider = ConfigProvider.fromEnv({ env: { RIKA_INSTALL_ROOT: path.join(root, "current") } })
+          const exit = yield* Effect.exit(
+            run(["update"]).pipe(Effect.provideService(ConfigProvider.ConfigProvider, provider)),
+          )
+          expect(exit._tag).toBe("Failure")
+        }),
+      ),
+      layer,
+    )
+    expect(yield* Ref.get(calls)).toEqual([])
+  }),
+)
+
 it.effect("dispatches a parsed doctor operation", () =>
   Effect.gen(function* () {
     expect(yield* capture(["doctor"])).toEqual([{ _tag: "Doctor" }])
@@ -344,7 +367,6 @@ it.effect("dispatches catalog, extension, review, and maintenance operations", (
         { _tag: "Review", staged: true, base: "main", workspace, ephemeral: true, json: true, paths: ["a", "b"] },
       ],
       [["review"], { _tag: "Review", staged: false, ephemeral: false, json: false, paths: [] }],
-      [["update"], { _tag: "Update" }],
       [
         ["workflows", "start", "delivery", "delivery-1"],
         { _tag: "Workflow", action: "start", name: "delivery", runId: "delivery-1" },

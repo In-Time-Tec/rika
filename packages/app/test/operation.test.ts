@@ -5084,9 +5084,8 @@ describe("Operation", () => {
       const result = yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         const workflow = yield* Effect.result(operation.run({ _tag: "Workflow", action: "inspect", runId: "defect" }))
-        const update = yield* Effect.result(operation.run({ _tag: "Update" }))
         const skill = yield* Effect.result(operation.run({ _tag: "Skill", action: "list" }))
-        return [workflow, update, skill]
+        return [workflow, skill]
       }).pipe(provideLayer(workflowLayer))
       expect(result.every((value) => value._tag === "Failure")).toBe(true)
     }),

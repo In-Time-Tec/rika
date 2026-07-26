@@ -21,6 +21,7 @@ import {
   Stream,
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { FetchHttpClient } from "effect/unstable/http"
 import { Command } from "effect/unstable/cli"
 import { command, version } from "./command"
 import * as Logging from "./logging"
@@ -264,7 +265,7 @@ if (import.meta.main) {
     interactiveSigintObserved = true
   }
   process.once("SIGINT", markSigint)
-  BunRuntime.runMain(run().pipe(provideLayerScoped(BunServices.layer)), {
+  BunRuntime.runMain(run().pipe(provideLayerScoped(Layer.merge(BunServices.layer, FetchHttpClient.layer))), {
     teardown: (exit, onExit) => {
       process.off("SIGINT", markSigint)
       onExit(clientProcessExitCode({ exit, interruptedBySigint }))
