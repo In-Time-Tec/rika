@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install Rika.
+# Install or upgrade Rika.
 #
 #   curl -fsSL https://raw.githubusercontent.com/In-Time-Tec/rika/main/install.sh | sh
 #
@@ -7,6 +7,8 @@
 #   RIKA_VERSION       version to install, without a leading "v" (default: latest release)
 #   RIKA_INSTALL_ROOT  install directory (default: $HOME/.local/share/rika/current)
 #   RIKA_BIN_DIR       directory for the rika command (default: $HOME/.local/bin)
+#   RIKA_FORCE_LINK    set to 1 to replace a rika command this installer does not own
+#   RIKA_RELEASE_API_URL   override the latest-release lookup (used by tests)
 #   RIKA_RELEASE_BASE_URL  override the release download location (used by tests)
 #
 # These defaults match scripts/local-install.ts so a curl install and a
@@ -46,9 +48,12 @@ resolve_version() {
     echo "${RIKA_VERSION#v}"
     return
   fi
-  tag="$(curl -fsSL "https://api.github.com/repos/${repository}/releases/latest" |
-    sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
-  [ -n "$tag" ] || fail "could not resolve the latest release; set RIKA_VERSION to install a specific one"
+  api_url="${RIKA_RELEASE_API_URL:-https://api.github.com/repos/${repository}/releases/latest}"
+  release_json="$(curl -fsSL "$api_url" 2>/dev/null || echo)"
+  [ -n "$release_json" ] || fail "could not read the latest release from ${api_url}.
+  Check your network and the GitHub API rate limit, or set RIKA_VERSION to install a specific release."
+  tag="$(printf '%s' "$release_json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
+  [ -n "$tag" ] || fail "${api_url} returned no release tag; set RIKA_VERSION to install a specific release."
   echo "${tag#v}"
 }
 
@@ -76,19 +81,58 @@ command -v tar >/dev/null 2>&1 || fail "tar is required"
 [ -n "${HOME:-}" ] || fail "HOME is not set"
 
 target="$(detect_target)"
-version="$(resolve_version)"
 install_root="${RIKA_INSTALL_ROOT:-$HOME/.local/share/rika/current}"
 bin_dir="${RIKA_BIN_DIR:-$HOME/.local/bin}"
 command_path="$bin_dir/rika"
+install_parent="$(dirname "$install_root")"
+
+# An upgrade replaces only the install this script published. Anything else is
+# owned by another installer and is never overwritten silently.
+if [ -e "$command_path" ] || [ -L "$command_path" ]; then
+  owned=0
+  if [ -L "$command_path" ]; then
+    link_target="$(readlink "$command_path" 2>/dev/null || echo)"
+    if [ "$link_target" = "${install_root}/bin/rika" ]; then
+      owned=1
+    fi
+  fi
+  if [ "$owned" -eq 0 ] && [ "${RIKA_FORCE_LINK:-}" != 1 ]; then
+    fail "$command_path already exists and was not installed by this script.
+  Remove it, or re-run with RIKA_FORCE_LINK=1 to replace it."
+  fi
+fi
+
+version="$(resolve_version)"
 archive_file="rika-${version}-${target}.tar.gz"
 archive_root="rika-${version}-${target}"
 base_url="${RIKA_RELEASE_BASE_URL:-https://github.com/${repository}/releases/download/v${version}}"
 
 echo "rika: installing ${version} for ${target}"
 
-staging="$(mktemp -d)"
-cleanup() { rm -rf "$staging"; }
-trap cleanup EXIT INT TERM
+mkdir -p "$install_parent" "$bin_dir"
+
+# Stage beside the install root so every publish step is a same-filesystem
+# rename, and keep the replaced install outside the staging directory so an
+# interrupt can never delete the only working copy.
+staging=""
+previous=""
+cleanup() {
+  if [ -n "$previous" ] && [ -d "$previous" ]; then
+    if [ -e "$install_root" ]; then
+      rm -rf "$previous" || true
+    else
+      mv "$previous" "$install_root" || true
+    fi
+  fi
+  if [ -n "$staging" ]; then
+    rm -rf "$staging" || true
+  fi
+}
+trap cleanup EXIT
+trap 'cleanup; exit 130' INT
+trap 'cleanup; exit 143' TERM
+
+staging="$(mktemp -d "${install_parent}/.rika-install-XXXXXX")"
 
 curl -fsSL "${base_url}/${archive_file}" -o "${staging}/${archive_file}" ||
   fail "could not download ${archive_file} from release v${version}"
@@ -101,17 +145,12 @@ tar -xzf "${staging}/${archive_file}" -C "$staging"
 [ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
 [ -f "${staging}/${archive_root}/bin/.rika-runtime" ] || fail "release archive is missing bin/.rika-runtime"
 
-mkdir -p "$(dirname "$install_root")" "$bin_dir"
-
-# Publish the install by rename so a failed download never replaces a working one.
-previous="${staging}/previous"
+previous="${install_parent}/.rika-previous-$$"
 if [ -e "$install_root" ]; then
   mv "$install_root" "$previous"
 fi
-if ! mv "${staging}/${archive_root}" "$install_root"; then
-  [ -e "$previous" ] && mv "$previous" "$install_root"
+mv "${staging}/${archive_root}" "$install_root" ||
   fail "could not publish the install to $install_root"
-fi
 
 # Swap the command symlink atomically.
 staged_command="${bin_dir}/.rika-install-$$"

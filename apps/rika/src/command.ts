@@ -11,6 +11,7 @@ import { dispatch } from "./commands/shared"
 import { command as ThreadsCommand } from "./commands/threads"
 import { command as ToolsCommand } from "./commands/tools"
 import { command as WorkflowsCommand } from "./commands/workflows"
+import * as ReleaseUpdate from "./release-update"
 import { modeIds, type ModeId } from "@rika/config/modes"
 
 declare const RIKA_VERSION: string | undefined
@@ -178,6 +179,17 @@ const reviewCommand = Command.make(
 
 const versionCommand = Command.make("version", {}, () => Console.log(version))
 
+const updateCommand = Command.make("update", {}, () =>
+  ReleaseUpdate.update({
+    currentVersion: version,
+    executable: process.execPath,
+    host: { platform: process.platform, architecture: process.arch },
+  }).pipe(
+    Effect.flatMap((outcome) => Console.log(ReleaseUpdate.updateReport(outcome))),
+    Effect.mapError((error) => Operation.OperationUnavailable.make({ operation: "Update", message: error.message })),
+  ),
+).pipe(Command.withDescription("Replace this Rika install with the latest published release"))
+
 export const command = Command.make(
   "rika",
   {
@@ -239,7 +251,7 @@ export const command = Command.make(
     WorkflowsCommand,
     reviewCommand,
     Command.make("doctor", {}, () => dispatch({ _tag: "Doctor" })),
-    Command.make("update", {}, () => dispatch({ _tag: "Update" })),
+    updateCommand,
     versionCommand,
   ]),
 )

@@ -12,7 +12,8 @@ import {
   validateInstallerScript,
 } from "../../scripts/install-contract"
 import { launcherManifest, packedName, platformConstraints, platformPackageName } from "../../scripts/npm-package"
-import { targetNames } from "../../scripts/package"
+import { archiveName, archiveRoot, targetNames } from "../../scripts/package"
+import * as ReleaseUpdate from "../../apps/rika/src/release-update"
 
 const installer = await Bun.file(new URL("../../install.sh", import.meta.url)).text()
 
@@ -47,6 +48,41 @@ describe("install contract", () => {
     const publishAt = installer.indexOf(`mv "${"${staging}"}/${"${archive_root}"}"`)
     expect(verifyAt).toBeGreaterThan(0)
     expect(publishAt).toBeGreaterThan(verifyAt)
+  })
+
+  test("install.sh stages beside the install root so publishing is one same-filesystem rename", () => {
+    expect(installer).toContain('mktemp -d "${install_parent}/.rika-install-XXXXXX"')
+    expect(installer).toContain('install_parent="$(dirname "$install_root")"')
+    expect(installer).toContain('previous="${install_parent}/.rika-previous-$$"')
+    const stagingAt = installer.indexOf('rm -rf "$staging"')
+    const restoreAt = installer.indexOf('mv "$previous" "$install_root"')
+    expect(restoreAt).toBeGreaterThan(0)
+    expect(restoreAt).toBeLessThan(stagingAt)
+  })
+
+  test("install.sh replaces only the command it installed", () => {
+    expect(installer).toContain("was not installed by this script")
+    expect(installer).toContain('"${RIKA_FORCE_LINK:-}" != 1')
+    const guardAt = installer.indexOf("was not installed by this script")
+    const downloadAt = installer.indexOf('curl -fsSL "${base_url}')
+    expect(guardAt).toBeGreaterThan(0)
+    expect(guardAt).toBeLessThan(downloadAt)
+  })
+
+  test("rika update and install.sh read the same release overrides", () => {
+    expect(installer).toContain(`${ReleaseUpdate.releaseApiUrlEnv}:-`)
+    expect(installer).toContain(`${ReleaseUpdate.releaseBaseUrlEnv}:-`)
+    expect(ReleaseUpdate.installRootEnv).toBe(installRootEnv)
+    expect(devRootSegments).toContain(ReleaseUpdate.developmentRootSegment)
+  })
+
+  test("rika update names the same artifacts the packaging step publishes", () => {
+    expect(ReleaseUpdate.releaseTargets.toSorted()).toEqual(targetNames.toSorted())
+    for (const target of targetNames) {
+      expect(ReleaseUpdate.archiveFileName("1.2.3", target)).toBe(archiveName("1.2.3", target))
+      expect(ReleaseUpdate.archiveRootName("1.2.3", target)).toBe(archiveRoot("1.2.3", target))
+      expect(installer).toContain(`${ReleaseUpdate.releaseRepository}`)
+    }
   })
 
   test("install.sh covers every packaged target", () => {

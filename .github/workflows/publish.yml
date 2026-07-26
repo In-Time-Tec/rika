@@ -8,6 +8,11 @@ on:
         required: true
         type: boolean
         default: true
+      skip_ci_gate:
+        description: Publish even though CI did not pass for this commit (records who overrode the gate)
+        required: true
+        type: boolean
+        default: false
   push:
     tags: ["v*"]
 
@@ -19,8 +24,105 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: verify-ci
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Require a green CI run for the commit being published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ github.sha }}
+          OVERRIDE: ${{ inputs.skip_ci_gate }}
+          REQUIRED_JOBS: quality tui proc
+          RETRY_JOB: tui
+          RETRY_LIMIT: "2"
+        run: |
+          set -euo pipefail
+
+          decide() {
+            {
+              echo "### CI gate"
+              echo
+              echo "- commit: \`$COMMIT\`"
+              echo "- decision: $1"
+              echo "- detail: $2"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          if [ "${GITHUB_REF#refs/tags/}" = "$GITHUB_REF" ]; then
+            decide "not evaluated" "$GITHUB_REF is not a tag, so no artifact is published"
+            exit 0
+          fi
+
+          run_id=""
+          for _attempt in 1 2 3 4 5 6 7 8 9 10; do
+            run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$COMMIT&per_page=1" --jq '.workflow_runs[0].id // empty')"
+            if [ -n "$run_id" ]; then break; fi
+            sleep 20
+          done
+          if [ -z "$run_id" ]; then
+            decide "blocked" "no ci workflow run exists for $COMMIT; push the commit to main and let CI finish"
+            echo "::error::No ci run exists for $COMMIT. A tag may only publish a commit CI has checked."
+            exit 1
+          fi
+          run_url="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.html_url')"
+
+          retries=0
+          while true; do
+            while [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.status')" != completed ]; do
+              echo "waiting for $run_url"
+              sleep 30
+            done
+            failed="$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/jobs" --jq '.jobs[] | select(.conclusion != "success") | .name' | sort -u | tr '\n' ' ')"
+            blocking=""
+            for job in $REQUIRED_JOBS; do
+              case " $failed " in
+                *" $job "*) blocking="$blocking $job" ;;
+              esac
+            done
+            blocking="$(echo "$blocking" | xargs || true)"
+            if [ -z "$blocking" ]; then
+              conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.conclusion')"
+              if [ "$conclusion" = success ] || [ -z "$failed" ]; then
+                decide "passed" "$run_url is green after $retries retry attempt(s)"
+                exit 0
+              fi
+              decide "blocked" "$run_url concluded $conclusion"
+              echo "::error::ci run $run_url concluded $conclusion."
+              break
+            fi
+            if [ "$blocking" = "$RETRY_JOB" ] && [ "$retries" -lt "$RETRY_LIMIT" ]; then
+              retries=$((retries + 1))
+              echo "::warning::Only the known-flaky $RETRY_JOB lane failed; re-running it (attempt $retries of $RETRY_LIMIT)."
+              gh run rerun "$run_id" --failed
+              for _restart in 1 2 3 4 5 6 7 8 9 10; do
+                if [ "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" --jq '.status')" != completed ]; then
+                  break
+                fi
+                sleep 15
+              done
+              continue
+            fi
+            decide "blocked" "$run_url has failing required job(s): $blocking"
+            echo "::error::ci run $run_url has failing required job(s): $blocking"
+            break
+          done
+
+          if [ "${OVERRIDE:-false}" = true ]; then
+            decide "overridden" "$GITHUB_ACTOR published $COMMIT with skip_ci_gate despite a red ci run at $run_url"
+            echo "::warning::CI gate overridden by $GITHUB_ACTOR for $COMMIT ($run_url)."
+            exit 0
+          fi
+          echo "::error::Re-run this workflow on the tag with skip_ci_gate to publish anyway."
+          exit 1
+
   package:
     name: package-${{ matrix.target }}
+    needs: verify
     permissions:
       contents: read
       id-token: write
