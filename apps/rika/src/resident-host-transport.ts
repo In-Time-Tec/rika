@@ -90,12 +90,14 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       yield* Ref.set(graceFiber, fiber)
     })
   const abandonFiber = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined)
-  const scheduleAbandonment = (generation: number) =>
+  const scheduleAbandonment = (generation: number, requireActiveWork = false) =>
     Effect.gen(function* () {
       const fiber = yield* Effect.forkIn(
         Effect.sleep(Math.min(options.abandonMilliseconds, options.graceMilliseconds)).pipe(
           Effect.andThen(lifecycle.graceHolds(generation)),
-          Effect.flatMap((abandoned) => (abandoned ? stopAbandonedExecutionWork(generation) : Effect.void)),
+          Effect.flatMap((abandoned) =>
+            abandoned ? stopAbandonedExecutionWork(generation, requireActiveWork) : Effect.void,
+          ),
         ),
         hostScope,
       )
@@ -508,14 +510,20 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   const stopExecutionWork = Deferred.await(operationReady).pipe(
     Effect.flatMap((operation) => operation.stopActiveExecutionWork ?? Effect.void),
   )
-  const stopAbandonedExecutionWork = (generation: number) =>
-    Effect.logInfo("resident.abandonment.cancelling").pipe(
-      Effect.annotateLogs("rika.resident.generation", generation),
-      Effect.andThen(stopExecutionWork),
-      Effect.andThen(
-        Effect.logInfo("resident.abandonment.cancelled").pipe(
-          Effect.annotateLogs("rika.resident.generation", generation),
-        ),
+  const stopAbandonedExecutionWork = (generation: number, requireActiveWork: boolean) =>
+    (requireActiveWork ? hasActiveExecutionWork : Effect.succeed(true)).pipe(
+      Effect.flatMap((active) =>
+        !active
+          ? Effect.void
+          : Effect.logInfo("resident.abandonment.cancelling").pipe(
+              Effect.annotateLogs("rika.resident.generation", generation),
+              Effect.andThen(stopExecutionWork),
+              Effect.andThen(
+                Effect.logInfo("resident.abandonment.cancelled").pipe(
+                  Effect.annotateLogs("rika.resident.generation", generation),
+                ),
+              ),
+            ),
       ),
       Effect.catch((error) =>
         Effect.logError("resident.abandonment.cancel_failed").pipe(
@@ -1099,7 +1107,10 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   yield* Deferred.succeed(operationReady, operation)
   yield* Ref.set(coldCohortUntil, (yield* Clock.currentTimeMillis) + options.startupHoldMilliseconds)
   const startupGrace = yield* lifecycle.ready
-  if (startupGrace !== undefined) yield* scheduleGrace(startupGrace)
+  if (startupGrace !== undefined) {
+    yield* scheduleGrace(startupGrace)
+    yield* scheduleAbandonment(startupGrace, true)
+  }
   yield* options.onReady
   yield* Effect.logInfo("resident.listener.ready")
   yield* Deferred.succeed(options.ready, undefined)

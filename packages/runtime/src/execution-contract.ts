@@ -253,6 +253,12 @@ export interface ThreadQueueWake {
 
 export type TurnPromoter = (threadId: string, generation: number) => Effect.Effect<number>
 
+export interface OpenRootExecution {
+  readonly executionId: string
+  readonly turnId: string | undefined
+  readonly createdAt: number
+}
+
 export interface Interface {
   readonly registerModels?: (
     registrations: ReadonlyArray<ModelRegistry.Registration>,
@@ -310,6 +316,7 @@ export interface Interface {
     limit?: number,
     reference?: ExecutionReference,
   ) => Effect.Effect<EventPage, BackendError>
+  readonly listOpenRootExecutions?: Effect.Effect<ReadonlyArray<OpenRootExecution>, BackendError>
   readonly cancel: (
     turnId: string,
     cancelledAt: number,

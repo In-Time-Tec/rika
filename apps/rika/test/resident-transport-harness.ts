@@ -149,6 +149,29 @@ export const startOldResident = Effect.fn("ResidentTransportTest.startOldResiden
   return old
 })
 
+export const startHostOnly = Effect.fn("ResidentTransportTest.startHostOnly")(function* (
+  root: string,
+  environment: Readonly<Record<string, string>>,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const host = yield* spawner.spawn(
+    ChildProcess.make("bun", ["test/fixtures/resident-host.ts"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "pipe",
+      env: {
+        RIKA_TEST_RESIDENT_DATA_ROOT: root,
+        ...environment,
+      },
+      extendEnv: true,
+    }),
+  )
+  if (host.pid !== undefined) hostPids.add(host.pid)
+  yield* waitUntil(fileExists(`${root}/owner-acquisitions.log`), 5_000)
+  return host
+})
+
 export interface ResidentClient {
   readonly pid: number
   readonly nextEffect: Effect.Effect<Event, FixtureFailure>

@@ -318,6 +318,7 @@ export interface ProductLayerOptions<
     readonly mcpFingerprint: Effect.Effect<string>
   }
   readonly defaultWorkspace: string
+  readonly recoveredWorkGrace?: Duration.Input
   readonly pendingTurnCapacity?: number
   readonly shellPermission?: "ask" | "allow" | "deny" | ((workspace: string) => Effect.Effect<"ask" | "allow" | "deny">)
   readonly makeThreadId: Effect.Effect<Thread.ThreadId>
@@ -1282,6 +1283,51 @@ export const stopActiveExecutionWork = Effect.fn("Operation.stopActiveExecutionW
   )
 })
 
+export const settleAbandonedRecoveredWork = Effect.fn("Operation.settleAbandonedRecoveredWork")(function* (
+  grace: Duration.Duration,
+  watchedThreads: () => ReadonlySet<string>,
+) {
+  const turns = yield* TurnRepository.Service
+  const backend = yield* ExecutionBackend.Service
+  const bootAt = yield* Clock.currentTimeMillis
+  yield* Effect.sleep(grace)
+  const watched = watchedThreads()
+  const abandoned = (yield* turns.listNonterminal).filter(
+    (turn) => turn.status !== "queued" && turn.createdAt < bootAt && !watched.has(String(turn.threadId)),
+  )
+  const requestedAt = yield* Clock.currentTimeMillis
+  for (const turn of abandoned) {
+    yield* turns.requestStop(turn.id, requestedAt)
+    yield* Effect.logInfo("execution.recovery.abandoned_stop_requested").pipe(
+      Effect.annotateLogs({ "rika.turn.id": String(turn.id), "rika.thread.id": String(turn.threadId) }),
+    )
+  }
+  if (abandoned.length > 0)
+    yield* settleStopRequestedTurns(backend, (turnId, status, cursor, settledAt) =>
+      turns.setStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
+    )
+  if (backend.listOpenRootExecutions === undefined) return
+  const openRoots = yield* backend.listOpenRootExecutions.pipe(Effect.orElseSucceed(() => []))
+  for (const root of openRoots) {
+    if (root.createdAt >= bootAt) continue
+    const turn = root.turnId === undefined ? undefined : yield* turns.get(Turn.TurnId.make(root.turnId))
+    if (turn !== undefined && !["completed", "failed", "cancelled"].includes(turn.status)) continue
+    const cancelledAt = yield* Clock.currentTimeMillis
+    yield* backend
+      .cancel(root.executionId, cancelledAt, ExecutionBackend.executionReference)
+      .pipe(
+        Effect.catch((failure) =>
+          Effect.logWarning("execution.recovery.orphan_cancel_failed").pipe(
+            Effect.annotateLogs({ "rika.execution.id": root.executionId, "rika.failure.kind": String(failure) }),
+          ),
+        ),
+      )
+    yield* Effect.logInfo("execution.recovery.orphan_cancelled").pipe(
+      Effect.annotateLogs({ "rika.execution.id": root.executionId }),
+    )
+  }
+})
+
 const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(function* (
   backend: ExecutionBackend.Interface,
   threadId: Thread.ThreadId,
@@ -1445,6 +1491,15 @@ export const productLayer = <
       let interactiveSessionSequence = 0
       let activitySequence = 0
       const interactiveSinks = new Map<number, (origin: number, event: InteractiveEvent) => void>()
+      const sessionThreadViews = new Map<number, () => string | undefined>()
+      const watchedThreadIds = () => {
+        const watched = new Set<string>()
+        for (const view of sessionThreadViews.values()) {
+          const threadId = view()
+          if (threadId !== undefined) watched.add(threadId)
+        }
+        return watched
+      }
       let rootTurnOwner: RootTurnOwner.Interface
       const claimTurnObserver = (turnId: Turn.TurnId, expectedStatus?: Turn.Status) =>
         rootTurnOwner.claim(turnId, expectedStatus)
@@ -4098,6 +4153,7 @@ export const productLayer = <
                   }
                 }),
               ).pipe(Effect.provide(executionDependencies))
+        if (!registerPromoter) sessionThreadViews.set(sessionId, () => selectedThreadId)
         if (!registerPromoter)
           interactiveSinks.set(sessionId, (_origin, event) => {
             const threadId = interactiveEventThreadId(event)
@@ -4672,6 +4728,7 @@ export const productLayer = <
               if (lifecycle === "closed") return Effect.void
               lifecycle = "closed"
               interactiveSinks.delete(sessionId)
+              sessionThreadViews.delete(sessionId)
               const approvals = [...shellApprovals.values()]
               shellApprovals.clear()
               return Effect.forEach(approvals, (approval) => Deferred.succeed(approval, false), { discard: true }).pipe(
@@ -4685,6 +4742,20 @@ export const productLayer = <
       })
       const owner = yield* makeInteractiveSession(options.defaultWorkspace, { registerPromoter: true })
       yield* Effect.forkIn(owner.supervise, ownerScope)
+      yield* Effect.forkIn(
+        settleAbandonedRecoveredWork(
+          Duration.fromInputUnsafe(options.recoveredWorkGrace ?? "15 seconds"),
+          watchedThreadIds,
+        ).pipe(
+          Effect.provide(executionDependencies),
+          Effect.catch((failure) =>
+            Effect.logError("execution.recovery.abandonment_failed").pipe(
+              Effect.annotateLogs("rika.failure.kind", String(failure)),
+            ),
+          ),
+        ),
+        ownerScope,
+      )
       const repairSummariesOnce = yield* Effect.cached(
         repairThreadSummaries().pipe(
           Effect.provide(executionDependencies),

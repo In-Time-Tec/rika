@@ -10,6 +10,7 @@ import {
   readText,
   run,
   start,
+  startHostOnly,
   waitUntil,
 } from "./resident-transport-harness"
 
@@ -20,6 +21,29 @@ const stayAbandoned = 200
 const idleGrace = 10_000
 
 describe("resident cancellation for abandoned clients", () => {
+  test(
+    "cancels recovered work when no client ever attaches after startup",
+    () =>
+      run(
+        Effect.gen(function* () {
+          const root = yield* makeRoot
+          try {
+            const host = yield* startHostOnly(root, {
+              RIKA_TEST_RESIDENT_GRACE: String(idleGrace),
+              RIKA_TEST_RESIDENT_ABANDON: String(stayAbandoned),
+              RIKA_TEST_RESIDENT_INITIAL_ACTIVE_WORK: "1",
+            })
+            yield* waitUntil(fileExists(`${root}/stop-work.log`), 5_000)
+            expect(yield* readText(`${root}/stop-work.log`)).toBe(`${host.pid}\n`)
+            expect(alive(host.pid!)).toBe(true)
+          } finally {
+            yield* cleanRoot(root)
+          }
+        }),
+      ),
+    20_000,
+  )
+
   test(
     "cancels active execution work once a hard-killed client stays away",
     () =>
