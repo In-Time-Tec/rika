@@ -117,5 +117,5 @@
     "verbatimModuleSyntax": true
   },
   "include": ["apps/**/*.ts", "packages/**/*.ts", "scripts/**/*.ts"],
-  "exclude": ["repos"]
+  "exclude": ["repos", "vendor"]
 }
