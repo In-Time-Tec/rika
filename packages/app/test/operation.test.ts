@@ -5419,6 +5419,8 @@ const usageEventAt = (executionId: string, cursor: string, sequence: number): Ex
 
 const childOf = (executionId: string, callId: string) => `child:${encodeURIComponent(executionId)}:${callId}`
 
+const opaqueCursor = (sequence: number) => Array.from({ length: 20 }, (_, index) => `${sequence}${index}`).join("")
+
 describe("rootExecutionEvents", () => {
   it("keeps root execution events and drops every foreign execution's events", () => {
     const turnId = "turn-1"
@@ -5461,12 +5463,14 @@ describe("rootExecutionEvents", () => {
   it("survives cursors that carry no information at all", () => {
     const turnId = "turn-4"
     const rootId = `execution:${turnId}`
-    const opaque = (sequence: number) => Array.from({ length: 20 }, (_, index) => `${sequence}${index}`).join("")
     const events = [
-      usageEventAt(rootId, opaque(1), 1),
-      usageEventAt(childOf(rootId, "call_a"), opaque(2), 2),
-      usageEventAt(rootId, opaque(3), 3),
+      usageEventAt(rootId, opaqueCursor(1), 1),
+      usageEventAt(childOf(rootId, "call_a"), opaqueCursor(2), 2),
+      usageEventAt(rootId, opaqueCursor(3), 3),
     ]
-    expect(Operation.rootExecutionEvents(turnId, events).map((value) => value.cursor)).toEqual([opaque(1), opaque(3)])
+    expect(Operation.rootExecutionEvents(turnId, events).map((value) => value.cursor)).toEqual([
+      opaqueCursor(1),
+      opaqueCursor(3),
+    ])
   })
 })
