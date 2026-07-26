@@ -67,7 +67,8 @@ const operationFailure = (input: Operation.Input, error: unknown) =>
     ? error
     : Operation.OperationUnavailable.make({ operation: input._tag, message: String(error) })
 
-export const cleanInteractiveRuntimeExit = (exitCode: number): boolean => exitCode === 0 || exitCode === 130
+export const cleanInteractiveRuntimeExit = (exitCode: number): boolean =>
+  exitCode === 0 || exitCode === 130 || exitCode === 129
 
 export const interactiveRuntimeRestartLimit = 3
 

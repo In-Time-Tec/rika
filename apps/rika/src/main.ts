@@ -1675,7 +1675,11 @@ export const persistedTitleModelRoutesForStartup = Effect.gen(function* () {
 export const interruptTrackedFibers = (fibers: Iterable<Fiber.Fiber<void, never>>) =>
   Effect.forEach([...fibers], Fiber.interrupt, { concurrency: "unbounded", discard: true })
 
-export const tuiSignalExitCode = (signal: "SIGINT" | "SIGTERM"): number => (signal === "SIGINT" ? 130 : 143)
+export const tuiSignalExitCode = (signal: "SIGINT" | "SIGTERM" | "SIGHUP"): number => {
+  if (signal === "SIGINT") return 130
+  if (signal === "SIGTERM") return 143
+  return 129
+}
 
 const quitStopWorkBound = Duration.seconds(3)
 
@@ -2110,14 +2114,18 @@ export const interactiveTui =
           const threadTitle =
             model.currentThreadTitle ??
             (model.threads as ReadonlyArray<ViewState.ThreadItem>).find((thread) => thread.id === threadId)?.title
-          process.stdout.write(
-            renderGoodbye({
-              mode: model.mode,
-              workspace: model.workspace,
-              ...(threadId === undefined ? {} : { threadId }),
-              ...(threadTitle === undefined ? {} : { threadTitle }),
-            }),
-          )
+          try {
+            process.stdout.write(
+              renderGoodbye({
+                mode: model.mode,
+                workspace: model.workspace,
+                ...(threadId === undefined ? {} : { threadId }),
+                ...(threadTitle === undefined ? {} : { threadTitle }),
+              }),
+            )
+          } catch {
+            return
+          }
         }
         const teardown = (showGoodbye: boolean) =>
           Effect.suspend(() => {
@@ -2128,8 +2136,12 @@ export const interactiveTui =
               closed = true
               process.off("SIGINT", interrupt)
               process.off("SIGTERM", terminate)
+              process.off("SIGHUP", hangup)
               process.off("SIGTSTP", suspend)
               process.off("SIGCONT", continueFromSuspend)
+              process.stdin.off("end", hangup)
+              process.stdin.off("error", hangup)
+              process.stdin.off("close", hangup)
               if (previewTimer !== undefined) yield* Fiber.interrupt(previewTimer)
               previewTimer = undefined
               if (renderTimer !== undefined) yield* Fiber.interrupt(renderTimer)
@@ -2144,7 +2156,7 @@ export const interactiveTui =
               yield* Effect.logInfo("tui.teardown.completed")
             })
           })
-        const close = (exitCode?: number) => {
+        const close = (exitCode?: number, showGoodbye = true) => {
           if (closing) return
           closing = true
           if (exitCode !== undefined) process.exitCode = exitCode
@@ -2159,13 +2171,14 @@ export const interactiveTui =
                   Effect.annotateLogs("rika.failure.kind", failure._tag),
                 ),
               ),
-              Effect.andThen(teardown(true)),
+              Effect.andThen(teardown(showGoodbye)),
               Effect.andThen(Effect.sync(() => resume(Effect.void))),
             ),
           )
         }
         const interrupt = () => close(tuiSignalExitCode("SIGINT"))
         const terminate = () => close(tuiSignalExitCode("SIGTERM"))
+        const hangup = () => close(tuiSignalExitCode("SIGHUP"), false)
         const suspend = () => {
           if (closed || pendingJobControlPause || releaseJobControlPause !== undefined) return
           if (renderer === undefined) {
@@ -2197,6 +2210,10 @@ export const interactiveTui =
         }
         process.once("SIGINT", interrupt)
         process.once("SIGTERM", terminate)
+        process.once("SIGHUP", hangup)
+        process.stdin.once("end", hangup)
+        process.stdin.once("error", hangup)
+        process.stdin.once("close", hangup)
         process.on("SIGTSTP", suspend)
         process.on("SIGCONT", continueFromSuspend)
         const submit = (
@@ -2730,6 +2747,7 @@ if (import.meta.main) {
       testMediaAnalyzerError: Config.option(Config.string("RIKA_TEST_MEDIA_ANALYZER_ERROR")),
       residentProfile: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_PROFILE")),
       residentGrace: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_GRACE")),
+      recoveryAbandon: Config.option(Config.string("RIKA_INTERNAL_RECOVERY_ABANDON")),
       residentStartupHold: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_STARTUP_HOLD")),
       residentHost: Config.option(Config.string("RIKA_INTERNAL_RESIDENT_HOST")),
       runtimeRestarted: Config.option(Config.string("RIKA_INTERNAL_RUNTIME_RESTARTED")),
@@ -3070,6 +3088,9 @@ if (import.meta.main) {
               ),
             ).pipe(Layer.orDie),
           defaultWorkspace: process.cwd(),
+          recoveredWorkGrace: Duration.millis(
+            Number(environment.recoveryAbandon._tag === "Some" ? environment.recoveryAbandon.value : "15000"),
+          ),
           shellPermission: (workspace) =>
             Effect.gen(function* () {
               const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)

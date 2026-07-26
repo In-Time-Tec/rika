@@ -10,7 +10,7 @@ import * as ExecutionBackend from "@rika/runtime/contract"
 import { AgentDepth } from "@rika/runtime"
 import { AgentTools, Catalog as ToolCatalog } from "@rika/tools"
 import { ExecutionExtensions, PluginRegistry } from "@rika/extensions"
-import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
+import { Context, Deferred, Duration, Effect, Fiber, Layer, Queue, Ref, Scheduler, Schema } from "effect"
 import { TestClock, TestConsole } from "effect/testing"
 import { it as rawIt } from "vitest"
 import { Operation, ResolvedContext } from "../src/index"
@@ -340,6 +340,78 @@ describe("Operation", () => {
       expect((yield* turns.get(Turn.TurnId.make("quit-queued")))?.status).toBe("queued")
       expect((yield* Ref.get(cancelled)).toSorted()).toEqual(["quit-running", "quit-waiting"])
       expect(yield* turns.listStopRequested).toEqual([])
+    }),
+  )
+
+  it.effect("settles recovered work whose thread no session watches and keeps watched threads running", () =>
+    Effect.gen(function* () {
+      const recoveredTurn = (id: string, threadId: string): Turn.Turn => ({
+        ...turnProvenance,
+        id: Turn.TurnId.make(id),
+        threadId: Thread.ThreadId.make(threadId),
+        prompt: id,
+        executionRoute: executionRoute(),
+        status: "running",
+        stopIntent: "none",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      yield* TestClock.adjust("1 minute")
+      const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
+      const turns = yield* TurnRepository.makeMemory([
+        recoveredTurn("abandoned-turn", "abandoned-thread"),
+        recoveredTurn("watched-turn", "watched-thread"),
+      ])
+      const recordingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        cancel: (turnId) =>
+          Ref.update(cancelled, (values) => [...values, turnId]).pipe(
+            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+          ),
+      })
+      yield* Operation.settleAbandonedRecoveredWork(Duration.zero, () => new Set(["watched-thread"])).pipe(
+        provideLayer(
+          Layer.mergeAll(
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(ExecutionBackend.Service, recordingBackend),
+          ),
+        ),
+      )
+      const abandoned = yield* turns.get(Turn.TurnId.make("abandoned-turn"))
+      expect(abandoned?.status).toBe("cancelled")
+      expect(abandoned?.stopIntent).toBe("requested")
+      const watched = yield* turns.get(Turn.TurnId.make("watched-turn"))
+      expect(watched?.status).toBe("running")
+      expect(watched?.stopIntent).toBe("none")
+      expect(yield* Ref.get(cancelled)).toEqual(["abandoned-turn"])
+    }),
+  )
+
+  it.effect("cancels open root executions with no live turn row after the recovery window", () =>
+    Effect.gen(function* () {
+      yield* TestClock.adjust("1 minute")
+      const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
+      const turns = yield* TurnRepository.makeMemory([])
+      const listingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        listOpenRootExecutions: Effect.succeed([
+          { executionId: "execution:orphan-turn", turnId: "orphan-turn", createdAt: 0 },
+          { executionId: "execution:fresh-turn", turnId: "fresh-turn", createdAt: Number.MAX_SAFE_INTEGER },
+        ]),
+        cancel: (turnId) =>
+          Ref.update(cancelled, (values) => [...values, turnId]).pipe(
+            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+          ),
+      })
+      yield* Operation.settleAbandonedRecoveredWork(Duration.zero, () => new Set()).pipe(
+        provideLayer(
+          Layer.mergeAll(
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(ExecutionBackend.Service, listingBackend),
+          ),
+        ),
+      )
+      expect(yield* Ref.get(cancelled)).toEqual(["execution:orphan-turn"])
     }),
   )
 

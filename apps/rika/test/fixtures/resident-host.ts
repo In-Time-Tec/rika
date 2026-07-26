@@ -30,6 +30,7 @@ const program = Effect.gen(function* () {
   const abandonMilliseconds = Number(
     yield* Config.string("RIKA_TEST_RESIDENT_ABANDON").pipe(Config.withDefault("5000")),
   )
+  activeWork = Number(yield* Config.string("RIKA_TEST_RESIDENT_INITIAL_ACTIVE_WORK").pipe(Config.withDefault("0")))
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const interactiveAdmissionActive = yield* Ref.make(0)

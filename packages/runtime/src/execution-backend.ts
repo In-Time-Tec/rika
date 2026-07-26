@@ -61,6 +61,7 @@ import {
   type ExecutionReference,
   type ExecutionRoutePin,
   type EventScope,
+  type OpenRootExecution,
   type PromptPart,
   Service,
   type StartInput,
@@ -1753,6 +1754,29 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               Effect.mapError(error),
             )
         }),
+        listOpenRootExecutions: Effect.gen(function* () {
+          const roots: Array<OpenRootExecution> = []
+          let cursor: string | undefined
+          do {
+            const page = yield* client.executions
+              .list({
+                statuses: ["queued", "running", "waiting"],
+                limit: 200,
+                ...(cursor === undefined ? {} : { cursor }),
+              })
+              .pipe(Effect.mapError(error))
+            for (const record of page.records) {
+              if (record.metadata["rika_agent_depth"] !== 0) continue
+              roots.push({
+                executionId: String(record.execution_id),
+                turnId: turnIdFromExecutionId(String(record.execution_id)),
+                createdAt: record.created_at,
+              })
+            }
+            cursor = page.next_cursor
+          } while (cursor !== undefined)
+          return roots
+        }).pipe(Effect.withSpan("ExecutionBackend.listOpenRootExecutions")),
         cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId, cancelledAt, reference) {
           return yield* Effect.gen(function* () {
             const id = executionId(turnId, reference)

@@ -40,7 +40,10 @@ export const PtyAction = Schema.Struct({
   after: Schema.String,
   write: Schema.String,
   checkRunning: Schema.optionalKey(Schema.Boolean),
-  signal: Schema.optionalKey(Schema.Literals(["SIGINT", "SIGTERM", "SIGKILL"])),
+  signal: Schema.optionalKey(Schema.Literals(["SIGINT", "SIGTERM", "SIGKILL", "SIGHUP"])),
+  closePty: Schema.optionalKey(Schema.Boolean),
+  turnPrompt: Schema.optionalKey(Schema.String),
+  turnStatus: Schema.optionalKey(Schema.String),
   timeoutMs: Schema.optionalKey(Schema.Int),
 })
 export const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
@@ -59,7 +62,10 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     readonly after: string
     readonly write: string
     readonly checkRunning?: boolean
-    readonly signal?: "SIGINT" | "SIGTERM" | "SIGKILL"
+    readonly signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP"
+    readonly closePty?: boolean
+    readonly turnPrompt?: string
+    readonly turnStatus?: string
     readonly timeoutMs?: number
   }>,
   modelScript?: string,
