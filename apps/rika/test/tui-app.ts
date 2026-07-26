@@ -32,6 +32,8 @@ export const model = {
     ),
 }
 
+const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
+
 export interface TuiAppOptions {
   readonly script: ReadonlyArray<Parameters<typeof TestModel.make>[0][number]>
   readonly root?: string
@@ -59,6 +61,7 @@ export interface TuiApp {
   readonly waitFrame: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitGone: (marker: string, timeoutMillis?: number) => Effect.Effect<string>
   readonly waitTerminalTitle: (predicate: (title: string) => boolean, timeoutMillis?: number) => Effect.Effect<string>
+  readonly settled: Effect.Effect<string>
   readonly reload: Effect.Effect<void>
   readonly waitModelRequests: (count: number) => Effect.Effect<void>
   readonly close: () => void
@@ -194,6 +197,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
         yield* Effect.sleep("20 millis")
       }
     })
+  const settled = waitFor((captured) => !activityMarkers.some((marker) => captured.includes(marker)), 60_000)
   const app: TuiApp = {
     workspace,
     type: (text) => setup.mockInput.typeText(text),
@@ -216,6 +220,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     waitFrame: (marker, timeoutMillis = 60_000) => waitFor((captured) => captured.includes(marker), timeoutMillis),
     waitGone: (marker, timeoutMillis = 60_000) => waitFor((captured) => !captured.includes(marker), timeoutMillis),
     waitTerminalTitle: (predicate, timeoutMillis = 60_000) => waitTerminalTitle(predicate, timeoutMillis),
+    settled,
     reload: Effect.gen(function* () {
       yield* session?.reopenThread(100).pipe(Effect.orDie) ?? Effect.die("TUI session is unavailable")
       yield* Deferred.await(reloadLoaded)
@@ -224,9 +229,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     close: () => setup.mockInput.pressCtrlC(),
     done: Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie),
     quit: Effect.gen(function* () {
-      for (const activity of ["Waiting", "Streaming", "Running 1 tool", "Thinking"]) {
-        yield* waitFor((captured) => !captured.includes(activity), 60_000)
-      }
+      yield* settled
       setup.mockInput.pressCtrlC()
       yield* Fiber.join(operationFiber).pipe(Effect.asVoid, Effect.orDie)
     }),
