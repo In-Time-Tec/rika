@@ -13,6 +13,7 @@ describe("interactive feed overflow", () => {
         threadId: Thread.ThreadId.make("thread"),
         turnId: Turn.TurnId.make("turn"),
         event: {
+          executionId: "execution:turn",
           cursor: String(index),
           sequence: index,
           type: "model.output.delta",

@@ -78,7 +78,15 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
             Effect.as({
               turnId: input.turnId,
               status: "completed" as const,
-              events: [{ cursor: "queued-done", sequence: 1, type: "execution.completed", createdAt: 3 }],
+              events: [
+                {
+                  executionId: `execution:${input.turnId}`,
+                  cursor: "queued-done",
+                  sequence: 1,
+                  type: "execution.completed",
+                  createdAt: 3,
+                },
+              ],
             }),
           )
         : Effect.die("unused"),
@@ -91,13 +99,20 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
           ) => {
             const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
             const output = {
+              executionId: `execution:${turnId}`,
               cursor: "resumed-output",
               sequence: 2,
               type: "model.output.completed",
               createdAt: 2,
               text: "created file",
             }
-            const completed = { cursor: "resumed-done", sequence: 3, type: "execution.completed", createdAt: 3 }
+            const completed = {
+              executionId: `execution:${turnId}`,
+              cursor: "resumed-done",
+              sequence: 3,
+              type: "execution.completed",
+              createdAt: 3,
+            }
             return record("follow", turnId, afterCursor).pipe(
               Effect.andThen(turnId === "active" ? Deferred.await(permissionResolved) : Effect.void),
               Effect.tap(() => Effect.sync(() => onEvent?.(output))),
@@ -124,7 +139,15 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
         Effect.as({
           turnId,
           status: "cancelled" as const,
-          events: [{ cursor: "cancel-cursor", sequence: 1, type: "execution.cancelled", createdAt: now }],
+          events: [
+            {
+              executionId: `execution:${turnId}`,
+              cursor: "cancel-cursor",
+              sequence: 1,
+              type: "execution.cancelled",
+              createdAt: now,
+            },
+          ],
         }),
       ),
     replay: (turnId, cursor) =>
@@ -354,8 +377,20 @@ describe("InteractiveSession controls", () => {
             turnId: input.turnId,
             status: "completed" as const,
             events: [
-              { cursor: "output", sequence: 1, type: "model.output.completed", createdAt: 1 },
-              { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 2 },
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "output",
+                sequence: 1,
+                type: "model.output.completed",
+                createdAt: 1,
+              },
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "done",
+                sequence: 2,
+                type: "execution.completed",
+                createdAt: 2,
+              },
             ],
           }),
         replay: () => Effect.die("unused"),
@@ -417,7 +452,13 @@ describe("InteractiveSession controls", () => {
           threadId: "created",
           turnId: "created-turn",
           revision: 1,
-          event: { cursor: "output", sequence: 1, type: "model.output.completed", createdAt: 1 },
+          event: {
+            executionId: "execution:created-turn",
+            cursor: "output",
+            sequence: 1,
+            type: "model.output.completed",
+            createdAt: 1,
+          },
         },
         {
           _tag: "TranscriptPatched",
@@ -425,7 +466,13 @@ describe("InteractiveSession controls", () => {
           threadId: "created",
           turnId: "created-turn",
           revision: 2,
-          event: { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 2 },
+          event: {
+            executionId: "execution:created-turn",
+            cursor: "done",
+            sequence: 2,
+            type: "execution.completed",
+            createdAt: 2,
+          },
         },
         {
           _tag: "ThreadUsageUpdated",
@@ -644,7 +691,15 @@ describe("InteractiveSession controls", () => {
           Effect.succeed({
             turnId: input.turnId,
             status: "completed" as const,
-            events: [{ cursor: "replacement-done", sequence: 1, type: "execution.completed", createdAt: 4 }],
+            events: [
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "replacement-done",
+                sequence: 1,
+                type: "execution.completed",
+                createdAt: 4,
+              },
+            ],
           }),
         replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
         inspect: (turnId) =>
@@ -748,6 +803,7 @@ describe("InteractiveSession controls", () => {
   it.effect("follows an approved durable permission through completion and drains the queue", () =>
     Effect.gen(function* () {
       const priorOutput = {
+        executionId: "execution:active",
         cursor: "prior-output",
         sequence: 0,
         type: "model.output.completed",
@@ -755,6 +811,7 @@ describe("InteractiveSession controls", () => {
         text: "work before permission",
       }
       const priorPermission = {
+        executionId: "execution:active",
         cursor: "permission-wait",
         sequence: 1,
         type: "permission.ask.requested",
@@ -1023,6 +1080,7 @@ describe("InteractiveSession controls", () => {
       const pagedEvents = Array.from(
         { length: 450 },
         (_, index): ExecutionBackend.Event => ({
+          executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
           type: "model.output.completed",
@@ -1061,6 +1119,7 @@ describe("InteractiveSession controls", () => {
       const pagedEvents = Array.from(
         { length: 450 },
         (_, index): ExecutionBackend.Event => ({
+          executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
           type: "model.output.completed",
@@ -1371,6 +1430,7 @@ const subagentChildId = "child:execution%3Adone:call_1"
 
 const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
   {
+    executionId: "execution:done",
     cursor: "done-call",
     sequence: 1,
     type: "tool.call.requested",
@@ -1378,52 +1438,58 @@ const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
     data: { tool_call_id: "call_1", tool_name: "oracle", input: { prompt: "Review the plan." } },
   },
   {
-    cursor: `execution:done:child:${subagentChildId}`,
+    executionId: "execution:done",
+    cursor: "done-spawn",
     sequence: 2,
     type: "child_run.spawned",
     createdAt: 2,
     data: { child_execution_id: subagentChildId, preset_name: "Oracle" },
   },
   {
-    cursor: `execution:done:child:${subagentChildId}:completed`,
+    executionId: "execution:done",
+    cursor: "done-child-completed",
     sequence: 3,
     type: "child_run.event",
     createdAt: 3,
     data: { child_execution_id: subagentChildId, status: "completed" },
   },
   {
+    executionId: "execution:done",
     cursor: "done-result",
     sequence: 4,
     type: "tool.result.received",
     createdAt: 4,
     data: { tool_call_id: "call_1", output: { output: [{ type: "text", text: "**All tests pass.**" }] } },
   },
-  { cursor: "done-final", sequence: 5, type: "execution.completed", createdAt: 5 },
+  { executionId: "execution:done", cursor: "done-final", sequence: 5, type: "execution.completed", createdAt: 5 },
 ]
 
 const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
   {
-    cursor: `${subagentChildId}:tool`,
+    executionId: subagentChildId,
+    cursor: "childtool~a1",
     sequence: 1,
     type: "tool.call.requested",
     createdAt: 1,
     data: { tool_call_id: "child-call", tool_name: "bash", input: { command: "bun test" } },
   },
   {
-    cursor: `${subagentChildId}:result`,
+    executionId: subagentChildId,
+    cursor: "childresult~a2",
     sequence: 2,
     type: "tool.result.received",
     createdAt: 2,
     data: { tool_call_id: "child-call", output: { text: "ok" } },
   },
   {
-    cursor: `${subagentChildId}:answer`,
+    executionId: subagentChildId,
+    cursor: "childanswer~a3",
     sequence: 3,
     type: "model.output.completed",
     createdAt: 3,
     text: "**All tests pass.**",
   },
-  { cursor: `${subagentChildId}:completed`, sequence: 4, type: "execution.completed", createdAt: 4 },
+  { executionId: subagentChildId, cursor: "childdone~a4", sequence: 4, type: "execution.completed", createdAt: 4 },
 ]
 
 const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagentReloadHarness")(function* (options: {
@@ -1571,6 +1637,7 @@ describe("InteractiveSession subagent reload", () => {
       const failedRoot = Transcript.project("done", "delegate", [
         ...subagentRootEvents.slice(0, 2),
         {
+          executionId: "execution:done",
           cursor: "failed-root",
           sequence: 3,
           type: "execution.failed",
@@ -1619,6 +1686,7 @@ describe("InteractiveSession subagent reload", () => {
       const nestedChildId = `child:${encodeURIComponent(completedChildId)}:nested`
       const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
         {
+          executionId: "execution:done",
           cursor: "root-completed-tool",
           sequence: 0,
           type: "tool.call.requested",
@@ -1626,6 +1694,7 @@ describe("InteractiveSession subagent reload", () => {
           data: { tool_call_id: "completed", tool_name: "task", input: { prompt: "complete" } },
         },
         {
+          executionId: "execution:done",
           cursor: "root-completed-spawn",
           sequence: 1,
           type: "child_run.spawned",
@@ -1633,6 +1702,7 @@ describe("InteractiveSession subagent reload", () => {
           data: { tool_call_id: "completed", child_execution_id: completedChildId },
         },
         {
+          executionId: "execution:done",
           cursor: "root-failed-tool",
           sequence: 2,
           type: "tool.call.requested",
@@ -1640,6 +1710,7 @@ describe("InteractiveSession subagent reload", () => {
           data: { tool_call_id: "failed", tool_name: "task", input: { prompt: "fail" } },
         },
         {
+          executionId: "execution:done",
           cursor: "root-failed-spawn",
           sequence: 3,
           type: "child_run.spawned",
@@ -1647,7 +1718,6 @@ describe("InteractiveSession subagent reload", () => {
           data: { tool_call_id: "failed", child_execution_id: failedChildId },
         },
         {
-          id: "root-usage",
           executionId: "execution:done",
           cursor: "root-usage",
           sequence: 4,
@@ -1667,7 +1737,6 @@ describe("InteractiveSession subagent reload", () => {
           },
         },
         {
-          id: "root-cost",
           executionId: "execution:done",
           cursor: "root-cost",
           sequence: 5,
@@ -1681,6 +1750,7 @@ describe("InteractiveSession subagent reload", () => {
           },
         },
         {
+          executionId: "execution:done",
           cursor: "root-failed",
           sequence: 6,
           type: "execution.failed",
@@ -1690,6 +1760,7 @@ describe("InteractiveSession subagent reload", () => {
       ]
       const completedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
         {
+          executionId: completedChildId,
           cursor: "nested-tool",
           sequence: 0,
           type: "tool.call.requested",
@@ -1697,16 +1768,24 @@ describe("InteractiveSession subagent reload", () => {
           data: { tool_call_id: "nested", tool_name: "task", input: { prompt: "nested work" } },
         },
         {
+          executionId: completedChildId,
           cursor: "nested-spawn",
           sequence: 1,
           type: "child_run.spawned",
           createdAt: 4,
           data: { tool_call_id: "nested", child_execution_id: nestedChildId },
         },
-        { cursor: "completed-child", sequence: 2, type: "execution.completed", createdAt: 7 },
+        {
+          executionId: completedChildId,
+          cursor: "completed-child",
+          sequence: 2,
+          type: "execution.completed",
+          createdAt: 7,
+        },
       ]
       const failedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
         {
+          executionId: failedChildId,
           cursor: "failed-child",
           sequence: 0,
           type: "execution.failed",
@@ -1716,13 +1795,20 @@ describe("InteractiveSession subagent reload", () => {
       ]
       const nestedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
         {
+          executionId: nestedChildId,
           cursor: "nested-answer",
           sequence: 0,
           type: "model.output.completed",
           createdAt: 5,
           text: "Nested child completed authoritatively.",
         },
-        { cursor: "nested-completed", sequence: 1, type: "execution.completed", createdAt: 6 },
+        {
+          executionId: nestedChildId,
+          cursor: "nested-completed",
+          sequence: 1,
+          type: "execution.completed",
+          createdAt: 6,
+        },
       ]
       const stale = Transcript.project("done", "delegate", rootEvents.slice(0, 4))
       const inspections: Readonly<Record<string, ExecutionBackend.Inspection>> = {
@@ -1849,7 +1935,7 @@ describe("InteractiveSession subagent reload", () => {
       const rootProjection = Transcript.project("done", "delegate", subagentRootEvents.slice(0, 2))
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
         storedTree: rootProjection,
-        turnLastCursor: `execution:done:child:${subagentChildId}`,
+        turnLastCursor: subagentRootEvents[1]!.cursor,
         childReplayEvents: subagentChildEvents,
         turnStatus: "running",
         followed,
@@ -1861,7 +1947,7 @@ describe("InteractiveSession subagent reload", () => {
         let attempt = 0;
         attempt < 400 &&
         !events.some(
-          (event) => event._tag === "TranscriptPatched" && event.event.cursor === `${subagentChildId}:completed`,
+          (event) => event._tag === "TranscriptPatched" && event.event.cursor === subagentChildEvents.at(-1)!.cursor,
         );
         attempt += 1
       )
@@ -1882,6 +1968,7 @@ describe("InteractiveSession subagent reload", () => {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
       const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
         {
+          executionId: subagentChildId,
           cursor: "nested-call",
           sequence: 1,
           type: "tool.call.requested",
@@ -1889,16 +1976,23 @@ describe("InteractiveSession subagent reload", () => {
           data: { tool_call_id: "nested", tool_name: "task", input: { prompt: "nested" } },
         },
         {
+          executionId: subagentChildId,
           cursor: "nested-spawn",
           sequence: 2,
           type: "child_run.spawned",
           createdAt: 3,
           data: { tool_call_id: "nested", child_execution_id: nestedId },
         },
-        { cursor: "child-complete", sequence: 3, type: "execution.completed", createdAt: 5 },
+        {
+          executionId: subagentChildId,
+          cursor: "child-complete",
+          sequence: 3,
+          type: "execution.completed",
+          createdAt: 5,
+        },
       ]
       const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
-        { cursor: "nested-complete", sequence: 1, type: "execution.completed", createdAt: 4 },
+        { executionId: nestedId, cursor: "nested-complete", sequence: 1, type: "execution.completed", createdAt: 4 },
       ]
       const inspection = (executionId: string): ExecutionBackend.Inspection => {
         let children: ExecutionBackend.Inspection["children"] = []

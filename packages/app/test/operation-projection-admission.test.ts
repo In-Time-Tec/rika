@@ -39,9 +39,16 @@ const openTurn: Turn.Turn = {
   updatedAt: 1,
 }
 
-const completedEvents = (prefix: string): ReadonlyArray<ExecutionBackend.Event> => [
-  { cursor: `${prefix}-0`, sequence: 0, type: "model.output.completed", createdAt: 0, text: prefix },
-  { cursor: `${prefix}-1`, sequence: 1, type: "execution.completed", createdAt: 1 },
+const completedEvents = (prefix: string, turnId: string): ReadonlyArray<ExecutionBackend.Event> => [
+  {
+    executionId: `execution:${turnId}`,
+    cursor: `${prefix}-0`,
+    sequence: 0,
+    type: "model.output.completed",
+    createdAt: 0,
+    text: prefix,
+  },
+  { executionId: `execution:${turnId}`, cursor: `${prefix}-1`, sequence: 1, type: "execution.completed", createdAt: 1 },
 ]
 
 const inspection = (
@@ -134,7 +141,11 @@ it.effect("loads an interactive thread while a background projection holds anoth
       ...idleBackend,
       start: (input) =>
         Ref.set(started, true).pipe(
-          Effect.as({ turnId: input.turnId, status: "completed" as const, events: completedEvents("busy") }),
+          Effect.as({
+            turnId: input.turnId,
+            status: "completed" as const,
+            events: completedEvents("busy", input.turnId),
+          }),
         ),
       inspect: (turnId) =>
         Effect.gen(function* () {
@@ -152,7 +163,7 @@ it.effect("loads an interactive thread while a background projection holds anoth
             yield* Deferred.await(releaseBackfill)
             yield* Ref.set(backfillCompleted, true)
           }
-          return { turnId, status: "completed" as const, events: completedEvents(turnId) }
+          return { turnId, status: "completed" as const, events: completedEvents(turnId, turnId) }
         }),
     })
     yield* runHarness(backend, [openTurn], (client) =>
@@ -189,7 +200,11 @@ it.effect("stops a reclaim backfill at the selection repair page budget", () =>
       ...idleBackend,
       start: (input) =>
         Ref.set(started, true).pipe(
-          Effect.as({ turnId: input.turnId, status: "completed" as const, events: completedEvents("busy") }),
+          Effect.as({
+            turnId: input.turnId,
+            status: "completed" as const,
+            events: completedEvents("busy", input.turnId),
+          }),
         ),
       inspect: (turnId) =>
         Effect.gen(function* () {
@@ -203,7 +218,7 @@ it.effect("stops a reclaim backfill at the selection repair page budget", () =>
             yield* Ref.update(childReplays, (count) => count + 1)
             if (turnId === overBudgetChild) yield* Ref.set(overBudgetReplayed, true)
           }
-          return { turnId, status: "completed" as const, events: completedEvents(turnId) }
+          return { turnId, status: "completed" as const, events: completedEvents(turnId, turnId) }
         }),
     })
     yield* runHarness(backend, [], (client) =>

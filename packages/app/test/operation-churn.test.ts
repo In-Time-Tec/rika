@@ -36,6 +36,7 @@ it.effect("delivers each joined subscriber suffix exactly once through subscribe
     const liveEvents = yield* Queue.unbounded<ExecutionBackend.Event>()
     const emitted: Array<ExecutionBackend.Event> = []
     const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: 8 }, (_, sequence) => ({
+      executionId: "execution:churn-turn",
       cursor: `churn-${sequence}`,
       sequence,
       type: sequence === 7 ? "execution.completed" : "model.output.delta",

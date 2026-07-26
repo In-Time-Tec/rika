@@ -71,6 +71,7 @@ import {
   mainInstructions,
   names as agentProfileNames,
   parentPermissions,
+  permissionsForProfile,
   presets,
   resolve,
   resolveTitle,
@@ -474,6 +475,14 @@ const threadIdFromMetadata = (metadata: Readonly<Record<string, unknown>> | unde
   const threadId = metadata?.rika_thread_id
   return typeof threadId === "string" && threadId.length > 0 ? threadId : undefined
 }
+const grantedPermissions = (permissions: ReadonlyArray<{ readonly name: string; readonly value: unknown }>) =>
+  permissions.filter((permission) => permission.value === true).map((permission) => permission.name)
+const permissionsFromMetadata = (metadata: Readonly<Record<string, unknown>> | undefined) => {
+  const granted = metadata?.rika_permissions
+  if (!Array.isArray(granted)) return undefined
+  const names = granted.filter((name): name is string => typeof name === "string")
+  return names.length === granted.length ? names.map((name) => ({ name, value: true })) : undefined
+}
 
 const cursorOf = (checkpoint: string | ExecutionCheckpoint | undefined) =>
   typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
@@ -493,10 +502,7 @@ const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.
   Effect.gen(function* () {
     let current: Execution.Execution | undefined = execution
     for (let depth = 0; depth < 3 && current !== undefined; depth += 1) {
-      const route =
-        executionRouteFromMetadata(current.metadata) ??
-        executionRouteFromMetadata(current.agent_snapshot?.metadata) ??
-        executionRouteFromMetadata(current.agent_snapshot?.model.metadata)
+      const route = executionRouteFromMetadata(current.metadata)
       if (route !== undefined) return route
       const parentId: unknown = current.metadata?.parent_execution_id
       current = typeof parentId === "string" ? yield* client.executions.get(Ids.ExecutionId.make(parentId)) : undefined
@@ -831,15 +837,14 @@ const failureMessage = (data: Readonly<Record<string, unknown>> | undefined): st
 }
 
 const event = (value: {
-  readonly id: string
   readonly execution_id: string
-  readonly child_execution_id?: string
+  readonly child_execution_id?: string | undefined
   readonly cursor: string
   readonly sequence: number
   readonly type: string
   readonly created_at: number
-  readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string }>
-  readonly data?: Readonly<Record<string, unknown>>
+  readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string | undefined }> | undefined
+  readonly data?: Readonly<Record<string, unknown>> | undefined
 }): Event => {
   const contentText = value.content
     ?.filter((part) => part.type === "text")
@@ -848,7 +853,6 @@ const event = (value: {
   const failureText = value.type === "execution.failed" ? failureMessage(value.data) : undefined
   const text = contentText !== undefined && contentText.length > 0 ? contentText : failureText
   return {
-    id: value.id,
     executionId: value.execution_id,
     ...(value.child_execution_id === undefined ? {} : { childExecutionId: value.child_execution_id }),
     cursor: value.cursor,
@@ -1338,8 +1342,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             const summaryModel = routePin?.compactionSummary
             const parentExecutionId = executionId(input.parentTurnId)
             const parent = yield* client.executions.get(parentExecutionId).pipe(Effect.mapError(error))
-            const threadId =
-              threadIdFromMetadata(parent?.metadata) ?? threadIdFromMetadata(parent?.agent_snapshot?.metadata)
+            const threadId = threadIdFromMetadata(parent?.metadata)
             const depth = childExecutionDepth(String(parentExecutionId)) + 1
             const children = yield* Effect.forEach(input.children, (child) => {
               const profile = child.profile ?? "Task"
@@ -1456,8 +1459,8 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
         invokeChild: Effect.fn("ExecutionBackend.invokeChild")(function* (input) {
           const parentExecutionId = executionId(input.parentTurnId)
           const parent = yield* client.executions.get(parentExecutionId).pipe(Effect.mapError(error))
-          const routePin = executionRouteFromMetadata(parent?.agent_snapshot?.metadata)
-          if (parent?.agent_snapshot === undefined || routePin === undefined)
+          const routePin = parent === undefined ? undefined : executionRouteFromMetadata(parent.metadata)
+          if (parent === undefined || routePin === undefined)
             return yield* BackendError.make({ message: `Execution ${input.parentTurnId} has no pinned model route` })
           const route = input.profile === "Title" ? routePin.title : routeForProfile(routePin, input.profile)
           if (route === undefined)
@@ -1468,7 +1471,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               : resolve(input.profile, pinnedSelection(route)).preset
           const depth = childExecutionDepth(String(parentExecutionId)) + 1
           const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
-          const threadId = threadIdFromMetadata(parent.metadata) ?? threadIdFromMetadata(parent.agent_snapshot.metadata)
+          const threadId = threadIdFromMetadata(parent.metadata)
           yield* client.childRuns
             .spawn({
               execution_id: parentExecutionId,
@@ -1495,6 +1498,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 product_profile: input.profile,
                 steering_enabled: true,
                 rika_agent_depth: depth,
+                rika_permissions: [...preset.permissions],
                 rika_reasoning_effort: route.effort,
                 ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
                 rika_execution_route: durableRoute,
@@ -1521,6 +1525,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 rika_execution_id: String(id),
                 rika_thread_id: input.threadId,
                 rika_agent_depth: 0,
+                rika_permissions: grantedPermissions(rootPermissions),
                 rika_reasoning_effort: input.reasoningEffort ?? input.executionRoute.main.effort,
                 rika_execution_route: durableRoute,
               }
@@ -1627,6 +1632,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 execution_id: id,
                 started_at: input.startedAt,
                 completed_at: input.startedAt,
+                metadata,
               } as const
               let acceptanceUnknownLogged = false
               const start: Effect.Effect<void, Client.ClientError | Client.ResidentNamespaceReserved> = Effect.suspend(
@@ -1821,14 +1827,11 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 return yield* BackendError.make({ message: `Missing parent execution ${parentId}` })
               current = parent
             }
-            const rootExecution =
-              current.metadata?.rika_execution_id ??
-              current.agent_snapshot?.metadata?.rika_execution_id ??
-              current.agent_snapshot?.model.metadata?.rika_execution_id
-            const threadId =
-              threadIdFromMetadata(current.metadata) ?? threadIdFromMetadata(current.agent_snapshot?.metadata)
-            const depth = source.metadata?.rika_agent_depth ?? source.agent_snapshot?.metadata?.rika_agent_depth
-            const profile = source.metadata?.product_profile ?? source.agent_snapshot?.metadata?.product_profile
+            const rootExecution = current.metadata?.rika_execution_id
+            const threadId = threadIdFromMetadata(current.metadata)
+            const depth = source.metadata?.rika_agent_depth
+            const profile = source.metadata?.product_profile
+            const permissions = permissionsFromMetadata(source.metadata)
             if (
               typeof rootExecution !== "string" ||
               !rootExecution.startsWith("execution:") ||
@@ -1837,7 +1840,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               !Number.isInteger(depth) ||
               depth < 0 ||
               (depth > 0 && typeof profile !== "string") ||
-              source.agent_snapshot === undefined
+              permissions === undefined
             )
               return yield* BackendError.make({ message: `Malformed invocation provenance for ${requestedId}` })
             const callerProfile: unknown = depth === 0 ? "Root" : profile
@@ -1848,10 +1851,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               threadId,
               callerProfile,
               threadCreationDepth: depth,
-              permissions: source.agent_snapshot.permissions.map((permission) => ({
-                name: permission.name,
-                value: permission.value,
-              })),
+              permissions,
             }
           }).pipe(Effect.mapError(error))
         }),
@@ -2028,26 +2028,16 @@ export const layer = <
                 message: `Execution ${invocation.executionId} was not found`,
               })
             }
-            const snapshot = parent?.agent_snapshot
             const routePin = yield* pinnedRouteForExecution(client, parent).pipe(
               Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
             )
-            if (snapshot === undefined) {
-              return yield* AgentTools.AgentToolError.make({
-                tool: toolName,
-                message: `Execution ${invocation.executionId} does not have an agent snapshot`,
-              })
-            }
             if (routePin === undefined) {
               return yield* AgentTools.AgentToolError.make({
                 tool: toolName,
                 message: "The parent execution does not have a pinned model route",
               })
             }
-            const threadId =
-              threadIdFromMetadata(parent.metadata) ??
-              threadIdFromMetadata(snapshot.metadata) ??
-              threadIdFromMetadata(snapshot.model.metadata)
+            const threadId = threadIdFromMetadata(parent.metadata)
             const requestedPrompt =
               "threadId" in input && input.threadId !== undefined
                 ? `Requested thread ID: ${input.threadId}\n\n${input.prompt}`
@@ -2061,11 +2051,25 @@ export const layer = <
                     : requestedPrompt,
               },
             ]
+            const childDepth = parentDepth + 1
+            const childRoute = routeForProfile(routePin, profile)
+            const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
+              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+            )
             const children = calls.map((childCall) => ({
               child_execution_id: makeChildExecutionId(invocation.executionId, childCall.callId),
               address_id: addressId,
               input: [Content.text(childCall.prompt)],
-              preset_name: `${profile}:${parentDepth + 1}`,
+              preset_name: `${profile}:${childDepth}`,
+              metadata: {
+                product_profile: profile,
+                steering_enabled: true,
+                rika_agent_depth: childDepth,
+                rika_permissions: [...permissionsForProfile(profile)],
+                rika_reasoning_effort: childRoute.effort,
+                ...(threadId === undefined ? {} : { rika_thread_id: threadId }),
+                rika_execution_route: durableRoute,
+              },
             }))
             yield* Effect.forEach(
               children,
@@ -2291,6 +2295,10 @@ export const layer = <
                         metadata: {
                           child_execution_id: child.child_execution_id,
                           fan_out_id: fanOutState.fan_out_id,
+                          rika_permissions:
+                            override.permissions === undefined
+                              ? grantedPermissions(parentPermissions)
+                              : [...override.permissions],
                           ...child.metadata,
                         },
                       })
@@ -2385,6 +2393,7 @@ export const layer = <
                           metadata: {
                             parent_execution_id: parentId,
                             child_execution_id: childId,
+                            rika_permissions: [...preset.permissions],
                             workflow_operation_id: operation.id,
                           },
                         })

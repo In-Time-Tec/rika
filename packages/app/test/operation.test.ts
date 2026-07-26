@@ -88,8 +88,21 @@ const backend = ExecutionBackend.Service.of({
       turnId: input.turnId,
       status: "completed",
       events: [
-        { cursor: "cursor-a", sequence: 1, type: "model.output.completed", createdAt: 1, text: "answer" },
-        { cursor: "cursor-b", sequence: 2, type: "execution.completed", createdAt: 2 },
+        {
+          executionId: `execution:${input.turnId}`,
+          cursor: "cursor-a",
+          sequence: 1,
+          type: "model.output.completed",
+          createdAt: 1,
+          text: "answer",
+        },
+        {
+          executionId: `execution:${input.turnId}`,
+          cursor: "cursor-b",
+          sequence: 2,
+          type: "execution.completed",
+          createdAt: 2,
+        },
       ],
     }),
   replay: (turnId) => Effect.succeed({ turnId, status: "completed", events: [] }),
@@ -156,6 +169,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     },
   })
   const streamed: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: eventCount }, (_, index) => ({
+    executionId: "execution:selection-live-turn",
     cursor: `selection-live-${index + 1}`,
     sequence: index + 1,
     type: "model.output.delta",
@@ -163,6 +177,7 @@ const makeSelectionLoadHarness = Effect.fn("OperationTest.makeSelectionLoadHarne
     text: String(index + 1),
   }))
   const usage: ExecutionBackend.Event = {
+    executionId: "execution:selection-live-turn",
     cursor: "selection-live-usage",
     sequence: eventCount + 1,
     type: "model.usage.reported",
@@ -1797,6 +1812,7 @@ describe("Operation", () => {
             status: "completed" as const,
             events: [
               {
+                executionId: `execution:${turnId}`,
                 cursor: `summary-repair-completed-${turnId}`,
                 sequence: 1,
                 type: "execution.completed" as const,
@@ -2088,8 +2104,21 @@ describe("Operation", () => {
         const events = new Map<string, Array<Operation.InteractiveEvent>>()
         const feedCompleted = Symbol("feed-completed")
         const streamed = [
-          { cursor: "streamed", sequence: 1, type: "model.output.completed", createdAt: 3, text: "done" },
-          { cursor: "terminal", sequence: 2, type: "execution.completed", createdAt: 4 },
+          {
+            executionId: "execution:promoted-turn",
+            cursor: "streamed",
+            sequence: 1,
+            type: "model.output.completed",
+            createdAt: 3,
+            text: "done",
+          },
+          {
+            executionId: "execution:promoted-turn",
+            cursor: "terminal",
+            sequence: 2,
+            type: "execution.completed",
+            createdAt: 4,
+          },
         ] as const
         const promotedBackend = ExecutionBackend.Service.of({
           ...backend,
@@ -2172,6 +2201,7 @@ describe("Operation", () => {
             ...Array.from(
               { length: eventCount },
               (_, index): ExecutionBackend.Event => ({
+                executionId: "execution:overflow-turn",
                 cursor: `chunk-${index + 1}`,
                 sequence: index + 1,
                 type: "model.output.delta",
@@ -2180,6 +2210,7 @@ describe("Operation", () => {
               }),
             ),
             {
+              executionId: "execution:overflow-turn",
               cursor: "terminal",
               sequence: eventCount + 1,
               type: "execution.completed",
@@ -2916,7 +2947,15 @@ describe("Operation", () => {
             turnId,
             status: "cancelled",
             stopIntent: "none",
-            events: [{ cursor: "cancelled", sequence: 1, type: "execution.cancelled", createdAt: 3 }],
+            events: [
+              {
+                executionId: `execution:${turnId}`,
+                cursor: "cancelled",
+                sequence: 1,
+                type: "execution.cancelled",
+                createdAt: 3,
+              },
+            ],
           }),
       })
       yield* Effect.gen(function* () {
@@ -3757,13 +3796,14 @@ describe("Operation", () => {
             status: "completed" as const,
             events: [
               {
+                executionId,
                 cursor: "title-a",
                 sequence: 1,
                 type: "model.output.completed" as const,
                 createdAt: 3,
                 text: "answer",
               },
-              { cursor: "title-b", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
+              { executionId, cursor: "title-b", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
             ],
           })
         },
@@ -3832,7 +3872,14 @@ describe("Operation", () => {
           threadId: "thread-interactive",
           turnId: "turn-interactive",
           revision: 1,
-          event: { cursor: "cursor-a", sequence: 1, type: "model.output.completed", createdAt: 1, text: "answer" },
+          event: {
+            executionId: "execution:turn-interactive",
+            cursor: "cursor-a",
+            sequence: 1,
+            type: "model.output.completed",
+            createdAt: 1,
+            text: "answer",
+          },
         },
         {
           _tag: "TranscriptPatched",
@@ -3840,7 +3887,13 @@ describe("Operation", () => {
           threadId: "thread-interactive",
           turnId: "turn-interactive",
           revision: 2,
-          event: { cursor: "cursor-b", sequence: 2, type: "execution.completed", createdAt: 2 },
+          event: {
+            executionId: "execution:turn-interactive",
+            cursor: "cursor-b",
+            sequence: 2,
+            type: "execution.completed",
+            createdAt: 2,
+          },
         },
       ])
       expect(transcript[5]).toMatchObject({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" })
@@ -3920,7 +3973,15 @@ describe("Operation", () => {
             Effect.as({
               turnId,
               status: "cancelled" as const,
-              events: [{ cursor: "cancelled", sequence: 1, type: "execution.cancelled", createdAt: now }],
+              events: [
+                {
+                  executionId: `execution:${turnId}`,
+                  cursor: "cancelled",
+                  sequence: 1,
+                  type: "execution.cancelled",
+                  createdAt: now,
+                },
+              ],
             }),
           ),
       })
@@ -4020,13 +4081,20 @@ describe("Operation", () => {
             status: "completed" as const,
             events: [
               {
+                executionId,
                 cursor: "title-output",
                 sequence: 1,
                 type: "model.output.completed" as const,
                 createdAt: 3,
                 text: "Selected Route Title",
               },
-              { cursor: "title-completed", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
+              {
+                executionId,
+                cursor: "title-completed",
+                sequence: 2,
+                type: "execution.completed" as const,
+                createdAt: 4,
+              },
             ],
           }),
         start: (input) =>
@@ -4036,6 +4104,7 @@ describe("Operation", () => {
               status: "completed" as const,
               events: [
                 {
+                  executionId: `execution:${input.turnId}`,
                   cursor: `cursor:${input.turnId}:output`,
                   sequence: 1,
                   type: "model.output.completed" as const,
@@ -4043,6 +4112,7 @@ describe("Operation", () => {
                   text: "answer",
                 },
                 {
+                  executionId: `execution:${input.turnId}`,
                   cursor: `cursor:${input.turnId}:completed`,
                   sequence: 2,
                   type: "execution.completed" as const,
@@ -4171,13 +4241,20 @@ describe("Operation", () => {
               status: "completed" as const,
               events: [
                 {
+                  executionId,
                   cursor: "restarted-title-output",
                   sequence: 1,
                   type: "model.output.completed" as const,
                   createdAt: 3,
                   text: "Recovered Durable Title",
                 },
-                { cursor: "restarted-title-done", sequence: 2, type: "execution.completed" as const, createdAt: 4 },
+                {
+                  executionId,
+                  cursor: "restarted-title-done",
+                  sequence: 2,
+                  type: "execution.completed" as const,
+                  createdAt: 4,
+                },
               ],
             }),
           ),
@@ -4284,6 +4361,7 @@ describe("Operation", () => {
                   status === "failed-event"
                     ? [
                         {
+                          executionId: `execution:${input.turnId}`,
                           cursor: "failure-cursor",
                           sequence: 1,
                           type: "execution.failed",
@@ -4365,6 +4443,7 @@ describe("Operation", () => {
         turnId: "turn-failed-event",
         revision: 1,
         event: {
+          executionId: "execution:turn-failed-event",
           cursor: "failure-cursor",
           sequence: 1,
           type: "execution.failed",
@@ -4396,9 +4475,28 @@ describe("Operation", () => {
               turnId: input.turnId,
               status: "completed",
               events: [
-                { cursor: "cursor-a", sequence: 1, type: "model.output.completed", createdAt: 1 },
-                { cursor: "cursor-b", sequence: 2, type: "model.output.completed", createdAt: 2, text: "answer" },
-                { cursor: "cursor-c", sequence: 3, type: "execution.completed", createdAt: 3 },
+                {
+                  executionId: `execution:${input.turnId}`,
+                  cursor: "cursor-a",
+                  sequence: 1,
+                  type: "model.output.completed",
+                  createdAt: 1,
+                },
+                {
+                  executionId: `execution:${input.turnId}`,
+                  cursor: "cursor-b",
+                  sequence: 2,
+                  type: "model.output.completed",
+                  createdAt: 2,
+                  text: "answer",
+                },
+                {
+                  executionId: `execution:${input.turnId}`,
+                  cursor: "cursor-c",
+                  sequence: 3,
+                  type: "execution.completed",
+                  createdAt: 3,
+                },
               ],
             }
           }),
@@ -4492,8 +4590,8 @@ describe("Operation", () => {
       expect(persisted).toEqual([thread])
       expect(turn).toMatchObject({ threadId: "thread-existing", prompt: "existing prompt", status: "completed" })
       expect(output.filter((line): line is string => typeof line === "string" && line.startsWith("{"))).toEqual([
-        '{"cursor":"cursor-a","sequence":1,"type":"model.output.completed","createdAt":1,"text":"answer"}',
-        '{"cursor":"cursor-b","sequence":2,"type":"execution.completed","createdAt":2}',
+        '{"executionId":"execution:turn-existing","cursor":"cursor-a","sequence":1,"type":"model.output.completed","createdAt":1,"text":"answer"}',
+        '{"executionId":"execution:turn-existing","cursor":"cursor-b","sequence":2,"type":"execution.completed","createdAt":2}',
       ])
     }),
   )
@@ -5248,17 +5346,17 @@ describe("Operation", () => {
               turnId: input.turnId,
               status: "completed" as const,
               events: [
-                delegationEvent("cursor-call", 1, "tool.call.requested", {
+                delegationEvent(`execution:${input.turnId}`, "cursor-call", 1, "tool.call.requested", {
                   tool_call_id: "call-1",
                   tool_name: "oracle",
                   input: { prompt: "review the plan" },
                 }),
-                delegationEvent("cursor-result", 2, "tool.result.received", {
+                delegationEvent(`execution:${input.turnId}`, "cursor-result", 2, "tool.result.received", {
                   tool_call_id: "call-1",
                   tool_name: "oracle",
                   output: noReport,
                 }),
-                delegationEvent("cursor-done", 3, "execution.completed", {}),
+                delegationEvent(`execution:${input.turnId}`, "cursor-done", 3, "execution.completed", {}),
               ],
             }),
         })
@@ -5303,13 +5401,15 @@ describe("Operation", () => {
 })
 
 const delegationEvent = (
+  executionId: string,
   cursor: string,
   sequence: number,
   type: string,
   data: Record<string, unknown>,
-): ExecutionBackend.Event => ({ cursor, sequence, type, createdAt: sequence, data })
+): ExecutionBackend.Event => ({ executionId, cursor, sequence, type, createdAt: sequence, data })
 
-const usageEventAt = (cursor: string, sequence: number): ExecutionBackend.Event => ({
+const usageEventAt = (executionId: string, cursor: string, sequence: number): ExecutionBackend.Event => ({
+  executionId,
   cursor,
   sequence,
   type: "model.usage.reported",
@@ -5317,16 +5417,19 @@ const usageEventAt = (cursor: string, sequence: number): ExecutionBackend.Event 
   data: { model: "test", input_tokens: 100, output_tokens: 10 },
 })
 
+const childOf = (executionId: string, callId: string) => `child:${encodeURIComponent(executionId)}:${callId}`
+
 describe("rootExecutionEvents", () => {
-  it("keeps root execution events and drops child execution events", () => {
+  it("keeps root execution events and drops every foreign execution's events", () => {
     const turnId = "turn-1"
+    const rootId = `execution:${turnId}`
     const events = [
-      { ...usageEventAt(`execution:${turnId}:model:9:usage`, 9), executionId: `execution:${turnId}` },
-      usageEventAt(`child:execution%3A${turnId}:call_a:model:4526:usage`, 4526),
-      usageEventAt(`execution:${turnId}:model:30:usage`, 30),
-      usageEventAt(`execution:title:${turnId}:model:8:usage`, 8),
-      usageEventAt("synthetic-cursor", 40),
-      { ...usageEventAt("opaque-child-cursor", 41), executionId: "child-execution" },
+      usageEventAt(rootId, "cm9vdDE~9Zk", 9),
+      usageEventAt(childOf(rootId, "call_a"), "Y2hpbGQ~4Wq", 4526),
+      usageEventAt(rootId, "cm9vdDI~30x", 30),
+      usageEventAt(childOf(rootId, "title"), "dGl0bGU~8Ab", 8),
+      usageEventAt(turnId, "YmFyZQ~40Cd", 40),
+      usageEventAt("execution:other-turn", "b3RoZXI~41Ef", 41),
     ]
     const filtered = Operation.rootExecutionEvents(turnId, events)
     expect(filtered.map((value) => value.sequence)).toEqual([9, 30, 40])
@@ -5334,10 +5437,36 @@ describe("rootExecutionEvents", () => {
 
   it("keeps a poisoned child sequence out of the projected revision", () => {
     const turnId = "turn-2"
+    const rootId = `execution:${turnId}`
     const events = [
-      usageEventAt(`child:execution%3A${turnId}:call_a:model:4526:usage`, 4526),
-      usageEventAt(`execution:${turnId}:model:9:usage`, 9),
+      usageEventAt(childOf(rootId, "call_a"), "cG9pc29u~4Wq", 4526),
+      usageEventAt(rootId, "cm9vdA~9Zk", 9),
     ]
     expect(Operation.rootExecutionEvents(turnId, events).every((value) => value.sequence <= 9)).toBe(true)
+  })
+
+  it("attributes by execution identity alone and never reads the cursor", () => {
+    const turnId = "turn-3"
+    const rootId = `execution:${turnId}`
+    const events = [
+      usageEventAt(rootId, `child:${turnId}:call_a:model:1:usage`, 1),
+      usageEventAt(rootId, "execution:some-other-turn:model:2:usage", 2),
+      usageEventAt(childOf(rootId, "call_a"), `execution:${turnId}:model:3:usage`, 3),
+      usageEventAt("execution:other-turn", `execution:${turnId}:model:4:usage`, 4),
+    ]
+    const filtered = Operation.rootExecutionEvents(turnId, events)
+    expect(filtered.map((value) => value.sequence)).toEqual([1, 2])
+  })
+
+  it("survives cursors that carry no information at all", () => {
+    const turnId = "turn-4"
+    const rootId = `execution:${turnId}`
+    const opaque = (sequence: number) => Array.from({ length: 20 }, (_, index) => `${sequence}${index}`).join("")
+    const events = [
+      usageEventAt(rootId, opaque(1), 1),
+      usageEventAt(childOf(rootId, "call_a"), opaque(2), 2),
+      usageEventAt(rootId, opaque(3), 3),
+    ]
+    expect(Operation.rootExecutionEvents(turnId, events).map((value) => value.cursor)).toEqual([opaque(1), opaque(3)])
   })
 })

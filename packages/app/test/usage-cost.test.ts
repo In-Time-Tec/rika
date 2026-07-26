@@ -5,7 +5,6 @@ import { Duration, Effect } from "effect"
 import * as UsageCost from "../src/usage-cost"
 
 const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
-  id: cursor,
   executionId: "execution",
   cursor,
   sequence: 0,
@@ -20,7 +19,6 @@ const usage = (cursor: string, costUsd: number): ExecutionBackend.Event => ({
 })
 
 const attemptCompleted = (cursor: string, attemptId: string, executionId = "execution"): ExecutionBackend.Event => ({
-  id: cursor,
   executionId,
   cursor,
   sequence: 0,
@@ -36,7 +34,6 @@ const reportedTokens = (
   outputTokens: number | null,
   data: Readonly<Record<string, unknown>> = {},
 ): ExecutionBackend.Event => ({
-  id: cursor,
   executionId: "execution",
   cursor,
   sequence: 0,
@@ -72,7 +69,6 @@ const lifecycle = (
   createdAt: number,
   sequence: number,
 ): ExecutionBackend.Event => ({
-  id,
   executionId,
   cursor: id,
   sequence,
@@ -208,7 +204,6 @@ describe("UsageCost", () => {
     const snapshot = [
       lifecycle("execution", "start", "execution.started", 1_000, 1),
       {
-        id: "tool",
         executionId: "execution",
         cursor: "tool",
         sequence: 2,
@@ -229,7 +224,6 @@ describe("UsageCost", () => {
 
   it("admits work evidence that repairs stale Relay timestamps into the observed stream", () => {
     const work: ExecutionBackend.Event = {
-      id: "tool",
       executionId: "execution",
       cursor: "tool",
       sequence: 2,
@@ -258,7 +252,6 @@ describe("UsageCost", () => {
     const events = [
       lifecycle("execution", "start", "execution.started", 1_000, 1),
       {
-        id: "tool",
         executionId: "execution",
         cursor: "tool",
         sequence: 2,
@@ -631,7 +624,7 @@ describe("UsageCost", () => {
     const missingIdentity = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
       turnId: "turn",
-      event: { cursor: "start", sequence: 1, type: "execution.started", createdAt: 1 },
+      event: { executionId: "", cursor: "start", sequence: 1, type: "execution.started", createdAt: 1 },
     })
     const invalidTimestamp = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
@@ -661,7 +654,6 @@ describe("UsageCost", () => {
         lifecycle("execution", "accepted", "execution.accepted", 0, 0),
         lifecycle("execution", "started", "execution.started", 1_000, 1),
         ...Array.from({ length: 1_001 }, (_, index) => ({
-          id: `output-${index}`,
           executionId: "execution",
           cursor: `output-${index}`,
           sequence: index + 2,
@@ -871,13 +863,12 @@ describe("UsageCost", () => {
     const unrelated = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
       turnId: "turn",
-      event: { cursor: "output", sequence: 0, type: "model.output.completed", createdAt: 1 },
+      event: { executionId: "execution", cursor: "output", sequence: 0, type: "workspace.diff", createdAt: 1 },
     })
-    const { id: _, ...eventWithoutId } = usage("missing-identity", 1)
     const missingIdentity = UsageCost.observe(unrelated, {
       threadId: "thread",
       turnId: "turn",
-      event: eventWithoutId,
+      event: { ...usage("missing-identity", 1), executionId: "" },
     })
     const missingAttempt = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
@@ -1061,13 +1052,13 @@ describe("UsageCost", () => {
     expect(UsageCost.threadTotals(retried, "thread")).toMatchObject({ costUsd: 1.75, unpricedAttempts: 1 })
   })
 
-  it("deduplicates values by attempt and deliveries by execution and event id", () => {
+  it("deduplicates values by attempt and deliveries by opaque event cursor", () => {
     const first = usage("first", 1)
     const sameAttempt = {
       ...usage("second", 9),
       data: { ...usage("second", 9).data, model_attempt_id: first.data?.model_attempt_id },
     }
-    const duplicateDelivery = { ...usage("ignored", 8), id: "first" }
+    const duplicateDelivery = { ...usage("ignored", 8), cursor: first.cursor }
     const snapshot = [first, sameAttempt, duplicateDelivery].reduce(
       (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
       UsageCost.empty,
@@ -1077,9 +1068,14 @@ describe("UsageCost", () => {
     expect(snapshot.global.unpricedAttempts === 0).toBe(false)
   })
 
-  it("scopes reused event and attempt ids to their execution", () => {
-    const first = { ...usage("same", 1), executionId: "execution-a" }
-    const second = { ...usage("same", 2), executionId: "execution-b" }
+  it("scopes reused attempt ids to their execution", () => {
+    const sharedAttempt = (cursor: string, executionId: string, costUsd: number) => ({
+      ...usage(cursor, costUsd),
+      executionId,
+      data: { ...usage(cursor, costUsd).data, model_attempt_id: "attempt-shared" },
+    })
+    const first = sharedAttempt("cursor-a", "execution-a", 1)
+    const second = sharedAttempt("cursor-b", "execution-b", 2)
     const snapshot = [first, second].reduce(
       (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
       UsageCost.empty,

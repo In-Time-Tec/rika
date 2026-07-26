@@ -130,6 +130,7 @@ const program = Effect.gen(function* () {
                           threadId: Thread.ThreadId.make("slow-consumer-thread"),
                           turnId: Turn.TurnId.make("slow-consumer-turn"),
                           event: {
+                            executionId: "execution:slow-consumer-turn",
                             cursor: `slow-consumer-${index}`,
                             sequence: index,
                             type: "model.output.delta",
@@ -153,6 +154,7 @@ const program = Effect.gen(function* () {
                         threadId: Thread.ThreadId.make("slow-consumer-thread"),
                         turnId: Turn.TurnId.make("slow-consumer-turn"),
                         event: {
+                          executionId: "execution:slow-consumer-turn",
                           cursor: "slow-consumer-completed",
                           sequence: outboundCapacity + 1,
                           type: "execution.completed",
@@ -179,6 +181,7 @@ const program = Effect.gen(function* () {
                           threadId,
                           turnId,
                           event: {
+                            executionId: "execution:slow-consumer-turn",
                             cursor: `timed-tool-${sequence}`,
                             sequence,
                             type,
@@ -218,6 +221,7 @@ const program = Effect.gen(function* () {
                       threadId,
                       turnId: parentTurnId,
                       event: {
+                        executionId: `execution:${parentTurnId}`,
                         cursor: "child-spawned",
                         sequence: 1,
                         type: "child_run.spawned",
@@ -235,6 +239,7 @@ const program = Effect.gen(function* () {
                       threadId,
                       turnId: childTurnId,
                       event: {
+                        executionId: `execution:${childTurnId}`,
                         cursor: "child-tool",
                         sequence: 0,
                         type: "tool.call.requested",
@@ -249,6 +254,7 @@ const program = Effect.gen(function* () {
                       threadId,
                       turnId: childTurnId,
                       event: {
+                        executionId: `execution:${childTurnId}`,
                         cursor: "child-response",
                         sequence: 1,
                         type: "model.output.completed",
@@ -270,6 +276,7 @@ const program = Effect.gen(function* () {
                         threadId: Thread.ThreadId.make("overflow-thread"),
                         turnId: Turn.TurnId.make("overflow-turn"),
                         event: {
+                          executionId: "execution:overflow-turn",
                           cursor: `overflow-${index}`,
                           sequence: index,
                           type: "model.output.delta",
@@ -319,6 +326,7 @@ const program = Effect.gen(function* () {
                           threadId: Thread.ThreadId.make("overflow-thread"),
                           turnId: Turn.TurnId.make("overflow-turn"),
                           event: {
+                            executionId: "execution:overflow-turn",
                             cursor: `watch-overflow-${index}`,
                             sequence: index,
                             type: "model.output.delta",

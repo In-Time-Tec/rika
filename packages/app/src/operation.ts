@@ -14,7 +14,7 @@ import { ExecutionExtensions } from "@rika/extensions"
 import { ConfigService } from "@rika/config"
 import * as ExtensionOperations from "./extension-operations"
 import * as OpenAiAuth from "./openai-auth"
-import { Catalog as ToolCatalog, ExecutionStatus, Runtime as ToolRuntime } from "@rika/tools"
+import { Catalog as ToolCatalog, ExecutionId, ExecutionStatus, Runtime as ToolRuntime } from "@rika/tools"
 import {
   Cause,
   Clock,
@@ -500,7 +500,9 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
                       yield* turns.setStatus(
                         turn.id,
                         result.status,
-                        result.checkpoint?.cursor ?? ThreadActivity.latestCursor(result.events) ?? turn.lastCursor,
+                        result.checkpoint?.cursor ??
+                          ThreadActivity.latestCursor(turn.id, result.events) ??
+                          turn.lastCursor,
                         now,
                       )
                     }).pipe(
@@ -650,7 +652,9 @@ const reconcileInternal = Effect.fn("Operation.reconcile")(function* (
           yield* turns.setStatus(
             promotedTurn.turn.id,
             result.status,
-            result.checkpoint?.cursor ?? ThreadActivity.latestCursor(result.events) ?? promotedTurn.turn.lastCursor,
+            result.checkpoint?.cursor ??
+              ThreadActivity.latestCursor(promotedTurn.turn.id, result.events) ??
+              promotedTurn.turn.lastCursor,
             yield* Clock.currentTimeMillis,
           )
           if (!isTerminalStatus(result.status) || result.status === "failed") return
@@ -769,14 +773,7 @@ export const rootExecutionEvents: {
 } = Function.dual(
   2,
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
-    events.filter(
-      (event) =>
-        (event.executionId === undefined ||
-          event.executionId === turnId ||
-          event.executionId === `execution:${turnId}`) &&
-        !event.cursor.startsWith("child:") &&
-        (!event.cursor.startsWith("execution:") || event.cursor.startsWith(`execution:${turnId}:`)),
-    ),
+    events.filter((event) => ExecutionId.ownsExecution(turnId, event.executionId)),
 )
 
 const completeRootExecutionEvents = Effect.fn("Operation.completeRootExecutionEvents")(function* (
@@ -799,13 +796,6 @@ const completeRootExecutionEvents = Effect.fn("Operation.completeRootExecutionEv
     after = next
   }
 })
-
-const rootCheckpointCursor = (turnId: string, cursor: string | undefined): string | undefined =>
-  cursor === undefined ||
-  cursor.startsWith("child:") ||
-  (cursor.startsWith("execution:") && !cursor.startsWith(`execution:${turnId}:`))
-    ? undefined
-    : cursor
 
 const toolForChild = (projection: Transcript.Projection, childExecutionId: string) =>
   Transcript.childParentMatch(
@@ -1792,7 +1782,7 @@ export const productLayer = <
                     candidate.turnId,
                     candidate.status,
                     candidate.lastCursor,
-                    ThreadActivity.latestCursor(result.events) ?? candidate.lastCursor,
+                    ThreadActivity.latestCursor(candidate.turnId, result.events) ?? candidate.lastCursor,
                   ))
                 )
                   return
@@ -2822,7 +2812,9 @@ export const productLayer = <
                       const updatedTurn = yield* setTurnStatus(
                         turn.id,
                         result.status,
-                        result.checkpoint?.cursor ?? ThreadActivity.latestCursor(result.events) ?? turn.lastCursor,
+                        result.checkpoint?.cursor ??
+                          ThreadActivity.latestCursor(turn.id, result.events) ??
+                          turn.lastCursor,
                         completedAt,
                       )
                       yield* projectExecutionResult(thread.id, result)
@@ -2962,7 +2954,7 @@ export const productLayer = <
               })
               return
             }
-            const nextCursor = ThreadActivity.latestCursor(result.events)
+            const nextCursor = ThreadActivity.latestCursor(result.turnId, result.events)
             if (nextCursor === undefined || nextCursor === state.afterCursor) {
               childFollowerStates.set(
                 job.key,
@@ -3133,7 +3125,9 @@ export const productLayer = <
             const updatedTurn = yield* setTurnStatus(
               promotedTurn.id,
               result.status,
-              result.checkpoint?.cursor ?? ThreadActivity.latestCursor(result.events) ?? promotedTurn.lastCursor,
+              result.checkpoint?.cursor ??
+                ThreadActivity.latestCursor(promotedTurn.id, result.events) ??
+                promotedTurn.lastCursor,
               yield* Clock.currentTimeMillis,
             )
             yield* projectExecutionResult(thread.id, result)
@@ -3264,7 +3258,7 @@ export const productLayer = <
           const updatedTurn = yield* setTurnStatus(
             turn.id,
             result.status,
-            result.checkpoint?.cursor ?? ThreadActivity.latestCursor(result.events) ?? turn.lastCursor,
+            result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
             yield* Clock.currentTimeMillis,
           )
           yield* projectExecutionResult(turn.threadId, result)
@@ -3326,7 +3320,7 @@ export const productLayer = <
         ) {
           const transcripts = yield* TranscriptRepository.Service
           const current = yield* transcripts.get(turn.id)
-          const boundary = rootCheckpointCursor(turn.id, current?.checkpointCursor)
+          const boundary = current?.checkpointCursor
           if (backend.pageEvents === undefined) {
             const result = yield* backend.replay(turn.id, boundary)
             yield* appendProjection({ ...turn, status }, result.events)
@@ -4433,7 +4427,7 @@ export const productLayer = <
               yield* setTurnStatus(
                 turn.id,
                 result.status,
-                ThreadActivity.latestCursor(result.events) ?? turn.lastCursor,
+                ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
                 yield* Clock.currentTimeMillis,
               )
               yield* projectExecutionResult(turn.threadId, result)
@@ -4951,7 +4945,7 @@ export const productLayer = <
                   const updated = yield* setTurnStatus(
                     turn.id,
                     result.status,
-                    result.checkpoint?.cursor ?? ThreadActivity.latestCursor(result.events) ?? turn.lastCursor,
+                    result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
                     completedAt,
                   )
                   yield* projectExecutionResult(thread.id, result)

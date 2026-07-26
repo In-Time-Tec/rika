@@ -15,8 +15,6 @@ import {
 } from "../src"
 
 const usage = (cursor: string, sequence: number): SourceEvent => ({
-  id: cursor,
-  executionId: "execution:turn-a",
   cursor,
   sequence,
   type: "model.usage.reported",
@@ -1263,24 +1261,20 @@ describe("Transcript projection", () => {
     expect(projection.revision).toBe(4526)
     expect(projection.checkpointCursor).toBe("foreign")
     expect(projection.costUsd).toBeCloseTo(2.5, 10)
-    expect(projection.usageCursors).toEqual(["execution:turn-a\u0000usage-9", "execution:turn-a\u0000usage-30"])
+    expect(projection.usageCursors).toEqual(["usage-9", "usage-30"])
   })
 
-  it("scopes durable usage identity to its source execution", () => {
-    const first = { ...usage("shared", 9), id: "event", executionId: "execution-a" }
-    const second = { ...usage("shared", 30), id: "event", executionId: "execution-b" }
-    const projection = project("turn-a", "prompt", [first, second])
+  it("scopes durable usage identity to the opaque event cursor", () => {
+    const projection = project("turn-a", "prompt", [usage("shared", 9), usage("shared", 30), usage("other", 31)])
 
-    expect(projection.costUsd).toBe(2.5)
-    expect(projection.usageCursors).toEqual(["execution-a\u0000event", "execution-b\u0000event"])
+    expect(projection.costUsd).toBeCloseTo(2.5, 10)
+    expect(projection.usageCursors).toEqual(["shared", "other"])
   })
 
   it("uses models.dev context tiers at their published threshold", () => {
     const model = providers.openai!.models["gpt-5.6-sol"]!
     const tier = model.cost!.tiers![0]!
     const event = (cursor: string, inputTokens: number): SourceEvent => ({
-      id: cursor,
-      executionId: `execution:${cursor}`,
       cursor,
       sequence: 1,
       type: "model.usage.reported",
@@ -1316,7 +1310,7 @@ describe("Transcript projection", () => {
     expect(reordered.costUsd).toBeCloseTo(2.5, 10)
     expect(reordered.revision).toBe(5)
     expect(reordered.checkpointCursor).toBe("usage-5")
-    expect(reordered.usageCursors).toEqual(["execution:turn-a\u0000usage-5", "execution:turn-a\u0000usage-2"])
+    expect(reordered.usageCursors).toEqual(["usage-5", "usage-2"])
   })
 
   it("settles running tool and child blocks at every execution terminal boundary", () => {

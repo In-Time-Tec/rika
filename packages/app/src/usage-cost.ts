@@ -58,7 +58,6 @@ export type ActiveTimeAvailability = ({ readonly _tag: "Available" } & ActiveTim
 
 interface ActiveEvent {
   readonly key: string
-  readonly id: string
   readonly executionId: string
   readonly threadId: string
   readonly type: ActiveEventType
@@ -113,7 +112,7 @@ export interface AttemptCost {
 }
 
 interface WorkEvidence {
-  readonly id: string
+  readonly cursor: string
   readonly createdAt: number
 }
 
@@ -176,8 +175,7 @@ const executionIntervals = (
   workTimestamps: HashMap.HashMap<number, WorkEvidence> | undefined,
 ): ReadonlyArray<Interval> | undefined => {
   const ordered = events.toSorted(
-    (left, right) =>
-      left.sequence - right.sequence || left.type.localeCompare(right.type) || left.id.localeCompare(right.id),
+    (left, right) => left.sequence - right.sequence || left.type.localeCompare(right.type),
   )
   const intervals: Array<Interval> = []
   let activeSince: number | undefined
@@ -325,10 +323,7 @@ const observeWorkTimestamp = (
   const event = input.event
   if (!isWorkEventType(event.type)) return snapshot
   if (
-    event.executionId === undefined ||
     event.executionId.length === 0 ||
-    event.id === undefined ||
-    event.id.length === 0 ||
     !Number.isSafeInteger(event.sequence) ||
     !Number.isFinite(event.createdAt) ||
     event.createdAt < 0
@@ -337,11 +332,11 @@ const observeWorkTimestamp = (
   const executionTimestamps = snapshot.executionWorkTimestamps.get(event.executionId) ?? HashMap.empty()
   const previous = Option.getOrUndefined(HashMap.get(executionTimestamps, event.sequence))
   if (previous !== undefined)
-    return previous.id === event.id && previous.createdAt === event.createdAt
+    return previous.cursor === event.cursor && previous.createdAt === event.createdAt
       ? snapshot
       : malformedTime(snapshot, input.threadId)
   const nextExecutionTimestamps = HashMap.set(executionTimestamps, event.sequence, {
-    id: event.id,
+    cursor: event.cursor,
     createdAt: event.createdAt,
   })
   const withTimestamp = {
@@ -373,16 +368,9 @@ const observeActive = (
 ): Snapshot => {
   const event = input.event
   if (!isActiveEventType(event.type)) return snapshot
-  if (
-    event.executionId === undefined ||
-    event.executionId.length === 0 ||
-    event.id === undefined ||
-    event.id.length === 0 ||
-    !Number.isFinite(event.createdAt) ||
-    event.createdAt < 0
-  )
+  if (event.executionId.length === 0 || !Number.isFinite(event.createdAt) || event.createdAt < 0)
     return malformedTime(snapshot, input.threadId)
-  const key = `${event.executionId}\u0000${event.id}`
+  const key = event.cursor
   const previous = snapshot.activeEvents.get(key)
   if (previous !== undefined) {
     if (
@@ -396,7 +384,6 @@ const observeActive = (
   }
   const activeEvents = new Map(snapshot.activeEvents).set(key, {
     key,
-    id: event.id,
     executionId: event.executionId,
     threadId: input.threadId,
     type: event.type,
@@ -608,14 +595,9 @@ const observeAttempt = (
   input: RootExecution & { readonly event: ExecutionBackend.Event },
 ): Snapshot => {
   const event = input.event
-  if (
-    event.executionId === undefined ||
-    event.executionId.length === 0 ||
-    event.id === undefined ||
-    event.id.length === 0
-  )
-    return unreadable(snapshot, input, `${event.cursor ?? ""}\u0000${event.sequence}`, "delivery-malformed")
-  const deliveryKey = `${event.executionId}\u0000${event.id}`
+  if (event.executionId.length === 0)
+    return unreadable(snapshot, input, `${event.cursor}\u0000${event.sequence}`, "delivery-malformed")
+  const deliveryKey = event.cursor
   if (snapshot.usageCursors.has(deliveryKey)) return snapshot
   const attemptId = stringField(event.data, "model_attempt_id")
   if (attemptId === undefined) return unreadable(snapshot, input, deliveryKey, "delivery-malformed")

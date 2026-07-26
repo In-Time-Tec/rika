@@ -375,8 +375,6 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
       const target = { ...turn(51), threadId: Thread.ThreadId.make("thread-usage") }
       const other = { ...turn(52), id: Turn.TurnId.make("turn-52"), threadId: Thread.ThreadId.make("thread-usage-b") }
       const usage: Transcript.SourceEvent = {
-        id: "event-usage-1",
-        executionId: "execution:turn-51",
         cursor: "usage-1",
         sequence: 5,
         type: "model.usage.reported",
@@ -388,8 +386,6 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
       const redelivered = yield* repository.appendAll(target, [
         usage,
         {
-          id: "event-late-usage",
-          executionId: "execution:turn-51",
           cursor: "late-usage",
           sequence: 2,
           type: "model.usage.reported",
@@ -401,10 +397,7 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
       yield* repository.replace(other, { ...Transcript.empty(other.id, other.prompt), costUsd: 0.5 })
       const after = yield* repository.globalCostUsd
       expect(redelivered.costUsd).toBeCloseTo(2, 10)
-      expect(redelivered.usageCursors).toEqual([
-        "execution:turn-51\u0000event-usage-1",
-        "execution:turn-51\u0000event-late-usage",
-      ])
+      expect(redelivered.usageCursors).toEqual(["usage-1", "late-usage"])
       expect(after - before).toBeCloseTo(2.5, 10)
     }),
   )
@@ -595,8 +588,6 @@ it.effect("persists usage cursors across reopen so redelivered usage never doubl
       const threadId = Thread.ThreadId.make("thread-usage-durable")
       const targetId = Turn.TurnId.make("turn-usage-durable")
       const usage: Transcript.SourceEvent = {
-        id: "event-usage-1",
-        executionId: "execution:turn-usage-durable",
         cursor: "usage-1",
         sequence: 5,
         type: "model.usage.reported",
@@ -645,7 +636,7 @@ it.effect("persists usage cursors across reopen so redelivered usage never doubl
             { cursor: "completed", sequence: 6, type: "execution.completed", createdAt: 6 },
           ])
           expect(redelivered.costUsd).toBeCloseTo(1.25, 10)
-          expect(redelivered.usageCursors).toEqual(["execution:turn-usage-durable\u0000event-usage-1"])
+          expect(redelivered.usageCursors).toEqual(["usage-1"])
           expect(yield* transcripts.globalCostUsd).toBeCloseTo(1.25, 10)
         }).pipe(provideLayer(makeLayer())),
       )

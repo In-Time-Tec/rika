@@ -290,6 +290,7 @@ describe("resident server message frames", () => {
         threadId: "thread",
         turnId: "turn",
         event: {
+          executionId: "execution:turn",
           cursor: "cursor",
           sequence: 1,
           type: "model.output.delta",

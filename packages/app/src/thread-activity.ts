@@ -1,4 +1,4 @@
-import { ExecutionStatus } from "@rika/tools"
+import { ExecutionId, ExecutionStatus } from "@rika/tools"
 import type { ThreadSummary, ThreadSummaryRepository } from "@rika/persistence"
 import type * as Thread from "@rika/persistence/thread"
 import * as Turn from "@rika/persistence/turn"
@@ -82,11 +82,19 @@ export const editTotals = (events: ReadonlyArray<ExecutionBackend.Event>): Threa
   )
 }
 
-export const latestCursor = (events: ReadonlyArray<ExecutionBackend.Event>): string | undefined =>
-  events.reduce<ExecutionBackend.Event | undefined>(
-    (current, event) => (current === undefined || event.sequence >= current.sequence ? event : current),
-    undefined,
-  )?.cursor
+export const latestCursor: {
+  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): string | undefined
+  (events: ReadonlyArray<ExecutionBackend.Event>): (turnId: string) => string | undefined
+} = Function.dual(
+  2,
+  (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): string | undefined =>
+    events
+      .filter((event) => ExecutionId.ownsExecution(turnId, event.executionId))
+      .reduce<
+        ExecutionBackend.Event | undefined
+      >((current, event) => (current === undefined || event.sequence >= current.sequence ? event : current), undefined)
+      ?.cursor,
+)
 
 export const finalAssistantOutput = (events: ReadonlyArray<ExecutionBackend.Event>): string | undefined => {
   const latestToolSequence = events.reduce(
@@ -123,7 +131,7 @@ export const projectionInput: {
     result: ExecutionBackend.Result,
     now: number,
   ): ThreadSummaryRepository.TurnActivityInput => {
-    const projectedCursor = latestCursor(result.events)
+    const projectedCursor = latestCursor(result.turnId, result.events)
     return {
       turnId: Turn.TurnId.make(result.turnId),
       threadId,

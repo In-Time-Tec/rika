@@ -136,11 +136,8 @@ test(
         expect(result.replay.events.map((event) => event.cursor)).toEqual(
           result.first.events.map((event) => event.cursor),
         )
-        expect(result.replay.events.every((event) => event.id !== undefined)).toBe(true)
         expect(result.replay.events.every((event) => event.executionId === "execution:turn-a")).toBe(true)
-        expect(new Set(result.replay.events.map((event) => `${event.executionId}\u0000${event.id}`)).size).toBe(
-          result.replay.events.length,
-        )
+        expect(new Set(result.replay.events.map((event) => event.cursor)).size).toBe(result.replay.events.length)
         expect(result.after.events.map((event) => event.cursor)).toEqual(
           result.replay.events
             .slice(result.replay.events.findIndex((event) => event.cursor === result.cursor) + 1)
@@ -719,7 +716,7 @@ test(
                   .query<
                     { readonly agent_snapshot_json: string },
                     []
-                  >("select agent_snapshot_json from relay_executions where id like 'child:%' order by id")
+                  >("select s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id like 'child:%' order by id")
                   .all()
                 database.close()
                 return { completed, requests: yield* fixture.requests, childSnapshots }
@@ -910,7 +907,7 @@ test(
                 .query<
                   { readonly id: string; readonly status: string; readonly agent_snapshot_json: string },
                   []
-                >("select id, status, agent_snapshot_json from relay_executions where id = 'child:turn-long-child-parent:long-child'")
+                >("select e.id as id, e.status as status, s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id = 'child:turn-long-child-parent:long-child'")
                 .all()
               database.close()
               return { fanOut, childExecutions }

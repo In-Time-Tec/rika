@@ -3,6 +3,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as ThreadActivity from "../src/thread-activity"
 
 const event = (overrides: Partial<import("@rika/runtime/contract").Event> = {}) => ({
+  executionId: "execution:turn-a",
   cursor: "cursor-1",
   sequence: 1,
   type: "workspace.diff",

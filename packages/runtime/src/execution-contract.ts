@@ -6,8 +6,7 @@ export const Status = Schema.Literals(["accepted", "queued", "running", "waiting
 export type Status = typeof Status.Type
 
 export const Event = Schema.Struct({
-  id: Schema.optionalKey(Schema.String),
-  executionId: Schema.optionalKey(Schema.String),
+  executionId: Schema.String,
   childExecutionId: Schema.optionalKey(Schema.String),
   cursor: Schema.String,
   sequence: Schema.Finite,

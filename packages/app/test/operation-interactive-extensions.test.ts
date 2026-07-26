@@ -49,7 +49,6 @@ const providerCostEvent = (
   amount: number,
   sequence = 0,
 ): ExecutionBackend.Event => ({
-  id: `${cursor}-id`,
   executionId,
   cursor,
   sequence,
@@ -59,7 +58,6 @@ const providerCostEvent = (
 })
 
 const estimatedCostEvent = (executionId: string, cursor: string, amount: number): ExecutionBackend.Event => ({
-  id: `${cursor}-id`,
   executionId,
   cursor,
   sequence: 0,
@@ -209,6 +207,7 @@ const terminalTransitionScenario = (
       const replayEvents: ReadonlyArray<ExecutionBackend.Event> = Array.from({ length: pageCount }, (_, index) => {
         const terminal = index === pageCount - 1
         return {
+          executionId: `execution:${target.id}`,
           cursor: terminal ? "terminal-cursor" : `cursor-${index}`,
           sequence: index + 1,
           type: terminal ? (`execution.${inspectedStatus}` as const) : "execution.started",
@@ -858,10 +857,18 @@ describe("interactive session extensions", () => {
         ])
         const childId = "turn-synth-child"
         const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
-          { cursor: "root-answer", sequence: 0, type: "model.output.completed", createdAt: 1, text: "Delegated." },
+          {
+            executionId: "turn-synth",
+            cursor: "root-answer",
+            sequence: 0,
+            type: "model.output.completed",
+            createdAt: 1,
+            text: "Delegated.",
+          },
         ]
         const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
           {
+            executionId: childId,
             cursor: "child-read",
             sequence: 0,
             type: "tool.call.requested",
@@ -869,6 +876,7 @@ describe("interactive session extensions", () => {
             data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
           },
           {
+            executionId: childId,
             cursor: "child-answer",
             sequence: 1,
             type: "model.output.completed",
@@ -1033,6 +1041,7 @@ describe("interactive session extensions", () => {
         const nestedId = `child:${encodeURIComponent(childId)}:${nestedCallId}`
         const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
           {
+            executionId: childId,
             cursor: "child-tool",
             sequence: 0,
             type: "tool.call.requested",
@@ -1040,6 +1049,7 @@ describe("interactive session extensions", () => {
             data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
           },
           {
+            executionId: childId,
             cursor: "child-delegate",
             sequence: 1,
             type: "tool.call.requested",
@@ -1047,6 +1057,7 @@ describe("interactive session extensions", () => {
             data: { tool_call_id: nestedCallId, tool_name: "task", input: { prompt: "run checks" } },
           },
           {
+            executionId: childId,
             cursor: "nested-spawn",
             sequence: 2,
             type: "child_run.spawned",
@@ -1055,16 +1066,18 @@ describe("interactive session extensions", () => {
           },
           providerCostEvent(childId, "child-usage", 2, 3),
           {
+            executionId: childId,
             cursor: "child-response",
             sequence: 4,
             type: "model.output.completed",
             createdAt: 5,
             text: "## Child complete\n\n**Projection preserved.**",
           },
-          { cursor: "child-done", sequence: 5, type: "execution.completed", createdAt: 5 },
+          { executionId: childId, cursor: "child-done", sequence: 5, type: "execution.completed", createdAt: 5 },
         ]
         const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
           {
+            executionId: nestedId,
             cursor: "nested-tool",
             sequence: 0,
             type: "tool.call.requested",
@@ -1072,6 +1085,7 @@ describe("interactive session extensions", () => {
             data: { tool_call_id: "bash", tool_name: "bash", input: { command: "bun test" } },
           },
           {
+            executionId: nestedId,
             cursor: "nested-response",
             sequence: 1,
             type: "model.output.completed",
@@ -1079,13 +1093,14 @@ describe("interactive session extensions", () => {
             text: "Nested checks passed.",
           },
           providerCostEvent(nestedId, "nested-usage", 4, 2),
-          { cursor: "nested-done", sequence: 3, type: "execution.completed", createdAt: 7 },
+          { executionId: nestedId, cursor: "nested-done", sequence: 3, type: "execution.completed", createdAt: 7 },
         ]
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
           start: (input) => {
             const parentEvents: ReadonlyArray<ExecutionBackend.Event> = [
               {
+                executionId: input.turnId,
                 cursor: "parent-tool",
                 sequence: 0,
                 type: "tool.call.requested",
@@ -1093,6 +1108,7 @@ describe("interactive session extensions", () => {
                 data: { tool_call_id: childCallId, tool_name: "oracle", input: { prompt: "inspect" } },
               },
               {
+                executionId: input.turnId,
                 cursor: "child-spawn",
                 sequence: 1,
                 type: "child_run.spawned",
@@ -1100,7 +1116,13 @@ describe("interactive session extensions", () => {
                 data: { child_execution_id: childId },
               },
               providerCostEvent(String(input.turnId), "parent-usage", 1, 2),
-              { cursor: "parent-done", sequence: 3, type: "execution.completed", createdAt: 8 },
+              {
+                executionId: input.turnId,
+                cursor: "parent-done",
+                sequence: 3,
+                type: "execution.completed",
+                createdAt: 8,
+              },
             ]
             return Ref.update(startEventScopes, (values) => [...values, input.eventScope]).pipe(
               Effect.tap(() =>
@@ -1244,6 +1266,7 @@ describe("interactive session extensions", () => {
             Effect.sync(() => {
               for (const [sequence, childId] of childIds.entries())
                 input.onEvent?.({
+                  executionId: input.turnId,
                   cursor: `spawn-${sequence}`,
                   sequence,
                   type: "child_run.spawned",
@@ -1259,7 +1282,8 @@ describe("interactive session extensions", () => {
               Effect.tap((values) =>
                 Effect.sync(() =>
                   onEvent?.({
-                    cursor: `${executionId}:started`,
+                    executionId,
+                    cursor: "started",
                     sequence: 0,
                     type: "model.output.delta",
                     createdAt: 1,
@@ -1299,13 +1323,13 @@ describe("interactive session extensions", () => {
         yield* Deferred.await(allChildrenStarted)
 
         expect(new Set(yield* Ref.get(followed))).toEqual(new Set(childIds))
-        const startedCursors = () =>
+        const startedChildren = () =>
           events.flatMap((event) =>
-            event._tag === "TranscriptPatched" && event.event.type === "model.output.delta" ? [event.event.cursor] : [],
+            event._tag === "TranscriptPatched" && event.event.type === "model.output.delta" ? [event.turnId] : [],
           )
-        while (startedCursors().length < childIds.length) yield* Effect.yieldNow
-        expect(startedCursors()).toEqual(expect.arrayContaining(childIds.map((childId) => `${childId}:started`)))
-        expect(startedCursors()).toHaveLength(childIds.length)
+        while (startedChildren().length < childIds.length) yield* Effect.yieldNow
+        expect(new Set(startedChildren())).toEqual(new Set(childIds))
+        expect(startedChildren()).toHaveLength(childIds.length)
 
         yield* Deferred.succeed(releaseChildren, undefined)
         yield* Fiber.interrupt(feed)
@@ -1328,6 +1352,7 @@ describe("interactive session extensions", () => {
           start: (input) =>
             Effect.sync(() => {
               input.onEvent?.({
+                executionId: input.turnId,
                 cursor: "spawn",
                 sequence: 0,
                 type: "child_run.spawned",
@@ -1345,6 +1370,7 @@ describe("interactive session extensions", () => {
             if (executionId === "parent-turn")
               return Effect.succeed({ turnId: executionId, status: "running" as const, events: [] })
             const waiting: ExecutionBackend.Event = {
+              executionId,
               cursor: "wait",
               sequence: 0,
               type: "permission.ask.requested",
@@ -1352,8 +1378,15 @@ describe("interactive session extensions", () => {
               data: { wait_id: "wait-child", tool_call_id: "read", tool_name: "read" },
             }
             const completed: ReadonlyArray<ExecutionBackend.Event> = [
-              { cursor: "answer", sequence: 1, type: "model.output.delta", createdAt: 3, text: "resumed" },
-              { cursor: "done", sequence: 2, type: "execution.completed", createdAt: 4 },
+              {
+                executionId,
+                cursor: "answer",
+                sequence: 1,
+                type: "model.output.delta",
+                createdAt: 3,
+                text: "resumed",
+              },
+              { executionId, cursor: "done", sequence: 2, type: "execution.completed", createdAt: 4 },
             ]
             return Ref.update(childFollows, (cursors) => [...cursors, cursor]).pipe(
               Effect.andThen(Ref.getAndUpdate(childFollowCount, (count) => count + 1)),
@@ -1434,7 +1467,8 @@ describe("interactive session extensions", () => {
             const childId = `${input.turnId}:child:worker`
             return Effect.sync(() => {
               input.onEvent?.({
-                cursor: `spawn-${input.turnId}`,
+                executionId: input.turnId,
+                cursor: "spawn",
                 sequence: 0,
                 type: "child_run.spawned",
                 createdAt: 1,
@@ -1459,7 +1493,8 @@ describe("interactive session extensions", () => {
                     afterCursor === undefined
                       ? Effect.sync(() =>
                           onEvent?.({
-                            cursor: `${executionId}:cursor`,
+                            executionId,
+                            cursor: "working",
                             sequence: 0,
                             type: "model.output.delta",
                             createdAt: 2,
@@ -1496,14 +1531,16 @@ describe("interactive session extensions", () => {
             const events: ReadonlyArray<ExecutionBackend.Event> = turnId.includes(":child:")
               ? [
                   {
-                    cursor: `${turnId}:cursor`,
+                    executionId: turnId,
+                    cursor: "working",
                     sequence: 0,
                     type: "model.output.delta",
                     createdAt: 2,
                     text: "working",
                   },
                   {
-                    cursor: `${turnId}:cancelled`,
+                    executionId: turnId,
+                    cursor: "stopped",
                     sequence: 1,
                     type: "execution.cancelled",
                     createdAt: 3,
@@ -1542,7 +1579,10 @@ describe("interactive session extensions", () => {
         expect(new Set(yield* Ref.get(cancelled))).toEqual(new Set(["turn-1:child:worker", "turn-1"]))
         while (
           !events.some(
-            (event) => event._tag === "TranscriptPatched" && event.event.cursor === "turn-1:child:worker:cancelled",
+            (event) =>
+              event._tag === "TranscriptPatched" &&
+              event.turnId === "turn-1:child:worker" &&
+              event.event.cursor === "stopped",
           )
         )
           yield* Effect.yieldNow
@@ -1550,7 +1590,7 @@ describe("interactive session extensions", () => {
           events.flatMap((event) =>
             event._tag === "TranscriptPatched" && event.turnId === "turn-1:child:worker" ? [event.event.cursor] : [],
           ),
-        ).toEqual(["turn-1:child:worker:cursor", "turn-1:child:worker:cancelled"])
+        ).toEqual(["working", "stopped"])
 
         yield* session.submit("selected away")
         expect(yield* Queue.take(followed)).toEqual({ executionId: "turn-2:child:worker" })
@@ -1559,7 +1599,7 @@ describe("interactive session extensions", () => {
         yield* session.selectThread(first.id, 3)
         expect(yield* Queue.take(followed)).toEqual({
           executionId: "turn-2:child:worker",
-          afterCursor: "turn-2:child:worker:cursor",
+          afterCursor: "working",
         })
         yield* session.selectThread(second.id, 4)
         expect(yield* Queue.take(stopped)).toBe("turn-2:child:worker")

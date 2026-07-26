@@ -170,6 +170,8 @@ export const presets = (options: {
     ]),
   )
 
+export const permissionsForProfile = (name: Name): ReadonlyArray<string> => [...definitions[name].permissions]
+
 export const parentPermissions = [...new Set(names.flatMap((name) => definitions[name].permissions))].map((name) => ({
   name,
   value: true,

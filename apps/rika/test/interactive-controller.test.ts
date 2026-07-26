@@ -306,6 +306,7 @@ it("rejects duplicate patches and stale units with the same semantic identity", 
     threadCostUsd: 0,
   })
   const liveEvent = {
+    executionId: "execution:new",
     cursor: "live-2",
     sequence: 2,
     type: "model.output.completed",
@@ -437,6 +438,7 @@ it("owns transcript page, prepend, and patch reduction", () => {
     threadId: thread.id,
     turnId: Turn.TurnId.make("new"),
     event: {
+      executionId: `execution:${Turn.TurnId.make("new")}`,
       cursor: "cursor-1",
       sequence: 1,
       type: "model.output.completed",
@@ -548,6 +550,7 @@ it("projects replayed child execution tools beneath the matching subagent", () =
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent"),
     event: {
+      executionId: "execution:parent",
       cursor: "agent",
       sequence: 0,
       type: "tool.call.requested",
@@ -562,6 +565,7 @@ it("projects replayed child execution tools beneath the matching subagent", () =
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent"),
     event: {
+      executionId: "execution:parent",
       cursor: "spawned",
       sequence: 1,
       type: "child_run.spawned",
@@ -579,6 +583,7 @@ it("projects replayed child execution tools beneath the matching subagent", () =
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent:child:agent"),
     event: {
+      executionId: "execution:parent:child:agent",
       cursor: "child-read",
       sequence: 0,
       type: "tool.call.requested",
@@ -593,6 +598,7 @@ it("projects replayed child execution tools beneath the matching subagent", () =
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent:child:agent"),
     event: {
+      executionId: "execution:parent:child:agent",
       cursor: "child-response",
       sequence: 1,
       type: "model.output.completed",
@@ -648,6 +654,7 @@ it("attaches parallel child streams when task rows lack explicit spawn links", (
       threadId: thread.id,
       turnId: Turn.TurnId.make(turnId),
       event: {
+        executionId: `execution:${turnId}`,
         cursor: `task-${callId}`,
         sequence,
         type: "tool.call.requested",
@@ -664,6 +671,7 @@ it("attaches parallel child streams when task rows lack explicit spawn links", (
       threadId: thread.id,
       turnId: Turn.TurnId.make(childId),
       event: {
+        executionId: `execution:${childId}`,
         cursor: `child-tool-${index}`,
         sequence: 0,
         type: "tool.call.requested",
@@ -678,6 +686,7 @@ it("attaches parallel child streams when task rows lack explicit spawn links", (
       threadId: thread.id,
       turnId: Turn.TurnId.make(childId),
       event: {
+        executionId: `execution:${childId}`,
         cursor: `child-response-${index}`,
         sequence: 1,
         type: "model.output.completed",
@@ -881,6 +890,7 @@ it("buffers live child patches until the parent subagent link arrives", () => {
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent:child:agent"),
     event: {
+      executionId: "execution:parent:child:agent",
       cursor: "child-read",
       sequence: 0,
       type: "tool.call.requested",
@@ -895,6 +905,7 @@ it("buffers live child patches until the parent subagent link arrives", () => {
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent"),
     event: {
+      executionId: "execution:parent",
       cursor: "agent",
       sequence: 0,
       type: "tool.call.requested",
@@ -909,6 +920,7 @@ it("buffers live child patches until the parent subagent link arrives", () => {
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent"),
     event: {
+      executionId: "execution:parent",
       cursor: "spawned",
       sequence: 1,
       type: "child_run.spawned",
@@ -948,6 +960,7 @@ it("surfaces a child projection whose parent tool has not arrived instead of dro
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent:child:agent"),
     event: {
+      executionId: "execution:parent:child:agent",
       cursor: "child-read",
       sequence: 0,
       type: "tool.call.requested",
@@ -962,6 +975,7 @@ it("surfaces a child projection whose parent tool has not arrived instead of dro
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent"),
     event: {
+      executionId: "execution:parent",
       cursor: "agent",
       sequence: 0,
       type: "tool.call.requested",
@@ -976,6 +990,7 @@ it("surfaces a child projection whose parent tool has not arrived instead of dro
     threadId: thread.id,
     turnId: Turn.TurnId.make("parent"),
     event: {
+      executionId: "execution:parent",
       cursor: "spawned",
       sequence: 1,
       type: "child_run.spawned",
@@ -1017,6 +1032,7 @@ it("keeps one of five status labels from submit until the turn completes", () =>
       threadId: thread.id,
       turnId: Turn.TurnId.make("active"),
       event: {
+        executionId: "execution:active",
         cursor: `event-${sequence}`,
         sequence,
         type,
@@ -1109,6 +1125,7 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
     threadId: thread.id,
     turnId: turn.id,
     event: {
+      executionId: `execution:${turn.id}`,
       cursor: `timed-${sequence}`,
       sequence,
       type,
@@ -1230,6 +1247,7 @@ it("shows the session total and updates it when child usage arrives", () => {
     threadCostUsd: 0.75,
     globalCostUsd: 10.25,
     event: {
+      executionId: "execution:parent:child:worker",
       cursor: "child-usage",
       sequence: 0,
       type: "model.usage.reported",
@@ -1265,6 +1283,7 @@ it("applies a late cost aggregate without lowering the semantic revision", () =>
     turnId: Turn.TurnId.make("parent"),
     threadCostUsd: 0.75,
     event: {
+      executionId: "execution:parent",
       cursor: "late-cost",
       sequence: 2,
       type: "model.attempt.completed",
@@ -1300,7 +1319,13 @@ it("clears working state when the semantic event stream reaches a terminal event
       selectionEpoch: 1,
       threadId: thread.id,
       turnId: Turn.TurnId.make("new"),
-      event: { cursor: "terminal", sequence: 0, type: "execution.completed", createdAt: 3 },
+      event: {
+        executionId: "execution:new",
+        cursor: "terminal",
+        sequence: 0,
+        type: "execution.completed",
+        createdAt: 3,
+      },
       revision: 0,
     },
   )
@@ -1336,7 +1361,14 @@ it("keeps the newest logical selection when delayed A to B to A work arrives", (
     selectionEpoch: 1,
     threadId: thread.id,
     turnId: Turn.TurnId.make("a-1"),
-    event: { cursor: "stale", sequence: 9, type: "model.output.completed", createdAt: 9, text: "stale" },
+    event: {
+      executionId: "execution:a-1",
+      cursor: "stale",
+      sequence: 9,
+      type: "model.output.completed",
+      createdAt: 9,
+      text: "stale",
+    },
     revision: 9,
   })
 
@@ -1433,6 +1465,7 @@ it("eagerly consumes more than one frame of events while bounding reducer work p
     threadId: thread.id,
     turnId: Turn.TurnId.make("stream"),
     event: {
+      executionId: "execution:stream",
       cursor: `chunk-${index}`,
       sequence: index,
       type: "model.output.delta",
@@ -1545,7 +1578,7 @@ it("only treats user-blocking requests as urgent feed events", () => {
     selectionEpoch: 1,
     threadId: thread.id,
     turnId: Turn.TurnId.make("turn"),
-    event: { cursor: type, sequence: 1, type, createdAt: 1 },
+    event: { executionId: "execution:turn", cursor: type, sequence: 1, type, createdAt: 1 },
     revision: 1,
   })
 

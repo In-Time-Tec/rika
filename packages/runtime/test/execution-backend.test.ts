@@ -85,7 +85,6 @@ const relayEvent = (
   content?: Execution.ExecutionEvent["content"],
   data?: Execution.ExecutionEvent["data"],
 ): Execution.ExecutionEvent => ({
-  id: Ids.EventId.make(`event:${sequence}`),
   execution_id: Ids.ExecutionId.make("execution:turn-a"),
   type,
   sequence,
@@ -458,7 +457,6 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(result.status).toBe("completed")
       expect(result.events).toEqual([
         {
-          id: "event:1",
           executionId: "execution:turn-a",
           cursor: "cursor-1",
           sequence: 1,
@@ -468,7 +466,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           content: [Content.text("hello "), { type: "structured", value: { n: 1 } }, Content.text("world")],
         },
         {
-          id: "event:2",
           executionId: "execution:turn-a",
           cursor: "cursor-2",
           sequence: 2,
@@ -477,7 +474,6 @@ describe("ExecutionBackend Relay client adapter", () => {
           content: [],
         },
         {
-          id: "event:3",
           executionId: "execution:turn-a",
           cursor: "cursor-3",
           sequence: 3,
@@ -1326,10 +1322,7 @@ describe("ExecutionBackend Relay client adapter", () => {
         get: () =>
           Effect.succeed({
             status: "waiting",
-            agent_snapshot: {
-              model: { provider: "test", model: "scripted", registration_key: "fixed" },
-              metadata: { rika_execution_route: currentExecutionRoute() },
-            },
+            metadata: { rika_execution_route: currentExecutionRoute() },
           }),
         inspect: () =>
           Effect.succeed({

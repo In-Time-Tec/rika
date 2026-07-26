@@ -1,8 +1,6 @@
 import { Schema } from "effect"
 
 export const SourceEvent = Schema.Struct({
-  id: Schema.optionalKey(Schema.String),
-  executionId: Schema.optionalKey(Schema.String),
   childExecutionId: Schema.optionalKey(Schema.String),
   cursor: Schema.String,
   sequence: Schema.Finite,

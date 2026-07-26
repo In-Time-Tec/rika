@@ -122,13 +122,13 @@ test("three Task calls in one model turn run as overlapping durable children", (
           .query<
             { readonly id: string; readonly status: string; readonly agent_snapshot_json: string },
             []
-          >("select id, status, agent_snapshot_json from relay_executions where id like 'child:%' order by id")
+          >("select e.id as id, e.status as status, s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id like 'child:%' order by e.id")
           .all()
         const root = database
           .query<
             { readonly agent_snapshot_json: string },
             []
-          >("select agent_snapshot_json from relay_executions where id = 'execution:turn-parallel-spawn'")
+          >("select s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id = 'execution:turn-parallel-spawn'")
           .get()
         const childRuns = database
           .query<
@@ -199,8 +199,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
           expect(
             settled.events
               .filter(
-                (event) =>
-                  event.type === "model.output.delta" && event.cursor.startsWith("execution:turn-parallel-spawn:"),
+                (event) => event.type === "model.output.delta" && event.executionId === "execution:turn-parallel-spawn",
               )
               .map((event) => event.text)
               .join(""),
@@ -266,7 +265,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
           .query<
             { readonly agent_snapshot_json: string },
             []
-          >("select agent_snapshot_json from relay_executions where id like 'child:%'")
+          >("select s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id like 'child:%'")
           .get()
         return { settled, child, oracleRequests: yield* oracle.requests }
       }).pipe(Effect.provide(backendContext))
@@ -477,7 +476,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
           .query<
             { readonly status: string; readonly agent_snapshot_json: string },
             []
-          >("select status, agent_snapshot_json from relay_executions where id like 'child:%' order by id")
+          >("select e.status as status, s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id like 'child:%' order by e.id")
           .all()
         const childRuns = database
           .query<
@@ -629,7 +628,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
           .query<
             { readonly id: string; readonly status: string; readonly agent_snapshot_json: string },
             []
-          >("select id, status, agent_snapshot_json from relay_executions where id like 'child:%' order by id")
+          >("select e.id as id, e.status as status, s.definition_json as agent_snapshot_json from relay_executions e join relay_agent_definition_snapshots s on s.digest = e.agent_definition_digest where e.id like 'child:%' order by e.id")
           .all()
         const failures = database
           .query<
@@ -752,8 +751,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             expect(
               settled.events
                 .filter(
-                  (event) =>
-                    event.type === "model.output.delta" && event.cursor.startsWith("execution:turn-nested-spawn:"),
+                  (event) => event.type === "model.output.delta" && event.executionId === "execution:turn-nested-spawn",
                 )
                 .map((event) => event.text)
                 .join(""),
@@ -1021,7 +1019,7 @@ test("handoff child approval asks surface through the parent and resume after ap
           expect(waiting.status).toBe("waiting")
           expect(String(ask?.data?.execution_id).startsWith("child:execution%3Aturn-child-permission:")).toBe(true)
           expect(ask?.executionId).toBe(ask?.data?.execution_id)
-          expect(ask?.id).toBeTypeOf("string")
+          expect(ask?.cursor).toBeTypeOf("string")
           expect(approvals[0]?.executionId).toBe(String(ask?.data?.execution_id))
           expect(completed.status).toBe("completed")
           expect(requests.length).toBeGreaterThanOrEqual(4)
