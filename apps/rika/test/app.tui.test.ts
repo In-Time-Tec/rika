@@ -3,14 +3,6 @@ import { Theme } from "@rika/tui"
 import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 
-const settled = (app: TuiApp.TuiApp) =>
-  Effect.gen(function* () {
-    yield* app.waitGone("Waiting")
-    yield* app.waitGone("Streaming")
-    yield* app.waitGone("Running 1 tool")
-    yield* app.waitGone("Thinking")
-  })
-
 const emptyFallback = "The subagent finished without a final message."
 
 const spanHasColor = (app: TuiApp.TuiApp, text: string, color: typeof Theme.colors.text): boolean =>
@@ -73,7 +65,7 @@ test(
         yield* Effect.promise(() => app.type("Price this turn."))
         app.pressEnter()
         yield* app.waitFrame("PRICED_TURN_COMPLETE")
-        yield* settled(app)
+        yield* app.settled
         const priced = app.frame()
         expect(priced.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00+")
         expect(priced).not.toContain("$\u2014")
@@ -81,7 +73,7 @@ test(
         yield* Effect.promise(() => app.type("Fail this turn."))
         app.pressEnter()
         yield* app.waitFrame("UNPRICED_TURN_FAILED")
-        yield* settled(app)
+        yield* app.settled
         const settledFrame = app.frame()
         expect(settledFrame.match(/\$[0-9][^ ]*/u)?.[0]).toBe("$0.00+")
         expect(settledFrame).not.toContain("$\u2014")
@@ -108,7 +100,7 @@ test(
         expect(active).toMatch(/◷ [0-9]+s/u)
         expect(active).not.toContain("◷ ····")
         yield* app.waitFrame("TIMER_COMPLETE")
-        yield* settled(app)
+        yield* app.settled
         yield* Effect.sleep("1100 millis")
         const completed = app.frame()
         const elapsed = completed.match(/◷ ([1-9][0-9]*s)/u)?.[1]
@@ -156,7 +148,7 @@ test(
             expect(app.frame()).toContain(`◷ ${waitingElapsed}`)
             app.pressEnter()
             yield* app.waitFrame("PERSISTED_TIMER_COMPLETE")
-            yield* settled(app)
+            yield* app.settled
             const completed = yield* app.waitFrame("◷ 1s")
             elapsed = completed.match(/◷ ([1-9][0-9]*s)/u)?.[1] ?? ""
             expect(elapsed).not.toBe("")
@@ -200,12 +192,12 @@ test(
         yield* Effect.promise(() => app.type("Ask Oracle to inspect the fixture."))
         app.pressEnter()
         yield* app.waitFrame("ROOT_STYLE_RESULT")
-        yield* settled(app)
+        yield* app.settled
         app.pressKey("\t")
         yield* app.waitFrame("Oracle has spoken")
         app.pressEnter()
         yield* app.waitFrame("Read nested.txt")
-        yield* settled(app)
+        yield* app.settled
         const completed = app.frame()
         expect(completed.match(/Oracle has spoken/g) ?? []).toHaveLength(1)
         expect(completed.match(/Read nested\.txt/g) ?? []).toHaveLength(1)
@@ -243,7 +235,7 @@ test(
         yield* Effect.promise(() => app.type("ROOT_USER_PROMPT"))
         app.pressEnter()
         yield* app.waitFrame("ROOT_AGENT_FINAL")
-        yield* settled(app)
+        yield* app.settled
         app.pressKey("\t")
         app.pressEnter()
         yield* app.waitFrame("PARENT_AGENT_PROMPT")
@@ -311,7 +303,7 @@ test(
             yield* Effect.promise(() => app.type(prompt))
             app.pressEnter()
             yield* app.waitFrame(marker)
-            yield* settled(app)
+            yield* app.settled
             app.pressKey("\t")
             app.pressEnter()
           })
@@ -361,7 +353,7 @@ test(
         yield* Effect.promise(() => app.type("Run the process and wait for it."))
         app.pressEnter()
         yield* app.waitFrame("SHELL_WAIT_COMPLETE")
-        yield* settled(app)
+        yield* app.settled
         app.pressKey("\t")
         app.pressEnter()
         const completed = yield* app.waitFrame("FINAL_OUTPUT")
@@ -394,7 +386,7 @@ test(
         app.pressEnter()
         const first = yield* app.waitFrame("HARNESS_RESPONSE")
         expect(first).toContain("Say hello.")
-        yield* settled(app)
+        yield* app.settled
 
         yield* Effect.promise(() => app.type("Run an ordinary tool."))
         app.pressEnter()
@@ -402,7 +394,7 @@ test(
         expect(ordinary).toContain("printf TOOL_OK")
         expect(ordinary).not.toContain("Allow once")
         expect(ordinary).not.toContain("[pending]")
-        yield* settled(app)
+        yield* app.settled
 
         yield* Effect.promise(() => app.type("check @"))
         const opened = yield* app.waitFrame("@README.md")
@@ -414,7 +406,7 @@ test(
         yield* app.waitFrame("check @src/alpha.ts")
         app.pressEnter()
         yield* app.waitFrame("MENTION_COMPLETE")
-        yield* settled(app)
+        yield* app.settled
 
         app.pressKey("t", { alt: true })
         const tree = yield* app.waitFrame("Files (3)")
@@ -537,7 +529,7 @@ test(
         const approved = yield* app.waitFrame("APPROVAL_COMPLETE")
         expect(approved).toContain("? read [approved]")
         expect(approved).not.toContain("[pending]")
-        yield* settled(app)
+        yield* app.settled
         expect(app.frame()).toMatch(/◷ [0-9]+s/u)
 
         yield* Effect.promise(() => app.type("Cancel the approval."))
@@ -579,7 +571,7 @@ test(
         yield* Effect.promise(() => app.type(" again"))
         app.pressEnter()
         yield* app.waitFrame("RESTORED_PROMPT_SENT")
-        yield* settled(app)
+        yield* app.settled
         app.close()
         yield* app.done
       }),
@@ -605,6 +597,7 @@ test(
         yield* Effect.promise(() => app.type("Queued follow-up prompt."))
         app.pressEnter()
         yield* app.waitFrame("Queued follow-up prompt.")
+        yield* app.waitModelRequests(1)
         app.pressKey("c", { ctrl: true })
         const promoted = yield* app.waitFrame("QUEUED_DONE")
         expect(promoted).not.toContain("LATE_QUEUE_HEAD")
@@ -648,7 +641,7 @@ test(
         app.pressEnter()
         yield* app.waitFrame("steering: Focus on the exact fixture text.")
         const steered = yield* app.waitFrame("ACTIVE_STEER_COMPLETE")
-        yield* settled(app)
+        yield* app.settled
         yield* app.waitTerminalTitle((title) => !/^[⠀-⣿] /u.test(title))
         expect(steered).not.toContain("Execution failed")
         expect(steered).not.toContain("steering:")
