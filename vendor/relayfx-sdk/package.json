@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "@relayfx/sdk",
+  "version": "0.7.23",
+  "description": "Effect-native durable execution SDK for addressable agents and tools",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/types/relay/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./ai": {
+      "types": "./dist/types/relay/ai.d.ts",
+      "import": "./dist/ai.js"
+    },
+    "./http-server": {
+      "types": "./dist/types/relay/http-server.d.ts",
+      "import": "./dist/http-server.js"
+    },
+    "./sqlite": {
+      "types": "./dist/types/relay/sqlite.d.ts",
+      "import": "./dist/sqlite.js"
+    },
+    "./postgres": {
+      "types": "./dist/types/relay/postgres.d.ts",
+      "import": "./dist/postgres.js"
+    },
+    "./mysql": {
+      "types": "./dist/types/relay/mysql.d.ts",
+      "import": "./dist/mysql.js"
+    },
+    "./migrations/*": "./dist/migrations/*"
+  },
+  "types": "./dist/types/relay/index.d.ts",
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22",
+    "bun": ">=1.3.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/In-Time-Tec/relayfx.git",
+    "directory": "packages/relay"
+  },
+  "homepage": "https://github.com/In-Time-Tec/relayfx#readme",
+  "bugs": {
+    "url": "https://github.com/In-Time-Tec/relayfx/issues"
+  },
+  "scripts": {
+    "build": "rm -rf dist && bun build ./src/index.ts ./src/ai.ts ./src/http-server.ts ./src/sqlite.ts ./src/postgres.ts ./src/mysql.ts --outdir dist --target bun --format esm --splitting --external effect --external 'effect/*' --external '@effect/*' --external '@aws-sdk/*' --external drizzle-orm --external 'drizzle-orm/*' --external pg && bun scripts/build-types.ts",
+    "lint": "bun --cwd ../.. oxlint packages/relay/src packages/relay/scripts packages/relay/test",
+    "test": "bun --cwd ../.. vitest run packages/relay/test --passWithNoTests && bun test/sqlite.integration.ts && bun test/mysql-migration-recovery.integration.ts && bun test/mysql-migration21-recovery.integration.ts && bun test/s3-cold-history.integration.ts",
+    "typecheck": "bun tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "3.1094.0",
+    "@batonfx/core": "0.11.8",
+    "@batonfx/providers": "0.11.8",
+    "@effect/ai-anthropic": "4.0.0-beta.98",
+    "@effect/ai-openai": "4.0.0-beta.98",
+    "@effect/ai-openai-compat": "4.0.0-beta.98",
+    "@effect/ai-openrouter": "4.0.0-beta.98",
+    "@effect/platform-bun": "4.0.0-beta.98",
+    "@effect/sql-pg": "4.0.0-beta.98",
+    "@effect/sql-mysql2": "4.0.0-beta.98",
+    "@effect/sql-sqlite-bun": "4.0.0-beta.98",
+    "drizzle-orm": "1.0.0-rc.3",
+    "effect": "4.0.0-beta.98",
+    "pg": "8.21.0"
+  }
+}
