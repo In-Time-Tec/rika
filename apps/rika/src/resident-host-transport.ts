@@ -316,17 +316,22 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         }
         if ((yield* Queue.size(feed)) === 0 && overflow !== undefined) {
           const state = overflow
-          overflow = undefined
           const reason = state.criticalOverflowed
             ? "Resident event feed exceeded its bounded non-recoverable event capacity"
             : "Resident event feed exceeded its bounded current-session window"
           const events = recoveryEvents(state, reason)
+          const barrierWindow = InteractiveFeedOverflow.make()
+          overflow = barrierWindow
           yield* sendBarrier(state.criticalOverflowed ? [...events, ...genericRecovery(reason)] : events)
           if (state.criticalOverflowed)
             return yield* Operation.OperationUnavailable.make({
               operation: "InteractiveSession.events",
               message: reason,
             })
+          if (overflow === barrierWindow) {
+            overflow = undefined
+            for (const event of recoveryEvents(barrierWindow, reason)) dispatch(event)
+          }
         }
       }
     })

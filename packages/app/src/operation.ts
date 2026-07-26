@@ -275,6 +275,16 @@ const selectionRepairTranscriptPageLimit = 8
 const selectionRepairDeferredPrefix = "selection repair deferred:"
 type RepairBudget = { nodes: number; pages: number; bytes: number }
 const makeRepairBudget = (): RepairBudget => ({ nodes: 0, pages: 0, bytes: 0 })
+type RepairCache = {
+  readonly inspections: Map<string, ExecutionBackend.Inspection | undefined>
+  readonly replays: Map<string, ExecutionBackend.Result>
+  readonly eventPages: Map<string, ExecutionBackend.EventPage>
+}
+const makeRepairCache = (): RepairCache => ({
+  inspections: new Map(),
+  replays: new Map(),
+  eventPages: new Map(),
+})
 const selectionRepairDeferred = (reason: "nodes" | "pages" | "bytes") =>
   ExecutionBackend.BackendError.make({ message: `${selectionRepairDeferredPrefix}${reason}` })
 const isSelectionRepairDeferred = (error: ExecutionBackend.BackendError) =>
@@ -2296,7 +2306,28 @@ export const productLayer = <
         const selectionRequest = yield* Ref.make(0)
         const isCurrentSelectionState = (state: SelectionEpochState) =>
           activeSelectionState === state || candidateSelectionState === state
-        const projectionAdmission = yield* Semaphore.make(1)
+        const projectionAdmissions = new Map<string, { readonly admission: Semaphore.Semaphore; holders: number }>()
+        const withProjectionAdmission = <A, E, R>(turnId: Turn.TurnId, effect: Effect.Effect<A, E, R>) => {
+          const key = String(turnId)
+          return Effect.acquireUseRelease(
+            Effect.sync(() => {
+              const existing = projectionAdmissions.get(key)
+              if (existing !== undefined) {
+                existing.holders += 1
+                return existing
+              }
+              const created = { admission: Semaphore.makeUnsafe(1), holders: 1 }
+              projectionAdmissions.set(key, created)
+              return created
+            }),
+            (entry) => entry.admission.withPermits(1)(effect),
+            (entry) =>
+              Effect.sync(() => {
+                entry.holders -= 1
+                if (entry.holders === 0 && projectionAdmissions.get(key) === entry) projectionAdmissions.delete(key)
+              }),
+          )
+        }
         const transcriptPageAdmission = yield* Semaphore.make(1)
         const selectionAdmission = yield* Semaphore.make(1)
         const backfillTree = (
@@ -2305,16 +2336,13 @@ export const productLayer = <
           backend?: ExecutionBackend.Interface,
           work?: ChildBackfillWork,
         ) =>
-          projectionAdmission.withPermits(1)(
+          withProjectionAdmission(
+            turn.id,
             backfillTranscriptTree(turn, force, work).pipe(
               backend === undefined ? Function.identity : Effect.provideService(ExecutionBackend.Service, backend),
             ),
           )
-        const repairBackend = (
-          state: SelectionEpochState,
-          backend: ExecutionBackend.Interface,
-          budget: RepairBudget,
-        ) => {
+        const budgetedBackend = (backend: ExecutionBackend.Interface, budget: RepairBudget, wanted: () => boolean) => {
           const reservePage = Effect.suspend(() => {
             if (budget.pages >= selectionRepairPageLimit) return Effect.fail(selectionRepairDeferred("pages"))
             budget.pages += 1
@@ -2329,45 +2357,25 @@ export const productLayer = <
           return ExecutionBackend.Service.of({
             ...backend,
             inspect: (executionId, reference) => {
-              const key = `${reference === undefined ? "root" : "reference"}:${executionId}`
-              if (state.inspections.has(key)) return Effect.succeed(state.inspections.get(key))
               if (budget.nodes >= selectionRepairNodeLimit) return Effect.fail(selectionRepairDeferred("nodes"))
               budget.nodes += 1
-              return backend.inspect(executionId, reference).pipe(
-                Effect.filterOrFail(
-                  () => isCurrentSelectionState(state),
-                  () => selectionRepairDeferred("nodes"),
-                ),
-                Effect.tap((inspection) => Effect.sync(() => state.inspections.set(key, inspection))),
-              )
+              return backend
+                .inspect(executionId, reference)
+                .pipe(Effect.filterOrFail(wanted, () => selectionRepairDeferred("nodes")))
             },
-            replay: (executionId, after, reference) => {
-              const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${after ?? ""}`
-              const cached = state.replays.get(key)
-              if (cached !== undefined) return Effect.succeed(cached)
-              return reservePage.pipe(
+            replay: (executionId, after, reference) =>
+              reservePage.pipe(
                 Effect.andThen(backend.replay(executionId, after, reference)),
-                Effect.filterOrFail(
-                  () => isCurrentSelectionState(state),
-                  () => selectionRepairDeferred("pages"),
-                ),
+                Effect.filterOrFail(wanted, () => selectionRepairDeferred("pages")),
                 Effect.tap((result) => consume(result.events)),
-                Effect.tap((result) => Effect.sync(() => state.replays.set(key, result))),
-              )
-            },
+              ),
             ...(backend.pageEvents === undefined
               ? {}
               : {
-                  pageEvents: (executionId, direction, cursor, limit, reference) => {
-                    const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${direction}:${cursor ?? ""}:${limit ?? ""}`
-                    const cached = state.eventPages.get(key)
-                    if (cached !== undefined) return Effect.succeed(cached)
-                    return reservePage.pipe(
+                  pageEvents: (executionId, direction, cursor, limit, reference) =>
+                    reservePage.pipe(
                       Effect.andThen(backend.pageEvents!(executionId, direction, cursor, limit, reference)),
-                      Effect.filterOrFail(
-                        () => isCurrentSelectionState(state),
-                        () => selectionRepairDeferred("pages"),
-                      ),
+                      Effect.filterOrFail(wanted, () => selectionRepairDeferred("pages")),
                       Effect.flatMap((page) =>
                         page.hasMore &&
                         (page.events.length === 0 || page.newestCursor === undefined || page.newestCursor === cursor)
@@ -2378,14 +2386,74 @@ export const productLayer = <
                             )
                           : consume(page.events).pipe(Effect.as(page)),
                       ),
-                      Effect.tap((page) => Effect.sync(() => state.eventPages.set(key, page))),
+                    ),
+                }),
+          })
+        }
+        const cachedBackend = (backend: ExecutionBackend.Interface, cache: RepairCache) =>
+          ExecutionBackend.Service.of({
+            ...backend,
+            inspect: (executionId, reference) => {
+              const key = `${reference === undefined ? "root" : "reference"}:${executionId}`
+              if (cache.inspections.has(key)) return Effect.succeed(cache.inspections.get(key))
+              return backend
+                .inspect(executionId, reference)
+                .pipe(Effect.tap((inspection) => Effect.sync(() => cache.inspections.set(key, inspection))))
+            },
+            replay: (executionId, after, reference) => {
+              const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${after ?? ""}`
+              const cached = cache.replays.get(key)
+              if (cached !== undefined) return Effect.succeed(cached)
+              return backend
+                .replay(executionId, after, reference)
+                .pipe(Effect.tap((result) => Effect.sync(() => cache.replays.set(key, result))))
+            },
+            ...(backend.pageEvents === undefined
+              ? {}
+              : {
+                  pageEvents: (executionId, direction, cursor, limit, reference) => {
+                    const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${direction}:${cursor ?? ""}:${limit ?? ""}`
+                    const cached = cache.eventPages.get(key)
+                    if (cached !== undefined) return Effect.succeed(cached)
+                    return backend.pageEvents!(executionId, direction, cursor, limit, reference).pipe(
+                      Effect.tap((page) => Effect.sync(() => cache.eventPages.set(key, page))),
                     )
                   },
                 }),
           })
-        }
+        const repairBackend = (state: SelectionEpochState, backend: ExecutionBackend.Interface, budget: RepairBudget) =>
+          cachedBackend(
+            budgetedBackend(backend, budget, () => isCurrentSelectionState(state)),
+            state,
+          )
+        const reclaimBackfillTree = Effect.fn("Operation.interactive.reclaimBackfillTree")(function* (turn: Turn.Turn) {
+          const backend = yield* ExecutionBackend.Service
+          const budget = makeRepairBudget()
+          yield* backfillTree(
+            turn,
+            true,
+            cachedBackend(
+              budgetedBackend(backend, budget, () => true),
+              makeRepairCache(),
+            ),
+          ).pipe(
+            Effect.catchTag("ExecutionBackendError", (error) =>
+              isSelectionRepairDeferred(error)
+                ? Effect.logInfo("execution.reclaim.backfill_deferred").pipe(
+                    Effect.annotateLogs({
+                      "rika.turn.id": String(turn.id),
+                      "rika.repair.nodes": budget.nodes,
+                      "rika.repair.pages": budget.pages,
+                      "rika.repair.bytes": budget.bytes,
+                    }),
+                  )
+                : Effect.fail(error),
+            ),
+          )
+        })
         const appendProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
-          projectionAdmission.withPermits(1)(
+          withProjectionAdmission(
+            turn.id,
             Effect.gen(function* () {
               const transcripts = yield* TranscriptRepository.Service
               yield* transcripts.appendAll(turn, rootExecutionEvents(turn.id, events))
@@ -2759,7 +2827,7 @@ export const productLayer = <
                       )
                       yield* projectExecutionResult(thread.id, result)
                       yield* appendProjection(updatedTurn, result.events)
-                      yield* backfillTree(updatedTurn, true)
+                      yield* reclaimBackfillTree(updatedTurn)
                       if (result.status === "completed") {
                         yield* settleThread(thread, dispatch)
                         if (isFirstTurn)
@@ -3070,7 +3138,7 @@ export const productLayer = <
             )
             yield* projectExecutionResult(thread.id, result)
             yield* appendProjection(updatedTurn, result.events)
-            yield* backfillTree(updatedTurn, true)
+            yield* reclaimBackfillTree(updatedTurn)
             return isTerminalStatus(result.status) && result.status !== "failed"
           })
           const runNext = Effect.fn("Operation.interactive.runNextQueued")(function* () {
@@ -3201,7 +3269,7 @@ export const productLayer = <
           )
           yield* projectExecutionResult(turn.threadId, result)
           yield* appendProjection(updatedTurn, result.events)
-          yield* backfillTree(updatedTurn, true)
+          yield* reclaimBackfillTree(updatedTurn)
           if (isTerminalStatus(result.status)) {
             yield* settleThread(thread, dispatch)
             if (result.status === "completed" && (yield* turns.list(thread.id))[0]?.id === updatedTurn.id)
@@ -3304,7 +3372,7 @@ export const productLayer = <
             }
           }
           const transcripts = yield* TranscriptRepository.Service
-          yield* projectionAdmission.withPermits(1)(transcripts.replace(turn, projection))
+          yield* withProjectionAdmission(turn.id, transcripts.replace(turn, projection))
         })
         const repairSelectionTurn = Effect.fn("Operation.interactive.repairSelectionTurn")(function* (
           state: SelectionEpochState,
@@ -3327,9 +3395,7 @@ export const productLayer = <
           }> = []
           if (execution === undefined) {
             if (projected === undefined)
-              yield* projectionAdmission.withPermits(1)(
-                transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)),
-              )
+              yield* withProjectionAdmission(turn.id, transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)))
           } else {
             const terminalTransition = isTerminalStatus(execution.status) && execution.status !== turn.status
             if (isTerminalStatus(execution.status)) {
@@ -3985,18 +4051,16 @@ export const productLayer = <
                   const settleStopRequested = Effect.gen(function* () {
                     for (const turn of yield* turns.listStopRequested) {
                       const settledAt = yield* Clock.currentTimeMillis
-                      yield* backend
-                        .cancel(turn.id, settledAt)
-                        .pipe(
-                          Effect.catch((failure) =>
-                            Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
-                              Effect.annotateLogs({
-                                "rika.turn.id": String(turn.id),
-                                "rika.failure.kind": String(failure),
-                              }),
-                            ),
+                      yield* backend.cancel(turn.id, settledAt).pipe(
+                        Effect.catch((failure) =>
+                          Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
+                            Effect.annotateLogs({
+                              "rika.turn.id": String(turn.id),
+                              "rika.failure.kind": String(failure),
+                            }),
                           ),
-                        )
+                        ),
+                      )
                       yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
                       yield* Effect.logInfo("execution.stop.settled").pipe(
                         Effect.annotateLogs({ "rika.turn.id": String(turn.id) }),
