@@ -1213,12 +1213,29 @@ const cancelLiveDescendants = Effect.fn("Operation.cancelLiveDescendants")(funct
   backend: ExecutionBackend.Interface,
   turnId: string,
 ) {
-  const descendants = yield* activeDescendantExecutionIds(backend, turnId).pipe(Effect.orElseSucceed(() => []))
+  const descendants = yield* activeDescendantExecutionIds(backend, turnId).pipe(
+    Effect.tapError((failure) =>
+      Effect.logError("execution.cancel.descendants_unavailable").pipe(
+        Effect.annotateLogs({ "rika.turn.id": turnId, "rika.failure.kind": String(failure) }),
+      ),
+    ),
+    Effect.orElseSucceed(() => []),
+  )
   if (descendants.length === 0) return
   const cancelledAt = yield* Clock.currentTimeMillis
   yield* Effect.forEach(
     descendants.toReversed(),
-    (executionId) => backend.cancel(executionId, cancelledAt, ExecutionBackend.executionReference).pipe(Effect.ignore),
+    (executionId) =>
+      backend.cancel(executionId, cancelledAt, ExecutionBackend.executionReference).pipe(
+        Effect.catch((failure) =>
+          Effect.logError("child-execution.cancel.failed").pipe(
+            Effect.annotateLogs({
+              "rika.execution.id": executionId,
+              "rika.failure.kind": String(failure),
+            }),
+          ),
+        ),
+      ),
     { concurrency: "unbounded", discard: true },
   )
 })
@@ -3965,9 +3982,31 @@ export const productLayer = <
                         ),
                       ),
                     )
+                  const settleStopRequested = Effect.gen(function* () {
+                    for (const turn of yield* turns.listStopRequested) {
+                      const settledAt = yield* Clock.currentTimeMillis
+                      yield* backend
+                        .cancel(turn.id, settledAt)
+                        .pipe(
+                          Effect.catch((failure) =>
+                            Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
+                              Effect.annotateLogs({
+                                "rika.turn.id": String(turn.id),
+                                "rika.failure.kind": String(failure),
+                              }),
+                            ),
+                          ),
+                        )
+                      yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+                      yield* Effect.logInfo("execution.stop.settled").pipe(
+                        Effect.annotateLogs({ "rika.turn.id": String(turn.id) }),
+                      )
+                    }
+                  })
                   const scan = Effect.gen(function* () {
                     for (const turn of yield* turns.listNonterminal) if (turn.status !== "queued") yield* launch(turn)
                   })
+                  yield* settleStopRequested
                   yield* scan
                   while (true) {
                     yield* PubSub.take(changes)
@@ -4285,10 +4324,19 @@ export const productLayer = <
               }
               const thread = yield* threadForTurn(turn)
               const cancelledAt = yield* Clock.currentTimeMillis
+              const turns = yield* TurnRepository.Service
+              yield* turns.requestStop(turn.id, cancelledAt)
               const childIds = yield* activeDescendantExecutionIds(backend, turn.id).pipe(
+                Effect.tapError((failure) =>
+                  Effect.logError("execution.cancel.descendants_unavailable").pipe(
+                    Effect.annotateLogs({
+                      "rika.turn.id": String(turn.id),
+                      "rika.failure.kind": String(failure),
+                    }),
+                  ),
+                ),
                 Effect.orElseSucceed(() => []),
               )
-              const turns = yield* TurnRepository.Service
               const cancelledBeforeStart =
                 turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, cancelledAt))
               const result = cancelledBeforeStart

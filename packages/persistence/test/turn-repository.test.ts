@@ -25,6 +25,48 @@ const create = (repository: TurnRepository.Interface, input: CurrentCreateInput)
     queueCapacity: input.queueCapacity ?? 128,
   })
 
+const stopIntentContract = (label: string, layer: Layer.Layer<TurnRepository.Service, never, never>) =>
+  it.effect(`${label} keeps a stopped turn out of the resumable set`, () =>
+    Effect.gen(function* () {
+      const repository = yield* TurnRepository.Service
+      const threadId = Thread.ThreadId.make("stop-thread")
+      const stopped = yield* create(repository, {
+        id: Turn.TurnId.make("stopped-turn"),
+        threadId,
+        prompt: "stop me",
+        now: 1,
+      })
+      expect(stopped.stopIntent).toBe("none")
+      expect((yield* repository.listNonterminal).map((turn) => turn.id)).toEqual([stopped.id])
+      expect(yield* repository.listStopRequested).toEqual([])
+
+      const marked = yield* repository.requestStop(stopped.id, 2)
+      expect(marked?.stopIntent).toBe("requested")
+
+      // A stopped turn is still unfinished, but nothing may re-follow it after a restart.
+      expect(yield* repository.listNonterminal).toEqual([])
+      expect((yield* repository.listStopRequested).map((turn) => turn.id)).toEqual([stopped.id])
+      expect((yield* repository.get(stopped.id))?.stopIntent).toBe("requested")
+    }).pipe(provideLayer(layer)),
+  )
+
+stopIntentContract("memory", TurnRepository.memoryLayer())
+
+it.effect("a terminal turn cannot acquire a stop intent", () =>
+  Effect.gen(function* () {
+    const repository = yield* TurnRepository.Service
+    const turn = yield* create(repository, {
+      id: Turn.TurnId.make("done-turn"),
+      threadId: Thread.ThreadId.make("done-thread"),
+      prompt: "already done",
+      now: 1,
+    })
+    yield* repository.setStatus(turn.id, "completed", undefined, 2)
+    expect(yield* repository.requestStop(turn.id, 3)).toBeUndefined()
+    expect((yield* repository.get(turn.id))?.stopIntent).toBe("none")
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
+)
+
 it.effect("memory turns preserve structured image prompt parts", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service
