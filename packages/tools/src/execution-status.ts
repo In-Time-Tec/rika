@@ -25,21 +25,6 @@ export const isActiveStatus = (status: Status): boolean => !isTerminalStatus(sta
 
 export const occupiesQueue = (status: Status): boolean => !isTerminalStatus(status)
 
-export const stopIntents = ["none", "requested"] as const
-
-export const StopIntent = Schema.Literals(stopIntents)
-export type StopIntent = typeof StopIntent.Type
-
-export const defaultStopIntent = "none" satisfies StopIntent
-
-export const isStopRequested = (intent: StopIntent): boolean => intent === "requested"
-
-export const resumesAfterRestart = (status: Status, intent: StopIntent): boolean =>
-  isActiveStatus(status) && !isStopRequested(intent)
-
-export const settlesToCancelledAfterRestart = (status: Status, intent: StopIntent): boolean =>
-  occupiesQueue(status) && isStopRequested(intent)
-
 export const terminalEventStatus = (eventType: string): Status | undefined => {
   if (eventType === "execution.completed") return "completed"
   if (eventType === "execution.failed") return "failed"
