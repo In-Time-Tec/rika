@@ -48,6 +48,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
   readonly identity: string
   readonly token: string
   readonly graceMilliseconds: number
+  readonly abandonMilliseconds: number
   readonly ownerDrainMilliseconds: number
   readonly startupHoldMilliseconds: number
   readonly outboundCapacity: number
@@ -87,6 +88,18 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
         hostScope,
       )
       yield* Ref.set(graceFiber, fiber)
+    })
+  const abandonFiber = yield* Ref.make<Fiber.Fiber<void> | undefined>(undefined)
+  const scheduleAbandonment = (generation: number) =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkIn(
+        Effect.sleep(Math.min(options.abandonMilliseconds, options.graceMilliseconds)).pipe(
+          Effect.andThen(lifecycle.graceHolds(generation)),
+          Effect.flatMap((abandoned) => (abandoned ? stopAbandonedExecutionWork(generation) : Effect.void)),
+        ),
+        hostScope,
+      )
+      yield* Ref.set(abandonFiber, fiber)
     })
   const requestByInput = new WeakMap<object, { readonly requestId: string; readonly routeKey: string }>()
   type ResidentSession = {
@@ -492,6 +505,24 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
       ),
     ),
   )
+  const stopExecutionWork = Deferred.await(operationReady).pipe(
+    Effect.flatMap((operation) => operation.stopActiveExecutionWork ?? Effect.void),
+  )
+  const stopAbandonedExecutionWork = (generation: number) =>
+    Effect.logInfo("resident.abandonment.cancelling").pipe(
+      Effect.annotateLogs("rika.resident.generation", generation),
+      Effect.andThen(stopExecutionWork),
+      Effect.andThen(
+        Effect.logInfo("resident.abandonment.cancelled").pipe(
+          Effect.annotateLogs("rika.resident.generation", generation),
+        ),
+      ),
+      Effect.catch((error) =>
+        Effect.logError("resident.abandonment.cancel_failed").pipe(
+          Effect.annotateLogs("rika.failure.kind", String(error)),
+        ),
+      ),
+    )
   const handle = Effect.fn("ResidentTransport.connection")(function* (socket: Socket.Socket) {
     const rawWriter = yield* socket.writer
     const outbound = yield* Queue.bounded<string | Socket.CloseEvent>(options.outboundCapacity)
@@ -632,6 +663,9 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               const existing = yield* Ref.get(graceFiber)
               if (existing !== undefined) yield* Fiber.interrupt(existing)
               yield* Ref.set(graceFiber, undefined)
+              const pendingAbandonment = yield* Ref.get(abandonFiber)
+              if (pendingAbandonment !== undefined) yield* Fiber.interrupt(pendingAbandonment)
+              yield* Ref.set(abandonFiber, undefined)
               const response = {
                 _tag: "accepted" as const,
                 family: "rika-resident" as const,
@@ -747,7 +781,8 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               }
               const cancelled = yield* Deferred.make<void>()
               const effect = Effect.gen(function* () {
-                yield* Operation.executeInteractiveCommand(active.session, message.command)
+                if (message.command._tag !== "Quit" || (yield* lifecycle.soleClient))
+                  yield* Operation.executeInteractiveCommand(active.session, message.command)
                 const completedAt = yield* Clock.currentTimeMillis
                 yield* Effect.logInfo("resident.interactive_command.completed").pipe(
                   Effect.annotateLogs({
@@ -813,7 +848,11 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
               )
               active.commands.set(message.commandSequence, cancelled)
               active.commandReleases.set(message.commandSequence, releaseReplacementWork)
-              if (message.command._tag === "ResolvePermission" || message.command._tag === "Cancel")
+              if (
+                message.command._tag === "ResolvePermission" ||
+                message.command._tag === "Cancel" ||
+                message.command._tag === "Quit"
+              )
                 yield* Effect.forkIn(
                   Effect.raceFirst(Deferred.await(cancelled), effect).pipe(
                     Effect.ensuring(
@@ -1026,6 +1065,7 @@ const host = Effect.fn("ResidentTransport.host")(function* (options: {
             )
             if (generation === undefined) return
             yield* scheduleGrace(generation)
+            yield* scheduleAbandonment(generation)
             yield* Effect.logInfo("resident.idle-generation.started").pipe(
               Effect.annotateLogs({
                 "rika.resident.connection.id": connectionId,
@@ -1070,6 +1110,7 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
   readonly profile: string
   readonly dataRoot: string
   readonly graceMilliseconds?: number
+  readonly abandonMilliseconds?: number
   readonly ownerDrainMilliseconds?: number
   readonly startupHoldMilliseconds?: number
   readonly outboundCapacity?: number
@@ -1092,6 +1133,9 @@ export const serve = Effect.fn("ResidentTransport.serve")(function* (options: {
     ...endpoint,
     token,
     graceMilliseconds: options.graceMilliseconds ?? 500,
+    abandonMilliseconds:
+      options.abandonMilliseconds ??
+      Number(yield* Config.string("RIKA_INTERNAL_RESIDENT_ABANDON").pipe(Config.withDefault("5000"))),
     ownerDrainMilliseconds,
     startupHoldMilliseconds: options.startupHoldMilliseconds ?? 10_000,
     outboundCapacity: Math.max(1, Math.floor(options.outboundCapacity ?? defaultOutboundCapacity)),

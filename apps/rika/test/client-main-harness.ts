@@ -1,7 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
+import * as SqliteClient from "@effect/sql-sqlite-bun/SqliteClient"
+import * as Reactivity from "effect/unstable/reactivity/Reactivity"
 import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
-import { Config, Effect, FileSystem, Function, Layer, Schema, Scope, Stream } from "effect"
+import { Cause, Config, Duration, Effect, FileSystem, Function, Layer, Schema, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
@@ -38,6 +40,8 @@ export const PtyAction = Schema.Struct({
   after: Schema.String,
   write: Schema.String,
   checkRunning: Schema.optionalKey(Schema.Boolean),
+  signal: Schema.optionalKey(Schema.Literals(["SIGINT", "SIGTERM", "SIGKILL"])),
+  timeoutMs: Schema.optionalKey(Schema.Int),
 })
 export const PtyActions = Schema.fromJsonString(Schema.Array(PtyAction))
 export const UnknownJson = Schema.UnknownFromJsonString
@@ -51,9 +55,16 @@ export const stripTerminalControl = (text: string) =>
     .replaceAll(new RegExp(`${escape}[@-_]`, "g"), "")
 
 export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(function* (
-  actions: ReadonlyArray<{ readonly after: string; readonly write: string; readonly checkRunning?: boolean }>,
+  actions: ReadonlyArray<{
+    readonly after: string
+    readonly write: string
+    readonly checkRunning?: boolean
+    readonly signal?: "SIGINT" | "SIGTERM" | "SIGKILL"
+    readonly timeoutMs?: number
+  }>,
   modelScript?: string,
   toolApprovals?: ReadonlyArray<string>,
+  residentEnvironment?: Readonly<Record<string, string>>,
 ) {
   const fs = yield* FileSystem.FileSystem
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -77,6 +88,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     RELAY_EVENT_POLL_INTERVAL_MILLIS: "50",
     RELAY_EVENT_POLL_IDLE_INTERVAL_MILLIS: "250",
     RELAY_SCHEDULER_POLL_INTERVAL_MILLIS: "100",
+    ...residentEnvironment,
     ...(toolApprovals === undefined ? {} : { RIKA_TEST_APPROVAL_TOOLS: toolApprovals.join(",") }),
     ...(modelScript === undefined
       ? { RIKA_TEST_MODEL_RESPONSE: "completed" }
@@ -99,7 +111,9 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     { concurrency: 3 },
   ).pipe(
     Effect.timeoutOrElse({
-      duration: "35 seconds",
+      duration: Duration.millis(
+        Math.max(35_000, actions.reduce((total, action) => total + (action.timeoutMs ?? 10_000), 0) + 13_000),
+      ),
       orElse: () =>
         handle
           .kill({ killSignal: "SIGTERM" })
@@ -108,11 +122,13 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   )
   expect(Number(helperExitCode), stderr).toBe(0)
   const result = yield* Schema.decodeUnknownEffect(PtyResult)(stdout.trim())
-  yield* waitUntil(
-    fs
-      .readDirectory(`${state}/diagnostics`)
-      .pipe(Effect.map((names) => names.every((name) => !name.endsWith(".open.jsonl")))),
-  )
+  const settlesDiagnostics = residentEnvironment === undefined && !actions.some((action) => action.signal !== undefined)
+  if (settlesDiagnostics)
+    yield* waitUntil(
+      fs
+        .readDirectory(`${state}/diagnostics`)
+        .pipe(Effect.map((names) => names.every((name) => !name.endsWith(".open.jsonl")))),
+    )
   const names = yield* fs.readDirectory(`${state}/diagnostics`)
   const clientLogs = yield* Effect.forEach(
     names.filter((name) => name.startsWith("client-") && name.endsWith(".jsonl")),
@@ -123,5 +139,38 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
     output: stripTerminalControl(Buffer.from(result.output, "base64").toString("utf8")),
     clientLogs: clientLogs.join("\n"),
     names,
+    database: `${state}/rika.db`,
   }
+})
+
+export const turnStatus = Effect.fn("ClientMainTest.turnStatus")(function* (database: string, prompt: string) {
+  const reactivity = yield* Reactivity.make
+  const client = yield* SqliteClient.make({ filename: database, readonly: true }).pipe(
+    Effect.provideService(Reactivity.Reactivity, reactivity),
+  )
+  const rows = yield* client<{ readonly status: string }>`SELECT status FROM rika_turns WHERE prompt = ${prompt}`
+  return rows[0]?.status
+})
+
+export const awaitTurnStatus = Effect.fn("ClientMainTest.awaitTurnStatus")(function* (
+  database: string,
+  prompt: string,
+  status: string,
+  timeout = 10_000,
+) {
+  let observed = "unread"
+  yield* waitUntil(
+    Effect.gen(function* () {
+      observed = yield* turnStatus(database, prompt).pipe(
+        Effect.map((value) => value ?? "absent"),
+        Effect.catchCause((cause) => Effect.succeed(Cause.pretty(cause))),
+      )
+      return observed === status
+    }).pipe(Effect.scoped),
+    timeout,
+  ).pipe(
+    Effect.catchCause(() =>
+      Effect.die(`turn "${prompt}" settled as ${observed} instead of ${status} within ${timeout}ms`),
+    ),
+  )
 })

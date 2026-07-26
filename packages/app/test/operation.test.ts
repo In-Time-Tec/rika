@@ -293,6 +293,56 @@ describe("Operation", () => {
     updatedAt: 1,
   })
 
+  it.effect("records a stop intent for every nonterminal turn before settling it as cancelled", () =>
+    Effect.gen(function* () {
+      const quitTurn = (id: string, status: Turn.Status): Turn.Turn => ({
+        ...turnProvenance,
+        id: Turn.TurnId.make(id),
+        threadId: Thread.ThreadId.make("quit-thread"),
+        prompt: id,
+        executionRoute: executionRoute(),
+        status,
+        stopIntent: "none",
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      const cancelled = yield* Ref.make<ReadonlyArray<string>>([])
+      const turns = yield* TurnRepository.makeMemory([
+        quitTurn("quit-running", "running"),
+        quitTurn("quit-waiting", "waiting"),
+        quitTurn("quit-queued", "queued"),
+        quitTurn("quit-completed", "completed"),
+      ])
+      const recordingBackend = ExecutionBackend.Service.of({
+        ...backend,
+        cancel: (turnId) =>
+          Ref.update(cancelled, (values) => [...values, turnId]).pipe(
+            Effect.as({ turnId, status: "cancelled" as const, events: [] }),
+          ),
+      })
+      yield* Operation.stopActiveExecutionWork().pipe(
+        provideLayer(
+          Layer.mergeAll(
+            Layer.succeed(TurnRepository.Service, turns),
+            Layer.succeed(ExecutionBackend.Service, recordingBackend),
+          ),
+        ),
+      )
+      for (const id of ["quit-running", "quit-waiting"]) {
+        const settled = yield* turns.get(Turn.TurnId.make(id))
+        expect(settled?.status, id).toBe("cancelled")
+        expect(settled?.stopIntent, id).toBe("requested")
+      }
+      for (const id of ["quit-queued", "quit-completed"]) {
+        const untouched = yield* turns.get(Turn.TurnId.make(id))
+        expect(untouched?.stopIntent, id).toBe("none")
+      }
+      expect((yield* turns.get(Turn.TurnId.make("quit-queued")))?.status).toBe("queued")
+      expect((yield* Ref.get(cancelled)).toSorted()).toEqual(["quit-running", "quit-waiting"])
+      expect(yield* turns.listStopRequested).toEqual([])
+    }),
+  )
+
   it.effect("reconciles a stale nonterminal row from authoritative Relay state", () =>
     Effect.gen(function* () {
       for (const status of ["accepted", "running", "waiting"] as const) {

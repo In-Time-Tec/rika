@@ -94,7 +94,7 @@ describe("resident WebSocket process transport", () => {
             yield* firstClient.closeEffect
             yield* firstClient.awaitExit.pipe(
               Effect.timeoutOrElse({
-                duration: "500 millis",
+                duration: "5 seconds",
                 orElse: () => Effect.die("resident startup owner did not exit after detaching its live host"),
               }),
             )

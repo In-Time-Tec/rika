@@ -22,7 +22,7 @@ export type InteractiveInput = Extract<Input, { readonly _tag: "Interactive" }>
 
 declare const RIKA_BUILD_IDENTITY: string | undefined
 
-export const protocolVersion = 5
+export const protocolVersion = 6
 export const buildIdentity = typeof RIKA_BUILD_IDENTITY === "string" ? RIKA_BUILD_IDENTITY : "rika-development-build"
 export const replacementGuard = "active-execution-v1" as const
 export const ClientKind = Schema.Literals(["interactive", "run", "review", "workflow", "thread-continue", "product"])
@@ -508,6 +508,15 @@ export const makeLifecycle = (changed: (state: LifecycleState) => Effect.Effect<
       }).pipe(Effect.flatMap((state) => (state === undefined ? Effect.void : changed(state))))
     return {
       state: Ref.get(value).pipe(Effect.map((current) => current.state)),
+      soleClient: Ref.get(value).pipe(
+        Effect.map((current) => current.clients <= 1 && current.state !== "draining" && current.state !== "stopped"),
+      ),
+      graceHolds: (generation: number) =>
+        Ref.get(value).pipe(
+          Effect.map(
+            (current) => current.state === "grace" && current.clients === 0 && current.graceGeneration === generation,
+          ),
+        ),
       ready: Ref.modify(value, (current) => {
         if (current.state !== "starting") return [undefined, current] as const
         const next =

@@ -43,6 +43,7 @@ import {
   Console,
   Context,
   Crypto,
+  Duration,
   Effect,
   Fiber,
   FileSystem,
@@ -1676,6 +1677,8 @@ export const interruptTrackedFibers = (fibers: Iterable<Fiber.Fiber<void, never>
 
 export const tuiSignalExitCode = (signal: "SIGINT" | "SIGTERM"): number => (signal === "SIGINT" ? 130 : 143)
 
+const quitStopWorkBound = Duration.seconds(3)
+
 const interruptAndClearTrackedFiberImpl = (
   fiber: Fiber.Fiber<void, never>,
   clear: (fiber: Fiber.Fiber<void, never>) => void,
@@ -2145,7 +2148,21 @@ export const interactiveTui =
           if (closing) return
           closing = true
           if (exitCode !== undefined) process.exitCode = exitCode
-          fork(teardown(true).pipe(Effect.andThen(Effect.sync(() => resume(Effect.void)))))
+          fork(
+            session.quit.pipe(
+              Effect.timeoutOrElse({
+                duration: quitStopWorkBound,
+                orElse: () => Effect.logWarning("tui.quit.stop_work.timeout"),
+              }),
+              Effect.catch((failure) =>
+                Effect.logWarning("tui.quit.stop_work.failed").pipe(
+                  Effect.annotateLogs("rika.failure.kind", failure._tag),
+                ),
+              ),
+              Effect.andThen(teardown(true)),
+              Effect.andThen(Effect.sync(() => resume(Effect.void))),
+            ),
+          )
         }
         const interrupt = () => close(tuiSignalExitCode("SIGINT"))
         const terminate = () => close(tuiSignalExitCode("SIGTERM"))
@@ -3167,6 +3184,14 @@ if (import.meta.main) {
                 Schema.is(Operation.OperationUnavailable)(error)
                   ? error
                   : Operation.OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+              ),
+            ),
+            stopActiveExecutionWork: loadProduct.pipe(
+              Effect.flatMap((service) => service.stopActiveExecutionWork ?? Effect.void),
+              Effect.mapError((error) =>
+                Schema.is(Operation.OperationUnavailable)(error)
+                  ? error
+                  : Operation.OperationUnavailable.make({ operation: "ResidentAbandonment", message: String(error) }),
               ),
             ),
             run: (input) => {

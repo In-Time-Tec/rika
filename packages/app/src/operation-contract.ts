@@ -269,6 +269,7 @@ export interface Interface {
   readonly run: (input: Input) => Effect.Effect<void, OperationUnavailable>
   readonly hasActiveExecutionWork?: Effect.Effect<boolean, OperationUnavailable>
   readonly authorizeResidentReplacement?: Effect.Effect<"defer" | "supersede", OperationUnavailable>
+  readonly stopActiveExecutionWork?: Effect.Effect<void, OperationUnavailable>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/app/operation-contract/Service") {}
@@ -666,6 +667,7 @@ export const InteractiveCommand = Schema.Union([
   Schema.Struct({ _tag: Schema.tag("Steer"), text: Schema.String, turnId: Schema.optionalKey(Schema.String) }),
   Schema.Struct({ _tag: Schema.tag("InterruptAndSend"), prompt: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("Cancel") }),
+  Schema.Struct({ _tag: Schema.tag("Quit") }),
   Schema.Struct({ _tag: Schema.tag("NewThread") }),
   Schema.Struct({
     _tag: Schema.tag("ResolvePermission"),
@@ -706,6 +708,7 @@ export interface InteractiveSession {
   readonly steer: (text: string, targetTurnId?: string) => Effect.Effect<void, OperationUnavailable>
   readonly interruptAndSend: (prompt: string) => Effect.Effect<void, OperationUnavailable>
   readonly cancel: Effect.Effect<void, OperationUnavailable>
+  readonly quit: Effect.Effect<void, OperationUnavailable>
   readonly newThread: Effect.Effect<void, OperationUnavailable>
   readonly resolvePermission: (
     waitId: string,
@@ -744,6 +747,8 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
       return session.interruptAndSend(command.prompt)
     case "Cancel":
       return session.cancel
+    case "Quit":
+      return session.quit
     case "NewThread":
       return session.newThread
     case "ResolvePermission":

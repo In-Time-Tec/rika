@@ -1240,6 +1240,48 @@ const cancelLiveDescendants = Effect.fn("Operation.cancelLiveDescendants")(funct
   )
 })
 
+const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")(function* <E, R>(
+  backend: ExecutionBackend.Interface,
+  settle: (
+    turnId: Turn.TurnId,
+    status: Turn.Status,
+    cursor: string | undefined,
+    settledAt: number,
+  ) => Effect.Effect<void, E, R>,
+) {
+  const turns = yield* TurnRepository.Service
+  for (const turn of yield* turns.listStopRequested) {
+    yield* cancelLiveDescendants(backend, turn.id)
+    const settledAt = yield* Clock.currentTimeMillis
+    yield* backend
+      .cancel(turn.id, settledAt)
+      .pipe(
+        Effect.catch((failure) =>
+          Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
+            Effect.annotateLogs({ "rika.turn.id": String(turn.id), "rika.failure.kind": String(failure) }),
+          ),
+        ),
+      )
+    yield* settle(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+    yield* Effect.logInfo("execution.stop.settled").pipe(Effect.annotateLogs({ "rika.turn.id": String(turn.id) }))
+  }
+})
+
+export const stopActiveExecutionWork = Effect.fn("Operation.stopActiveExecutionWork")(function* () {
+  const turns = yield* TurnRepository.Service
+  const backend = yield* ExecutionBackend.Service
+  const running = (yield* turns.listNonterminal).filter((turn) => turn.status !== "queued")
+  const requestedAt = yield* Clock.currentTimeMillis
+  for (const turn of running) yield* turns.requestStop(turn.id, requestedAt)
+  if (running.length > 0)
+    yield* Effect.logInfo("execution.stop.requested_for_all").pipe(
+      Effect.annotateLogs({ "rika.turn.count": running.length }),
+    )
+  yield* settleStopRequestedTurns(backend, (turnId, status, cursor, settledAt) =>
+    turns.setStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
+  )
+})
+
 const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(function* (
   backend: ExecutionBackend.Interface,
   threadId: Thread.ThreadId,
@@ -4042,25 +4084,9 @@ export const productLayer = <
                         ),
                       ),
                     )
-                  const settleStopRequested = Effect.gen(function* () {
-                    for (const turn of yield* turns.listStopRequested) {
-                      const settledAt = yield* Clock.currentTimeMillis
-                      yield* backend.cancel(turn.id, settledAt).pipe(
-                        Effect.catch((failure) =>
-                          Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
-                            Effect.annotateLogs({
-                              "rika.turn.id": String(turn.id),
-                              "rika.failure.kind": String(failure),
-                            }),
-                          ),
-                        ),
-                      )
-                      yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
-                      yield* Effect.logInfo("execution.stop.settled").pipe(
-                        Effect.annotateLogs({ "rika.turn.id": String(turn.id) }),
-                      )
-                    }
-                  })
+                  const settleStopRequested = settleStopRequestedTurns(backend, (turnId, status, cursor, settledAt) =>
+                    setTurnStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
+                  )
                   const scan = Effect.gen(function* () {
                     for (const turn of yield* turns.listNonterminal) if (turn.status !== "queued") yield* launch(turn)
                   })
@@ -4443,6 +4469,12 @@ export const productLayer = <
               if (isTerminalStatus(result.status)) yield* settleThread(thread, sessionDispatch)
             }),
           ),
+          quit: stopActiveExecutionWork().pipe(
+            Effect.provide(executionDependencies),
+            Effect.mapError((failure) =>
+              OperationUnavailable.make({ operation: "InteractiveSession.quit", message: String(failure) }),
+            ),
+          ),
           resolvePermission: (waitId, kind, decision) =>
             shellApprovals.has(waitId)
               ? Effect.gen(function* () {
@@ -4615,6 +4647,7 @@ export const productLayer = <
           steer: (text, targetTurnId) => admitLocal(implementation.steer(text, targetTurnId)),
           interruptAndSend: (prompt) => admitLocal(implementation.interruptAndSend(prompt)),
           cancel: admitLocal(implementation.cancel),
+          quit: implementation.quit,
           resolvePermission: (waitId, kind, decision) =>
             admitLocal(implementation.resolvePermission(waitId, kind, decision)),
           selectThread: (threadId, epoch) => admitLocal(implementation.selectThread(threadId, epoch)),
@@ -4751,6 +4784,12 @@ export const productLayer = <
           Effect.provide(executionDependencies),
           Effect.mapError((error) =>
             OperationUnavailable.make({ operation: "ResidentReplacement", message: String(error) }),
+          ),
+        ),
+        stopActiveExecutionWork: stopActiveExecutionWork().pipe(
+          Effect.provide(executionDependencies),
+          Effect.mapError((error) =>
+            OperationUnavailable.make({ operation: "ResidentAbandonment", message: String(error) }),
           ),
         ),
         authorizeResidentReplacement: replacementAdmission

@@ -84,7 +84,7 @@ running_checks = []
 replaced_descendants = []
 status = None
 timed_out = False
-deadline = time.monotonic() + 30
+deadline = time.monotonic() + max(30, sum(action.get("timeoutMs", 10_000) for action in actions) / 1000 + 8)
 action_started = time.monotonic()
 blocked_action = None
 terminal_control = re.compile(rb"\x1b(?:\][^\x07]*(?:\x07|\x1b\\)|\[[0-?]*[ -/]*[@-~]|[@-_])")
@@ -186,6 +186,9 @@ while time.monotonic() < deadline:
         if resize is not None:
             fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", resize["height"], resize["width"], 0, 0))
             os.kill(pid, signal.SIGWINCH)
+        signal_name = action.get("signal")
+        if signal_name is not None:
+            os.killpg(pid, getattr(signal, signal_name))
         restart_arguments = action.get("restartArguments")
         if restart_arguments is None:
             write = action.get("write")

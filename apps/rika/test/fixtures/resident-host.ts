@@ -27,6 +27,9 @@ const program = Effect.gen(function* () {
   const uninterruptibleOwner =
     (yield* Config.string("RIKA_TEST_RESIDENT_UNINTERRUPTIBLE_OWNER").pipe(Config.withDefault("0"))) === "1"
   const outboundCapacity = yield* Config.int("RIKA_TEST_RESIDENT_OUTBOUND_CAPACITY").pipe(Config.withDefault(1_024))
+  const abandonMilliseconds = Number(
+    yield* Config.string("RIKA_TEST_RESIDENT_ABANDON").pipe(Config.withDefault("5000")),
+  )
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const interactiveAdmissionActive = yield* Ref.make(0)
@@ -42,6 +45,7 @@ const program = Effect.gen(function* () {
     profile: "default",
     dataRoot,
     graceMilliseconds: Number(grace),
+    abandonMilliseconds,
     startupHoldMilliseconds: Number(startupHold),
     outboundCapacity,
     onReady: ResidentProcessStartup.signalReady,
@@ -64,6 +68,9 @@ const program = Effect.gen(function* () {
         return Operation.Service.of({
           hasActiveExecutionWork: Effect.sync(() => activeWork > 0),
           authorizeResidentReplacement: Effect.sync(() => (activeWork > 0 ? "defer" : "supersede")),
+          stopActiveExecutionWork: Effect.sync(() => {
+            activeWork = 0
+          }).pipe(Effect.andThen(append("stop-work.log", `${process.pid}\n`))),
           run: (input) => {
             if (input._tag !== "Interactive")
               return Effect.suspend(() => {
@@ -399,6 +406,9 @@ const program = Effect.gen(function* () {
               steer: () => Effect.void,
               interruptAndSend: () => Effect.void,
               cancel: Effect.void,
+              quit: Effect.sync(() => {
+                activeWork = 0
+              }).pipe(Effect.andThen(append("quit-commands.log", `${process.pid}\n`))),
               newThread: Effect.void,
               resolvePermission: () => Effect.void,
               selectThread: () => Effect.void,

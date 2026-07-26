@@ -502,6 +502,7 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                     steer: (text) => invoke({ _tag: "Steer", text }),
                     interruptAndSend: (prompt) => invoke({ _tag: "InterruptAndSend", prompt }),
                     cancel: invoke({ _tag: "Cancel" }),
+                    quit: invoke({ _tag: "Quit" }),
                     newThread: invoke({ _tag: "NewThread" }),
                     resolvePermission: (waitId, kind, decision) =>
                       invoke({ _tag: "ResolvePermission", waitId, kind, decision }),
@@ -1059,6 +1060,7 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
               steer: (text) => mutation((session) => session.steer(text)),
               interruptAndSend: (prompt) => mutation((session) => session.interruptAndSend(prompt)),
               cancel: mutation((session) => session.cancel),
+              quit: mutation((session) => session.quit),
               newThread: nextWireEpoch().pipe(
                 Effect.andThen(Ref.set(selected, { _tag: "latest" as const })),
                 Effect.andThen(mutation((session) => session.newThread)),
