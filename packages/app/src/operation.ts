@@ -981,6 +981,20 @@ const invalidateSelectionTurn = (state: SelectionEpochState, turn: Turn.Turn) =>
   state.pendingTurns.set(turnId, { turn, window: state.requestedWindow })
 }
 
+const reconcileSelectionTurn = (state: SelectionEpochState, current: Turn.Turn): boolean => {
+  const turnId = String(current.id)
+  const version = state.authoritativeVersions.get(turnId)
+  if (version === undefined) return false
+  if (current.status === version.status && current.lastCursor === version.lastCursor) return false
+  if (current.status === version.status && !isTerminalStatus(current.status)) {
+    state.authoritativeTurns.set(turnId, current)
+    state.authoritativeVersions.set(turnId, { status: current.status, lastCursor: current.lastCursor })
+    return false
+  }
+  invalidateSelectionTurn(state, current)
+  return true
+}
+
 const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")(function* (
   backend: ExecutionBackend.Interface,
   rootExecutionId: string,
@@ -3690,7 +3704,7 @@ export const productLayer = <
           if (before === undefined) {
             yield* Effect.forEach(
               state.authoritativeVersions,
-              ([turnId, version]) =>
+              ([turnId]) =>
                 Effect.gen(function* () {
                   const current = yield* turns.get(Turn.TurnId.make(turnId))
                   if (current === undefined) {
@@ -3698,27 +3712,23 @@ export const productLayer = <
                     state.authoritativeVersions.delete(turnId)
                     return
                   }
-                  if (current.status === version.status && current.lastCursor === version.lastCursor) return
-                  invalidateSelectionTurn(state, current)
+                  reconcileSelectionTurn(state, current)
                 }),
               { concurrency: 1, discard: true },
             )
           }
           const usageCosts = currentUsageCosts()
           const authoritativeTurns = state.authoritativeTurns
-          let entries = storedEntries.flatMap((storedEntry) => {
+          let entries = storedEntries.map((storedEntry) => {
             const authoritativeTurn = authoritativeTurns.get(String(storedEntry.turn.id))
-            if (state.pendingTurns.has(String(storedEntry.turn.id))) return []
             const entry =
               authoritativeTurn === undefined
                 ? storedEntry
                 : Object.assign({}, storedEntry, { turn: authoritativeTurn })
             const costUsd = usageCosts.turns.get(entry.turn.id)?.costUsd
-            return [
-              costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
-                ? entry
-                : Object.assign({}, entry, { projectionCostUsd: costUsd }),
-            ]
+            return costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
+              ? entry
+              : Object.assign({}, entry, { projectionCostUsd: costUsd })
           })
           const hasOlder = storedHasOlder || state.hasUnprojectedTurns
           if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes)
@@ -3739,23 +3749,17 @@ export const productLayer = <
             if (!isCurrentSelectionState(state) || (yield* Ref.get(selectionRequest)) !== request) return
             yield* Effect.forEach(
               state.authoritativeVersions,
-              ([turnId, version]) =>
+              ([turnId]) =>
                 Effect.gen(function* () {
                   const current = yield* turns.get(Turn.TurnId.make(turnId))
-                  if (
-                    current === undefined ||
-                    (current.status === version.status && current.lastCursor === version.lastCursor)
-                  )
-                    return
-                  invalidateSelectionTurn(state, current)
+                  if (current === undefined) return
+                  reconcileSelectionTurn(state, current)
                 }),
               { concurrency: 1, discard: true },
             )
-            entries = entries.flatMap((entry) => {
-              const turnId = String(entry.turn.id)
-              if (state.pendingTurns.has(turnId)) return []
-              const current = state.authoritativeTurns.get(turnId)
-              return [current === undefined ? entry : Object.assign({}, entry, { turn: current })]
+            entries = entries.map((entry) => {
+              const current = state.authoritativeTurns.get(String(entry.turn.id))
+              return current === undefined ? entry : Object.assign({}, entry, { turn: current })
             })
             for (const entry of entries) state.loadedKeys.add(entry.unit.key)
             const inspectedActiveTurn =
@@ -3861,16 +3865,9 @@ export const productLayer = <
                   if (activeSelectionState !== state) return false
                   const projection = yield* transcripts.get(turn.id)
                   const current = yield* turns.get(turn.id)
-                  const version = state.authoritativeVersions.get(String(turn.id))
-                  if (
-                    current === undefined ||
-                    version === undefined ||
-                    current.status !== version.status ||
-                    current.lastCursor !== version.lastCursor
-                  ) {
-                    if (current !== undefined) invalidateSelectionTurn(state, current)
+                  if (current === undefined || state.authoritativeVersions.get(String(turn.id)) === undefined)
                     return false
-                  }
+                  if (reconcileSelectionTurn(state, current)) return false
                   if (activeSelectionState !== state) return false
                   const authoritativeTurn = state.authoritativeTurns.get(String(turn.id))
                   if (projection === undefined || authoritativeTurn === undefined) return false

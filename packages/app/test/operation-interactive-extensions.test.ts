@@ -645,13 +645,18 @@ describe("interactive session extensions", () => {
         while (loaded._tag !== "SelectionLoaded") loaded = yield* Queue.take(events)
 
         const entries = loaded.entries.filter((entry) => entry.turn.id === target.id)
+        expect(entries.length).toBeGreaterThan(0)
         expect(entries.every((entry) => entry.turn.status === "running")).toBe(true)
         expect(entries.every((entry) => entry.turn.lastCursor === "cursor-new")).toBe(true)
-        let replaced = yield* Queue.take(events)
-        while (replaced._tag !== "TranscriptReplaced") replaced = yield* Queue.take(events)
-        expect(replaced.entries.length).toBeGreaterThan(0)
-        expect(replaced.entries.every((entry) => entry.turn.status === "running")).toBe(true)
-        expect(replaced.entries.every((entry) => entry.turn.lastCursor === "cursor-new")).toBe(true)
+        for (let attempt = 0; attempt < 200; attempt += 1) yield* Effect.yieldNow
+        const stale = (yield* Queue.takeAll(events)).flatMap((event) =>
+          event._tag === "SelectionLoaded" ||
+          event._tag === "TranscriptReplaced" ||
+          event._tag === "TranscriptPagePrepended"
+            ? event.entries.filter((entry) => entry.turn.id === target.id && entry.turn.lastCursor !== "cursor-new")
+            : [],
+        )
+        expect(stale).toHaveLength(0)
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)
