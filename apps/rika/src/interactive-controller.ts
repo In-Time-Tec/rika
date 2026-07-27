@@ -478,7 +478,8 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       return { state, preserveAnchor: false }
     const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
-    if (event.revision <= (state.revisions.get(event.turnId) ?? -1)) {
+    const transient = Transcript.isTransientEvent(event.event)
+    if (!transient && event.revision <= (state.revisions.get(event.turnId) ?? -1)) {
       if (event.threadCostUsd === undefined) return { state, preserveAnchor: false }
       const { costUsd: _costUsd, ...modelWithoutCost } = state.model
       return {
@@ -490,6 +491,9 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         preserveAnchor: false,
       }
     }
+    const revisions = transient
+      ? state.revisions
+      : new Map([...state.revisions, [event.turnId, event.revision]] as const)
     const turn = state.replayTurns.get(event.turnId)
     if (turn === undefined) {
       const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, "")
@@ -516,7 +520,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         state: {
           ...stateWithoutCost,
           model: threadCostUsd === undefined ? modelWithoutCost : { ...modelWithoutCost, costUsd: threadCostUsd },
-          revisions: new Map([...state.revisions, [event.turnId, event.revision]]),
+          revisions,
           projections: childProjections,
           ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
           attachedChildRevisions: attached.attachments,
@@ -578,7 +582,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
             ? state.replayTurns
             : new Map([...state.replayTurns, [event.turnId, { ...turn, status: terminalStatus }]]),
         entries,
-        revisions: new Map([...state.revisions, [event.turnId, event.revision]]),
+        revisions,
         projections: nextProjections,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         attachedChildRevisions: attached.attachments,

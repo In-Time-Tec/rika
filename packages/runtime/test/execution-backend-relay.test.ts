@@ -158,6 +158,43 @@ test(
 )
 
 test(
+  "streams transient output deltas live while keeping replay on durable completions",
+  () =>
+    runNative(
+      Effect.gen(function* () {
+        const result = yield* withBackend(
+          [TestModel.turn([TestModel.text("one "), TestModel.text("two "), TestModel.text("three")])],
+          () =>
+            Effect.gen(function* () {
+              const backend = yield* ExecutionBackend.Service
+              const streamed: Array<ExecutionBackend.Event> = []
+              const first = yield* start(backend, {
+                threadId: "thread-a",
+                turnId: "turn-a",
+                prompt: "hello",
+                startedAt: 1,
+                onEvent: (event: ExecutionBackend.Event) => streamed.push(event),
+              })
+              const replay = yield* backend.replay("turn-a")
+              return { first, replay, streamed }
+            }),
+        )
+        const deltas = result.first.events.filter((event) => event.type === "model.output.delta")
+        expect(deltas.length).toBeGreaterThanOrEqual(3)
+        expect(deltas.map((event) => event.text)).toEqual(["one ", "two ", "three"])
+        expect(deltas.every((event) => typeof event.data?.transient_index === "number")).toBe(true)
+        expect(new Set(deltas.map((event) => event.sequence)).size).toBe(1)
+        expect(result.streamed.map((event) => event.cursor)).toEqual(result.first.events.map((event) => event.cursor))
+        expect(result.replay.events.some((event) => event.type === "model.output.delta")).toBe(false)
+        const cycle = result.replay.events.find((event) => event.type === "model.cycle.completed")
+        expect(cycle?.text).toBe("one two three")
+        expect(result.first.checkpoint).toEqual(result.replay.checkpoint)
+      }),
+    ),
+  30_000,
+)
+
+test(
   "provides the exact Relay invocation context to an additional tool without exposing its raw key",
   () =>
     runNative(

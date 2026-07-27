@@ -363,6 +363,68 @@ it("rejects duplicate patches and stale units with the same semantic identity", 
   expect(prepended.state.revisions.get("new")).toBe(2)
 })
 
+it("applies transient output deltas that share the durable head sequence", () => {
+  const initial = initialState()
+  const page = InteractiveController.update(initial, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("new", 2, [
+      { cursor: "started-1", sequence: 1, type: "execution.started", createdAt: 1 },
+      { cursor: "prepared-2", sequence: 2, type: "model.input.prepared", createdAt: 2 },
+    ]),
+    hasOlder: false,
+    threadCostUsd: 0,
+  })
+  expect(page.state.revisions.get("new")).toBe(2)
+
+  const transientDelta = (index: number, text: string) => ({
+    _tag: "TranscriptPatched" as const,
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("new"),
+    event: {
+      executionId: "execution:new",
+      cursor: `transient-${index}`,
+      sequence: 2,
+      type: "model.output.delta",
+      createdAt: 3 + index,
+      text,
+      data: { delta: text, transient_index: index, model_call_id: "call-1", model_attempt_id: "attempt-1" },
+    },
+    revision: 2,
+  })
+  const first = InteractiveController.update(page.state, transientDelta(1, "hel"))
+  const second = InteractiveController.update(first.state, transientDelta(2, "lo"))
+  const duplicate = InteractiveController.update(second.state, transientDelta(2, "lo"))
+  const completed = InteractiveController.update(duplicate.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("new"),
+    event: {
+      executionId: "execution:new",
+      cursor: "cycle-3",
+      sequence: 3,
+      type: "model.cycle.completed",
+      createdAt: 6,
+      text: "hello world",
+    },
+    revision: 3,
+  })
+
+  expect(first.state.model.entries.at(-1)?.text).toBe("hel")
+  expect(second.state.model.entries.at(-1)?.text).toBe("hello")
+  expect(duplicate.state.model.entries.at(-1)?.text).toBe("hello")
+  expect(first.state.revisions.get("new")).toBe(2)
+  expect(second.state.revisions.get("new")).toBe(2)
+  expect(completed.state.model.entries.at(-1)?.text).toBe("hello world")
+  expect(completed.state.revisions.get("new")).toBe(3)
+})
+
 it("reconciles a stale prepended tool call with its newer retained result", () => {
   const initial = initialState()
   const resultPage = entries("new", 2, [
