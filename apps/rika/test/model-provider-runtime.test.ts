@@ -334,6 +334,16 @@ test("classifies a nested OpenAI Responses context error without exposing the Ef
 
 test("compacts a restored durable session and replays a nested OpenAI Responses context error", () => {
   let modelCalls = 0
+  const scriptedFinish = () =>
+    AiResponse.makePart("finish", {
+      reason: "stop",
+      usage: AiResponse.Usage.make({
+        inputTokens: { uncached: undefined, total: undefined, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: undefined, text: undefined, reasoning: undefined },
+      }),
+      response: undefined,
+    })
+
   const overflow = {
     type: "invalid_request_error",
     code: "context_length_exceeded",
@@ -367,9 +377,13 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
                     params: { path: "fixture.txt" },
                     providerExecuted: false,
                   }),
+                  scriptedFinish(),
                 )
               if (modelCalls === 2)
-                return Stream.make(AiResponse.makePart("text-delta", { id: "history", delta: "history ready" }))
+                return Stream.make(
+                  AiResponse.makePart("text-delta", { id: "history", delta: "history ready" }),
+                  scriptedFinish(),
+                )
               if (modelCalls === 3)
                 return Stream.make(
                   Schema.encodeSync(AiResponse.ResponseMetadataPart)(
@@ -382,7 +396,10 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
                   ),
                   AiResponse.makePart("error", { error: overflow }),
                 )
-              return Stream.make(AiResponse.makePart("text-delta", { id: "recovered", delta: "recovered" }))
+              return Stream.make(
+                AiResponse.makePart("text-delta", { id: "recovered", delta: "recovered" }),
+                scriptedFinish(),
+              )
             },
           })
           const registration = yield* ModelRegistry.registration({
