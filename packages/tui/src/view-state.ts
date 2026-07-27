@@ -1410,16 +1410,12 @@ export const update: {
       }
     }
     case "SubmissionAdmitted": {
-      const queue =
-        message.submissionId === undefined
-          ? model.queue
-          : model.queue.flatMap((item) =>
-              item.id === message.submissionId && item.provisional === true
-                ? message.status === "queued"
-                  ? [{ ...item, id: message.turnId }]
-                  : []
-                : [item],
-            )
+      const admitProvisional = (item: QueueItem): ReadonlyArray<QueueItem> => {
+        if (item.id !== message.submissionId || item.provisional !== true) return [item]
+        if (message.status === "queued") return [{ ...item, id: message.turnId }]
+        return []
+      }
+      const queue = message.submissionId === undefined ? model.queue : model.queue.flatMap(admitProvisional)
       return {
         ...model,
         queue,

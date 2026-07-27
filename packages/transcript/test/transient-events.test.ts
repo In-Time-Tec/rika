@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { applyEvent, empty, isTransientEvent, project, type SourceEvent } from "../src"
+import { applyEvent, empty, isTransientEvent, project, type Projection, type SourceEvent } from "../src"
 
 const transientDelta = (index: number, text: string): SourceEvent => ({
   cursor: `delta-${index}`,
@@ -19,19 +19,26 @@ const transientReasoning = (index: number, text: string): SourceEvent => ({
   data: { delta: text, transient_index: index },
 })
 
-const assistantText = (projection: ReturnType<typeof empty>): string => {
+const assistantText = (projection: Projection): string => {
   const unit = projection.units.find(
     (candidate) => candidate.content._tag === "Entry" && candidate.content.role === "assistant",
   )
   return unit?.content._tag === "Entry" ? unit.content.text : ""
 }
 
-const reasoningText = (projection: ReturnType<typeof empty>): string => {
+const reasoningText = (projection: Projection): string => {
   const unit = projection.units.find(
     (candidate) => candidate.content._tag === "Block" && candidate.content.block._tag === "Reasoning",
   )
   return unit?.content._tag === "Block" && unit.content.block._tag === "Reasoning" ? unit.content.block.text : ""
 }
+
+const entryTexts = (projection: Projection) =>
+  projection.units.map((unit) => {
+    if (unit.content._tag === "Entry") return unit.content.text
+    if (unit.content.block._tag === "Reasoning") return unit.content.block.text
+    return unit.content.block._tag
+  })
 
 describe("transient events", () => {
   it("identifies transients by type and transient index", () => {
@@ -144,16 +151,6 @@ describe("transient events", () => {
     const replayed = project("turn-a", "prompt", durable)
     const streamed = live.reduce((current, event) => applyEvent(current, event), empty("turn-a", "prompt"))
 
-    const entryTexts = (projection: ReturnType<typeof empty>) =>
-      projection.units
-        .filter((unit) => unit.content._tag === "Entry" || unit.content._tag === "Block")
-        .map((unit) =>
-          unit.content._tag === "Entry"
-            ? unit.content.text
-            : unit.content.block._tag === "Reasoning"
-              ? unit.content.block.text
-              : unit.content.block._tag,
-        )
     expect(entryTexts(replayed)).toEqual(entryTexts(streamed))
     expect(replayed.revision).toBe(streamed.revision)
   })

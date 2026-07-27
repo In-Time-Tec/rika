@@ -130,12 +130,11 @@ test(
         expect(result.first.status).toBe("completed")
         expect(result.first.events.map((event) => event.type)).toContain("model.output.completed")
         expect(result.streamed).toEqual([...result.first.events])
-        expect(result.duplicate.events.map((event) => event.cursor)).toEqual(
-          result.first.events.map((event) => event.cursor),
-        )
-        expect(result.replay.events.map((event) => event.cursor)).toEqual(
-          result.first.events.map((event) => event.cursor),
-        )
+        const durableCursors = result.first.events
+          .filter((event) => event.data?.transient_index === undefined)
+          .map((event) => event.cursor)
+        expect(result.duplicate.events.map((event) => event.cursor)).toEqual(durableCursors)
+        expect(result.replay.events.map((event) => event.cursor)).toEqual(durableCursors)
         expect(result.replay.events.every((event) => event.executionId === "execution:turn-a")).toBe(true)
         expect(new Set(result.replay.events.map((event) => event.cursor)).size).toBe(result.replay.events.length)
         expect(result.after.events.map((event) => event.cursor)).toEqual(
@@ -766,7 +765,7 @@ test(
         expect(result.status).toBe("completed")
         expect(
           result.events
-            .filter((event) => event.type === "model.output.delta")
+            .filter((event) => event.type === "model.cycle.completed")
             .map((event) => event.text)
             .join(""),
         ).toBe("group stream")
@@ -795,12 +794,14 @@ test.skipIf(!("reasoning" in TestModel))(
               return { completed, replay: yield* backend.replay(completed.turnId) }
             }),
         )
-        const reasoning = result.completed.events.filter((event) => event.type === "model.reasoning.delta")
-        const assistant = result.completed.events.filter((event) => event.type === "model.output.delta")
+        const reasoning = result.completed.events.filter((event) => event.type === "model.reasoning.completed")
+        const assistant = result.completed.events.filter((event) => event.type === "model.cycle.completed")
         expect(reasoning.map((event) => event.text).join("")).toBe("inspect state")
         expect(assistant.map((event) => event.text).join("")).toBe("final answer")
         expect(reasoning[0]?.cursor).not.toBe(assistant[0]?.cursor)
-        expect(result.replay.events).toEqual(result.completed.events)
+        expect(result.replay.events).toEqual(
+          result.completed.events.filter((event) => event.data?.transient_index === undefined),
+        )
       }),
     ),
   30_000,
@@ -829,7 +830,7 @@ test(
             expect(outcome.result.status).toBe("completed")
             expect(
               outcome.result.events
-                .filter((event) => event.type === "model.output.delta")
+                .filter((event) => event.type === "model.cycle.completed")
                 .map((event) => event.text)
                 .join(""),
             ).toBe("corrected")
@@ -1046,7 +1047,7 @@ test(
         expect(result.requests).toHaveLength(2)
         expect(
           result.result.events
-            .filter((event) => event.type === "model.output.delta")
+            .filter((event) => event.type === "model.cycle.completed")
             .map((event) => event.text)
             .join(""),
         ).toBe("recovered")
@@ -1113,7 +1114,7 @@ test(
         expect(encodeJson(result.requests[3]?.prompt)).toContain("Recover the rejected request")
         expect(
           result.execution.events
-            .filter((event) => event.type === "model.output.delta")
+            .filter((event) => event.type === "model.cycle.completed")
             .map((event) => event.text)
             .join(""),
         ).toBe("recovered after compaction")

@@ -565,7 +565,13 @@ describe("ViewState", () => {
 
   test("submitting while busy echoes a provisional queue row immediately", () => {
     const busy: ViewState.Model = ViewState.resetQueue(
-      { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "queued prompt" },
+      {
+        ...ViewState.initial("/work"),
+        busy: true,
+        activeTurnId: "turn-a",
+        currentThreadId: "thread",
+        input: "queued prompt",
+      },
       "thread",
       3,
       [],
@@ -578,7 +584,13 @@ describe("ViewState", () => {
 
   test("admission rebinds a queued provisional row and the real delta replaces it without resync", () => {
     const busy: ViewState.Model = ViewState.resetQueue(
-      { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "queued prompt" },
+      {
+        ...ViewState.initial("/work"),
+        busy: true,
+        activeTurnId: "turn-a",
+        currentThreadId: "thread",
+        input: "queued prompt",
+      },
       "thread",
       3,
       [],
@@ -626,9 +638,9 @@ describe("ViewState", () => {
     )
     const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
     const selected = { ...submitted, queueSelection: "sub-1" }
-    const dequeued = ViewState.update(selected, { _tag: "KeyPressed", key: { name: "backspace" } })
-    const steered = ViewState.update(selected, { _tag: "KeyPressed", key: { name: "return" } })
-    const edited = ViewState.update(selected, { _tag: "KeyPressed", key: { name: "e", ctrl: true } })
+    const dequeued = ViewState.update(selected, { _tag: "KeyPressed", key: key({ name: "backspace" }) })
+    const steered = ViewState.update(selected, { _tag: "KeyPressed", key: key({ name: "return" }) })
+    const edited = ViewState.update(selected, { _tag: "KeyPressed", key: key({ name: "e", ctrl: true }) })
     expect(dequeued.pendingAction).toBeUndefined()
     expect(steered.pendingAction).toBeUndefined()
     expect(edited.editingTurnId).toBeUndefined()

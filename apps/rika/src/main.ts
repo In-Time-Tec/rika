@@ -1769,9 +1769,7 @@ export const interactiveTui =
           const key = String(threadId)
           if (queueResyncs.has(key)) return
           queueResyncs.add(key)
-          fork(
-            session.readQueue(threadId).pipe(Effect.ensuring(Effect.sync(() => queueResyncs.delete(key)))),
-          )
+          fork(session.readQueue(threadId).pipe(Effect.ensuring(Effect.sync(() => queueResyncs.delete(key)))))
         }
         const render = (immediate = false) => {
           if (applyingFeedBatch) return
