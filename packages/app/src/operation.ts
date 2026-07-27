@@ -83,6 +83,7 @@ const isTerminalStatus = ExecutionStatus.isTerminalStatus
 const isAgentResponseEvent = (event: ExecutionBackend.Event): boolean =>
   event.type.includes("reasoning") ||
   event.type === "model.output.delta" ||
+  event.type === "model.cycle.completed" ||
   event.type === "model.output.completed" ||
   event.type === "model.toolcall.delta" ||
   event.type === "tool.call.requested" ||
@@ -2655,6 +2656,10 @@ export const productLayer = <
           event: ExecutionBackend.Event,
           publishUsage: boolean,
         ) => {
+          if (Transcript.isTransientEvent(event)) {
+            sessionDispatch(childTranscriptPatch(threadId, executionId, rootTurnId, event))
+            return
+          }
           const key = normalizeChildExecutionId(executionId)
           const delivered = deliveredChildCursors.get(key) ?? new Set<string>()
           if (delivered.has(event.cursor)) return

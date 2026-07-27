@@ -668,7 +668,7 @@ export const resolveChildResult = ({ childExecutionId, events, reconciled }: Chi
     ? undefined
     : events.findLast(
         (executionEvent) =>
-          executionEvent.type === "model.output.completed" &&
+          (executionEvent.type === "model.output.completed" || executionEvent.type === "model.cycle.completed") &&
           executionEvent.sequence > lastToolSequence &&
           executionEvent.content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true,
       )

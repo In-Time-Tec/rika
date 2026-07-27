@@ -859,11 +859,12 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
           expect(inspection?.children).toHaveLength(1)
           expect(child?.status).toBe("completed")
           expect(child?.session_id).toBe(`session:child:${child?.id}`)
-          expect(childEventCount).toBeGreaterThan(1_000)
+          expect(childEventCount).toBeGreaterThan(0)
+          expect(childEventCount).toBeLessThan(200)
           expect(inspection?.children[0]?.status).toBe("completed")
           expect(
             settled.events
-              .filter((event) => event.type === "model.output.delta")
+              .filter((event) => event.type === "model.cycle.completed")
               .map((event) => event.text)
               .join(""),
           ).toBe("Parent synthesized the child answer.")

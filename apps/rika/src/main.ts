@@ -1764,6 +1764,13 @@ export const interactiveTui =
         let loadingOlder = false
         const selectionResyncs = new Set<string>()
         let requestSelectionResync = ignoreSelectionResync
+        const queueResyncs = new Set<string>()
+        const requestQueueResync = (threadId: Thread.ThreadId) => {
+          const key = String(threadId)
+          if (queueResyncs.has(key)) return
+          queueResyncs.add(key)
+          fork(session.readQueue(threadId).pipe(Effect.ensuring(Effect.sync(() => queueResyncs.delete(key)))))
+        }
         const render = (immediate = false) => {
           if (applyingFeedBatch) return
           if (renderer === undefined || renderSuppressed) return
@@ -1868,14 +1875,14 @@ export const interactiveTui =
             ) {
               const updated = InteractiveController.updateQueue(model, event)
               model = updated.model
-              if (updated.resync) requestSelectionResync(event.threadId, event.selectionEpoch)
+              if (updated.resync) requestQueueResync(event.threadId)
             }
           } else if (event._tag === "QueueResyncRequired") {
             if (
               event.selectionEpoch === activeSelectionEpoch &&
               (model.currentThreadId === undefined || model.currentThreadId === event.threadId)
             )
-              requestSelectionResync(event.threadId, event.selectionEpoch)
+              requestQueueResync(event.threadId)
           } else if (event._tag === "TurnStarted") {
             if (
               event.selectionEpoch === activeSelectionEpoch &&
@@ -1910,6 +1917,7 @@ export const interactiveTui =
               model = ViewState.update(model, {
                 _tag: "SubmissionAdmitted",
                 turnId: event.turnId,
+                status: event.status,
                 ...(event.submissionId === undefined ? {} : { submissionId: event.submissionId }),
               })
           } else if (event._tag === "ThreadsListed") {

@@ -3,6 +3,7 @@ import type { ThreadSummary, ThreadSummaryRepository } from "@rika/persistence"
 import type * as Thread from "@rika/persistence/thread"
 import * as Turn from "@rika/persistence/turn"
 import type * as ExecutionBackend from "@rika/runtime/contract"
+import * as Transcript from "@rika/transcript"
 import { Function } from "effect"
 
 const record = (value: unknown): Readonly<Record<string, unknown>> =>
@@ -89,7 +90,7 @@ export const latestCursor: {
   2,
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): string | undefined =>
     events
-      .filter((event) => ExecutionId.ownsExecution(turnId, event.executionId))
+      .filter((event) => ExecutionId.ownsExecution(turnId, event.executionId) && !Transcript.isTransientEvent(event))
       .reduce<
         ExecutionBackend.Event | undefined
       >((current, event) => (current === undefined || event.sequence >= current.sequence ? event : current), undefined)

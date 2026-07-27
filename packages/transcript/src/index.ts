@@ -19,6 +19,15 @@ const string = (value: unknown, fallback = ""): string => (typeof value === "str
 
 const sourcePayload = (event: SourceEvent): Record<string, unknown> => event.data ?? record(event.content?.[0])
 
+const transientEventTypes: ReadonlySet<string> = new Set([
+  "model.output.delta",
+  "model.reasoning.delta",
+  "model.toolcall.delta",
+])
+
+export const isTransientEvent = (event: SourceEvent): boolean =>
+  transientEventTypes.has(event.type) && typeof event.data?.transient_index === "number"
+
 const callPayload = (event: SourceEvent): Record<string, unknown> => {
   const value = sourcePayload(event)
   return value.type === "tool-call" ? record(value.call) : value
@@ -799,12 +808,13 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
   )
 }
 
-const applyReasoning = (projection: Projection, turnId: string, event: SourceEvent): Projection => {
+const applyReasoning = (projection: Projection, turnId: string, event: SourceEvent, complete: boolean): Projection => {
   const key = reasoningKey(turnId, projection.modelPhase)
   const current = projection.units.find((candidate) => candidate.key === key)
   const previous =
     current?.content._tag === "Block" && current.content.block._tag === "Reasoning" ? current.content.block.text : ""
-  const block: Block = { _tag: "Reasoning", text: previous + (event.text ?? string(sourcePayload(event).text)) }
+  const incoming = event.text ?? string(sourcePayload(event).text)
+  const block: Block = { _tag: "Reasoning", text: complete && incoming.length > 0 ? incoming : previous + incoming }
   return upsertUnit(
     projection,
     makeUnit(key, turnId, current?.order.sequence ?? event.sequence, 0, event.sequence, { _tag: "Block", block }),
@@ -990,7 +1000,9 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   }
   if (event.type === "model.output.delta") return applyAssistant(projection, turnId, event, false)
   if (event.type === "model.output.completed") return applyAssistant(projection, turnId, event, true)
-  if (event.type.includes("reasoning")) return applyReasoning(projection, turnId, event)
+  if (event.type === "model.cycle.completed") return applyAssistant(projection, turnId, event, true)
+  if (event.type === "model.reasoning.completed") return applyReasoning(projection, turnId, event, true)
+  if (event.type.includes("reasoning")) return applyReasoning(projection, turnId, event, false)
   if (event.type === "model.toolcall.delta") return applyToolDelta(projection, turnId, event)
   if (event.type === "tool.call.requested")
     return advanceModelPhase(applyToolRequested(projection, turnId, event), turnId)
@@ -1069,6 +1081,7 @@ export const applyEvent: {
   (projection: Projection, event: SourceEvent): Projection
   (event: SourceEvent): (projection: Projection) => Projection
 } = Function.dual(2, (projection: Projection, event: SourceEvent): Projection => {
+  if (isTransientEvent(event)) return applyKnownEvent(projection, projection.units[0]?.turnId ?? "", event)
   if (event.sequence <= projection.revision)
     return event.type === "model.usage.reported" ? applyUsage(projection, event) : projection
   const turnId = projection.units[0]?.turnId ?? ""

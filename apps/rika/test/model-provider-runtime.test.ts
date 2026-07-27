@@ -451,7 +451,7 @@ test("compacts a restored durable session and replays a nested OpenAI Responses 
           expect(execution.events.some((event) => event.type === "agent.compaction.started")).toBe(true)
           expect(
             execution.events
-              .filter((event) => event.type === "model.output.delta")
+              .filter((event) => event.type === "model.output.completed")
               .map((event) => event.text)
               .join(""),
           ).toBe("recovered")

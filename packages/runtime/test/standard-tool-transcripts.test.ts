@@ -88,7 +88,9 @@ for (const [name, parameters, malformedField] of cases) {
               expect(result.completed.status).toBe("completed")
               expect(types).toContain("tool.call.requested")
               expect(types).toContain("tool.result.received")
-              expect(result.replay.events).toEqual(result.completed.events)
+              expect(result.replay.events).toEqual(
+                result.completed.events.filter((event) => event.data?.transient_index === undefined),
+              )
               expect(definition.permission).toBe("allow")
               expect(transcript).not.toContain("rika-tool-matrix-")
               if (name !== "read") expect(transcript).toContain('"truncated":true')

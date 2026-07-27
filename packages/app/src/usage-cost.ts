@@ -648,6 +648,7 @@ export const observe: {
 } = Function.dual(
   2,
   (snapshot: Snapshot, input: RootExecution & { readonly event: ExecutionBackend.Event }): Snapshot => {
+    if (Transcript.isTransientEvent(input.event)) return snapshot
     const withWorkTimestamp = observeWorkTimestamp(snapshot, input)
     if (isActiveEventType(input.event.type)) {
       const active = observeActive(withWorkTimestamp, input)
