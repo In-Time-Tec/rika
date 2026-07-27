@@ -1515,9 +1515,11 @@ describe("interactive session extensions", () => {
             Ref.get(cancelled).pipe(
               Effect.map((values) => {
                 const childId = `${turnId}:child:worker`
+                const rootId = turnId.split(":child:")[0]!
+                const terminal = values.includes(turnId) || values.includes(rootId)
                 return {
                   turnId,
-                  status: values.includes(turnId) ? ("cancelled" as const) : ("running" as const),
+                  status: terminal ? ("cancelled" as const) : ("running" as const),
                   waits: [],
                   pendingTools: [],
                   children: turnId.includes(":child:")
@@ -1525,7 +1527,7 @@ describe("interactive session extensions", () => {
                     : [
                         {
                           executionId: childId,
-                          status: values.includes(childId) ? ("cancelled" as const) : ("running" as const),
+                          status: terminal || values.includes(childId) ? ("cancelled" as const) : ("running" as const),
                         },
                       ],
                 }
@@ -1580,21 +1582,12 @@ describe("interactive session extensions", () => {
         expect(yield* Queue.take(followed)).toEqual({ executionId: "turn-1:child:worker" })
         yield* session.cancel
         expect(yield* Queue.take(stopped)).toBe("turn-1:child:worker")
-        expect(new Set(yield* Ref.get(cancelled))).toEqual(new Set(["turn-1:child:worker", "turn-1"]))
-        while (
-          !events.some(
-            (event) =>
-              event._tag === "TranscriptPatched" &&
-              event.turnId === "turn-1:child:worker" &&
-              event.event.cursor === "stopped",
-          )
-        )
-          yield* Effect.yieldNow
+        expect(new Set(yield* Ref.get(cancelled))).toEqual(new Set(["turn-1"]))
         expect(
           events.flatMap((event) =>
             event._tag === "TranscriptPatched" && event.turnId === "turn-1:child:worker" ? [event.event.cursor] : [],
           ),
-        ).toEqual(["working", "stopped"])
+        ).toEqual(["working"])
 
         yield* session.submit("selected away")
         expect(yield* Queue.take(followed)).toEqual({ executionId: "turn-2:child:worker" })

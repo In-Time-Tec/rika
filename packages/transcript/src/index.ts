@@ -624,7 +624,7 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
       summary: event.text ?? string(value.summary),
       status: "running",
     }
-  if (event.type.includes("compact"))
+  if (event.type === "agent.compaction.committed")
     return {
       _tag: "Compaction",
       summary: event.text ?? string(value.summary),
@@ -632,6 +632,12 @@ const genericBlock = (turnId: string, event: SourceEvent): Block | undefined => 
       ...(string(value.checkpoint ?? value.checkpoint_id).length === 0
         ? {}
         : { checkpoint: string(value.checkpoint ?? value.checkpoint_id) }),
+    }
+  if (event.type === "agent.compaction.failed")
+    return {
+      _tag: "Compaction",
+      summary: event.text ?? string(value.summary ?? value.message),
+      status: "failed",
     }
   if (event.type.includes("notification"))
     return {
@@ -963,22 +969,6 @@ const advanceModelPhase = (projection: Projection, turnId: string): Projection =
   return hasOutput ? { ...projection, modelPhase: phase + 1 } : projection
 }
 
-const hasResponseEvidence = (projection: Projection, turnId: string): boolean =>
-  projection.units.some((candidate) => {
-    if (candidate.turnId !== turnId || candidate.content._tag !== "Block") return false
-    const block = candidate.content.block
-    return (
-      block._tag === "Reasoning" ||
-      block._tag === "ToolCall" ||
-      block._tag === "Permission" ||
-      block._tag === "ChildAgent"
-    )
-  }) ||
-  projection.units.some(
-    (candidate) =>
-      candidate.turnId === turnId && candidate.content._tag === "Entry" && candidate.content.role === "assistant",
-  )
-
 const isTruncatedStream = (event: SourceEvent) => {
   const payload = sourcePayload(event)
   if (payload.category === "truncated-stream") return true
@@ -1090,15 +1080,7 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
     const reason = event.text ?? string(payload.reason, string(payload.message))
     const settled = settleRunningImpl(projection, "cancelled", event.sequence)
     const outcome = { status: "cancelled" as const, ...(reason.length > 0 ? { reason } : {}) }
-    if (!hasResponseEvidence(projection, turnId)) return applyExecutionOutcome(settled, turnId, event.sequence, outcome)
-    return upsertUnit(settled, {
-      ...makeUnit(`execution:${turnId}:cancelled`, turnId, event.sequence, 0, event.sequence, {
-        _tag: "Entry",
-        role: "notice",
-        text: reason.length > 0 ? reason : "cancelled",
-      }),
-      executionOutcome: outcome,
-    })
+    return applyExecutionOutcome(settled, turnId, event.sequence, outcome)
   }
   if (event.type.startsWith("child_run.") || event.type.startsWith("child_fan_out.member."))
     return applyChild(projection, turnId, event)
@@ -1174,11 +1156,18 @@ export const withNestedProjections: {
   (nested: ReadonlyArray<NestedProjection>): (root: Projection) => Projection
 } = Function.dual(2, (root: Projection, nested: ReadonlyArray<NestedProjection>): Projection => {
   const rootTurnId = root.units.find((candidate) => candidate.parentId === undefined)?.turnId ?? root.units[0]?.turnId
+  const rootOutcome = root.units.find(
+    (candidate) => candidate.parentId === undefined && candidate.executionOutcome !== undefined,
+  )?.executionOutcome
   const units = [
     ...root.units.filter((candidate) => candidate.parentId === undefined && candidate.turnId === rootTurnId),
-    ...nested.flatMap(({ parentId, projection }) =>
-      projection.units.map((candidate) => attachParent(candidate, parentId)),
-    ),
+    ...nested.flatMap(({ parentId, projection }) => {
+      const settled =
+        rootOutcome?.status === "cancelled" || rootOutcome?.status === "failed"
+          ? settleRunningImpl(projection, rootOutcome.status, root.revision)
+          : projection
+      return settled.units.map((candidate) => attachParent(candidate, parentId))
+    }),
   ].map(assignOrder)
   return { ...root, units }
 })

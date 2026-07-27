@@ -547,6 +547,8 @@ export type Message =
       readonly turnId: string
       readonly sequences: ReadonlyArray<number>
     }
+  | { readonly _tag: "SteeringFailed"; readonly turnId: string; readonly text: string; readonly message: string }
+  | { readonly _tag: "CancelFailed"; readonly turnId?: string; readonly message: string }
   | { readonly _tag: "AssistantStreamed"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "AssistantCompleted"; readonly id?: string; readonly turnId?: string; readonly text: string }
   | { readonly _tag: "ExecutionCompleted"; readonly turnId?: string }
@@ -1427,12 +1429,12 @@ export const update: {
       const index = model.pendingSteering.findIndex(
         (row) => row.turnId === message.turnId && row.sequence === undefined && row.text === message.text,
       )
-      const pendingSteering =
-        index < 0
-          ? [...model.pendingSteering, { turnId: message.turnId, text: message.text, sequence: message.sequence }]
-          : model.pendingSteering.map((row, position) =>
-              position === index ? { ...row, sequence: message.sequence } : row,
-            )
+      if (index < 0) return model
+      if (model.activeTurnId !== message.turnId)
+        return { ...model, pendingSteering: model.pendingSteering.filter((_, position) => position !== index) }
+      const pendingSteering = model.pendingSteering.map((row, position) =>
+        position === index ? { ...row, sequence: message.sequence } : row,
+      )
       return { ...model, pendingSteering }
     }
     case "SteeringDelivered":
@@ -1442,6 +1444,33 @@ export const update: {
           (row) =>
             row.turnId !== message.turnId || row.sequence === undefined || !message.sequences.includes(row.sequence),
         ),
+      }
+    case "SteeringFailed": {
+      const index = model.pendingSteering.findIndex(
+        (row) => row.turnId === message.turnId && row.sequence === undefined && row.text === message.text,
+      )
+      if (index < 0) return model
+      const pendingSteering = model.pendingSteering.filter((_, position) => position !== index)
+      if (model.activeTurnId !== message.turnId) return { ...model, pendingSteering }
+      const restoreInput = model.input.length === 0
+      return {
+        ...model,
+        pendingSteering,
+        ...(restoreInput ? { input: message.text, cursor: message.text.length } : {}),
+        blocks: [...model.blocks, { _tag: "Notification", title: "Steering not delivered", detail: message.message }],
+        items: [...model.items, { _tag: "Block", index: model.blocks.length }],
+      }
+    }
+    case "CancelFailed":
+      if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
+      return {
+        ...model,
+        cancelPending: false,
+        blocks: [
+          ...model.blocks,
+          { _tag: "Notification", title: "Cancellation not completed", detail: message.message },
+        ],
+        items: [...model.items, { _tag: "Block", index: model.blocks.length }],
       }
     case "TurnStarted": {
       const boundDrafts = bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId)
@@ -1654,33 +1683,8 @@ export const update: {
       if (message.turnId !== undefined && model.activeTurnId !== message.turnId) return model
       if (!model.busy) return model
       const cancelSettled = settleSteering(model, turnId)
-      const hasMarkerUnit = model.blocks.some((candidate) => {
-        const block = candidate as TranscriptBlock
-        return (
-          (block._tag === "ToolCall" || block._tag === "ChildAgent") &&
-          (block.status === "running" || block.status === "cancelled")
-        )
-      })
-      const entries = hasMarkerUnit
-        ? model.entries
-        : [
-            ...model.entries,
-            { role: "notice" as const, text: "cancelled", ...(turnId === undefined ? {} : { turnId }) },
-          ]
-      const items = hasMarkerUnit
-        ? model.items
-        : [
-            ...model.items,
-            {
-              _tag: "Entry" as const,
-              index: model.entries.length,
-              ...(turnId === undefined ? {} : { id: `execution:${turnId}:cancelled`, turnId }),
-            },
-          ]
       return {
         ...model,
-        entries,
-        items,
         submittedDrafts: dropSubmittedDrafts(model.submittedDrafts, turnId),
         pendingSteering: cancelSettled.pendingSteering,
         cancelPending: false,
@@ -1985,6 +1989,7 @@ export const update: {
       if (
         key.ctrl &&
         key.name === "c" &&
+        !model.cancelPending &&
         (model.busy ||
           model.blocks.some(
             (block) =>

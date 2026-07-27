@@ -1343,7 +1343,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       Object.assign(fixture.implementation.executions, {
         get: () =>
           Effect.succeed({
-            status: "waiting",
+            status: "running",
             metadata: { rika_execution_route: currentExecutionRoute() },
           }),
         inspect: () =>
@@ -1411,6 +1411,32 @@ describe("ExecutionBackend Relay client adapter", () => {
       expect(result.inspection).toMatchObject({ status: "waiting", lastCursor: "last" })
       expect(result.approvals[0]).toMatchObject({ waitId: "wait-1", callId: "call-1" })
       expect(calls).toHaveLength(10)
+    }),
+  )
+
+  it.effect("waits for the root execution to become steerable before sending steering", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient()
+      let reads = 0
+      const steering: Array<unknown> = []
+      Object.assign(fixture.implementation.executions, {
+        get: () =>
+          Effect.sync(() => {
+            reads += 1
+            return reads === 1 ? undefined : { status: "running", metadata: {} }
+          }),
+        steer: (input: unknown) => Effect.sync(() => steering.push(input)),
+      })
+      const fiber = yield* Effect.forkChild(
+        Effect.gen(function* () {
+          const backend = yield* ExecutionBackend.Service
+          return yield* backend.steer("turn-race", "continue", "steer-turn-race", 5)
+        }).pipe(provideBackend(fixture.implementation)),
+      )
+      yield* TestClock.adjust("25 millis")
+      yield* Fiber.join(fiber)
+      expect(reads).toBe(2)
+      expect(steering).toHaveLength(1)
     }),
   )
 

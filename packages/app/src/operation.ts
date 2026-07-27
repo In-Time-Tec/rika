@@ -137,6 +137,7 @@ const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): In
     case "TurnStarted":
     case "ContextDiagnostics":
     case "ExecutionFailed":
+    case "ExecutionControlFailed":
     case "ExecutionControlled":
       return { ...event, selectionEpoch }
     default:
@@ -200,7 +201,9 @@ const boundTurnEntries = (
 }
 const isSemanticTranscriptEntry = (entry: TranscriptRepository.Entry): boolean =>
   entry.unit.parentId === undefined &&
-  (entry.unit.content._tag === "Entry" || entry.unit.executionOutcome !== undefined)
+  (entry.unit.content._tag === "Entry" ||
+    entry.unit.content.block._tag === "Compaction" ||
+    entry.unit.executionOutcome !== undefined)
 const boundTranscriptEntries = (
   sourceEntries: ReadonlyArray<TranscriptRepository.Entry>,
 ): {
@@ -1088,42 +1091,6 @@ const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")
   }
 })
 
-const descendantExecutions = Effect.fn("Operation.descendantExecutions")(function* (
-  backend: ExecutionBackend.Interface,
-  rootExecutionId: string,
-) {
-  const pending: Array<{ readonly executionId: string; readonly reference: boolean }> = [
-    { executionId: rootExecutionId, reference: false },
-  ]
-  const seen = new Set([normalizeChildExecutionId(rootExecutionId)])
-  const descendants: Array<{ readonly executionId: string; readonly status: ExecutionBackend.Status }> = []
-  while (pending.length > 0) {
-    const current = pending.shift()!
-    const inspection = yield* backend.inspect(
-      current.executionId,
-      current.reference ? ExecutionBackend.executionReference : undefined,
-    )
-    if (inspection === undefined) continue
-    for (const child of inspection.children) {
-      const normalized = normalizeChildExecutionId(child.executionId)
-      if (seen.has(normalized)) continue
-      seen.add(normalized)
-      descendants.push(child)
-      pending.push({ executionId: child.executionId, reference: true })
-    }
-  }
-  return descendants
-})
-
-const activeDescendantExecutionIds = (backend: ExecutionBackend.Interface, rootExecutionId: string) =>
-  descendantExecutions(backend, rootExecutionId).pipe(
-    Effect.map((descendants) =>
-      descendants
-        .filter((descendant) => !isTerminalStatus(descendant.status))
-        .map((descendant) => descendant.executionId),
-    ),
-  )
-
 const sessionQuiescencePollAttempts = 40
 const sessionQuiescenceCandidateLimit = 8
 
@@ -1223,37 +1190,6 @@ const blockedSessionWriter = Effect.fn("Operation.blockedSessionWriter")(functio
   return undefined
 })
 
-const cancelLiveDescendants = Effect.fn("Operation.cancelLiveDescendants")(function* (
-  backend: ExecutionBackend.Interface,
-  turnId: string,
-) {
-  const descendants = yield* activeDescendantExecutionIds(backend, turnId).pipe(
-    Effect.tapError((failure) =>
-      Effect.logError("execution.cancel.descendants_unavailable").pipe(
-        Effect.annotateLogs({ "rika.turn.id": turnId, "rika.failure.kind": String(failure) }),
-      ),
-    ),
-    Effect.orElseSucceed(() => []),
-  )
-  if (descendants.length === 0) return
-  const cancelledAt = yield* Clock.currentTimeMillis
-  yield* Effect.forEach(
-    descendants.toReversed(),
-    (executionId) =>
-      backend.cancel(executionId, cancelledAt, ExecutionBackend.executionReference).pipe(
-        Effect.catch((failure) =>
-          Effect.logError("child-execution.cancel.failed").pipe(
-            Effect.annotateLogs({
-              "rika.execution.id": executionId,
-              "rika.failure.kind": String(failure),
-            }),
-          ),
-        ),
-      ),
-    { concurrency: "unbounded", discard: true },
-  )
-})
-
 const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")(function* <E, R>(
   backend: ExecutionBackend.Interface,
   settle: (
@@ -1265,18 +1201,21 @@ const settleStopRequestedTurns = Effect.fn("Operation.settleStopRequestedTurns")
 ) {
   const turns = yield* TurnRepository.Service
   for (const turn of yield* turns.listStopRequested) {
-    yield* cancelLiveDescendants(backend, turn.id)
     const settledAt = yield* Clock.currentTimeMillis
-    yield* backend
-      .cancel(turn.id, settledAt)
-      .pipe(
-        Effect.catch((failure) =>
-          Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
-            Effect.annotateLogs({ "rika.turn.id": String(turn.id), "rika.failure.kind": String(failure) }),
-          ),
-        ),
+    const outcome = yield* Effect.result(backend.cancel(turn.id, settledAt))
+    if (outcome._tag === "Failure") {
+      yield* Effect.logWarning("execution.stop.settle_cancel_failed").pipe(
+        Effect.annotateLogs({ "rika.turn.id": String(turn.id), "rika.failure.kind": String(outcome.failure) }),
       )
-    yield* settle(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+      continue
+    }
+    const result = outcome.success
+    yield* settle(
+      turn.id,
+      result.status,
+      result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
+      yield* Clock.currentTimeMillis,
+    )
     yield* Effect.logInfo("execution.stop.settled").pipe(Effect.annotateLogs({ "rika.turn.id": String(turn.id) }))
   }
 })
@@ -1354,7 +1293,6 @@ const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(fun
       "rika.predecessor.turn.status": blocked.status,
     }),
   )
-  yield* cancelLiveDescendants(backend, blocked.id)
   for (let attempt = 1; attempt < sessionQuiescencePollAttempts; attempt += 1) {
     yield* Effect.sleep("250 millis")
     blocked = yield* blockedSessionWriter(backend, threadId)
@@ -2638,6 +2576,10 @@ export const productLayer = <
           const selection = childFollowerSelection
           if (selection.threadId !== String(threadId)) return
           const current = childFollowerStates.get(key) ?? { _tag: "Idle" as const }
+          if (status === "cancelled" && current.afterCursor !== undefined) {
+            childFollowerStates.set(key, { _tag: "Terminal", afterCursor: current.afterCursor })
+            return
+          }
           if (current._tag === "Terminal") return
           if (
             (current._tag === "Waiting" && (status === undefined || status === "waiting")) ||
@@ -2876,6 +2818,7 @@ export const productLayer = <
                   yield* Effect.uninterruptible(
                     Effect.gen(function* () {
                       if (outcome._tag === "Failure") {
+                        if (Cause.hasInterruptsOnly(outcome.cause)) return
                         yield* flushProjection
                         const failedAt = yield* Clock.currentTimeMillis
                         if (sessionOwnershipRejected(outcome.cause) && (yield* requeueOwnedSession(turn, dispatch))) {
@@ -2962,9 +2905,11 @@ export const productLayer = <
                   Effect.provide(executionDependencies),
                   Effect.scoped,
                   Effect.tapCause((cause) =>
-                    Effect.logError("interactive.submit.failed").pipe(
-                      Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
-                    ),
+                    Cause.hasInterruptsOnly(cause)
+                      ? Effect.void
+                      : Effect.logError("interactive.submit.failed").pipe(
+                          Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+                        ),
                   ),
                   Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
                   Effect.ensuring(releaseTurnObserver(turn.id).pipe(Effect.andThen(notifyTurnChanged(turn)))),
@@ -2980,9 +2925,11 @@ export const productLayer = <
               Effect.provide(executionDependencies),
               Effect.scoped,
               Effect.tapCause((cause) =>
-                Effect.logError("interactive.submit.failed").pipe(
-                  Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
-                ),
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Effect.logError("interactive.submit.failed").pipe(
+                      Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+                    ),
               ),
               Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
               Effect.ensuring(
@@ -4377,7 +4324,16 @@ export const productLayer = <
                       if (requeued.queue === undefined)
                         return yield* operationError(`Turn ${queued.id} was not restored to its queue`)
                       emit(sessionDispatch, queueMutationEvent(requeued.queue))
-                      return yield* Effect.failCause(outcome.cause)
+                      emit(sessionDispatch, {
+                        _tag: "ExecutionControlFailed",
+                        selectionEpoch: 0,
+                        threadId: turn.threadId,
+                        turnId: turn.id,
+                        action: "steer",
+                        message: operationFailureDetail(outcome.cause),
+                        steeringText,
+                      })
+                      return
                     }
                     emit(sessionDispatch, {
                       _tag: "ExecutionControlled",
@@ -4400,19 +4356,28 @@ export const productLayer = <
                 const turn = yield* active()
                 if (targetTurnId !== undefined && String(turn.id) !== targetTurnId)
                   return yield* operationError(`Steering target ${targetTurnId} is no longer the active turn`)
-                const receipt = yield* backend.steer(
-                  turn.id,
-                  text,
-                  nextSteeringIdentity(String(turn.id)),
-                  yield* Clock.currentTimeMillis,
+                const outcome = yield* Effect.exit(
+                  backend.steer(turn.id, text, nextSteeringIdentity(String(turn.id)), yield* Clock.currentTimeMillis),
                 )
+                if (outcome._tag === "Failure") {
+                  emit(sessionDispatch, {
+                    _tag: "ExecutionControlFailed",
+                    selectionEpoch: 0,
+                    threadId: turn.threadId,
+                    turnId: turn.id,
+                    action: "steer",
+                    message: operationFailureDetail(outcome.cause),
+                    steeringText: text,
+                  })
+                  return
+                }
                 emit(sessionDispatch, {
                   _tag: "ExecutionControlled",
                   selectionEpoch: 0,
                   threadId: turn.threadId,
                   turnId: turn.id,
                   action: "steered",
-                  steeringSequence: receipt.sequence,
+                  steeringSequence: outcome.value.sequence,
                   steeringText: text,
                 })
               }),
@@ -4454,83 +4419,78 @@ export const productLayer = <
                   yield* notifyThreadSummaries
                   if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
                 } else {
-                  yield* backend.cancel(turn.id, cancelledAt)
-                  yield* setTurnStatus(turn.id, "cancelled", turn.lastCursor, yield* Clock.currentTimeMillis)
+                  const result = yield* backend.cancel(turn.id, cancelledAt)
+                  yield* setTurnStatus(
+                    turn.id,
+                    result.status,
+                    result.checkpoint?.cursor ?? ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
+                    yield* Clock.currentTimeMillis,
+                  )
+                  yield* projectExecutionResult(turn.threadId, result)
                 }
                 yield* drainQueued(thread, sessionDispatch)
               }),
             ),
-          cancel: safe(
-            sessionDispatch,
-            Effect.gen(function* () {
-              const localApprovals = [...shellApprovals.entries()]
-              if (localApprovals.length > 0) {
-                for (const [id, approval] of localApprovals) {
-                  shellApprovals.delete(id)
-                  yield* Deferred.succeed(approval, false)
-                  sessionDispatch({ _tag: "ShellPermissionCancelled", id })
-                }
-                sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
-                return
+          cancel: Effect.gen(function* () {
+            const localApprovals = [...shellApprovals.entries()]
+            if (localApprovals.length > 0) {
+              for (const [id, approval] of localApprovals) {
+                shellApprovals.delete(id)
+                yield* Deferred.succeed(approval, false)
+                sessionDispatch({ _tag: "ShellPermissionCancelled", id })
               }
-              const backend = yield* ExecutionBackend.Service
-              const turn = yield* active().pipe(Effect.orElseSucceed(() => undefined))
-              if (turn === undefined) {
-                sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
-                return
-              }
-              const thread = yield* threadForTurn(turn)
-              const cancelledAt = yield* Clock.currentTimeMillis
-              const turns = yield* TurnRepository.Service
-              yield* turns.requestStop(turn.id, cancelledAt)
-              const childIds = yield* activeDescendantExecutionIds(backend, turn.id).pipe(
-                Effect.tapError((failure) =>
-                  Effect.logError("execution.cancel.descendants_unavailable").pipe(
-                    Effect.annotateLogs({
-                      "rika.turn.id": String(turn.id),
-                      "rika.failure.kind": String(failure),
-                    }),
-                  ),
-                ),
-                Effect.orElseSucceed(() => []),
-              )
-              const cancelledBeforeStart =
-                turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, cancelledAt))
-              const result = cancelledBeforeStart
-                ? { turnId: turn.id, status: "cancelled" as const, events: [] }
-                : yield* backend.cancel(turn.id, cancelledAt)
-              if (cancelledBeforeStart) {
-                const cancelled = yield* turns.get(turn.id)
-                yield* notifyThreadSummaries
-                if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
-              }
-              const cancellationOrder = childIds.toReversed()
-              const childOutcomes = yield* Effect.forEach(
-                cancellationOrder,
-                (childId) => Effect.result(backend.cancel(childId, cancelledAt, ExecutionBackend.executionReference)),
-                { concurrency: "unbounded" },
-              )
-              for (const [index, outcome] of childOutcomes.entries()) {
-                const childId = cancellationOrder[index]!
-                if (outcome._tag === "Success") {
-                  for (const event of outcome.success.events)
-                    deliverChildEvent(thread.id, childId, turn.id, event, false)
-                } else
-                  yield* Effect.logError("child-execution.cancel.failed").pipe(
-                    Effect.annotateLogs({
-                      "rika.execution.id": childId,
-                      "rika.failure.kind": String(outcome.failure),
-                    }),
-                  )
-              }
-              yield* setTurnStatus(
-                turn.id,
-                result.status,
-                ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
-                yield* Clock.currentTimeMillis,
-              )
-              yield* projectExecutionResult(turn.threadId, result)
-              if (isTerminalStatus(result.status)) yield* activateChildFollowers(thread.id)
+              sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+              return
+            }
+            const selectedThread = yield* Ref.get(interactiveThread)
+            if (selectedThread === undefined) {
+              sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+              return
+            }
+            const turns = yield* TurnRepository.Service
+            const turn = yield* turns.findActive(selectedThread.id)
+            if (turn === undefined) {
+              sessionDispatch({ _tag: "ExecutionControlled", selectionEpoch: 0, action: "cancelled" })
+              return
+            }
+            const backend = yield* ExecutionBackend.Service
+            const thread = yield* threadForTurn(turn)
+            const cancelledAt = yield* Clock.currentTimeMillis
+            yield* turns.requestStop(turn.id, cancelledAt)
+            const cancelledBeforeStart =
+              turn.status === "accepted" && (yield* turns.cancelAccepted(turn.id, cancelledAt))
+            const cancellation = cancelledBeforeStart
+              ? Effect.exit(Effect.succeed({ turnId: turn.id, status: "cancelled" as const, events: [] }))
+              : Effect.exit(backend.cancel(turn.id, cancelledAt))
+            const outcome = yield* cancellation
+            if (outcome._tag === "Failure") {
+              emit(sessionDispatch, {
+                _tag: "ExecutionControlFailed",
+                selectionEpoch: 0,
+                threadId: turn.threadId,
+                turnId: turn.id,
+                action: "cancel",
+                message: operationFailureDetail(outcome.cause),
+              })
+              return
+            }
+            const result = outcome.value
+            if (cancelledBeforeStart) {
+              const cancelled = yield* turns.get(turn.id)
+              yield* notifyThreadSummaries
+              if (cancelled !== undefined) yield* notifyTurnChanged(cancelled)
+            }
+            yield* setTurnStatus(
+              turn.id,
+              result.status,
+              ThreadActivity.latestCursor(turn.id, result.events) ?? turn.lastCursor,
+              yield* Clock.currentTimeMillis,
+            )
+            yield* projectExecutionResult(turn.threadId, result)
+            if (result.status === "cancelled") {
+              yield* activateChildFollowers(thread.id)
+            } else if (isTerminalStatus(result.status)) yield* activateChildFollowers(thread.id)
+            if (result.status === "cancelled")
               emit(sessionDispatch, {
                 _tag: "ExecutionControlled",
                 selectionEpoch: 0,
@@ -4539,8 +4499,30 @@ export const productLayer = <
                 action: "cancelled",
                 agentResponseArrived: agentResponseArrived(result.events),
               })
-              if (isTerminalStatus(result.status)) yield* settleThread(thread, sessionDispatch)
-            }),
+            else if (result.status === "failed" && !result.events.some((event) => event.type === "execution.failed"))
+              emit(sessionDispatch, {
+                _tag: "ExecutionFailed",
+                selectionEpoch: 0,
+                threadId: turn.threadId,
+                turnId: turn.id,
+                message: `Execution ${result.status}`,
+              })
+            if (isTerminalStatus(result.status)) yield* settleThread(thread, sessionDispatch)
+          }).pipe(
+            Effect.provide(executionDependencies),
+            Effect.scoped,
+            Effect.catch((failure) =>
+              Effect.sync(() => {
+                const selected = Ref.getUnsafe(interactiveThread)
+                sessionDispatch({
+                  _tag: "ExecutionControlFailed",
+                  selectionEpoch: 0,
+                  ...(selected === undefined ? {} : { threadId: selected.id }),
+                  action: "cancel",
+                  message: operationFailureDetail(failure),
+                })
+              }),
+            ),
           ),
           quit: stopActiveExecutionWork().pipe(
             Effect.provide(executionDependencies),

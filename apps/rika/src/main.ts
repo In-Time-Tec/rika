@@ -1961,6 +1961,22 @@ export const interactiveTui =
                 sequence: event.steeringSequence,
                 text: event.steeringText,
               })
+          } else if (event._tag === "ExecutionControlFailed") {
+            if (event.threadId !== undefined && event.selectionEpoch !== activeSelectionEpoch) return
+            if (event.threadId !== undefined && model.currentThreadId !== event.threadId) return
+            if (event.action === "steer" && event.turnId !== undefined && event.steeringText !== undefined)
+              model = ViewState.update(model, {
+                _tag: "SteeringFailed",
+                turnId: event.turnId,
+                text: event.steeringText,
+                message: event.message,
+              })
+            if (event.action === "cancel")
+              model = ViewState.update(model, {
+                _tag: "CancelFailed",
+                ...(event.turnId === undefined ? {} : { turnId: event.turnId }),
+                message: event.message,
+              })
           } else if (event._tag === "ContextDiagnostics") {
             if (event.selectionEpoch !== activeSelectionEpoch) return
             if (model.currentThreadId !== event.threadId) return

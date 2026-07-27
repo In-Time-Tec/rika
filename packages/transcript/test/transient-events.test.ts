@@ -202,7 +202,6 @@ describe("transient events", () => {
       "assistant:turn-a:0",
       "tool:turn-a:call_t80",
       "tool:turn-a:call_BLq",
-      "execution:turn-a:cancelled",
     ])
     expect(assistantText(reattached)).toBe(reply)
     expect(reasoningText(reattached)).toBe(thoughts)

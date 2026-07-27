@@ -2,7 +2,7 @@ import * as Thread from "@rika/persistence/thread"
 import * as Turn from "@rika/persistence/turn"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Effect, Fiber, Scope, Semaphore } from "effect"
+import { Cause, Effect, Fiber, Scope, Semaphore } from "effect"
 
 export interface Lifecycle {
   readonly run: (turnId: Turn.TurnId) => Effect.Effect<void, Error>
@@ -70,9 +70,11 @@ export const make = Effect.fn("RootTurnOwner.make")(function* (
         if (lifecycle === undefined || running.has(String(turnId))) return
         const program = lifecycle.run(turnId).pipe(
           Effect.catchCause((cause) =>
-            Effect.logError("root-turn-owner.run.failed").pipe(
-              Effect.annotateLogs({ "rika.turn.id": String(turnId), "rika.failure.message": String(cause) }),
-            ),
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.void
+              : Effect.logError("root-turn-owner.run.failed").pipe(
+                  Effect.annotateLogs({ "rika.turn.id": String(turnId), "rika.failure.message": String(cause) }),
+                ),
           ),
           Effect.ensuring(admission.withPermits(1)(Effect.sync(() => running.delete(String(turnId))))),
         )

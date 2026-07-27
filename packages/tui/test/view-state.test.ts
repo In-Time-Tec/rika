@@ -684,6 +684,61 @@ describe("ViewState", () => {
     expect(foreign.pendingSteering).toHaveLength(1)
   })
 
+  test("keeps the active turn running and restores text when steering fails", () => {
+    const busy: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-a",
+      pendingSteering: [{ turnId: "turn-a", text: "focus on the fixture" }],
+    }
+    const failed = ViewState.update(busy, {
+      _tag: "SteeringFailed",
+      turnId: "turn-a",
+      text: "focus on the fixture",
+      message: "Execution did not become available for steering",
+    })
+    expect(failed.busy).toBe(true)
+    expect(failed.activeTurnId).toBe("turn-a")
+    expect(failed.pendingSteering).toEqual([])
+    expect(failed.input).toBe("focus on the fixture")
+    expect(failed.blocks).toContainEqual(
+      expect.objectContaining({ _tag: "Notification", title: "Steering not delivered" }),
+    )
+  })
+
+  test("ignores steering receipts that arrive after another turn becomes active", () => {
+    const active: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-b",
+      pendingSteering: [{ turnId: "turn-b", text: "for b" }],
+    }
+    const accepted = ViewState.update(active, {
+      _tag: "SteeringAccepted",
+      turnId: "turn-a",
+      sequence: 1,
+      text: "for a",
+    })
+    const failed = ViewState.update(active, {
+      _tag: "SteeringFailed",
+      turnId: "turn-a",
+      text: "for a",
+      message: "late failure",
+    })
+    expect(accepted).toEqual(active)
+    expect(failed).toEqual(active)
+  })
+
+  test("does not issue another cancel while cancellation is pending", () => {
+    const pending: ViewState.Model = {
+      ...ViewState.initial("/work"),
+      busy: true,
+      activeTurnId: "turn-a",
+      cancelPending: true,
+    }
+    expect(ViewState.update(pending, { _tag: "KeyPressed", key: key({ name: "c", ctrl: true }) })).toEqual(pending)
+  })
+
   test("restores undelivered steering text into an empty composer when the turn settles", () => {
     const busy: ViewState.Model = {
       ...ViewState.initial("/work"),
@@ -751,7 +806,7 @@ describe("ViewState", () => {
     expect(afterStale.submittedDrafts).toHaveLength(1)
   })
 
-  test("keeps a cancellation marker after an agent response when no transcript unit can carry it", () => {
+  test("settles cancellation without adding a textual notice", () => {
     const running: ViewState.Model = {
       ...ViewState.initial("/work"),
       busy: true,
@@ -765,8 +820,8 @@ describe("ViewState", () => {
       agentResponseArrived: true,
     })
 
-    expect(cancelled.entries).toEqual([{ role: "notice", text: "cancelled", turnId: "turn" }])
-    expect(cancelled.items).toEqual([{ _tag: "Entry", index: 0, id: "execution:turn:cancelled", turnId: "turn" }])
+    expect(cancelled.entries).toEqual([])
+    expect(cancelled.items).toEqual([])
     expect(cancelled.input).toBe("")
   })
 

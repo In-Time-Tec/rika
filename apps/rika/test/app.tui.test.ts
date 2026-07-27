@@ -683,6 +683,9 @@ test(
         const promoted = yield* app.waitFrame("QUEUED_DONE")
         expect(promoted).not.toContain("LATE_QUEUE_HEAD")
         expect(promoted).not.toContain("\u2298")
+        expect(promoted).not.toContain("Execution failed")
+        expect(promoted).not.toContain("wait cancelled")
+        expect(promoted).not.toContain("! cancelled")
         yield* app.quit
       }),
     ),

@@ -269,17 +269,19 @@ export const routedToolRuntimeLayer: {
                   ),
                 ),
                 Effect.tapCause((cause) =>
-                  Clock.currentTimeMillis.pipe(
-                    Effect.flatMap((failedAt) =>
-                      Effect.logError("tool.failed").pipe(
-                        Effect.annotateLogs({
-                          "rika.duration.ms": failedAt - startedAt,
-                          ...toolFailureAnnotations(cause),
-                          "rika.failure.kind": failureKind(cause),
-                        }),
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.void
+                    : Clock.currentTimeMillis.pipe(
+                        Effect.flatMap((failedAt) =>
+                          Effect.logError("tool.failed").pipe(
+                            Effect.annotateLogs({
+                              "rika.duration.ms": failedAt - startedAt,
+                              ...toolFailureAnnotations(cause),
+                              "rika.failure.kind": failureKind(cause),
+                            }),
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
                 ),
                 Effect.annotateLogs({
                   "rika.execution.id": String(call.executionId),
@@ -465,6 +467,25 @@ const awaitExecutionAvailable = (client: Client.Interface, id: Ids.ExecutionId):
         existing === undefined ? Effect.sleep("25 millis").pipe(Effect.andThen(poll)) : Effect.void,
       ),
       Effect.catchTag("ClientError", () => Effect.sleep("250 millis").pipe(Effect.andThen(poll))),
+    ),
+  )
+  return poll
+}
+const awaitExecutionRunning = (
+  client: Client.Interface,
+  id: Ids.ExecutionId,
+): Effect.Effect<void, Client.ClientError> => {
+  const poll: Effect.Effect<void, Client.ClientError> = Effect.suspend(() =>
+    client.executions.get(id).pipe(
+      Effect.matchEffect({
+        onFailure: () => Effect.sleep("250 millis").pipe(Effect.andThen(poll)),
+        onSuccess: (existing) => {
+          if (existing?.status === "running") return Effect.void
+          if (existing === undefined || existing.status === "queued")
+            return Effect.sleep("25 millis").pipe(Effect.andThen(poll))
+          return Effect.fail(Client.ClientError.make({ message: `Execution is not running: ${id}` }))
+        },
+      }),
     ),
   )
   return poll
@@ -1181,7 +1202,8 @@ const followExecution = (
       if (stoppedAtActionableWait && (status === "running" || status === "queued")) {
         finalStatus = Status.make("waiting")
       }
-      if (terminalExecutionStatus(finalStatus)) yield* cancelOutlivingChildren(client, rootExecutionId)
+      if (terminalExecutionStatus(finalStatus) && finalStatus !== "cancelled")
+        yield* cancelOutlivingChildren(client, rootExecutionId)
       const checkpoint = yield* checkpointForExecution(client, rootExecutionId)
       return {
         turnId,
@@ -1192,9 +1214,14 @@ const followExecution = (
     }),
   ).pipe(
     Effect.tapCause((cause) =>
-      reference !== undefined && String(Cause.squash(cause)).includes("ExecutionNotFound")
-        ? Effect.logInfo("execution.follow.missing")
-        : Effect.logError("execution.follow.failed").pipe(Effect.annotateLogs("rika.failure.kind", failureKind(cause))),
+      Effect.suspend(() => {
+        if (Cause.hasInterruptsOnly(cause)) return Effect.void
+        if (reference !== undefined && String(Cause.squash(cause)).includes("ExecutionNotFound"))
+          return Effect.logInfo("execution.follow.missing")
+        return Effect.logError("execution.follow.failed").pipe(
+          Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+        )
+      }),
     ),
     Effect.annotateLogs({
       "rika.execution.id": String(executionId(turnId, reference)),
@@ -1376,14 +1403,16 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
             )
             .pipe(
               Effect.tapCause((cause) =>
-                Effect.logError("thread_host.notification.failed").pipe(
-                  Effect.annotateLogs({
-                    "rika.thread.id": wake.threadId,
-                    "rika.queue.wake_generation": wake.generation,
-                    "rika.queue.revision": wake.queueRevision,
-                    "rika.failure.kind": failureKind(cause),
-                  }),
-                ),
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Effect.logError("thread_host.notification.failed").pipe(
+                      Effect.annotateLogs({
+                        "rika.thread.id": wake.threadId,
+                        "rika.queue.wake_generation": wake.generation,
+                        "rika.queue.revision": wake.queueRevision,
+                        "rika.failure.kind": failureKind(cause),
+                      }),
+                    ),
               ),
               Effect.mapError(error),
             )
@@ -1738,9 +1767,11 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               ).pipe(Effect.ensuring(Fiber.interrupt(starter)))
             }).pipe(
               Effect.tapCause((cause) =>
-                Effect.logError("execution.start.failed").pipe(
-                  Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
-                ),
+                Cause.hasInterruptsOnly(cause)
+                  ? Effect.void
+                  : Effect.logError("execution.start.failed").pipe(
+                      Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
+                    ),
               ),
               Effect.annotateLogs({
                 "rika.execution.id": String(executionId(input.turnId)),
@@ -1933,9 +1964,18 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
           }).pipe(Effect.mapError(error))
         }),
         steer: Effect.fn("ExecutionBackend.steer")(function* (turnId, text, idempotencyIdentity, createdAt, reference) {
+          const id = executionId(turnId, reference)
+          yield* awaitExecutionRunning(client, id).pipe(
+            Effect.timeoutOrElse({
+              duration: "15 seconds",
+              orElse: () =>
+                Effect.fail(Client.ClientError.make({ message: "Execution did not become available for steering" })),
+            }),
+            Effect.mapError(error),
+          )
           const accepted = yield* client.executions
             .steer({
-              execution_id: executionId(turnId, reference),
+              execution_id: id,
               idempotency_key: idempotencyIdentity,
               kind: "steering",
               content: [Content.text(text)],

@@ -1070,6 +1070,27 @@ describe("Transcript projection", () => {
     expect(committed.units.filter((item) => item.key.startsWith("compaction:"))).toHaveLength(1)
   })
 
+  it("does not project a failed compaction event as complete", () => {
+    const projection = project("turn-a", "prompt", [
+      {
+        cursor: "compaction-started",
+        sequence: 0,
+        type: "agent.compaction.started",
+        createdAt: 0,
+      },
+      {
+        cursor: "compaction-failed",
+        sequence: 1,
+        type: "agent.compaction.failed",
+        createdAt: 1,
+        text: "compaction failed",
+      },
+    ])
+    expect(projection.units.find((item) => item.key === "compaction:turn-a")).toMatchObject({
+      content: { _tag: "Block", block: { _tag: "Compaction", status: "failed" } },
+    })
+  })
+
   it("projects every semantic block shape with stable keys across lifecycle revisions", () => {
     const projection = project("turn-a", "prompt", [
       { cursor: "reason", sequence: 0, type: "model.reasoning.delta", createdAt: 0, text: "thinking" },
@@ -1099,14 +1120,14 @@ describe("Transcript projection", () => {
       {
         cursor: "compaction-1",
         sequence: 6,
-        type: "context.compacted",
+        type: "agent.compaction.committed",
         createdAt: 6,
         data: { summary: "Earlier work", checkpoint: "checkpoint-1" },
       },
       {
         cursor: "compaction-2",
         sequence: 7,
-        type: "context.compacted",
+        type: "agent.compaction.committed",
         createdAt: 7,
         data: { summary: "Updated work", checkpoint: "checkpoint-2" },
       },

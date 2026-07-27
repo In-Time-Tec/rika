@@ -3478,10 +3478,11 @@ describe("Operation", () => {
       ])
       expect(received).toContainEqual(
         expect.objectContaining({
-          _tag: "ExecutionFailed",
+          _tag: "ExecutionControlFailed",
           message: "Rika could not complete that action. Run rika diagnostics status if it keeps happening.",
         }),
       )
+      expect(received.some((event) => event._tag === "ExecutionFailed")).toBe(false)
     }),
   )
 
@@ -3605,7 +3606,7 @@ describe("Operation", () => {
         expect(yield* Ref.get(starts)).toEqual([])
         expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({ status: "cancelled" })
         expect(yield* turns.get(Turn.TurnId.make("replacement"))).toMatchObject({ status: "queued" })
-        expect(yield* Ref.get(cancelledExecutions)).toContain(childId)
+        expect(yield* Ref.get(cancelledExecutions)).toEqual(["active"])
         yield* Ref.set(childLive, false)
         yield* TestClock.adjust("250 millis")
         yield* Fiber.join(interrupted)
@@ -3736,7 +3737,7 @@ describe("Operation", () => {
         const submitted = yield* Effect.forkChild(session.submit("fresh"))
         for (let index = 0; index < 40; index += 1) yield* Effect.yieldNow
         expect(yield* Ref.get(starts)).toEqual([])
-        expect(yield* Ref.get(cancelledExecutions)).toContain(childId)
+        expect(yield* Ref.get(cancelledExecutions)).toEqual([])
         yield* TestClock.adjust("30 seconds")
         yield* Fiber.join(submitted)
       }).pipe(

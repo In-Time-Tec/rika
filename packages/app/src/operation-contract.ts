@@ -360,6 +360,15 @@ export type InteractiveEvent =
       readonly message: string
     }
   | {
+      readonly _tag: "ExecutionControlFailed"
+      readonly selectionEpoch: number
+      readonly threadId?: Thread.ThreadId
+      readonly turnId?: Turn.TurnId
+      readonly action: "steer" | "cancel"
+      readonly message: string
+      readonly steeringText?: string
+    }
+  | {
       readonly _tag: "QueueUpdated"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
@@ -636,6 +645,15 @@ export const InteractiveEventSchema = Schema.Union([
     action: Schema.Literals(["steered", "cancelled", "permission-resolved"]),
     agentResponseArrived: Schema.optionalKey(Schema.Boolean),
     steeringSequence: Schema.optionalKey(Schema.Int),
+    steeringText: Schema.optionalKey(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ExecutionControlFailed"),
+    selectionEpoch: Schema.Int,
+    threadId: Schema.optionalKey(Thread.ThreadId),
+    turnId: Schema.optionalKey(Turn.TurnId),
+    action: Schema.Literals(["steer", "cancel"]),
+    message: Schema.String,
     steeringText: Schema.optionalKey(Schema.String),
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadTitled"), threadId: Schema.String, title: Schema.String }),

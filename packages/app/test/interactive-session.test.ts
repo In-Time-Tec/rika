@@ -52,6 +52,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   pagedEvents?: ReadonlyArray<ExecutionBackend.Event>,
   stalePageCursor: boolean = false,
   turnPageRequests?: Ref.Ref<ReadonlyArray<TurnRepository.PageCursor | undefined>>,
+  cancelFailure: boolean = false,
 ) {
   const older = thread("older", 1)
   const latest = thread("latest", 2)
@@ -136,6 +137,11 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       ),
     cancel: (turnId, now) =>
       record("cancel", turnId, now).pipe(
+        Effect.andThen(
+          cancelFailure
+            ? Effect.fail(ExecutionBackend.BackendError.make({ message: "cancel unavailable" }))
+            : Effect.void,
+        ),
         Effect.as({
           turnId,
           status: "cancelled" as const,
@@ -1341,8 +1347,23 @@ describe("InteractiveSession controls", () => {
           revision: 1,
           content: { _tag: "Entry", role: "assistant", text: "opening response" },
         },
+        {
+          key: `compaction:${created.id}`,
+          turnId: created.id,
+          order: { sequence: 1, part: 1 },
+          revision: 2,
+          content: {
+            _tag: "Block",
+            block: {
+              _tag: "Compaction",
+              summary: "Earlier thread context was compacted.",
+              status: "complete",
+              checkpoint: "checkpoint-oversized",
+            },
+          },
+        },
         ...Array.from(
-          { length: 220 },
+          { length: 260 },
           (_, index): Transcript.Unit => ({
             key: `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
             turnId: created.id,
@@ -1358,12 +1379,12 @@ describe("InteractiveSession controls", () => {
         {
           key: `${created.id}:assistant:final`,
           turnId: created.id,
-          order: { sequence: 222, part: 0 },
-          revision: 222,
+          order: { sequence: 262, part: 0 },
+          revision: 262,
           content: { _tag: "Entry", role: "assistant", text: "final response" },
         },
       ]
-      yield* transcripts.replace(completed, { ...Transcript.empty(created.id, created.prompt), units, revision: 222 })
+      yield* transcripts.replace(completed, { ...Transcript.empty(created.id, created.prompt), units, revision: 262 })
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
@@ -1379,6 +1400,7 @@ describe("InteractiveSession controls", () => {
       expect(loaded.some((entry) => entry.unit.key === `turn:${created.id}:user`)).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:opening`)).toBe(true)
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:final`)).toBe(true)
+      expect(loaded.filter((entry) => entry.unit.key === `compaction:${created.id}`)).toHaveLength(1)
       expect(cursor?.key).not.toBe(`turn:${created.id}:user`)
 
       const olderEntries: Array<TranscriptRepository.Entry> = []
@@ -1402,7 +1424,7 @@ describe("InteractiveSession controls", () => {
       expect(olderEntries.at(-1)?.unit.order.sequence).toBeLessThan(cursorEntry!.unit.order.sequence)
       const allEntries = [...olderEntries, ...loaded]
       expect(new Set(allEntries.map((entry) => entry.unit.key)).size).toBe(allEntries.length)
-      expect(allEntries.filter((entry) => entry.unit.parentId === "nested-agent")).toHaveLength(220)
+      expect(allEntries.filter((entry) => entry.unit.parentId === "nested-agent")).toHaveLength(260)
       expect(hasOlder).toBe(false)
     }),
   )
@@ -1493,6 +1515,21 @@ describe("InteractiveSession controls", () => {
       expect(failures[0]).toMatchObject({ message: expect.stringContaining("Thread missing does not exist") })
       expect(failures[1]).toMatchObject({ message: expect.stringContaining("No thread selected") })
       expect(failures[2]).toMatchObject({ message: expect.stringContaining("is not queued") })
+    }),
+  )
+
+  it.effect("keeps the active turn running when the cancellation request fails", () =>
+    Effect.gen(function* () {
+      const { session, turns, older } = yield* makeHarness(false, [], undefined, false, undefined, true)
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(older.id, 1)
+      events.length = 0
+      yield* session.cancel
+      yield* Effect.yieldNow
+      expect(events).toContainEqual(expect.objectContaining({ _tag: "ExecutionControlFailed", action: "cancel" }))
+      expect(events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
+      expect(yield* turns.findActive(older.id)).toMatchObject({ status: "running" })
     }),
   )
 })

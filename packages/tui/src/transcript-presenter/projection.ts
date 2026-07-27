@@ -528,6 +528,26 @@ export const projectChildUnits: {
     parentId: string,
     units: ReadonlyArray<Unit>,
   ): (model: import("../view-state").Model) => import("../view-state").Model
-} = Function.dual(3, (model: import("../view-state").Model, parentId: string, units: ReadonlyArray<Unit>) =>
-  projectUnitsImpl(model, units, parentId),
-)
+} = Function.dual(3, (model: import("../view-state").Model, parentId: string, units: ReadonlyArray<Unit>) => {
+  const projected = projectUnitsImpl(model, units, parentId)
+  const parentCancelled = (projected.blocks as ReadonlyArray<Block>).some(
+    (block) => block._tag === "ToolCall" && block.id === parentId && block.status === "cancelled",
+  )
+  if (!parentCancelled) return projected
+  const childIndexes = new Set(
+    (projected.items as ReadonlyArray<TranscriptItem>).flatMap((item) =>
+      item._tag === "Block" && item.parentId === parentId ? [item.index] : [],
+    ),
+  )
+  const blocks = [...(projected.blocks as ReadonlyArray<Block>)]
+  for (const index of childIndexes) {
+    const block = blocks[index]
+    if (block === undefined) continue
+    if ((block._tag !== "ToolCall" && block._tag !== "ChildAgent") || block.status !== "running") continue
+    blocks[index] = { ...block, status: "cancelled" as const }
+  }
+  return {
+    ...projected,
+    blocks,
+  }
+})
