@@ -73,14 +73,15 @@ describe("product agent profiles", () => {
     expect(mainInstructions).toContain(
       "Use Task for workspace investigation, codebase exploration, reproductions, and implementation",
     )
-    expect(mainInstructions).toContain(
-      "start independent investigations together whenever they are genuinely independent",
-    )
+    expect(mainInstructions).toContain("start more together only when their scopes are genuinely independent")
     expect(mainInstructions).toContain("Delegation is asynchronous")
     expect(mainInstructions).toContain("call await_subagents to collect their reports")
     expect(mainInstructions).toContain("an uncollected subagent is cancelled when the turn ends")
-    expect(mainInstructions).toContain("Delegate in small batches")
-    expect(registered.Task?.instructions).toContain("delegate in small batches and collect them before starting more")
+    expect(mainInstructions).toContain("Delegate conservatively")
+    expect(mainInstructions).toContain("Use the smallest useful batch")
+    expect(mainInstructions).toContain("Never delegate speculatively")
+    expect(registered.Task?.instructions).toContain("Do not start Task subagents")
+    expect(registered.Task?.instructions).toContain("Start at most one specialist at a time")
     expect(mainInstructions).toContain("Use Oracle only as a read-only, high-reasoning advisor")
     expect(mainInstructions).toContain("after it has been gathered")
     expect(mainInstructions).toContain("do not use Oracle to search or explore the codebase")
@@ -109,18 +110,7 @@ describe("product agent profiles", () => {
     expect(mainInstructions).not.toContain("parallel delegation")
     expect(mainInstructions).not.toContain("same tool-call batch")
     expect(registered.Librarian).toMatchObject({
-      tool_names: [
-        "web_search",
-        "read_web_page",
-        "task",
-        "oracle",
-        "librarian",
-        "review",
-        "surgeon",
-        "read_thread",
-        "await_subagents",
-        ...threadRecoveryTools,
-      ],
+      tool_names: ["web_search", "read_web_page", "read_thread", "await_subagents", ...threadRecoveryTools],
       permissions: ["network.read", "thread.read"],
     })
     expect(registered.Librarian?.instructions).toContain("one to three focused queries")
@@ -136,7 +126,7 @@ describe("product agent profiles", () => {
       "Prefer repository-qualified GitHub queries for access-controlled material",
     )
     expect(registered.Librarian?.instructions).toContain("Do not use compare, code, web, or read_web_page")
-    expect(registered.Librarian?.instructions).toContain("use a Task to inspect an available local checkout")
+    expect(registered.Librarian?.instructions).toContain("rather than starting another agent")
     expect(registered.Librarian?.instructions).toContain(
       "For public material, if Exa Code Context or GitHub search is unavailable",
     )
@@ -154,7 +144,7 @@ describe("product agent profiles", () => {
     )
     expect(registered.Task?.instructions).toContain("Modify files only when the delegated task requests it")
     expect(registered.Task?.instructions).toContain(
-      "For external research beyond a narrow lookup, delegate it to Librarian",
+      "For external research beyond a narrow lookup, use Librarian only when its specialist capability is necessary",
     )
     expect(registered.Task?.instructions).toContain("private or access-controlled codebases")
     expect(registered.Task?.instructions).toContain(
@@ -170,7 +160,6 @@ describe("product agent profiles", () => {
         "bash",
         "shell_command_status",
         "web_search",
-        "task",
         "oracle",
         "librarian",
         "review",
@@ -181,6 +170,8 @@ describe("product agent profiles", () => {
       ],
       permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
     })
+    expect(registered.Task?.tool_names).not.toContain("task")
+    expect(registered.Librarian?.tool_names).not.toContain("task")
     expect(registered.Task?.instructions).not.toContain("Use subagents for independent work")
     expect(registered.Task?.instructions).not.toContain("parallel delegation")
     expect(registered.Task?.instructions).not.toContain("same tool-call batch")
@@ -242,11 +233,6 @@ describe("product agent profiles", () => {
       expect(painter.preset.model).toEqual(relayModel(model))
       expect(painter.preset.tool_names).toEqual([
         "view_media",
-        "task",
-        "oracle",
-        "librarian",
-        "review",
-        "surgeon",
         "read_thread",
         "await_subagents",
         ...threadRecoveryTools,

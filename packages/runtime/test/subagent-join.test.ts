@@ -224,11 +224,11 @@ test("a silent subagent is collected as a no-report verdict", () => {
   )
 }, 60_000)
 
-test("one batch of delegations stops at the depth-zero budget", () => {
+test("one root batch can start more than four delegations", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
-      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-budget-" })
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-unbounded-" })
       const main = yield* TestModel.make(
         [
           TestModel.turn(
@@ -295,21 +295,19 @@ test("one batch of delegations stops at the depth-zero budget", () => {
     ).pipe(
       Effect.tap(({ settled, children, results }) =>
         Effect.sync(() => {
-          const refused = results.filter((result) => (result.error ?? "").includes("budget 4"))
           expect(settled.status, encodeJson(settled.events.filter((event) => event.type === "execution.failed"))).toBe(
             "completed",
           )
-          expect(children).toHaveLength(4)
+          expect(children).toHaveLength(6)
           expect(results).toHaveLength(6)
-          expect(refused).toHaveLength(2)
-          expect(refused[0]?.error).toContain("Call await_subagents")
+          expect(results.every((result) => result.error === null)).toBe(true)
         }),
       ),
     ),
   )
 }, 60_000)
 
-test("collecting the batch frees the budget for another delegation", () => {
+test("collecting one batch allows a later delegation", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem

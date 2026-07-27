@@ -43,7 +43,6 @@ import {
   PlatformError,
   Queue,
   Redacted,
-  Ref,
   Schedule,
   Schema,
   Semaphore,
@@ -89,7 +88,6 @@ import {
   childExecutionId as encodeChildExecutionId,
   decodeParentExecutionId,
   delegationAvailableAtDepth,
-  delegationBudgetAtDepth,
   toolsAtDepth,
 } from "./agent-depth"
 import { ExecutionId, ExecutionStatus } from "@rika/tools"
@@ -2082,24 +2080,6 @@ export const layer = <
             ...Object.values(toolkit.tools).filter((tool) => tool.name !== AgentTools.awaitSubagentsToolName),
             ThreadHost.promoteTurnTool,
           )
-          const delegationReservations = yield* Ref.make(new Map<string, ReadonlySet<string>>())
-          const reserveDelegation = (execution: string, child: string) =>
-            Ref.modify(delegationReservations, (current) => {
-              const held = new Set(current.get(execution) ?? [])
-              held.add(child)
-              const next = new Map(current)
-              next.set(execution, held)
-              return [held as ReadonlySet<string>, next] as const
-            })
-          const releaseDelegation = (execution: string, child: string) =>
-            Ref.update(delegationReservations, (current) => {
-              const held = new Set(current.get(execution) ?? [])
-              held.delete(child)
-              const next = new Map(current)
-              if (held.size === 0) next.delete(execution)
-              else next.set(execution, held)
-              return next
-            })
           const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
             toolName: AgentTools.DelegationToolName,
             profile: AgentProfile,
@@ -2108,10 +2088,13 @@ export const layer = <
             const invocation = yield* ToolInvocation.ToolInvocation
             const parentExecutionId = Ids.ExecutionId.make(invocation.executionId)
             const parentDepth = childExecutionDepth(invocation.executionId)
-            if (!delegationAvailableAtDepth(parentDepth)) {
+            if (!delegationAvailableAtDepth(toolName, parentDepth)) {
               return yield* AgentTools.AgentToolError.make({
                 tool: toolName,
-                message: `Agent delegation is unavailable at depth ${parentDepth}`,
+                message:
+                  toolName === "task"
+                    ? "Task subagents cannot start other Task subagents; complete the workspace work directly or use one focused specialist"
+                    : `Agent delegation is unavailable at depth ${parentDepth}`,
               })
             }
             const client = yield* Deferred.await(relayClient)
@@ -2169,24 +2152,6 @@ export const layer = <
                 rika_execution_route: durableRoute,
               },
             }))
-            const reservedChild = String(children[0]!.child_execution_id)
-            const reserved = yield* reserveDelegation(invocation.executionId, reservedChild)
-            const inspection = yield* client.executions.inspect(parentExecutionId).pipe(
-              Effect.tapError(() => releaseDelegation(invocation.executionId, reservedChild)),
-              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
-            )
-            const settledElsewhere = inspection.child_runs.filter(
-              (child) => !terminalExecutionStatus(child.status) && !reserved.has(String(child.child_execution_id)),
-            ).length
-            const budget = delegationBudgetAtDepth(parentDepth)
-            const claimed = settledElsewhere + reserved.size
-            if (claimed > budget) {
-              yield* releaseDelegation(invocation.executionId, reservedChild)
-              return yield* AgentTools.AgentToolError.make({
-                tool: toolName,
-                message: `This execution already has ${claimed - 1} subagents running (budget ${budget}). Call await_subagents to collect their reports before delegating more work.`,
-              })
-            }
             yield* Effect.forEach(
               children,
               (child) =>
@@ -2198,7 +2163,6 @@ export const layer = <
               { discard: true },
             ).pipe(
               Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
-              Effect.ensuring(releaseDelegation(invocation.executionId, reservedChild)),
             )
             const currentCall = calls.find((childCall) => childCall.callId === invocation.callId)
             const current =

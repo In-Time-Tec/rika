@@ -14,7 +14,7 @@ describe("tool contracts", () => {
       expect(AgentTools.taskTool.description).toContain(
         "Returns immediately while the subagent runs in the background; collect its report with await_subagents.",
       )
-      expect(AgentTools.taskTool.description).toContain("only a few subagents may run at a time")
+      expect(AgentTools.taskTool.description).toContain("prefer the smallest useful batch")
       expect(AgentTools.oracleTool.description).toContain("already-gathered evidence")
       expect(AgentTools.oracleTool.description).toContain("do not use it for primary workspace or codebase exploration")
       expect(AgentTools.librarianTool.description).toContain(

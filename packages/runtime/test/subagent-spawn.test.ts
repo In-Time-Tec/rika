@@ -4,7 +4,7 @@ import { TestModel } from "@batonfx/test"
 import { Runtime, ThreadTools } from "@rika/tools"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
-import { Clock, Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
+import { Clock, Effect, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
 import * as ExecutionBackend from "../src/execution-contract"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { routedModel } from "./routed-model"
@@ -558,7 +558,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
   )
 }, 60_000)
 
-test("depth-one agents route Task to main and specialists to oracle without depth-three tools", () => {
+test("depth-one Task agents can use specialists but cannot delegate more Tasks", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -573,18 +573,11 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             ],
           },
           {
-            when: (prompt) => prompt.includes("Do a nested check.") && !prompt.includes("Coordinate nested work."),
-            steps: [TestModel.text("Terra completed the nested check.")],
-          },
-          {
             when: (prompt) => !prompt.includes(nestedRootPrompt),
             steps: [
-              TestModel.turn([
-                TestModel.toolCall("oracle", { prompt: "Check the nested design." }, { id: "call-oracle" }),
-                TestModel.toolCall("task", { prompt: "Do a nested check." }, { id: "call-depth-two" }),
-              ]),
+              TestModel.toolCall("oracle", { prompt: "Check the nested design." }, { id: "call-oracle" }),
               TestModel.toolCall("await_subagents", {}, { id: "depth-one-join" }),
-              TestModel.toolCall("review", { prompt: "Review the nested check." }, { id: "call-review" }),
+              TestModel.toolCall("librarian", { prompt: "Research the nested check." }, { id: "call-librarian" }),
               TestModel.toolCall("await_subagents", {}, { id: "depth-one-join-second" }),
               TestModel.text("Depth one combined both results."),
             ],
@@ -596,46 +589,24 @@ test("depth-one agents route Task to main and specialists to oracle without dept
       })
       const sol = yield* routedModel({
         lanes: [
-          { steps: [TestModel.text("Oracle checked.")] },
           {
-            when: (prompt) => prompt.includes("Review the nested check."),
-            steps: [TestModel.text("Review checked.")],
+            when: (prompt) => prompt.includes("Check the nested design."),
+            steps: [TestModel.text("Oracle checked.")],
+          },
+          {
+            when: (prompt) => prompt.includes("Research the nested check."),
+            steps: [TestModel.text("Librarian checked.")],
           },
         ],
         provider: "test",
         model: "gpt-5.6-sol",
         registrationKey: "sol-medium",
       })
-      const nestedStarted = yield* Ref.make(0)
-      const maximumNested = yield* Ref.make(0)
-      const allNestedStarted = yield* Deferred.make<void>()
-      const releaseNested = yield* Deferred.make<void>()
-      const trackedLayer = (layer: typeof terra.layer) =>
-        Layer.effect(
-          LanguageModel.LanguageModel,
-          Effect.gen(function* () {
-            const model = yield* LanguageModel.LanguageModel
-            const streamText = ((options: Parameters<LanguageModel.Service["streamText"]>[0]) =>
-              Stream.unwrap(
-                Effect.gen(function* () {
-                  const prompt = encodeJson(options.prompt)
-                  const nested = !prompt.includes(nestedRootPrompt) && !prompt.includes("Coordinate nested work.")
-                  if (!nested) return model.streamText(options)
-                  const active = yield* Ref.updateAndGet(nestedStarted, (value) => value + 1)
-                  yield* Ref.update(maximumNested, (value) => Math.max(value, active))
-                  if (active === 2) yield* Deferred.succeed(allNestedStarted, undefined)
-                  yield* Deferred.await(releaseNested)
-                  return model.streamText(options)
-                }),
-              )) as LanguageModel.Service["streamText"]
-            return { ...model, streamText }
-          }),
-        ).pipe(Layer.provide(layer))
       const terraRegistration = yield* ModelRegistry.registration({
         ...terra.selection,
-        layer: trackedLayer(terra.layer),
+        layer: terra.layer,
       })
-      const solRegistration = yield* ModelRegistry.registration({ ...sol.selection, layer: trackedLayer(sol.layer) })
+      const solRegistration = yield* ModelRegistry.registration({ ...sol.selection, layer: sol.layer })
       const executionRoute: ExecutionBackend.ExecutionRoutePin = {
         mode: "test",
         main: executionModelRoute("main", terra.selection),
@@ -655,20 +626,13 @@ test("depth-one agents route Task to main and specialists to oracle without dept
       const backendContext = yield* Layer.build(backendLayer)
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
-        const running = yield* start(backend, {
+        const settled = yield* start(backend, {
           threadId: "thread-nested-spawn",
           turnId: "turn-nested-spawn",
           prompt: nestedRootPrompt,
           startedAt: 1,
           executionRoute,
-        }).pipe(Effect.forkChild)
-        const allNestedOverlapped = yield* Deferred.await(allNestedStarted).pipe(
-          Effect.as(true),
-          Effect.timeoutOrElse({ duration: "10 seconds", orElse: () => Effect.succeed(false) }),
-        )
-        const nestedMaximum = yield* Ref.get(maximumNested)
-        yield* Deferred.succeed(releaseNested, undefined)
-        const settled = yield* Fiber.join(running)
+        })
         const database = yield* Effect.acquireRelease(
           Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
           (connection) => Effect.sync(() => connection.close()),
@@ -696,22 +660,20 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             },
             []
           >(
-            "select call.execution_id, call.name, call.input_json, result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.execution_id like 'child:%' and call.name in ('task', 'oracle', 'review') order by call.created_at",
+            "select call.execution_id, call.name, call.input_json, result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.execution_id like 'child:%' and call.name in ('task', 'oracle', 'librarian', 'review') order by call.created_at",
           )
           .all()
-        const nestedRefusals = delegationResults.filter((result) => (result.error ?? "").includes("budget"))
+        const nestedErrors = delegationResults.filter((result) => result.error !== null)
         return {
           settled,
           children,
           failures,
           delegationResults,
-          nestedRefusals,
+          nestedErrors,
           terraRequests: yield* terra.requests,
-          depthOneRequests: yield* terra.lanes[2]!.requests,
-          depthTwoRequests: yield* terra.lanes[1]!.requests,
-          solRequests: yield* sol.lanes[0]!.requests,
-          allNestedOverlapped,
-          nestedMaximum,
+          depthOneRequests: yield* terra.lanes[1]!.requests,
+          oracleRequests: yield* sol.lanes[0]!.requests,
+          librarianRequests: yield* sol.lanes[1]!.requests,
         }
       }).pipe(Effect.provide(backendContext))
     }),
@@ -729,42 +691,37 @@ test("depth-one agents route Task to main and specialists to oracle without dept
           children,
           failures,
           delegationResults,
-          nestedRefusals,
+          nestedErrors,
           terraRequests,
           depthOneRequests,
-          depthTwoRequests,
-          solRequests,
-          allNestedOverlapped,
-          nestedMaximum,
+          oracleRequests,
+          librarianRequests,
         }) =>
           Effect.sync(() => {
-            const delegationTools = ["task", "oracle", "librarian", "review"]
+            const delegationTools = new Set(["task", "oracle", "librarian", "review"])
             const depthOneTools = depthOneRequests[0]?.tools.map((tool) => tool.name) ?? []
-            const taskDepthTwoTools = depthTwoRequests[0]?.tools.map((tool) => tool.name) ?? []
-            const oracleDepthTwoTools = solRequests[0]?.tools.map((tool) => tool.name) ?? []
+            const depthTwoToolSets = [oracleRequests, librarianRequests].map(
+              (requests) => requests[0]?.tools.map((tool) => tool.name) ?? [],
+            )
             expect(settled.status).toBe("completed")
             expect(failures).toEqual([])
-            expect(allNestedOverlapped).toBe(true)
-            expect(nestedMaximum).toBe(2)
-            expect(terraRequests).toHaveLength(9)
-            expect(delegationResults).toHaveLength(3)
+            expect(terraRequests.length).toBeGreaterThan(0)
+            expect(delegationResults).toHaveLength(2)
             expect(delegationResults.map((result) => ({ name: result.name, error: result.error }))).toEqual([
               { name: "oracle", error: null },
-              { name: "task", error: null },
-              { name: "review", error: null },
+              { name: "librarian", error: null },
             ])
-            expect(nestedRefusals).toEqual([])
-            expect(children).toHaveLength(4)
+            expect(nestedErrors).toEqual([])
+            expect(children).toHaveLength(3)
             expect(children.every((child) => child.status === "completed")).toBe(true)
             expect(
               children.every(
                 (child) => decodeToolExecution(child.agent_snapshot_json).tool_execution?.concurrency === "unbounded",
               ),
             ).toBe(true)
-            expect(depthOneTools).toEqual(expect.arrayContaining(delegationTools))
-            expect(taskDepthTwoTools).not.toEqual(expect.arrayContaining(delegationTools))
-            expect(oracleDepthTwoTools).not.toEqual(expect.arrayContaining(delegationTools))
-            expect(solRequests).toHaveLength(1)
+            expect(depthOneTools).not.toContain("task")
+            expect(depthOneTools).toEqual(expect.arrayContaining(["oracle", "librarian"]))
+            expect(depthTwoToolSets.every((tools) => !tools.some((tool) => delegationTools.has(tool)))).toBe(true)
             expect(
               children.some((child) => {
                 const snapshot = JSON.parse(child.agent_snapshot_json) as {
@@ -798,8 +755,8 @@ test("depth-one agents route Task to main and specialists to oracle without dept
                   }
                 }
                 return (
-                  snapshot.model?.model === "gpt-5.6-terra" &&
-                  snapshot.model.registration_key === "terra-medium" &&
+                  snapshot.model?.model === "gpt-5.6-sol" &&
+                  snapshot.model.registration_key === "sol-medium" &&
                   snapshot.model.metadata?.rika_agent_depth === 2 &&
                   snapshot.model.metadata.rika_reasoning_effort === "medium"
                 )

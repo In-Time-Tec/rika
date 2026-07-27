@@ -2,6 +2,7 @@ import { Agent, type ModelRegistry, TurnPolicy } from "@batonfx/core"
 import { AgentTools, Runtime as Tools, ThreadTools } from "@rika/tools"
 import { Effect, Function, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
+import childPrompt from "./prompts/child.prompt.txt"
 import librarianPrompt from "./prompts/librarian.prompt.txt"
 import oraclePrompt from "./prompts/oracle.prompt.txt"
 import painterPrompt from "./prompts/painter.prompt.txt"
@@ -33,6 +34,7 @@ const instructions = (name: string, prompt: string) => {
 
 export const mainInstructions = instructions("root", rootPrompt)
 export const titleInstructions = instructions("Title", titlePrompt)
+const childInstructions = instructions("child", childPrompt)
 
 export const resolveTitle = (model: ModelRegistry.ModelSelection) => ({
   instructions: titleInstructions,
@@ -110,13 +112,23 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   const definition = definitions[name]
   const delegationTools = (() => {
     if (name === "ReadThread") return []
-    if (name === "Oracle" || name === "Review" || name === "Surgeon")
-      return [AgentTools.readThreadTool, AgentTools.awaitSubagentsTool]
-    return [...Object.values(AgentTools.modelToolkit.tools), AgentTools.awaitSubagentsTool]
+    if (name !== "Task") return [AgentTools.readThreadTool, AgentTools.awaitSubagentsTool]
+    return [
+      AgentTools.oracleTool,
+      AgentTools.librarianTool,
+      AgentTools.reviewTool,
+      AgentTools.surgeonTool,
+      AgentTools.readThreadTool,
+      AgentTools.awaitSubagentsTool,
+    ]
   })()
   const recoveryTools =
     name === "ReadThread" ? [] : [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool]
   const toolkit = Toolkit.make(...definition.tools, ...delegationTools, ...recoveryTools)
+  const profileInstructions =
+    name === "ReadThread"
+      ? definition.instructions
+      : instructions(name, `${definition.instructions}\n\n${childInstructions}`)
   const relayModel = {
     provider: model.provider,
     model: model.model,
@@ -126,13 +138,13 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
     name,
     agent: Agent.make({
       name: `rika-${name.toLowerCase()}`,
-      instructions: definition.instructions,
+      instructions: profileInstructions,
       model,
       toolkit,
       policy: TurnPolicy.both(TurnPolicy.recurs(definition.maxToolTurns), TurnPolicy.forever),
     }),
     preset: {
-      instructions: definition.instructions,
+      instructions: profileInstructions,
       model: relayModel,
       tool_names: Object.keys(toolkit.tools),
       permissions: [...definition.permissions],
