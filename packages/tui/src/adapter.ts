@@ -3572,6 +3572,7 @@ const shortcutsContent = (model: Model, innerWidth: number): StyledText => {
     chunks.push(fg(colors.text)(` ${description}`))
     chunks.push(fg(colors.text)("\n"))
   }
+  chunks.push(fg(colors.text)("\n"))
   chunks.push(dim(fg(colors.text)("─".repeat(Math.max(1, innerWidth)))))
   chunks.push(fg(colors.text)("\n"))
   chunks.push(...composerTextChunks(model))

@@ -3195,6 +3195,31 @@ test("drives keyboard, palette, resize, frame capture, and teardown", () =>
     }),
   ))
 
+test("keeps the draft on the same terminal row when shortcuts open", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      const base = { ...initial("/work", "high"), width: 80, height: 24, input: "anchor-draft", cursor: 12 }
+      const draftRow = Effect.fn("draftRow")(function* (model: Model) {
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        return setup
+          .captureCharFrame()
+          .split("\n")
+          .findIndex((row) => row.includes("anchor-draft"))
+      })
+      try {
+        const composerRow = yield* draftRow(base)
+        expect(composerRow).toBeGreaterThanOrEqual(0)
+        expect(yield* draftRow({ ...base, shortcutsOpen: true })).toBe(composerRow)
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
 test("keeps every overlay above the composer at 50x12", () =>
   Effect.runPromise(
     Effect.gen(function* () {
