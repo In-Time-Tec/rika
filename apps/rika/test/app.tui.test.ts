@@ -33,7 +33,7 @@ test(
             {
               when: (prompt) => !prompt.includes("Delegate nested work, then fail."),
               script: [
-                TuiApp.model.toolCall("task", { prompt: "Run nested work." }, "nested-agent"),
+                TuiApp.model.toolCall("review", { prompt: "Run nested work." }, "nested-agent"),
                 TuiApp.model.toolCall("await_subagents", {}, "top-join"),
                 TuiApp.model.text("TOP_LEVEL_RELOAD_COMPLETE"),
               ],
@@ -267,7 +267,7 @@ test(
             {
               when: (prompt) => !prompt.includes("ROOT_USER_PROMPT"),
               script: [
-                TuiApp.model.toolCall("task", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
+                TuiApp.model.toolCall("review", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
                 TuiApp.model.toolCall("await_subagents", {}, "parent-join"),
                 TuiApp.model.text("PARENT_AGENT_FINAL"),
               ],
@@ -292,7 +292,7 @@ test(
           const rootRow = lines.findIndex((line) => line.includes("ROOT_USER_PROMPT"))
           const parentPromptRow = lines.findIndex((line) => line.includes("PARENT_AGENT_PROMPT"))
           const nestedHeaderRow = lines.findIndex(
-            (line, index) => index > parentPromptRow && line.includes("Subagent finished"),
+            (line, index) => index > parentPromptRow && line.includes("Reviewed code"),
           )
           const nestedHeader = nestedHeaderRow < 0 ? undefined : lines[nestedHeaderRow]
           const nestedPrompt = lines.find((line) => line.includes("NESTED_AGENT_PROMPT"))
