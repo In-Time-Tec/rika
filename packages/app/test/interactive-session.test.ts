@@ -1470,7 +1470,10 @@ describe("InteractiveSession controls", () => {
         expect(keys.has(`turn:${entry.id}:user`)).toBe(true)
         expect(keys.has(`assistant:${entry.id}:0`)).toBe(true)
       }
-      expect(loaded.filter((entry) => entry.unit.key.startsWith("retry:child:"))).toHaveLength(600)
+      const newest = loaded.filter((entry) => entry.turn.id === "retry")
+      expect(newest.length).toBeLessThanOrEqual(400)
+      expect(newest.filter((entry) => entry.unit.parentId !== undefined).length).toBeGreaterThan(0)
+      expect(loaded.filter((entry) => entry.turn.id === "explore" && entry.unit.parentId !== undefined)).toHaveLength(0)
       expect(keys.size).toBe(loaded.length)
       expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
     }),

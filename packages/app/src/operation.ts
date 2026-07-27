@@ -187,6 +187,17 @@ const compareTranscriptCursors = (left: TranscriptRepository.PageCursor, right: 
   left.sequence - right.sequence ||
   left.part - right.part ||
   left.key.localeCompare(right.key)
+const boundTurnEntries = (
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  detail: number,
+): { readonly entries: ReadonlyArray<TranscriptRepository.Entry>; readonly contiguousFrom: number } => {
+  const semantic = new Set(entries.flatMap((entry, index) => (isSemanticTranscriptEntry(entry) ? [index] : [])))
+  const contiguousFrom = Math.max(0, entries.length - Math.max(0, detail - semantic.size))
+  return {
+    entries: entries.filter((_, index) => semantic.has(index) || index >= contiguousFrom),
+    contiguousFrom,
+  }
+}
 const isSemanticTranscriptEntry = (entry: TranscriptRepository.Entry): boolean =>
   entry.unit.parentId === undefined &&
   (entry.unit.content._tag === "Entry" || entry.unit.executionOutcome !== undefined)
@@ -3601,17 +3612,19 @@ export const productLayer = <
                 projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
               ),
             )
-            if (!reduced && (entryCount === 0 || entryCount + entries.length <= selectionInitialEntryWindow)) {
+            if (!reduced && entryCount + entries.length <= selectionInitialEntryWindow) {
               window.unshift(entries)
               entryCount += entries.length
               oldestCursor = transcriptCursorFor(entries[0]) ?? oldestCursor
               continue
             }
+            const detail = reduced ? 0 : selectionInitialEntryWindow - entryCount
             reduced = true
-            const semantic = entries.filter(isSemanticTranscriptEntry)
-            if (semantic.length < entries.length) hasOlder = true
-            window.unshift(semantic)
-            entryCount += semantic.length
+            hasOlder = true
+            const bounded = boundTurnEntries(entries, detail)
+            window.unshift(bounded.entries)
+            entryCount += bounded.entries.length
+            if (detail > 0) oldestCursor = transcriptCursorFor(entries[bounded.contiguousFrom]) ?? oldestCursor
           }
           return { entries: window.flat(), hasOlder, oldestCursor }
         })
