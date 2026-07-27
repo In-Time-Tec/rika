@@ -1,23 +1,36 @@
 import { describe, expect, it } from "@effect/vitest"
 import { applyEvent, empty, isTransientEvent, project, type Projection, type SourceEvent } from "../src"
 
-const transientDelta = (index: number, text: string): SourceEvent => ({
+const transientDelta = (index: number, text: string, sequence = 1): SourceEvent => ({
   cursor: `delta-${index}`,
-  sequence: 1,
+  sequence,
   type: "model.output.delta",
   createdAt: index,
   text,
   data: { delta: text, transient_index: index },
 })
 
-const transientReasoning = (index: number, text: string): SourceEvent => ({
+const transientReasoning = (index: number, text: string, sequence = 1): SourceEvent => ({
   cursor: `reasoning-${index}`,
-  sequence: 1,
+  sequence,
   type: "model.reasoning.delta",
   createdAt: index,
   text,
   data: { delta: text, transient_index: index },
 })
+
+const durable = (sequence: number, type: string, data?: Record<string, unknown>): SourceEvent => ({
+  cursor: `${type}-${sequence}`,
+  sequence,
+  type,
+  createdAt: sequence,
+  ...(data === undefined ? {} : { data }),
+})
+
+const keysOf = (projection: Projection) => projection.units.map((unit) => unit.key)
+
+const fold = (events: ReadonlyArray<SourceEvent>, projection: Projection) =>
+  events.reduce((current, event) => applyEvent(current, event), projection)
 
 const assistantText = (projection: Projection): string => {
   const unit = projection.units.find(
@@ -153,6 +166,72 @@ describe("transient events", () => {
 
     expect(entryTexts(replayed)).toEqual(entryTexts(streamed))
     expect(replayed.revision).toBe(streamed.revision)
+  })
+
+  it("ignores transient deltas re-delivered after the durable cycle completed", () => {
+    const reply = "I’ll trace the current permission/path enforcement and every related test."
+    const thoughts = "**Planning project exploration and permissions review**"
+    const streamed = fold(
+      [
+        durable(0, "execution.accepted"),
+        durable(1, "execution.started"),
+        durable(2, "model.input.prepared"),
+        durable(3, "model.call.started"),
+        durable(4, "model.attempt.started"),
+        durable(5, "model.attempt.first_output"),
+        transientReasoning(1, thoughts, 5),
+        durable(6, "model.attempt.first_output"),
+        transientDelta(2, reply, 6),
+        durable(7, "model.attempt.first_output"),
+        durable(8, "model.cycle.completed", { text: reply }),
+        durable(9, "model.reasoning.completed", { text: thoughts }),
+        durable(10, "tool.call.requested", { tool_call_id: "call_t80", tool_name: "read", input: "{}" }),
+        durable(11, "tool.call.requested", { tool_call_id: "call_BLq", tool_name: "read", input: "{}" }),
+        durable(14, "execution.cancelled"),
+      ],
+      empty("turn-a", "prompt"),
+    )
+    const reattached = fold([transientReasoning(1, thoughts, 5), transientDelta(2, reply, 6)], streamed)
+
+    expect(keysOf(streamed)).toEqual(keysOf(reattached))
+    expect(keysOf(reattached)).toEqual([
+      "turn:turn-a:user",
+      "reasoning:turn-a:0",
+      "assistant:turn-a:0",
+      "tool:turn-a:call_t80",
+      "tool:turn-a:call_BLq",
+      "execution:turn-a:cancelled",
+    ])
+    expect(assistantText(reattached)).toBe(reply)
+    expect(reasoningText(reattached)).toBe(thoughts)
+  })
+
+  it("ignores transient deltas from an earlier cycle after steering advanced the model phase", () => {
+    const first = "I’ll create an isolated worktree and branch from the current remote main."
+    const latest = "The isolated branch is now based on the fetched remote main."
+    const streamed = fold(
+      [
+        durable(2, "model.input.prepared"),
+        durable(5, "model.attempt.first_output"),
+        transientDelta(1, first, 5),
+        durable(8, "model.cycle.completed", { text: first }),
+        durable(10, "tool.call.requested", { tool_call_id: "call_mAk", tool_name: "read", input: "{}" }),
+        durable(11, "tool.result.received", { tool_call_id: "call_mAk" }),
+        durable(15, "steering.delivered", { message_count: 1 }),
+        durable(16, "model.call.started"),
+        durable(26, "steering.delivered", { message_count: 1 }),
+        durable(29, "model.attempt.first_output"),
+        durable(32, "model.cycle.completed", { text: latest }),
+        durable(34, "tool.call.requested", { tool_call_id: "call_Alg", tool_name: "read", input: "{}" }),
+        durable(46, "execution.cancelled"),
+      ],
+      empty("turn-b", "prompt"),
+    )
+    const reattached = applyEvent(streamed, transientDelta(1, first, 5))
+
+    expect(keysOf(streamed)).toEqual(keysOf(reattached))
+    expect(reattached.units.filter((unit) => unit.key.startsWith("assistant:turn-b:"))).toHaveLength(2)
+    expect(entryTexts(reattached).filter((text) => text === first)).toHaveLength(1)
   })
 
   it("keeps legacy durable delta histories advancing the revision", () => {

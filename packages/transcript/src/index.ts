@@ -1077,11 +1077,16 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
   return block._tag === "Permission" && block.status === "pending" ? advanceModelPhase(updated, turnId) : updated
 }
 
+const isStaleTransient = (projection: Projection, event: SourceEvent): boolean => event.sequence < projection.revision
+
 export const applyEvent: {
   (projection: Projection, event: SourceEvent): Projection
   (event: SourceEvent): (projection: Projection) => Projection
 } = Function.dual(2, (projection: Projection, event: SourceEvent): Projection => {
-  if (isTransientEvent(event)) return applyKnownEvent(projection, projection.units[0]?.turnId ?? "", event)
+  if (isTransientEvent(event))
+    return isStaleTransient(projection, event)
+      ? projection
+      : applyKnownEvent(projection, projection.units[0]?.turnId ?? "", event)
   if (event.sequence <= projection.revision)
     return event.type === "model.usage.reported" ? applyUsage(projection, event) : projection
   const turnId = projection.units[0]?.turnId ?? ""
