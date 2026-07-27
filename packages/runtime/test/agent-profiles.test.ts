@@ -50,7 +50,7 @@ describe("product agent profiles", () => {
       expect(registered[name]).not.toHaveProperty("output_schema_ref")
     }
     expect(registered.Oracle).toMatchObject({
-      tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
+      tool_names: ["grep", "read", "web_search", "read_thread", "await_subagents", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
     const expectedCaps = {
@@ -113,6 +113,7 @@ describe("product agent profiles", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         ...threadRecoveryTools,
       ],
       permissions: ["network.read", "thread.read"],
@@ -139,7 +140,7 @@ describe("product agent profiles", () => {
     expect(registered.Librarian?.instructions).toContain("distinguish sourced facts from your conclusions")
     expect(registered.Librarian?.instructions).toContain("Stop when the evidence is sufficient")
     expect(registered.Review).toMatchObject({
-      tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
+      tool_names: ["grep", "read", "web_search", "read_thread", "await_subagents", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
     expect(registered.Oracle?.tool_names).not.toContain("task")
@@ -170,6 +171,7 @@ describe("product agent profiles", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         ...threadRecoveryTools,
       ],
       permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
@@ -241,6 +243,7 @@ describe("product agent profiles", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         ...threadRecoveryTools,
       ])
       expect(painter.preset.permissions).toEqual(["workspace.read", "thread.read"])

@@ -158,6 +158,7 @@ const observableEventTypes = new Set([
 const toolExecutionPolicy = { concurrency: "unbounded" as const }
 const memoryDatabaseFilename = ":memory:"
 const unsafeRecoveryFailure = "Parent execution stopped before its first durable chat checkpoint"
+const outlivedParentReason = "Parent execution ended before this subagent's report was collected"
 const defaultRecoveryChildSettlementGrace = Duration.seconds(30)
 const recoveryRetrySchedule = Schedule.exponential("100 millis").pipe(
   Schedule.jittered,
@@ -921,6 +922,35 @@ const executionTreeIds = (client: Client.Interface, root: Ids.ExecutionId) =>
     return ids
   })
 
+const cancelOutlivingChildren = (client: Client.Interface, root: Ids.ExecutionId) =>
+  Effect.gen(function* () {
+    const ids = (yield* executionTreeIds(client, root)).slice(1)
+    const live: Array<Ids.ExecutionId> = []
+    for (const id of ids) {
+      const inspection = yield* client.executions.inspect(id)
+      if (!terminalExecutionStatus(inspection.status)) live.push(id)
+    }
+    if (live.length === 0) return
+    const cancelledAt = yield* Clock.currentTimeMillis
+    yield* Effect.logWarning("execution.subagents.outlived_parent").pipe(
+      Effect.annotateLogs({
+        "rika.execution.id": String(root),
+        "rika.subagent.count": live.length,
+      }),
+    )
+    yield* Effect.forEach(
+      live.toReversed(),
+      (id) => client.executions.cancel({ execution_id: id, cancelled_at: cancelledAt, reason: outlivedParentReason }),
+      { concurrency: "unbounded", discard: true },
+    )
+  }).pipe(
+    Effect.catchCause((cause) =>
+      Effect.logWarning("execution.subagents.cancel_failed").pipe(
+        Effect.annotateLogs({ "rika.execution.id": String(root), "rika.failure.kind": failureKind(cause) }),
+      ),
+    ),
+  )
+
 const traceWithoutResult = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
   Effect.suspend(() => {
     let result!: A
@@ -1151,6 +1181,7 @@ const followExecution = (
       if (stoppedAtActionableWait && (status === "running" || status === "queued")) {
         finalStatus = Status.make("waiting")
       }
+      if (terminalExecutionStatus(finalStatus)) yield* cancelOutlivingChildren(client, rootExecutionId)
       const checkpoint = yield* checkpointForExecution(client, rootExecutionId)
       return {
         turnId,
