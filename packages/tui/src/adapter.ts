@@ -882,6 +882,18 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       append(italic(fg(colors.green)(current)))
     })
   }
+  const renderAgentPrompt = (text: string, prefix: string) => {
+    const rows = renderMarkdownLines(
+      text.trimEnd(),
+      Math.max(1, transcriptWrapWidth(model.width) - stringWidth(prefix)),
+    )
+    for (const row of rows) {
+      append(fg(colors.text)("\n"))
+      append(dim(fg(colors.subtle)(prefix)))
+      for (const chunk of row) append(chunk)
+    }
+  }
+
   const renderAgentResponse = (index: number, prefix: string, gap = false): UnitLineRange | undefined => {
     const entry = model.entries[index]
     if (entry?.role !== "assistant" || entry.text.trim().length === 0) return
@@ -1285,8 +1297,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
       if (expandable) append(marker(expanded))
     }
     if (expanded && agent && unit.block.detail.length > 0) {
-      append(fg(colors.text)("\n"))
-      append(dim(fg(colors.text)(wrapBodyText(unit.block.detail, transcriptWrapWidth(model.width), "  "))))
+      renderAgentPrompt(unit.block.detail, "  ")
     } else if (expanded && !agent && output !== undefined) {
       append(fg(colors.text)("\n"))
       const body = output.split("\n").slice(0, 12).join("\n")
@@ -1382,11 +1393,8 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     })
     const bodyPrefix = `${visiblePrefix}${last ? "  " : "│ "}`
     const bodyIndent = `${bodyPrefix}  `
-    const bodyWidth = Math.max(1, rowWidth - stringWidth(bodyIndent))
     if (expanded && agent && block.detail.length > 0) {
-      append(fg(colors.text)("\n"))
-      append(dim(fg(colors.subtle)(bodyIndent)))
-      append(dim(fg(colors.text)(wrapTextToWidth(block.detail, bodyWidth).join(`\n${bodyIndent}`))))
+      renderAgentPrompt(block.detail, bodyIndent)
     } else if (expanded && output !== undefined && output.length > 0) {
       const outputIndent = block.presentation.family === "shell" ? `${bodyIndent}  ` : bodyIndent
       const outputWidth = Math.max(1, rowWidth - stringWidth(outputIndent))

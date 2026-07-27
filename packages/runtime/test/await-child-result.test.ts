@@ -22,6 +22,11 @@ const modelTurn = (finishReason?: string): ReadonlyArray<EventInput> => [
   { type: "model.call.completed" },
 ]
 
+const truncatedAttempt = (classification?: string): EventInput => ({
+  type: "model.attempt.failed",
+  data: { category: "truncated-stream", ...(classification === undefined ? {} : { classification }) },
+})
+
 const resolve = (values: ReadonlyArray<EventInput>, reconciled?: "completed" | "failed" | "cancelled") =>
   resolveChildResult({
     childExecutionId: child,
@@ -115,14 +120,94 @@ describe("resolveChildResult", () => {
       { type: "tool.result.received" },
       ...modelTurn("stop"),
       { type: "model.output.completed", content: [{ type: "text", text: "final answer" }] },
-      {
-        type: "execution.failed",
-        data: { message: "stream closed", details: { failure_classification: "truncated-stream" } },
-      },
+      truncatedAttempt("terminal"),
+      { type: "execution.failed", data: { message: "stream closed" } },
     ])
     expect(result._tag).toBe("NoReport")
     if (result._tag !== "NoReport") throw new Error("expected NoReport")
     expect(result.reason).toBe("Subagent execution failed: stream closed")
+  })
+
+  it("keeps the report when an earlier transient truncation was retried and recovered", () => {
+    const result = resolve([
+      { type: "model.call.started" },
+      { type: "model.attempt.started" },
+      truncatedAttempt("transient"),
+      { type: "model.attempt.started" },
+      { type: "model.usage.reported", data: { finish_reason: "tool-calls" } },
+      { type: "model.call.completed" },
+      { type: "tool.call.requested" },
+      { type: "tool.result.received" },
+      ...modelTurn("stop"),
+      { type: "model.output.completed", content: [{ type: "text", text: "recovered finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "recovered finding" }])
+  })
+
+  it("keeps the report when the final call recovers from a transient truncation", () => {
+    const result = resolve([
+      { type: "tool.call.requested" },
+      { type: "tool.result.received" },
+      { type: "model.call.started" },
+      { type: "model.attempt.started" },
+      truncatedAttempt("transient"),
+      { type: "model.attempt.started" },
+      { type: "model.usage.reported", data: { finish_reason: "stop" } },
+      { type: "model.call.completed" },
+      { type: "model.output.completed", content: [{ type: "text", text: "recovered finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+  })
+
+  it("ignores a retry-scheduled event carrying the truncated-stream category", () => {
+    const result = resolve([
+      { type: "model.call.started" },
+      { type: "model.attempt.started" },
+      truncatedAttempt("transient"),
+      { type: "model.retry.scheduled", data: { category: "truncated-stream" } },
+      { type: "model.attempt.started" },
+      { type: "model.usage.reported", data: { finish_reason: "stop" } },
+      { type: "model.call.completed" },
+      { type: "model.output.completed", content: [{ type: "text", text: "recovered finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+  })
+
+  it("discards the report after a terminal truncation classification", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      truncatedAttempt("terminal"),
+      { type: "model.output.completed", content: [{ type: "text", text: "tainted finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("NoReport")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).toContain("the stream was cut off")
+  })
+
+  it("treats a truncated call failure without a classification as terminal", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.call.failed", data: { category: "truncated-stream" } },
+      { type: "model.output.completed", content: [{ type: "text", text: "tainted finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("NoReport")
+  })
+
+  it("treats an attempt failure without a classification as terminal", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      truncatedAttempt(),
+      { type: "model.output.completed", content: [{ type: "text", text: "tainted finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("NoReport")
   })
 
   it("remaps a failed child with a complete post-tool response to a report", () => {

@@ -624,13 +624,8 @@ const childFailureText = (terminal: Execution.ExecutionEvent | undefined) => {
 const truncatedStreamClassification = "truncated-stream"
 
 const classifiedTruncated = (event: Execution.ExecutionEvent) => {
-  if (event.data?.category === truncatedStreamClassification) return true
-  const details = event.data?.details
-  return (
-    typeof details === "object" &&
-    details !== null &&
-    (details as Record<string, unknown>).failure_classification === truncatedStreamClassification
-  )
+  if (event.type !== "model.attempt.failed" && event.type !== "model.call.failed") return false
+  return event.data?.category === truncatedStreamClassification && event.data?.classification !== "transient"
 }
 
 const truncatedModelStream = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
