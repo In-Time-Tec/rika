@@ -88,6 +88,7 @@ import {
   childExecutionId as encodeChildExecutionId,
   decodeParentExecutionId,
   delegationAvailableAtDepth,
+  delegationBudgetAtDepth,
   toolsAtDepth,
 } from "./agent-depth"
 import { ExecutionId, ExecutionStatus } from "@rika/tools"
@@ -2095,6 +2096,21 @@ export const layer = <
               })
             }
             const client = yield* Deferred.await(relayClient)
+            const inspection = yield* client.executions
+              .inspect(parentExecutionId)
+              .pipe(
+                Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+              )
+            const liveChildren = inspection.child_runs.filter(
+              (child) => child.status === "queued" || child.status === "running" || child.status === "waiting",
+            ).length
+            const budget = delegationBudgetAtDepth(parentDepth)
+            if (liveChildren >= budget) {
+              return yield* AgentTools.AgentToolError.make({
+                tool: toolName,
+                message: `This execution already has ${liveChildren} subagents running (budget ${budget}). Call await_subagents to collect their reports before delegating more work.`,
+              })
+            }
             const parent = yield* client.executions
               .get(parentExecutionId)
               .pipe(
