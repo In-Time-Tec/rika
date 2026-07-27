@@ -50,7 +50,7 @@ describe("product agent profiles", () => {
       expect(registered[name]).not.toHaveProperty("output_schema_ref")
     }
     expect(registered.Oracle).toMatchObject({
-      tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
+      tool_names: ["grep", "read", "web_search", "read_thread", "await_subagents", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
     const expectedCaps = {
@@ -74,8 +74,11 @@ describe("product agent profiles", () => {
       "Use Task for workspace investigation, codebase exploration, reproductions, and implementation",
     )
     expect(mainInstructions).toContain(
-      "delegate independent investigations in parallel only when they are genuinely independent",
+      "start independent investigations together whenever they are genuinely independent",
     )
+    expect(mainInstructions).toContain("Delegation is asynchronous")
+    expect(mainInstructions).toContain("call await_subagents to collect their reports")
+    expect(mainInstructions).toContain("an uncollected subagent is cancelled when the turn ends")
     expect(mainInstructions).toContain("Use Oracle only as a read-only, high-reasoning advisor")
     expect(mainInstructions).toContain("after it has been gathered")
     expect(mainInstructions).toContain("do not use Oracle to search or explore the codebase")
@@ -113,6 +116,7 @@ describe("product agent profiles", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         ...threadRecoveryTools,
       ],
       permissions: ["network.read", "thread.read"],
@@ -139,7 +143,7 @@ describe("product agent profiles", () => {
     expect(registered.Librarian?.instructions).toContain("distinguish sourced facts from your conclusions")
     expect(registered.Librarian?.instructions).toContain("Stop when the evidence is sufficient")
     expect(registered.Review).toMatchObject({
-      tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
+      tool_names: ["grep", "read", "web_search", "read_thread", "await_subagents", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
     expect(registered.Oracle?.tool_names).not.toContain("task")
@@ -170,6 +174,7 @@ describe("product agent profiles", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         ...threadRecoveryTools,
       ],
       permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
@@ -241,6 +246,7 @@ describe("product agent profiles", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         ...threadRecoveryTools,
       ])
       expect(painter.preset.permissions).toEqual(["workspace.read", "thread.read"])

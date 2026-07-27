@@ -199,6 +199,7 @@ describe("specialty durable transcripts", () => {
         "review",
         "surgeon",
         "read_thread",
+        "await_subagents",
         "search_threads",
         "read_thread_transcript",
       ])

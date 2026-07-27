@@ -9,10 +9,10 @@ describe("tool contracts", () => {
     Effect.gen(function* () {
       const schema = Tool.getJsonSchema(AgentTools.taskTool)
       expect(AgentTools.taskTool.description).toContain(
-        "Delegate workspace investigation, codebase exploration, reproductions, or implementation",
+        "Start a durable Task subagent for workspace investigation, codebase exploration, reproductions, or implementation",
       )
       expect(AgentTools.taskTool.description).toContain(
-        "Independent explorations SHOULD be parallel spawn calls in one turn.",
+        "Returns immediately while the subagent runs in the background; collect its report with await_subagents.",
       )
       expect(AgentTools.oracleTool.description).toContain("already-gathered evidence")
       expect(AgentTools.oracleTool.description).toContain("do not use it for primary workspace or codebase exploration")
@@ -34,6 +34,36 @@ describe("tool contracts", () => {
       })
     }),
   )
+
+  it.effect("defines the model-facing subagent join contract", () =>
+    Effect.gen(function* () {
+      const schema = Tool.getJsonSchema(AgentTools.awaitSubagentsTool)
+      expect(AgentTools.awaitSubagentsTool.name).toBe("await_subagents")
+      expect(AgentTools.awaitSubagentsTool.description).toContain(
+        "Collect the reports of subagents started earlier in this turn",
+      )
+      expect(AgentTools.awaitSubagentsTool.description).toContain(
+        "You must collect every subagent you started before giving your final answer.",
+      )
+      expect(schema.required).toBeUndefined()
+      expect(yield* Schema.decodeUnknownEffect(AgentTools.AwaitSubagentsInput)({})).toEqual({})
+      expect(yield* Schema.decodeUnknownEffect(AgentTools.AwaitSubagentsInput)({ subagents: null })).toEqual({
+        subagents: null,
+      })
+      expect(yield* Schema.decodeUnknownEffect(AgentTools.AwaitSubagentsInput)({ subagents: ["child-a"] })).toEqual({
+        subagents: ["child-a"],
+      })
+    }),
+  )
+
+  it("reports a started subagent as a running handle instead of a verdict", () => {
+    expect(AgentTools.spawned({ childExecutionId: "child:execution%3Aturn:call-1" })).toEqual({
+      _tag: "Spawned",
+      childExecutionId: "child:execution%3Aturn:call-1",
+      status: "running",
+      next: AgentTools.spawnedNext,
+    })
+  })
 
   it("defines permission and output policies for every initial tool", () => {
     expect(Catalog.definitions.length).toBeGreaterThanOrEqual(9)
@@ -58,6 +88,7 @@ describe("tool contracts", () => {
       "review",
       "surgeon",
       "read_thread",
+      "await_subagents",
       "create_thread",
       "thread_interact",
     ])
@@ -171,6 +202,7 @@ describe("tool contracts", () => {
     const tools = [
       ...Object.values(Runtime.toolkit.tools),
       ...Object.values(AgentTools.modelToolkit.tools),
+      ...Object.values(AgentTools.joinToolkit.tools),
       ...Object.values(ThreadTools.allToolkit.tools),
     ]
     expect(Catalog.definitions.map(({ name, description }) => ({ name, description }))).toEqual(

@@ -370,6 +370,28 @@ const provideBackendWithThreadTools = (implementation: Client.Interface) => {
 }
 
 describe("ExecutionBackend Relay client adapter", () => {
+  it("treats a non-terminal child run as live subagent work", () => {
+    expect(RelayExecutionBackend.hasLiveSubagentWork({ child_runs: [{ status: "running" }], waiting_on: [] })).toBe(
+      true,
+    )
+    expect(RelayExecutionBackend.hasLiveSubagentWork({ child_runs: [{ status: "completed" }], waiting_on: [] })).toBe(
+      false,
+    )
+  })
+
+  it("treats an open child join wait as live subagent work even when every child settled", () => {
+    expect(
+      RelayExecutionBackend.hasLiveSubagentWork({
+        child_runs: [{ status: "completed" }],
+        waiting_on: [{ mode: "child" }],
+      }),
+    ).toBe(true)
+  })
+
+  it("does not treat an approval wait without children as live subagent work", () => {
+    expect(RelayExecutionBackend.hasLiveSubagentWork({ child_runs: [], waiting_on: [{ mode: "event" }] })).toBe(false)
+  })
+
   it("keeps preset inheritance separate from explicit child-run overrides", () => {
     const base = {
       child_execution_id: Ids.ChildExecutionId.make("child:one"),

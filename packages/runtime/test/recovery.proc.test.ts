@@ -196,18 +196,14 @@ test(
           expect(starts[0]?.count).toBe(1)
           expect(prepared[0]?.count).toBe(1)
           expect(delegationCalls).toEqual([
-            { id: "call-alpha", name: "task", state: "failed" },
-            { id: "call-beta", name: "task", state: "failed" },
-            { id: "call-gamma", name: "task", state: "failed" },
+            { id: "call-alpha", name: "task", state: "completed" },
+            { id: "call-beta", name: "task", state: "completed" },
+            { id: "call-gamma", name: "task", state: "completed" },
           ])
           expect(pendingDelegationCalls[0]?.count).toBe(0)
           expect(delegationResults.map((result) => result.tool_call_id)).toEqual(delegationCalls.map((call) => call.id))
-          expect(delegationResults.map((result) => result.error)).toEqual([
-            "Tool execution cancelled",
-            "Tool execution cancelled",
-            "Tool execution cancelled",
-          ])
-          expect(attempts.map((attempt) => attempt.state)).toEqual(["failed", "failed", "failed"])
+          expect(delegationResults.map((result) => result.error)).toEqual([null, null, null])
+          expect(attempts.map((attempt) => attempt.state)).toEqual(["completed", "completed", "completed"])
           expect(attempts.every((attempt) => attempt.completed_at !== null)).toBe(true)
           expect(childOutcomes.map((outcome) => outcome.execution_id)).toEqual(
             childIds.filter((id) => id !== lateChildId),

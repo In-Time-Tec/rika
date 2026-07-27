@@ -23,4 +23,9 @@ describe("agent depth", () => {
     ])
     expect(toolsAtDepth(["read", "task", "oracle", "librarian", "review"], 2)).toEqual(["read"])
   })
+
+  it("removes the subagent join tool wherever delegation is unavailable", () => {
+    expect(toolsAtDepth(["read", "task", "await_subagents"], 1)).toEqual(["read", "task", "await_subagents"])
+    expect(toolsAtDepth(["read", "task", "await_subagents"], 2)).toEqual(["read"])
+  })
 })
