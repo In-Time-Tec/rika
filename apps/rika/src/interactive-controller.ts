@@ -36,6 +36,7 @@ export interface Update {
   readonly state: State
   readonly preserveAnchor: boolean
   readonly unattached?: ReadonlyArray<string>
+  readonly discarded?: boolean
 }
 
 export const warnUnattached = (unattached: ReadonlyArray<string>): Effect.Effect<void> =>
@@ -135,6 +136,31 @@ const cleared = (model: ViewState.Model): ViewState.Model => ({
   childExecutionOutcomes: {},
   eventCursor: undefined,
 })
+
+const retaining = (model: ViewState.Model, previous: ViewState.Model): ViewState.Model => ({
+  ...model,
+  entries: previous.entries,
+  blocks: previous.blocks,
+  items: previous.items,
+  seenEventIds: previous.seenEventIds,
+  seenExecutionEventKeys: previous.seenExecutionEventKeys,
+  childExecutionOutcomes: previous.childExecutionOutcomes,
+  eventCursor: previous.eventCursor,
+})
+
+const activeSeedEntries = (
+  activeTurn: Turn.Turn | undefined,
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+): ReadonlyArray<TranscriptRepository.Entry> => {
+  if (activeTurn === undefined || entries.some((entry) => entry.turn.id === activeTurn.id)) return []
+  const seed = Transcript.empty(activeTurn.id, activeTurn.prompt)
+  return seed.units.map((unit) => ({
+    turn: activeTurn,
+    unit,
+    projectionRevision: seed.revision,
+    projectionModelPhase: seed.modelPhase,
+  }))
+}
 
 const project = (
   model: ViewState.Model,
@@ -355,17 +381,38 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       threadPreview: ViewState.idle,
     })
     const selectedCostUsd = event.threadCostUsd ?? (sameSelection ? state.threadCostUsd : undefined)
+    const selected = normalizeEntries([...entries, ...activeSeedEntries(activeTurn, entries)])
+    const projected = project(model, selected, selectedCostUsd)
+    if (
+      state.model.currentThreadId === String(event.thread.id) &&
+      projected.items.length === 0 &&
+      state.model.items.length > 0
+    )
+      return {
+        state: {
+          ...state,
+          selectionEpoch: event.selectionEpoch,
+          model: retaining(model, state.model),
+          replayTurns:
+            activeTurn === undefined
+              ? state.replayTurns
+              : new Map([...state.replayTurns, [activeTurn.id, activeTurn] as const]),
+          ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
+        },
+        preserveAnchor: true,
+        discarded: true,
+      }
     return {
       state: {
         selectionEpoch: event.selectionEpoch,
-        model: project(model, entries, selectedCostUsd),
+        model: projected,
         replayTurns: new Map([
-          ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
-          ...(event.activeTurn === undefined ? [] : [[event.activeTurn.id, event.activeTurn] as const]),
+          ...selected.map((entry) => [entry.turn.id, entry.turn] as const),
+          ...(activeTurn === undefined ? [] : [[activeTurn.id, activeTurn] as const]),
         ]),
-        entries,
-        revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        projections: projections(entries),
+        entries: selected,
+        revisions: new Map(selected.map((entry) => [entry.turn.id, entry.projectionRevision])),
+        projections: projections(selected),
         ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
       },
       preserveAnchor: false,

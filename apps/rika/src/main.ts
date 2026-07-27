@@ -1858,7 +1858,10 @@ export const interactiveTui =
               )
             if (selectionStartedAt !== undefined && event._tag === "SelectionLoaded")
               fork(
-                Effect.logInfo("tui.selection.applied").pipe(
+                (controlled.discarded === true
+                  ? Effect.logWarning("tui.selection.discarded")
+                  : Effect.logInfo("tui.selection.applied")
+                ).pipe(
                   Effect.annotateLogs({
                     "rika.thread.id": String(event.thread.id),
                     "rika.transcript.page.units": event.entries.length,
