@@ -14,7 +14,6 @@ Unselected summaries show the action or agent identity as primary text and mute 
 | `write`                              | `Creating <path>`                | `Created <path>`                | the live or final diff |
 | `edit`                               | `Editing <path>`                 | `Edited <path>`                 | the live or final diff |
 | `bash`                               | `$ <command>`                    | `$ <command>`                   | bounded command output |
-| `shell_command_status`               | `Waiting for <command>`          | `Waited for <command>`          | bounded new output     |
 | `oracle`, `transfer_to_oracle`       | `Oracle exploring`               | `Oracle has spoken`             | delegated task         |
 | `librarian`, `transfer_to_librarian` | `Librarian researching`          | `Librarian researched`          | delegated task         |
 | `task`, `spawn_child_run`            | `Subagent working`               | `Subagent finished`             | delegated task         |
@@ -33,6 +32,8 @@ Unselected summaries show the action or agent identity as primary text and mute 
 | `send_message_to_puck`               | `Sending message to Puck`        | `Sent message to Puck`          | bounded result         |
 | `slack_read`, `slack_write`          | `Slack <detail>`                 | `Slack <detail>`                | bounded result         |
 | unknown or MCP tool                  | `Running tool <detail>`          | `Ran tool <detail>`             | bounded result         |
+
+Continuation calls do not create transcript rows while running or completing. `shell_command_status` updates the originating shell row's liveness and bounded newest output, while `await_subagents` leaves delegated agent rows and outcomes visible without showing the wait itself. A continuation failure appears only when no originating row owns that failure; process exits remain on the shell row.
 
 Adjacent reads and searches collapse into `Explored <counts>`. Adjacent edits collapse into `Edited <count> files +<added> -<removed>`. Adjacent shell calls collapse into `Ran <count> commands[, <failed> failed]`. A failed single command appends `(exit code: <code>)`. Shell commands render syntax-highlighted: command words bold, flags amber, quoted strings green, and operators, line continuations, comments, and heredoc bodies dim or muted.
 

@@ -266,6 +266,8 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
       action: "await-subagents",
       activeLabel: "Waiting for subagents",
       completeLabel: "Collected subagents",
+      failedLabel: "Subagent wait failed",
+      rowDisplay: "continuation",
     }),
   ),
 ]
