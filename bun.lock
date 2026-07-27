@@ -33,7 +33,7 @@
     },
     "apps/rika": {
       "name": "@rika/cli",
-      "version": "0.0.7",
+      "version": "0.0.9",
       "bin": {
         "rika": "./dist/client-main.js",
       },
@@ -211,12 +211,12 @@
     },
   },
   "overrides": {
-    "@batonfx/core": "0.11.9",
+    "@batonfx/core": "0.11.10",
     "@batonfx/providers": "0.11.9",
   },
   "catalog": {
     "@ast-grep/cli": "0.44.0",
-    "@batonfx/core": "0.11.9",
+    "@batonfx/core": "0.11.10",
     "@batonfx/mcp": "0.11.9",
     "@batonfx/providers": "0.11.9",
     "@batonfx/skills": "0.11.9",
@@ -238,7 +238,7 @@
     "@opentui/core-win32-arm64": "0.4.3",
     "@opentui/core-win32-x64": "0.4.3",
     "@pierre/diffs": "1.2.11",
-    "@relayfx/sdk": "0.7.25",
+    "@relayfx/sdk": "0.7.26",
     "@tsconfig/bun": "1.0.9",
     "@types/bun": "1.3.13",
     "@types/node": "24.12.2",
@@ -356,7 +356,7 @@
 
     "@babel/types": ["@babel/types@7.29.7", "", { "dependencies": { "@babel/helper-string-parser": "^7.29.7", "@babel/helper-validator-identifier": "^7.29.7" } }, "sha512-4zBIxpPzowiZpusoFkyGVwakdRJUyuH5PxQ/PrqghfdFWWasvnCdPfQXHrenDai+gyLARulZjZowCOj6fjT4pA=="],
 
-    "@batonfx/core": ["@batonfx/core@0.11.9", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-8+WxXddiC0EjjK1BfxuToaeNhMPQ7FzA9EJLp1hHeHFDXOg10ScjDciWY1Vow5B0XtSaIonZvFuGGrEsDFW8YQ=="],
+    "@batonfx/core": ["@batonfx/core@0.11.10", "", { "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-ABJ0uVZ4AvChI5fEkmvwU7jPECHKFpYz1tOdbNPc8zOEc8seWzpyEHM+/U5gXFPCmeEwb7gcxOGL6pQEn4l8gQ=="],
 
     "@batonfx/mcp": ["@batonfx/mcp@0.11.9", "", { "dependencies": { "@batonfx/core": "0.11.9", "@modelcontextprotocol/sdk": "1.29.0" }, "peerDependencies": { "effect": "4.0.0-beta.98" } }, "sha512-XJvKnOSfMBBisstobixXstE/CTyjh94ob6+bZlfVurQ4JcQYLD7OY2rjZyGsIAY/qqxZJ4yyTDzo/M9BNQxoow=="],
 
@@ -572,7 +572,7 @@
 
     "@pierre/theming": ["@pierre/theming@0.0.1", "", { "peerDependencies": { "@pierre/theme": "^1.0.0", "@shikijs/themes": "^3.0.0 || ^4.0.0", "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0", "shiki": "^3.0.0 || ^4.0.0" }, "optionalPeers": ["@pierre/theme", "@shikijs/themes", "react", "react-dom", "shiki"] }, "sha512-1thlEtJbqdyLzc1ZS2KQa1q7FzDGHT4dTEdKHoyQjOMeWWOmbVG5/ndEfOKfAb5Fzkz8cNJrOjFLiZoDH/A03A=="],
 
-    "@relayfx/sdk": ["@relayfx/sdk@0.7.25", "", { "dependencies": { "@aws-sdk/client-s3": "3.1094.0", "@batonfx/core": "0.11.8", "@batonfx/providers": "0.11.8", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/platform-bun": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-5DinCEvT8uheH8QC57vvL7h0EGIk73TES0eNeXCmtqImJeSoRlZToLre/mRTWqCFzDADWPfBiNtHOOEhSZKDgQ=="],
+    "@relayfx/sdk": ["@relayfx/sdk@0.7.26", "", { "dependencies": { "@aws-sdk/client-s3": "3.1094.0", "@batonfx/core": "0.11.8", "@batonfx/providers": "0.11.8", "@effect/ai-anthropic": "4.0.0-beta.98", "@effect/ai-openai": "4.0.0-beta.98", "@effect/ai-openai-compat": "4.0.0-beta.98", "@effect/ai-openrouter": "4.0.0-beta.98", "@effect/platform-bun": "4.0.0-beta.98", "@effect/sql-mysql2": "4.0.0-beta.98", "@effect/sql-pg": "4.0.0-beta.98", "@effect/sql-sqlite-bun": "4.0.0-beta.98", "drizzle-orm": "1.0.0-rc.3", "effect": "4.0.0-beta.98", "pg": "8.21.0" } }, "sha512-gJZXVAwEJwQoGMHCP3Mw98blFwgUMkNrrIoUImuA7psqVXgaie5bL0Ux7Y9Zt1mIa21H2vCpw9B37KC1jj5ZuQ=="],
 
     "@rika/app": ["@rika/app@workspace:packages/app"],
 
