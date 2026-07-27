@@ -86,11 +86,11 @@ describe("ResolvedContext", () => {
     }).pipe(provideLayer(contextLayer)),
   )
 
-  it.effect("diagnoses escaping and missing references", () =>
+  it.effect("diagnoses missing references", () =>
     Effect.gen(function* () {
       const resolver = yield* ResolvedContext.Service
       const result = yield* resolver.resolve({ workspace: "/work", references: ["../secret", "missing.md"] })
-      expect(result.diagnostics.map((item) => item._tag)).toEqual(["PathOutsideWorkspace", "ReferenceNotFound"])
+      expect(result.diagnostics.map((item) => item._tag)).toEqual(["ReferenceNotFound", "ReferenceNotFound"])
     }).pipe(provideLayer(contextLayer)),
   )
 
@@ -230,7 +230,7 @@ describe("ResolvedContext", () => {
     }),
   )
 
-  it.effect("rejects reference symlinks that escape the workspace", () =>
+  it.effect("follows reference symlinks that leave the workspace", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const resolver = yield* ResolvedContext.Service
@@ -239,8 +239,8 @@ describe("ResolvedContext", () => {
       yield* fileSystem.writeFileString(`${outside}/secret.txt`, "secret")
       yield* fileSystem.symlink(`${outside}/secret.txt`, `${root}/escape.txt`)
       const result = yield* resolver.resolve({ workspace: root, references: ["escape.txt"] })
-      expect(result.sources).toEqual([])
-      expect(result.diagnostics.map((diagnostic) => diagnostic._tag)).toEqual(["PathOutsideWorkspace"])
+      expect(result.sources.map((source) => source.content)).toEqual(["secret"])
+      expect(result.diagnostics).toEqual([])
     }).pipe(
       provideLayer(
         ResolvedContext.layer(() => Effect.succeed([])).pipe(

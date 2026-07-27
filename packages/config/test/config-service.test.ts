@@ -336,7 +336,7 @@ describe("ConfigService", () => {
     Effect.gen(function* () {
       const config = yield* ConfigService.effective()
       expect(config.settings.keymap).toMatchObject({ mode: "alt+m", submit: "ctrl+enter", newline: "alt+enter" })
-      expect(config.settings.permissions).toMatchObject({ read: "deny", write: "ask", shell: "deny" })
+      expect(config.settings.permissions).toEqual({ shell: "deny" })
       expect(Object.keys(config.settings.mcp).toSorted()).toEqual(["global", "shared", "workspace"])
       expect(config.settings.mcp.shared).toMatchObject({ command: "workspace-shared" })
       expect(config.settings.notifications).toEqual({ enabled: false, command: "workspace-notify" })

@@ -15,7 +15,7 @@ import {
   persistPastedImage,
   readChangedFiles,
   refreshChangedFilesOn,
-  resolveWorkspaceFile,
+  resolveLocalFile,
 } from "../src/main"
 
 class TestFailure extends Data.TaggedError("TestFailure")<{ readonly operation: string; readonly cause: unknown }> {}
@@ -239,7 +239,7 @@ test("opens files with the platform default application when no editor is config
     }),
   ))
 
-test("rejects workspace symlinks that resolve outside the workspace before opening", () =>
+test("follows workspace symlinks that resolve outside the workspace before opening", () =>
   run(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -249,20 +249,24 @@ test("rejects workspace symlinks that resolve outside the workspace before openi
       const outside = path.join(outsideRoot, "outside.ts")
       yield* fileSystem.writeFileString(outside, "private\ncontent\n")
       yield* fileSystem.symlink(outside, path.join(root, "link.ts"))
-      const resolved = yield* Effect.exit(resolveWorkspaceFile(root, { path: "link.ts" }))
-      expect(resolved).toMatchObject({ _tag: "Failure" })
+      const linked = yield* resolveLocalFile(root, { path: "link.ts" })
+      const traversed = yield* resolveLocalFile(root, { path: `../${path.basename(outsideRoot)}/outside.ts` })
+      const absolute = yield* resolveLocalFile(root, { path: outside })
+      expect(yield* fileSystem.readFileString(linked)).toBe("private\ncontent\n")
+      expect(yield* fileSystem.readFileString(traversed)).toBe("private\ncontent\n")
+      expect(yield* fileSystem.readFileString(absolute)).toBe("private\ncontent\n")
     }),
   ))
 
-test("rejects absolute, traversal, missing, and directory targets as typed workspace file failures", () =>
+test("rejects missing, directory, and empty targets as typed local file failures", () =>
   run(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const root = yield* workspace("rika-path-validation-")
       yield* fileSystem.makeDirectory(path.join(root, "directory"))
-      for (const target of ["/etc/passwd", "../outside.ts", "missing.ts", "directory", ""]) {
-        const error = yield* Effect.flip(resolveWorkspaceFile(root, { path: target }))
+      for (const target of ["missing.ts", "directory", ""]) {
+        const error = yield* Effect.flip(resolveLocalFile(root, { path: target }))
         expect(error._tag).toBe("WorkspaceFileError")
         expect(error.path).toBe(target)
       }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto"
 import { Context, Effect, FileSystem, Layer, Path, PlatformError, Schema } from "effect"
+import { LocalPath } from "@rika/tools"
 import * as ContextFileSystem from "./context-file-system"
 
 export const Diagnostic = Schema.Struct({
@@ -53,6 +54,15 @@ export const layer = (glob: GlobLookup) =>
           candidate === root ||
           (!path.relative(root, candidate).startsWith("..") &&
             !path.resolve(path.relative(root, candidate)).startsWith(".."))
+        const displayPath = (from: string, name: string) => {
+          const relative = path.relative(from, name)
+          return relative.length === 0 ? path.basename(name) : relative
+        }
+        const lookup: LocalPath.Lookup = {
+          exists: (candidate) => fileSystem.exists(candidate),
+          readDirectory: (candidate) =>
+            fileSystem.readDirectory(candidate).pipe(Effect.map((entries) => entries ?? [])),
+        }
         const diagnostics: Array<Diagnostic> = []
         const physicallyContained = Effect.fn("ResolvedContext.physicallyContained")(function* (candidate: string) {
           const resolved = yield* Effect.option(fileSystem.realPath(candidate))
@@ -100,7 +110,11 @@ export const layer = (glob: GlobLookup) =>
                   globCandidates.add(candidate)
                   return true
                 })
-            : [path.resolve(root, reference)]
+            : [
+                yield* LocalPath.resolveExistingPath(lookup, reference, { path, base: root }).pipe(
+                  Effect.orElseSucceed(() => path.resolve(root, reference)),
+                ),
+              ]
           if (candidates.length === 0)
             diagnostics.push({
               _tag: "ReferenceNotFound",
@@ -108,25 +122,13 @@ export const layer = (glob: GlobLookup) =>
               message: "Referenced path did not match a file",
             })
           for (const candidate of candidates.toSorted()) {
-            if (!contained(candidate))
-              diagnostics.push({
-                _tag: "PathOutsideWorkspace",
-                path: candidate,
-                message: "Referenced path is outside the Workspace",
-              })
-            else if (!(yield* fileSystem.exists(candidate)))
+            if (yield* fileSystem.exists(candidate)) selected.set(candidate, "reference")
+            else
               diagnostics.push({
                 _tag: "ReferenceNotFound",
                 path: candidate,
                 message: "Referenced file does not exist",
               })
-            else if (!(yield* physicallyContained(candidate)))
-              diagnostics.push({
-                _tag: "PathOutsideWorkspace",
-                path: candidate,
-                message: "Referenced path resolves outside the Workspace",
-              })
-            else selected.set(candidate, "reference")
           }
         }
         const sources: Array<Source> = []
@@ -136,7 +138,7 @@ export const layer = (glob: GlobLookup) =>
             diagnostics.push({ _tag: "ReferenceReadFailed", path: name, message: "Context file could not be read" })
           else
             sources.push({
-              path: path.relative(root, name) || path.basename(name),
+              path: contained(name) ? displayPath(root, name) : name,
               kind,
               content: read.success,
               digest: digest(read.success),

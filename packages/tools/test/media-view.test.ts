@@ -120,43 +120,44 @@ describe("MediaView", () => {
     })
   })
 
-  it.effect("rejects missing, directories, unsupported, escaped, and oversized media", () =>
-    Effect.scoped(
-      Effect.gen(function* () {
-        const fs = yield* FileSystem.FileSystem
-        const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "rika-media-errors-" })
-        const outside = yield* fs.makeTempDirectoryScoped({ prefix: "rika-media-outside-" })
-        yield* fs.makeDirectory(`${workspace}/directory`)
-        yield* fs.writeFileString(`${workspace}/plain`, "plain")
-        yield* fs.writeFile(`${workspace}/inside.png`, bytes([0x89, 0x50, 0x4e, 0x47], 24))
-        yield* fs.writeFile(`${outside}/outside.png`, bytes([0x89, 0x50, 0x4e, 0x47], 24))
-        yield* fs.symlink(`${workspace}/inside.png`, `${workspace}/inside-link.png`)
-        yield* fs.symlink(`${outside}/outside.png`, `${workspace}/outside-link.png`)
-        yield* fs.writeFile(`${workspace}/maximum`, bytes([0x89, 0x50, 0x4e, 0x47], 25 * 1024 * 1024))
-        yield* fs.writeFile(`${workspace}/huge`, bytes([0x89, 0x50, 0x4e, 0x47], 25 * 1024 * 1024 + 1))
-        const layer = MediaView.layer(workspace).pipe(Layer.provide(MediaView.analyzerUnavailableLayer))
-        const result = yield* Effect.gen(function* () {
-          const service = yield* MediaView.Service
-          const insideLink = yield* service.view("inside-link.png")
-          const maximum = yield* service.view("maximum")
-          const errors = yield* Effect.all(
-            ["missing", "directory", "plain", "../escape", "outside-link.png", "huge"].map((path) =>
-              Effect.flip(service.view(path)),
-            ),
-          )
-          return { insideLink, maximum, errors }
-        }).pipe(provide(layer))
-        expect(result.insideLink.artifact).toMatchObject({ path: "inside-link.png", mimeType: "image/png" })
-        expect(result.maximum.artifact.size).toBe(25 * 1024 * 1024)
-        expect(result.errors.map((error) => error._tag)).toEqual([
-          "MediaMissingError",
-          "UnsupportedMediaError",
-          "UnsupportedMediaError",
-          "MediaPathError",
-          "MediaPathError",
-          "MediaOversizedError",
-        ])
-      }).pipe(provide(BunServices.layer)),
-    ),
+  it.effect(
+    "views media outside the workspace and rejects missing, directories, unsupported, and oversized media",
+    () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem
+          const workspace = yield* fs.makeTempDirectoryScoped({ prefix: "rika-media-errors-" })
+          const outside = yield* fs.makeTempDirectoryScoped({ prefix: "rika-media-outside-" })
+          yield* fs.makeDirectory(`${workspace}/directory`)
+          yield* fs.writeFileString(`${workspace}/plain`, "plain")
+          yield* fs.writeFile(`${workspace}/inside.png`, bytes([0x89, 0x50, 0x4e, 0x47], 24))
+          yield* fs.writeFile(`${outside}/outside.png`, bytes([0x89, 0x50, 0x4e, 0x47], 24))
+          yield* fs.symlink(`${workspace}/inside.png`, `${workspace}/inside-link.png`)
+          yield* fs.symlink(`${outside}/outside.png`, `${workspace}/outside-link.png`)
+          yield* fs.writeFile(`${workspace}/maximum`, bytes([0x89, 0x50, 0x4e, 0x47], 25 * 1024 * 1024))
+          yield* fs.writeFile(`${workspace}/huge`, bytes([0x89, 0x50, 0x4e, 0x47], 25 * 1024 * 1024 + 1))
+          const layer = MediaView.layer(workspace).pipe(Layer.provide(MediaView.analyzerUnavailableLayer))
+          const result = yield* Effect.gen(function* () {
+            const service = yield* MediaView.Service
+            const insideLink = yield* service.view("inside-link.png")
+            const outsideLink = yield* service.view("outside-link.png")
+            const maximum = yield* service.view("maximum")
+            const errors = yield* Effect.all(
+              ["missing", "directory", "plain", "../escape", "huge"].map((path) => Effect.flip(service.view(path))),
+            )
+            return { insideLink, outsideLink, maximum, errors }
+          }).pipe(provide(layer))
+          expect(result.insideLink.artifact).toMatchObject({ path: "inside-link.png", mimeType: "image/png" })
+          expect(result.outsideLink.artifact).toMatchObject({ path: "outside-link.png", mimeType: "image/png" })
+          expect(result.maximum.artifact.size).toBe(25 * 1024 * 1024)
+          expect(result.errors.map((error) => error._tag)).toEqual([
+            "MediaMissingError",
+            "UnsupportedMediaError",
+            "UnsupportedMediaError",
+            "MediaMissingError",
+            "MediaOversizedError",
+          ])
+        }).pipe(provide(BunServices.layer)),
+      ),
   )
 })

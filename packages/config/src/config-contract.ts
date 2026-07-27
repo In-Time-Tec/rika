@@ -709,7 +709,7 @@ export const defaults: Settings = {
   agents: {},
   compaction: { summaryModel: { alias: "sol", effort: "xhigh" } },
   keymap: { mode: "ctrl+s", palette: "ctrl+p", submit: "enter", newline: "shift+enter", interrupt: "escape" },
-  permissions: { read: "allow", search: "allow", write: "allow", shell: "allow", external: "allow" },
+  permissions: { shell: "allow" },
   extensionRoots: [`~/${Paths.globalDirectory}/extensions`, `${Paths.workspaceDirectory}/extensions`],
   mcp: {},
   notifications: { enabled: true },

@@ -39,9 +39,6 @@ export class MediaOversizedError extends Schema.TaggedErrorClass<MediaOversizedE
 export class UnsupportedMediaError extends Schema.TaggedErrorClass<UnsupportedMediaError>()("UnsupportedMediaError", {
   path: Schema.String,
 }) {}
-export class MediaPathError extends Schema.TaggedErrorClass<MediaPathError>()("MediaPathError", {
-  path: Schema.String,
-}) {}
 
 export interface AnalyzerInterface {
   readonly analyze: (input: AnalysisInput) => Effect.Effect<string, MediaAnalysisError>
@@ -58,10 +55,7 @@ export const analyzerUnavailableLayer = analyzerTestLayer(() =>
 export interface Interface {
   readonly view: (
     path: string,
-  ) => Effect.Effect<
-    Output,
-    MediaMissingError | MediaOversizedError | UnsupportedMediaError | MediaPathError | MediaAnalysisError
-  >
+  ) => Effect.Effect<Output, MediaMissingError | MediaOversizedError | UnsupportedMediaError | MediaAnalysisError>
 }
 export class Service extends Context.Service<Service, Interface>()("@rika/tools/media-view/Service") {}
 
@@ -104,12 +98,7 @@ export const layer = (workspace: string) =>
       const analyzer = yield* MediaAnalyzer
       return Service.of({
         view: Effect.fn("MediaView.view")(function* (relativePath) {
-          const canonicalWorkspace = yield* fileSystem
-            .realPath(workspace)
-            .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))
-          const target = pathService.resolve(canonicalWorkspace, relativePath)
-          if (target !== canonicalWorkspace && !target.startsWith(`${canonicalWorkspace}${pathService.sep}`))
-            return yield* MediaPathError.make({ path: relativePath })
+          const target = pathService.resolve(workspace, relativePath)
           const exists = yield* fileSystem
             .exists(target)
             .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))
@@ -117,11 +106,6 @@ export const layer = (workspace: string) =>
           const canonicalTarget = yield* fileSystem
             .realPath(target)
             .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))
-          if (
-            canonicalTarget !== canonicalWorkspace &&
-            !canonicalTarget.startsWith(`${canonicalWorkspace}${pathService.sep}`)
-          )
-            return yield* MediaPathError.make({ path: relativePath })
           const info = yield* fileSystem
             .stat(canonicalTarget)
             .pipe(Effect.mapError(() => MediaMissingError.make({ path: relativePath })))

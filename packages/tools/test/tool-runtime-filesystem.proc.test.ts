@@ -31,7 +31,7 @@ test("exposes fileSearch, glob, and grep through the FFF workspace index", () =>
     ),
   ))
 
-test("runs filesystem, shell, and git tools against a bounded workspace", () => {
+test("runs filesystem, shell, and git tools across and beyond the workspace", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -52,7 +52,9 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
         const regex = yield* runtime.run({ _tag: "Grep", pattern: "b.ta", regex: true })
         const read = yield* runtime.run({ _tag: "Read", path: "src/a.ts", readRange: [2, 2] })
         const fuzzyRead = yield* runtime.run({ _tag: "Read", path: "src/aa.ts", readRange: [1, 1] })
-        const escapedRead = yield* Effect.result(runtime.run({ _tag: "Read", path: "link/target.txt" }))
+        const outsideRead = yield* runtime.run({ _tag: "Read", path: "link/target.txt" })
+        const absoluteRead = yield* runtime.run({ _tag: "Read", path: `${outside}/target.txt` })
+        const miscasedRead = yield* runtime.run({ _tag: "Read", path: "SRC/A.ts", readRange: [2, 2] })
         const escapedGrep = yield* runtime.run({ _tag: "Grep", pattern: "outside", regex: false })
         const created = yield* runtime.run({ _tag: "Write", path: "new/file.txt", content: "old" })
         const overwritten = yield* runtime.run({ _tag: "Write", path: "new/file.txt", content: "old" })
@@ -63,14 +65,17 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
         const ambiguous = yield* Effect.result(
           runtime.run({ _tag: "Edit", path: "src/a.ts", oldStr: "alpha", newStr: "x" }),
         )
-        const symlinkCreate = yield* Effect.result(
-          runtime.run({ _tag: "Write", path: "link/new.txt", content: "escaped" }),
-        )
-        const symlinkEdit = yield* Effect.result(
-          runtime.run({ _tag: "Edit", path: "link/target.txt", oldStr: "outside", newStr: "escaped" }),
-        )
+        const symlinkCreate = yield* runtime.run({ _tag: "Write", path: "link/new.txt", content: "escaped" })
+        const symlinkEdit = yield* runtime.run({
+          _tag: "Edit",
+          path: "link/target.txt",
+          oldStr: "outside",
+          newStr: "escaped",
+        })
+        const directoryWrite = yield* Effect.result(runtime.run({ _tag: "Write", path: "src", content: "no" }))
+        const refusedShell = yield* Effect.result(runtime.run({ _tag: "Bash", command: "rm -rf /" }))
         const shell = yield* runtime.run({ _tag: "Bash", command: "bun -e \"console.log('ok')\"" })
-        const escapedCwd = yield* Effect.result(runtime.run({ _tag: "Bash", command: "pwd", workdir: "escaped-cwd" }))
+        const outsideCwd = yield* runtime.run({ _tag: "Bash", command: "pwd", workdir: "escaped-cwd" })
         yield* runtime.run({ _tag: "Bash", command: "git init -q -b inspection" })
         yield* runtime.run({ _tag: "Bash", command: 'git config user.name "Rika Test"' })
         yield* runtime.run({ _tag: "Bash", command: "git config user.email rika@example.test" })
@@ -86,7 +91,9 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           regex,
           read,
           fuzzyRead,
-          escapedRead,
+          outsideRead,
+          absoluteRead,
+          miscasedRead,
           escapedGrep,
           created,
           overwritten,
@@ -95,8 +102,10 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           ambiguous,
           symlinkCreate,
           symlinkEdit,
+          directoryWrite,
+          refusedShell,
           shell,
-          escapedCwd,
+          outsideCwd,
           git,
         }
       }).pipe(
@@ -112,7 +121,11 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           ),
         ),
       )
-      return { ...result, outside: yield* fileSystem.readFileString(`${outside}/target.txt`) }
+      return {
+        ...result,
+        outside: yield* fileSystem.readFileString(`${outside}/target.txt`),
+        outsideRoot: yield* fileSystem.realPath(outside),
+      }
     }),
   )
   return Effect.runPromise(
@@ -123,20 +136,24 @@ test("runs filesystem, shell, and git tools against a bounded workspace", () => 
           expect(result.regex.text).toContain("src/a.ts:2:beta")
           expect(result.read.text).toBe("2: beta")
           expect(result.fuzzyRead.text).toBe("1: alpha")
-          expect(result.escapedRead._tag).toBe("Failure")
+          expect(result.outsideRead.text).toContain("outside")
+          expect(result.absoluteRead.text).toContain("outside")
+          expect(result.miscasedRead.text).toBe("2: beta")
           expect(result.escapedGrep.text).toBe("")
           expect(result.created.text).toBe("Successfully wrote 3 bytes to new/file.txt")
           expect(result.edited.text).toBe("Successfully replaced text in new/file.txt")
           expect(result.overwritten.text).toBe("Successfully wrote 3 bytes to new/file.txt")
           expect(result.stale._tag).toBe("Failure")
           expect(result.ambiguous._tag).toBe("Failure")
-          expect(result.symlinkCreate._tag).toBe("Failure")
-          expect(result.symlinkEdit._tag).toBe("Failure")
-          expect(result.outside).toBe("outside")
+          expect(result.symlinkCreate.text).toContain("Successfully wrote")
+          expect(result.symlinkEdit.text).toContain("Successfully replaced text")
+          expect(result.directoryWrite._tag).toBe("Failure")
+          expect(result.refusedShell._tag).toBe("Failure")
+          if (result.refusedShell._tag === "Failure")
+            expect(String(result.refusedShell.failure)).toContain("filesystem root")
+          expect(result.outside).toBe("escaped")
           expect(result.shell.text).toBe("ok")
-          expect(result.escapedCwd._tag).toBe("Failure")
-          if (result.escapedCwd._tag === "Failure")
-            expect(String(result.escapedCwd.failure)).toContain("escapes workspace")
+          expect(result.outsideCwd.text).toContain(result.outsideRoot)
           expect(result.git.text).toContain("## inspection")
           expect(result.git.text).toContain(" M src/a.ts")
           expect(result.git.text).toContain("A  staged.txt")

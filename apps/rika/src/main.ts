@@ -30,7 +30,15 @@ import * as Turn from "@rika/persistence/turn"
 import * as Transcript from "@rika/transcript"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
-import { MediaView, ReadWebPage, Runtime as ToolRuntime, ThreadTools, WebSearch, WorkspaceIndex } from "@rika/tools"
+import {
+  LocalPath,
+  MediaView,
+  ReadWebPage,
+  Runtime as ToolRuntime,
+  ThreadTools,
+  WebSearch,
+  WorkspaceIndex,
+} from "@rika/tools"
 import { Palette, Session, ViewState } from "@rika/tui"
 import { create as createTui, probeNativeAsset } from "@rika/tui/adapter"
 import type { PathTarget } from "@rika/tui"
@@ -85,10 +93,7 @@ const pathService = Effect.runSync(Effect.scoped(Layer.build(Path.layer))).pipe(
   Context.get(context, Path.Path),
 )
 const dirname = pathService.dirname
-const isAbsolute = pathService.isAbsolute
 const join = pathService.join
-const relativePathFrom = pathService.relative
-const resolve = pathService.resolve
 const ignoreSelectionResync = (_threadId: string, _selectionEpoch: number) => {}
 
 const terminalTitleText = (value: string) =>
@@ -211,47 +216,18 @@ const pastedImageFormat = (bytes: Uint8Array, declaredMediaType?: string) => {
   return mediaType === undefined || mediaType === signature.mediaType ? signature : undefined
 }
 
-const resolveWorkspacePathImpl = (workspace: string, target: PathTarget): string => {
-  const root = resolve(workspace)
-  const path = resolve(root, target.path)
-  const relation = relativePathFrom(root, path)
-  if (
-    relation === ".." ||
-    relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
-    isAbsolute(relation)
-  )
-    throw new Error("Path is outside the workspace")
-  return path
-}
-
-export const resolveWorkspacePath: {
-  (target: PathTarget): (workspace: string) => string
-  (workspace: string, target: PathTarget): string
-} = Function.dual(2, resolveWorkspacePathImpl)
-
-const resolveWorkspaceFileImpl = Effect.fn("Main.resolveWorkspaceFile")(function* (
-  workspace: string,
-  target: PathTarget,
-) {
-  if (target.path.length === 0 || isAbsolute(target.path))
-    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
-  const root = yield* realpath(workspace).pipe(
-    Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Workspace is unavailable" })),
-  )
-  const candidate = resolve(root, target.path)
-  const lexicalRelation = relativePathFrom(root, candidate)
-  if (lexicalRelation === ".." || lexicalRelation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`))
-    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
-  const path = yield* realpath(candidate).pipe(
+const resolveLocalFileImpl = Effect.fn("Main.resolveLocalFile")(function* (workspace: string, target: PathTarget) {
+  if (target.path.length === 0) return yield* WorkspaceFileError.make({ path: target.path, message: "Path is empty" })
+  const fileSystem = yield* FileSystem.FileSystem
+  const home = yield* Config.string("HOME").pipe(Config.option, Effect.orElseSucceed(Option.none<string>))
+  const corrected = yield* LocalPath.resolveExistingPath(
+    { exists: (name) => fileSystem.exists(name), readDirectory: (name) => fileSystem.readDirectory(name) },
+    target.path,
+    { path: pathService, base: workspace, ...(Option.isNone(home) ? {} : { home: home.value }) },
+  ).pipe(Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path does not exist" })))
+  const path = yield* realpath(corrected).pipe(
     Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path does not exist" })),
   )
-  const relation = relativePathFrom(root, path)
-  if (
-    relation === ".." ||
-    relation.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) ||
-    isAbsolute(relation)
-  )
-    return yield* WorkspaceFileError.make({ path: target.path, message: "Path is outside the workspace" })
   const info = yield* stat(path).pipe(
     Effect.mapError(() => WorkspaceFileError.make({ path: target.path, message: "Path is unavailable" })),
   )
@@ -259,10 +235,10 @@ const resolveWorkspaceFileImpl = Effect.fn("Main.resolveWorkspaceFile")(function
   return path
 })
 
-export const resolveWorkspaceFile: {
+export const resolveLocalFile: {
   (target: PathTarget): (workspace: string) => Effect.Effect<string, WorkspaceFileError, FileSystem.FileSystem>
   (workspace: string, target: PathTarget): Effect.Effect<string, WorkspaceFileError, FileSystem.FileSystem>
-} = Function.dual(2, (workspace: string, target: PathTarget) => resolveWorkspaceFileImpl(workspace, target))
+} = Function.dual(2, (workspace: string, target: PathTarget) => resolveLocalFileImpl(workspace, target))
 
 const editorArgumentsImpl = (editor: string, path: string, line?: number, column?: number): Array<string> => {
   const location = line === undefined ? path : `${path}:${line}${column === undefined ? "" : `:${column}`}`
@@ -2374,11 +2350,11 @@ export const interactiveTui =
           if (openingPath) return
           openingPath = true
           run(
-            resolveWorkspaceFileImpl(model.workspace, target).pipe(
+            resolveLocalFileImpl(model.workspace, target).pipe(
               Effect.matchEffect({
-                onFailure: () =>
+                onFailure: (failure) =>
                   Effect.sync(() => {
-                    renderer?.surface.showToast("Refusing to open a path outside the workspace", "#e06c75")
+                    renderer?.surface.showToast(failure.message, "#e06c75")
                   }),
                 onSuccess: (path) =>
                   Effect.gen(function* () {

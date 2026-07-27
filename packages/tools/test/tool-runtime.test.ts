@@ -99,7 +99,7 @@ const testEnvironment = (
       const content = files.get(path)
       return content === undefined ? Effect.fail(platformError("readFileString", path)) : Effect.succeed(content)
     },
-    exists: (path) => Effect.succeed(files.has(path)),
+    exists: (path) => Effect.succeed(files.has(path) || directories.has(path)),
     makeDirectory: () => Effect.void,
     writeFileString: (path, content) => Effect.sync(() => void files.set(path, content)),
   })
@@ -503,8 +503,9 @@ describe("Runtime", () => {
     }).pipe(provide(environment.runtime))
   })
 
-  it.effect("routes status, web page, and media requests and rejects escaped paths", () => {
+  it.effect("routes status, web page, and media requests and reads outside the workspace", () => {
     const environment = testEnvironment()
+    environment.files.set("/outside", "outside content")
     return Effect.gen(function* () {
       const runtime = yield* Runtime.Service
       const status = yield* Effect.flip(
@@ -519,13 +520,23 @@ describe("Runtime", () => {
         forceRefetch: true,
       })
       const media = yield* Effect.flip(runtime.run({ _tag: "ViewMedia", path: "missing.png" }))
-      const escaped = yield* Effect.flip(runtime.run({ _tag: "Read", path: "../outside" }))
+      const outside = yield* runtime.run({ _tag: "Read", path: "../outside" })
       expect(status).toMatchObject({ _tag: "ToolError", tool: "shell_command_status" })
       expect(pageDefault.text).toBe("page")
       expect(pageOptions.text).toBe("page")
       expect(media.tool).toBe("view_media")
-      expect(escaped).toMatchObject({ category: "access_denied", outcome: "known", recovery: "after_change" })
-      expect(escaped.message).toContain("Use a path under /workspace")
+      expect(outside.text).toContain("outside content")
+    }).pipe(provide(environment.runtime))
+  })
+
+  it.effect("refuses catastrophic commands without offering recovery", () => {
+    const environment = testEnvironment()
+    return Effect.gen(function* () {
+      const runtime = yield* Runtime.Service
+      const refused = yield* Effect.flip(runtime.run({ _tag: "Bash", command: "rm -rf /" }))
+      const allowed = yield* runtime.run({ _tag: "Bash", command: "rm -rf ./build" })
+      expect(refused).toMatchObject({ category: "access_denied", outcome: "known", recovery: "never" })
+      expect(allowed.text).toContain("out")
     }).pipe(provide(environment.runtime))
   })
 

@@ -1,4 +1,6 @@
-import { Context, Data, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
+import * as LocalPath from "./local-path"
+import * as LocalSafetyPolicy from "./local-safety-policy"
 import { Toolkit } from "effect/unstable/ai"
 import * as WebSearchService from "./web-search"
 import * as ReadWebPageService from "./read-web-page"
@@ -355,91 +357,57 @@ const runtimeLayer = (workspace: string) =>
       const processes = yield* ProcessRegistry.Service
       const mediaView = yield* MediaView.Service
       const workspaceIndex = yield* WorkspaceIndex.Service
-      const canonicalWorkspace = yield* fileSystem.realPath(workspace).pipe(Effect.orDie)
-      const resolve = (value: string) =>
-        Effect.try({
-          try: () => {
-            const target = path.resolve(workspace, value)
-            if (target !== workspace && !target.startsWith(`${workspace}${path.sep}`))
-              throw runtimeError({
-                category: "access_denied",
-                message: `Path escapes workspace: ${value}`,
-                outcome: "known",
-                recovery: "after_change",
-                nextAction: `Use a path under ${workspace}`,
-              })
-            return target
-          },
-          catch: operationError,
+      const home = yield* Config.string("HOME").pipe(
+        Config.option,
+        Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv()),
+        Effect.orDie,
+      )
+      const lookup: LocalPath.Lookup = {
+        exists: (target) => fileSystem.exists(target),
+        readDirectory: (target) => fileSystem.readDirectory(target),
+      }
+      const resolveOptions = {
+        path,
+        base: workspace,
+        ...(Option.isNone(home) ? {} : { home: home.value }),
+      }
+      const localPathError = (value: string, cause: unknown) => {
+        if (!Schema.is(LocalPath.LocalPathError)(cause)) return operationError(cause)
+        if (cause.reason === "ambiguous_case")
+          return runtimeError({
+            category: "conflict",
+            message: `Several paths differ only by casing: ${cause.candidates.join(", ")}`,
+            outcome: "known",
+            recovery: "after_change",
+            nextAction: "Call the tool again with the exact path casing",
+          })
+        return runtimeError({
+          category: "not_found",
+          message: `File not found: ${value}`,
+          outcome: "known",
+          recovery: "after_change",
+          nextAction: "Search for the file or call the tool with a corrected path",
         })
-      const resolveCwd = (value: string) =>
-        resolve(value).pipe(
-          Effect.flatMap((target) =>
-            Effect.all([fileSystem.realPath(workspace), fileSystem.realPath(target)]).pipe(
-              Effect.mapError(operationError),
-            ),
-          ),
-          Effect.flatMap(([canonicalRoot, canonicalTarget]) =>
-            canonicalTarget === canonicalRoot || canonicalTarget.startsWith(`${canonicalRoot}${path.sep}`)
-              ? Effect.succeed(canonicalTarget)
-              : Effect.fail(
-                  runtimeError({
-                    category: "access_denied",
-                    message: `Path escapes workspace: ${value}`,
-                    outcome: "known",
-                    recovery: "after_change",
-                    nextAction: `Use a path under ${workspace}`,
-                  }),
-                ),
-          ),
+      }
+      const resolveExisting = (value: string) =>
+        LocalPath.resolveExistingPath(lookup, value, resolveOptions).pipe(
+          Effect.mapError((cause) => localPathError(value, cause)),
         )
-      const resolveEdit = (value: string) =>
-        resolve(value).pipe(
-          Effect.flatMap((target) => {
-            const relative = path.relative(workspace, target)
-            return Effect.forEach(relative.split(path.sep), (_, index) => {
-              const current = path.join(workspace, ...relative.split(path.sep).slice(0, index + 1))
-              return fileSystem.readLink(current).pipe(
-                Effect.option,
-                Effect.flatMap((link) =>
-                  Option.isNone(link)
-                    ? Effect.void
-                    : Effect.fail(
-                        runtimeError({
-                          category: "access_denied",
-                          message: `Symbolic links are not writable through this tool: ${value}`,
-                          outcome: "known",
-                          recovery: "after_change",
-                          nextAction: "Use the real file path under the workspace",
-                        }),
-                      ),
-                ),
-              )
-            }).pipe(Effect.as(target))
-          }),
+      const resolveWrite = (value: string) =>
+        LocalPath.resolveWriteTarget(lookup, value, resolveOptions).pipe(
+          Effect.mapError((cause) => localPathError(value, cause)),
         )
-      const isContained = (target: string) =>
-        target === canonicalWorkspace || target.startsWith(`${canonicalWorkspace}${path.sep}`)
-      const resolveContained = (value: string) =>
-        resolve(value).pipe(
-          Effect.flatMap((target) => fileSystem.realPath(target)),
-          Effect.flatMap((target) =>
-            isContained(target)
-              ? Effect.succeed(target)
-              : Effect.fail(
-                  runtimeError({
-                    category: "access_denied",
-                    message: `Path escapes workspace: ${value}`,
-                    outcome: "known",
-                    recovery: "after_change",
-                    nextAction: `Use a path under ${workspace}`,
-                  }),
-                ),
-          ),
-        )
+      const withinWorkspace = (value: string) => {
+        if (value === "~" || value.startsWith("~/")) return false
+        const relative = path.relative(workspace, path.resolve(workspace, value))
+        return !relative.startsWith("..") && !path.isAbsolute(relative)
+      }
       const resolveRead = Effect.fn("ToolRuntime.resolveRead")(function* (value: string) {
-        const exact = yield* resolve(value)
-        if (yield* fileSystem.exists(exact)) return yield* resolveContained(value)
+        const resolved = yield* Effect.result(LocalPath.resolveExistingPath(lookup, value, resolveOptions))
+        if (resolved._tag === "Success") return resolved.success
+        const notFound =
+          Schema.is(LocalPath.LocalPathError)(resolved.failure) && resolved.failure.reason === "not_found"
+        if (!notFound || !withinWorkspace(value)) return yield* localPathError(value, resolved.failure)
         const found = yield* workspaceIndex.fileSearch(value, { pageSize: 20 })
         const bestMatch = found.items[0]
         if (bestMatch === undefined)
@@ -450,8 +418,44 @@ const runtimeLayer = (workspace: string) =>
             recovery: "after_change",
             nextAction: "Search for the file or call read with a corrected path",
           })
-        return yield* resolveContained(bestMatch.relativePath)
+        return yield* resolveExisting(bestMatch.relativePath)
       })
+      const requireRegularFile = (value: string, target: string) =>
+        fileSystem.stat(target).pipe(
+          Effect.mapError(operationError),
+          Effect.flatMap((info) =>
+            info.type === "File"
+              ? Effect.void
+              : Effect.fail(
+                  runtimeError({
+                    category: "invalid_input",
+                    message: `Not a regular file: ${value}`,
+                    outcome: "known",
+                    recovery: "after_change",
+                    nextAction: "Target a regular file instead of a directory, device, or socket",
+                  }),
+                ),
+          ),
+        )
+      const startChecked = (executable: string, args: ReadonlyArray<string>, cwd: string) => {
+        const refusal = LocalSafetyPolicy.checkProcessInvocation({
+          executable,
+          args,
+          cwd,
+          home: Option.getOrUndefined(home),
+        })
+        return refusal === undefined
+          ? processes.start(executable, args, cwd)
+          : Effect.fail(
+              runtimeError({
+                category: "access_denied",
+                message: refusal.message,
+                outcome: "known",
+                recovery: "never",
+                nextAction: refusal.nextAction,
+              }),
+            )
+      }
       return Service.of({
         run: Effect.fn("ToolRuntime.run")(function* (request) {
           const operation = Effect.gen(function* () {
@@ -476,10 +480,7 @@ const runtimeLayer = (workspace: string) =>
                       nextAction: "Correct the regular expression or set regex to false",
                     })
                   for (const match of page.items) {
-                    const target = yield* resolveContained(match.relativePath)
-                    matches.push(
-                      `${path.relative(canonicalWorkspace, target)}:${match.lineNumber}:${match.lineContent}`,
-                    )
+                    matches.push(`${match.relativePath}:${match.lineNumber}:${match.lineContent}`)
                     if (matches.length === 1_000) break
                   }
                   cursor = page.nextCursor
@@ -507,8 +508,9 @@ const runtimeLayer = (workspace: string) =>
                 )
               }
               case "Write": {
-                const target = yield* resolveEdit(request.path)
+                const target = yield* resolveWrite(request.path)
                 const exists = yield* fileSystem.exists(target)
+                if (exists) yield* requireRegularFile(request.path, target)
                 const previous = exists ? yield* fileSystem.readFileString(target) : ""
                 yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true })
                 yield* fileSystem.writeFileString(target, request.content)
@@ -518,7 +520,8 @@ const runtimeLayer = (workspace: string) =>
                 }
               }
               case "Edit": {
-                const target = yield* resolveEdit(request.path)
+                const target = yield* resolveExisting(request.path)
+                yield* requireRegularFile(request.path, target)
                 const content = yield* fileSystem.readFileString(target)
                 if (request.oldStr === request.newStr)
                   return yield* runtimeError({
@@ -566,8 +569,8 @@ const runtimeLayer = (workspace: string) =>
                 }
               }
               case "Bash": {
-                const cwd = yield* resolveCwd(request.workdir ?? ".")
-                const processId = yield* processes.start("/bin/bash", ["-lc", request.command], cwd)
+                const cwd = yield* resolveExisting(request.workdir ?? ".")
+                const processId = yield* startChecked("/bin/bash", ["-lc", request.command], cwd)
                 const output = yield* processes
                   .poll(processId, Math.min(Math.max(0, request.timeoutMillis ?? 10_000), 60_000), maxOutput)
                   .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
@@ -577,8 +580,8 @@ const runtimeLayer = (workspace: string) =>
                 }
               }
               case "Shell": {
-                const cwd = yield* resolveCwd(request.cwd ?? ".")
-                const processId = yield* processes.start(request.command, request.args, cwd)
+                const cwd = yield* resolveExisting(request.cwd ?? ".")
+                const processId = yield* startChecked(request.command, request.args, cwd)
                 const output = yield* processes
                   .poll(processId, Math.min(Math.max(0, request.waitMillis ?? 10_000), 120_000), maxOutput)
                   .pipe(Effect.onInterrupt(() => processes.cancel(processId).pipe(Effect.ignore)))
