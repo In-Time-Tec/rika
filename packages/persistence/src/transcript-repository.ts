@@ -206,7 +206,7 @@ const makeMemory = Effect.gen(function* () {
     page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
       const limit = pageSize(options.limit)
       const descending = [...(yield* Ref.get(state)).values()]
-        .filter((projection) => projection.turn.threadId === threadId)
+        .filter((projection) => projection.turn.threadId === threadId && projection.turn.status !== "queued")
         .flatMap((projection) =>
           projection.units.map((unit) => ({
             turn: projection.turn,

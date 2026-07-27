@@ -1,23 +1,38 @@
 import { describe, expect, it } from "@effect/vitest"
 import { applyEvent, empty, isTransientEvent, project, type Projection, type SourceEvent } from "../src"
 
-const transientDelta = (index: number, text: string): SourceEvent => ({
-  cursor: `delta-${index}`,
-  sequence: 1,
+const attemptData = (attempt: string) => ({ model_call_id: `call-${attempt}`, model_attempt_id: `attempt-${attempt}` })
+
+const transientDelta = (index: number, text: string, sequence = 1, attempt = "a"): SourceEvent => ({
+  cursor: `delta-${attempt}-${index}`,
+  sequence,
   type: "model.output.delta",
   createdAt: index,
   text,
-  data: { delta: text, transient_index: index },
+  data: { delta: text, transient_index: index, ...attemptData(attempt) },
 })
 
-const transientReasoning = (index: number, text: string): SourceEvent => ({
-  cursor: `reasoning-${index}`,
-  sequence: 1,
+const transientReasoning = (index: number, text: string, sequence = 1, attempt = "a"): SourceEvent => ({
+  cursor: `reasoning-${attempt}-${index}`,
+  sequence,
   type: "model.reasoning.delta",
   createdAt: index,
   text,
-  data: { delta: text, transient_index: index },
+  data: { delta: text, transient_index: index, ...attemptData(attempt) },
 })
+
+const durableEvent = (sequence: number, type: string, data?: Record<string, unknown>): SourceEvent => ({
+  cursor: `${type}-${sequence}`,
+  sequence,
+  type,
+  createdAt: sequence,
+  ...(data === undefined ? {} : { data }),
+})
+
+const keysOf = (projection: Projection) => projection.units.map((unit) => unit.key)
+
+const fold = (events: ReadonlyArray<SourceEvent>, projection: Projection) =>
+  events.reduce((current, event) => applyEvent(current, event), projection)
 
 const assistantText = (projection: Projection): string => {
   const unit = projection.units.find(
@@ -153,6 +168,119 @@ describe("transient events", () => {
 
     expect(entryTexts(replayed)).toEqual(entryTexts(streamed))
     expect(replayed.revision).toBe(streamed.revision)
+  })
+
+  it("ignores transient deltas re-delivered after the durable cycle completed", () => {
+    const reply = "I’ll trace the current permission/path enforcement and every related test."
+    const thoughts = "**Planning project exploration and permissions review**"
+    const streamed = fold(
+      [
+        durableEvent(0, "execution.accepted"),
+        durableEvent(1, "execution.started"),
+        durableEvent(2, "model.input.prepared"),
+        durableEvent(3, "model.call.started"),
+        durableEvent(4, "model.attempt.started"),
+        durableEvent(5, "model.attempt.first_output"),
+        transientReasoning(1, thoughts, 5),
+        durableEvent(6, "model.attempt.first_output"),
+        transientDelta(2, reply, 6),
+        durableEvent(7, "model.attempt.first_output"),
+        durableEvent(8, "model.cycle.completed", { text: reply }),
+        durableEvent(9, "model.reasoning.completed", { text: thoughts }),
+        durableEvent(10, "tool.call.requested", { tool_call_id: "call_t80", tool_name: "read", input: "{}" }),
+        durableEvent(11, "tool.call.requested", { tool_call_id: "call_BLq", tool_name: "read", input: "{}" }),
+        durableEvent(14, "execution.cancelled"),
+      ],
+      empty("turn-a", "prompt"),
+    )
+    const reattached = fold([transientReasoning(1, thoughts, 5), transientDelta(2, reply, 6)], streamed)
+
+    expect(keysOf(streamed)).toEqual(keysOf(reattached))
+    expect(keysOf(reattached)).toEqual([
+      "turn:turn-a:user",
+      "reasoning:turn-a:0",
+      "assistant:turn-a:0",
+      "tool:turn-a:call_t80",
+      "tool:turn-a:call_BLq",
+      "execution:turn-a:cancelled",
+    ])
+    expect(assistantText(reattached)).toBe(reply)
+    expect(reasoningText(reattached)).toBe(thoughts)
+  })
+
+  it("ignores transient deltas from an earlier cycle after steering advanced the model phase", () => {
+    const first = "I’ll create an isolated worktree and branch from the current remote main."
+    const latest = "The isolated branch is now based on the fetched remote main."
+    const streamed = fold(
+      [
+        durableEvent(2, "model.input.prepared"),
+        durableEvent(5, "model.attempt.first_output"),
+        transientDelta(1, first, 5),
+        durableEvent(8, "model.cycle.completed", { text: first }),
+        durableEvent(10, "tool.call.requested", { tool_call_id: "call_mAk", tool_name: "read", input: "{}" }),
+        durableEvent(11, "tool.result.received", { tool_call_id: "call_mAk" }),
+        durableEvent(15, "steering.delivered", { message_count: 1 }),
+        durableEvent(16, "model.call.started"),
+        durableEvent(26, "steering.delivered", { message_count: 1 }),
+        durableEvent(29, "model.attempt.first_output"),
+        durableEvent(32, "model.cycle.completed", { text: latest }),
+        durableEvent(34, "tool.call.requested", { tool_call_id: "call_Alg", tool_name: "read", input: "{}" }),
+        durableEvent(46, "execution.cancelled"),
+      ],
+      empty("turn-b", "prompt"),
+    )
+    const reattached = applyEvent(streamed, transientDelta(1, first, 5))
+
+    expect(keysOf(streamed)).toEqual(keysOf(reattached))
+    expect(reattached.units.filter((unit) => unit.key.startsWith("assistant:turn-b:"))).toHaveLength(2)
+    expect(entryTexts(reattached).filter((text) => text === first)).toHaveLength(1)
+  })
+
+  it("applies a re-delivered transient batch once while the same attempt is still streaming", () => {
+    const base = fold(
+      [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
+      empty("turn-c", "prompt"),
+    )
+    const batch = [transientDelta(1, "hel", 4), transientDelta(2, "lo", 4)]
+    const streamed = fold(batch, base)
+    const redelivered = fold(batch, streamed)
+
+    expect(assistantText(streamed)).toBe("hello")
+    expect(assistantText(redelivered)).toBe("hello")
+    expect(keysOf(redelivered)).toEqual(keysOf(streamed))
+    expect(redelivered.revision).toBe(streamed.revision)
+    expect(redelivered.checkpointCursor).toBe(streamed.checkpointCursor)
+  })
+
+  it("streams a retried attempt whose transient index restarts below the previous attempt", () => {
+    const base = fold(
+      [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
+      empty("turn-d", "prompt"),
+    )
+    const first = fold([transientDelta(7, "cut off", 4, "one")], base)
+    const retried = fold(
+      [durableEvent(5, "model.attempt.started"), transientDelta(1, "complete answer", 5, "two")],
+      first,
+    )
+
+    expect(assistantText(retried)).toBe("cut offcomplete answer")
+  })
+
+  it("keeps the durable cycle completion when a late transient of that cycle arrives after it", () => {
+    const streamed = fold(
+      [
+        durableEvent(2, "model.input.prepared"),
+        durableEvent(5, "model.attempt.first_output"),
+        transientDelta(1, "partial", 5),
+        durableEvent(8, "model.cycle.completed", { text: "the complete answer" }),
+      ],
+      empty("turn-e", "prompt"),
+    )
+    const late = fold([transientDelta(2, " and more", 5), transientDelta(3, " and more still", 6)], streamed)
+
+    expect(assistantText(streamed)).toBe("the complete answer")
+    expect(assistantText(late)).toBe("the complete answer")
+    expect(keysOf(late)).toEqual(keysOf(streamed))
   })
 
   it("keeps legacy durable delta histories advancing the revision", () => {

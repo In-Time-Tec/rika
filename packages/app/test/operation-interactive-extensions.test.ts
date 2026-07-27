@@ -123,7 +123,7 @@ const terminalTransitionScenario = (
         ...target,
         id: Turn.TurnId.make(`historical-${selected.id}`),
         prompt: "historical",
-        status: "queued",
+        status: "completed",
         stopIntent: "none",
         createdAt: 0,
         updatedAt: 0,
@@ -220,14 +220,18 @@ const terminalTransitionScenario = (
       const backend = ExecutionBackend.Service.of({
         ...baseBackend,
         inspect: (executionId) =>
-          Effect.succeed({
-            turnId: executionId,
-            status: inspectedStatus,
-            lastCursor: "terminal-cursor",
-            waits: [],
-            pendingTools: [],
-            children: [],
-          }),
+          Effect.succeed(
+            String(executionId) === String(historical.id)
+              ? undefined
+              : {
+                  turnId: executionId,
+                  status: inspectedStatus,
+                  lastCursor: "terminal-cursor",
+                  waits: [],
+                  pendingTools: [],
+                  children: [],
+                },
+          ),
         replay: (executionId) => Effect.succeed({ turnId: executionId, status: inspectedStatus, events: replayEvents }),
         pageEvents: (executionId, _direction, cursor) => {
           const index = cursor === undefined ? 0 : replayEvents.findIndex((event) => event.cursor === cursor) + 1

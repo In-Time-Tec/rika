@@ -171,6 +171,7 @@ export const Projection = Schema.Struct({
   revision: Schema.Finite,
   modelPhase: Schema.Finite,
   usableCompletionSequence: Schema.optionalKey(Schema.Finite),
+  transientIndexes: Schema.optionalKey(Schema.Record(Schema.String, Schema.Finite)),
   oldestCursor: Schema.optionalKey(Schema.String),
   checkpointCursor: Schema.optionalKey(Schema.String),
   costUsd: Schema.optionalKey(Schema.Finite),
