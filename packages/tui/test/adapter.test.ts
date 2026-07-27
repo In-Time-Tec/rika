@@ -996,6 +996,35 @@ describe("Surface", () => {
     expect(text).not.toContain("Subagent finished Fix packaging integration tests")
   })
 
+  test("renders an expanded delegation prompt as markdown", () => {
+    const state = model({
+      blocks: [
+        {
+          _tag: "ToolCall",
+          id: "task",
+          name: "task",
+          input: "{}",
+          output: "child result",
+          status: "complete",
+          presentation: {
+            family: "agent" as const,
+            action: "task",
+            activeLabel: "Subagent working",
+            completeLabel: "Subagent finished",
+          },
+          detail: "Review `packages/tools` first.\n\n1. Check the resolver\n2. Check the tests",
+          files: [],
+        },
+      ],
+      expandedRowKeys: ["tool:task"],
+    })
+    const built = buildTranscript(state)
+    const text = built.styled.chunks.map((chunk) => chunk.text).join("")
+    expect(text).toContain("packages/tools")
+    expect(text).not.toContain("`packages/tools`")
+    expect(text).toContain("1. Check the resolver")
+  })
+
   test("keeps the exit code on a failed shell row with nested process waits", () => {
     const state = model({
       blocks: [

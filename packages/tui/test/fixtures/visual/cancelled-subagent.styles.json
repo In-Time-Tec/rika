@@ -464,7 +464,7 @@
           "width": 1
         },
         {
-          "text": "│ ",
+          "text": "│   ",
           "fg": {
             "buffer": {
               "0": 2176,
@@ -482,10 +482,10 @@
             }
           },
           "attributes": 2,
-          "width": 2
+          "width": 4
         },
         {
-          "text": "  Wait then run the checks",
+          "text": "Wait then run the checks",
           "fg": {
             "buffer": {
               "0": 1984,
@@ -502,8 +502,8 @@
               "3": 255
             }
           },
-          "attributes": 2,
-          "width": 26
+          "attributes": 0,
+          "width": 24
         },
         {
           "text": "                                                   ",
