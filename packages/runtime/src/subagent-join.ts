@@ -17,10 +17,12 @@ export type JoinTarget =
   | { readonly _tag: "terminal"; readonly childExecutionId: string }
   | { readonly _tag: "unknown"; readonly childExecutionId: string }
 
-export const planJoin = (
-  children: ReadonlyArray<ChildRun>,
-  requested: ReadonlyArray<string> | undefined,
-): ReadonlyArray<JoinTarget> => {
+export interface JoinPlanInput {
+  readonly children: ReadonlyArray<ChildRun>
+  readonly requested?: ReadonlyArray<string> | undefined
+}
+
+export const planJoin = ({ children, requested }: JoinPlanInput): ReadonlyArray<JoinTarget> => {
   const known = new Map(children.map((child) => [child.childExecutionId, child.status]))
   const selected = [...new Set(requested ?? [...known.keys()])]
   return selected.map((childExecutionId) => {
@@ -37,6 +39,11 @@ export interface JoinOptions {
   readonly resolveChild: (childExecutionId: string) => Effect.Effect<AgentTools.Result, string>
 }
 
+export interface JoinInput extends JoinOptions {
+  readonly executionId: string
+  readonly requested?: ReadonlyArray<string> | undefined
+}
+
 const failed = (message: string) =>
   RelayToolRuntime.ToolExecutionFailed.make({ tool_name: AgentTools.awaitSubagentsToolName, message })
 
@@ -50,10 +57,10 @@ const collect = (options: JoinOptions, target: JoinTarget) =>
       )
     : options.resolveChild(target.childExecutionId).pipe(Effect.mapError(failed))
 
-export const join = (options: JoinOptions, executionId: string, requested: ReadonlyArray<string> | undefined) =>
+export const join = (input: JoinInput) =>
   Effect.gen(function* () {
-    const children = yield* options.childRuns(executionId).pipe(Effect.mapError(failed))
-    const plan = planJoin(children, requested)
+    const children = yield* input.childRuns(input.executionId).pipe(Effect.mapError(failed))
+    const plan = planJoin({ children, requested: input.requested })
     const pending = plan.find((target) => target._tag === "pending")
     if (pending !== undefined) {
       return yield* RelayToolRuntime.ToolExecutionWaitRequested.make({
@@ -61,9 +68,7 @@ export const join = (options: JoinOptions, executionId: string, requested: Reado
         wait_id: childJoinWaitId(pending.childExecutionId),
       })
     }
-    const subagents = yield* Effect.forEach(plan, (target) => collect(options, target), {
-      concurrency: "unbounded",
-    })
+    const subagents = yield* Effect.forEach(plan, (target) => collect(input, target), { concurrency: "unbounded" })
     return { subagents }
   })
 
@@ -73,5 +78,6 @@ export const registeredTool = (options: JoinOptions): RelayToolRuntime.Registere
     input: AgentTools.AwaitSubagentsInput,
     output: AgentTools.AwaitSubagentsResult,
     needsApproval: false,
-    run: (input, context) => join(options, String(context.executionId), input.subagents ?? undefined),
+    run: (input, context) =>
+      join({ ...options, executionId: String(context.executionId), requested: input.subagents ?? undefined }),
   })

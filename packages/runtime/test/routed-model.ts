@@ -17,12 +17,16 @@ export interface RoutedModel {
   readonly requests: Effect.Effect<ReadonlyArray<TestModel.Request>>
 }
 
-export const routedModel = (
-  lanes: ReadonlyArray<Lane>,
-  options?: { readonly provider?: string; readonly model?: string; readonly registrationKey?: string },
-) =>
+export interface RoutedModelInput {
+  readonly lanes: ReadonlyArray<Lane>
+  readonly provider?: string
+  readonly model?: string
+  readonly registrationKey?: string
+}
+
+export const routedModel = ({ lanes, ...options }: RoutedModelInput) =>
   Effect.gen(function* () {
-    const fixtures = yield* Effect.forEach(lanes, (lane) => TestModel.make(lane.steps, options ?? {}))
+    const fixtures = yield* Effect.forEach(lanes, (lane) => TestModel.make(lane.steps, options))
     const services = yield* Effect.forEach(fixtures, (fixture) =>
       Layer.build(fixture.layer).pipe(Effect.map((context) => Context.get(context, LanguageModel.LanguageModel))),
     )
@@ -33,8 +37,6 @@ export const routedModel = (
     }
     const model: LanguageModel.Service = {
       ...services[0]!,
-      generateText: ((request: Parameters<LanguageModel.Service["generateText"]>[0]) =>
-        select(request.prompt).generateText(request)) as LanguageModel.Service["generateText"],
       streamText: ((request: Parameters<LanguageModel.Service["streamText"]>[0]) =>
         Stream.unwrap(
           Effect.sync(() => select(request.prompt).streamText(request)),

@@ -48,27 +48,29 @@ test("three Task calls in one model turn run as overlapping durable children", (
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-parallel-" })
-      const fixture = yield* routedModel([
-        {
-          steps: [
-            TestModel.turn([
-              TestModel.toolCall("task", { prompt: "Explore alpha." }, { id: "call-alpha" }),
-              TestModel.toolCall("task", { prompt: "Explore beta." }, { id: "call-beta" }),
-              TestModel.toolCall("task", { prompt: "Explore gamma." }, { id: "call-gamma" }),
-            ]),
-            TestModel.turn([TestModel.toolCall("await_subagents", {}, { id: "call-join" })]),
-            TestModel.text("All three explorations finished."),
-          ],
-        },
-        {
-          when: (prompt) => !prompt.includes(parallelRootPrompt),
-          steps: [
-            TestModel.turn([TestModel.text("alpha")], { delay: "400 millis" }),
-            TestModel.turn([TestModel.text("beta")], { delay: "400 millis" }),
-            TestModel.turn([TestModel.text("gamma")], { delay: "400 millis" }),
-          ],
-        },
-      ])
+      const fixture = yield* routedModel({
+        lanes: [
+          {
+            steps: [
+              TestModel.turn([
+                TestModel.toolCall("task", { prompt: "Explore alpha." }, { id: "call-alpha" }),
+                TestModel.toolCall("task", { prompt: "Explore beta." }, { id: "call-beta" }),
+                TestModel.toolCall("task", { prompt: "Explore gamma." }, { id: "call-gamma" }),
+              ]),
+              TestModel.turn([TestModel.toolCall("await_subagents", {}, { id: "call-join" })]),
+              TestModel.text("All three explorations finished."),
+            ],
+          },
+          {
+            when: (prompt) => !prompt.includes(parallelRootPrompt),
+            steps: [
+              TestModel.turn([TestModel.text("alpha")], { delay: "400 millis" }),
+              TestModel.turn([TestModel.text("beta")], { delay: "400 millis" }),
+              TestModel.turn([TestModel.text("gamma")], { delay: "400 millis" }),
+            ],
+          },
+        ],
+      })
       const windows = yield* Ref.make<
         Array<{ readonly prompt: string; readonly startedAt: number; readonly completedAt?: number }>
       >([])
@@ -334,8 +336,8 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
         ],
         { provider: "test", model: "gpt-5.6-terra", registrationKey: "terra-xhigh" },
       )
-      const oracle = yield* routedModel(
-        [
+      const oracle = yield* routedModel({
+        lanes: [
           {
             steps: [
               TestModel.toolCall("read_thread", { prompt: "Read the current thread." }, { id: "read-thread" }),
@@ -353,8 +355,10 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
             steps: [TestModel.text("The thread required exact nested recovery.")],
           },
         ],
-        { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-medium" },
-      )
+        provider: "test",
+        model: "gpt-5.6-sol",
+        registrationKey: "sol-medium",
+      })
       const transcriptReads = yield* Ref.make(0)
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/execution.db`,
@@ -559,8 +563,8 @@ test("depth-one agents route Task to main and specialists to oracle without dept
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-nested-" })
-      const terra = yield* routedModel(
-        [
+      const terra = yield* routedModel({
+        lanes: [
           {
             steps: [
               TestModel.toolCall("task", { prompt: "Coordinate nested work." }, { id: "call-depth-one" }),
@@ -585,18 +589,22 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             ],
           },
         ],
-        { provider: "test", model: "gpt-5.6-terra", registrationKey: "terra-medium" },
-      )
-      const sol = yield* routedModel(
-        [
+        provider: "test",
+        model: "gpt-5.6-terra",
+        registrationKey: "terra-medium",
+      })
+      const sol = yield* routedModel({
+        lanes: [
           { steps: [TestModel.text("Oracle checked.")] },
           {
             when: (prompt) => prompt.includes("Review the nested check."),
             steps: [TestModel.text("Review checked.")],
           },
         ],
-        { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-medium" },
-      )
+        provider: "test",
+        model: "gpt-5.6-sol",
+        registrationKey: "sol-medium",
+      })
       const nestedStarted = yield* Ref.make(0)
       const maximumNested = yield* Ref.make(0)
       const allNestedStarted = yield* Deferred.make<void>()
@@ -811,24 +819,26 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-" })
-      const fixture = yield* routedModel([
-        {
-          steps: [
-            TestModel.toolCall("oracle", { prompt: "Investigate the boundary." }, { id: "call-oracle" }),
-            TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
-            TestModel.text("Parent synthesized the child answer."),
-          ],
-        },
-        {
-          when: (prompt) => !prompt.includes("Ask the Oracle to investigate the boundary."),
-          steps: [
-            TestModel.turn([
-              ...Array.from({ length: 1_100 }, () => TestModel.text(".")),
-              TestModel.text("Oracle investigated the boundary."),
-            ]),
-          ],
-        },
-      ])
+      const fixture = yield* routedModel({
+        lanes: [
+          {
+            steps: [
+              TestModel.toolCall("oracle", { prompt: "Investigate the boundary." }, { id: "call-oracle" }),
+              TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
+              TestModel.text("Parent synthesized the child answer."),
+            ],
+          },
+          {
+            when: (prompt) => !prompt.includes("Ask the Oracle to investigate the boundary."),
+            steps: [
+              TestModel.turn([
+                ...Array.from({ length: 1_100 }, () => TestModel.text(".")),
+                TestModel.text("Oracle investigated the boundary."),
+              ]),
+            ],
+          },
+        ],
+      })
       const runtimeLayer = Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false }))
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/execution.db`,
@@ -936,22 +946,24 @@ test("handoff children resolve real workspace tools through their parent Rika tu
       const workspace = `${directory}/workspace`
       yield* fileSystem.makeDirectory(workspace)
       yield* fileSystem.writeFileString(`${workspace}/AGENTS.md`, "child workspace marker")
-      const fixture = yield* routedModel([
-        {
-          steps: [
-            TestModel.toolCall("review", { prompt: "Inspect AGENTS.md." }, { id: "call-review" }),
-            TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
-            TestModel.text("Parent received the review."),
-          ],
-        },
-        {
-          when: (prompt) => !prompt.includes("Ask Review to inspect AGENTS.md."),
-          steps: [
-            TestModel.turn([TestModel.toolCall("read", { path: "AGENTS.md" }, { id: "call-child-read" })]),
-            TestModel.text("Child inspected the workspace."),
-          ],
-        },
-      ])
+      const fixture = yield* routedModel({
+        lanes: [
+          {
+            steps: [
+              TestModel.toolCall("review", { prompt: "Inspect AGENTS.md." }, { id: "call-review" }),
+              TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
+              TestModel.text("Parent received the review."),
+            ],
+          },
+          {
+            when: (prompt) => !prompt.includes("Ask Review to inspect AGENTS.md."),
+            steps: [
+              TestModel.turn([TestModel.toolCall("read", { path: "AGENTS.md" }, { id: "call-child-read" })]),
+              TestModel.text("Child inspected the workspace."),
+            ],
+          },
+        ],
+      })
       const workspaces = new Map([["turn-review", workspace]])
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/execution.db`,
@@ -1033,22 +1045,24 @@ test("handoff child approval asks surface through the parent and resume after ap
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-permission-" })
       yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "permission marker")
-      const fixture = yield* routedModel([
-        {
-          steps: [
-            TestModel.toolCall("review", { prompt: "Read fixture.txt." }, { id: "call-parent-review" }),
-            TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
-            TestModel.text("Parent received the approved child result."),
-          ],
-        },
-        {
-          when: (prompt) => !prompt.includes("Ask Review to read fixture.txt."),
-          steps: [
-            TestModel.toolCall("read", { path: "fixture.txt" }, { id: "call-child-permission" }),
-            TestModel.text("Child read the fixture."),
-          ],
-        },
-      ])
+      const fixture = yield* routedModel({
+        lanes: [
+          {
+            steps: [
+              TestModel.toolCall("review", { prompt: "Read fixture.txt." }, { id: "call-parent-review" }),
+              TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
+              TestModel.text("Parent received the approved child result."),
+            ],
+          },
+          {
+            when: (prompt) => !prompt.includes("Ask Review to read fixture.txt."),
+            steps: [
+              TestModel.toolCall("read", { path: "fixture.txt" }, { id: "call-child-permission" }),
+              TestModel.text("Child read the fixture."),
+            ],
+          },
+        ],
+      })
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
@@ -1110,22 +1124,24 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
       const fileSystem = yield* FileSystem.FileSystem
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-call-id-" })
       yield* fileSystem.writeFileString(`${directory}/fixture.txt`, "shared call id marker")
-      const fixture = yield* routedModel([
-        {
-          steps: [
-            TestModel.toolCall("review", { prompt: "Read fixture.txt." }, { id: "call_shared" }),
-            TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
-            TestModel.text("Parent received the child result."),
-          ],
-        },
-        {
-          when: (prompt) => !prompt.includes("Ask Review to read fixture.txt."),
-          steps: [
-            TestModel.toolCall("read", { path: "fixture.txt" }, { id: "call_shared" }),
-            TestModel.text("Child reused the call id."),
-          ],
-        },
-      ])
+      const fixture = yield* routedModel({
+        lanes: [
+          {
+            steps: [
+              TestModel.toolCall("review", { prompt: "Read fixture.txt." }, { id: "call_shared" }),
+              TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
+              TestModel.text("Parent received the child result."),
+            ],
+          },
+          {
+            when: (prompt) => !prompt.includes("Ask Review to read fixture.txt."),
+            steps: [
+              TestModel.toolCall("read", { path: "fixture.txt" }, { id: "call_shared" }),
+              TestModel.text("Child reused the call id."),
+            ],
+          },
+        ],
+      })
       const backendLayer = RelayExecutionBackend.layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
