@@ -83,6 +83,7 @@ const isTerminalStatus = ExecutionStatus.isTerminalStatus
 const isAgentResponseEvent = (event: ExecutionBackend.Event): boolean =>
   event.type.includes("reasoning") ||
   event.type === "model.output.delta" ||
+  event.type === "model.cycle.completed" ||
   event.type === "model.output.completed" ||
   event.type === "model.toolcall.delta" ||
   event.type === "tool.call.requested" ||
