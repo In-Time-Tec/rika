@@ -890,7 +890,7 @@ const transcriptUnitBuilder = (model: Model, spinnerFrame = idleSpinnerFrame) =>
     for (const row of rows) {
       append(fg(colors.text)("\n"))
       append(dim(fg(colors.subtle)(prefix)))
-      for (const chunk of row) append(chunk)
+      for (const chunk of row) append(dim(chunk))
     }
   }
 

@@ -203,6 +203,41 @@ describe("tool presentation", () => {
     expectForeground(chunks, secondary, colors.muted)
   })
 
+  test("dims expanded agent prompts without losing markdown styles", () => {
+    const parent = call(
+      "parent",
+      "task",
+      {},
+      { family: "agent", action: "task", activeLabel: "Subagent working", completeLabel: "Subagent finished" },
+      { detail: "Top plain **top bold** *top italic* `top-code`" },
+    )
+    const child = call(
+      "child",
+      "task",
+      {},
+      { family: "agent", action: "task", activeLabel: "Subagent working", completeLabel: "Subagent finished" },
+      { detail: "Nested plain" },
+    )
+    const chunks = buildTranscript({
+      ...model([parent, child], ["tool:parent", "tool:child"]),
+      items: [
+        { _tag: "Block" as const, index: 0, id: "item:parent", turnId: "turn" },
+        { _tag: "Block" as const, index: 1, id: "item:child", turnId: "child", parentId: "parent" },
+      ],
+    }).styled.chunks
+    const plain = chunkFor(chunks, "Top plain")
+    const bold = chunkFor(chunks, "top bold")
+    const italic = chunkFor(chunks, "top italic")
+    const code = chunkFor(chunks, "top-code")
+    const nested = chunkFor(chunks, "Nested plain")
+
+    for (const chunk of [plain, bold, italic, code, nested]) expect(hasAttribute(chunk, TextAttributes.DIM)).toBe(true)
+    expect(hasAttribute(bold, TextAttributes.BOLD)).toBe(true)
+    expect(hasAttribute(italic, TextAttributes.ITALIC)).toBe(true)
+    expect(hasAttribute(code, TextAttributes.BOLD)).toBe(true)
+    expect(code.fg?.equals(colors.amber)).toBe(true)
+  })
+
   test("preserves primary and muted roles in nested agent tools", () => {
     const parent = call(
       "parent",
