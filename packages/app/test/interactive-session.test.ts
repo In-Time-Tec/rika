@@ -1407,6 +1407,75 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
+  it.effect("keeps earlier conversation Turns when a cancelled Turn's child units outnumber the wire page", () =>
+    Effect.gen(function* () {
+      const { session, turns, transcripts, older } = yield* makeHarness()
+      yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", 2)
+      const conversation = [
+        { id: "hey", prompt: "Hey", reply: "Hey! What can I help you with?", children: 0 },
+        { id: "explore", prompt: "Explore this project", reply: "I’ll trace the current path flow.", children: 600 },
+        { id: "followup", prompt: "Also note any tests that cover permissions.", reply: "Got it.", children: 0 },
+        { id: "retry", prompt: "Explore this project", reply: "I’ll trace the permission enforcement.", children: 600 },
+      ]
+      for (const [index, entry] of conversation.entries()) {
+        const created = yield* createTurn(turns, {
+          id: Turn.TurnId.make(entry.id),
+          threadId: older.id,
+          prompt: entry.prompt,
+          now: index + 10,
+        })
+        const completed = yield* turns.setStatus(created.id, "completed", undefined, index + 10)
+        const units: Array<Transcript.Unit> = [
+          {
+            key: `turn:${created.id}:user`,
+            turnId: created.id,
+            order: { sequence: 0, part: 0 },
+            revision: 0,
+            content: { _tag: "Entry", role: "user", text: entry.prompt },
+          },
+          {
+            key: `assistant:${created.id}:0`,
+            turnId: created.id,
+            order: { sequence: 1, part: 0 },
+            revision: 1,
+            content: { _tag: "Entry", role: "assistant", text: entry.reply },
+          },
+          ...Array.from(
+            { length: entry.children },
+            (_, child): Transcript.Unit => ({
+              key: `${created.id}:child:${child.toString().padStart(3, "0")}`,
+              turnId: `child:${created.id}`,
+              parentId: `tool:${created.id}:delegate`,
+              order: { sequence: child + 2, part: 0 },
+              revision: child + 2,
+              content: { _tag: "Block", block: { _tag: "Reasoning", text: `child ${child}` } },
+            }),
+          ),
+        ]
+        yield* transcripts.replace(completed, {
+          ...Transcript.empty(created.id, created.prompt),
+          units,
+          revision: units.length,
+        })
+      }
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(older.id, 1)
+      yield* Effect.yieldNow
+
+      const initial = events.find((event) => event._tag === "SelectionLoaded")
+      const loaded = initial?._tag === "SelectionLoaded" ? initial.entries : []
+      const keys = new Set(loaded.map((entry) => entry.unit.key))
+      for (const entry of conversation) {
+        expect(keys.has(`turn:${entry.id}:user`)).toBe(true)
+        expect(keys.has(`assistant:${entry.id}:0`)).toBe(true)
+      }
+      expect(loaded.filter((entry) => entry.unit.key.startsWith("retry:child:"))).toHaveLength(600)
+      expect(keys.size).toBe(loaded.length)
+      expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
+    }),
+  )
+
   it.effect("projects control failures instead of failing the session effect", () =>
     Effect.gen(function* () {
       const { session } = yield* makeHarness()

@@ -187,6 +187,9 @@ const compareTranscriptCursors = (left: TranscriptRepository.PageCursor, right: 
   left.sequence - right.sequence ||
   left.part - right.part ||
   left.key.localeCompare(right.key)
+const isSemanticTranscriptEntry = (entry: TranscriptRepository.Entry): boolean =>
+  entry.unit.parentId === undefined &&
+  (entry.unit.content._tag === "Entry" || entry.unit.executionOutcome !== undefined)
 const boundTranscriptEntries = (
   sourceEntries: ReadonlyArray<TranscriptRepository.Entry>,
 ): {
@@ -240,11 +243,7 @@ const boundPartialTranscriptEntries = (
       for (let index = entries.length - 1; index >= 0; index -= 1) {
         if (index === userBoundary) continue
         const entry = entries[index]!
-        if (
-          entry.unit.parentId !== undefined ||
-          (entry.unit.content._tag !== "Entry" && entry.unit.executionOutcome === undefined)
-        )
-          continue
+        if (!isSemanticTranscriptEntry(entry)) continue
         const entryBytes = transcriptPageEncoder.encode(encodeJson(entry)).byteLength
         if (semanticBytes + entryBytes > maximumTranscriptPayloadBytes) continue
         semanticIndexes.add(index)
@@ -273,6 +272,8 @@ const selectionRepairNodeLimit = 128
 const selectionRepairPageLimit = 32
 const selectionRepairTurnPageLimit = 4
 const selectionRepairTranscriptPageLimit = 8
+const selectionInitialTurnWindow = 24
+const selectionInitialEntryWindow = 400
 const selectionRepairDeferredPrefix = "selection repair deferred:"
 type RepairBudget = { nodes: number; pages: number; bytes: number }
 const makeRepairBudget = (): RepairBudget => ({ nodes: 0, pages: 0, bytes: 0 })
@@ -3568,6 +3569,46 @@ export const productLayer = <
           state.hasUnprojectedTurns = page.hasOlder
           return true
         })
+        const initialTranscriptWindow = Effect.fn("Operation.interactive.initialTranscriptWindow")(function* (
+          state: SelectionEpochState,
+        ) {
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          const turnPage = yield* turns.page(state.thread.id, { limit: selectionInitialTurnWindow })
+          const window: Array<ReadonlyArray<TranscriptRepository.Entry>> = []
+          let entryCount = 0
+          let hasOlder = turnPage.hasOlder
+          let reduced = false
+          let oldestCursor: TranscriptRepository.PageCursor | undefined
+          for (const turn of turnPage.turns.toReversed()) {
+            if (turn.status === "queued") continue
+            const projection = yield* transcripts.get(turn.id)
+            if (projection === undefined) continue
+            const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
+              Object.assign(
+                {
+                  turn: projection.turn,
+                  unit,
+                  projectionRevision: projection.revision,
+                  projectionModelPhase: projection.modelPhase,
+                },
+                projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
+              ),
+            )
+            if (!reduced && (entryCount === 0 || entryCount + entries.length <= selectionInitialEntryWindow)) {
+              window.unshift(entries)
+              entryCount += entries.length
+              oldestCursor = transcriptCursorFor(entries[0]) ?? oldestCursor
+              continue
+            }
+            reduced = true
+            const semantic = entries.filter(isSemanticTranscriptEntry)
+            if (semantic.length < entries.length) hasOlder = true
+            window.unshift(semantic)
+            entryCount += semantic.length
+          }
+          return { entries: window.flat(), hasOlder, oldestCursor }
+        })
         const loadTranscriptPage = Effect.fn("Operation.interactive.loadTranscriptPage")(function* (
           state: SelectionEpochState,
           dispatch: (event: InteractiveEvent) => void,
@@ -3609,71 +3650,23 @@ export const productLayer = <
             }
           }
           if (!isCurrentSelectionState(state)) return
-          const page = yield* transcripts.page(thread.id, { ...(before === undefined ? {} : { before }), limit: 50 })
+          const page =
+            before === undefined
+              ? yield* initialTranscriptWindow(state)
+              : yield* transcripts.page(thread.id, { before, limit: 50 })
           transcriptPages += 1
           if (
             page.hasOlder &&
+            before !== undefined &&
             (page.entries.length === 0 ||
               page.oldestCursor === undefined ||
               sameTranscriptCursor(page.oldestCursor, before))
           )
             return yield* operationError(`Transcript page did not advance for Thread ${thread.id}`)
-          const olderPages: Array<typeof page.entries> = []
-          let entryCount = page.entries.length
           let oldestCursor = page.oldestCursor
           let storedHasOlder = page.hasOlder
           let initialBoundary = -1
-          if (before === undefined) {
-            const locateInitialBoundary = () => {
-              const loaded = olderPages.toReversed().flat().concat(page.entries)
-              const newestTurnId = loaded.at(-1)?.turn.id
-              const newestTurnBoundary =
-                newestTurnId === undefined
-                  ? -1
-                  : loaded.findIndex((entry) => entry.unit.key === `turn:${newestTurnId}:user`)
-              if (newestTurnBoundary >= 0 && loaded.length - newestTurnBoundary >= 200) {
-                return loaded.findLastIndex(
-                  (entry, index) => index < newestTurnBoundary && entry.unit.key === `turn:${entry.turn.id}:user`,
-                )
-              }
-              const latestAllowed = loaded.length - 200
-              return latestAllowed < 0
-                ? -1
-                : loaded.findLastIndex(
-                    (entry, index) => index <= latestAllowed && entry.unit.key === `turn:${entry.turn.id}:user`,
-                  )
-            }
-            initialBoundary = locateInitialBoundary()
-            while (
-              storedHasOlder &&
-              oldestCursor !== undefined &&
-              initialBoundary < 0 &&
-              transcriptPages < selectionRepairTranscriptPageLimit
-            ) {
-              const previousCursor = oldestCursor
-              const older = yield* transcripts.page(thread.id, {
-                before: oldestCursor,
-                limit: entryCount < 200 ? Math.min(50, 200 - entryCount) : 50,
-              })
-              transcriptPages += 1
-              if (
-                older.hasOlder &&
-                (older.entries.length === 0 ||
-                  older.oldestCursor === undefined ||
-                  sameTranscriptCursor(older.oldestCursor, previousCursor))
-              )
-                return yield* operationError(`Transcript page did not advance for Thread ${thread.id}`)
-              if (older.entries.length === 0) break
-              olderPages.push(older.entries)
-              entryCount += older.entries.length
-              oldestCursor = older.oldestCursor
-              storedHasOlder = older.hasOlder
-              initialBoundary = locateInitialBoundary()
-            }
-          }
-          const loadedEntries =
-            olderPages.length === 0 ? page.entries : olderPages.toReversed().flat().concat(page.entries)
-          let storedEntries = initialBoundary <= 0 ? loadedEntries : loadedEntries.slice(initialBoundary)
+          let storedEntries = page.entries
           const bounded = boundTranscriptEntries(storedEntries)
           if (bounded.oversizedEntry)
             return yield* operationError("Transcript entry exceeds the transcript event limit")
