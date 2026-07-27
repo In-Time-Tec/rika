@@ -1079,14 +1079,29 @@ const applyKnownEvent = (projection: Projection, turnId: string, event: SourceEv
 
 const isStaleTransient = (projection: Projection, event: SourceEvent): boolean => event.sequence < projection.revision
 
+const transientAttempt = (event: SourceEvent): string => {
+  const payload = sourcePayload(event)
+  return `${string(payload.model_call_id)}:${string(payload.model_attempt_id)}`
+}
+
+const transientIndex = (event: SourceEvent): number =>
+  typeof event.data?.transient_index === "number" ? event.data.transient_index : -1
+
+const applyTransient = (projection: Projection, event: SourceEvent): Projection => {
+  if (isStaleTransient(projection, event)) return projection
+  const attempt = transientAttempt(event)
+  const index = transientIndex(event)
+  const applied = projection.transientIndexes ?? {}
+  if (index <= (applied[attempt] ?? -1)) return projection
+  const next = applyKnownEvent(projection, projection.units[0]?.turnId ?? "", event)
+  return { ...next, transientIndexes: { ...applied, [attempt]: index } }
+}
+
 export const applyEvent: {
   (projection: Projection, event: SourceEvent): Projection
   (event: SourceEvent): (projection: Projection) => Projection
 } = Function.dual(2, (projection: Projection, event: SourceEvent): Projection => {
-  if (isTransientEvent(event))
-    return isStaleTransient(projection, event)
-      ? projection
-      : applyKnownEvent(projection, projection.units[0]?.turnId ?? "", event)
+  if (isTransientEvent(event)) return applyTransient(projection, event)
   if (event.sequence <= projection.revision)
     return event.type === "model.usage.reported" ? applyUsage(projection, event) : projection
   const turnId = projection.units[0]?.turnId ?? ""
