@@ -3,7 +3,7 @@ export const threadTitleLimit = 80
 export const clampThreadTitle = (text: string): string =>
   [
     ...text
-      .replace(/[\u0000-\u001f\u007f-\u009f]+/g, " ")
+      .replace(/\p{Cc}+/gu, " ")
       .replace(/\s+/g, " ")
       .trim(),
   ]

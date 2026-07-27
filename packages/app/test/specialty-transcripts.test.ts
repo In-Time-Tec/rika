@@ -193,11 +193,6 @@ describe("specialty durable transcripts", () => {
       const painter = yield* AgentProfiles.resolvePainter(model, true)
       expect(painter.preset.tool_names).toEqual([
         "view_media",
-        "task",
-        "oracle",
-        "librarian",
-        "review",
-        "surgeon",
         "read_thread",
         "await_subagents",
         "search_threads",

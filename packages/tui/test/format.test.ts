@@ -29,7 +29,7 @@ describe("format", () => {
 
   test("escapes control characters in one notation", () => {
     expect(escapeControlCharacters("a\nb")).toBe("a\\nb")
-    expect(escapeControlCharacters("ab")).toBe("a\\u{1b}b")
+    expect(escapeControlCharacters("a\u001bb")).toBe("a\\u{1b}b")
   })
 
   test("pluralizes including -ch nouns", () => {

@@ -30,8 +30,13 @@ export const childExecutionDepth = (executionId: string) => {
   return depth
 }
 
-export const delegationAvailableAtDepth = (name: AgentTools.DelegationToolName, depth: number) =>
+const delegationAvailableAtDepthImpl = (name: AgentTools.DelegationToolName, depth: number) =>
   depth === 0 || (depth === 1 && name !== "task")
+
+export const delegationAvailableAtDepth: {
+  (depth: number): (name: AgentTools.DelegationToolName) => boolean
+  (name: AgentTools.DelegationToolName, depth: number): boolean
+} = Function.dual(2, delegationAvailableAtDepthImpl)
 
 const toolsAtDepthImpl = (names: ReadonlyArray<string>, depth: number) =>
   names.filter((name) => {
