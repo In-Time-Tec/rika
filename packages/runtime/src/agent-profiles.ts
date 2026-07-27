@@ -51,26 +51,31 @@ const definitions = {
     instructions: instructions("Oracle", oraclePrompt),
     tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
     permissions: ["workspace.read", "network.read", "thread.read"],
+    maxToolTurns: 60,
   },
   Librarian: {
     instructions: instructions("Librarian", librarianPrompt),
     tools: [Tools.webSearchTool, Tools.readWebPageTool],
     permissions: ["network.read", "thread.read"],
+    maxToolTurns: 30,
   },
   Painter: {
     instructions: instructions("Painter", painterPrompt),
     tools: [Tools.viewMediaTool],
     permissions: ["workspace.read", "thread.read"],
+    maxToolTurns: 30,
   },
   Review: {
     instructions: instructions("Review", reviewPrompt),
     tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
     permissions: ["workspace.read", "network.read", "thread.read"],
+    maxToolTurns: 60,
   },
   ReadThread: {
     instructions: instructions("ReadThread", readThreadPrompt),
     tools: [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool],
     permissions: ["thread.read"],
+    maxToolTurns: 30,
   },
   Surgeon: {
     instructions: instructions("Surgeon", surgeonPrompt),
@@ -83,6 +88,7 @@ const definitions = {
       Tools.shellCommandStatusTool,
     ],
     permissions: ["workspace.read", "workspace.write", "process.run", "thread.read"],
+    maxToolTurns: 80,
   },
   Task: {
     instructions: instructions("Task", taskPrompt),
@@ -96,6 +102,7 @@ const definitions = {
       Tools.webSearchTool,
     ],
     permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
+    maxToolTurns: 80,
   },
 } as const
 
@@ -121,13 +128,14 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
       instructions: definition.instructions,
       model,
       toolkit,
-      policy: TurnPolicy.forever,
+      policy: TurnPolicy.both(TurnPolicy.recurs(definition.maxToolTurns), TurnPolicy.forever),
     }),
     preset: {
       instructions: definition.instructions,
       model: relayModel,
       tool_names: Object.keys(toolkit.tools),
       permissions: [...definition.permissions],
+      max_tool_turns: definition.maxToolTurns,
       metadata: { product_profile: name },
     },
   }

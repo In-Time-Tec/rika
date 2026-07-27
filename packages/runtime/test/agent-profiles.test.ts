@@ -43,7 +43,7 @@ describe("product agent profiles", () => {
     for (const name of names) {
       const profile = resolve(name, model)
       expect(profile.agent.name).toBe(`rika-${name.toLowerCase()}`)
-      expect(profile.agent.policy).toBe(TurnPolicy.forever)
+      expect(profile.agent.policy).not.toBe(TurnPolicy.forever)
       expect(registered[name]?.model).toEqual(relayModel(model))
       expect(registered[name]?.tool_names).toEqual(Object.keys(profile.agent.toolkit.tools))
       expect(registered[name]?.permissions.length).toBeGreaterThan(0)
@@ -53,6 +53,18 @@ describe("product agent profiles", () => {
       tool_names: ["grep", "read", "web_search", "read_thread", ...threadRecoveryTools],
       permissions: ["workspace.read", "network.read", "thread.read"],
     })
+    const expectedCaps = {
+      Oracle: 60,
+      Librarian: 30,
+      Painter: 30,
+      Review: 60,
+      ReadThread: 30,
+      Surgeon: 80,
+      Task: 80,
+    }
+    for (const name of names) {
+      expect(registered[name]?.max_tool_turns).toBe(expectedCaps[name])
+    }
     expect(registered.Oracle?.instructions).toContain(
       "high-level planning, architecture tradeoffs, difficult debugging analysis",
     )
