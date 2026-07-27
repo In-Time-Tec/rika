@@ -1,7 +1,7 @@
 import { agentPresentation, childParentMatch, executionKey, type Block, type Unit } from "@rika/transcript"
 import { Function } from "effect"
 import type { Model, TranscriptItem } from "../view-state"
-import { isFailedDelegationOutput } from "./rows"
+import { isDeliveredDelegationOutput, isFailedDelegationOutput } from "./rows"
 
 export interface Event {
   readonly turnId?: string
@@ -109,6 +109,7 @@ const applyExecutionOutcome = (model: Model, parentId: string, outcome: Executio
   const block = blocks[index]
   if (block?._tag !== "ToolCall") return model
   if (outcome.status === "complete" && isFailedDelegationOutput(block.output)) return model
+  if (outcome.status === "failed" && isDeliveredDelegationOutput(block.output)) return model
   const { output: _, ...withoutOutput } = block
   const applied = {
     ...withoutOutput,

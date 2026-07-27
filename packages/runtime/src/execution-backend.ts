@@ -596,12 +596,29 @@ const recoveredDeltaOutput = (events: ReadonlyArray<Execution.ExecutionEvent>, a
   return text.length === 0 ? [] : [{ type: "text", text }]
 }
 
+const scrubbedEventMessage = (data: Readonly<Record<string, unknown>> | undefined): string | undefined => {
+  const message = data?.message
+  return typeof message === "string" && message.length > 0 && message !== "[object Object]" ? message : undefined
+}
+
+const overflowDetail = (data: Readonly<Record<string, unknown>> | undefined): string | undefined => {
+  const details =
+    typeof data?.details === "object" && data.details !== null
+      ? (data.details as Readonly<Record<string, unknown>>)
+      : undefined
+  return details?.failure_classification === "context-overflow"
+    ? "Automatic compaction could not reduce the thread enough for this model."
+    : undefined
+}
+
 const childFailureText = (terminal: Execution.ExecutionEvent | undefined) => {
   if (terminal?.type !== "execution.failed" && terminal?.type !== "execution.cancelled") return undefined
-  const message = terminal.data?.message
+  const message =
+    scrubbedEventMessage(terminal.data) ??
+    (terminal.type === "execution.failed" ? overflowDetail(terminal.data) : undefined)
   const outcome =
     terminal.type === "execution.cancelled" ? "Subagent execution was cancelled" : "Subagent execution failed"
-  return typeof message === "string" && message.length > 0 ? `${outcome}: ${message}` : outcome
+  return message !== undefined ? `${outcome}: ${message}` : outcome
 }
 
 const truncatedStreamClassification = "truncated-stream"
@@ -826,15 +843,11 @@ const workflow = (value: any) => {
 }
 
 const failureMessage = (data: Readonly<Record<string, unknown>> | undefined): string | undefined => {
-  const message = data?.message
-  if (typeof message === "string" && message.length > 0 && message !== "[object Object]") return message
-  const details =
-    typeof data?.details === "object" && data.details !== null
-      ? (data.details as Readonly<Record<string, unknown>>)
-      : undefined
-  if (details?.failure_classification === "context-overflow")
-    return "Automatic compaction could not reduce the thread enough for this model."
-  return message === "[object Object]" ? "The execution failed unexpectedly." : undefined
+  const scrubbed = scrubbedEventMessage(data)
+  if (scrubbed !== undefined) return scrubbed
+  const overflow = overflowDetail(data)
+  if (overflow !== undefined) return overflow
+  return data?.message === "[object Object]" ? "The execution failed unexpectedly." : undefined
 }
 
 const event = (value: {

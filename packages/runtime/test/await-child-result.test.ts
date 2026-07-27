@@ -202,6 +202,60 @@ describe("resolveChildResult", () => {
     expect(result.output).toEqual([{ type: "text", text: "boom" }])
   })
 
+  it("scrubs an unrenderable failure message from a NoReport reason", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.output.completed" },
+      { type: "execution.failed", data: { message: "[object Object]" } },
+    ])
+    expect(result._tag).toBe("NoReport")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).not.toContain("[object Object]")
+    expect(result.reason).toBe("Subagent execution failed")
+  })
+
+  it("scrubs an unrenderable failure message from a truncated Failed reason", () => {
+    const result = resolve([
+      ...modelTurn("tool-calls"),
+      { type: "tool.call.requested" },
+      { type: "tool.result.received" },
+      { type: "model.call.started" },
+      { type: "model.attempt.started" },
+      delta("part-a", 0, "Partial finding"),
+      { type: "execution.failed", data: { message: "[object Object]" } },
+    ])
+    expect(result._tag).toBe("Failed")
+    if (result._tag !== "Failed") throw new Error("expected Failed")
+    expect(result.reason).not.toContain("[object Object]")
+  })
+
+  it("scrubs an unrenderable cancellation message", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.output.completed" },
+      { type: "execution.cancelled", data: { message: "[object Object]" } },
+    ])
+    expect(result._tag).toBe("Cancelled")
+    if (result._tag !== "Cancelled") throw new Error("expected Cancelled")
+    expect(result.reason).not.toContain("[object Object]")
+    expect(result.reason).toBe("Subagent execution was cancelled")
+  })
+
+  it("keeps the context-overflow explanation in a child failure reason", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.output.completed" },
+      {
+        type: "execution.failed",
+        data: { message: "[object Object]", details: { failure_classification: "context-overflow" } },
+      },
+    ])
+    expect(result._tag).toBe("NoReport")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).toContain("Automatic compaction")
+    expect(result.reason).not.toContain("[object Object]")
+  })
+
   it("reports cancellation with empty stream output", () => {
     const result = resolve([{ type: "execution.cancelled", data: {} }])
     expect(result._tag).toBe("Cancelled")

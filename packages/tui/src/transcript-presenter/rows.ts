@@ -217,6 +217,12 @@ export const isFailedDelegationOutput = (output: string | undefined): boolean =>
   return tag !== undefined && failedDelegationTags.has(tag) && stringField(decoded, "status") === "failed"
 }
 
+export const isDeliveredDelegationOutput = (output: string | undefined): boolean => {
+  const decoded = decodedOutput(output)
+  if (decoded === undefined) return false
+  return stringField(decoded, "_tag") === "Report" && stringField(decoded, "status") === "completed"
+}
+
 const noReportText = (decoded: object): string | undefined => {
   if (stringField(decoded, "_tag") !== "NoReport") return undefined
   const reason = stringField(decoded, "reason") ?? agentEmptyFallback
@@ -281,6 +287,9 @@ const settledText = (
   children: ReadonlyArray<TranscriptItem>,
   fallback: string,
 ): string =>
+  (block.status === "complete" && isDeliveredDelegationOutput(block.output)
+    ? agentOutputText(block.output)
+    : undefined) ??
   childErrorDetail(model, children) ??
   outcomeReason(model, block) ??
   (isToolOutputDisplayed(block) ? agentOutputText(block.output) : undefined) ??
