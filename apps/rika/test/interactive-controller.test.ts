@@ -1006,6 +1006,225 @@ it("surfaces a child projection whose parent tool has not arrived instead of dro
   expect(spawned.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
 })
 
+const runningTurn = (id: string): Turn.Turn => ({
+  id: Turn.TurnId.make(id),
+  threadId: thread.id,
+  prompt: `${id} prompt`,
+  author: { _tag: "Human" },
+  lineage: { _tag: "Original" },
+  executionRoute: Turn.testExecutionRoute(),
+  status: "running",
+  stopIntent: "none",
+  createdAt: 2,
+  updatedAt: 2,
+})
+
+const orphanEntries = (turn: Turn.Turn, count: number) =>
+  Array.from({ length: count }, (_, index) => ({
+    turn,
+    unit: {
+      key: `${turn.id}:nested:${index}`,
+      turnId: turn.id,
+      order: { sequence: index + 10, part: 0 },
+      revision: index + 10,
+      parentId: `${turn.id}:agent`,
+      content: {
+        _tag: "Block" as const,
+        block: { _tag: "Notification" as const, title: `nested ${index}`, detail: "detail" },
+      },
+    },
+    projectionRevision: index + 10,
+    projectionModelPhase: 0,
+  }))
+
+const populatedSelection = (turn: Turn.Turn) =>
+  InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("history", 1, [
+      { cursor: "history-answer", sequence: 1, type: "model.output.completed", createdAt: 1, text: "history answer" },
+    ]),
+    hasOlder: false,
+    threadCostUsd: 0,
+    activeTurn: turn,
+  })
+
+it("keeps a populated view when a reload delivers a window that renders nothing", () => {
+  const active = runningTurn("active")
+  const populated = populatedSelection(active)
+  const reloaded = InteractiveController.update(populated.state, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: orphanEntries(active, 5),
+    hasOlder: true,
+    threadCostUsd: 0,
+    activeTurn: active,
+  })
+
+  expect(populated.state.model.entries.map((value) => value.text)).toContain("history answer")
+  expect(reloaded.discarded).toBe(true)
+  expect(reloaded.state.model.entries.map((value) => value.text)).toContain("history answer")
+  expect(reloaded.state.selectionEpoch).toBe(2)
+})
+
+it("repaints live patches for the in-flight turn after a reload that renders nothing", () => {
+  const active = runningTurn("active")
+  const populated = populatedSelection(active)
+  const reloaded = InteractiveController.update(populated.state, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: orphanEntries(active, 5),
+    hasOlder: true,
+    threadCostUsd: 0,
+    activeTurn: active,
+  })
+  const patched = InteractiveController.update(reloaded.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 2,
+    threadId: thread.id,
+    turnId: active.id,
+    event: {
+      executionId: "execution:active",
+      cursor: "answer",
+      sequence: 9,
+      type: "model.output.completed",
+      createdAt: 9,
+      text: "live answer",
+    },
+    revision: 9,
+  })
+
+  const texts = patched.state.model.entries.map((value) => value.text)
+  expect(texts).toContain("history answer")
+  expect(texts).toContain("live answer")
+})
+
+it("seeds the in-flight turn so an empty reload still paints and keeps taking live patches", () => {
+  const active = runningTurn("active")
+  const reloaded = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: [],
+    hasOlder: true,
+    threadCostUsd: 0,
+    activeTurn: active,
+  })
+  const patched = InteractiveController.update(reloaded.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 2,
+    threadId: thread.id,
+    turnId: active.id,
+    event: {
+      executionId: "execution:active",
+      cursor: "answer",
+      sequence: 9,
+      type: "model.output.completed",
+      createdAt: 9,
+      text: "live answer",
+    },
+    revision: 9,
+  })
+
+  expect(reloaded.discarded).toBeUndefined()
+  expect(reloaded.state.model.entries.map((value) => value.text)).toEqual(["active prompt"])
+  expect(patched.state.model.entries.map((value) => value.text)).toEqual(["active prompt", "live answer"])
+})
+
+it("keeps live child patches rendering after a mid-turn selection reload", () => {
+  const running = entries("parent", 2, [
+    {
+      cursor: "agent",
+      sequence: 0,
+      type: "tool.call.requested",
+      createdAt: 4,
+      data: { tool_call_id: "agent", tool_name: "oracle", input: { prompt: "Review" } },
+    },
+    {
+      cursor: "spawned",
+      sequence: 1,
+      type: "child_run.spawned",
+      createdAt: 5,
+      data: { tool_call_id: "agent", child_execution_id: "execution:parent:child:agent" },
+    },
+  ]).map((entry) => Object.assign({}, entry, { turn: Object.assign({}, entry.turn, { status: "running" as const }) }))
+  const selected = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: running,
+    hasOlder: false,
+    threadCostUsd: 0,
+    activeTurn: running[0]!.turn,
+  })
+  const child = InteractiveController.update(selected.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("parent:child:agent"),
+    event: {
+      executionId: "execution:parent:child:agent",
+      cursor: "child-read",
+      sequence: 0,
+      type: "tool.call.requested",
+      createdAt: 6,
+      data: { tool_call_id: "read", tool_name: "read", input: { path: "src/a.ts" } },
+    },
+    revision: 0,
+  })
+  const reloaded = InteractiveController.update(child.state, {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 2,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: running,
+    hasOlder: false,
+    threadCostUsd: 0,
+    activeTurn: running[0]!.turn,
+  })
+  const resumed = InteractiveController.update(reloaded.state, {
+    _tag: "TranscriptPatched",
+    selectionEpoch: 2,
+    threadId: thread.id,
+    turnId: Turn.TurnId.make("parent:child:agent"),
+    event: {
+      executionId: "execution:parent:child:agent",
+      cursor: "child-write",
+      sequence: 1,
+      type: "tool.call.requested",
+      createdAt: 7,
+      data: { tool_call_id: "write", tool_name: "write", input: { path: "src/b.ts" } },
+    },
+    revision: 1,
+  })
+
+  expect(child.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
+  expect(reloaded.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:agent" }))
+  expect(reloaded.state.model.items.length).toBeGreaterThan(0)
+  expect(resumed.state.model.blocks).toContainEqual(expect.objectContaining({ id: "parent:child:agent:write" }))
+  expect(resumed.unattached ?? []).not.toContain("parent:child:agent")
+})
+
 it("keeps one of five status labels from submit until the turn completes", () => {
   const turn = { ...entries("active", 2)[0]!.turn, status: "running" as const }
   const submitted = ViewState.update(
