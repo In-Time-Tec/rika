@@ -569,8 +569,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             ],
           },
           {
-            when: (prompt) =>
-              prompt.includes("Do a nested check.") && !prompt.includes("Coordinate nested work."),
+            when: (prompt) => prompt.includes("Do a nested check.") && !prompt.includes("Coordinate nested work."),
             steps: [TestModel.text("Terra completed the nested check.")],
           },
           {
@@ -611,8 +610,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
               Stream.unwrap(
                 Effect.gen(function* () {
                   const prompt = encodeJson(options.prompt)
-                  const nested =
-                    !prompt.includes(nestedRootPrompt) && !prompt.includes("Coordinate nested work.")
+                  const nested = !prompt.includes(nestedRootPrompt) && !prompt.includes("Coordinate nested work.")
                   if (!nested) return model.streamText(options)
                   const active = yield* Ref.updateAndGet(nestedStarted, (value) => value + 1)
                   yield* Ref.update(maximumNested, (value) => Math.max(value, active))

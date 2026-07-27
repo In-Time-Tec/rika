@@ -115,9 +115,7 @@ test("a delegation returns a running handle and await_subagents collects the rep
           .query<
             { readonly name: string; readonly output_json: string; readonly error: string | null },
             []
-          >(
-            "select call.name, result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.execution_id = 'execution:turn-join' order by call.created_at",
-          )
+          >("select call.name, result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.execution_id = 'execution:turn-join' order by call.created_at")
           .all()
         return { settled, results }
       }).pipe(Effect.provide(backendContext))
@@ -173,8 +171,9 @@ test("await_subagents suspends on an open child and resumes when the child termi
         Effect.gen(function* () {
           const model = yield* LanguageModel.LanguageModel
           const streamText = ((options: Parameters<LanguageModel.Service["streamText"]>[0]) =>
-            Stream.unwrap(Deferred.await(release).pipe(Effect.as(model.streamText(options))))) as
-            LanguageModel.Service["streamText"]
+            Stream.unwrap(
+              Deferred.await(release).pipe(Effect.as(model.streamText(options))),
+            )) as LanguageModel.Service["streamText"]
           return { ...model, streamText }
         }),
       ).pipe(Layer.provide(child.layer))
@@ -222,17 +221,13 @@ test("await_subagents suspends on an open child and resumes when the child termi
           .query<
             { readonly count: number },
             []
-          >(
-            "select count(*) as count from relay_tool_attempts attempt join relay_tool_calls call on call.id = attempt.tool_call_id and call.execution_id = attempt.execution_id where call.name = 'await_subagents'",
-          )
+          >("select count(*) as count from relay_tool_attempts attempt join relay_tool_calls call on call.id = attempt.tool_call_id and call.execution_id = attempt.execution_id where call.name = 'await_subagents'")
           .get()
         const join = database
           .query<
             { readonly output_json: string; readonly error: string | null },
             []
-          >(
-            "select result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.name = 'await_subagents'",
-          )
+          >("select result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.name = 'await_subagents'")
           .get()
         return { suspended, settled, attempts, join }
       }).pipe(Effect.provide(backendContext))
@@ -254,6 +249,86 @@ test("await_subagents suspends on an open child and resumes when the child termi
           expect(attempts?.count).toBeGreaterThan(1)
           expect(join?.error).toBeNull()
           expect(join?.output_json).toContain("Held child reported.")
+        }),
+      ),
+    ),
+  )
+}, 60_000)
+
+test("a parent that answers without collecting its subagents cancels them", () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-join-abandon-" })
+      const main = yield* TestModel.make(
+        [
+          TestModel.toolCall("oracle", { prompt: "Investigate forever." }, { id: "call-oracle" }),
+          TestModel.text("Answered without collecting the subagent."),
+        ],
+        { provider: "test", model: "gpt-5.6-terra", registrationKey: "terra-medium" },
+      )
+      const child = yield* TestModel.make([TestModel.text("Never delivered.")], {
+        provider: "test",
+        model: "gpt-5.6-sol",
+        registrationKey: "sol-medium",
+      })
+      const never = yield* Deferred.make<void>()
+      const stalled = Layer.effect(
+        LanguageModel.LanguageModel,
+        Effect.gen(function* () {
+          const model = yield* LanguageModel.LanguageModel
+          const streamText = ((options: Parameters<LanguageModel.Service["streamText"]>[0]) =>
+            Stream.unwrap(
+              Deferred.await(never).pipe(Effect.as(model.streamText(options))),
+            )) as LanguageModel.Service["streamText"]
+          return { ...model, streamText }
+        }),
+      ).pipe(Layer.provide(child.layer))
+      const childRegistration = yield* ModelRegistry.registration({ ...child.selection, layer: stalled })
+      const backendLayer = RelayExecutionBackend.layer({
+        filename: `${directory}/execution.db`,
+        workspace: directory,
+        registration: main.registration,
+        additionalRegistrations: [childRegistration],
+        selection: main.selection,
+        toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
+        toolNeedsApproval: () => false,
+        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
+      })
+      const backendContext = yield* Layer.build(backendLayer)
+      return yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        const settled = yield* start(backend, {
+          threadId: "thread-join-abandon",
+          turnId: "turn-join-abandon",
+          prompt: "Ask the Oracle to investigate forever.",
+          startedAt: 1,
+          executionRoute: {
+            mode: "test",
+            main: executionModelRoute("main", main.selection),
+            oracle: executionModelRoute("oracle", child.selection),
+          },
+        })
+        const childStatus = yield* backend.inspect("turn-join-abandon").pipe(
+          Effect.map((inspection) => inspection?.children[0]?.status),
+          Effect.repeat({ while: (status) => status !== "cancelled", schedule: Schedule.spaced("20 millis") }),
+          Effect.timeoutOrElse({ duration: "30 seconds", orElse: () => Effect.succeed("timed out") }),
+        )
+        return { settled, childStatus }
+      }).pipe(Effect.provide(backendContext))
+    }),
+  )
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const bunContext = yield* Layer.build(BunServices.layer)
+        return yield* program.pipe(Effect.provide(bunContext))
+      }),
+    ).pipe(
+      Effect.tap(({ settled, childStatus }) =>
+        Effect.sync(() => {
+          expect(settled.status).toBe("completed")
+          expect(childStatus).toBe("cancelled")
         }),
       ),
     ),
@@ -336,9 +411,7 @@ test("delegations issued in separate model cycles run at the same time", () => {
           .query<
             { readonly output_json: string; readonly error: string | null },
             []
-          >(
-            "select result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.name = 'await_subagents'",
-          )
+          >("select result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.name = 'await_subagents'")
           .get()
         return { settled, children, join }
       }).pipe(Effect.provide(backendContext))

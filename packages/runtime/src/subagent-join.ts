@@ -2,8 +2,7 @@ import { AgentTools, ExecutionStatus } from "@rika/tools"
 import { Ids, ToolRuntime as RelayToolRuntime } from "@relayfx/sdk"
 import { Effect } from "effect"
 
-export const childJoinWaitId = (childExecutionId: string) =>
-  Ids.WaitId.make(`wait:child:${childExecutionId}`)
+export const childJoinWaitId = (childExecutionId: string) => Ids.WaitId.make(`wait:child:${childExecutionId}`)
 
 export const unknownSubagentReason = (childExecutionId: string) =>
   `${childExecutionId} is not a subagent of this turn, so there is no report to collect.`
