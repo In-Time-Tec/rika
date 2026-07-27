@@ -6,6 +6,13 @@ describe("thread titles", () => {
     expect(clampThreadTitle("a".repeat(200))).toHaveLength(threadTitleLimit)
   })
 
+  it("normalizes titles to one visible line", () => {
+    expect(clampThreadTitle("  # Finish the release\n\nYou are finishing\ttoday\u001b  ")).toBe(
+      "# Finish the release You are finishing today",
+    )
+    expect(clampThreadTitle("Family 👨‍👩‍👧‍👦")).toBe("Family 👨‍👩‍👧‍👦")
+  })
+
   it("never splits a surrogate pair", () => {
     const title = clampThreadTitle(`${"a".repeat(threadTitleLimit - 1)}😀tail`)
     expect([...title]).toHaveLength(threadTitleLimit)

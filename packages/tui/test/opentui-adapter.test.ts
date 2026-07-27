@@ -3220,6 +3220,36 @@ test("keeps the draft on the same terminal row when shortcuts open", () =>
     }),
   ))
 
+test("keeps malformed thread titles on one styled picker row", () =>
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const setup = yield* openTui(() => createTestRenderer({ width: 140, height: 30 }))
+      const base = { ...initial("/work", "high"), width: 140, height: 30 }
+      const model: Model = {
+        ...base,
+        threads: [
+          thread({ id: "broken", title: "# Finish the release\n\nYou are finishing\ttoday\u001b" }),
+          thread({ id: "following", title: "Following thread" }),
+        ],
+        threadSwitcher: { ...base.threadSwitcher, open: true },
+      }
+      const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
+      try {
+        surface.update(model)
+        yield* openTui(() => setup.renderOnce())
+        const rows = setup.captureCharFrame().split("\n")
+        const selectedRow = rows.findIndex((row) => row.includes("# Finish the release"))
+        const followingRow = rows.findIndex((row) => row.includes("Following thread"))
+        expect(selectedRow).toBeGreaterThanOrEqual(0)
+        expect(followingRow).toBe(selectedRow + 1)
+        expect(rows[selectedRow]).toContain("\\n\\nYou are finishing\\ttoday\\u{1b}")
+      } finally {
+        surface.destroy()
+        setup.renderer.destroy()
+      }
+    }),
+  ))
+
 test("keeps every overlay above the composer at 50x12", () =>
   Effect.runPromise(
     Effect.gen(function* () {

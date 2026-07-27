@@ -307,7 +307,7 @@ export const renderSidebar: {
         if (thread.id === model.currentThreadId) marker = "*"
         else if (isThreadBusy(thread.status)) marker = spinnerFrame
         else if (thread.unread) marker = "○"
-        const title = truncateToWidth(thread.title, sidebarWidth - 4)
+        const title = truncateToWidth(escapeControlCharacters(thread.title), sidebarWidth - 4)
         const padding = " ".repeat(Math.max(0, sidebarWidth - 4 - stringWidth(title)))
         const renderedRow = ` ${marker} ${title}${padding}`
         if (selected) chunks.push(bg(colors.amber)(fg(colors.surface)(renderedRow)))
@@ -3761,10 +3761,9 @@ const threadListRows = (
     const statsWidth = stats.reduce((total, [text]) => total + text.length + 1, 0)
     const rightWidth = statsWidth + (stats.length > 0 && age.length > 0 ? 1 : 0) + age.length
     const titleWidth = Math.max(1, width - rightWidth - 4)
+    const safeTitle = escapeControlCharacters(thread.title)
     const title =
-      stringWidth(thread.title) > titleWidth
-        ? `${truncateToWidth(thread.title, Math.max(0, titleWidth - 1))}…`
-        : thread.title
+      stringWidth(safeTitle) > titleWidth ? `${truncateToWidth(safeTitle, Math.max(0, titleWidth - 1))}…` : safeTitle
     const leftText = `  ${title}`
     const padding = Math.max(1, width - stringWidth(leftText) - rightWidth - 1)
     if (selected) {
@@ -3801,7 +3800,7 @@ export const previewBoxRows: {
     preview === undefined
       ? []
       : [
-          preview.title,
+          escapeControlCharacters(preview.title),
           preview.workspace,
           [preview.archived ? "archived" : "", preview.unread ? "unread" : "", preview.status]
             .filter((value) => value.length > 0)

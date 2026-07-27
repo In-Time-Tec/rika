@@ -1498,12 +1498,12 @@ describe("Operation", () => {
       const output = yield* Effect.gen(function* () {
         const operation = yield* Operation.Service
         yield* operation.run({ _tag: "Thread", action: "new", clientWorkspace: "/client-work" })
-        yield* operation.run({ _tag: "Thread", action: "rename", threadId: "thread-a", title: "Named" })
+        yield* operation.run({ _tag: "Thread", action: "rename", threadId: "thread-a", title: "\nNamed\tthread\u001b" })
         yield* operation.run({ _tag: "Thread", action: "label", threadId: "thread-a", labels: ["one"] })
         yield* operation.run({ _tag: "Thread", action: "pin", threadId: "thread-a" })
         yield* operation.run({ _tag: "Thread", action: "archive", threadId: "thread-a" })
         yield* operation.run({ _tag: "Thread", action: "list", includeArchived: true })
-        yield* operation.run({ _tag: "Thread", action: "search", query: ["Named"], includeArchived: true })
+        yield* operation.run({ _tag: "Thread", action: "search", query: ["Named thread"], includeArchived: true })
         yield* operation.run({ _tag: "Thread", action: "unarchive", threadId: "thread-a" })
         const catalogLine = (yield* TestConsole.logLines).length
         yield* operation.run({ _tag: "ToolCatalog", action: "list" })
@@ -1522,7 +1522,7 @@ describe("Operation", () => {
         return { catalogOutput, lines: yield* TestConsole.logLines }
       }).pipe(provideLayer(layer))
       const lines = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(output.lines)
-      expect(lines.some((line) => line.includes('"title":"Named"'))).toBe(true)
+      expect(lines.some((line) => line.includes('"title":"Named thread"'))).toBe(true)
       expect(lines.some((line) => line.includes('"workspace":"/client-work"'))).toBe(true)
       expect(lines.some((line) => line.includes('"name":"read"'))).toBe(true)
       const catalogOutput = yield* Schema.decodeUnknownEffect(Schema.Array(Schema.String))(output.catalogOutput)

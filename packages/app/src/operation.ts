@@ -5468,7 +5468,7 @@ export const productLayer = <
               }
               case "rename":
                 yield* repository
-                  .rename(Thread.ThreadId.make(input.threadId), input.title, now)
+                  .rename(Thread.ThreadId.make(input.threadId), clampThreadTitle(input.title) || "New thread", now)
                   .pipe(Effect.flatMap(writeThread))
                 yield* notifyThreadSummaries
                 return
