@@ -412,6 +412,7 @@ export const QueueItem = Schema.Struct({
   id: Schema.String,
   prompt: Schema.String,
   attachments: Schema.optionalKey(Schema.Array(Schema.String)),
+  provisional: Schema.optionalKey(Schema.Literal(true)),
 })
 export type QueueItem = typeof QueueItem.Type
 
@@ -526,6 +527,7 @@ export type Message =
   | {
       readonly _tag: "SubmissionAdmitted"
       readonly turnId: string
+      readonly status?: "active" | "queued"
       readonly submissionId?: string
     }
   | {
@@ -668,8 +670,10 @@ export const applyQueueDelta: {
     const queue = [...model.queue]
     let selection = model.queueSelection
     if (change._tag === "Added") {
-      if (queue.some((item) => item.id === change.item.id)) return { model, resync: true }
-      queue.push(change.item)
+      const existing = queue.findIndex((item) => item.id === change.item.id)
+      if (existing >= 0 && queue[existing]!.provisional !== true) return { model, resync: true }
+      if (existing >= 0) queue[existing] = change.item
+      else queue.push(change.item)
     } else if (change._tag === "Updated") {
       const index = queue.findIndex((item) => item.id === change.item.id)
       if (index < 0) return { model, resync: true }
@@ -1377,12 +1381,21 @@ export const update: {
         historyIndex: undefined,
         historySearch: "",
       }
+      const queuesBehindActiveTurn = model.busy && message.submissionId !== undefined
       return {
         ...model,
         input: "",
         cursor: 0,
         pastedText: [],
         ...submittedHistory,
+        ...(queuesBehindActiveTurn
+          ? {
+              queue: [
+                ...model.queue,
+                { id: message.submissionId!, prompt: submittedPrompt, provisional: true as const },
+              ],
+            }
+          : {}),
         submittedDrafts: [
           ...model.submittedDrafts,
           {
@@ -1393,14 +1406,27 @@ export const update: {
           },
         ],
         busy: true,
-        activity: { _tag: "Sending" },
+        activity: model.busy ? model.activity : { _tag: "Sending" },
       }
     }
-    case "SubmissionAdmitted":
+    case "SubmissionAdmitted": {
+      const queue =
+        message.submissionId === undefined
+          ? model.queue
+          : model.queue.flatMap((item) =>
+              item.id === message.submissionId && item.provisional === true
+                ? message.status === "queued"
+                  ? [{ ...item, id: message.turnId }]
+                  : []
+                : [item],
+            )
       return {
         ...model,
+        queue,
+        queueSelection: validQueueSelection(model.queueSelection, queue),
         submittedDrafts: bindSubmittedDraft(model.submittedDrafts, message.turnId, message.submissionId),
       }
+    }
     case "SteeringAccepted": {
       const index = model.pendingSteering.findIndex(
         (row) => row.turnId === message.turnId && row.sequence === undefined && row.text === message.text,
@@ -2196,6 +2222,7 @@ export const update: {
             }
           }
           const selected = queued[current]!
+          if (selected.provisional === true) return model
           if (key.ctrl && key.name === "e")
             return insert(
               {

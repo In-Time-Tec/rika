@@ -563,6 +563,77 @@ describe("ViewState", () => {
     ])
   })
 
+  test("submitting while busy echoes a provisional queue row immediately", () => {
+    const busy: ViewState.Model = ViewState.resetQueue(
+      { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "queued prompt" },
+      "thread",
+      3,
+      [],
+    )
+    const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
+    expect(submitted.queue).toEqual([{ id: "sub-1", prompt: "queued prompt", provisional: true }])
+    expect(submitted.queueRevision).toBe(3)
+    expect(submitted.input).toBe("")
+  })
+
+  test("admission rebinds a queued provisional row and the real delta replaces it without resync", () => {
+    const busy: ViewState.Model = ViewState.resetQueue(
+      { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "queued prompt" },
+      "thread",
+      3,
+      [],
+    )
+    const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
+    const admitted = ViewState.update(submitted, {
+      _tag: "SubmissionAdmitted",
+      turnId: "turn-b",
+      status: "queued",
+      submissionId: "sub-1",
+    })
+    expect(admitted.queue).toEqual([{ id: "turn-b", prompt: "queued prompt", provisional: true }])
+    const applied = ViewState.applyQueueDelta(admitted, "thread", 4, {
+      _tag: "Added",
+      item: { id: "turn-b", prompt: "queued prompt" },
+    })
+    expect(applied.resync).toBe(false)
+    expect(applied.model.queue).toEqual([{ id: "turn-b", prompt: "queued prompt" }])
+    expect(applied.model.queueRevision).toBe(4)
+  })
+
+  test("admission that starts immediately removes the provisional row", () => {
+    const busy: ViewState.Model = ViewState.resetQueue(
+      { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
+      "thread",
+      3,
+      [],
+    )
+    const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
+    const admitted = ViewState.update(submitted, {
+      _tag: "SubmissionAdmitted",
+      turnId: "turn-b",
+      status: "active",
+      submissionId: "sub-1",
+    })
+    expect(admitted.queue).toEqual([])
+  })
+
+  test("provisional queue rows ignore edit, steer, and dequeue keys", () => {
+    const busy: ViewState.Model = ViewState.resetQueue(
+      { ...ViewState.initial("/work"), busy: true, activeTurnId: "turn-a", currentThreadId: "thread", input: "prompt" },
+      "thread",
+      3,
+      [],
+    )
+    const submitted = ViewState.update(busy, { _tag: "Submitted", submissionId: "sub-1" })
+    const selected = { ...submitted, queueSelection: "sub-1" }
+    const dequeued = ViewState.update(selected, { _tag: "KeyPressed", key: { name: "backspace" } })
+    const steered = ViewState.update(selected, { _tag: "KeyPressed", key: { name: "return" } })
+    const edited = ViewState.update(selected, { _tag: "KeyPressed", key: { name: "e", ctrl: true } })
+    expect(dequeued.pendingAction).toBeUndefined()
+    expect(steered.pendingAction).toBeUndefined()
+    expect(edited.editingTurnId).toBeUndefined()
+  })
+
   test("steering a selected queued message opens a pending steering row", () => {
     const busy: ViewState.Model = ViewState.resetQueue(
       {

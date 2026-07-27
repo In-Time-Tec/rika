@@ -585,6 +585,30 @@ test(
 )
 
 test(
+  "echoes a queued prompt beside the streaming turn and drains it without a restart",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const app = yield* TuiApp.tuiApp({
+          script: [TuiApp.model.text("SLOW_FIRST_ANSWER", 5_000), TuiApp.model.text("QUEUED_SECOND_ANSWER")],
+        })
+        yield* Effect.promise(() => app.type("First slow prompt."))
+        app.pressEnter()
+        yield* app.waitFrame("First slow prompt.")
+        yield* app.waitModelRequests(1)
+        yield* Effect.promise(() => app.type("Second queued prompt."))
+        app.pressEnter()
+        const queuedFrame = yield* app.waitFrame("Second queued prompt.")
+        expect(queuedFrame).toContain("First slow prompt.")
+        const finalFrame = yield* app.waitFrame("QUEUED_SECOND_ANSWER")
+        expect(finalFrame).toContain("SLOW_FIRST_ANSWER")
+        yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
   "cancels the active turn and promotes the queued turn",
   () =>
     TuiApp.run(
