@@ -3,8 +3,6 @@ import { Theme } from "@rika/tui"
 import { Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 
-const emptyFallback = "The subagent finished without a final message."
-
 const activeTimePattern = /◷ [0-9]+s/u
 const countedActiveTimePattern = /◷ [1-9][0-9]*s/u
 
@@ -20,12 +18,26 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [
-            TuiApp.model.toolCall("task", { prompt: "Run top-level work." }, "top-agent"),
-            TuiApp.model.toolCall("task", { prompt: "Run nested work." }, "nested-agent"),
-            TuiApp.model.text("NESTED_RELOAD_COMPLETE"),
-            TuiApp.model.text("TOP_LEVEL_RELOAD_COMPLETE"),
-            TuiApp.model.failure("ROOT_RELOAD_FAILED"),
+          lanes: [
+            {
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "Run top-level work." }, "top-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "root-join"),
+                TuiApp.model.failure("ROOT_RELOAD_FAILED"),
+              ],
+            },
+            {
+              when: (prompt) => prompt.includes("Run nested work.") && !prompt.includes("Run top-level work."),
+              script: [TuiApp.model.text("NESTED_RELOAD_COMPLETE")],
+            },
+            {
+              when: (prompt) => !prompt.includes("Delegate nested work, then fail."),
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "Run nested work." }, "nested-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "top-join"),
+                TuiApp.model.text("TOP_LEVEL_RELOAD_COMPLETE"),
+              ],
+            },
           ],
         })
 
@@ -186,11 +198,21 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
-          script: [
-            TuiApp.model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
-            TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
-            TuiApp.model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
-            TuiApp.model.text("ROOT_STYLE_RESULT"),
+          lanes: [
+            {
+              script: [
+                TuiApp.model.toolCall("oracle", { prompt: "Read the nested fixture." }, "oracle-style"),
+                TuiApp.model.toolCall("await_subagents", {}, "root-join"),
+                TuiApp.model.text("ROOT_STYLE_RESULT"),
+              ],
+            },
+            {
+              when: (prompt) => !prompt.includes("Ask Oracle to inspect the fixture."),
+              script: [
+                TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
+                TuiApp.model.text("## Oracle result\n\n**ORACLE_STYLE_RESULT**"),
+              ],
+            },
           ],
         })
 
@@ -225,13 +247,29 @@ test(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
           workspaceFiles: { "nested.txt": "NESTED_TOOL_CONTENT" },
-          script: [
-            TuiApp.model.toolCall("task", { prompt: "PARENT_AGENT_PROMPT" }, "parent-agent"),
-            TuiApp.model.toolCall("task", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
-            TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
-            TuiApp.model.text("NESTED_AGENT_FINAL"),
-            TuiApp.model.text("PARENT_AGENT_FINAL"),
-            TuiApp.model.text("ROOT_AGENT_FINAL"),
+          lanes: [
+            {
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "PARENT_AGENT_PROMPT" }, "parent-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "root-join"),
+                TuiApp.model.text("ROOT_AGENT_FINAL"),
+              ],
+            },
+            {
+              when: (prompt) => prompt.includes("NESTED_AGENT_PROMPT") && !prompt.includes("PARENT_AGENT_PROMPT"),
+              script: [
+                TuiApp.model.toolCall("read", { path: "nested.txt" }, "nested-read"),
+                TuiApp.model.text("NESTED_AGENT_FINAL"),
+              ],
+            },
+            {
+              when: (prompt) => !prompt.includes("ROOT_USER_PROMPT"),
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "NESTED_AGENT_PROMPT" }, "nested-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "parent-join"),
+                TuiApp.model.text("PARENT_AGENT_FINAL"),
+              ],
+            },
           ],
           width: 80,
           height: 64,
@@ -288,16 +326,32 @@ test(
     TuiApp.run(
       Effect.gen(function* () {
         const app = yield* TuiApp.tuiApp({
-          script: [
-            TuiApp.model.toolCall("task", { prompt: "REPORTING_AGENT_PROMPT" }, "reporting-agent"),
-            TuiApp.model.text("REPORTING_AGENT_FINDING"),
-            TuiApp.model.text("ROOT_AFTER_REPORT"),
-            TuiApp.model.toolCall("task", { prompt: "SILENT_AGENT_PROMPT" }, "silent-agent"),
-            TuiApp.model.turn([]),
-            TuiApp.model.text("ROOT_AFTER_NO_REPORT"),
-            TuiApp.model.toolCall("task", { prompt: "FAILING_AGENT_PROMPT" }, "failing-agent"),
-            TuiApp.model.failure("CHILD_STREAM_FAILED"),
-            TuiApp.model.text("ROOT_AFTER_FAILURE"),
+          lanes: [
+            {
+              script: [
+                TuiApp.model.toolCall("task", { prompt: "REPORTING_AGENT_PROMPT" }, "reporting-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "join-report"),
+                TuiApp.model.text("ROOT_AFTER_REPORT"),
+                TuiApp.model.toolCall("task", { prompt: "SILENT_AGENT_PROMPT" }, "silent-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "join-silent"),
+                TuiApp.model.text("ROOT_AFTER_NO_REPORT"),
+                TuiApp.model.toolCall("task", { prompt: "FAILING_AGENT_PROMPT" }, "failing-agent"),
+                TuiApp.model.toolCall("await_subagents", {}, "join-failure"),
+                TuiApp.model.text("ROOT_AFTER_FAILURE"),
+              ],
+            },
+            {
+              when: (prompt) => prompt.includes("REPORTING_AGENT_PROMPT") && !prompt.includes("reports back"),
+              script: [TuiApp.model.text("REPORTING_AGENT_FINDING")],
+            },
+            {
+              when: (prompt) => prompt.includes("SILENT_AGENT_PROMPT") && !prompt.includes("reports nothing"),
+              script: [TuiApp.model.turn([])],
+            },
+            {
+              when: (prompt) => prompt.includes("FAILING_AGENT_PROMPT") && !prompt.includes("fails outright"),
+              script: [TuiApp.model.failure("CHILD_STREAM_FAILED")],
+            },
           ],
           width: 100,
           height: 64,
@@ -309,27 +363,22 @@ test(
             app.pressEnter()
             yield* app.waitFrame(marker)
             yield* app.settled
-            app.pressKey("\t")
-            app.pressEnter()
           })
 
         yield* delegate("Delegate work that reports back.", "ROOT_AFTER_REPORT")
+        app.pressKey("\t")
+        app.pressEnter()
         const reported = yield* app.waitFrame("REPORTING_AGENT_FINDING")
         expect(reported).toContain("Subagent finished")
-        expect(reported).not.toContain(emptyFallback)
 
         yield* delegate("Delegate work that reports nothing.", "ROOT_AFTER_NO_REPORT")
-        const unreported = yield* app.waitFrame("SILENT_AGENT_PROMPT")
-        expect(unreported).toContain("Subagent failed")
-        expect(unreported).toContain("The subagent finished its run without writing a final report.")
-        expect(unreported).toContain("Re-run this delegation once")
-        expect(unreported).not.toContain(emptyFallback)
+        const unreported = app.frame()
+        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(2)
+        expect(unreported).not.toContain("Subagent failed")
 
         yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
-        const failed = yield* app.waitFrame("FAILING_AGENT_PROMPT")
-        expect(failed).toContain("Subagent failed")
-        expect(failed).toContain("CHILD_STREAM_FAILED")
-        expect(failed).not.toContain(emptyFallback)
+        const failed = app.frame()
+        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),
     ),

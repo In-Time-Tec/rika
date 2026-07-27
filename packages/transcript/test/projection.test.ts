@@ -93,6 +93,40 @@ describe("Transcript projection", () => {
     ).toHaveLength(1)
   })
 
+  it("keeps a delegation card running when its result is a spawned subagent handle", () => {
+    const projection = project("turn-a", "prompt", [
+      { cursor: "0", sequence: 0, type: "model.input.prepared", createdAt: 0 },
+      {
+        cursor: "1",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "call", tool_name: "task", input: { prompt: "Explore." } },
+      },
+      {
+        cursor: "2",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: {
+          tool_call_id: "call",
+          output: {
+            _tag: "Spawned",
+            childExecutionId: "child:execution%3Aturn-a:call",
+            status: "running",
+            next: "Call await_subagents.",
+          },
+        },
+      },
+    ])
+
+    const unit = projection.units.find((candidate) => candidate.key === "tool:turn-a:call")
+    const block = unit?.content._tag === "Block" ? unit.content.block : undefined
+    expect(block?._tag).toBe("ToolCall")
+    expect(block?._tag === "ToolCall" ? block.status : undefined).toBe("running")
+    expect(block?._tag === "ToolCall" ? (block.output ?? "") : "").not.toContain("Spawned")
+  })
+
   it("does not replay the execution-wide completion text into the final assistant phase", () => {
     const projection = project("turn-a", "prompt", [
       { cursor: "0", sequence: 0, type: "model.input.prepared", createdAt: 0 },

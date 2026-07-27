@@ -262,7 +262,7 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
   Policy.register(
     awaitSubagentsTool,
     Policy.allow("unsafe", 120_000, 40_000, {
-      family: "agent",
+      family: "direct",
       action: "await-subagents",
       activeLabel: "Waiting for subagents",
       completeLabel: "Collected subagents",

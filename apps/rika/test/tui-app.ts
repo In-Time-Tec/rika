@@ -1,4 +1,5 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
+import { LanguageModel, ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Operation } from "@rika/app"
@@ -9,7 +10,7 @@ import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { MediaView, ReadWebPage, Runtime as ToolRuntime, WebSearch } from "@rika/tools"
-import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Scope } from "effect"
+import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
 import { interactiveTui } from "../src/main"
@@ -32,10 +33,20 @@ export const model = {
     ),
 }
 
+const encodePrompt = Schema.encodeSync(Schema.UnknownFromJsonString)
+
 const activityMarkers = ["Waiting", "Streaming", "Running 1 tool", "Thinking"] as const
 
+export type Script = ReadonlyArray<Parameters<typeof TestModel.make>[0][number]>
+
+export interface TuiAppLane {
+  readonly when?: (prompt: string) => boolean
+  readonly script: Script
+}
+
 export interface TuiAppOptions {
-  readonly script: ReadonlyArray<Parameters<typeof TestModel.make>[0][number]>
+  readonly script?: Script
+  readonly lanes?: ReadonlyArray<TuiAppLane>
   readonly root?: string
   readonly initialThreadId?: string
   readonly idStart?: number
@@ -89,7 +100,28 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true })
     yield* fileSystem.writeFileString(target, content)
   }
-  const fixture = yield* TestModel.make([...options.script])
+  const lanes = options.lanes ?? [{ script: options.script ?? [] }]
+  const fixtures = yield* Effect.forEach(lanes, (lane) => TestModel.make([...lane.script]))
+  const services = yield* Effect.forEach(fixtures, (built) =>
+    Layer.build(built.layer).pipe(Effect.map((context) => Context.get(context, LanguageModel.LanguageModel))),
+  )
+  const selectLane = (prompt: unknown) => {
+    const text = encodePrompt(prompt)
+    const index = lanes.findIndex((lane) => lane.when !== undefined && lane.when(text))
+    return services[index < 0 ? 0 : index]!
+  }
+  const routedModel: LanguageModel.Service = {
+    ...services[0]!,
+    streamText: ((request: Parameters<LanguageModel.Service["streamText"]>[0]) =>
+      Stream.unwrap(
+        Effect.sync(() => selectLane(request.prompt).streamText(request)),
+      )) as LanguageModel.Service["streamText"],
+  }
+  const fixture = fixtures[0]!
+  const registration = yield* ModelRegistry.registration({
+    ...fixture.selection,
+    layer: Layer.succeed(LanguageModel.LanguageModel, routedModel),
+  })
   const database = Database.layer(path.join(root, "rika.db"))
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
@@ -109,7 +141,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const backendLayer = RelayExecutionBackend.layer({
     filename: path.join(root, "execution.db"),
     workspace,
-    registration: fixture.registration,
+    registration,
     selection: fixture.selection,
     modelVariantPolicy: "fixed-selection",
     toolRuntimeLayer: toolRuntimeLayer(workspace),

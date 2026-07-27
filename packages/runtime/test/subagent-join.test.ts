@@ -149,6 +149,81 @@ test("a delegation returns a running handle and await_subagents collects the rep
   )
 }, 60_000)
 
+test("a silent subagent is collected as a no-report verdict", () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-subagent-join-silent-" })
+      const main = yield* TestModel.make(
+        [
+          TestModel.toolCall("oracle", { prompt: "Say nothing." }, { id: "call-oracle" }),
+          TestModel.toolCall("await_subagents", {}, { id: "call-join" }),
+          TestModel.text("Root noticed the empty report."),
+        ],
+        { provider: "test", model: "gpt-5.6-terra", registrationKey: "terra-medium" },
+      )
+      const oracle = yield* TestModel.make([TestModel.turn([])], {
+        provider: "test",
+        model: "gpt-5.6-sol",
+        registrationKey: "sol-medium",
+      })
+      const backendLayer = RelayExecutionBackend.layer({
+        filename: `${directory}/execution.db`,
+        workspace: directory,
+        registration: main.registration,
+        additionalRegistrations: [oracle.registration],
+        selection: main.selection,
+        toolRuntimeLayer: Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false })),
+        toolNeedsApproval: () => false,
+        permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
+      })
+      const backendContext = yield* Layer.build(backendLayer)
+      return yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        const settled = yield* start(backend, {
+          threadId: "thread-join-silent",
+          turnId: "turn-join-silent",
+          prompt: "Ask the Oracle to say nothing.",
+          startedAt: 1,
+          executionRoute: {
+            mode: "test",
+            main: executionModelRoute("main", main.selection),
+            oracle: executionModelRoute("oracle", oracle.selection),
+          },
+        })
+        const database = yield* Effect.acquireRelease(
+          Effect.sync(() => new Database(`${directory}/execution.db`, { readonly: true })),
+          (connection) => Effect.sync(() => connection.close()),
+        )
+        const join = database
+          .query<
+            { readonly output_json: string },
+            []
+          >("select result.output_json from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.name = 'await_subagents'")
+          .get()
+        return { settled, join }
+      }).pipe(Effect.provide(backendContext))
+    }),
+  )
+  return Effect.runPromise(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const bunContext = yield* Layer.build(BunServices.layer)
+        return yield* program.pipe(Effect.provide(bunContext))
+      }),
+    ).pipe(
+      Effect.tap(({ settled, join }) =>
+        Effect.sync(() => {
+          expect(settled.status).toBe("completed")
+          expect(join?.output_json).toContain('"_tag":"NoReport"')
+          expect(join?.output_json).toContain("without writing a final report")
+          expect(join?.output_json).toContain("Re-run this delegation once")
+        }),
+      ),
+    ),
+  )
+}, 60_000)
+
 test("await_subagents suspends on an open child and resumes when the child terminates", () => {
   const program = Effect.scoped(
     Effect.gen(function* () {

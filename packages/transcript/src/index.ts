@@ -754,6 +754,7 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
     outputStatus === "failed" ||
     (process?.exitCode !== undefined && process.exitCode !== 0)
   const cancelled = outputStatus === "cancelled" || outputStatus === "canceled"
+  const spawned = record(output)._tag === "Spawned" && outputStatus === "running"
   const errorText = string(value.error, string(record(output).message))
   const resultText = failed && errorText.length > 0 ? errorText : outputText(output)
   const diff = string(record(output).diff)
@@ -761,11 +762,11 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
     let status: Extract<Block, { _tag: "ToolCall" }>["status"] = "complete"
     if (failed) status = "failed"
     else if (cancelled) status = "cancelled"
-    else if (process?.running === true && tool.name !== "shell_command_status") status = "running"
+    else if (spawned || (process?.running === true && tool.name !== "shell_command_status")) status = "running"
     return {
       ...tool,
       status,
-      output: resultText,
+      ...(spawned ? {} : { output: resultText }),
       ...(process === undefined ? {} : { process: { ...tool.process, ...process } }),
       files:
         diff.length > 0
