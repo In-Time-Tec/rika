@@ -373,6 +373,35 @@ test("draws every thread-preview row at the exact box width with a two-cell gutt
   expect(text).toContain("idle")
 })
 
+test("reuses formatted thread-preview content while scrolling", () => {
+  let eventReads = 0
+  const event = {
+    cursor: "answer",
+    get sequence() {
+      eventReads += 1
+      return 1
+    },
+    type: "model.output.completed" as const,
+    createdAt: 1,
+    text: Array.from({ length: 40 }, (_, index) => `preview line ${index}`).join("\n"),
+  }
+  const previewModel = model({
+    threads: [thread({ id: "a", title: "Alpha" })],
+    threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
+    threadPreview: ready({
+      threadId: "a",
+      turns: [{ prompt: "hello", events: [event] }],
+    }),
+  })
+
+  previewBoxRows(previewModel, 44, 14)
+  const readsAfterFormatting = eventReads
+  expect(readsAfterFormatting).toBeGreaterThan(0)
+
+  previewBoxRows(update(previewModel, { _tag: "ThreadPreviewScrolled", offset: 3 }), 44, 14)
+  expect(eventReads).toBe(readsAfterFormatting)
+})
+
 test("keeps the previous thread preview visible until the next preview is ready", () => {
   const width = 64
   const height = 24

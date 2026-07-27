@@ -3701,6 +3701,37 @@ export const clipStyledLine: {
   return out
 })
 
+type ThreadPreviewValue = Extract<Model["threadPreview"], { _tag: "Ready" }>["value"]
+
+const previewTranscriptCache = new WeakMap<ThreadPreviewValue, Map<string, ReadonlyArray<ReadonlyArray<TextChunk>>>>()
+
+const renderPreviewTranscript = (
+  preview: ThreadPreviewValue,
+  workspace: string,
+  mode: Mode,
+  width: number,
+): ReadonlyArray<ReadonlyArray<TextChunk>> => {
+  const key = `${workspace}\0${mode}\0${width}`
+  const cached = previewTranscriptCache.get(preview)?.get(key)
+  if (cached !== undefined) return cached
+  let previewModel: Model = { ...initial(workspace, mode), width: Math.max(8, width), height: 200 }
+  preview.turns.forEach((turn, index) => {
+    previewModel = projectUnits(
+      previewModel,
+      Transcript.project(
+        `preview-${index}`,
+        turn.prompt,
+        (turn.events as ReadonlyArray<Event>).map((event) => Object.assign({}, event, { createdAt: event.sequence })),
+      ).units,
+    )
+  })
+  const lines = splitStyledLines(renderTranscriptStyled(previewModel)).map((line) => clipStyledLine(line, width))
+  const cachedWidths = previewTranscriptCache.get(preview) ?? new Map()
+  cachedWidths.set(key, lines)
+  previewTranscriptCache.set(preview, cachedWidths)
+  return lines
+}
+
 const previewTranscriptLines = (
   model: Model,
   width: number,
@@ -3718,18 +3749,7 @@ const previewTranscriptLines = (
     if (selected?.id === model.threadPreview.value.threadId) preview = model.threadPreview.value
   } else if (model.threadPreview._tag === "Loading") preview = model.threadPreview.previous
   if (preview === undefined || preview.turns.length === 0) return undefined
-  let previewModel: Model = { ...initial(model.workspace, model.mode), width: Math.max(8, width), height: 200 }
-  preview.turns.forEach((turn, index) => {
-    previewModel = projectUnits(
-      previewModel,
-      Transcript.project(
-        `preview-${index}`,
-        turn.prompt,
-        (turn.events as ReadonlyArray<Event>).map((event) => Object.assign({}, event, { createdAt: event.sequence })),
-      ).units,
-    )
-  })
-  const lines = splitStyledLines(renderTranscriptStyled(previewModel)).map((line) => clipStyledLine(line, width))
+  const lines = renderPreviewTranscript(preview, model.workspace, model.mode, width)
   const rows = Math.max(1, maxRows)
   const offset = Math.min(model.threadSwitcher.previewScroll, Math.max(0, lines.length - rows))
   const end = lines.length - offset
