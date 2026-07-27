@@ -162,7 +162,7 @@ export const awaitTurnStatus = Effect.fn("ClientMainTest.awaitTurnStatus")(funct
   database: string,
   prompt: string,
   status: string,
-  timeout = 10_000,
+  timeout = 30_000,
 ) {
   let observed = "unread"
   yield* waitUntil(

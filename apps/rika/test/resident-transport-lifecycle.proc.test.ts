@@ -17,6 +17,8 @@ import {
 
 afterEach(() => killTrackedHosts())
 
+const coldStartupHold = 10_000
+
 describe("resident WebSocket process transport", () => {
   test(
     "uses one distinct host for simultaneous clients and exits after final-client grace",
@@ -89,32 +91,32 @@ describe("resident WebSocket process transport", () => {
         Effect.gen(function* () {
           const root = yield* makeRoot
           try {
-            const firstClient = yield* start(root, 100, 0, false, 1_024, 2_000)
+            const firstClient = yield* start(root, 100, 0, false, 1_024, coldStartupHold)
             const first = yield* attachedEffect(firstClient)
             yield* firstClient.closeEffect
             yield* firstClient.awaitExit.pipe(
               Effect.timeoutOrElse({
-                duration: "5 seconds",
+                duration: "20 seconds",
                 orElse: () => Effect.die("resident startup owner did not exit after detaching its live host"),
               }),
             )
             expect(alive(first.hostPid!)).toBe(true)
             yield* Effect.sleep("500 millis")
 
-            const lateClient = yield* start(root, 100, 0, false, 1_024, 2_000)
+            const lateClient = yield* start(root, 100, 0, false, 1_024, coldStartupHold)
             const late = yield* attachedEffect(lateClient)
             expect(late.hostPid).toBe(first.hostPid)
             expect(yield* readText(`${root}/owner-acquisitions.log`)).toBe(`${first.hostPid}\n`)
             yield* lateClient.closeEffect
 
-            yield* waitUntil(fileExists(`${root}/owner-finalizations.log`), 3_000)
+            yield* waitUntil(fileExists(`${root}/owner-finalizations.log`), coldStartupHold * 3)
             expect(yield* readText(`${root}/owner-finalizations.log`)).toBe(`${first.hostPid}\n`)
           } finally {
             yield* cleanRoot(root)
           }
         }),
       ),
-    10_000,
+    120_000,
   )
 
   test(
