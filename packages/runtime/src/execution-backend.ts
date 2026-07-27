@@ -78,6 +78,7 @@ import {
   resolveTitle,
   rootPermissions,
 } from "./agent-profiles"
+import * as ContextTokenizer from "./context-tokenizer"
 import * as MediaAnalyzer from "./media-analyzer"
 import * as ThreadHost from "./thread-host"
 import { definitions, idFor, workflowDefinitionName } from "./workflow-definitions"
@@ -2160,7 +2161,7 @@ export const layer = <
             ),
           ).pipe(Effect.mapError(error))
           const modelRegistry = Context.get(relayModelContext, ModelHub.Service).modelRegistry
-          const languageModelLayer = Layer.succeedContext(relayModelContext)
+          const languageModelLayer = Layer.mergeAll(Layer.succeedContext(relayModelContext), ContextTokenizer.layer)
           const sharedModelRegistryLayer = Layer.succeed(ModelRegistry.ModelRegistry, modelRegistry)
           const rikaToolRuntimeLayer =
             options.toolRuntimeLayerForWorkspace !== undefined && options.resolveWorkspace !== undefined
