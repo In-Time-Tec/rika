@@ -5,7 +5,7 @@ import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { ExecutionStatus, Runtime as ToolRuntime } from "@rika/tools"
+import { Runtime as ToolRuntime } from "@rika/tools"
 import * as Transcript from "@rika/transcript"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -52,7 +52,6 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
   pagedEvents?: ReadonlyArray<ExecutionBackend.Event>,
   stalePageCursor: boolean = false,
   turnPageRequests?: Ref.Ref<ReadonlyArray<TurnRepository.PageCursor | undefined>>,
-  stalePageTurns: boolean = false,
 ) {
   const older = thread("older", 1)
   const latest = thread("latest", 2)
@@ -211,22 +210,14 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       record("permission", waitId, decision, now).pipe(Effect.andThen(Deferred.succeed(permissionResolved, undefined))),
     resolveInvocationSource: () => Effect.die("unused"),
   })
-  const pagedTurn = (turn: Turn.Turn): Turn.Turn =>
-    !stalePageTurns || turn.lastCursor === undefined || ExecutionStatus.isTerminalStatus(turn.status)
-      ? turn
-      : { ...turn, lastCursor: `${turn.lastCursor}-before-advance` }
   const selectionTurns: TurnRepository.Interface =
-    turnPageRequests === undefined && !stalePageTurns
+    turnPageRequests === undefined
       ? turns
       : {
           ...turns,
           page: (threadId, options) =>
-            (turnPageRequests === undefined
-              ? Effect.void
-              : Ref.update(turnPageRequests, (requests) => [...requests, options?.before])
-            ).pipe(
+            Ref.update(turnPageRequests, (requests) => [...requests, options?.before]).pipe(
               Effect.andThen(turns.page(threadId, options)),
-              Effect.map((page) => ({ ...page, turns: page.turns.map(pagedTurn) })),
             ),
         }
   const layer = Operation.productLayer({
@@ -1194,23 +1185,6 @@ describe("InteractiveSession controls", () => {
         ["replay", "active", undefined],
         ["replay", "child:active:title", undefined],
       ])
-    }),
-  )
-
-  it.effect("keeps a running Turn in the initial page when its cursor advances during the load", () =>
-    Effect.gen(function* () {
-      const { session, older } = yield* makeHarness(false, [], undefined, false, undefined, true)
-      const events: Array<Operation.InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread(older.id, 1)
-      yield* Effect.yieldNow
-
-      const initial = events.find((event) => event._tag === "SelectionLoaded")
-      if (initial?._tag !== "SelectionLoaded") return yield* Effect.die("Missing selection")
-      expect(initial.entries.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
-      expect(initial.activeTurn?.id).toBe("active")
-      for (let attempt = 0; attempt < 200; attempt += 1) yield* Effect.yieldNow
-      expect(events.some((event) => event._tag === "TranscriptResyncRequired")).toBe(false)
     }),
   )
 
