@@ -582,9 +582,10 @@ test("depth-one agents route Task to main and specialists to oracle without dept
               TestModel.turn([
                 TestModel.toolCall("oracle", { prompt: "Check the nested design." }, { id: "call-oracle" }),
                 TestModel.toolCall("task", { prompt: "Do a nested check." }, { id: "call-depth-two" }),
-                TestModel.toolCall("review", { prompt: "Review the nested check." }, { id: "call-review" }),
               ]),
               TestModel.toolCall("await_subagents", {}, { id: "depth-one-join" }),
+              TestModel.toolCall("review", { prompt: "Review the nested check." }, { id: "call-review" }),
+              TestModel.toolCall("await_subagents", {}, { id: "depth-one-join-second" }),
               TestModel.text("Depth one combined both results."),
             ],
           },
@@ -622,7 +623,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
                   if (!nested) return model.streamText(options)
                   const active = yield* Ref.updateAndGet(nestedStarted, (value) => value + 1)
                   yield* Ref.update(maximumNested, (value) => Math.max(value, active))
-                  if (active === 3) yield* Deferred.succeed(allNestedStarted, undefined)
+                  if (active === 2) yield* Deferred.succeed(allNestedStarted, undefined)
                   yield* Deferred.await(releaseNested)
                   return model.streamText(options)
                 }),
@@ -698,11 +699,13 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             "select call.execution_id, call.name, call.input_json, result.output_json, result.error from relay_tool_calls call join relay_tool_results result on result.tool_call_id = call.id where call.execution_id like 'child:%' and call.name in ('task', 'oracle', 'review') order by call.created_at",
           )
           .all()
+        const nestedRefusals = delegationResults.filter((result) => (result.error ?? "").includes("budget"))
         return {
           settled,
           children,
           failures,
           delegationResults,
+          nestedRefusals,
           terraRequests: yield* terra.requests,
           depthOneRequests: yield* terra.lanes[2]!.requests,
           depthTwoRequests: yield* terra.lanes[1]!.requests,
@@ -726,6 +729,7 @@ test("depth-one agents route Task to main and specialists to oracle without dept
           children,
           failures,
           delegationResults,
+          nestedRefusals,
           terraRequests,
           depthOneRequests,
           depthTwoRequests,
@@ -741,14 +745,15 @@ test("depth-one agents route Task to main and specialists to oracle without dept
             expect(settled.status).toBe("completed")
             expect(failures).toEqual([])
             expect(allNestedOverlapped).toBe(true)
-            expect(nestedMaximum).toBe(3)
-            expect(terraRequests).toHaveLength(7)
+            expect(nestedMaximum).toBe(2)
+            expect(terraRequests).toHaveLength(9)
             expect(delegationResults).toHaveLength(3)
             expect(delegationResults.map((result) => ({ name: result.name, error: result.error }))).toEqual([
               { name: "oracle", error: null },
               { name: "task", error: null },
               { name: "review", error: null },
             ])
+            expect(nestedRefusals).toEqual([])
             expect(children).toHaveLength(4)
             expect(children.every((child) => child.status === "completed")).toBe(true)
             expect(
