@@ -2655,6 +2655,10 @@ export const productLayer = <
           event: ExecutionBackend.Event,
           publishUsage: boolean,
         ) => {
+          if (Transcript.isTransientEvent(event)) {
+            sessionDispatch(childTranscriptPatch(threadId, executionId, rootTurnId, event))
+            return
+          }
           const key = normalizeChildExecutionId(executionId)
           const delivered = deliveredChildCursors.get(key) ?? new Set<string>()
           if (delivered.has(event.cursor)) return

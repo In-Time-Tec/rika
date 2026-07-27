@@ -119,6 +119,28 @@ const reader = (
 })
 
 describe("UsageCost", () => {
+  it("ignores transient delta events entirely", () => {
+    const accepted = UsageCost.observe(UsageCost.empty, {
+      threadId: "thread",
+      turnId: "turn",
+      event: lifecycle("execution", "accepted", "execution.accepted", 1_000, 1),
+    })
+    const next = UsageCost.observe(accepted, {
+      threadId: "thread",
+      turnId: "turn",
+      event: {
+        executionId: "execution",
+        cursor: "delta-1",
+        sequence: 1,
+        type: "model.output.delta",
+        createdAt: 2_000,
+        data: { delta: "x", transient_index: 1 },
+      },
+    })
+
+    expect(next).toBe(accepted)
+  })
+
   it("keeps accepted and never-started cancelled executions at zero active time", () => {
     const accepted = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
