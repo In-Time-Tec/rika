@@ -52,6 +52,34 @@ export type Cancelled = typeof Cancelled.Type
 export const Result = Schema.Union([Report, NoReport, Failed, Cancelled])
 export type Result = typeof Result.Type
 
+export const Spawned = Schema.Struct({
+  _tag: Schema.tag("Spawned"),
+  childExecutionId: Schema.String,
+  status: Schema.Literal("running"),
+  next: Schema.String,
+})
+export type Spawned = typeof Spawned.Type
+
+export const spawnedNext =
+  "The subagent is running in the background. Start any other independent work now, then call await_subagents to collect its report. Never answer the user before every subagent you started has been collected."
+
+export const spawned = ({ childExecutionId }: Pick<Spawned, "childExecutionId">): Spawned => ({
+  _tag: "Spawned",
+  childExecutionId,
+  status: "running",
+  next: spawnedNext,
+})
+
+export const AwaitSubagentsInput = Schema.Struct({
+  subagents: Schema.optionalKey(Schema.NullOr(Schema.Array(Schema.String))),
+})
+export type AwaitSubagentsInput = typeof AwaitSubagentsInput.Type
+
+export const AwaitSubagentsResult = Schema.Struct({
+  subagents: Schema.Array(Result),
+})
+export type AwaitSubagentsResult = typeof AwaitSubagentsResult.Type
+
 export const noReportRecovery =
   "Nothing came back, so there is no finding to report or act on. Re-run this delegation once with the same prompt, or do the work yourself. Never present this to the user as the subagent having found nothing."
 
@@ -106,12 +134,12 @@ const Failure = Schema.Struct({
 })
 
 export const taskDescription =
-  "Delegate workspace investigation, codebase exploration, reproductions, or implementation to a durable Task subagent and wait for its result. Independent explorations SHOULD be parallel spawn calls in one turn."
+  "Start a durable Task subagent for workspace investigation, codebase exploration, reproductions, or implementation. Returns immediately while the subagent runs in the background; collect its report with await_subagents. Start independent explorations as separate calls without waiting between them."
 
 export const taskTool = Tool.make("task", {
   description: taskDescription,
   parameters: TaskInput,
-  success: Result,
+  success: Spawned,
   failure: Failure,
   failureMode: "return",
 }).addDependency(ToolInvocation.ToolInvocation)
@@ -120,42 +148,59 @@ const specialist = <const Name extends string>(name: Name, description: string) 
   Tool.make(name, {
     description,
     parameters: Schema.Struct({ prompt: Schema.String }),
-    success: Result,
+    success: Spawned,
     failure: Failure,
     failureMode: "return",
   }).addDependency(ToolInvocation.ToolInvocation)
 
 export const oracleTool = specialist(
   "oracle",
-  "Delegate high-level planning, architecture tradeoffs, difficult debugging analysis, or critical review of already-gathered evidence to the read-only Oracle product agent; do not use it for primary workspace or codebase exploration",
+  "Start the read-only Oracle product agent for high-level planning, architecture tradeoffs, difficult debugging analysis, or critical review of already-gathered evidence; do not use it for primary workspace or codebase exploration. Returns immediately; collect its advice with await_subagents",
 )
 export const librarianTool = specialist(
   "librarian",
-  "Delegate substantive external documentation, repository, or codebase research—including access-controlled GitHub-oriented and public semantic-code searches—to the network-read-only Librarian product agent and wait for its result",
+  "Start the network-read-only Librarian product agent for substantive external documentation, repository, or codebase research—including access-controlled GitHub-oriented and public semantic-code searches. Returns immediately; collect its findings with await_subagents",
 )
 export const reviewTool = specialist(
   "review",
-  "Delegate a focused correctness and regression review to the read-only Review product agent and wait for its result",
+  "Start the read-only Review product agent for a focused correctness and regression review. Returns immediately; collect its review with await_subagents",
 )
 export const surgeonTool = specialist(
   "surgeon",
-  "Delegate reproducing and isolating a specific defect to the Surgeon product agent, which may run commands and add temporary instrumentation, and wait for its diagnosis",
+  "Start the Surgeon product agent to reproduce and isolate a specific defect, which may run commands and add temporary instrumentation. Returns immediately; collect its diagnosis with await_subagents",
 )
 export const readThreadTool = Tool.make("read_thread", {
   description:
-    "Ask the ReadThread agent a focused question about one Rika Thread, or let it find relevant Threads when threadId is omitted",
+    "Start the ReadThread agent on a focused question about one Rika Thread, or let it find relevant Threads when threadId is omitted. Returns immediately; collect its answer with await_subagents",
   parameters: ReadThreadInput,
-  success: Result,
+  success: Spawned,
   failure: Failure,
   failureMode: "return",
 }).addDependency(ToolInvocation.ToolInvocation)
+
+export const awaitSubagentsToolName = "await_subagents"
+
+export const awaitSubagentsDescription =
+  "Collect the reports of subagents started earlier in this turn. Blocks until every requested subagent has finished, then returns each one's report or failure. Call it with no arguments to collect every subagent you started, or pass the childExecutionId values to collect a subset. You must collect every subagent you started before giving your final answer."
+
+export const awaitSubagentsTool = Tool.make(awaitSubagentsToolName, {
+  description: awaitSubagentsDescription,
+  parameters: AwaitSubagentsInput,
+  success: AwaitSubagentsResult,
+  failure: Failure,
+  failureMode: "return",
+})
 
 export const delegationToolNames = ["task", "oracle", "librarian", "review", "surgeon", "read_thread"] as const
 export type DelegationToolName = (typeof delegationToolNames)[number]
 export const isDelegationToolName = (name: string): name is DelegationToolName =>
   delegationToolNames.includes(name as DelegationToolName)
 
+export const isSubagentToolName = (name: string) => isDelegationToolName(name) || name === awaitSubagentsToolName
+
 export const modelToolkit = Toolkit.make(taskTool, oracleTool, librarianTool, reviewTool, surgeonTool, readThreadTool)
+
+export const joinToolkit = Toolkit.make(awaitSubagentsTool)
 
 export const registrations: ReadonlyArray<Policy.Registration> = [
   Policy.register(
@@ -212,6 +257,15 @@ export const registrations: ReadonlyArray<Policy.Registration> = [
       activeLabel: "Reading Thread",
       completeLabel: "Read Thread",
       counter: "thread",
+    }),
+  ),
+  Policy.register(
+    awaitSubagentsTool,
+    Policy.allow("unsafe", 120_000, 40_000, {
+      family: "agent",
+      action: "await-subagents",
+      activeLabel: "Waiting for subagents",
+      completeLabel: "Collected subagents",
     }),
   ),
 ]

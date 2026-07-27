@@ -33,7 +33,7 @@ export const childExecutionDepth = (executionId: string) => {
 export const delegationAvailableAtDepth = (depth: number) => depth < 2
 
 const toolsAtDepthImpl = (names: ReadonlyArray<string>, depth: number) =>
-  delegationAvailableAtDepth(depth) ? [...names] : names.filter((name) => !AgentTools.isDelegationToolName(name))
+  delegationAvailableAtDepth(depth) ? [...names] : names.filter((name) => !AgentTools.isSubagentToolName(name))
 
 export const toolsAtDepth: {
   (depth: number): (names: ReadonlyArray<string>) => Array<string>

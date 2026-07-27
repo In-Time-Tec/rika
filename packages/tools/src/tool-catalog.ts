@@ -22,6 +22,7 @@ export type Definition = typeof Definition.Type
 const tools: ReadonlyArray<ToolPolicy.RegisteredTool> = [
   ...Object.values(Runtime.toolkit.tools),
   ...Object.values(AgentTools.modelToolkit.tools),
+  ...Object.values(AgentTools.joinToolkit.tools),
   ...Object.values(ThreadTools.allToolkit.tools),
 ]
 

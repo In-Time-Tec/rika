@@ -80,6 +80,7 @@ import {
 } from "./agent-profiles"
 import * as ContextTokenizer from "./context-tokenizer"
 import * as MediaAnalyzer from "./media-analyzer"
+import * as SubagentJoin from "./subagent-join"
 import * as ThreadHost from "./thread-host"
 import { definitions, idFor, workflowDefinitionName } from "./workflow-definitions"
 import {
@@ -419,6 +420,7 @@ export const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(
   Toolkit.make(
     ...Object.values(RikaToolRuntime.toolkit.tools),
     ...Object.values(AgentTools.modelToolkit.tools),
+    ...Object.values(AgentTools.joinToolkit.tools),
     ...Object.values(options.additionalToolkit?.tools ?? {}),
   )
 
@@ -513,6 +515,17 @@ const pinnedRouteForExecution = (client: Client.Interface, execution: Execution.
   })
 
 const terminalExecutionStatus = ExecutionStatus.isTerminalStatus
+
+const childJoinWaitMode = "child"
+
+export interface SubagentWorkInspection {
+  readonly child_runs: ReadonlyArray<{ readonly status: ExecutionStatus.Status }>
+  readonly waiting_on: ReadonlyArray<{ readonly mode: string }>
+}
+
+export const hasLiveSubagentWork = (inspection: SubagentWorkInspection) =>
+  inspection.child_runs.some((child) => !terminalExecutionStatus(child.status)) ||
+  inspection.waiting_on.some((wait) => wait.mode === childJoinWaitMode)
 
 const retryRecoveryPersistence = <A, E, R>(effect: Effect.Effect<A, E, R>, execution: string) =>
   effect.pipe(
@@ -1050,7 +1063,7 @@ const followExecution = (
               })
               return
             }
-            if (stopAtActionableWait && inspection.waiting_on.length > 0) {
+            if (stopAtActionableWait && inspection.waiting_on.some((wait) => wait.mode !== childJoinWaitMode)) {
               yield* Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true })
               return
             }
@@ -2014,9 +2027,7 @@ export const layer = <
                   Effect.retry({ schedule: recoveryRetrySchedule }),
                   Effect.orDie,
                 )
-                const unsafe =
-                  inspection.child_runs.length > 0 &&
-                  inspection.pending_tool_calls.some((tool) => AgentTools.isDelegationToolName(tool.tool_name))
+                const unsafe = hasLiveSubagentWork(inspection)
                 yield* Effect.logInfo("execution.context.baseline.assembled").pipe(
                   Effect.annotateLogs({
                     "rika.context.baseline.hash": hash,
@@ -2034,7 +2045,10 @@ export const layer = <
               }),
           })
           const toolkit = toolkitFor(options)
-          const runnerToolkit = Toolkit.make(...Object.values(toolkit.tools), ThreadHost.promoteTurnTool)
+          const runnerToolkit = Toolkit.make(
+            ...Object.values(toolkit.tools).filter((tool) => tool.name !== AgentTools.awaitSubagentsToolName),
+            ThreadHost.promoteTurnTool,
+          )
           const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
             toolName: AgentTools.DelegationToolName,
             profile: AgentProfile,
@@ -2110,7 +2124,7 @@ export const layer = <
                 client.childRuns.spawn({
                   execution_id: parentExecutionId,
                   ...child,
-                  wait: false,
+                  wait: true,
                 }),
               { discard: true },
             ).pipe(
@@ -2130,9 +2144,14 @@ export const layer = <
                 message: `The child for tool call ${invocation.callId} is not in its fan-out batch`,
               })
             }
-            return yield* awaitChildResult(client, String(current.child_execution_id)).pipe(
-              Effect.mapError((cause) => AgentTools.AgentToolError.make({ tool: toolName, message: String(cause) })),
+            yield* Effect.logInfo("delegation.spawned").pipe(
+              Effect.annotateLogs({
+                "rika.execution.id": invocation.executionId,
+                "rika.child.execution.id": String(current.child_execution_id),
+                "rika.tool.name": toolName,
+              }),
             )
+            return AgentTools.spawned({ childExecutionId: String(current.child_execution_id) })
           })
           const delegationHandlerLayer = AgentTools.modelToolkit.toLayer({
             task: (input) => delegation("task", "Task", input),
@@ -2179,7 +2198,7 @@ export const layer = <
             yield* Effect.logWarning("web_search.unsupported_provider").pipe(
               Effect.annotateLogs("rika.web_search.provider_ids", search.unsupportedIds.join(",")),
             )
-          const toolRuntimeLayer = RelayToolRuntime.layerFromHandledToolkit(runnerToolkit, {
+          const handledToolRuntimeLayer = RelayToolRuntime.layerFromHandledToolkit(runnerToolkit, {
             tools: (tool) => ({
               needsApproval:
                 tool.name === ThreadHost.promoteTurnTool.name
@@ -2226,6 +2245,34 @@ export const layer = <
               ),
             ),
           )
+          const subagentJoinTool = SubagentJoin.registeredTool({
+            childRuns: (execution) =>
+              Deferred.await(relayClient).pipe(
+                Effect.flatMap((client) => client.executions.inspect(Ids.ExecutionId.make(execution))),
+                Effect.map((inspection) =>
+                  inspection.child_runs.map((child) => ({
+                    childExecutionId: String(child.child_execution_id),
+                    status: child.status,
+                  })),
+                ),
+                Effect.mapError(String),
+              ),
+            resolveChild: (childExecutionId) =>
+              Deferred.await(relayClient).pipe(
+                Effect.flatMap((client) => awaitChildResult(client, childExecutionId)),
+                Effect.mapError(String),
+              ),
+          })
+          const toolRuntimeLayer = Layer.effect(
+            RelayToolRuntime.HostService,
+            Effect.gen(function* () {
+              const host = yield* RelayToolRuntime.HostService
+              const registered = yield* host.registeredTools
+              return RelayToolRuntime.HostService.of({
+                registeredTools: Effect.succeed([...registered, subagentJoinTool]),
+              })
+            }),
+          ).pipe(Layer.provide(handledToolRuntimeLayer))
           const childResult = (client: Client.Interface, childId: string) => {
             const childExecutionId = Ids.ExecutionId.make(childId)
             return client.executions.stream({ execution_id: childExecutionId }).pipe(

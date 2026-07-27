@@ -110,8 +110,9 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   const definition = definitions[name]
   const delegationTools = (() => {
     if (name === "ReadThread") return []
-    if (name === "Oracle" || name === "Review" || name === "Surgeon") return [AgentTools.readThreadTool]
-    return Object.values(AgentTools.modelToolkit.tools)
+    if (name === "Oracle" || name === "Review" || name === "Surgeon")
+      return [AgentTools.readThreadTool, AgentTools.awaitSubagentsTool]
+    return [...Object.values(AgentTools.modelToolkit.tools), AgentTools.awaitSubagentsTool]
   })()
   const recoveryTools =
     name === "ReadThread" ? [] : [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool]
