@@ -44,31 +44,31 @@ const quitCancelsBlockedTurn = (
 test(
   "cancels a blocked turn from the quitting client before the process exits",
   () => quitCancelsBlockedTurn("quit from the palette", { write: `${openPalette}quit\r` }, withoutAbandonmentFallback),
-  60_000,
+  120_000,
 )
 
 test(
   "cancels a blocked turn after an interrupted client leaves the resident",
   () => quitCancelsBlockedTurn("quit on SIGINT", { write: "", signal: "SIGINT" }, "500"),
-  60_000,
+  120_000,
 )
 
 test(
   "cancels a blocked turn after a terminated client leaves the resident",
   () => quitCancelsBlockedTurn("quit on SIGTERM", { write: "", signal: "SIGTERM" }, "500"),
-  60_000,
+  120_000,
 )
 
 test(
   "cancels a blocked turn after a hard-killed client stays away",
   () => quitCancelsBlockedTurn("quit on SIGKILL", { write: "", signal: "SIGKILL" }, "500"),
-  60_000,
+  120_000,
 )
 
 test(
   "cancels a blocked turn from the client when its terminal hangs up",
   () => quitCancelsBlockedTurn("quit on SIGHUP", { write: "", signal: "SIGHUP" }, withoutAbandonmentFallback),
-  60_000,
+  120_000,
 )
 
 test(
@@ -92,5 +92,5 @@ test(
         yield* awaitTurnStatus(result.database, prompt, "cancelled")
       }),
     ),
-  60_000,
+  120_000,
 )

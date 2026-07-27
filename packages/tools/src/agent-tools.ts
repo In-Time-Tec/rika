@@ -134,7 +134,7 @@ const Failure = Schema.Struct({
 })
 
 export const taskDescription =
-  "Start a durable Task subagent for workspace investigation, codebase exploration, reproductions, or implementation. Returns immediately while the subagent runs in the background; collect its report with await_subagents. Start independent explorations as separate calls without waiting between them."
+  "Start a durable Task subagent for workspace investigation, codebase exploration, reproductions, or implementation. Returns immediately while the subagent runs in the background; collect its report with await_subagents. Start a few independent explorations at once, then collect them with await_subagents before starting more; only a few subagents may run at a time."
 
 export const taskTool = Tool.make("task", {
   description: taskDescription,

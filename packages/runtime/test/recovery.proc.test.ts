@@ -101,6 +101,20 @@ test(
             ),
             (rows) => rows[0]?.count === 3,
           )
+          yield* waitFor(
+            query<{ tool_call_id: string }>(
+              `select tool_call_id from relay_tool_results where tool_call_id in ('call-alpha', 'call-beta', 'call-gamma')`,
+            ),
+            (rows) => rows.length === 3,
+          )
+          const rootBeforeReplacement = yield* query<{ status: string }>(
+            `select status from relay_executions where id = '${rootId}'`,
+          )
+          expect(rootBeforeReplacement[0]?.status).toBe("running")
+          const chatCheckpoints = yield* query<{ count: number }>(
+            `select count(*) as count from relay_agent_chats where execution_id = '${rootId}'`,
+          )
+          expect(chatCheckpoints[0]?.count).toBe(0)
           const baseline = (yield* query<{ baseline: string }>(
             `select baseline from relay_execution_context_epochs where execution_id = '${rootId}'`,
           ))[0]?.baseline
@@ -173,16 +187,16 @@ test(
             `select count(*) as count from relay_execution_events where execution_id = '${rootId}' and type = 'model.input.prepared'`,
           )
           const delegationCalls = yield* query<{ id: string; name: string; state: string }>(
-            `select id, name, state from relay_tool_calls where execution_id = '${rootId}' order by id`,
+            `select id, name, state from relay_tool_calls where execution_id = '${rootId}' and name = 'task' order by id`,
           )
           const pendingDelegationCalls = yield* query<{ count: number }>(
             `select count(*) as count from relay_tool_calls where execution_id = '${rootId}' and state not in ('completed', 'failed', 'cancelled')`,
           )
           const delegationResults = yield* query<{ tool_call_id: string; error: string | null }>(
-            `select result.tool_call_id, result.error from relay_tool_results result join relay_tool_calls call on call.id = result.tool_call_id where call.execution_id = '${rootId}' order by result.tool_call_id`,
+            `select result.tool_call_id, result.error from relay_tool_results result join relay_tool_calls call on call.id = result.tool_call_id where call.execution_id = '${rootId}' and call.name = 'task' order by result.tool_call_id`,
           )
           const attempts = yield* query<{ state: string; completed_at: number | null }>(
-            `select state, completed_at from relay_tool_attempts where execution_id = '${rootId}' order by tool_call_id`,
+            `select state, completed_at from relay_tool_attempts where execution_id = '${rootId}' and tool_call_id in ('call-alpha', 'call-beta', 'call-gamma') order by tool_call_id`,
           )
           const childOutcomes = yield* query<{ execution_id: string; content_json: string }>(
             `select execution_id, content_json from relay_execution_events where execution_id like 'child:%' and type = 'model.output.completed' order by execution_id`,

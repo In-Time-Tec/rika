@@ -1,5 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { childExecutionDepth, childExecutionId, delegationAvailableAtDepth, toolsAtDepth } from "../src/agent-depth"
+import {
+  childExecutionDepth,
+  childExecutionId,
+  delegationAvailableAtDepth,
+  delegationBudgetAtDepth,
+  toolsAtDepth,
+} from "../src/agent-depth"
 
 describe("agent depth", () => {
   it("tracks encoded ancestry and stops delegation after depth two", () => {
@@ -22,6 +28,11 @@ describe("agent depth", () => {
       "review",
     ])
     expect(toolsAtDepth(["read", "task", "oracle", "librarian", "review"], 2)).toEqual(["read"])
+  })
+
+  it("bounds live subagents more tightly below the root", () => {
+    expect(delegationBudgetAtDepth(0)).toBe(4)
+    expect(delegationBudgetAtDepth(1)).toBe(2)
   })
 
   it("removes the subagent join tool wherever delegation is unavailable", () => {

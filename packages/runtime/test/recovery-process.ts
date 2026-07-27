@@ -43,6 +43,7 @@ const main = Effect.gen(function* () {
     TestModel.toolCall("task", { prompt: "alpha" }, { id: "call-alpha" }),
     TestModel.toolCall("task", { prompt: "beta" }, { id: "call-beta" }),
     TestModel.toolCall("task", { prompt: "gamma" }, { id: "call-gamma" }),
+    TestModel.toolCall("context_probe", {}, { id: "call-checkpoint-barrier" }),
   ])
   let turns: ReadonlyArray<TestModel.Step> = Array.from({ length: 6 }, (_, index) =>
     TestModel.text(`recovered child ${index}`),
@@ -87,7 +88,10 @@ const main = Effect.gen(function* () {
     toolNeedsApproval: () => false,
     permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
     additionalToolkit: contextToolkit,
-    additionalHandlerLayer: contextToolkit.toLayer({ context_probe: () => Effect.succeed("unused") }),
+    additionalHandlerLayer: contextToolkit.toLayer({
+      context_probe: () =>
+        phase === "initial" ? Effect.sleep("5 minutes").pipe(Effect.as("unused")) : Effect.succeed("unused"),
+    }),
     recoveryChildSettlementGrace: phase === "recovered-stuck" ? "0 millis" : "5 minutes",
   })
   const services = yield* Layer.build(backendLayer).pipe(Effect.mapError(fixtureError))

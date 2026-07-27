@@ -79,6 +79,8 @@ describe("product agent profiles", () => {
     expect(mainInstructions).toContain("Delegation is asynchronous")
     expect(mainInstructions).toContain("call await_subagents to collect their reports")
     expect(mainInstructions).toContain("an uncollected subagent is cancelled when the turn ends")
+    expect(mainInstructions).toContain("Delegate in small batches")
+    expect(registered.Task?.instructions).toContain("delegate in small batches and collect them before starting more")
     expect(mainInstructions).toContain("Use Oracle only as a read-only, high-reasoning advisor")
     expect(mainInstructions).toContain("after it has been gathered")
     expect(mainInstructions).toContain("do not use Oracle to search or explore the codebase")
