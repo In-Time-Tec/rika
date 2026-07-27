@@ -272,7 +272,7 @@ const selectionRepairNodeLimit = 128
 const selectionRepairPageLimit = 32
 const selectionRepairTurnPageLimit = 4
 const selectionRepairTranscriptPageLimit = 8
-const selectionInitialTurnWindow = 24
+const selectionInitialTurnWindow = 12
 const selectionInitialEntryWindow = 400
 const selectionRepairDeferredPrefix = "selection repair deferred:"
 type RepairBudget = { nodes: number; pages: number; bytes: number }
@@ -3574,16 +3574,22 @@ export const productLayer = <
         ) {
           const turns = yield* TurnRepository.Service
           const transcripts = yield* TranscriptRepository.Service
-          const turnPage = yield* turns.page(state.thread.id, { limit: selectionInitialTurnWindow })
+          const turnPage = yield* turns.page(state.thread.id, { limit: 50 })
           const window: Array<ReadonlyArray<TranscriptRepository.Entry>> = []
           let entryCount = 0
+          let projectedTurns = 0
           let hasOlder = turnPage.hasOlder
           let reduced = false
           let oldestCursor: TranscriptRepository.PageCursor | undefined
           for (const turn of turnPage.turns.toReversed()) {
+            if (projectedTurns >= selectionInitialTurnWindow) {
+              hasOlder = true
+              break
+            }
             if (turn.status === "queued") continue
             const projection = yield* transcripts.get(turn.id)
-            if (projection === undefined) continue
+            if (projection === undefined || projection.units.length === 0) continue
+            projectedTurns += 1
             const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
               Object.assign(
                 {

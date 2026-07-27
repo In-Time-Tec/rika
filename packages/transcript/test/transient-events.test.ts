@@ -19,7 +19,7 @@ const transientReasoning = (index: number, text: string, sequence = 1): SourceEv
   data: { delta: text, transient_index: index },
 })
 
-const durable = (sequence: number, type: string, data?: Record<string, unknown>): SourceEvent => ({
+const durableEvent = (sequence: number, type: string, data?: Record<string, unknown>): SourceEvent => ({
   cursor: `${type}-${sequence}`,
   sequence,
   type,
@@ -173,21 +173,21 @@ describe("transient events", () => {
     const thoughts = "**Planning project exploration and permissions review**"
     const streamed = fold(
       [
-        durable(0, "execution.accepted"),
-        durable(1, "execution.started"),
-        durable(2, "model.input.prepared"),
-        durable(3, "model.call.started"),
-        durable(4, "model.attempt.started"),
-        durable(5, "model.attempt.first_output"),
+        durableEvent(0, "execution.accepted"),
+        durableEvent(1, "execution.started"),
+        durableEvent(2, "model.input.prepared"),
+        durableEvent(3, "model.call.started"),
+        durableEvent(4, "model.attempt.started"),
+        durableEvent(5, "model.attempt.first_output"),
         transientReasoning(1, thoughts, 5),
-        durable(6, "model.attempt.first_output"),
+        durableEvent(6, "model.attempt.first_output"),
         transientDelta(2, reply, 6),
-        durable(7, "model.attempt.first_output"),
-        durable(8, "model.cycle.completed", { text: reply }),
-        durable(9, "model.reasoning.completed", { text: thoughts }),
-        durable(10, "tool.call.requested", { tool_call_id: "call_t80", tool_name: "read", input: "{}" }),
-        durable(11, "tool.call.requested", { tool_call_id: "call_BLq", tool_name: "read", input: "{}" }),
-        durable(14, "execution.cancelled"),
+        durableEvent(7, "model.attempt.first_output"),
+        durableEvent(8, "model.cycle.completed", { text: reply }),
+        durableEvent(9, "model.reasoning.completed", { text: thoughts }),
+        durableEvent(10, "tool.call.requested", { tool_call_id: "call_t80", tool_name: "read", input: "{}" }),
+        durableEvent(11, "tool.call.requested", { tool_call_id: "call_BLq", tool_name: "read", input: "{}" }),
+        durableEvent(14, "execution.cancelled"),
       ],
       empty("turn-a", "prompt"),
     )
@@ -211,19 +211,19 @@ describe("transient events", () => {
     const latest = "The isolated branch is now based on the fetched remote main."
     const streamed = fold(
       [
-        durable(2, "model.input.prepared"),
-        durable(5, "model.attempt.first_output"),
+        durableEvent(2, "model.input.prepared"),
+        durableEvent(5, "model.attempt.first_output"),
         transientDelta(1, first, 5),
-        durable(8, "model.cycle.completed", { text: first }),
-        durable(10, "tool.call.requested", { tool_call_id: "call_mAk", tool_name: "read", input: "{}" }),
-        durable(11, "tool.result.received", { tool_call_id: "call_mAk" }),
-        durable(15, "steering.delivered", { message_count: 1 }),
-        durable(16, "model.call.started"),
-        durable(26, "steering.delivered", { message_count: 1 }),
-        durable(29, "model.attempt.first_output"),
-        durable(32, "model.cycle.completed", { text: latest }),
-        durable(34, "tool.call.requested", { tool_call_id: "call_Alg", tool_name: "read", input: "{}" }),
-        durable(46, "execution.cancelled"),
+        durableEvent(8, "model.cycle.completed", { text: first }),
+        durableEvent(10, "tool.call.requested", { tool_call_id: "call_mAk", tool_name: "read", input: "{}" }),
+        durableEvent(11, "tool.result.received", { tool_call_id: "call_mAk" }),
+        durableEvent(15, "steering.delivered", { message_count: 1 }),
+        durableEvent(16, "model.call.started"),
+        durableEvent(26, "steering.delivered", { message_count: 1 }),
+        durableEvent(29, "model.attempt.first_output"),
+        durableEvent(32, "model.cycle.completed", { text: latest }),
+        durableEvent(34, "tool.call.requested", { tool_call_id: "call_Alg", tool_name: "read", input: "{}" }),
+        durableEvent(46, "execution.cancelled"),
       ],
       empty("turn-b", "prompt"),
     )
