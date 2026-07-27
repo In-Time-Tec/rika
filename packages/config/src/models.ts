@@ -130,13 +130,8 @@ export const defaults = {
 
 export const presetForBase = (base: string): PresetId => (base === "fable" || base === "opus" ? "claude" : "openai")
 
-export const compactionTriggerTokens = 160_000
-
 export const defaultCompaction = {
-  contextWindow: Math.min(
-    catalog.gpt56Luna.limits.contextWindow,
-    compactionTriggerTokens + catalog.gpt56Luna.limits.maxOutputTokens,
-  ),
+  contextWindow: catalog.gpt56Luna.limits.contextWindow,
   reserveTokens: catalog.gpt56Luna.limits.maxOutputTokens,
   keepRecentTokens: 32_000,
 }

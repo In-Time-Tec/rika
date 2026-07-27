@@ -1,5 +1,5 @@
 import { Function, Schema, type Redacted } from "effect"
-import { compactionTriggerTokens, defaults as modelDefaults, presetIds, presets, supportedEfforts } from "./models"
+import { defaults as modelDefaults, presetIds, presets, supportedEfforts } from "./models"
 import * as Modes from "./modes"
 import * as Paths from "./paths"
 
@@ -281,10 +281,7 @@ const resolveRoute = (settings: Settings, route: RoleRoute, owner: string): Reso
     candidates: alias.candidates,
     model,
     compaction: {
-      contextWindow: Math.min(
-        alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
-        compactionTriggerTokens + alias.limits.maxOutputTokens,
-      ),
+      contextWindow: alias.limits.maxInputTokens + alias.limits.maxOutputTokens,
       reserveTokens: alias.limits.maxOutputTokens,
       keepRecentTokens: alias.limits.keepRecentTokens,
     },
