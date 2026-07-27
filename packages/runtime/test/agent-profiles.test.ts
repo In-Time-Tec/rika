@@ -33,6 +33,10 @@ describe("product agent profiles", () => {
       expect(profile.preset.instructions).toContain(
         name === "ReadThread" ? "Check later Turns" : "read_thread subagent selectively",
       )
+      if (name !== "ReadThread") {
+        expect(profile.preset.instructions).toContain("Preserve substantial generated output")
+        expect(profile.preset.instructions).toContain("Mark each material claim as a worker assertion")
+      }
       expect(profile.agent.instructions).toBe(profile.preset.instructions)
     }
   })
@@ -81,11 +85,20 @@ describe("product agent profiles", () => {
     expect(mainInstructions).toContain("Use the smallest useful batch")
     expect(mainInstructions).toContain("Never delegate speculatively")
     expect(mainInstructions).toContain("Give every subagent a self-contained task packet")
-    expect(mainInstructions).toContain("Treat reports as evidence, not authority")
+    expect(mainInstructions).toContain("assign an exact persistent artifact path")
+    expect(mainInstructions).toContain("Inspect returned artifacts and changed files directly")
+    expect(mainInstructions).toContain("worker assertion, workspace evidence, command or test evidence")
+    expect(mainInstructions).toContain("Never turn a worker's assertion that verification passed")
+    expect(mainInstructions).toContain("run one focused discriminating check")
+    expect(mainInstructions).toContain("do not launch another broad investigation")
     expect(mainInstructions).toContain("start another only for a specific unresolved requirement")
     expect(registered.Task?.instructions).toContain("Do not start Task subagents")
     expect(registered.Task?.instructions).toContain("Start at most one specialist at a time")
     expect(registered.Task?.instructions).toContain("do not turn specialists into a serial exploration loop")
+    expect(registered.Task?.instructions).toContain("Preserve substantial generated output")
+    expect(registered.Task?.instructions).toContain("Do not write an artifact when the parent did not authorize one")
+    expect(registered.Task?.instructions).toContain("Worker assertion, Workspace evidence, Command/test evidence")
+    expect(registered.Task?.instructions).toContain("Report verification as performed only when supported")
     expect(registered.Task?.instructions).toContain("Outcome; Evidence or artifacts; Changes; Verification")
     expect(mainInstructions).toContain("Use Oracle only as a read-only, high-reasoning advisor")
     expect(mainInstructions).toContain("after it has been gathered")
