@@ -424,6 +424,29 @@ const updateTool = (
   })
 }
 
+const processOutput = (process: ToolProcess | undefined): string => `${process?.stdout ?? ""}${process?.stderr ?? ""}`
+
+const initialProcessOutput = (tool: Extract<Block, { _tag: "ToolCall" }>): string | undefined => {
+  const raw = processOutput(tool.process)
+  return tool.process?.truncated !== true && tool.output === raw.trim() ? raw : tool.output
+}
+
+const boundedSuffix = (text: string, limit: number): string => {
+  const suffix = text.slice(-limit)
+  const first = suffix.charCodeAt(0)
+  return first >= 0xdc00 && first <= 0xdfff ? suffix.slice(1) : suffix
+}
+
+const foldOutput = (
+  current: string | undefined,
+  next: string,
+  limit: number,
+): { readonly output?: string; readonly truncated: boolean } => {
+  const combined = `${current ?? ""}${next}`
+  if (combined.length <= limit) return { ...(combined.length === 0 ? {} : { output: combined }), truncated: false }
+  return { output: boundedSuffix(combined, limit), truncated: true }
+}
+
 const processResult = (output: unknown): ToolProcess | undefined => {
   const value = record(output)
   const process = {
@@ -723,7 +746,9 @@ const applyToolRequested = (projection: Projection, turnId: string, event: Sourc
   const previous = toolAt(projection, id)
   const base = toolBlock(id, name, input, previous)
   const processId =
-    name === "shell_command_status" ? inputString(inputRecord(input), ["processId", "process_id"]) : undefined
+    base.presentation.rowDisplay === "continuation"
+      ? inputString(inputRecord(input), ["processId", "process_id"])
+      : undefined
   const parent =
     processId === undefined
       ? undefined
@@ -762,7 +787,8 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
     let status: Extract<Block, { _tag: "ToolCall" }>["status"] = "complete"
     if (failed) status = "failed"
     else if (cancelled) status = "cancelled"
-    else if (spawned || (process?.running === true && tool.name !== "shell_command_status")) status = "running"
+    else if (spawned || (process?.running === true && tool.presentation.rowDisplay !== "continuation"))
+      status = "running"
     return {
       ...tool,
       status,
@@ -776,7 +802,7 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
   })
   if (updated !== projection) {
     if (
-      requested?.name !== "shell_command_status" ||
+      requested?.presentation.rowDisplay !== "continuation" ||
       requested.parentId === undefined ||
       process?.running === undefined ||
       process.processId === undefined
@@ -790,14 +816,21 @@ const applyToolResult = (projection: Projection, turnId: string, event: SourceEv
       let status: Extract<Block, { _tag: "ToolCall" }>["status"] = "complete"
       if (process.exitCode !== undefined && process.exitCode !== 0) status = "failed"
       else if (running) status = "running"
+      const mergedOutput = foldOutput(
+        initialProcessOutput(tool),
+        resultText,
+        Catalog.get(tool.name)?.outputLimit ?? 40_000,
+      )
       return {
         ...tool,
         status,
+        ...(mergedOutput.output === undefined ? {} : { output: mergedOutput.output }),
         process: {
           ...tool.process,
           processId,
           running,
           ...(process.exitCode === undefined ? {} : { exitCode: process.exitCode }),
+          truncated: tool.process?.truncated === true || process.truncated === true || mergedOutput.truncated,
         },
       }
     })

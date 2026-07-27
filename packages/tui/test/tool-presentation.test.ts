@@ -111,6 +111,67 @@ describe("tool presentation", () => {
     expectForeground(chunks, " 3 commands", colors.muted)
   })
 
+  test("omits folded continuation tools from transcript rows and navigation", () => {
+    const continuation = {
+      family: "direct" as const,
+      action: "continuation",
+      activeLabel: "Waiting",
+      completeLabel: "Waited",
+      rowDisplay: "continuation",
+    } as ToolCall["presentation"]
+    const value = model([
+      call("shell", "bash", { command: "bun test" }, shellPresentation, { detail: "bun test" }),
+      call("status", "shell_command_status", { processId: "1" }, continuation, { detail: "bun test" }),
+      call("join", "await_subagents", {}, continuation),
+    ])
+
+    expect(transcriptUnits(value)).toMatchObject([{ kind: "tool", blocks: [0] }])
+    expect(text(value)).toContain("$ bun test")
+    expect(text(value)).not.toContain("Waited")
+    expect(expandableRowIds(value)).not.toContain("tool:status")
+    expect(expandableRowIds(value)).not.toContain("tool:join")
+  })
+
+  test("surfaces unowned continuation failures and folds process exits into their shell row", () => {
+    const continuation = {
+      family: "direct" as const,
+      action: "continuation",
+      activeLabel: "Waiting",
+      completeLabel: "Waited",
+      failedLabel: "Continuation failed",
+      rowDisplay: "continuation",
+    } as ToolCall["presentation"]
+    const value = model([
+      call("shell", "bash", { command: "bun test" }, shellPresentation, {
+        detail: "bun test",
+        status: "failed",
+        process: { processId: "1", running: false, exitCode: 7 },
+      }),
+      call("join", "await_subagents", {}, continuation, {
+        status: "failed",
+        output: "Child report could not be collected",
+      }),
+      call("owned-status", "shell_command_status", { processId: "1" }, continuation, {
+        status: "failed",
+        output: "exit 7",
+        parentId: "shell",
+        process: { processId: "1", running: false, exitCode: 7 },
+      }),
+      call("orphan-status", "shell_command_status", { processId: "missing" }, continuation, {
+        status: "failed",
+        output: "Unknown process id: missing",
+        process: { processId: "missing", running: false, exitCode: 7 },
+      }),
+    ])
+
+    expect(transcriptUnits(value).map((unit) => unit.kind === "tool" && unit.blocks)).toEqual([[0], [1], [3]])
+    expect(text(value)).toContain("Continuation failed")
+    expect(text(value)).not.toContain("Waited")
+    expect(expandableRowIds(value)).toContain("tool:join")
+    expect(expandableRowIds(value)).toContain("tool:orphan-status")
+    expect(expandableRowIds(value)).not.toContain("tool:owned-status")
+  })
+
   test.each([
     ["running", "Oracle", " exploring"],
     ["complete", "Oracle", " has spoken"],

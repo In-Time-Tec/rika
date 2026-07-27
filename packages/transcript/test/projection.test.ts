@@ -507,6 +507,42 @@ describe("Transcript projection", () => {
     })
   })
 
+  it("preserves a failed await_subagents continuation as an actionable AgentToolError", () => {
+    const failure = "AgentToolError: Child reports could not be collected"
+    const projection = project("turn-a", "prompt", [
+      {
+        cursor: "call",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "join", tool_name: "await_subagents", input: {} },
+      },
+      {
+        cursor: "result",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: { tool_call_id: "join", error: failure },
+      },
+    ])
+
+    expect(projection.units[1]).toMatchObject({
+      content: {
+        _tag: "Block",
+        block: {
+          _tag: "ToolCall",
+          name: "await_subagents",
+          status: "failed",
+          output: failure,
+          presentation: {
+            rowDisplay: "continuation",
+            failedLabel: "Subagent wait failed",
+          },
+        },
+      },
+    })
+  })
+
   it("links a Relay handoff spawn to its encoded tool call and keeps the supplied prompt", () => {
     const callId = "rika:execution%3Aparent:spawn-oracle"
     const childId = `execution:parent:child:${callId}`
@@ -665,7 +701,7 @@ describe("Transcript projection", () => {
         createdAt: 2,
         data: {
           tool_call_id: "bash-1",
-          output: { text: "initial", processId: "process-1", running: true, stdout: "initial" },
+          output: { text: "initial", processId: "process-1", running: true, stdout: "initial\n" },
         },
       },
       {
@@ -686,7 +722,7 @@ describe("Transcript projection", () => {
         createdAt: 4,
         data: {
           tool_call_id: "wait-1",
-          output: { text: "middle", processId: "process-1", running: true, stdout: "middle" },
+          output: { text: "middle\n", processId: "process-1", running: true, stdout: "middle\n" },
         },
       },
       {
@@ -707,7 +743,7 @@ describe("Transcript projection", () => {
         createdAt: 6,
         data: {
           tool_call_id: "wait-2",
-          output: { text: "final", processId: "process-1", running: false, exitCode: 0, stdout: "final" },
+          output: { text: "final\n", processId: "process-1", running: false, exitCode: 0, stdout: "final\n" },
         },
       },
       {
@@ -737,11 +773,11 @@ describe("Transcript projection", () => {
 
     expect(interim.units[1]).toMatchObject({
       revision: 4,
-      content: { _tag: "Block", block: { _tag: "ToolCall", status: "running" } },
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "running", output: "initial\nmiddle\n" } },
     })
     expect(interim.units[2]).toMatchObject({
       revision: 4,
-      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete", output: "middle" } },
+      content: { _tag: "Block", block: { _tag: "ToolCall", status: "complete", output: "middle\n" } },
     })
     expect(hasRunningBlocks(interim)).toBe(true)
     expect(projection.units).toHaveLength(5)
@@ -753,8 +789,8 @@ describe("Transcript projection", () => {
         block: {
           _tag: "ToolCall",
           status: "complete",
-          output: "initial",
-          process: { processId: "process-1", running: false, exitCode: 0, stdout: "initial" },
+          output: "initial\nmiddle\nfinal\n",
+          process: { processId: "process-1", running: false, exitCode: 0, stdout: "initial\n" },
         },
       },
     })
@@ -766,10 +802,10 @@ describe("Transcript projection", () => {
         block: {
           _tag: "ToolCall",
           status: "complete",
-          output: "middle",
+          output: "middle\n",
           parentId: "turn-a:bash-1",
           detail: "bun test",
-          process: { processId: "process-1", running: true, stdout: "middle" },
+          process: { processId: "process-1", running: true, stdout: "middle\n" },
           presentation: { activeLabel: "Waiting for", completeLabel: "Waited for" },
         },
       },
@@ -782,10 +818,10 @@ describe("Transcript projection", () => {
         block: {
           _tag: "ToolCall",
           status: "complete",
-          output: "final",
+          output: "final\n",
           parentId: "turn-a:bash-1",
           detail: "bun test",
-          process: { processId: "process-1", running: false, exitCode: 0, stdout: "final" },
+          process: { processId: "process-1", running: false, exitCode: 0, stdout: "final\n" },
           presentation: { activeLabel: "Waiting for", completeLabel: "Waited for" },
         },
       },
@@ -888,6 +924,67 @@ describe("Transcript projection", () => {
       content: { _tag: "Block", block: { _tag: "ToolCall", status: "failed" } },
     })
     expect(hasRunningBlocks(statusError)).toBe(true)
+  })
+
+  it("bounds folded process output while retaining the newest status chunk", () => {
+    const initial = "a".repeat(30_000)
+    const latest = `${"b".repeat(30_000)}TAIL`
+    const projection = project("turn-a", "run tests", [
+      {
+        cursor: "bash",
+        sequence: 1,
+        type: "tool.call.requested",
+        createdAt: 1,
+        data: { tool_call_id: "bash-1", tool_name: "bash", input: { command: "bun test" } },
+      },
+      {
+        cursor: "bash-result",
+        sequence: 2,
+        type: "tool.result.received",
+        createdAt: 2,
+        data: {
+          tool_call_id: "bash-1",
+          output: { text: initial, processId: "process-1", running: true, stdout: initial },
+        },
+      },
+      {
+        cursor: "wait",
+        sequence: 3,
+        type: "tool.call.requested",
+        createdAt: 3,
+        data: {
+          tool_call_id: "wait-1",
+          tool_name: "shell_command_status",
+          input: { processId: "process-1" },
+        },
+      },
+      {
+        cursor: "wait-result",
+        sequence: 4,
+        type: "tool.result.received",
+        createdAt: 4,
+        data: {
+          tool_call_id: "wait-1",
+          output: {
+            text: latest,
+            processId: "process-1",
+            running: true,
+            stdout: latest,
+            truncated: true,
+          },
+        },
+      },
+    ])
+    const parent = projection.units[1]?.content
+
+    expect(parent).toMatchObject({
+      _tag: "Block",
+      block: { _tag: "ToolCall", status: "running", process: { running: true, truncated: true } },
+    })
+    if (parent?._tag !== "Block" || parent.block._tag !== "ToolCall") return
+    expect(parent.block.output).toHaveLength(40_000)
+    expect(parent.block.output).toBe(`${initial}${latest}`.slice(-40_000))
+    expect(parent.block.output?.endsWith("TAIL")).toBe(true)
   })
 
   it("preserves hidden web output with its presentation metadata", () => {

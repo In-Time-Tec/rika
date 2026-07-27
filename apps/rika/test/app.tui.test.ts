@@ -232,6 +232,8 @@ test(
         expect(completed).toContain("ORACLE_STYLE_RESULT")
         expect(completed).not.toContain("## Oracle result")
         expect(completed).not.toContain("The subagent finished without a final message.")
+        expect(completed).not.toContain("Collected subagents")
+        expect(completed).not.toContain("Waiting for subagents")
         expect(spanHasColor(app, "Read", Theme.colors.text), "Read primary span").toBe(true)
         expect(spanHasColor(app, " nested.txt", Theme.colors.muted), "Read path span").toBe(true)
         yield* app.quit
@@ -411,9 +413,10 @@ test(
         app.pressKey("\t")
         app.pressEnter()
         const completed = yield* app.waitFrame("FINAL_OUTPUT")
-        expect(completed.match(/Waited for/g) ?? []).toHaveLength(2)
+        expect(completed).not.toContain("Waited for")
         expect(completed).not.toContain("Waiting for")
         expect(completed).not.toContain("Running 1 tool")
+        expect(completed).toContain("EARLY_OUTPUTFINAL_OUTPUT")
         expect(completed.match(/\$ printf EARLY_OUTPUT/g) ?? []).toHaveLength(1)
         yield* app.quit
       }),

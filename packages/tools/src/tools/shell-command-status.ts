@@ -25,5 +25,7 @@ export const registration = Policy.register(
     action: "status",
     activeLabel: "Waiting for",
     completeLabel: "Waited for",
+    failedLabel: "Command wait failed",
+    rowDisplay: "continuation",
   }),
 )

@@ -148,7 +148,12 @@ export const toolDetail: {
     const command = call.detail || stringValue(input, ["command", "cmd", "script"]) || ""
     return withLabel(block, summary("$", command || (call.input.trimStart().startsWith("{") ? "" : call.input)))
   }
-  const label = call.status === "running" ? call.presentation.activeLabel : call.presentation.completeLabel
+  let label = call.presentation.completeLabel
+  if (call.status === "running") {
+    label = call.presentation.activeLabel
+  } else if (call.status === "failed") {
+    label = call.presentation.failedLabel ?? call.presentation.completeLabel
+  }
   const value = call.presentation.family === "agent" ? agentToolSummary(label) : summary(label, call.detail)
   return {
     ...withLabel(block, value),
@@ -384,6 +389,18 @@ export const transcriptUnits = (model: Model): ReadonlyArray<TranscriptUnit> => 
   return units
 }
 
+const continuationIsFolded = (
+  block: Extract<TranscriptBlock, { _tag: "ToolCall" }>,
+  blocks: ReadonlyArray<unknown>,
+): boolean =>
+  block.presentation.rowDisplay === "continuation" &&
+  (block.status !== "failed" ||
+    (block.parentId !== undefined &&
+      blocks.some((value) => {
+        const candidate = value as TranscriptBlock
+        return candidate._tag === "ToolCall" && candidate.id === block.parentId && candidate.status === "failed"
+      })))
+
 const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
   const units: Array<TranscriptUnit> = []
   const childItems = new Map<string, Array<TranscriptItem>>()
@@ -397,7 +414,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
     (childItems.get(parentId) ?? []).flatMap((item) => {
       if (item._tag !== "Block") return []
       const block = model.blocks[item.index] as TranscriptBlock
-      if (block._tag !== "ToolCall") return []
+      if (block._tag !== "ToolCall" || continuationIsFolded(block, model.blocks)) return []
       const children = nestedTools(block.id)
       const agentResponse = agentResponseFor(block)
       return [
@@ -443,6 +460,7 @@ const transcriptUnitsImpl = (model: Model): ReadonlyArray<TranscriptUnit> => {
       continue
     }
     const block = model.blocks[item.index] as TranscriptBlock
+    if (block._tag === "ToolCall" && continuationIsFolded(block, model.blocks)) continue
     if (block._tag === "ToolCall") {
       const children = nestedTools(block.id)
       const agentResponse = agentResponseFor(block)

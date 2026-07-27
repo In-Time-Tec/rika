@@ -17,6 +17,8 @@ export const Presentation = Schema.Struct({
   action: Schema.String,
   activeLabel: Schema.String,
   completeLabel: Schema.String,
+  failedLabel: Schema.optionalKey(Schema.String),
+  rowDisplay: Schema.optionalKey(Schema.Literal("continuation")),
   outputDisplay: Schema.optionalKey(Schema.Literals(["hidden", "expandable"])),
   counter: Schema.optionalKey(
     Schema.Literals([

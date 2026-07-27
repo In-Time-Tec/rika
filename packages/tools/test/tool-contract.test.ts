@@ -290,7 +290,18 @@ describe("tool contracts", () => {
     expect(Catalog.definitions.every((definition) => definition.presentation !== undefined)).toBe(true)
     expect(Catalog.get("edit")?.presentation).toMatchObject({ family: "edit" })
     expect(Catalog.get("read")?.presentation).toMatchObject({ family: "explore", action: "read" })
-    expect(Catalog.get("shell_command_status")?.presentation).toMatchObject({ family: "direct", action: "status" })
+    expect(Catalog.get("shell_command_status")?.presentation).toMatchObject({
+      family: "direct",
+      action: "status",
+      rowDisplay: "continuation",
+      failedLabel: "Command wait failed",
+    })
+    expect(Catalog.get("await_subagents")?.presentation).toMatchObject({
+      family: "direct",
+      action: "await-subagents",
+      rowDisplay: "continuation",
+      failedLabel: "Subagent wait failed",
+    })
     expect(Catalog.get("web_search")?.presentation).toMatchObject({
       family: "direct",
       action: "web-search",
