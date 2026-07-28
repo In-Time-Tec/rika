@@ -2500,6 +2500,7 @@ export class Surface {
   }
 
   private tickLoader(): void {
+    if (this.destroyed) return
     this.loaderPhase += 1
     this.toolSpinner.step()
     const current = this.model
@@ -3454,7 +3455,10 @@ export class Surface {
   }
 
   destroy(): void {
+    if (this.destroyed) return
     this.destroyed = true
+    if (this.loaderTimer !== undefined) this.clock.clearInterval(this.loaderTimer)
+    this.loaderTimer = undefined
     if (this.publishedWorkingFrame !== undefined) this.publishWorkingFrame(undefined)
     this.scrollGeneration += 1
     if (this.cursorRestoreFrame !== undefined) this.renderer.off(CliRenderEvents.FRAME, this.cursorRestoreFrame)
@@ -3470,8 +3474,6 @@ export class Surface {
     this.transcriptAnchorScrollBy = 0
     this.pendingTranscriptPosition = undefined
     this.cancelWheelReport()
-    if (this.loaderTimer !== undefined) this.clock.clearInterval(this.loaderTimer)
-    this.loaderTimer = undefined
     this.cancelTimer(this.welcomeTimer)
     this.welcomeTimer = undefined
     this.cancelTimer(this.toastTimer)
@@ -4275,6 +4277,7 @@ export const create = (handlers: Handlers) =>
         ? createCliRenderer({
             screenMode: "alternate-screen",
             exitOnCtrlC: false,
+            exitSignals: [],
             useMouse: true,
             enableMouseMovement: true,
           })

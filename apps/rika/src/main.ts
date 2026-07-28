@@ -2214,7 +2214,7 @@ export const interactiveTui =
         }
         process.once("SIGINT", interrupt)
         process.once("SIGTERM", terminate)
-        process.once("SIGHUP", hangup)
+        process.on("SIGHUP", hangup)
         process.stdin.once("end", hangup)
         process.stdin.once("error", hangup)
         process.stdin.once("close", hangup)

@@ -2319,6 +2319,19 @@ describe("Surface", () => {
     }),
   )
 
+  it.effect("ignores a queued loader tick after destroy", () =>
+    Effect.gen(function* () {
+      const { surface } = yield* createScoped(handlers())
+      const loader = surface as unknown as { loaderPhase: number; tickLoader: () => void }
+      const phase = loader.loaderPhase
+
+      surface.destroy()
+      loader.tickLoader()
+
+      expect(loader.loaderPhase).toBe(phase)
+    }),
+  )
+
   it.effect("renders mode picker, filtered palette, sidebar visibility, and notice transitions", () =>
     Effect.gen(function* () {
       const { surface } = yield* createScoped(handlers())
@@ -2351,6 +2364,7 @@ it.effect("create configures the CLI renderer", () =>
     expect(opentui.createCliRenderer).toHaveBeenLastCalledWith({
       screenMode: "alternate-screen",
       exitOnCtrlC: false,
+      exitSignals: [],
       useMouse: true,
       enableMouseMovement: true,
     })

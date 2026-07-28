@@ -159,7 +159,17 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                         },
                       }),
                     )
-                    const exitCode = Number(yield* handle.exitCode)
+                    const forwardHangup = () => {
+                      try {
+                        process.kill(Number(handle.pid), "SIGHUP")
+                      } catch {}
+                    }
+                    process.on("SIGHUP", forwardHangup)
+                    const exitCode = Number(
+                      yield* handle.exitCode.pipe(
+                        Effect.ensuring(Effect.sync(() => process.off("SIGHUP", forwardHangup))),
+                      ),
+                    )
                     const restartLine = yield* Stream.runFold(
                       Stream.splitLines(Stream.decodeText(handle.getOutputFd(ResidentProcessStartup.runtimeRestartFd))),
                       () => Option.none<string>(),
