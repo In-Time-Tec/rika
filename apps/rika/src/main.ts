@@ -2042,7 +2042,10 @@ export const interactiveTui =
               model = ViewState.update(model, {
                 _tag: "ThreadPreviewLoaded",
                 threadId: event.threadId,
-                turns: event.turns,
+                turns: event.turns.map((turn) => ({
+                  prompt: turn.prompt,
+                  units: turn.units.map((unit) => Schema.decodeUnknownSync(Transcript.Unit)(unit)),
+                })),
               })
           } else {
             model = ViewState.update(model, event)

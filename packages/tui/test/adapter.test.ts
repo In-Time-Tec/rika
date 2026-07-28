@@ -349,7 +349,10 @@ test("draws every thread-preview row at the exact box width with a two-cell gutt
       turns: [
         {
           prompt: "hello world this prompt is long enough that it must wrap across several preview rows",
-          events: [],
+          units: Transcript.empty(
+            "preview",
+            "hello world this prompt is long enough that it must wrap across several preview rows",
+          ).units,
         },
       ],
     }),
@@ -374,11 +377,11 @@ test("draws every thread-preview row at the exact box width with a two-cell gutt
 })
 
 test("reuses formatted thread-preview content while scrolling", () => {
-  let eventReads = 0
+  let unitReads = 0
   const event = {
     cursor: "answer",
     get sequence() {
-      eventReads += 1
+      unitReads += 1
       return 1
     },
     type: "model.output.completed" as const,
@@ -390,16 +393,16 @@ test("reuses formatted thread-preview content while scrolling", () => {
     threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     threadPreview: ready({
       threadId: "a",
-      turns: [{ prompt: "hello", events: [event] }],
+      turns: [{ prompt: "hello", units: Transcript.project("preview", "hello", [event]).units }],
     }),
   })
 
   previewBoxRows(previewModel, 44, 14)
-  const readsAfterFormatting = eventReads
+  const readsAfterFormatting = unitReads
   expect(readsAfterFormatting).toBeGreaterThan(0)
 
   previewBoxRows(update(previewModel, { _tag: "ThreadPreviewScrolled", offset: 3 }), 44, 14)
-  expect(eventReads).toBe(readsAfterFormatting)
+  expect(unitReads).toBe(readsAfterFormatting)
 })
 
 test("keeps the previous thread preview visible until the next preview is ready", () => {
@@ -426,7 +429,7 @@ test("keeps the previous thread preview visible until the next preview is ready"
     threadSwitcher: { open: true, query: "", selected: 0, kind: "switch", previewScroll: 0 },
     threadPreview: ready({
       threadId: "a",
-      turns: [{ prompt: "previous preview", events: [] }],
+      turns: [{ prompt: "previous preview", units: Transcript.empty("preview", "previous preview").units }],
     }),
   })
   const pendingModel = update(
@@ -445,7 +448,7 @@ test("keeps the previous thread preview visible until the next preview is ready"
       turns: [
         {
           prompt: "next preview",
-          events: [
+          units: Transcript.project("preview", "next preview", [
             {
               cursor: "answer",
               sequence: 1,
@@ -453,7 +456,7 @@ test("keeps the previous thread preview visible until the next preview is ready"
               createdAt: 1,
               text: "transcript tail loaded",
             },
-          ],
+          ]).units,
         },
       ],
     }),

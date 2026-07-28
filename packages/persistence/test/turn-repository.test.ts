@@ -222,6 +222,36 @@ it.effect("memory pages newest turns without loading the full thread", () =>
   }).pipe(provideLayer(TurnRepository.memoryLayer())),
 )
 
+it.effect("memory lists recent nonqueued turns independently of queue depth", () =>
+  Effect.gen(function* () {
+    const threadId = Thread.ThreadId.make("preview-thread")
+    const repository = yield* TurnRepository.Service
+    for (let index = 0; index < 6; index += 1) {
+      const turn = yield* create(repository, {
+        id: Turn.TurnId.make(`turn-${index}`),
+        threadId,
+        prompt: `prompt ${index}`,
+        now: index + 1,
+      })
+      if (index < 5) yield* repository.setStatus(turn.id, "completed", undefined, index + 1)
+    }
+    for (let index = 0; index < 140; index += 1)
+      yield* create(repository, {
+        id: Turn.TurnId.make(`queued-${index}`),
+        threadId,
+        prompt: `queued ${index}`,
+        now: index + 10,
+        queueCapacity: 200,
+      })
+    expect((yield* repository.listRecentNonqueued(threadId, 4)).map((turn) => turn.id)).toEqual([
+      Turn.TurnId.make("turn-2"),
+      Turn.TurnId.make("turn-3"),
+      Turn.TurnId.make("turn-4"),
+      Turn.TurnId.make("turn-5"),
+    ])
+  }).pipe(provideLayer(TurnRepository.memoryLayer())),
+)
+
 it.effect("memory terminal status is immutable against every stale lifecycle update", () =>
   Effect.gen(function* () {
     const repository = yield* TurnRepository.Service

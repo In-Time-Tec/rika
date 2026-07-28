@@ -290,7 +290,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 20, name: "usage_projection" })
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 21, name: "materialized_thread_summaries" })
           expect(yield* sql`SELECT COUNT(*) AS count FROM rika_transcript_entries`).toEqual([{ count: 1 }])
         }).pipe(provideLayer(layer)),
       )
@@ -313,7 +313,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             units: [{ content: { _tag: "Entry", text: "completed prompt" } }],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 20 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 21 }])
         }).pipe(provideLayer(reopened)),
       )
     }),
@@ -949,6 +949,63 @@ test("turn SQL mutations, ordering, and rejection branches", () => {
         expect(yield* turns.startAccepted(cancellation.id, 12)).toBe(false)
         expect(yield* turns.cancelAccepted(cancellation.id, 13)).toBe(false)
       }).pipe(provideLayer(layer))
+    }),
+  )
+  return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))
+})
+
+test("dequeue removes the queued turn activity from the materialized summary", () => {
+  const program = Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-summary-dequeue-" })
+      const database = Database.layer(`${directory}/rika.db`)
+      const layer = Layer.mergeAll(
+        database,
+        ThreadRepository.layer.pipe(Layer.provide(database)),
+        TurnRepository.layer.pipe(Layer.provide(database)),
+        ThreadSummaryRepository.layer.pipe(Layer.provide(database)),
+      )
+      const context = yield* Layer.build(layer)
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadRepository.Service
+        const turns = yield* TurnRepository.Service
+        const summaries = yield* ThreadSummaryRepository.Service
+        yield* threads.create({ id, workspace: "/work/a", title: "First", now: 1 })
+        const active = yield* create(turns, {
+          id: Turn.TurnId.make("active"),
+          threadId: id,
+          prompt: "active",
+          now: 2,
+        })
+        yield* turns.setStatus(active.id, "running", "active-cursor", 3)
+        const queued = yield* create(turns, {
+          id: Turn.TurnId.make("queued"),
+          threadId: id,
+          prompt: "queued",
+          now: 4,
+        })
+        yield* summaries.replaceTurn({
+          turnId: active.id,
+          threadId: id,
+          projectedCursor: "active-cursor",
+          complete: false,
+          editTotals: { added: 3, modified: 2, removed: 1 },
+          lastEventAt: 3,
+          now: 3,
+        })
+        yield* summaries.replaceTurn({
+          turnId: queued.id,
+          threadId: id,
+          complete: false,
+          editTotals: { added: 7, modified: 5, removed: 4 },
+          lastEventAt: 4,
+          now: 4,
+        })
+        expect((yield* summaries.list())[0]?.editTotals).toEqual({ added: 10, modified: 7, removed: 5 })
+        yield* turns.dequeue(queued.id)
+        expect((yield* summaries.list())[0]?.editTotals).toEqual({ added: 3, modified: 2, removed: 1 })
+      }).pipe(Effect.provide(context))
     }),
   )
   return Effect.runPromise(Effect.scoped(program.pipe(provideLayer(BunServices.layer))))

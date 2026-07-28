@@ -253,39 +253,24 @@ export const layer = Layer.effect(
     return Service.of({
       list: Effect.fn("ThreadSummaryRepository.list")(function* (input: ListInput = {}) {
         const rows = yield* sql`SELECT
-          thread.id,
-          thread.workspace,
-          thread.title,
-          thread.pinned,
-          thread.archived,
-          MAX(${sql.unsafe(ThreadState.rankCase("turn.status"))}) AS status_rank,
-          (SELECT last.status FROM rika_turns AS last
-            WHERE last.thread_id = thread.id
-            ORDER BY last.created_at DESC, last.id DESC LIMIT 1) AS last_status,
-          MAX(
-            thread.created_at,
-            COALESCE(MAX(turn.updated_at), thread.created_at),
-            COALESCE(MAX(activity.last_event_at), thread.created_at)
-          ) AS last_activity_at,
+          summary.thread_id AS id,
+          summary.workspace,
+          summary.title,
+          summary.pinned,
+          summary.archived,
+          summary.status_rank,
+          summary.last_status,
+          summary.last_activity_at,
           read_state.last_read_at,
-          COUNT(turn.id) AS turn_count,
-          COALESCE(SUM(CASE
-            WHEN activity.turn_id IS NOT NULL
-              AND activity.projected_cursor IS turn.last_cursor
-              AND (turn.status NOT IN ('completed', 'failed', 'cancelled') OR activity.complete = 1)
-            THEN 1
-            ELSE 0
-          END), 0) AS current_activity_count,
-          COALESCE(SUM(activity.added), 0) AS added,
-          COALESCE(SUM(activity.modified), 0) AS modified,
-          COALESCE(SUM(activity.removed), 0) AS removed
-        FROM rika_threads AS thread
-        LEFT JOIN rika_turns AS turn ON turn.thread_id = thread.id
-        LEFT JOIN rika_thread_turn_activity AS activity ON activity.turn_id = turn.id
-        LEFT JOIN rika_thread_read_state AS read_state ON read_state.thread_id = thread.id
-        WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR thread.archived = 0)
-        GROUP BY thread.id
-        ORDER BY thread.pinned DESC, last_activity_at DESC, thread.id ASC
+          summary.turn_count,
+          summary.current_activity_count,
+          summary.added,
+          summary.modified,
+          summary.removed
+        FROM rika_thread_picker_summary AS summary
+        LEFT JOIN rika_thread_read_state AS read_state ON read_state.thread_id = summary.thread_id
+        WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR summary.archived = 0)
+        ORDER BY summary.pinned DESC, summary.last_activity_at DESC, summary.thread_id ASC
         LIMIT ${listLimit(input.limit)}`.pipe(Effect.mapError(repositoryError))
         return yield* Effect.all(rows.map(decodeSummary))
       }),

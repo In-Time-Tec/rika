@@ -105,6 +105,10 @@ export interface Interface {
   readonly copy: (turn: Turn, queueCapacity: number) => Effect.Effect<Submission, RepositoryError | QueueFull>
   readonly get: (id: TurnId) => Effect.Effect<Turn | undefined, RepositoryError>
   readonly list: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
+  readonly listRecentNonqueued: (
+    threadId: ThreadId,
+    limit: number,
+  ) => Effect.Effect<ReadonlyArray<Turn>, RepositoryError>
   readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<PageResult, RepositoryError>
   readonly findActive: (threadId: ThreadId) => Effect.Effect<Turn | undefined, RepositoryError>
   readonly readQueue: (threadId: ThreadId) => Effect.Effect<QueueSnapshot, RepositoryError>
@@ -397,6 +401,14 @@ export const makeMemory = (initial: ReadonlyArray<Turn> = []) =>
         return [...(yield* Ref.get(state)).turns.values()]
           .filter((turn) => turn.threadId === threadId)
           .toSorted((left, right) => left.createdAt - right.createdAt)
+          .map(clone)
+      }),
+      listRecentNonqueued: Effect.fn("TurnRepository.listRecentNonqueued")(function* (threadId, limit) {
+        return [...(yield* Ref.get(state)).turns.values()]
+          .filter((turn) => turn.threadId === threadId && turn.status !== "queued")
+          .toSorted((left, right) => right.createdAt - left.createdAt || right.id.localeCompare(left.id))
+          .slice(0, Math.max(0, Math.floor(limit)))
+          .toReversed()
           .map(clone)
       }),
       page: Effect.fn("TurnRepository.page")(function* (threadId, options = {}) {
@@ -885,6 +897,14 @@ export const layer = Layer.effect(
             Effect.mapError(repositoryError),
           )
         return yield* Effect.all(rows.map(decode))
+      }),
+      listRecentNonqueued: Effect.fn("TurnRepository.listRecentNonqueued")(function* (threadId, limit) {
+        const rows = yield* sql`SELECT * FROM rika_turns
+          WHERE thread_id = ${threadId} AND status <> 'queued'
+          ORDER BY created_at DESC, id DESC LIMIT ${Math.max(0, Math.floor(limit))}`.pipe(
+          Effect.mapError(repositoryError),
+        )
+        return (yield* Effect.all(rows.map(decode))).toReversed()
       }),
       page: Effect.fn("TurnRepository.page")(function* (threadId, options = {}) {
         const limit = pageSize(options.limit)

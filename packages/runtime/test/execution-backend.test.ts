@@ -1069,6 +1069,39 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
+  it.effect("cancels nested descendants by their durable execution identifiers", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ existingStatus: "running", cancelStatus: "cancelled" })
+      const root = Ids.ExecutionId.make("execution:turn-a")
+      const child = Ids.ChildExecutionId.make("execution:turn-a:child:Task:call-child")
+      const grandchild = Ids.ChildExecutionId.make("execution:turn-a:child:Task:call-child:child:Task:call-grandchild")
+      Object.assign(fixture.implementation.executions, {
+        inspect: (id: Ids.ExecutionId) => {
+          let childRuns: ReadonlyArray<{ readonly child_execution_id: Ids.ChildExecutionId; readonly status: string }> =
+            []
+          if (String(id) === String(root)) childRuns = [{ child_execution_id: child, status: "running" }]
+          else if (String(id) === String(child)) childRuns = [{ child_execution_id: grandchild, status: "running" }]
+          return Effect.succeed({
+            execution_id: id,
+            status: "running",
+            waiting_on: [],
+            pending_tool_calls: [],
+            child_runs: childRuns,
+          })
+        },
+      })
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        yield* backend.cancel("turn-a", 50)
+      }).pipe(provideBackend(fixture.implementation))
+      expect((yield* Ref.get(fixture.cancellations)).map((input) => input.execution_id)).toEqual([
+        root,
+        grandchild,
+        child,
+      ])
+    }),
+  )
+
   it.effect("waits for a concurrently starting execution before cancelling", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({

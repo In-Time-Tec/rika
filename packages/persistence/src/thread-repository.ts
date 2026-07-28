@@ -220,7 +220,15 @@ export const layer = Layer.effect(
       }),
       get,
       list: Effect.fn("ThreadRepository.list")(function* (input = {}) {
-        const rows = yield* sql`SELECT * FROM rika_threads`.pipe(Effect.mapError(repositoryError))
+        const rows = yield* sql`SELECT * FROM rika_threads
+          WHERE (${input.includeArchived === true ? 1 : 0} = 1 OR archived = 0)
+            AND (${input.query === undefined ? 1 : 0} = 1
+              OR INSTR(LOWER(title), LOWER(${input.query ?? ""})) > 0
+              OR INSTR(LOWER(workspace), LOWER(${input.query ?? ""})) > 0
+              OR EXISTS (SELECT 1 FROM json_each(labels_json)
+                WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(${input.query ?? ""})) > 0))
+          ORDER BY pinned DESC, updated_at DESC, id ASC
+          LIMIT ${listLimit(input.limit)}`.pipe(Effect.mapError(repositoryError))
         const threads = yield* Effect.all(rows.map(decode))
         return select(threads, input)
       }),

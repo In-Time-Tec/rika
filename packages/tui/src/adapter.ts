@@ -59,7 +59,7 @@ import {
   isThreadBusy,
 } from "./view-state"
 import type { ModeRouteLabel, ThreadItem, TranscriptBlock } from "./view-state"
-import { applyTurnUnits as projectUnits, type Event } from "./transcript-presenter"
+import { applyTurnUnits as projectUnits } from "./transcript-presenter"
 import {
   includeRowEnd,
   maxMountedTranscriptRows,
@@ -587,6 +587,8 @@ export const boundedTranscriptModel: {
         items: [],
       }
     const windowEnd = Math.min(model.items.length, Math.max(0, Math.floor(end)))
+    if (windowEnd === model.items.length && model.items.length <= limit)
+      return { ...model, items: model.items as ReadonlyArray<TranscriptItem> }
     const allItems = model.items as ReadonlyArray<TranscriptItem>
     let hasParent = false
     for (let position = 0; position < windowEnd; position += 1)
@@ -3718,15 +3720,8 @@ const renderPreviewTranscript = (
   const cached = previewTranscriptCache.get(preview)?.get(key)
   if (cached !== undefined) return cached
   let previewModel: Model = { ...initial(workspace, mode), width: Math.max(8, width), height: 200 }
-  preview.turns.forEach((turn, index) => {
-    previewModel = projectUnits(
-      previewModel,
-      Transcript.project(
-        `preview-${index}`,
-        turn.prompt,
-        (turn.events as ReadonlyArray<Event>).map((event) => Object.assign({}, event, { createdAt: event.sequence })),
-      ).units,
-    )
+  preview.turns.forEach((turn) => {
+    previewModel = projectUnits(previewModel, turn.units)
   })
   const lines = splitStyledLines(renderTranscriptStyled(previewModel)).map((line) => clipStyledLine(line, width))
   const cachedWidths = previewTranscriptCache.get(preview) ?? new Map()

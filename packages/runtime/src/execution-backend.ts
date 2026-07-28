@@ -943,16 +943,21 @@ const executionTreeIds = (client: Client.Interface, root: Ids.ExecutionId) =>
     return ids
   })
 
-const cancelOutlivingChildren = (client: Client.Interface, root: Ids.ExecutionId) =>
+const cancelOutlivingChildren = (
+  client: Client.Interface,
+  root: Ids.ExecutionId,
+  cancelledAt?: number,
+  knownTree?: ReadonlyArray<Ids.ExecutionId>,
+) =>
   Effect.gen(function* () {
-    const ids = (yield* executionTreeIds(client, root)).slice(1)
+    const ids = (knownTree ?? (yield* executionTreeIds(client, root))).slice(1)
     const live: Array<Ids.ExecutionId> = []
     for (const id of ids) {
       const inspection = yield* client.executions.inspect(id)
       if (!terminalExecutionStatus(inspection.status)) live.push(id)
     }
     if (live.length === 0) return
-    const cancelledAt = yield* Clock.currentTimeMillis
+    const cancellationTime = cancelledAt ?? (yield* Clock.currentTimeMillis)
     yield* Effect.logWarning("execution.subagents.outlived_parent").pipe(
       Effect.annotateLogs({
         "rika.execution.id": String(root),
@@ -961,8 +966,9 @@ const cancelOutlivingChildren = (client: Client.Interface, root: Ids.ExecutionId
     )
     yield* Effect.forEach(
       live.toReversed(),
-      (id) => client.executions.cancel({ execution_id: id, cancelled_at: cancelledAt, reason: outlivedParentReason }),
-      { concurrency: "unbounded", discard: true },
+      (id) =>
+        client.executions.cancel({ execution_id: id, cancelled_at: cancellationTime, reason: outlivedParentReason }),
+      { concurrency: 1, discard: true },
     )
   }).pipe(
     Effect.catchCause((cause) =>
@@ -1005,7 +1011,7 @@ const followExecution = (
       const events: Array<Event> = []
       const followed = new Set<string>()
       const tracedDeltas = new Set<string>()
-      const updates = yield* Queue.unbounded<
+      const updates = yield* Queue.bounded<
         | {
             readonly _tag: "event"
             readonly event: Event
@@ -1014,7 +1020,7 @@ const followExecution = (
           }
         | { readonly _tag: "stopped"; readonly status: Status; readonly actionable: boolean }
         | { readonly _tag: "failed"; readonly error: BackendError }
-      >()
+      >(1_024)
       const attributedEvent = (item: Execution.ExecutionEvent, childExecutionId: string | undefined) =>
         event(
           childExecutionId === undefined
@@ -1202,8 +1208,7 @@ const followExecution = (
       if (stoppedAtActionableWait && (status === "running" || status === "queued")) {
         finalStatus = Status.make("waiting")
       }
-      if (terminalExecutionStatus(finalStatus) && finalStatus !== "cancelled")
-        yield* cancelOutlivingChildren(client, rootExecutionId)
+      if (terminalExecutionStatus(finalStatus)) yield* cancelOutlivingChildren(client, rootExecutionId)
       const checkpoint = yield* checkpointForExecution(client, rootExecutionId)
       return {
         turnId,
@@ -1850,10 +1855,11 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               })
               .pipe(Effect.mapError(error))
             for (const record of page.records) {
-              if (record.metadata["rika_agent_depth"] !== 0) continue
+              const turnId = turnIdFromExecutionId(String(record.execution_id))
+              if (turnId === undefined) continue
               roots.push({
                 executionId: String(record.execution_id),
-                turnId: turnIdFromExecutionId(String(record.execution_id)),
+                turnId,
                 createdAt: record.created_at,
               })
             }
@@ -1873,10 +1879,12 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                   ),
               }),
             )
+            const tree = yield* executionTreeIds(client, id)
             const accepted = yield* client.executions.cancel({
               execution_id: id,
               cancelled_at: cancelledAt,
             })
+            yield* cancelOutlivingChildren(client, id, cancelledAt, tree)
             const replay = yield* client.executions.replay({ execution_id: id })
             const events = replay.events.map(event)
             const checkpoint = yield* checkpointForExecution(client, id)

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest"
 import { it } from "@effect/vitest"
+import * as Transcript from "@rika/transcript"
 import { Duration, Effect } from "effect"
 import { Keys, Palette, ViewState } from "../src"
 import * as Adapter from "../src/adapter"
@@ -1395,7 +1396,7 @@ describe("ViewState", () => {
     model = ViewState.update(model, {
       _tag: "ThreadPreviewLoaded",
       threadId: "a",
-      turns: [{ prompt: "stale preview", events: [] }],
+      turns: [{ prompt: "stale preview", units: Transcript.empty("preview", "stale preview").units }],
     })
     for (const character of "missing")
       model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: character, sequence: character }) })
@@ -1406,7 +1407,7 @@ describe("ViewState", () => {
     model = ViewState.update(model, {
       _tag: "ThreadPreviewLoaded",
       threadId: "a",
-      turns: [{ prompt: "removed preview", events: [] }],
+      turns: [{ prompt: "removed preview", units: Transcript.empty("preview", "removed preview").units }],
     })
     model = ViewState.update(model, {
       _tag: "ThreadsReplaced",
@@ -1709,17 +1710,20 @@ describe("loadable panel state machine", () => {
     const previous = ViewState.update(firstPreviewLoading, {
       _tag: "ThreadPreviewLoaded",
       threadId: "thread-0",
-      turns: [{ prompt: "previous", events: [] }],
+      turns: [{ prompt: "previous", units: Transcript.empty("preview", "previous").units }],
     })
     const previewLoading = ViewState.update(previous, { _tag: "ThreadPreviewRequested" })
     expect(previewLoading.threadPreview).toEqual({
       _tag: "Loading",
-      previous: { threadId: "thread-0", turns: [{ prompt: "previous", events: [] }] },
+      previous: {
+        threadId: "thread-0",
+        turns: [{ prompt: "previous", units: Transcript.empty("preview", "previous").units }],
+      },
     })
     const previewReady = ViewState.update(previewLoading, {
       _tag: "ThreadPreviewLoaded",
       threadId: "thread-1",
-      turns: [{ prompt: "hi", events: [] }],
+      turns: [{ prompt: "hi", units: Transcript.empty("preview", "hi").units }],
     })
     expect(previewReady.threadPreview._tag).toBe("Ready")
     const opening = ViewState.update(base, { _tag: "ThreadOpenRequested" })

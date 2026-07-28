@@ -459,7 +459,7 @@ export type InteractiveEvent =
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
-      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly events: ReadonlyArray<ExecutionBackend.Event> }>
+      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<unknown> }>
     }
 
 export const InteractiveEventSchema = Schema.Union([
@@ -663,7 +663,7 @@ export const InteractiveEventSchema = Schema.Union([
   Schema.Struct({
     _tag: Schema.tag("ThreadPreviewLoaded"),
     threadId: Schema.String,
-    turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(ExecutionBackend.Event) })),
+    turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(Schema.Unknown) })),
   }),
 ])
 

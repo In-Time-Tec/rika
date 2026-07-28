@@ -190,6 +190,18 @@ describe("thread search repository", () => {
         yield* Effect.sync(() => {
           const database = new NativeDatabase(filename)
           database.exec(`
+          DROP TRIGGER rika_thread_picker_summary_thread_insert;
+          DROP TRIGGER rika_thread_picker_summary_thread_update;
+          DROP TRIGGER rika_thread_picker_summary_turn_insert;
+          DROP TRIGGER rika_thread_picker_summary_turn_update;
+          DROP TRIGGER rika_thread_picker_summary_turn_before_delete;
+          DROP TRIGGER rika_thread_picker_summary_turn_delete;
+          DROP TRIGGER rika_thread_picker_summary_activity_insert;
+          DROP TRIGGER rika_thread_picker_summary_activity_update;
+          DROP TRIGGER rika_thread_picker_summary_activity_delete;
+          DROP TABLE rika_thread_picker_summary;
+          DROP INDEX rika_turns_thread_updated;
+          DROP INDEX rika_turns_thread_nonqueued;
           DROP TABLE rika_usage_repairs;
           DROP TABLE rika_turn_usage;
           DROP TABLE rika_thread_search;
@@ -202,7 +214,7 @@ describe("thread search repository", () => {
           ALTER TABLE rika_turns DROP COLUMN author_json;
           ALTER TABLE rika_turns DROP COLUMN lineage_json;
           ALTER TABLE rika_turns DROP COLUMN stop_intent;
-          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20);
+          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21);
           INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/current', 1);
           INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
             VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);

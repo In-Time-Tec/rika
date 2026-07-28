@@ -1,4 +1,4 @@
-import type * as Transcript from "@rika/transcript"
+import * as Transcript from "@rika/transcript"
 import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
 import { formatTokens, plural } from "./format"
@@ -400,7 +400,7 @@ const ChangedFilesSchema = Schema.Union([
 ])
 const ThreadPreviewValueSchema = Schema.Struct({
   threadId: Schema.String,
-  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, events: Schema.Array(Schema.Unknown) })),
+  turns: Schema.Array(Schema.Struct({ prompt: Schema.String, units: Schema.Array(Transcript.Unit) })),
 })
 const ThreadPreviewSchema = Schema.Union([
   LoadableIdleSchema,
@@ -591,7 +591,7 @@ export type Message =
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
-      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly events: ReadonlyArray<unknown> }>
+      readonly turns: ReadonlyArray<{ readonly prompt: string; readonly units: ReadonlyArray<Transcript.Unit> }>
     }
 
 export const replaceQueue: {
@@ -1759,7 +1759,7 @@ export const update: {
         ...model,
         threadPreview: ready({
           threadId: message.threadId,
-          turns: message.turns.map((turn) => ({ prompt: turn.prompt, events: [...turn.events] })),
+          turns: message.turns.map((turn) => ({ prompt: turn.prompt, units: [...turn.units] })),
         }),
       }
     case "ComposerReplaced":

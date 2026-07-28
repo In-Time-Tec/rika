@@ -14,10 +14,10 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows).toHaveLength(20)
+          expect(migrationRows).toHaveLength(21)
           expect(migrationRows.at(-1)).toEqual({
-            migration_id: 20,
-            name: "usage_projection",
+            migration_id: 21,
+            name: "materialized_thread_summaries",
           })
           const objects = yield* sql`SELECT name FROM sqlite_schema
             WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
@@ -31,6 +31,20 @@ it.layer(BunServices.layer)("product database", (test) => {
           expect(names).toContain("rika_thread_search_files")
           expect(names).toContain("rika_turn_usage")
           expect(names).toContain("rika_usage_repairs")
+          expect(names).toContain("rika_thread_picker_summary")
+          expect(names).toContain("rika_turns_thread_updated")
+          expect(names).toContain("rika_turns_thread_nonqueued")
+          const updatedPlan = yield* sql`EXPLAIN QUERY PLAN
+            SELECT MAX(updated_at) FROM rika_turns WHERE thread_id = 'thread-a'`
+          expect(updatedPlan.map((row) => String((row as { readonly detail: unknown }).detail)).join(" ")).toContain(
+            "rika_turns_thread_updated",
+          )
+          const previewPlan = yield* sql`EXPLAIN QUERY PLAN SELECT * FROM rika_turns
+            WHERE thread_id = 'thread-a' AND status <> 'queued'
+            ORDER BY created_at DESC, id DESC LIMIT 4`
+          expect(previewPlan.map((row) => String((row as { readonly detail: unknown }).detail)).join(" ")).toContain(
+            "rika_turns_thread_nonqueued",
+          )
           const checkpointColumns = yield* sql`PRAGMA table_info(rika_transcript_checkpoints)`
           const columnNames = checkpointColumns.map((row) => String((row as { readonly name: unknown }).name))
           expect(columnNames).toEqual([

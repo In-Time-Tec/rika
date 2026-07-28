@@ -171,6 +171,16 @@ describe("sql layer", () => {
         ).toEqual([id("a")])
         expect(yield* repository.list({ includeArchived: true, query: "/OTHER", limit: 200 })).toHaveLength(1)
         expect(yield* repository.list({ includeArchived: true, limit: 200 })).toHaveLength(100)
+        expect(sql.statements[0]).toEqual({
+          sql: "SELECT * FROM rika_threads WHERE (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
+          parameters: [0, 1, "", "", "", 50],
+        })
+        expect(sql.statements[1]?.parameters).toEqual([1, 0, "urgent", "urgent", "urgent", 1])
+        expect(sql.statements[2]?.parameters).toEqual([1, 0, "/OTHER", "/OTHER", "/OTHER", 100])
+        expect(sql.statements[3]).toEqual({
+          sql: "SELECT * FROM rika_threads WHERE (? = 1 OR archived = 0) AND (? = 1 OR INSTR(LOWER(title), LOWER(?)) > 0 OR INSTR(LOWER(workspace), LOWER(?)) > 0 OR EXISTS (SELECT 1 FROM json_each(labels_json) WHERE INSTR(LOWER(CAST(value AS TEXT)), LOWER(?)) > 0)) ORDER BY pinned DESC, updated_at DESC, id ASC LIMIT ?",
+          parameters: [1, 1, "", "", "", 100],
+        })
       }),
     ),
   )
