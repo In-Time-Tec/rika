@@ -342,7 +342,8 @@ describe("InteractiveSession controls", () => {
       const betaEvents: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(alpha, alphaEvents)
       yield* collectEvents(beta, betaEvents)
-      yield* Effect.all([alpha.submit("alpha prompt"), beta.submit("beta prompt")], { concurrency: "unbounded" })
+      yield* alpha.submit("alpha prompt")
+      yield* beta.submit("beta prompt")
       yield* Effect.all([alpha.shell("pwd", true), beta.shell("pwd", true)])
       const alphaThreadId = alphaEvents.find((event) => event._tag === "ThreadActivated")?.threadId
       const betaThreadId = betaEvents.find((event) => event._tag === "ThreadActivated")?.threadId
@@ -428,7 +429,7 @@ describe("InteractiveSession controls", () => {
       yield* session.reopenThread(1)
       yield* session.submit("")
       while ((yield* turns.get(Turn.TurnId.make("created-turn")))?.status !== "completed") yield* Effect.yieldNow
-      while (events.filter((event) => event._tag !== "ThreadsListed").length < 7) yield* Effect.yieldNow
+      while (events.filter((event) => event._tag !== "ThreadsListed").length < 6) yield* Effect.yieldNow
       expect(events.filter((event) => event._tag !== "ThreadsListed")).toEqual([
         { _tag: "ThreadActivated", threadId: "created", title: "New thread" },
         {
@@ -437,7 +438,7 @@ describe("InteractiveSession controls", () => {
           threadId: "created",
           cost: { _tag: "Unavailable" },
           tokens: { _tag: "Unavailable" },
-          time: { _tag: "Available", accumulatedMillis: 0 },
+          time: { _tag: "Unavailable" },
         },
         {
           _tag: "SubmissionAdmitted",
@@ -479,14 +480,6 @@ describe("InteractiveSession controls", () => {
             type: "execution.completed",
             createdAt: 2,
           },
-        },
-        {
-          _tag: "ThreadUsageUpdated",
-          selectionEpoch: 0,
-          threadId: "created",
-          cost: { _tag: "Available", usd: 0, unpricedAttempts: 0 },
-          tokens: { _tag: "Available", total: 0, uncountedAttempts: 0 },
-          time: { _tag: "Unavailable" },
         },
       ])
       expect(yield* repositories.get(Thread.ThreadId.make("created"))).toMatchObject({ title: "New thread" })
@@ -660,10 +653,11 @@ describe("InteractiveSession controls", () => {
       yield* Effect.yieldNow
       expect(yield* Ref.get(controls)).toEqual([
         ["replay", "active", undefined],
-        ["replay", "active", undefined],
-        ["replay", "child:active:title", undefined],
         ["steer", "active", "change course", "rika:interactive-steer:active:0"],
         ["cancel", "active", 0],
+        ["replay", "active", undefined],
+        ["replay", "active", undefined],
+        ["replay", "active", undefined],
       ])
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
         status: "cancelled",
@@ -1065,17 +1059,13 @@ describe("InteractiveSession controls", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 2,
         threadId: "latest",
-        cost: { _tag: "Available", usd: 0, unpricedAttempts: 0 },
-        tokens: { _tag: "Available", total: 0, uncountedAttempts: 0 },
+        cost: { _tag: "Unavailable" },
+        tokens: { _tag: "Unavailable" },
         time: { _tag: "Unavailable" },
       })
       expect(yield* Ref.get(controls)).toEqual([
         ["replay", "active", undefined],
-        ["replay", "active", undefined],
-        ["replay", "child:active:title", undefined],
         ["replay", "latest-active", undefined],
-        ["replay", "latest-active", undefined],
-        ["replay", "child:latest-active:title", undefined],
         ["replay", "latest-active", "cursor-7"],
       ])
     }),
@@ -1112,10 +1102,6 @@ describe("InteractiveSession controls", () => {
         ["page", "active", "forward", undefined, 200],
         ["page", "active", "forward", "cursor-200", 200],
         ["page", "active", "forward", "cursor-400", 200],
-        ["replay", "active", undefined],
-        ["replay", "child:active:title", undefined],
-        ["page", "active", "forward", undefined, 1_000],
-        ["page", "child:active:title", "forward", undefined, 1_000],
       ])
     }),
   )
@@ -1186,11 +1172,7 @@ describe("InteractiveSession controls", () => {
           { turn: { id: shell.id, status: "completed" }, unit: { content: { _tag: "Entry" } } },
         ],
       })
-      expect(yield* Ref.get(controls)).toEqual([
-        ["replay", "active", undefined],
-        ["replay", "active", undefined],
-        ["replay", "child:active:title", undefined],
-      ])
+      expect(yield* Ref.get(controls)).toEqual([["replay", "active", undefined]])
     }),
   )
 

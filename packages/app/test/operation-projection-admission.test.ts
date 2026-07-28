@@ -186,7 +186,7 @@ it.effect("loads an interactive thread while a background projection holds anoth
   })
 })
 
-it.effect("stops a reclaim backfill at the selection repair page budget", () =>
+it.effect("finishes terminal usage reconciliation after bounded selection repair", () =>
   Effect.gen(function* () {
     const children = Array.from({ length: 200 }, (_, index) => ({
       executionId: `busy-child-${index}`,
@@ -230,8 +230,9 @@ it.effect("stops a reclaim backfill at the selection repair page budget", () =>
         expect(
           yield* awaitCondition(client.turns.get(busyTurnId).pipe(Effect.map((turn) => turn?.status === "completed"))),
         ).toBe(true)
-        expect(yield* awaitCondition(Ref.get(overBudgetReplayed))).toBe(false)
-        expect(yield* Ref.get(childReplays)).toBe(selectionRepairPageLimit)
+        expect(yield* awaitCondition(Ref.get(overBudgetReplayed))).toBe(true)
+        expect(yield* Ref.get(childReplays)).toBeGreaterThanOrEqual(children.length)
+        expect(yield* Ref.get(childReplays)).toBeLessThanOrEqual(3 * (children.length + selectionRepairPageLimit))
         expect(client.events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
       }),
     )

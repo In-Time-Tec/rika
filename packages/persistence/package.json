@@ -17,7 +17,8 @@
     "./turn": "./src/turn-schema.ts",
     "./turn-repository": "./src/turn-repository.ts",
     "./transcript-page": "./src/transcript-page.ts",
-    "./transcript-repository": "./src/transcript-repository.ts"
+    "./transcript-repository": "./src/transcript-repository.ts",
+    "./usage-repository": "./src/usage-repository.ts"
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@effect/*'",

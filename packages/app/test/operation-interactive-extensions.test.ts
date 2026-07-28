@@ -4,10 +4,10 @@ import * as Thread from "@rika/persistence/thread"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
+import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
-import { TestClock } from "effect/testing"
 import { Operation } from "../src/index"
 import { executeInteractiveCommand, InteractiveEventSchema } from "../src/operation-contract"
 
@@ -57,24 +57,6 @@ const providerCostEvent = (
   data: { model_attempt_id: `${cursor}-attempt`, cost: { amount, currency: "USD" } },
 })
 
-const estimatedCostEvent = (executionId: string, cursor: string, amount: number): ExecutionBackend.Event => ({
-  executionId,
-  cursor,
-  sequence: 0,
-  type: "model.usage.reported",
-  createdAt: 1,
-  data: {
-    model_attempt_id: `${cursor}-attempt`,
-    provider: "openai",
-    model: "gpt-5.6-sol",
-    input_tokens: amount * 200_000,
-    input_tokens_uncached: amount * 200_000,
-    input_tokens_cache_read: 0,
-    input_tokens_cache_write: 0,
-    output_tokens: 0,
-  },
-})
-
 const interactiveLayer = (
   repository: ThreadRepository.Interface,
   turns: TurnRepository.Interface,
@@ -83,6 +65,7 @@ const interactiveLayer = (
   makeThreadId: Effect.Effect<Thread.ThreadId> = Effect.die("unused"),
   makeTurnId: Effect.Effect<Turn.TurnId> = Effect.die("unused"),
   transcripts?: TranscriptRepository.Interface,
+  usage?: UsageRepository.Interface,
 ) =>
   Operation.productLayer({
     repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
@@ -90,6 +73,7 @@ const interactiveLayer = (
     ...(transcripts === undefined
       ? {}
       : { transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts) }),
+    ...(usage === undefined ? {} : { usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage) }),
     backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId,
@@ -383,54 +367,29 @@ describe("interactive session extensions", () => {
     terminalTransitionScenario("failed", true, true),
   )
 
-  it.effect("submits while historical cost reconciliation is still running", () =>
+  it.effect("submits while persisted thread usage is still loading", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const selected = thread("cost-reconciliation")
-        const historical: Turn.Turn = {
-          id: Turn.TurnId.make("historical-turn"),
-          threadId: selected.id,
-          prompt: "historical",
-          author: { _tag: "Human" },
-          lineage: { _tag: "Original" },
-          executionRoute: Turn.testExecutionRoute(),
-          status: "completed",
-          stopIntent: "none",
-          createdAt: 1,
-          updatedAt: 1,
-        }
+        const selected = thread("persisted-usage-read")
         const repository = yield* ThreadRepository.makeMemory([selected])
-        const turns = yield* TurnRepository.makeMemory([historical])
-        const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
-        const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
-        yield* transcripts.replace(historical, Transcript.empty(historical.id, historical.prompt))
-        const reconciliationStarted = yield* Deferred.make<void>()
-        const releaseReconciliation = yield* Deferred.make<void>()
+        const turns = yield* TurnRepository.makeMemory()
+        const usageContext = yield* Layer.build(UsageRepository.memoryLayer)
+        const memoryUsage = Context.get(usageContext, UsageRepository.Service)
+        const readStarted = yield* Deferred.make<void>()
+        const releaseRead = yield* Deferred.make<void>()
+        const usage: UsageRepository.Interface = {
+          ...memoryUsage,
+          readThread: (threadId) =>
+            Deferred.succeed(readStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseRead)),
+              Effect.andThen(memoryUsage.readThread(threadId)),
+            ),
+        }
         const submissionStarted = yield* Deferred.make<void>()
-        let inspectionCount = 0
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
-          inspect: (executionId) => {
-            inspectionCount += 1
-            return executionId === historical.id && inspectionCount > 3
-              ? Deferred.succeed(reconciliationStarted, undefined).pipe(
-                  Effect.andThen(Deferred.await(releaseReconciliation)),
-                  Effect.as({
-                    turnId: executionId,
-                    status: "completed" as const,
-                    waits: [],
-                    pendingTools: [],
-                    children: [],
-                  }),
-                )
-              : Effect.succeed({
-                  turnId: executionId,
-                  status: "completed" as const,
-                  waits: [],
-                  pendingTools: [],
-                  children: [],
-                })
-          },
+          inspect: () => Effect.die("usage loading must not inspect Relay"),
+          replay: () => Effect.die("usage loading must not replay Relay"),
           start: (input) =>
             Deferred.succeed(submissionStarted, undefined).pipe(Effect.andThen(baseBackend.start(input))),
         })
@@ -443,7 +402,8 @@ describe("interactive session extensions", () => {
             registration,
             Effect.die("unused"),
             Effect.succeed(Turn.TurnId.make("submitted-turn")),
-            transcripts,
+            undefined,
+            usage,
           ),
         )
         const operation = Context.get(context, Operation.Service)
@@ -453,13 +413,11 @@ describe("interactive session extensions", () => {
         const session = yield* Deferred.await(registration)
 
         yield* session.selectThread(selected.id, 1)
-        yield* Effect.yieldNow
-        yield* TestClock.adjust("1 second")
-        yield* Deferred.await(reconciliationStarted)
+        yield* Deferred.await(readStarted)
         yield* session.submit("send now")
         yield* Deferred.await(submissionStarted)
 
-        yield* Deferred.succeed(releaseReconciliation, undefined)
+        yield* Deferred.succeed(releaseRead, undefined)
         yield* Fiber.interrupt(operationFiber)
       }),
     ),
@@ -486,7 +444,6 @@ describe("interactive session extensions", () => {
         const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
         const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
         yield* transcripts.replace(target, { ...Transcript.empty(target.id, target.prompt), costUsd: 15 })
-        const usage = { ...estimatedCostEvent(String(target.id), "corrected-usage", 5), sequence: 1 }
         let inspections = 0
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
@@ -504,8 +461,7 @@ describe("interactive session extensions", () => {
                 : undefined,
             )
           },
-          replay: (executionId) =>
-            Effect.succeed({ turnId: executionId, status: "completed" as const, events: [usage] }),
+          replay: (executionId) => Effect.succeed({ turnId: executionId, status: "completed" as const, events: [] }),
         })
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
         const context = yield* Layer.build(
@@ -537,11 +493,6 @@ describe("interactive session extensions", () => {
         expect(yield* transcripts.get(target.id)).toMatchObject({
           costUsd: 15,
         })
-        yield* TestClock.adjust("1 second")
-        let refreshed = yield* Queue.take(events)
-        while (refreshed._tag !== "TitleCostUpdated" || refreshed.turnId !== target.id)
-          refreshed = yield* Queue.take(events)
-        expect(refreshed).toMatchObject({ threadCostUsd: 10, globalCostUsd: 10 })
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)
@@ -783,36 +734,74 @@ describe("interactive session extensions", () => {
           },
         ])
         const registration = yield* Deferred.make<Operation.InteractiveSession>()
-        const executionEvents = new Map<string, ReadonlyArray<ExecutionBackend.Event>>([
-          ["turn-first", [estimatedCostEvent("turn-first", "first-usage", 1)]],
-          ["turn-first-child", [estimatedCostEvent("turn-first-child", "first-child-usage", 2)]],
-          ["turn-second", [estimatedCostEvent("turn-second", "second-usage", 4)]],
-        ])
+        const transcriptContext = yield* Layer.build(TranscriptRepository.memoryLayer)
+        const transcripts = Context.get(transcriptContext, TranscriptRepository.Service)
+        for (const turnId of ["turn-first", "turn-second"] as const) {
+          const target = (yield* turns.get(Turn.TurnId.make(turnId)))!
+          yield* transcripts.replace(
+            target,
+            Transcript.project(target.id, target.prompt, [
+              {
+                cursor: `${turnId}-completed`,
+                sequence: 1,
+                type: "execution.completed",
+                createdAt: 1,
+              },
+            ]),
+          )
+        }
+        const usageContext = yield* Layer.build(UsageRepository.memoryLayer)
+        const usage = Context.get(usageContext, UsageRepository.Service)
+        const firstFold = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({ child: "turn-first-child" })
+        const secondFold = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)({ root: "turn-second" })
+        yield* usage.admit("turn-first", String(first.id))
+        yield* usage.commitFold("turn-first", 0, firstFold, {
+          costNanoUsd: 5_000_000_000,
+          tokens: 50,
+          activeMillis: 500,
+          activeIntervals: [{ start: 0, end: 500 }],
+          pricedAttempts: 2,
+          unpricedAttempts: 0,
+          countedAttempts: 2,
+          uncountedAttempts: 0,
+          sourceComplete: true,
+        })
+        yield* usage.admit("turn-second", String(second.id))
+        yield* usage.commitFold("turn-second", 0, secondFold, {
+          costNanoUsd: 8_000_000_000,
+          tokens: 80,
+          activeMillis: 800,
+          activeIntervals: [{ start: 500, end: 1_300 }],
+          pricedAttempts: 1,
+          unpricedAttempts: 0,
+          countedAttempts: 1,
+          uncountedAttempts: 0,
+          sourceComplete: true,
+        })
+        let backendReads = 0
         const backend = ExecutionBackend.Service.of({
           ...baseBackend,
-          inspect: (executionId) =>
-            Effect.succeed(
-              executionEvents.has(executionId)
-                ? {
-                    turnId: executionId,
-                    status: "completed" as const,
-                    waits: [],
-                    pendingTools: [],
-                    children:
-                      executionId === "turn-first"
-                        ? [{ executionId: "turn-first-child", status: "completed" as const }]
-                        : [],
-                  }
-                : undefined,
-            ),
-          replay: (executionId) =>
-            Effect.succeed({
-              turnId: executionId,
-              status: "completed" as const,
-              events: executionEvents.get(executionId) ?? [],
-            }),
+          inspect: () => {
+            backendReads += 1
+            return Effect.void.pipe(Effect.as(undefined))
+          },
+          replay: (turnId) => {
+            backendReads += 1
+            return Effect.succeed({ turnId, status: "completed" as const, events: [] })
+          },
         })
-        const context = yield* Layer.build(interactiveLayer(repository, turns, backend, registration))
+        const context = yield* Layer.build(
+          interactiveLayer(
+            repository,
+            turns,
+            backend,
+            registration,
+            Effect.die("unused"),
+            Effect.die("unused"),
+            transcripts,
+            usage,
+          ),
+        )
         const operation = Context.get(context, Operation.Service)
         const operationFiber = yield* Effect.forkChild(
           operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }),
@@ -827,12 +816,17 @@ describe("interactive session extensions", () => {
 
         expect(loaded.threadCostUsd).toBeUndefined()
         expect(loaded.globalCostUsd).toBeUndefined()
-        expect(new Set(loaded.entries.map((entry) => entry.projectionCostUsd))).toEqual(new Set([1]))
-        yield* TestClock.adjust("1 second")
+        const transcriptRepairReads = backendReads
         let refreshed = yield* Queue.take(events)
-        while (refreshed._tag !== "TitleCostUpdated" || refreshed.threadId !== first.id)
+        while (refreshed._tag !== "ThreadUsageUpdated" || refreshed.threadId !== first.id)
           refreshed = yield* Queue.take(events)
-        expect(refreshed).toMatchObject({ threadCostUsd: 5, globalCostUsd: 13 })
+        expect(refreshed).toMatchObject({
+          cost: { _tag: "Available", usd: 5 },
+          tokens: { _tag: "Available", total: 50 },
+          time: { _tag: "Available", accumulatedMillis: 500 },
+        })
+        expect(backendReads).toBe(transcriptRepairReads)
+        expect(yield* usage.readGlobal).toMatchObject({ costNanoUsd: 13_000_000_000 })
 
         yield* Fiber.interrupt(feed)
         yield* Fiber.interrupt(operationFiber)

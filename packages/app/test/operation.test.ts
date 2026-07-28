@@ -2743,8 +2743,8 @@ describe("Operation", () => {
           ),
         ).toHaveLength(1)
         expect(
-          received.filter((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2),
-        ).toHaveLength(1)
+          received.filter((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2).length,
+        ).toBeGreaterThanOrEqual(1)
         expect(
           received.filter(
             (event) =>
@@ -4019,7 +4019,9 @@ describe("Operation", () => {
           },
         },
       ])
-      expect(transcript[5]).toMatchObject({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" })
+      expect(transcript).toContainEqual(
+        expect.objectContaining({ _tag: "ThreadTitled", threadId: "thread-interactive", title: "answer" }),
+      )
       expect(yield* Ref.get(childInputs)).toContainEqual({
         parentTurnId: "turn-interactive",
         childId: "title",

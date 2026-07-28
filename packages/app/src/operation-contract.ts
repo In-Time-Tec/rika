@@ -199,6 +199,7 @@ const Extension = Schema.Struct({
 })
 const ExtensionList = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Extension"), action: Schema.tag("list") })
 const Doctor = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Doctor") })
+const Migrate = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Migrate"), action: Schema.tag("usage") })
 const WorkflowStart = Schema.Struct({
   ...ClientWorkspace,
   _tag: Schema.tag("Workflow"),
@@ -245,6 +246,7 @@ export const Input = Schema.Union([
   Extension,
   ExtensionList,
   Doctor,
+  Migrate,
   WorkflowStart,
   WorkflowInspect,
 ])

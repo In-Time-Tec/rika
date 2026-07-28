@@ -26,6 +26,7 @@ import * as ThreadInteractionRepository from "@rika/persistence/thread-interacti
 import * as ThreadSearchRepository from "@rika/persistence/thread-search-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
+import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as Transcript from "@rika/transcript"
 import * as ExecutionBackend from "@rika/runtime/contract"
@@ -2854,6 +2855,10 @@ if (import.meta.main) {
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
   )
+  const usageRepositoryLayer = UsageRepository.layer.pipe(
+    Layer.provide(productDatabase),
+    Layer.provide(BunServices.layer),
+  )
   const threadInteractionRepositoryLayer = ThreadInteractionRepository.layer.pipe(
     Layer.provide(productDatabase),
     Layer.provide(BunServices.layer),
@@ -3051,6 +3056,7 @@ if (import.meta.main) {
           turnRepositoryLayer: repositories,
           threadSummaryRepositoryLayer: repositories,
           transcriptRepositoryLayer: repositories,
+          usageRepositoryLayer,
           threadInteractionRepositoryLayer,
           threadToolGateway,
           resolvedContextLayer,

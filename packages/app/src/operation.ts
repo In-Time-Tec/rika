@@ -4,6 +4,7 @@ import * as ThreadSummaryRepository from "@rika/persistence/thread-summary-repos
 import * as ThreadInteractionRepository from "@rika/persistence/thread-interaction-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
+import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { AgentDepth } from "@rika/runtime"
@@ -30,6 +31,7 @@ import {
   Layer,
   PubSub,
   Queue,
+  Random,
   Ref,
   Schema,
   Semaphore,
@@ -139,6 +141,7 @@ const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): In
     case "ExecutionFailed":
     case "ExecutionControlFailed":
     case "ExecutionControlled":
+    case "ThreadUsageUpdated":
       return { ...event, selectionEpoch }
     default:
       return event
@@ -313,12 +316,14 @@ export interface ProductLayerOptions<
   ThreadSummaryError = never,
   TranscriptError = never,
   ThreadInteractionError = never,
+  UsageError = never,
 > {
   readonly repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadError>
   readonly turnRepositoryLayer: Layer.Layer<TurnRepository.Service, TurnError>
   readonly threadSummaryRepositoryLayer?: Layer.Layer<ThreadSummaryRepository.Service, ThreadSummaryError>
   readonly transcriptRepositoryLayer?: Layer.Layer<TranscriptRepository.Service, TranscriptError>
   readonly threadInteractionRepositoryLayer?: Layer.Layer<ThreadInteractionRepository.Service, ThreadInteractionError>
+  readonly usageRepositoryLayer?: Layer.Layer<UsageRepository.Service, UsageError>
   readonly threadToolGateway?: ThreadToolService.Gateway
   readonly backendLayer: Layer.Layer<ExecutionBackend.Service, BackendError>
   readonly resolveExecutionRoute?: (
@@ -751,6 +756,15 @@ const sameUsageTime = (left: UsageTime | undefined, right: UsageTime | undefined
       left.accumulatedMillis === right.accumulatedMillis &&
       left.activeSince === right.activeSince))
 
+const repositoryTotals = (value: UsageRepository.Materialized): UsageCost.Totals => ({
+  costUsd: (value.costNanoUsd ?? 0) / 1_000_000_000,
+  pricedAttempts: value.pricedAttempts,
+  unpricedAttempts: value.unpricedAttempts,
+  tokens: value.tokens ?? 0,
+  countedAttempts: value.countedAttempts,
+  uncountedAttempts: value.uncountedAttempts,
+})
+
 const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): InteractiveEvent => {
   const executionId = event.executionId ?? event.data?.execution_id
   const turnId =
@@ -762,12 +776,11 @@ const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): Intera
     selectionEpoch: 0,
     threadId: turn.threadId,
     turnId,
-    ...(turnId === turn.id ||
-    (event.type !== "model.usage.reported" &&
-      event.type !== "model.attempt.completed" &&
-      event.type !== "child_run.spawned")
-      ? {}
-      : { rootTurnId: turn.id }),
+    ...(event.type === "model.usage.reported" ||
+    event.type === "model.attempt.completed" ||
+    event.type === "child_run.spawned"
+      ? { rootTurnId: turn.id }
+      : {}),
     event,
     revision: event.sequence,
   }
@@ -1419,6 +1432,7 @@ export const productLayer = <
   ThreadSummaryError = never,
   TranscriptError = never,
   ThreadInteractionError = never,
+  UsageError = never,
 >(
   options: ProductLayerOptions<
     ThreadError,
@@ -1426,7 +1440,8 @@ export const productLayer = <
     BackendError,
     ThreadSummaryError,
     TranscriptError,
-    ThreadInteractionError
+    ThreadInteractionError,
+    UsageError
   >,
 ) =>
   Layer.effect(
@@ -1436,8 +1451,11 @@ export const productLayer = <
       const pendingTurnCapacity = Math.max(0, Math.floor(options.pendingTurnCapacity ?? 64))
       const reviewSettlementAdmission = yield* Semaphore.make(1)
       const turnMutationAdmission = yield* Semaphore.make(1)
+      let admitUsageTurn: (turn: Turn.Turn) => Effect.Effect<unknown> = () => Effect.void
       const createForSubmission = (turns: TurnRepository.Interface, input: TurnRepository.CreateInput) =>
-        turnMutationAdmission.withPermits(1)(turns.createForSubmission(input))
+        turnMutationAdmission.withPermits(1)(
+          turns.createForSubmission(input).pipe(Effect.tap((turn) => admitUsageTurn(turn))),
+        )
       const turnChanges = yield* PubSub.sliding<void>(1)
       let interactiveSessionSequence = 0
       let activitySequence = 0
@@ -1458,6 +1476,7 @@ export const productLayer = <
       const createObservedSubmission = (turns: TurnRepository.Interface, input: TurnRepository.CreateInput) =>
         Effect.gen(function* () {
           const turn = yield* turns.createForSubmission(input)
+          yield* admitUsageTurn(turn)
           if (turn.status === "queued") return { turn, claimed: false }
           return { turn, claimed: yield* rootTurnOwner.claim(turn.id, turn.status) }
         }).pipe(turnMutationAdmission.withPermits(1))
@@ -1479,6 +1498,7 @@ export const productLayer = <
         repositories,
         threadSummaryRepositoryLayer,
         options.transcriptRepositoryLayer ?? TranscriptRepository.memoryLayer,
+        options.usageRepositoryLayer ?? UsageRepository.memoryLayer,
         ...(options.threadInteractionRepositoryLayer === undefined ? [] : [options.threadInteractionRepositoryLayer]),
         resolvedContextLayer,
         ...(options.executionExtensions === undefined ? [] : [options.executionExtensions.layer]),
@@ -1489,6 +1509,126 @@ export const productLayer = <
         yield* Layer.buildWithScope(options.backendLayer, ownerScope),
         ExecutionBackend.Service,
       )
+      const usageRepository = Context.get(dependencyContext, UsageRepository.Service)
+      const usageOwners = new Map<string, { readonly threadId: string; readonly turnId: string }>()
+      admitUsageTurn = (turn) =>
+        turn.status === "queued"
+          ? Effect.void
+          : usageRepository.admit(String(turn.id), String(turn.threadId)).pipe(
+              Effect.tap(() =>
+                Effect.sync(() =>
+                  usageOwners.set(String(turn.id), { threadId: String(turn.threadId), turnId: String(turn.id) }),
+                ),
+              ),
+              Effect.orDie,
+            )
+      const usageWriteAdmission = yield* Semaphore.make(1)
+      const persistUsageEvents = (threadId: string, turnId: string, events: ReadonlyArray<ExecutionBackend.Event>) =>
+        usageWriteAdmission.withPermits(1)(
+          Effect.gen(function* () {
+            const observed = events.filter(UsageCost.isObservedEvent)
+            if (observed.length === 0) return yield* usageRepository.readTurn(turnId)
+            yield* usageRepository.admit(turnId, threadId)
+            while (true) {
+              const stored = yield* usageRepository.loadFold(turnId)
+              if (stored === undefined) return
+              let snapshot = stored.foldJson === undefined ? UsageCost.empty : UsageCost.deserialize(stored.foldJson)
+              for (const event of observed) snapshot = UsageCost.observe(snapshot, { threadId, turnId, event })
+              const foldJson = UsageCost.serialize(snapshot)
+              if (foldJson === stored.foldJson) return yield* usageRepository.readTurn(turnId)
+              const committed = yield* usageRepository.commitFold(
+                turnId,
+                stored.revision,
+                foldJson,
+                UsageCost.materialize(snapshot, turnId, threadId),
+              )
+              if (committed._tag === "Applied") return committed.value
+            }
+          }),
+        )
+      const reconcileUsageTree = (threadId: string, turnId: string) =>
+        usageWriteAdmission.withPermits(1)(
+          Effect.gen(function* () {
+            while (true) {
+              const stored = yield* usageRepository.loadFold(turnId)
+              if (stored === undefined || stored.projectionVersion !== UsageRepository.projectionVersion) return
+              const rebuilt = yield* UsageCost.rebuild(rawBackend, [{ threadId, turnId }])
+              const committed = yield* usageRepository.commitFold(
+                turnId,
+                stored.revision,
+                UsageCost.serialize(rebuilt.snapshot),
+                {
+                  ...UsageCost.materialize(rebuilt.snapshot, turnId, threadId),
+                  sourceComplete: rebuilt.sourceComplete,
+                },
+              )
+              if (committed._tag === "Applied") {
+                if (!rebuilt.sourceComplete)
+                  return yield* UsageRepository.RepositoryError.make({
+                    message: `Usage tree for Turn ${turnId} changed or could not be read completely`,
+                  })
+                return committed.value
+              }
+            }
+          }),
+        )
+      const persistedUsageEvent = Effect.fn("Operation.persistedUsageEvent")(function* (
+        value: UsageRepository.TurnUsage | undefined,
+      ) {
+        if (value === undefined) return
+        const thread = yield* usageRepository.readThread(value.threadId)
+        const global = yield* usageRepository.readGlobal
+        if (thread.costNanoUsd === undefined && thread.tokens === undefined && thread.activeMillis === undefined) return
+        publishInteractiveActivity(0, {
+          _tag: "ThreadUsageUpdated",
+          selectionEpoch: 0,
+          threadId: Thread.ThreadId.make(value.threadId),
+          cost:
+            thread.costNanoUsd === undefined
+              ? { _tag: "Unavailable" }
+              : {
+                  _tag: "Available",
+                  usd: thread.costNanoUsd / 1_000_000_000,
+                  unpricedAttempts: thread.unpricedAttempts,
+                },
+          tokens:
+            thread.tokens === undefined
+              ? { _tag: "Unavailable" }
+              : { _tag: "Available", total: thread.tokens, uncountedAttempts: thread.uncountedAttempts },
+          time:
+            thread.activeMillis === undefined
+              ? { _tag: "Unavailable" }
+              : {
+                  _tag: "Available",
+                  accumulatedMillis: thread.activeMillis,
+                  ...(thread.activeSince === undefined ? {} : { activeSince: thread.activeSince }),
+                },
+        })
+        if (value.costNanoUsd !== undefined && thread.costNanoUsd !== undefined && global.costNanoUsd !== undefined)
+          publishInteractiveActivity(0, {
+            _tag: "TitleCostUpdated",
+            threadId: Thread.ThreadId.make(value.threadId),
+            turnId: Turn.TurnId.make(value.turnId),
+            turnCostUsd: value.costNanoUsd / 1_000_000_000,
+            threadCostUsd: thread.costNanoUsd / 1_000_000_000,
+            globalCostUsd: global.costNanoUsd / 1_000_000_000,
+          })
+      })
+      const reconcileTerminalUsage = (threadId: string, turnId: string) =>
+        reconcileUsageTree(threadId, turnId).pipe(
+          Effect.retry({ times: 2 }),
+          Effect.catchCause((cause) =>
+            Cause.hasInterruptsOnly(cause)
+              ? Effect.interrupt
+              : Effect.logWarning("usage-projection.reconcile.failed").pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": threadId,
+                    "rika.turn.id": turnId,
+                    "rika.failure.kind": failureKind(cause),
+                  }),
+                ),
+          ),
+        )
       const replacementAdmission = yield* Semaphore.make(1)
       const replacementState = yield* Ref.make({ closed: false, active: 0 })
       const activeWorkflows = new Map<
@@ -1519,7 +1659,142 @@ export const productLayer = <
         )
       const acquiredBackend = ExecutionBackend.Service.of({
         ...rawBackend,
-        start: (input) => withExecutionAdmission(rawBackend.start(input)),
+        start: (input) =>
+          withExecutionAdmission(
+            Effect.gen(function* () {
+              usageOwners.set(input.turnId, { threadId: input.threadId, turnId: input.turnId })
+              const streamed: Array<ExecutionBackend.Event> = []
+              const result = yield* rawBackend.start({
+                ...input,
+                onEvent: (event) => {
+                  if (UsageCost.isObservedEvent(event)) streamed.push(event)
+                  input.onEvent?.(event)
+                },
+              })
+              const persisted = yield* persistUsageEvents(input.threadId, input.turnId, [
+                ...streamed,
+                ...result.events,
+              ]).pipe(
+                Effect.tap(persistedUsageEvent),
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.interrupt
+                    : Effect.logWarning("usage-projection.flush.failed").pipe(
+                        Effect.annotateLogs({
+                          "rika.thread.id": input.threadId,
+                          "rika.turn.id": input.turnId,
+                          "rika.failure.kind": failureKind(cause),
+                        }),
+                        Effect.as(undefined),
+                      ),
+                ),
+              )
+              if (persisted === undefined)
+                yield* Effect.logWarning("usage-projection.turn.partial").pipe(
+                  Effect.annotateLogs({ "rika.thread.id": input.threadId, "rika.turn.id": input.turnId }),
+                )
+              if (isTerminalStatus(result.status)) {
+                yield* reconcileTerminalUsage(input.threadId, input.turnId)
+              }
+              return result
+            }),
+          ),
+        ...(rawBackend.follow === undefined
+          ? {}
+          : {
+              follow: (turnId, afterCursor, onEvent, reference, eventScope) => {
+                let owner = usageOwners.get(String(turnId))
+                return Effect.gen(function* () {
+                  if (owner === undefined && reference === undefined) {
+                    const storedTurn = yield* Context.get(dependencyContext, TurnRepository.Service)
+                      .get(Turn.TurnId.make(String(turnId)))
+                      .pipe(
+                        Effect.catchCause((cause) =>
+                          Effect.logWarning("usage-projection.owner.read.failed").pipe(
+                            Effect.annotateLogs({
+                              "rika.turn.id": String(turnId),
+                              "rika.failure.kind": failureKind(cause),
+                            }),
+                            Effect.as(undefined),
+                          ),
+                        ),
+                      )
+                    if (storedTurn !== undefined) {
+                      owner = { threadId: String(storedTurn.threadId), turnId: String(storedTurn.id) }
+                      usageOwners.set(String(turnId), owner)
+                      yield* admitUsageTurn(storedTurn)
+                    }
+                  }
+                  const streamed: Array<ExecutionBackend.Event> = []
+                  const result = yield* rawBackend.follow!(
+                    turnId,
+                    afterCursor,
+                    (event) => {
+                      if (owner !== undefined && UsageCost.isObservedEvent(event)) streamed.push(event)
+                      onEvent?.(event)
+                    },
+                    reference,
+                    eventScope,
+                  )
+                  if (owner !== undefined) {
+                    yield* Effect.gen(function* () {
+                      const persisted = yield* persistUsageEvents(owner!.threadId, owner!.turnId, [
+                        ...streamed,
+                        ...result.events,
+                      ])
+                      yield* persistedUsageEvent(persisted)
+                      if (isTerminalStatus(result.status)) {
+                        yield* reconcileTerminalUsage(owner!.threadId, owner!.turnId)
+                      }
+                    }).pipe(
+                      Effect.catchCause((cause) =>
+                        Cause.hasInterruptsOnly(cause)
+                          ? Effect.interrupt
+                          : Effect.logWarning("usage-projection.flush.failed").pipe(
+                              Effect.annotateLogs({
+                                "rika.thread.id": owner!.threadId,
+                                "rika.turn.id": owner!.turnId,
+                                "rika.failure.kind": failureKind(cause),
+                              }),
+                            ),
+                      ),
+                    )
+                  }
+                  return result
+                })
+              },
+            }),
+        cancel: (turnId, cancelledAt, reference) =>
+          withExecutionAdmission(
+            Effect.gen(function* () {
+              const result = yield* rawBackend.cancel(turnId, cancelledAt, reference)
+              yield* Effect.gen(function* () {
+                let owner = usageOwners.get(String(turnId))
+                if (owner === undefined && reference === undefined) {
+                  const turn = yield* Context.get(dependencyContext, TurnRepository.Service).get(
+                    Turn.TurnId.make(String(turnId)),
+                  )
+                  if (turn !== undefined) owner = { threadId: String(turn.threadId), turnId: String(turn.id) }
+                }
+                if (owner === undefined) return
+                yield* persistUsageEvents(owner.threadId, owner.turnId, result.events)
+                if (!isTerminalStatus(result.status)) return
+                yield* reconcileTerminalUsage(owner.threadId, owner.turnId)
+              }).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.interrupt
+                    : Effect.logWarning("usage-projection.cancel.flush.failed").pipe(
+                        Effect.annotateLogs({
+                          "rika.turn.id": String(turnId),
+                          "rika.failure.kind": failureKind(cause),
+                        }),
+                      ),
+                ),
+              )
+              return result
+            }),
+          ),
         invokeChild: (input) => withExecutionAdmission(rawBackend.invokeChild(input)),
         createFanOut: (input) => withExecutionAdmission(rawBackend.createFanOut(input)),
         startWorkflow: (name, runId, revision, ownerTurnId, workspace) =>
@@ -1580,26 +1855,26 @@ export const productLayer = <
             threadId: String(thread.id),
             turnId: String(first.id),
             executionId: titleExecutionId(first.id),
+            reference: true,
             optional: true,
           })
         return roots
       }
       const readUsageCosts = Effect.fn("Operation.readUsageCosts")(function* () {
-        const threads = yield* ThreadRepository.Service
-        const turns = yield* TurnRepository.Service
-        const roots = (yield* Effect.forEach(
-          yield* threads.list({ includeArchived: true, limit: UsageCost.maximumGlobalThreads }),
-          (thread) => turns.list(thread.id).pipe(Effect.map((values) => usageRoots(thread, values))),
-        )).flat()
-        return { roots, snapshot: yield* UsageCost.collect(acquiredBackend, roots) }
+        const value = yield* usageRepository.readGlobal
+        usageGlobalCostAvailable = value.costNanoUsd !== undefined
+        return {
+          roots: [] as Array<UsageCost.RootExecution>,
+          snapshot: { ...UsageCost.empty, global: repositoryTotals(value) },
+        }
       })
       const usageCostAdmission = yield* Semaphore.make(1)
       let usageSnapshot: UsageCost.Snapshot = { ...UsageCost.empty }
       let usageCostsLoaded = false
+      let usageGlobalCostAvailable = false
       const deletedUsageThreads = new Set<string>()
       const pendingUsageEvents: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }> = []
       const currentUsageCosts = (): UsageCost.Snapshot => usageSnapshot
-      const usageCostsRead = (): boolean => usageCostsLoaded
       const observeUsage = (input: UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }) => {
         if (deletedUsageThreads.has(input.threadId)) return usageSnapshot
         if (!usageCostsLoaded) pendingUsageEvents.push(input)
@@ -1610,7 +1885,6 @@ export const productLayer = <
         Effect.suspend(() => {
           if (usageCostsLoaded) return Effect.void
           return readUsageCosts().pipe(
-            Effect.provide(executionDependencies),
             Effect.tap(({ roots, snapshot }) =>
               Effect.sync(() => {
                 usageSnapshot = pendingUsageEvents.reduce(UsageCost.observe, snapshot)
@@ -1696,6 +1970,9 @@ export const productLayer = <
             result = yield* backend.follow(executionId, undefined, undefined, ExecutionBackend.executionReference)
           }
           if (result === undefined) return
+          yield* persistUsageEvents(String(thread.id), String(firstTurn.id), result.events).pipe(
+            Effect.tap(persistedUsageEvent),
+          )
           const previousGlobalCostUsd = currentUsageCosts().global.costUsd
           for (const event of result.events)
             observeUsage({
@@ -1704,7 +1981,7 @@ export const productLayer = <
               event,
             })
           const totals = currentUsageCosts()
-          if (totals.global.costUsd !== previousGlobalCostUsd)
+          if (usageGlobalCostAvailable && totals.global.costUsd !== previousGlobalCostUsd)
             announce({
               _tag: "TitleCostUpdated",
               threadId: thread.id,
@@ -1777,6 +2054,7 @@ export const productLayer = <
       ) {
         const turns = yield* TurnRepository.Service
         const turn = yield* turns.setStatus(id, status, lastCursor, now)
+        yield* admitUsageTurn(turn)
         yield* notifyThreadSummaries
         yield* notifyTurnChanged(turn)
         return turn
@@ -2130,6 +2408,8 @@ export const productLayer = <
           readonly threadId: string
           snapshot: UsageCost.Snapshot | undefined
           readonly pending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
+          costAvailable: boolean
+          tokensAvailable: boolean
         }
         let selectedUsage: SelectionUsage | undefined
         let candidateUsage: SelectionUsage | undefined
@@ -2160,6 +2440,8 @@ export const productLayer = <
             threadId: String(threadId),
             snapshot: UsageCost.empty,
             pending: [],
+            costAvailable: false,
+            tokensAvailable: false,
           }
           return {
             _tag: "ThreadUsageUpdated",
@@ -2189,15 +2471,25 @@ export const productLayer = <
           if (selection !== undefined && selection.threadId === String(event.threadId)) {
             if (selection.snapshot === undefined) selection.pending.push(observation)
             else selection.snapshot = UsageCost.observe(selection.snapshot, observation)
+            if (
+              event.event.type === "model.usage.reported" ||
+              event.event.type === "model.attempt.completed" ||
+              event.event.type === "model.attempt.failed"
+            ) {
+              selection.costAvailable = true
+              selection.tokensAvailable = true
+            }
           }
           const selectedTotals = selection?.threadId === String(event.threadId) ? selection.snapshot : undefined
           const timeChanged =
             selectedTotals !== undefined &&
             !sameUsageTime(previousTime, displayActiveTime(selectedTotals, String(event.threadId)))
-          if (!UsageCost.isUsageBearingEvent(event.event) && !timeChanged) return { event }
-          const totals = selectedTotals ?? currentUsageCosts()
           const costBearing =
-            event.event.type === "model.usage.reported" || event.event.type === "model.attempt.completed"
+            event.event.type === "model.usage.reported" ||
+            event.event.type === "model.attempt.completed" ||
+            event.event.type === "model.attempt.failed"
+          if (!costBearing && !timeChanged) return { event }
+          const totals = selectedTotals ?? currentUsageCosts()
           const patched = {
             ...event,
             ...(costBearing ? { rootTurnId } : {}),
@@ -2205,7 +2497,7 @@ export const productLayer = <
               ? { rootTurnCostUsd: UsageCost.turnTotals(totals, rootTurnId).costUsd }
               : {}),
             ...(costBearing ? { threadCostUsd: UsageCost.threadTotals(totals, String(event.threadId)).costUsd } : {}),
-            ...(costBearing && usageCostsRead() ? { globalCostUsd: currentUsageCosts().global.costUsd } : {}),
+            ...(costBearing && usageCostsLoaded ? { globalCostUsd: currentUsageCosts().global.costUsd } : {}),
           }
           if (selectedTotals === undefined || selection === undefined) return { event: patched }
           const threadId = String(event.threadId)
@@ -2215,8 +2507,8 @@ export const productLayer = <
               _tag: "ThreadUsageUpdated",
               selectionEpoch: selection.request,
               threadId: event.threadId,
-              cost: threadUsage(selectedTotals, threadId),
-              tokens: threadUsageTokens(selectedTotals, threadId),
+              cost: selection.costAvailable ? threadUsage(selectedTotals, threadId) : { _tag: "Unavailable" },
+              tokens: selection.tokensAvailable ? threadUsageTokens(selectedTotals, threadId) : { _tag: "Unavailable" },
               time: displayActiveTime(selectedTotals, threadId),
             },
           }
@@ -2573,6 +2865,8 @@ export const productLayer = <
           status?: ExecutionBackend.Status,
         ) => {
           const key = normalizeChildExecutionId(executionId)
+          usageOwners.set(String(executionId), { threadId: String(threadId), turnId: String(rootTurnId) })
+          usageOwners.set(key, { threadId: String(threadId), turnId: String(rootTurnId) })
           const selection = childFollowerSelection
           if (selection.threadId !== String(threadId)) return
           const current = childFollowerStates.get(key) ?? { _tag: "Idle" as const }
@@ -3097,6 +3391,7 @@ export const productLayer = <
                 promotedAt,
               )
               if (transition._tag === "Unavailable") return undefined
+              yield* admitUsageTurn(transition.turn)
               yield* notifyThreadSummaries
               yield* notifyTurnChanged(transition.turn)
               const runningTurn = transition.turn
@@ -3165,6 +3460,7 @@ export const productLayer = <
                   yield* Clock.currentTimeMillis,
                 )
                 if (transition._tag === "Unavailable") return true
+                yield* admitUsageTurn(transition.turn)
                 yield* notifyThreadSummaries
                 yield* notifyTurnChanged(transition.turn)
                 emit(dispatch, queueMutationEvent(transition.queue))
@@ -3690,8 +3986,8 @@ export const productLayer = <
           state.transcriptCursor = oldestCursor
           state.hasOlder = hasOlder
           if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
-          const threadCostUsd = usageCostsRead() ? UsageCost.threadTotals(usageCosts, thread.id).costUsd : undefined
-          const globalCostUsd = usageCostsRead() ? usageCosts.global.costUsd : undefined
+          const threadCostUsd = undefined
+          const globalCostUsd = undefined
           if (before === undefined) {
             const queue = yield* turns.readQueue(thread.id)
             const storedActiveTurn = yield* turns.findActive(thread.id)
@@ -3919,22 +4215,45 @@ export const productLayer = <
             selectionBackground.push(
               yield* Effect.forkIn(
                 Effect.gen(function* () {
-                  const turns = yield* TurnRepository.Service
-                  const snapshot = yield* UsageCost.collect(
-                    acquiredBackend,
-                    usageRoots(state.thread, yield* turns.list(state.thread.id)),
-                  )
+                  const totals = yield* usageRepository.readThread(String(state.thread.id))
+                  const snapshot: UsageCost.Snapshot = {
+                    ...UsageCost.empty,
+                    threads: new Map([[String(state.thread.id), repositoryTotals(totals)]]),
+                    global: repositoryTotals(totals),
+                    ...(totals.activeMillis === undefined
+                      ? { timeMalformedThreads: new Set([String(state.thread.id)]) }
+                      : {
+                          activeObservedThreads: new Set([String(state.thread.id)]),
+                          threadActiveTime: new Map([
+                            [
+                              String(state.thread.id),
+                              {
+                                accumulated: Duration.millis(totals.activeMillis),
+                                ...(totals.activeSince === undefined ? {} : { activeSince: totals.activeSince }),
+                              },
+                            ],
+                          ]),
+                        }),
+                  }
                   if (selectedUsage !== usageState) return
                   usageState.snapshot = usageState.pending.reduce(UsageCost.observe, snapshot)
                   usageState.pending.length = 0
+                  usageState.costAvailable = totals.costNanoUsd !== undefined
+                  usageState.tokensAvailable = totals.tokens !== undefined
                   const selectedSnapshot = usageState.snapshot
                   const threadId = String(state.thread.id)
                   dispatch({
                     _tag: "ThreadUsageUpdated",
                     selectionEpoch: state.epoch,
                     threadId: state.thread.id,
-                    cost: threadUsage(selectedSnapshot, threadId),
-                    tokens: threadUsageTokens(selectedSnapshot, threadId),
+                    cost:
+                      totals.costNanoUsd === undefined
+                        ? { _tag: "Unavailable" }
+                        : threadUsage(selectedSnapshot, threadId),
+                    tokens:
+                      totals.tokens === undefined
+                        ? { _tag: "Unavailable" }
+                        : threadUsageTokens(selectedSnapshot, threadId),
                     time: displayActiveTime(selectedSnapshot, threadId),
                   })
                 }).pipe(Effect.provide(executionDependencies)),
@@ -3975,6 +4294,8 @@ export const productLayer = <
             threadId: String(thread.id),
             snapshot: undefined as UsageCost.Snapshot | undefined,
             pending: [] as Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>,
+            costAvailable: false,
+            tokensAvailable: false,
           }
           candidateSelectionState = state
           candidateUsage = usageState
@@ -4057,7 +4378,6 @@ export const productLayer = <
             thread,
             entries: [],
             hasOlder: false,
-            ...(usageCostsRead() ? { threadCostUsd: 0, globalCostUsd: currentUsageCosts().global.costUsd } : {}),
             queueRevision: queue.revision,
             queuedCount: queue.queuedCount,
             queue: queue.turns.map(queueItem),
@@ -5087,8 +5407,10 @@ export const productLayer = <
                       promoted.turn.extensionPin,
                       yield* Clock.currentTimeMillis,
                     )
-                    if (transition._tag === "Transitioned")
+                    if (transition._tag === "Transitioned") {
+                      yield* admitUsageTurn(transition.turn)
                       publishInteractiveActivity(0, queueMutationEvent(transition.queue))
+                    }
                     yield* releaseTurnObserver(promoted.turn.id)
                     continue
                   }
@@ -5103,6 +5425,7 @@ export const productLayer = <
                     yield* releaseTurnObserver(promoted.turn.id)
                     continue
                   }
+                  yield* admitUsageTurn(transition.turn)
                   publishInteractiveActivity(0, queueMutationEvent(transition.queue))
                   yield* runTurn(transition.turn, prepared.value).pipe(
                     Effect.ensuring(releaseTurnObserver(transition.turn.id)),
@@ -5371,6 +5694,65 @@ export const productLayer = <
             )
             return
           }
+          if (input._tag === "Migrate") {
+            yield* Effect.gen(function* () {
+              const threads = Context.get(dependencyContext, ThreadRepository.Service)
+              const turns = Context.get(dependencyContext, TurnRepository.Service)
+              const token = `usage-${yield* Clock.currentTimeMillis}-${yield* Random.next}`
+              let repaired = 0
+              for (const thread of yield* threads.listAll) {
+                const threadTurns = yield* turns.list(thread.id)
+                const roots = usageRoots(thread, threadTurns)
+                for (const turn of threadTurns) {
+                  if (turn.status === "queued" || !isTerminalStatus(turn.status)) continue
+                  const admitted = yield* usageRepository.admit(String(turn.id), String(thread.id))
+                  if (admitted.sourceComplete) continue
+                  const claim = yield* usageRepository.claimRepair(String(turn.id), token)
+                  if (claim._tag === "Busy") continue
+                  yield* Effect.gen(function* () {
+                    while (true) {
+                      const stored = yield* usageRepository.loadFold(String(turn.id))
+                      if (stored === undefined) break
+                      if (stored.projectionVersion !== UsageRepository.projectionVersion)
+                        return yield* operationError(
+                          `Usage projection ${stored.projectionVersion} for Turn ${turn.id} is not supported`,
+                        )
+                      if (!(yield* usageRepository.checkpointRepair(String(turn.id), token, "collecting")))
+                        return yield* operationError(`Usage repair claim was lost for Turn ${turn.id}`)
+                      const rebuilt = yield* UsageCost.rebuild(
+                        acquiredBackend,
+                        roots.filter((root) => root.turnId === String(turn.id)),
+                      )
+                      if (!(yield* usageRepository.checkpointRepair(String(turn.id), token, "committing")))
+                        return yield* operationError(`Usage repair claim was lost for Turn ${turn.id}`)
+                      const materialized = UsageCost.materialize(rebuilt.snapshot, String(turn.id), String(thread.id))
+                      const committed = yield* usageRepository.commitRepairFold(
+                        String(turn.id),
+                        token,
+                        stored.revision,
+                        UsageCost.serialize(rebuilt.snapshot),
+                        { ...materialized, sourceComplete: rebuilt.sourceComplete },
+                      )
+                      if (committed._tag === "Applied") {
+                        repaired += 1
+                        break
+                      }
+                    }
+                  }).pipe(
+                    Effect.ensuring(
+                      usageRepository.finishRepair(String(turn.id), token).pipe(
+                        Effect.orElseSucceed(() => false),
+                        Effect.asVoid,
+                      ),
+                    ),
+                  )
+                }
+              }
+              const global = yield* usageRepository.readGlobal
+              yield* Console.log(encodeJson({ repaired, sourceComplete: global.sourceComplete }))
+            }).pipe(Effect.mapError((error) => unavailable(input, String(error))))
+            return
+          }
           if (input._tag !== "Thread") return yield* unavailable(input)
           const program = Effect.gen(function* () {
             const repository = yield* ThreadRepository.Service
@@ -5485,6 +5867,7 @@ export const productLayer = <
                     deletedUsageThreads.add(input.threadId)
                     usageSnapshot = { ...UsageCost.empty }
                     usageCostsLoaded = false
+                    usageGlobalCostAvailable = false
                     usageCostLoadStarted = false
                     pendingUsageEvents.length = 0
                   }),
@@ -5505,6 +5888,7 @@ export const productLayer = <
               case "usage": {
                 const thread = yield* requireThread(repository, input.threadId)
                 const threadTurns = yield* turns.list(thread.id)
+                const usage = yield* usageRepository.readThread(String(thread.id))
                 const statusNames: ReadonlyArray<Turn.Status> = [
                   "accepted",
                   "queued",
@@ -5517,7 +5901,24 @@ export const productLayer = <
                 const statuses = Object.fromEntries(
                   statusNames.map((status) => [status, threadTurns.filter((turn) => turn.status === status).length]),
                 )
-                yield* Console.log(encodeJson({ threadId: thread.id, turns: threadTurns.length, statuses }))
+                yield* Console.log(
+                  encodeJson({
+                    threadId: thread.id,
+                    turns: threadTurns.length,
+                    statuses,
+                    costUsd: usage.costNanoUsd === undefined ? null : usage.costNanoUsd / 1_000_000_000,
+                    tokens: usage.tokens ?? null,
+                    activeMillis: usage.activeMillis ?? null,
+                    attempts: {
+                      priced: usage.pricedAttempts,
+                      unpriced: usage.unpricedAttempts,
+                      counted: usage.countedAttempts,
+                      uncounted: usage.uncountedAttempts,
+                    },
+                    sourceComplete: usage.sourceComplete,
+                    projectionVersion: UsageRepository.projectionVersion,
+                  }),
+                )
                 return
               }
               case "fork": {

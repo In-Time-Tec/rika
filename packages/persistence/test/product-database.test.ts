@@ -14,10 +14,10 @@ it.layer(BunServices.layer)("product database", (test) => {
         yield* Effect.gen(function* () {
           const sql = yield* SqlClient
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows).toHaveLength(19)
+          expect(migrationRows).toHaveLength(20)
           expect(migrationRows.at(-1)).toEqual({
-            migration_id: 19,
-            name: "turn_stop_intent",
+            migration_id: 20,
+            name: "usage_projection",
           })
           const objects = yield* sql`SELECT name FROM sqlite_schema
             WHERE type IN ('table', 'index') AND name NOT LIKE 'sqlite_%'
@@ -29,6 +29,8 @@ it.layer(BunServices.layer)("product database", (test) => {
           expect(names).toContain("rika_transcript_entries")
           expect(names).toContain("rika_thread_search")
           expect(names).toContain("rika_thread_search_files")
+          expect(names).toContain("rika_turn_usage")
+          expect(names).toContain("rika_usage_repairs")
           const checkpointColumns = yield* sql`PRAGMA table_info(rika_transcript_checkpoints)`
           const columnNames = checkpointColumns.map((row) => String((row as { readonly name: unknown }).name))
           expect(columnNames).toEqual([

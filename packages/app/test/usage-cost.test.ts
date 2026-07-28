@@ -119,6 +119,26 @@ const reader = (
 })
 
 describe("UsageCost", () => {
+  it("round trips every fold state and continues identically", () => {
+    const input = { threadId: "thread", turnId: "turn" }
+    const before = [
+      lifecycle("execution", "accepted", "execution.accepted", 1_000, 1),
+      lifecycle("execution", "started", "execution.started", 2_000, 2),
+      usage("cost", 0.25),
+    ].reduce((snapshot, event) => UsageCost.observe(snapshot, { ...input, event }), UsageCost.empty)
+    const after = [
+      reportedTokens("tokens", "gpt-4o", 10, 5),
+      lifecycle("execution", "completed", "execution.completed", 5_000, 4),
+    ]
+    const uninterrupted = after.reduce((snapshot, event) => UsageCost.observe(snapshot, { ...input, event }), before)
+    const resumed = after.reduce(
+      (snapshot, event) => UsageCost.observe(snapshot, { ...input, event }),
+      UsageCost.deserialize(UsageCost.serialize(before)),
+    )
+    expect(UsageCost.serialize(resumed)).toBe(UsageCost.serialize(uninterrupted))
+    expect(UsageCost.observe(resumed, { ...input, event: after[0]! })).toEqual(resumed)
+  })
+
   it("ignores transient delta events entirely", () => {
     const accepted = UsageCost.observe(UsageCost.empty, {
       threadId: "thread",
@@ -700,6 +720,86 @@ describe("UsageCost", () => {
     }),
   )
 
+  it.effect("marks a stable, fully paged terminal execution tree complete", () =>
+    Effect.gen(function* () {
+      const rebuilt = yield* UsageCost.rebuild(
+        reader({
+          parent: {
+            events: [
+              lifecycle("parent", "parent-start", "execution.started", 1_000, 1),
+              lifecycle("parent", "parent-complete", "execution.completed", 2_000, 2),
+            ],
+            children: ["child"],
+          },
+          child: {
+            events: [usage("child-cost", 0.25), lifecycle("child", "child-complete", "execution.completed", 2_000, 2)],
+          },
+        }),
+        [{ threadId: "thread", turnId: "parent" }],
+      )
+
+      expect(rebuilt.sourceComplete).toBe(true)
+      expect(UsageCost.turnTotals(rebuilt.snapshot, "parent").costUsd).toBe(0.25)
+    }),
+  )
+
+  it.effect("reads an explicit reference root from the reference namespace", () =>
+    Effect.gen(function* () {
+      const complete = reader({
+        title: {
+          events: [usage("title-cost", 0.25), lifecycle("title", "title-complete", "execution.completed", 2_000, 2)],
+        },
+      })
+      const references: Array<boolean> = []
+      const rebuilt = yield* UsageCost.rebuild(
+        {
+          inspect: (executionId, reference) => {
+            references.push(reference !== undefined)
+            return reference === undefined
+              ? Effect.sync((): ExecutionBackend.Inspection | undefined => undefined)
+              : complete.inspect(executionId, reference)
+          },
+          replay: complete.replay,
+          pageEvents: complete.pageEvents,
+        },
+        [{ threadId: "thread", turnId: "turn", executionId: "title", reference: true, optional: true }],
+      )
+
+      expect(rebuilt.sourceComplete).toBe(true)
+      expect(references).toEqual([true, true])
+      expect(UsageCost.turnTotals(rebuilt.snapshot, "turn").costUsd).toBe(0.25)
+    }),
+  )
+
+  it.effect("keeps an unstable or incompletely paged execution source partial", () =>
+    Effect.gen(function* () {
+      const complete = reader({ execution: { events: [usage("cost", 0.25)] } })
+      const withoutPages = yield* UsageCost.rebuild({ inspect: complete.inspect, replay: complete.replay }, [
+        { threadId: "thread", turnId: "execution" },
+      ])
+      let inspections = 0
+      const changing = yield* UsageCost.rebuild(
+        {
+          ...complete,
+          inspect: (executionId) => {
+            inspections += 1
+            return complete
+              .inspect(executionId)
+              .pipe(
+                Effect.map((value) =>
+                  value === undefined || inspections === 1 ? value : { ...value, lastCursor: "changed" },
+                ),
+              )
+          },
+        },
+        [{ threadId: "thread", turnId: "execution" }],
+      )
+
+      expect(withoutPages.sourceComplete).toBe(false)
+      expect(changing.sourceComplete).toBe(false)
+    }),
+  )
+
   it("prices uncached input, cache reads, and output from the models.dev snapshot", () => {
     expect(
       UsageCost.eventCostUsd(
@@ -1104,6 +1204,23 @@ describe("UsageCost", () => {
     )
 
     expect(snapshot.global.costUsd).toBe(3)
+  })
+
+  it("scopes reused delivery cursors to their execution", () => {
+    const sharedDelivery = (executionId: string, costUsd: number) => ({
+      ...usage("cursor-shared", costUsd),
+      executionId,
+      data: { ...usage("cursor-shared", costUsd).data, model_attempt_id: `attempt-${executionId}` },
+    })
+    const first = sharedDelivery("execution-a", 1)
+    const second = sharedDelivery("execution-b", 2)
+    const snapshot = [first, second, first].reduce(
+      (current, event) => UsageCost.observe(current, { threadId: "thread", turnId: "turn", event }),
+      UsageCost.empty,
+    )
+
+    expect(snapshot.global.costUsd).toBe(3)
+    expect(snapshot.global.pricedAttempts).toBe(2)
   })
 
   it("does not require dense or arrival-ordered execution sequences", () => {

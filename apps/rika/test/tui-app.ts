@@ -8,6 +8,7 @@ import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
+import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { MediaView, ReadWebPage, Runtime as ToolRuntime, WebSearch } from "@rika/tools"
 import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
@@ -125,6 +126,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const database = Database.layer(path.join(root, "rika.db"))
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
+  const usageRepositoryLayer = UsageRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const toolRuntimeLayer = (directory: string) =>
     ToolRuntime.layer(directory).pipe(
       Layer.provide(
@@ -167,6 +169,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const operationLayer = Operation.productLayer({
     repositoryLayer,
     turnRepositoryLayer,
+    usageRepositoryLayer,
     backendLayer,
     toolRuntimeLayer,
     defaultWorkspace: workspace,

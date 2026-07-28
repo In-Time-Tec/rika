@@ -178,6 +178,9 @@ const reviewCommand = Command.make(
 )
 
 const versionCommand = Command.make("version", {}, () => Console.log(version))
+const migrateCommand = Command.make("migrate").pipe(
+  Command.withSubcommands([Command.make("usage", {}, () => dispatch({ _tag: "Migrate", action: "usage" }))]),
+)
 
 const updateCommand = Command.make("update", {}, () =>
   ReleaseUpdate.update({
@@ -250,6 +253,7 @@ export const command = Command.make(
     ExtensionsCommand,
     WorkflowsCommand,
     reviewCommand,
+    migrateCommand,
     Command.make("doctor", {}, () => dispatch({ _tag: "Doctor" })),
     updateCommand,
     versionCommand,

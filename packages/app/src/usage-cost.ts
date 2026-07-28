@@ -1,12 +1,13 @@
 import { ExecutionStatus } from "@rika/tools"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import * as Transcript from "@rika/transcript"
-import { Duration, Effect, Function, HashMap, Option } from "effect"
+import { Cause, Duration, Effect, Function, HashMap, Option } from "effect"
 
 export interface RootExecution {
   readonly threadId: string
   readonly turnId: string
   readonly executionId?: string
+  readonly reference?: boolean
   readonly optional?: boolean
 }
 
@@ -121,8 +122,8 @@ interface ExecutionActiveBounds {
   readonly maximumSequence: number
 }
 
-export const maximumGlobalThreads = 100
 const collectionConcurrency = 1
+export const maximumGlobalThreads = 100
 
 export const empty: Snapshot = {
   turns: new Map(),
@@ -138,6 +139,125 @@ export const empty: Snapshot = {
   executionWorkTimestamps: new Map(),
   executionActiveBounds: new Map(),
 }
+
+type SerializedSnapshot = {
+  readonly version: 1
+  readonly turns: ReadonlyArray<readonly [string, Totals]>
+  readonly threads: ReadonlyArray<readonly [string, Totals]>
+  readonly global: Totals
+  readonly usageCursors: ReadonlyArray<string>
+  readonly attempts: ReadonlyArray<readonly [string, AttemptCost]>
+  readonly executionAttempts: ReadonlyArray<readonly [string, ReadonlyArray<string>]>
+  readonly activeEvents: ReadonlyArray<readonly [string, ActiveEvent]>
+  readonly activeObservedThreads: ReadonlyArray<string>
+  readonly timeMalformedThreads: ReadonlyArray<string>
+  readonly threadActiveTime: ReadonlyArray<
+    readonly [string, { readonly accumulatedMillis: number; readonly activeSince?: number }]
+  >
+  readonly executionWorkTimestamps: ReadonlyArray<readonly [string, ReadonlyArray<readonly [number, WorkEvidence]>]>
+  readonly executionActiveBounds: ReadonlyArray<readonly [string, ExecutionActiveBounds]>
+}
+
+export const serialize = (snapshot: Snapshot): string =>
+  JSON.stringify({
+    version: 1,
+    turns: [...snapshot.turns],
+    threads: [...snapshot.threads],
+    global: snapshot.global,
+    usageCursors: [...snapshot.usageCursors],
+    attempts: [...snapshot.attempts],
+    executionAttempts: [...snapshot.executionAttempts].map(([key, values]) => [key, [...values]]),
+    activeEvents: [...snapshot.activeEvents],
+    activeObservedThreads: [...snapshot.activeObservedThreads],
+    timeMalformedThreads: [...snapshot.timeMalformedThreads],
+    threadActiveTime: [...snapshot.threadActiveTime].map(([key, value]) => [
+      key,
+      {
+        accumulatedMillis: Duration.toMillis(value.accumulated),
+        ...(value.activeSince === undefined ? {} : { activeSince: value.activeSince }),
+      },
+    ]),
+    executionWorkTimestamps: [...snapshot.executionWorkTimestamps].map(([key, values]) => [key, [...values]]),
+    executionActiveBounds: [...snapshot.executionActiveBounds],
+  } satisfies SerializedSnapshot)
+
+export const deserialize = (json: string): Snapshot => {
+  const value = JSON.parse(json) as SerializedSnapshot
+  if (value.version !== 1) throw new Error(`Unsupported usage projection version ${String(value.version)}`)
+  return {
+    turns: new Map(value.turns),
+    threads: new Map(value.threads),
+    global: value.global,
+    usageCursors: new Set(value.usageCursors),
+    attempts: new Map(value.attempts),
+    executionAttempts: new Map(value.executionAttempts.map(([key, values]) => [key, new Set(values)])),
+    activeEvents: new Map(value.activeEvents),
+    activeObservedThreads: new Set(value.activeObservedThreads),
+    timeMalformedThreads: new Set(value.timeMalformedThreads),
+    threadActiveTime: new Map(
+      value.threadActiveTime.map(([key, time]) => [
+        key,
+        {
+          accumulated: Duration.millis(time.accumulatedMillis),
+          ...(time.activeSince === undefined ? {} : { activeSince: time.activeSince }),
+        },
+      ]),
+    ),
+    executionWorkTimestamps: new Map(
+      value.executionWorkTimestamps.map(([key, values]) => [key, HashMap.fromIterable(values)]),
+    ),
+    executionActiveBounds: new Map(value.executionActiveBounds),
+  }
+}
+
+export const materialize: {
+  (
+    turnId: string,
+    threadId: string,
+  ): (snapshot: Snapshot) => {
+    readonly costNanoUsd?: number
+    readonly tokens?: number
+    readonly activeMillis?: number
+    readonly activeIntervals?: ReadonlyArray<Interval>
+    readonly pricedAttempts: number
+    readonly unpricedAttempts: number
+    readonly countedAttempts: number
+    readonly uncountedAttempts: number
+    readonly sourceComplete: false
+  }
+  (
+    snapshot: Snapshot,
+    turnId: string,
+    threadId: string,
+  ): {
+    readonly costNanoUsd?: number
+    readonly tokens?: number
+    readonly activeMillis?: number
+    readonly activeIntervals?: ReadonlyArray<Interval>
+    readonly pricedAttempts: number
+    readonly unpricedAttempts: number
+    readonly countedAttempts: number
+    readonly uncountedAttempts: number
+    readonly sourceComplete: false
+  }
+} = Function.dual(3, (snapshot: Snapshot, turnId: string, threadId: string) => {
+  const totals = turnTotals(snapshot, turnId)
+  const time = activeTime(snapshot, threadId)
+  const intervals = activeIntervals(snapshot, threadId)
+  return {
+    ...(totals.pricedAttempts + totals.unpricedAttempts === 0
+      ? {}
+      : { costNanoUsd: Math.round(totals.costUsd * 1_000_000_000) }),
+    ...(totals.countedAttempts + totals.uncountedAttempts === 0 ? {} : { tokens: totals.tokens }),
+    ...(time._tag === "Unavailable" ? {} : { activeMillis: Math.round(Duration.toMillis(time.accumulated)) }),
+    ...(intervals === undefined ? {} : { activeIntervals: intervals }),
+    pricedAttempts: totals.pricedAttempts,
+    unpricedAttempts: totals.unpricedAttempts,
+    countedAttempts: totals.countedAttempts,
+    uncountedAttempts: totals.uncountedAttempts,
+    sourceComplete: false as const,
+  }
+})
 
 const activeEventTypes = new Set<string>([
   "execution.accepted",
@@ -165,7 +285,7 @@ const isActiveEventType = (type: string): type is ActiveEventType => activeEvent
 
 const isTerminalEventType = (type: ActiveEventType): boolean => ExecutionStatus.isTerminalEventType(type)
 
-interface Interval {
+export interface Interval {
   readonly start: number
   readonly end?: number
 }
@@ -288,7 +408,8 @@ const unionIntervals = (intervals: ReadonlyArray<Interval>): ActiveTime => {
   return { accumulated: Duration.sum(accumulated, Duration.millis(currentEnd - currentStart)) }
 }
 
-const rebuildThreadActiveTime = (snapshot: Snapshot, threadId: string): Snapshot => {
+const activeIntervals = (snapshot: Snapshot, threadId: string): ReadonlyArray<Interval> | undefined => {
+  if (!snapshot.activeObservedThreads.has(threadId) || snapshot.timeMalformedThreads.has(threadId)) return undefined
   const executions = new Map<string, Array<ActiveEvent>>()
   for (const event of snapshot.activeEvents.values()) {
     if (event.threadId !== threadId) continue
@@ -297,12 +418,18 @@ const rebuildThreadActiveTime = (snapshot: Snapshot, threadId: string): Snapshot
   const intervals: Array<Interval> = []
   for (const [executionId, events] of executions) {
     const execution = executionIntervals(events, snapshot.executionWorkTimestamps.get(executionId))
-    if (execution === undefined) {
-      const threadActiveTime = new Map(snapshot.threadActiveTime)
-      threadActiveTime.delete(threadId)
-      return { ...snapshot, threadActiveTime }
-    }
+    if (execution === undefined) return undefined
     intervals.push(...execution)
+  }
+  return intervals
+}
+
+const rebuildThreadActiveTime = (snapshot: Snapshot, threadId: string): Snapshot => {
+  const intervals = activeIntervals(snapshot, threadId)
+  if (intervals === undefined) {
+    const threadActiveTime = new Map(snapshot.threadActiveTime)
+    threadActiveTime.delete(threadId)
+    return { ...snapshot, threadActiveTime }
   }
   return {
     ...snapshot,
@@ -358,8 +485,8 @@ export const activeTime: {
 } = Function.dual(2, (snapshot: Snapshot, threadId: string): ActiveTimeAvailability => {
   if (snapshot.timeMalformedThreads.has(threadId)) return { _tag: "Unavailable" }
   const time = snapshot.threadActiveTime.get(threadId)
-  if (time === undefined && snapshot.activeObservedThreads.has(threadId)) return { _tag: "Unavailable" }
-  return { _tag: "Available", ...(time ?? { accumulated: Duration.zero }) }
+  if (time === undefined) return { _tag: "Unavailable" }
+  return { _tag: "Available", ...time }
 })
 
 const observeActive = (
@@ -370,7 +497,7 @@ const observeActive = (
   if (!isActiveEventType(event.type)) return snapshot
   if (event.executionId.length === 0 || !Number.isFinite(event.createdAt) || event.createdAt < 0)
     return malformedTime(snapshot, input.threadId)
-  const key = event.cursor
+  const key = `${event.executionId}\u0000${event.cursor}`
   const previous = snapshot.activeEvents.get(key)
   if (previous !== undefined) {
     if (
@@ -597,7 +724,7 @@ const observeAttempt = (
   const event = input.event
   if (event.executionId.length === 0)
     return unreadable(snapshot, input, `${event.cursor}\u0000${event.sequence}`, "delivery-malformed")
-  const deliveryKey = event.cursor
+  const deliveryKey = `${event.executionId}\u0000${event.cursor}`
   if (snapshot.usageCursors.has(deliveryKey)) return snapshot
   const attemptId = stringField(event.data, "model_attempt_id")
   if (attemptId === undefined) return unreadable(snapshot, input, deliveryKey, "delivery-malformed")
@@ -668,14 +795,19 @@ export const observe: {
   },
 )
 
-const readExecution = <A, E>(effect: Effect.Effect<A, E>, executionId: string): Effect.Effect<A | undefined> =>
+type ReadResult<A> = { readonly _tag: "Read"; readonly value: A } | { readonly _tag: "Unreadable" }
+
+const readResult = <A, E>(effect: Effect.Effect<A, E>, executionId: string): Effect.Effect<ReadResult<A>, E> =>
   effect.pipe(
+    Effect.map((value) => ({ _tag: "Read" as const, value })),
     Effect.catchCause((cause) =>
-      Effect.logWarning("usage-cost.execution.read.failed").pipe(
-        Effect.annotateLogs("rika.execution.id", executionId),
-        Effect.annotateLogs("rika.failure.cause", String(cause)),
-        Effect.as(undefined),
-      ),
+      Cause.hasInterruptsOnly(cause)
+        ? Effect.failCause(cause)
+        : Effect.logWarning("usage-cost.execution.read.failed").pipe(
+            Effect.annotateLogs("rika.execution.id", executionId),
+            Effect.annotateLogs("rika.failure.cause", String(cause)),
+            Effect.as({ _tag: "Unreadable" as const }),
+          ),
     ),
   )
 
@@ -683,29 +815,40 @@ const readCompleteHistory = Effect.fn("UsageCost.readCompleteHistory")(function*
   reader: ExecutionReader,
   executionId: string,
   reference: ExecutionBackend.ExecutionReference | undefined,
+  observePage: (events: ReadonlyArray<ExecutionBackend.Event>) => void,
 ) {
-  if (reader.pageEvents === undefined) return undefined
-  const events: Array<ExecutionBackend.Event> = []
+  if (reader.pageEvents === undefined) {
+    const replay = yield* readResult(reader.replay(executionId, undefined, reference), executionId)
+    if (replay._tag === "Unreadable") return false
+    observePage(replay.value.events)
+    return false
+  }
   const seenCursors = new Set<string>()
   let cursor: string | undefined
   while (true) {
-    const page = yield* readExecution(reader.pageEvents(executionId, "forward", cursor, 1_000, reference), executionId)
-    if (page === undefined) return undefined
-    events.push(...page.events)
-    if (!page.hasMore) return events
+    const result = yield* readResult(reader.pageEvents(executionId, "forward", cursor, 1_000, reference), executionId)
+    if (result._tag === "Unreadable") return false
+    const page = result.value
+    observePage(page.events)
+    if (!page.hasMore) return true
     const nextCursor = page.newestCursor ?? page.events.at(-1)?.cursor
-    if (nextCursor === undefined || seenCursors.has(nextCursor)) return undefined
+    if (nextCursor === undefined || seenCursors.has(nextCursor)) return false
     seenCursors.add(nextCursor)
     cursor = nextCursor
   }
 })
 
-export const collect = Effect.fn("UsageCost.collect")(function* (
+export const rebuild = Effect.fn("UsageCost.rebuild")(function* (
   reader: ExecutionReader,
   roots: ReadonlyArray<RootExecution>,
 ) {
   let snapshot: Snapshot = { ...empty }
-  const pending = roots.map((root) => ({ ...root, executionId: root.executionId ?? root.turnId, reference: false }))
+  let sourceComplete = true
+  const pending = roots.map((root) => ({
+    ...root,
+    executionId: root.executionId ?? root.turnId,
+    reference: root.reference ?? false,
+  }))
   const seenExecutions = new Set<string>()
   const markUnreadable = (current: RootExecution & { readonly executionId: string }) => {
     snapshot = unreadable(snapshot, current, current.executionId, "execution-unreadable")
@@ -721,53 +864,73 @@ export const collect = Effect.fn("UsageCost.collect")(function* (
       (current) =>
         Effect.gen(function* () {
           const reference = current.reference ? ExecutionBackend.executionReference : undefined
-          const inspection = yield* readExecution(reader.inspect(current.executionId, reference), current.executionId)
-          if (inspection === undefined) return { current, inspection }
-          const replay = yield* readExecution(
-            reader.replay(current.executionId, undefined, reference),
-            current.executionId,
-          )
-          return { current, inspection, replay }
+          const inspectionRead = yield* readResult(reader.inspect(current.executionId, reference), current.executionId)
+          if (inspectionRead._tag === "Unreadable") return { current, inspectionRead }
+          return { current, inspectionRead }
         }),
       { concurrency: collectionConcurrency },
     )
-    for (const { current, inspection, replay } of results) {
+    for (const { current, inspectionRead } of results) {
+      if (inspectionRead._tag === "Unreadable") {
+        sourceComplete = false
+        markUnreadable(current)
+        continue
+      }
+      const inspection = inspectionRead.value
       if (inspection === undefined) {
-        if (current.optional !== true) markUnreadable(current)
+        if (current.optional !== true) {
+          sourceComplete = false
+          markUnreadable(current)
+        }
         continue
       }
-      if (replay === undefined) {
-        if (current.optional !== true) markUnreadable(current)
-        continue
-      }
-      for (const event of replay.events)
-        snapshot = observe(snapshot, {
-          threadId: current.threadId,
-          turnId: current.turnId,
-          event,
-        })
       const reference = current.reference ? ExecutionBackend.executionReference : undefined
-      const history = yield* readCompleteHistory(reader, current.executionId, reference)
-      if (history !== undefined)
-        for (const event of history) {
+      let sawActiveEvent = false
+      let sawHistoryEvent = false
+      const historyComplete = yield* readCompleteHistory(reader, current.executionId, reference, (events) => {
+        for (const event of events) {
+          sawHistoryEvent = true
+          if (isActiveEventType(event.type)) sawActiveEvent = true
           snapshot = observe(snapshot, {
             threadId: current.threadId,
             turnId: current.turnId,
             event,
           })
         }
-      if (
-        history === undefined ||
-        (!history.some((event) => isActiveEventType(event.type)) &&
-          inspection.status !== "accepted" &&
-          inspection.status !== "queued")
-      )
+      })
+      if (!historyComplete) {
+        sourceComplete = false
+        if (!sawHistoryEvent) markUnreadable(current)
+      }
+      if (!historyComplete || (!sawActiveEvent && inspection.status !== "accepted" && inspection.status !== "queued"))
         snapshot = malformedTime(snapshot, current.threadId)
       if (ExecutionStatus.isTerminalStatus(inspection.status))
         snapshot = settleExecution(snapshot, current.executionId, "settled-without-usage")
+      else sourceComplete = false
+      const confirmedRead = yield* readResult(reader.inspect(current.executionId, reference), current.executionId)
+      const confirmed = confirmedRead._tag === "Read" ? confirmedRead.value : undefined
+      if (
+        confirmed === undefined ||
+        confirmed.status !== inspection.status ||
+        confirmed.lastCursor !== inspection.lastCursor ||
+        confirmed.children.length !== inspection.children.length ||
+        confirmed.children.some(
+          (child, index) =>
+            child.executionId !== inspection.children[index]?.executionId ||
+            child.status !== inspection.children[index]?.status,
+        )
+      )
+        sourceComplete = false
       for (const child of inspection.children)
         pending.push({ ...current, executionId: child.executionId, reference: true })
     }
   }
-  return snapshot
+  return { snapshot, sourceComplete }
+})
+
+export const collect = Effect.fn("UsageCost.collect")(function* (
+  reader: ExecutionReader,
+  roots: ReadonlyArray<RootExecution>,
+) {
+  return (yield* rebuild(reader, roots)).snapshot
 })

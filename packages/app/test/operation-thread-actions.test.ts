@@ -3,8 +3,9 @@ import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
+import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Effect, Layer, Ref } from "effect"
+import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { TestConsole } from "effect/testing"
 import { Operation } from "../src/index"
 import { provideLayer } from "./layer"
@@ -48,6 +49,85 @@ const thread = (id: string, overrides: Partial<Thread.Thread> = {}): Thread.Thre
 })
 
 describe("Operation thread actions", () => {
+  it.effect("rebuilds persisted usage explicitly and skips complete Turns on resume", () =>
+    Effect.gen(function* () {
+      const target = thread("repair")
+      const turn: Turn.Turn = {
+        id: Turn.TurnId.make("repair-turn"),
+        threadId: target.id,
+        prompt: "repair",
+        author: { _tag: "Human" },
+        lineage: { _tag: "Original" },
+        executionRoute: Turn.testExecutionRoute(),
+        status: "completed",
+        stopIntent: "none",
+        createdAt: 1,
+        updatedAt: 2,
+      }
+      const event: ExecutionBackend.Event = {
+        executionId: String(turn.id),
+        cursor: "usage",
+        sequence: 1,
+        type: "model.attempt.completed",
+        createdAt: 2,
+        data: {
+          model_attempt_id: "attempt",
+          cost: { amount: 0.75, currency: "USD" },
+        },
+      }
+      const repairBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (executionId) =>
+          Effect.succeed(
+            executionId === turn.id
+              ? {
+                  turnId: String(turn.id),
+                  status: "completed" as const,
+                  lastCursor: event.cursor,
+                  waits: [],
+                  pendingTools: [],
+                  children: [],
+                }
+              : undefined,
+          ),
+        replay: () => Effect.succeed({ turnId: String(turn.id), status: "completed" as const, events: [event] }),
+        pageEvents: () => Effect.succeed({ events: [event], hasMore: false, newestCursor: event.cursor }),
+      })
+      const usageContext = yield* Layer.build(UsageRepository.memoryLayer)
+      const usage = Context.get(usageContext, UsageRepository.Service)
+      const layer = Layer.merge(
+        TestConsole.layer,
+        Operation.productLayer({
+          repositoryLayer: ThreadRepository.memoryLayer([target]),
+          turnRepositoryLayer: TurnRepository.memoryLayer([turn]),
+          usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage),
+          backendLayer: Layer.succeed(ExecutionBackend.Service, repairBackend),
+          defaultWorkspace: "/work",
+          makeThreadId: Effect.die("unused"),
+          makeTurnId: Effect.die("unused"),
+        }),
+      )
+      const output = yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({ _tag: "Migrate", action: "usage" })
+        yield* operation.run({ _tag: "Migrate", action: "usage" })
+        return yield* TestConsole.logLines
+      }).pipe(provideLayer(layer))
+      const reports = yield* Effect.forEach(output, (line) =>
+        Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(line),
+      )
+      expect(reports).toEqual([
+        { repaired: 1, sourceComplete: true },
+        { repaired: 0, sourceComplete: true },
+      ])
+      expect(yield* usage.readTurn(String(turn.id))).toMatchObject({
+        costNanoUsd: 750_000_000,
+        pricedAttempts: 1,
+        sourceComplete: true,
+      })
+    }),
+  )
+
   it.effect("covers list, search, ordering, continuation, export, usage, and failures", () =>
     Effect.gen(function* () {
       const alpha = thread("alpha", { title: "Release Alpha", labels: ["urgent", "red"], updatedAt: 30 })

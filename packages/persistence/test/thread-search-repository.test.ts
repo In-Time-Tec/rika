@@ -190,6 +190,8 @@ describe("thread search repository", () => {
         yield* Effect.sync(() => {
           const database = new NativeDatabase(filename)
           database.exec(`
+          DROP TABLE rika_usage_repairs;
+          DROP TABLE rika_turn_usage;
           DROP TABLE rika_thread_search;
           DROP TABLE rika_thread_search_files;
           DROP TABLE rika_thread_relationships;
@@ -200,7 +202,7 @@ describe("thread search repository", () => {
           ALTER TABLE rika_turns DROP COLUMN author_json;
           ALTER TABLE rika_turns DROP COLUMN lineage_json;
           ALTER TABLE rika_turns DROP COLUMN stop_intent;
-          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19);
+          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20);
           INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/current', 1);
           INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
             VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);
