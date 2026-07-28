@@ -1591,6 +1591,8 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
   readonly followed?: Ref.Ref<ReadonlyArray<string>>
   readonly inspection?: (executionId: string) => ExecutionBackend.Inspection | undefined
   readonly replayEvents?: (executionId: string) => ReadonlyArray<ExecutionBackend.Event>
+  readonly pageEvents?: (executionId: string, after: string | undefined) => ExecutionBackend.EventPage
+  readonly pageGate?: { readonly after: string; readonly open: Deferred.Deferred<void> }
 }) {
   const subagentThread = thread("subagent-thread", 1)
   const doneTurn: Turn.Turn = {
@@ -1611,18 +1613,18 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   const transcripts = Context.get(yield* Layer.build(TranscriptRepository.memoryLayer), TranscriptRepository.Service)
   yield* transcripts.replace(doneTurn, options.storedTree)
-  const inspection = (turnId: string): ExecutionBackend.Inspection | undefined =>
-    options.inspection?.(turnId) ??
-    (turnId === "done"
-      ? {
-          turnId,
-          status: options.turnStatus ?? "completed",
-          lastCursor: "done-final",
-          waits: [],
-          pendingTools: [],
-          children: [{ executionId: subagentChildId, status: "completed" }],
-        }
-      : { turnId, status: "completed", waits: [], pendingTools: [], children: [] })
+  const inspection = (turnId: string): ExecutionBackend.Inspection | undefined => {
+    if (options.inspection !== undefined) return options.inspection(turnId)
+    if (turnId !== "done") return { turnId, status: "completed", waits: [], pendingTools: [], children: [] }
+    return {
+      turnId,
+      status: options.turnStatus ?? "completed",
+      lastCursor: "done-final",
+      waits: [],
+      pendingTools: [],
+      children: [{ executionId: subagentChildId, status: "completed" }],
+    }
+  }
   const eventsFor = (turnId: string): ReadonlyArray<ExecutionBackend.Event> =>
     options.replayEvents?.(turnId) ?? (turnId === subagentChildId ? options.childReplayEvents : [])
   const backend = ExecutionBackend.Service.of({
@@ -1649,15 +1651,19 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
     steer: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
     replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: eventsFor(turnId) }),
-    pageEvents: (turnId, _direction, cursor) => {
-      const events = eventsFor(turnId)
-      const boundary = cursor === undefined ? -1 : events.findIndex((event) => event.cursor === cursor)
-      return Effect.succeed({
-        events: events.slice(boundary + 1),
-        hasMore: false,
-        ...(events.at(-1) === undefined ? {} : { newestCursor: events.at(-1)!.cursor }),
-      })
-    },
+    pageEvents: (turnId, _direction, cursor) =>
+      Effect.gen(function* () {
+        const pageGate = options.pageGate
+        if (pageGate !== undefined && cursor === pageGate.after) yield* Deferred.await(pageGate.open)
+        if (options.pageEvents !== undefined) return options.pageEvents(turnId, cursor)
+        const events = eventsFor(turnId)
+        const boundary = cursor === undefined ? -1 : events.findIndex((event) => event.cursor === cursor)
+        return {
+          events: events.slice(boundary + 1),
+          hasMore: false,
+          ...(events.at(-1) === undefined ? {} : { newestCursor: events.at(-1)!.cursor }),
+        }
+      }),
     listApprovals: () => Effect.succeed([]),
     resolveToolApproval: () => Effect.void,
     resolvePermission: () => Effect.void,
@@ -2154,6 +2160,36 @@ describe("InteractiveSession subagent reload", () => {
     }),
   )
 
+  it.effect("retries child reconciliation when Relay has no replayable child transcript", () =>
+    Effect.gen(function* () {
+      let inspections = 0
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        turnLastCursor: "done-final",
+        childReplayEvents: [],
+        inspection: (executionId) => {
+          inspections += 1
+          return {
+            turnId: executionId,
+            status: "completed",
+            ...(executionId === "done" ? { lastCursor: "done-final" } : {}),
+            waits: [],
+            pendingTools: [],
+            children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
+          }
+        },
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      const firstInspections = inspections
+
+      yield* session.reopenThread(2)
+      expect(inspections).toBeGreaterThan(firstInspections)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+    }),
+  )
+
   it.effect("keeps persisted subagent transcripts when the backend can no longer replay the child", () =>
     Effect.gen(function* () {
       const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
@@ -2190,4 +2226,313 @@ describe("InteractiveSession subagent reload", () => {
       expect(nestedAnswer).toBe(true)
     }),
   )
+
+  it.effect("does not replay a reconciled terminal child tree when the thread reopens", () =>
+    Effect.gen(function* () {
+      const rootProjection = Transcript.project("done", "delegate", subagentRootEvents)
+      const childProjection = Transcript.project(subagentChildId, "", subagentChildEvents)
+      const attributedChildEvents = subagentChildEvents.map((event) => ({
+        ...event,
+        childExecutionId: subagentChildId,
+      }))
+      const storedTree = Transcript.withNestedProjections(rootProjection, [
+        { parentId: subagentToolId, projection: childProjection },
+      ])
+      let inspections = 0
+      let eventPages = 0
+      const inspection = (executionId: string): ExecutionBackend.Inspection => {
+        inspections += 1
+        return {
+          turnId: executionId,
+          status: "completed",
+          lastCursor: executionId === "done" ? "done-final" : "childdone~a4",
+          waits: [],
+          pendingTools: [],
+          children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
+        }
+      }
+      const { session, subagentThread } = yield* makeSubagentReloadHarness({
+        storedTree,
+        turnLastCursor: "done-final",
+        childReplayEvents: subagentChildEvents,
+        inspection,
+        replayEvents: (executionId) => {
+          eventPages += 1
+          if (executionId === "done") return subagentRootEvents
+          return executionId === subagentChildId ? attributedChildEvents : []
+        },
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      const repairedInspections = inspections
+      const repairedPages = eventPages
+      expect(repairedInspections).toBeGreaterThan(0)
+      expect(repairedPages).toBeGreaterThan(0)
+
+      yield* session.reopenThread(2)
+      expect(inspections).toBe(repairedInspections + 1)
+      expect(eventPages).toBe(repairedPages)
+    }),
+  )
+
+  it.effect("does not mark a persisted terminal turn reconciled while Relay reports active execution", () =>
+    Effect.gen(function* () {
+      let inspections = 0
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        turnLastCursor: "done-final",
+        childReplayEvents: [],
+        inspection: (executionId) => {
+          inspections += 1
+          return {
+            turnId: executionId,
+            status: "running",
+            lastCursor: "done-final",
+            waits: [],
+            pendingTools: [],
+            children: [],
+          }
+        },
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      const firstInspections = inspections
+      yield* session.reopenThread(2)
+      expect(inspections).toBeGreaterThan(firstInspections)
+    }),
+  )
+
+  it.effect("does not mark a child tree reconciled when a descendant inspection is missing or active", () =>
+    Effect.gen(function* () {
+      let childAvailable = false
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        turnLastCursor: "done-final",
+        childReplayEvents: subagentChildEvents,
+        inspection: (executionId) => {
+          if (executionId !== "done")
+            return childAvailable
+              ? {
+                  turnId: executionId,
+                  status: "running",
+                  waits: [],
+                  pendingTools: [],
+                  children: [],
+                }
+              : undefined
+          return {
+            turnId: executionId,
+            status: "completed",
+            lastCursor: "done-final",
+            waits: [],
+            pendingTools: [],
+            children: [{ executionId: subagentChildId, status: "completed" }],
+          }
+        },
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      childAvailable = true
+      yield* session.reopenThread(2)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+    }),
+  )
+
+  it.effect("does not mark a child tree reconciled when confirmation discovers another child", () =>
+    Effect.gen(function* () {
+      const lateChild = `${subagentChildId}:late`
+      let rootInspections = 0
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        turnLastCursor: "done-final",
+        childReplayEvents: subagentChildEvents,
+        inspection: (executionId) => {
+          if (executionId === "done") rootInspections += 1
+          return {
+            turnId: executionId,
+            status: "completed",
+            lastCursor: executionId === "done" ? "done-final" : "childdone~a4",
+            waits: [],
+            pendingTools: [],
+            children:
+              executionId !== "done"
+                ? []
+                : [
+                    { executionId: subagentChildId, status: "completed" },
+                    ...(rootInspections > 1 ? [{ executionId: lateChild, status: "completed" as const }] : []),
+                  ],
+          }
+        },
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      expect(rootInspections).toBeGreaterThan(1)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+    }),
+  )
+
+  it.effect("certifies only replayed root and child projections and excludes stored orphan children", () =>
+    Effect.gen(function* () {
+      const staleChild = Transcript.project(subagentChildId, "", [
+        ...subagentChildEvents,
+        {
+          cursor: "stale-child",
+          sequence: 100,
+          type: "model.output.completed",
+          createdAt: 100,
+          text: "stale stored child",
+        },
+      ])
+      const orphan = Transcript.project("orphan-child", "", [
+        {
+          cursor: "orphan-answer",
+          sequence: 200,
+          type: "model.output.completed",
+          createdAt: 200,
+          text: "orphan stored child",
+        },
+      ])
+      const storedTree = Transcript.withNestedProjections(
+        Transcript.project("done", "wrong stored prompt", subagentRootEvents),
+        [
+          { parentId: subagentToolId, projection: staleChild },
+          { parentId: "orphan-parent", projection: orphan },
+        ],
+      )
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree,
+        turnLastCursor: "done-final",
+        childReplayEvents: subagentChildEvents,
+        replayEvents: (executionId) => (executionId === "done" ? subagentRootEvents : subagentChildEvents),
+        inspection: (executionId) => ({
+          turnId: executionId,
+          status: "completed",
+          lastCursor: executionId === "done" ? "done-final" : "childdone~a4",
+          waits: [],
+          pendingTools: [],
+          children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
+        }),
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(stored?.childTreeReconciled).toBe(true)
+      expect(stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text === "delegate")).toBe(true)
+      expect(
+        stored?.units.some(
+          (unit) =>
+            unit.content._tag === "Entry" && ["stale stored child", "orphan stored child"].includes(unit.content.text),
+        ),
+      ).toBe(false)
+    }),
+  )
+
+  it.effect("finishes an interrupted paged replay before certifying persisted content", () =>
+    Effect.gen(function* () {
+      const pageGate = yield* Deferred.make<void>()
+      const replayedRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        ...Array.from({ length: 31 }, (_, index) => ({
+          executionId: "done",
+          cursor: `root-page-${index}`,
+          sequence: index,
+          type: "model.output.delta" as const,
+          createdAt: index,
+          text: `replayed-${index}`,
+        })),
+        ...subagentRootEvents.map((event, index) => ({
+          ...event,
+          cursor: `root-page-${index + 31}`,
+          sequence: index + 31,
+          createdAt: index + 31,
+        })),
+      ]
+      const finalRootCursor = replayedRootEvents.at(-1)!.cursor
+      const staleRoot = Transcript.project("done", "stale stored root", [
+        {
+          cursor: "stale-root",
+          sequence: 0,
+          type: "model.output.completed",
+          createdAt: 0,
+          text: "stale stored content",
+        },
+      ])
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: staleRoot,
+        turnLastCursor: finalRootCursor,
+        childReplayEvents: subagentChildEvents,
+        pageGate: { after: "root-page-31", open: pageGate },
+        inspection: (executionId) => ({
+          turnId: executionId,
+          status: "completed",
+          lastCursor: executionId === "done" ? finalRootCursor : "childdone~a4",
+          waits: [],
+          pendingTools: [],
+          children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
+        }),
+        pageEvents: (executionId, after) => {
+          const events = executionId === "done" ? replayedRootEvents : subagentChildEvents
+          const boundary = after === undefined ? -1 : events.findIndex((event) => event.cursor === after)
+          const event = events[boundary + 1]
+          return event === undefined
+            ? { events: [], hasMore: false, ...(after === undefined ? {} : { newestCursor: after }) }
+            : { events: [event], hasMore: boundary + 2 < events.length, newestCursor: event.cursor }
+        },
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      yield* Deferred.succeed(pageGate, undefined)
+
+      for (let attempt = 0; attempt < 800; attempt += 1) {
+        if ((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled === true) break
+        yield* Effect.yieldNow
+      }
+      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(stored?.childTreeReconciled).toBe(true)
+      expect(
+        stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text.includes("stale stored")),
+      ).toBe(false)
+      expect(
+        stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text.includes("replayed-30")),
+      ).toBe(true)
+    }),
+  )
+
+  it.effect("keeps an incomplete root replay as an uncertified display fallback", () =>
+    Effect.gen(function* () {
+      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+        storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+        turnLastCursor: "done-final",
+        childReplayEvents: subagentChildEvents,
+        replayEvents: (executionId) => (executionId === subagentChildId ? subagentChildEvents : []),
+      })
+
+      yield* selectionEntriesFor(session, subagentThread.id)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+    }),
+  )
+
+  for (const malformedTerminal of ["empty", "nonadvancing"] as const)
+    it.effect(`rejects a final ${malformedTerminal} continuation page`, () =>
+      Effect.gen(function* () {
+        const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
+          storedTree: Transcript.project("done", "delegate", subagentRootEvents),
+          turnLastCursor: "done-final",
+          childReplayEvents: subagentChildEvents,
+          pageEvents: (executionId, after) => {
+            const events = executionId === "done" ? subagentRootEvents : subagentChildEvents
+            if (executionId !== "done") return { events, hasMore: false, newestCursor: events.at(-1)!.cursor }
+            if (after === undefined) return { events: events.slice(0, 2), hasMore: true, newestCursor: "root-page-one" }
+            return malformedTerminal === "empty"
+              ? { events: [], hasMore: false, newestCursor: "root-page-two" }
+              : { events: events.slice(2), hasMore: false, newestCursor: after }
+          },
+        })
+
+        yield* selectionEntriesFor(session, subagentThread.id)
+        expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      }),
+    )
 })

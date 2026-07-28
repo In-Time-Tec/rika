@@ -617,7 +617,7 @@ test("keeps a large expanded subagent tree in one mounted row window", () =>
   Effect.runPromise(
     Effect.gen(function* () {
       const setup = yield* openTui(() => createTestRenderer({ width: 80, height: 24 }))
-      const model = giantSubagentModel(maxMountedTranscriptEntries - 400)
+      const model = giantSubagentModel(maxMountedTranscriptEntries - 300)
       const surface = new Surface(setup.renderer, { key: () => undefined, resize: () => undefined })
       try {
         surface.update(model)

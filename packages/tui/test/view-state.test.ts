@@ -1387,6 +1387,19 @@ describe("ViewState", () => {
     expect(model.threadSwitcher.open).toBe(false)
   })
 
+  test("closes the thread switcher without reloading the current thread", () => {
+    let model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "ThreadsReplaced",
+      threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second" })],
+    })
+    model = ViewState.update(model, { _tag: "ThreadActivated", threadId: "b", title: "Second" })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "t", ctrl: true }) })
+    model = ViewState.update(model, { _tag: "KeyPressed", key: key({ name: "return" }) })
+
+    expect(model.threadSwitcher.open).toBe(false)
+    expect(model.pendingAction).toBeUndefined()
+  })
+
   test("clears stale previews for missing filters and removed or archived thread summaries", () => {
     let model = ViewState.update(ViewState.initial("/work"), {
       _tag: "ThreadsReplaced",
@@ -1502,6 +1515,18 @@ describe("ViewState", () => {
     model = ViewState.update(model, toggle)
     model = ViewState.update(model, toggle)
     expect(model.threadSidebar.open).toBe(false)
+  })
+
+  test("keeps the current thread selected in the sidebar without reloading it", () => {
+    let model = ViewState.update(ViewState.initial("/work"), {
+      _tag: "ThreadsReplaced",
+      threads: [thread({ id: "a", title: "First" }), thread({ id: "b", title: "Second" })],
+    })
+    model = ViewState.update(model, { _tag: "ThreadActivated", threadId: "b", title: "Second" })
+    model = ViewState.update(model, { _tag: "ThreadSidebarSelectionConfirmed", index: 1 })
+
+    expect(model.threadSidebar.selected).toBe(1)
+    expect(model.pendingAction).toBeUndefined()
   })
 
   test("keeps the thread sidebar selection visible when stale threads disappear", () => {

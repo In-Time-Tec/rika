@@ -36,8 +36,10 @@ const publish = async (releases: string, version: string, marker: string, tamper
   await mkdir(join(payload, "bin"), { recursive: true })
   await writeFile(join(payload, "INSTALL"), "install fixture\n")
   await writeFile(join(payload, "bin", "rika"), marker)
+  await writeFile(join(payload, "bin", ".rika-performance"), `performance-${marker}`)
   await writeFile(join(payload, "bin", ".rika-runtime"), `runtime-${marker}`)
   await chmod(join(payload, "bin", "rika"), 0o755)
+  await chmod(join(payload, "bin", ".rika-performance"), 0o755)
   await chmod(join(payload, "bin", ".rika-runtime"), 0o755)
   const archiveFile = `rika-${version}-${target}.tar.gz`
   const archivePath = join(releases, archiveFile)
@@ -80,6 +82,7 @@ test("re-running the installer upgrades in place, verifies checksums, and never 
     expect(upgrade.stderr).toBe("")
     expect(upgrade.exitCode).toBe(0)
     expect(await readFile(command, "utf8")).toBe("second")
+    expect(await readFile(join(installRoot, "bin", ".rika-performance"), "utf8")).toBe("performance-second")
     expect(await readFile(join(installRoot, "bin", ".rika-runtime"), "utf8")).toBe("runtime-second")
     expect(await strays(dirname(installRoot))).toEqual([])
     expect(await strays(binDir)).toEqual([])

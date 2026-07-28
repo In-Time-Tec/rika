@@ -17,6 +17,7 @@ describe("package archive contract", () => {
   })
 
   test.each([
+    ["missing performance runtime", names.replace(`${root}/bin/.rika-performance\n`, ""), headers],
     ["missing runtime", names.replace(`${root}/bin/.rika-runtime\n`, ""), headers],
     [
       "duplicate entry",

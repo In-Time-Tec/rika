@@ -62,7 +62,8 @@ const initialState = (): InteractiveController.State => ({
   replayTurns: new Map(),
   entries: [],
   revisions: new Map(),
-  projections: new Map(),
+  liveProjections: new Map(),
+  transientEventCursors: new Set(),
   threadCostUsd: 0,
   selectionEpoch: 0,
 })
@@ -240,7 +241,7 @@ it("maps the new-thread palette action to a command and resets the transcript fr
     costUsd: 0,
   })
   expect(reset.replayTurns.size).toBe(0)
-  expect(reset.projections.size).toBe(0)
+  expect(reset.liveProjections.size).toBe(0)
   expect(reset.revisions.size).toBe(0)
 })
 
@@ -321,6 +322,8 @@ it("rejects duplicate patches and stale units with the same semantic identity", 
     event: liveEvent,
     revision: 2,
   })
+  expect(patched.state.liveProjections.has("new")).toBe(false)
+  expect(patched.state.entries.some((entry) => entry.turn.id === "new" && entry.projectionRevision === 2)).toBe(true)
   const duplicate = InteractiveController.update(patched.state, {
     _tag: "TranscriptPatched",
     selectionEpoch: 1,
@@ -992,7 +995,7 @@ it("buffers live child patches until the parent subagent link arrives", () => {
     revision: 1,
   })
 
-  expect(child.state.projections.get("parent:child:agent")?.units).toHaveLength(2)
+  expect(child.state.liveProjections.get("parent:child:agent")?.units).toHaveLength(2)
   expect(child.state.model.blocks).not.toContainEqual(expect.objectContaining({ id: "parent:child:agent:read" }))
   expect(spawned.state.model.blocks).toEqual([
     expect.objectContaining({ _tag: "ToolCall", id: "parent:agent" }),
@@ -1298,7 +1301,7 @@ it("keeps one of five status labels from submit until the turn completes", () =>
     selectionEpoch: 1,
     model: { ...submitted, currentThreadId: thread.id, activeTurnId: turn.id },
     replayTurns: new Map([[turn.id, turn]]),
-    projections: new Map([[turn.id, Transcript.empty(turn.id, turn.prompt)]]),
+    entries: entries(turn.id, turn.createdAt),
   }
   const labels = ["Sending", "Waiting", "Thinking 2 tok", "Streaming 2 tok", "Running 1 tool", "Running 2 tools"]
   const expectStatus = (expected: string) => {
@@ -1373,7 +1376,7 @@ it("keeps 200ms tool lifecycle events in distinct TUI frames", () => {
       activity: { _tag: "Waiting" },
     },
     replayTurns: new Map([[turn.id, turn]]),
-    projections: new Map([[turn.id, Transcript.empty(turn.id, turn.prompt)]]),
+    entries: entries(turn.id, turn.createdAt),
   }
   let now = 0
   const scheduled: Array<{ readonly at: number; readonly flush: () => void }> = []
@@ -1541,7 +1544,7 @@ it("shows the session total and updates it when child usage arrives", () => {
   expect(page.state.model.costUsd).toBe(0.5)
   expect(child.state.model.costUsd).toBe(0.75)
   expect(child.state.threadCostUsd).toBe(0.75)
-  expect(child.state.projections.get("parent")?.costUsd).toBe(0.75)
+  expect(child.state.entries.find((entry) => entry.turn.id === "parent")?.projectionCostUsd).toBe(0.75)
 })
 
 it("applies a late cost aggregate without lowering the semantic revision", () => {

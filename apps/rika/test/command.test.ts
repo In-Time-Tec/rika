@@ -109,6 +109,8 @@ it.effect("renders help without dispatching an operation", () =>
     )
     expect(output.join("\n")).toContain("Local durable coding agent")
     expect(output.join("\n")).toContain("diagnostics")
+    yield* execute(run(["diagnostics", "--help"]), layer)
+    expect((yield* TestConsole.logLines).join("\n")).toContain("performance")
     expect(yield* Ref.get(calls)).toEqual([])
   }),
 )

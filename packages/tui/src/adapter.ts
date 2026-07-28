@@ -563,9 +563,9 @@ export interface UnitLineRange {
   readonly targets?: ReadonlyArray<PathTarget>
 }
 
-export const maxMountedTranscriptEntries = 2800
+export const maxMountedTranscriptEntries = 600
 
-export const maxBoundedTranscriptItems = 5600
+export const maxBoundedTranscriptItems = 1200
 
 export { maxMountedTranscriptRows } from "./transcript-presenter"
 
@@ -1794,6 +1794,21 @@ export class Surface {
   private transcriptRecords = new Map<string, TranscriptRenderableRecord>()
   private transcriptUnitCache = new Map<string, TranscriptUnitCacheEntry>()
   private transcriptRenderInput: TranscriptRenderInput | undefined
+  private threadSwitcherContentCache:
+    | {
+        readonly threads: Model["threads"]
+        readonly preview: Model["threadPreview"]
+        readonly query: string
+        readonly selected: number
+        readonly previewScroll: number
+        readonly workspace: string
+        readonly mode: Mode
+        readonly width: number
+        readonly height: number
+        readonly minute: number
+        readonly content: StyledText
+      }
+    | undefined
   private composerDrag: { readonly startY: number; readonly startHeight: number } | undefined
   private sidebarDrag: { readonly startX: number; readonly startWidth: number } | undefined
   private pointerShape = "default"
@@ -3411,7 +3426,41 @@ export class Surface {
       this.paletteBox.titleAlignment = "left"
       this.paletteBox.bottomTitle = " Opt+W/Ctrl+T all workspaces · Esc close "
       this.paletteBox.bottomTitleAlignment = "right"
-      this.palette.content = threadSwitcherContent(model, Math.max(1, overlayWidth - 4), Math.max(1, overlayHeight - 2))
+      const switcherContentWidth = Math.max(1, overlayWidth - 4)
+      const contentHeight = Math.max(1, overlayHeight - 2)
+      const minute = Math.floor(this.currentTimeMillis() / 60_000)
+      const cached = this.threadSwitcherContentCache
+      if (
+        cached !== undefined &&
+        cached.threads === model.threads &&
+        cached.preview === model.threadPreview &&
+        cached.query === model.threadSwitcher.query &&
+        cached.selected === model.threadSwitcher.selected &&
+        cached.previewScroll === model.threadSwitcher.previewScroll &&
+        cached.workspace === model.workspace &&
+        cached.mode === model.mode &&
+        cached.width === switcherContentWidth &&
+        cached.height === contentHeight &&
+        cached.minute === minute
+      )
+        this.palette.content = cached.content
+      else {
+        const content = threadSwitcherContent(model, switcherContentWidth, contentHeight)
+        this.threadSwitcherContentCache = {
+          threads: model.threads,
+          preview: model.threadPreview,
+          query: model.threadSwitcher.query,
+          selected: model.threadSwitcher.selected,
+          previewScroll: model.threadSwitcher.previewScroll,
+          workspace: model.workspace,
+          mode: model.mode,
+          width: switcherContentWidth,
+          height: contentHeight,
+          minute,
+          content,
+        }
+        this.palette.content = content
+      }
       this.syncOverlayEditor(
         `> ${model.threadSwitcher.query}`,
         2 + model.threadSwitcher.query.length,

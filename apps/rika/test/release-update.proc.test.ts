@@ -46,8 +46,12 @@ const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (opti
   const stage = path.join(options.directory, root)
   yield* fileSystem.makeDirectory(path.join(stage, "bin"), { recursive: true })
   yield* fileSystem.writeFileString(path.join(stage, "bin", "rika"), `rika ${latest}`, { mode: 0o755 })
-  if (options.withRuntime)
+  if (options.withRuntime) {
+    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-performance"), `performance ${latest}`, {
+      mode: 0o755,
+    })
     yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-runtime"), `runtime ${latest}`, { mode: 0o755 })
+  }
   const archive = path.join(options.directory, archiveFile)
   const exitCode = yield* spawner.exitCode(
     ChildProcess.make("tar", ["-czf", archive, root], { cwd: options.directory }),
@@ -68,6 +72,9 @@ const installed = Effect.fn("ReleaseUpdateProc.installed")(function* (prefix: st
   yield* fileSystem.makeDirectory(path.join(installRoot, "bin"), { recursive: true })
   yield* fileSystem.makeDirectory(binDirectory, { recursive: true })
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", "rika"), "rika 0.0.3", { mode: 0o755 })
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "performance 0.0.3", {
+    mode: 0o755,
+  })
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-runtime"), "runtime 0.0.3", { mode: 0o755 })
   const command = path.join(binDirectory, "rika")
   yield* fileSystem.symlink(path.join(installRoot, "bin", "rika"), command)
@@ -125,6 +132,9 @@ it.effect("replaces a verified install in one rename and keeps the command on PA
           installRoot: install.installRoot,
         })
       expect(yield* fileSystem.readFileString(install.binary)).toBe(`rika ${latest}`)
+      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-performance"))).toBe(
+        `performance ${latest}`,
+      )
       expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-runtime"))).toBe(
         `runtime ${latest}`,
       )

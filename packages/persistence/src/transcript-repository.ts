@@ -28,6 +28,13 @@ export interface Projection {
   readonly costUsd: number | undefined
   readonly usageCursors: ReadonlyArray<string> | undefined
   readonly pricingVersion: string | undefined
+  readonly childTreeReconciled: boolean
+  readonly projectionGeneration: number
+}
+
+export interface ReplaceOptions {
+  readonly childTreeReconciled?: boolean
+  readonly ifGeneration?: number
 }
 
 export interface PageOptions {
@@ -48,7 +55,11 @@ export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()(
 
 export interface Interface {
   readonly get: (turnId: TurnId) => Effect.Effect<Projection | undefined, RepositoryError>
-  readonly replace: (turn: Turn, projection: Transcript.Projection) => Effect.Effect<Projection, RepositoryError>
+  readonly replace: (
+    turn: Turn,
+    projection: Transcript.Projection,
+    options?: ReplaceOptions,
+  ) => Effect.Effect<Projection, RepositoryError>
   readonly append: (turn: Turn, event: Transcript.SourceEvent) => Effect.Effect<Projection, RepositoryError>
   readonly appendAll: (
     turn: Turn,
@@ -80,6 +91,8 @@ const CheckpointRow = Schema.Struct({
   cost_usd: Schema.NullOr(Schema.Finite),
   usage_cursors_json: Schema.NullOr(Schema.String),
   pricing_version: Schema.NullOr(Schema.String),
+  child_tree_reconciled: Schema.Finite,
+  projection_generation: Schema.Finite,
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
@@ -125,7 +138,12 @@ const cursorFor = (entry: Entry | undefined): PageCursor | undefined =>
         key: entry.unit.key,
       }
 
-const stored = (turn: Turn, projection: Transcript.Projection): Projection => ({
+const stored = (
+  turn: Turn,
+  projection: Transcript.Projection,
+  childTreeReconciled: boolean = false,
+  projectionGeneration: number = 0,
+): Projection => ({
   turn: clone(turn),
   units: clone(projection.units),
   revision: projection.revision,
@@ -135,6 +153,8 @@ const stored = (turn: Turn, projection: Transcript.Projection): Projection => ({
   costUsd: projection.costUsd,
   usageCursors: projection.usageCursors === undefined ? undefined : clone(projection.usageCursors),
   pricingVersion: projection.pricingVersion,
+  childTreeReconciled,
+  projectionGeneration,
 })
 
 const source = (projection: Projection): Transcript.Projection => ({
@@ -152,12 +172,19 @@ const continueProjection = (
   turn: Turn,
   current: Projection | undefined,
   events: ReadonlyArray<Transcript.SourceEvent>,
-): Transcript.Projection => {
+): { readonly projection: Transcript.Projection; readonly changed: boolean } => {
   let projection = current === undefined ? Transcript.empty(turn.id, turn.prompt) : source(current)
-  for (const event of events.toSorted((left, right) => left.sequence - right.sequence))
-    projection = Transcript.applyEvent(projection, event)
-  return projection
+  let changed = false
+  for (const event of events.toSorted((left, right) => left.sequence - right.sequence)) {
+    const next = Transcript.applyEvent(projection, event)
+    if (next !== projection) changed = true
+    projection = next
+  }
+  return { projection, changed }
 }
+
+const matchesGeneration = (current: Projection | undefined, expected: number | undefined): boolean =>
+  expected === undefined || current?.projectionGeneration === expected
 
 const before = (entry: Entry, cursor: PageCursor): boolean =>
   entry.turn.createdAt < cursor.createdAt ||
@@ -187,17 +214,28 @@ const makeMemory = Effect.gen(function* () {
     events: ReadonlyArray<Transcript.SourceEvent>,
   ) {
     return yield* Ref.modify(state, (entries) => {
-      const next = stored(turn, continueProjection(turn, entries.get(turn.id), events))
+      const current = entries.get(turn.id)
+      const { projection, changed } = continueProjection(turn, current, events)
+      const next = stored(
+        turn,
+        projection,
+        current?.childTreeReconciled === true && !changed,
+        (current?.projectionGeneration ?? 0) + (changed || current === undefined ? 1 : 0),
+      )
       return [clone(next), new Map(entries).set(turn.id, next)]
     })
   })
   return Service.of({
     get,
-    replace: Effect.fn("TranscriptRepository.replace")(function* (turn, projection) {
+    replace: Effect.fn("TranscriptRepository.replace")(function* (turn, projection, options = {}) {
       return yield* Ref.modify(state, (entries) => {
         const current = entries.get(turn.id)
+        if (!matchesGeneration(current, options.ifGeneration)) return [clone(current!), entries]
         if (current !== undefined && current.revision > projection.revision) return [clone(current), entries]
-        const next = stored(turn, projection)
+        const childTreeReconciled =
+          options.childTreeReconciled ??
+          (current?.childTreeReconciled === true && current.revision === projection.revision)
+        const next = stored(turn, projection, childTreeReconciled, (current?.projectionGeneration ?? 0) + 1)
         return [clone(next), new Map(entries).set(turn.id, next)]
       })
     }),
@@ -305,6 +343,8 @@ export const layer = Layer.effect(
         costUsd: row.cost_usd ?? undefined,
         usageCursors,
         pricingVersion: row.pricing_version ?? undefined,
+        childTreeReconciled: row.child_tree_reconciled === 1,
+        projectionGeneration: row.projection_generation,
       } satisfies Projection
     })
     const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: Transcript.Unit) {
@@ -318,29 +358,41 @@ export const layer = Layer.effect(
     const storeCheckpoint = Effect.fn("TranscriptRepository.storeCheckpoint")(function* (
       turn: Turn,
       projection: Transcript.Projection,
+      childTreeReconciled: boolean,
+      projectionGeneration: number,
     ) {
       const usageCursors =
         projection.usageCursors === undefined
           ? null
           : yield* Schema.encodeEffect(UsageCursorsJson)(projection.usageCursors)
-      yield* sql`INSERT INTO rika_transcript_checkpoints (turn_id, thread_id, model_phase, revision, oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, pricing_version, updated_at)
-          VALUES (${turn.id}, ${turn.threadId}, ${projection.modelPhase}, ${projection.revision}, ${projection.oldestCursor ?? null}, ${projection.checkpointCursor ?? null}, ${projection.costUsd ?? null}, ${usageCursors}, ${projection.pricingVersion ?? null}, ${turn.updatedAt})
+      yield* sql`INSERT INTO rika_transcript_checkpoints (turn_id, thread_id, model_phase, revision, oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, pricing_version, child_tree_reconciled, projection_generation, updated_at)
+          VALUES (${turn.id}, ${turn.threadId}, ${projection.modelPhase}, ${projection.revision}, ${projection.oldestCursor ?? null}, ${projection.checkpointCursor ?? null}, ${projection.costUsd ?? null}, ${usageCursors}, ${projection.pricingVersion ?? null}, ${childTreeReconciled ? 1 : 0}, ${projectionGeneration}, ${turn.updatedAt})
           ON CONFLICT(turn_id) DO UPDATE SET thread_id = excluded.thread_id, model_phase = excluded.model_phase,
             revision = excluded.revision, oldest_cursor = excluded.oldest_cursor, checkpoint_cursor = excluded.checkpoint_cursor,
             cost_usd = excluded.cost_usd, usage_cursors_json = excluded.usage_cursors_json,
-            pricing_version = excluded.pricing_version, updated_at = excluded.updated_at`
+            pricing_version = excluded.pricing_version, child_tree_reconciled = excluded.child_tree_reconciled,
+            projection_generation = excluded.projection_generation,
+            updated_at = excluded.updated_at`
     }, Effect.mapError(error))
     const storedResult = Effect.fn("TranscriptRepository.storedResult")(function* (turnId: TurnId) {
       const result = yield* get(turnId)
       if (result === undefined) return yield* RepositoryError.make({ message: `Transcript ${turnId} was not stored` })
       return result
     })
-    const write = Effect.fn("TranscriptRepository.write")(function* (turn: Turn, projection: Transcript.Projection) {
+    const write = Effect.fn("TranscriptRepository.write")(function* (
+      turn: Turn,
+      projection: Transcript.Projection,
+      childTreeReconciled?: boolean,
+      ifGeneration?: number,
+    ) {
       const current = yield* get(turn.id)
+      if (!matchesGeneration(current, ifGeneration)) return current!
       if (current !== undefined && current.revision > projection.revision) return current
+      const reconciled =
+        childTreeReconciled ?? (current?.childTreeReconciled === true && current.revision === projection.revision)
       yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`.pipe(Effect.mapError(error))
       yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
-      yield* storeCheckpoint(turn, projection)
+      yield* storeCheckpoint(turn, projection, reconciled, (current?.projectionGeneration ?? 0) + 1)
       return yield* storedResult(turn.id)
     })
     const appendAll = Effect.fn("TranscriptRepository.appendAll")(function* (
@@ -353,14 +405,19 @@ export const layer = Layer.effect(
             const current = yield* get(turn.id)
             if (current === undefined)
               yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`.pipe(Effect.mapError(error))
-            const projection = continueProjection(turn, current, events)
+            const { projection, changed } = continueProjection(turn, current, events)
             const revisions = new Map(current?.units.map((unit) => [unit.key, unit.revision]))
             yield* Effect.forEach(
               projection.units.filter((unit) => revisions.get(unit.key) !== unit.revision),
               (unit) => storeUnit(turn, unit),
               { discard: true },
             )
-            yield* storeCheckpoint(turn, projection)
+            yield* storeCheckpoint(
+              turn,
+              projection,
+              current?.childTreeReconciled === true && !changed,
+              (current?.projectionGeneration ?? 0) + (changed || current === undefined ? 1 : 0),
+            )
             return yield* storedResult(turn.id)
           }),
         )
@@ -368,8 +425,10 @@ export const layer = Layer.effect(
     })
     return Service.of({
       get,
-      replace: Effect.fn("TranscriptRepository.replace")((turn, projection) =>
-        sql.withTransaction(write(turn, projection)).pipe(Effect.mapError(error)),
+      replace: Effect.fn("TranscriptRepository.replace")((turn, projection, options = {}) =>
+        sql
+          .withTransaction(write(turn, projection, options.childTreeReconciled, options.ifGeneration))
+          .pipe(Effect.mapError(error)),
       ),
       append: Effect.fn("TranscriptRepository.append")((turn, event) => appendAll(turn, [event])),
       appendAll,

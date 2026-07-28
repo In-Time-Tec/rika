@@ -5,6 +5,7 @@ export const packageEntries = (root: string) =>
     { name: `${root}/`, type: "d", executable: true },
     { name: `${root}/INSTALL`, type: "-", executable: false },
     { name: `${root}/bin/`, type: "d", executable: true },
+    { name: `${root}/bin/.rika-performance`, type: "-", executable: true },
     { name: `${root}/bin/.rika-runtime`, type: "-", executable: true },
     { name: `${root}/bin/rika`, type: "-", executable: true },
   ] as const

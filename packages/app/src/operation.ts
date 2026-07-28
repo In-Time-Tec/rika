@@ -871,30 +871,74 @@ const recordedChildIds = (projection: Transcript.Projection): ReadonlySet<string
   return ids
 }
 
+const childIdsFromRelayEvent = (event: ExecutionBackend.Event): ReadonlyArray<string> => {
+  const ids = new Set<string>()
+  const addAliases = (value: Readonly<Record<string, unknown>> | undefined) => {
+    if (value === undefined) return
+    for (const alias of ["child_execution_id", "child_run_id", "childId", "child_id"] as const) {
+      const id = value[alias]
+      if (typeof id === "string" && id.length > 0) ids.add(id)
+    }
+  }
+  if (event.childExecutionId !== undefined && event.childExecutionId.length > 0) ids.add(event.childExecutionId)
+  addAliases(event.data)
+  const member = event.data?.member
+  if (member !== null && typeof member === "object") addAliases(member as Readonly<Record<string, unknown>>)
+  if (event.type === "child_fan_out.created" && Array.isArray(event.data?.children))
+    for (const child of event.data.children)
+      if (child !== null && typeof child === "object") addAliases(child as Readonly<Record<string, unknown>>)
+  return [...ids]
+}
+
+const childIdsFromRelayEvents = (events: ReadonlyArray<ExecutionBackend.Event>): ReadonlySet<string> =>
+  new Set(events.flatMap(childIdsFromRelayEvent).map(normalizeChildExecutionId))
+
 const hasChildrenAwaitingBackfill = (projection: Transcript.Projection): boolean => {
   const stored = storedChildUnits(projection)
   return [...recordedChildIds(projection)].some((childId) => !(stored.get(childId) ?? []).some(realChildUnit))
 }
 
-const replayChildTranscript = Effect.fn("Operation.replayChildTranscript")(function* (
+const pageExecutionHistory = Effect.fn("Operation.pageExecutionHistory")(function* (
   backend: ExecutionBackend.Interface,
   executionId: string,
+  reference: boolean,
 ) {
-  const turnId = normalizeChildExecutionId(executionId)
   if (backend.pageEvents === undefined) {
-    const result = yield* backend.replay(executionId, undefined, ExecutionBackend.executionReference)
-    return Transcript.project(turnId, "", result.events)
+    const replay = yield* backend.replay(
+      executionId,
+      undefined,
+      reference ? ExecutionBackend.executionReference : undefined,
+    )
+    return {
+      events: replay.events.toSorted((left, right) => left.sequence - right.sequence),
+      finalCursor: undefined,
+      historyComplete: false,
+      replayStatus: replay.status,
+    }
   }
-  let projection = Transcript.empty(turnId, "")
+  const events: Array<ExecutionBackend.Event> = []
   let after: string | undefined
   const cursors = new Set<string>()
   while (true) {
-    const page = yield* backend.pageEvents(executionId, "forward", after, 200, ExecutionBackend.executionReference)
-    for (const event of page.events.toSorted((left, right) => left.sequence - right.sequence))
-      projection = Transcript.applyEvent(projection, event)
-    if (!page.hasMore) return projection
+    const page = yield* backend.pageEvents(
+      executionId,
+      "forward",
+      after,
+      200,
+      reference ? ExecutionBackend.executionReference : undefined,
+    )
+    events.push(...page.events)
     const next = page.newestCursor
-    if (next === undefined || cursors.has(next)) return projection
+    if (after !== undefined && (page.events.length === 0 || next === undefined || next === after || cursors.has(next)))
+      return { events, finalCursor: next, historyComplete: false }
+    if (!page.hasMore)
+      return {
+        events: events.toSorted((left, right) => left.sequence - right.sequence),
+        finalCursor: next,
+        historyComplete: events.length > 0 && next !== undefined,
+      }
+    if (page.events.length === 0 || next === undefined || cursors.has(next))
+      return { events, finalCursor: next, historyComplete: false }
     cursors.add(next)
     after = next
   }
@@ -932,6 +976,7 @@ const withoutSynthesizedTwins = (
 })
 
 type ChildBackfillWork = {
+  readonly rootPrompt: string
   readonly stored: ReadonlyMap<string, ReadonlyArray<Transcript.Unit>>
   readonly nested: Array<Transcript.NestedProjection>
   readonly descendants: Array<{ readonly executionId: string; readonly status: ExecutionBackend.Status }>
@@ -942,18 +987,29 @@ type ChildBackfillWork = {
     readonly nestedIndex: number | undefined
     readonly reference: boolean
     childIndex: number
+    initialized: boolean
+    inspection?: ExecutionBackend.Inspection
   }>
   readonly seen: Set<string>
+  fullyInspectedTerminalTree: boolean
 }
 
-const makeChildBackfillWork = (rootExecutionId: string, root: Transcript.Projection): ChildBackfillWork => ({
+const makeChildBackfillWork = (
+  rootExecutionId: string,
+  rootPrompt: string,
+  root: Transcript.Projection,
+): ChildBackfillWork => ({
+  rootPrompt,
   stored: storedChildUnits(root),
   nested: [],
   descendants: [],
   parents: new Map(),
   rootProjection: root,
-  pending: [{ executionId: rootExecutionId, nestedIndex: undefined, reference: false, childIndex: 0 }],
+  pending: [
+    { executionId: rootExecutionId, nestedIndex: undefined, reference: false, childIndex: 0, initialized: false },
+  ],
   seen: new Set([normalizeChildExecutionId(rootExecutionId)]),
+  fullyInspectedTerminalTree: true,
 })
 
 type SelectionEpochState = {
@@ -1012,25 +1068,88 @@ const invalidateSelectionTurn = (state: SelectionEpochState, turn: Turn.Turn) =>
 const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")(function* (
   backend: ExecutionBackend.Interface,
   rootExecutionId: string,
+  rootPrompt: string,
   root: Transcript.Projection,
   existing?: ChildBackfillWork,
 ) {
-  const work = existing ?? makeChildBackfillWork(rootExecutionId, root)
+  const work = existing ?? makeChildBackfillWork(rootExecutionId, rootPrompt, root)
   while (work.pending.length > 0) {
     const current = work.pending[0]!
-    const inspection = yield* backend.inspect(
-      current.executionId,
-      current.reference ? ExecutionBackend.executionReference : undefined,
-    )
+    const inspection =
+      current.inspection ??
+      (yield* backend.inspect(current.executionId, current.reference ? ExecutionBackend.executionReference : undefined))
     if (inspection === undefined) {
+      work.fullyInspectedTerminalTree = false
       work.pending.shift()
       continue
     }
+    if (!isTerminalStatus(inspection.status)) work.fullyInspectedTerminalTree = false
     const parentProjection = () =>
       current.nestedIndex === undefined ? work.rootProjection : work.nested[current.nestedIndex]!.projection
     const settleParent = (projection: Transcript.Projection) => {
       if (current.nestedIndex === undefined) work.rootProjection = projection
       else work.nested[current.nestedIndex] = { ...work.nested[current.nestedIndex]!, projection }
+    }
+    if (!current.initialized) {
+      const history = yield* pageExecutionHistory(backend, current.executionId, current.reference)
+      const confirmed = yield* backend.inspect(
+        current.executionId,
+        current.reference ? ExecutionBackend.executionReference : undefined,
+      )
+      const inspectedChildren = new Map(
+        inspection.children.map((child) => [normalizeChildExecutionId(child.executionId), child.status]),
+      )
+      const confirmedChildren = new Map(
+        confirmed?.children.map((child) => [normalizeChildExecutionId(child.executionId), child.status]) ?? [],
+      )
+      const replayChildren = new Set(childIdsFromRelayEvents(history.events))
+      replayChildren.delete(normalizeChildExecutionId(current.executionId))
+      const historyCertified =
+        history.historyComplete &&
+        confirmed !== undefined &&
+        isTerminalStatus(inspection.status) &&
+        confirmed.status === inspection.status &&
+        (history.replayStatus === undefined || history.replayStatus === inspection.status) &&
+        (history.replayStatus !== undefined || history.finalCursor === inspection.lastCursor) &&
+        (history.replayStatus !== undefined || history.finalCursor === confirmed.lastCursor) &&
+        inspectedChildren.size === confirmedChildren.size &&
+        [...inspectedChildren].every(([id, status]) => confirmedChildren.get(id) === status) &&
+        replayChildren.size === inspectedChildren.size &&
+        [...replayChildren].every((id) => inspectedChildren.has(id))
+      if (!historyCertified) {
+        work.fullyInspectedTerminalTree = false
+        yield* Effect.logInfo("execution.child.reconciliation_unverified").pipe(
+          Effect.annotateLogs({
+            "rika.execution.id": current.executionId,
+            "rika.reconciliation.history.complete": history.historyComplete,
+            "rika.reconciliation.inspection.confirmed": confirmed !== undefined,
+            "rika.reconciliation.status.terminal": isTerminalStatus(inspection.status),
+            "rika.reconciliation.status.stable": confirmed?.status === inspection.status,
+            "rika.reconciliation.cursor.initial": inspection.lastCursor ?? "",
+            "rika.reconciliation.cursor.replayed": history.finalCursor ?? "",
+            "rika.reconciliation.cursor.confirmed": confirmed?.lastCursor ?? "",
+            "rika.reconciliation.children.inspected": inspectedChildren.size,
+            "rika.reconciliation.children.confirmed": confirmedChildren.size,
+            "rika.reconciliation.children.replayed": replayChildren.size,
+          }),
+        )
+      }
+      {
+        const replayed = Transcript.project(
+          normalizeChildExecutionId(current.executionId),
+          current.nestedIndex === undefined ? work.rootPrompt : "",
+          history.events,
+        )
+        const storedUnits = work.stored.get(normalizeChildExecutionId(current.executionId)) ?? []
+        const storedTranscript = storedUnits.some(realChildUnit) ? storedChildProjection(storedUnits) : undefined
+        const fallback = current.nestedIndex === undefined ? root : storedTranscript
+        if (historyCertified) settleParent(replayed)
+        else if (fallback !== undefined) settleParent(fallback)
+        else if (replayed.revision >= 0) settleParent(replayed)
+        else work.fullyInspectedTerminalTree = false
+      }
+      current.inspection = inspection
+      current.initialized = true
     }
     const child = inspection.children[current.childIndex]
     if (child === undefined) {
@@ -1043,23 +1162,13 @@ const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")
         current.childIndex += 1
         continue
       }
-      const replayed = yield* replayChildTranscript(backend, child.executionId)
       current.childIndex += 1
       work.seen.add(childKey)
       work.descendants.push(child)
-      if (replayed.revision < 0)
-        yield* Effect.logWarning("execution.child.replay_empty").pipe(
-          Effect.annotateLogs({
-            "rika.execution.parent": current.executionId,
-            "rika.execution.child": child.executionId,
-          }),
-        )
+      if (!isTerminalStatus(child.status)) work.fullyInspectedTerminalTree = false
       const storedUnits = work.stored.get(childKey) ?? []
       const storedTranscript = storedUnits.some(realChildUnit) ? storedChildProjection(storedUnits) : undefined
-      let projection: Transcript.Projection | undefined = replayed
-      if (replayed.revision < 0) projection = undefined
-      if (storedTranscript !== undefined && storedTranscript.revision > replayed.revision) projection = storedTranscript
-      if (projection === undefined) continue
+      const projection = storedTranscript ?? Transcript.empty(childKey, "")
       let parent = toolForChild(parentProjection(), child.executionId)
       if (parent === undefined) {
         const ensured = Transcript.ensureChildTool(parentProjection(), child.executionId, "task")
@@ -1084,23 +1193,31 @@ const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")
         nestedIndex: work.nested.length - 1,
         reference: true,
         childIndex: 0,
+        initialized: false,
       })
     }
   }
-  for (const [childKey, units] of work.stored) {
-    if (work.parents.has(childKey) || !units.some(realChildUnit)) continue
-    const parentId = units[0]!.parentId
-    if (parentId === undefined) continue
-    work.parents.set(childKey, parentId)
-    work.nested.push({ parentId, projection: storedChildProjection(units) })
-  }
-  if (work.nested.length === 0) return { projection: work.rootProjection, descendants: work.descendants }
+  if (!work.fullyInspectedTerminalTree)
+    for (const [childKey, units] of work.stored) {
+      if (work.parents.has(childKey) || !units.some(realChildUnit)) continue
+      const parentId = units[0]!.parentId
+      if (parentId === undefined) continue
+      work.parents.set(childKey, parentId)
+      work.nested.push({ parentId, projection: storedChildProjection(units) })
+    }
+  if (work.nested.length === 0)
+    return {
+      projection: work.rootProjection,
+      descendants: work.descendants,
+      fullyInspectedTerminalTree: work.fullyInspectedTerminalTree,
+    }
   return {
     projection: Transcript.withNestedProjections(
       withoutSynthesizedTwins(work.rootProjection, work.parents),
       work.nested,
     ),
     descendants: work.descendants,
+    fullyInspectedTerminalTree: work.fullyInspectedTerminalTree,
   }
 })
 
@@ -1342,22 +1459,31 @@ const backfillTranscriptTree = Effect.fn("Operation.backfillTranscriptTree")(fun
   const transcripts = yield* TranscriptRepository.Service
   const current = yield* transcripts.get(turn.id)
   if (current === undefined) return []
+  if (isTerminalStatus(turn.status) && current.childTreeReconciled) return []
   const root = sourceProjection(current)
   if (!force && !hasChildrenAwaitingBackfill(root)) return []
   const backend = yield* ExecutionBackend.Service
-  const tree = yield* backfillChildTranscripts(backend, turn.id, root, work)
-  if (tree.projection !== root) yield* transcripts.replace(turn, tree.projection)
+  const tree = yield* backfillChildTranscripts(backend, turn.id, turn.prompt, root, work)
+  const reconciled =
+    isTerminalStatus(turn.status) && tree.fullyInspectedTerminalTree && !hasChildrenAwaitingBackfill(tree.projection)
+  yield* Effect.logInfo("execution.child.reconciliation_completed").pipe(
+    Effect.annotateLogs({
+      "rika.execution.id": turn.id,
+      "rika.reconciliation.terminal": isTerminalStatus(turn.status),
+      "rika.reconciliation.tree.verified": tree.fullyInspectedTerminalTree,
+      "rika.reconciliation.children.pending": hasChildrenAwaitingBackfill(tree.projection),
+      "rika.reconciliation.certified": reconciled,
+    }),
+  )
+  if (tree.projection !== root || reconciled !== current.childTreeReconciled)
+    yield* transcripts.replace(turn, tree.projection, {
+      childTreeReconciled: reconciled,
+      ifGeneration: current.projectionGeneration,
+    })
   return tree.descendants
 })
 
-const childExecutionId = (event: ExecutionBackend.Event): string | undefined => {
-  if (event.type !== "child_run.spawned") return undefined
-  const member = event.data?.member
-  const nested =
-    member !== null && typeof member === "object" ? (member as Readonly<Record<string, unknown>>) : undefined
-  const value = nested?.child_execution_id ?? event.data?.child_execution_id
-  return typeof value === "string" && value.length > 0 ? value : undefined
-}
+const childExecutionId = (event: ExecutionBackend.Event): string | undefined => childIdsFromRelayEvent(event)[0]
 
 const childTranscriptPatch = (
   threadId: Thread.ThreadId,
@@ -2742,13 +2868,7 @@ export const productLayer = <
         const cachedBackend = (backend: ExecutionBackend.Interface, cache: RepairCache) =>
           ExecutionBackend.Service.of({
             ...backend,
-            inspect: (executionId, reference) => {
-              const key = `${reference === undefined ? "root" : "reference"}:${executionId}`
-              if (cache.inspections.has(key)) return Effect.succeed(cache.inspections.get(key))
-              return backend
-                .inspect(executionId, reference)
-                .pipe(Effect.tap((inspection) => Effect.sync(() => cache.inspections.set(key, inspection))))
-            },
+            inspect: backend.inspect,
             replay: (executionId, after, reference) => {
               const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${after ?? ""}`
               const cached = cache.replays.get(key)
@@ -3741,7 +3861,7 @@ export const productLayer = <
             }
           }
           const transcripts = yield* TranscriptRepository.Service
-          yield* withProjectionAdmission(turn.id, transcripts.replace(turn, projection))
+          yield* withProjectionAdmission(turn.id, transcripts.replace(turn, projection, { childTreeReconciled: false }))
         })
         const repairSelectionTurn = Effect.fn("Operation.interactive.repairSelectionTurn")(function* (
           state: SelectionEpochState,
@@ -3764,7 +3884,10 @@ export const productLayer = <
           }> = []
           if (execution === undefined) {
             if (projected === undefined)
-              yield* withProjectionAdmission(turn.id, transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt)))
+              yield* withProjectionAdmission(
+                turn.id,
+                transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt), { childTreeReconciled: false }),
+              )
           } else {
             const terminalTransition = isTerminalStatus(execution.status) && execution.status !== turn.status
             if (isTerminalStatus(execution.status)) {
@@ -3784,7 +3907,9 @@ export const productLayer = <
             const latest = yield* transcripts.get(turn.id)
             if (latest !== undefined) {
               const key = String(turn.id)
-              const work = state.backfills.get(key) ?? makeChildBackfillWork(String(turn.id), sourceProjection(latest))
+              const work =
+                state.backfills.get(key) ??
+                makeChildBackfillWork(String(turn.id), authoritativeTurn.prompt, sourceProjection(latest))
               state.backfills.set(key, work)
               descendants = yield* backfillTree(authoritativeTurn, true, backend, work)
               state.backfills.delete(key)

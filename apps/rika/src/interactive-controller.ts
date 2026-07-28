@@ -27,7 +27,8 @@ export interface State {
   readonly replayTurns: ReadonlyMap<string, Turn.Turn>
   readonly entries: ReadonlyArray<TranscriptRepository.Entry>
   readonly revisions: ReadonlyMap<string, number>
-  readonly projections: ReadonlyMap<string, Transcript.Projection>
+  readonly liveProjections: ReadonlyMap<string, Transcript.Projection>
+  readonly transientEventCursors: ReadonlySet<string>
   readonly threadCostUsd?: number
   readonly attachedChildRevisions?: ReadonlyMap<string, number>
 }
@@ -238,6 +239,18 @@ const projections = (
   )
 }
 
+const projectionFromEntries = (
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  turnId: string,
+  prompt: string,
+): Transcript.Projection => projections(entries).get(turnId) ?? Transcript.empty(turnId, prompt)
+
+const unownedProjections = (
+  liveProjections: ReadonlyMap<string, Transcript.Projection>,
+  replayTurns: ReadonlyMap<string, Turn.Turn>,
+): ReadonlyMap<string, Transcript.Projection> =>
+  new Map([...liveProjections].filter(([turnId]) => !replayTurns.has(turnId)))
+
 const sourceText = (event: Transcript.SourceEvent): string => {
   if (typeof event.text === "string") return event.text
   const delta = event.data?.delta
@@ -412,7 +425,8 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ]),
         entries: selected,
         revisions: new Map(selected.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        projections: projections(selected),
+        liveProjections: new Map(),
+        transientEventCursors: new Set(),
         ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
       },
       preserveAnchor: false,
@@ -444,7 +458,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ]),
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        projections: projections(entries),
+        liveProjections: unownedProjections(
+          state.liveProjections,
+          new Map(entries.map((entry) => [entry.turn.id, entry.turn] as const)),
+        ),
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
       },
       preserveAnchor: true,
@@ -466,7 +483,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         ]),
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        projections: projections(entries),
+        liveProjections: unownedProjections(
+          state.liveProjections,
+          new Map(entries.map((entry) => [entry.turn.id, entry.turn] as const)),
+        ),
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
       },
       preserveAnchor: true,
@@ -479,6 +499,11 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
     const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
     const transient = Transcript.isTransientEvent(event.event)
+    const transientEventKey = `${event.turnId}\u0000${event.event.cursor}`
+    if (transient && state.transientEventCursors.has(transientEventKey)) return { state, preserveAnchor: false }
+    const transientEventCursors = transient
+      ? new Set([...state.transientEventCursors, transientEventKey])
+      : state.transientEventCursors
     if (!transient && event.revision <= (state.revisions.get(event.turnId) ?? -1)) {
       if (event.threadCostUsd === undefined) return { state, preserveAnchor: false }
       const { costUsd: _costUsd, ...modelWithoutCost } = state.model
@@ -496,13 +521,18 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       : new Map([...state.revisions, [event.turnId, event.revision]] as const)
     const turn = state.replayTurns.get(event.turnId)
     if (turn === undefined) {
-      const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, "")
+      const previous = state.liveProjections.get(event.turnId) ?? Transcript.empty(event.turnId, "")
       const next = Transcript.applyEvent(previous, event.event)
-      const childProjections = new Map([...state.projections, [event.turnId, next]] as const)
+      const liveProjections = new Map([...state.liveProjections, [event.turnId, next]] as const)
       const rootTurnId = event.rootTurnId
-      const rootProjection = rootTurnId === undefined ? undefined : childProjections.get(rootTurnId)
-      if (rootTurnId !== undefined && rootProjection !== undefined && event.rootTurnCostUsd !== undefined)
-        childProjections.set(rootTurnId, { ...rootProjection, costUsd: event.rootTurnCostUsd })
+      const rootTurnCostUsd = event.rootTurnCostUsd
+      const entries =
+        rootTurnId === undefined || rootTurnCostUsd === undefined
+          ? state.entries
+          : state.entries.map((entry) =>
+              entry.turn.id === rootTurnId ? { ...entry, projectionCostUsd: rootTurnCostUsd } : entry,
+            )
+      const attachmentProjections = new Map([...projections(entries), ...liveProjections])
       const childTerminal =
         event.event.type === "execution.completed" ||
         event.event.type === "execution.failed" ||
@@ -510,7 +540,7 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       const attached = TranscriptPresenter.attachChildProjections(
         state.model,
         state.replayTurns,
-        childProjections,
+        attachmentProjections,
         childTerminal
           ? TranscriptPresenter.emptyAttachments
           : (state.attachedChildRevisions ?? TranscriptPresenter.emptyAttachments),
@@ -520,8 +550,10 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         state: {
           ...stateWithoutCost,
           model: threadCostUsd === undefined ? modelWithoutCost : { ...modelWithoutCost, costUsd: threadCostUsd },
+          entries,
           revisions,
-          projections: childProjections,
+          liveProjections,
+          transientEventCursors,
           ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
           attachedChildRevisions: attached.attachments,
         },
@@ -529,34 +561,16 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         unattached: attached.unattached,
       }
     }
-    const previous = state.projections.get(event.turnId) ?? Transcript.empty(event.turnId, turn.prompt)
+    const previous = projectionFromEntries(state.entries, event.turnId, turn.prompt)
     const projected = Transcript.applyEvent(previous, event.event)
     const next =
       event.rootTurnId === event.turnId && event.rootTurnCostUsd !== undefined
         ? { ...projected, costUsd: event.rootTurnCostUsd }
         : projected
-    const nextProjections = new Map([...state.projections, [event.turnId, next]] as const)
     const terminal =
       event.event.type === "execution.completed" ||
       event.event.type === "execution.failed" ||
       event.event.type === "execution.cancelled"
-    const attached = TranscriptPresenter.attachChildProjections(
-      TranscriptPresenter.applyTurnUnits(state.model, next.units),
-      state.replayTurns,
-      nextProjections,
-      terminal
-        ? TranscriptPresenter.emptyAttachments
-        : (state.attachedChildRevisions ?? TranscriptPresenter.emptyAttachments),
-    )
-    const projectedModel = {
-      ...attached.model,
-      activity: activityAfter(state.model.activity, event.event, next, attached.model),
-    }
-    const terminalStatus = ExecutionStatus.terminalEventStatus(event.event.type)
-    const model = terminal
-      ? { ...projectedModel, activeTurnId: undefined, busy: false, activity: undefined }
-      : projectedModel
-    const { costUsd: _costUsd, ...modelWithoutCost } = model
     const known = new Map(state.entries.map((entry, index) => [entry.unit.key, index] as const))
     const entries = [...state.entries]
     for (const unit of next.units) {
@@ -573,6 +587,24 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         entries.push(entry)
       } else entries[index] = entry
     }
+    const attachmentProjections = new Map([...projections(entries), ...state.liveProjections])
+    const attached = TranscriptPresenter.attachChildProjections(
+      TranscriptPresenter.applyTurnUnits(state.model, next.units),
+      state.replayTurns,
+      attachmentProjections,
+      terminal
+        ? TranscriptPresenter.emptyAttachments
+        : (state.attachedChildRevisions ?? TranscriptPresenter.emptyAttachments),
+    )
+    const projectedModel = {
+      ...attached.model,
+      activity: activityAfter(state.model.activity, event.event, next, attached.model),
+    }
+    const terminalStatus = ExecutionStatus.terminalEventStatus(event.event.type)
+    const model = terminal
+      ? { ...projectedModel, activeTurnId: undefined, busy: false, activity: undefined }
+      : projectedModel
+    const { costUsd: _costUsd, ...modelWithoutCost } = model
     return {
       state: {
         ...stateWithoutCost,
@@ -583,7 +615,8 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
             : new Map([...state.replayTurns, [event.turnId, { ...turn, status: terminalStatus }]]),
         entries,
         revisions,
-        projections: nextProjections,
+        liveProjections: state.liveProjections,
+        transientEventCursors,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         attachedChildRevisions: attached.attachments,
       },

@@ -1,5 +1,6 @@
 import { Config, Console, Effect, Option, Path } from "effect"
 import { Argument, Command } from "effect/unstable/cli"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as DataRoot from "@rika/config/data-root"
 import * as Logging from "../logging"
 
@@ -37,7 +38,29 @@ const exportCommand = Command.make("export", { destination: Argument.string("dir
   ),
 )
 
+const performanceCommand = Command.make("performance", {}, () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
+    let runtime: { readonly executable: string; readonly arguments: ReadonlyArray<string> }
+    if (Option.isSome(testExecutable)) runtime = { executable: testExecutable.value, arguments: [] }
+    else if (import.meta.path.startsWith("/$bunfs/"))
+      runtime = { executable: path.join(path.dirname(process.execPath), ".rika-performance"), arguments: [] }
+    else
+      runtime = { executable: process.execPath, arguments: [path.join(import.meta.dir, "..", "performance-main.ts")] }
+    const output = yield* spawner.string(
+      ChildProcess.make(runtime.executable, runtime.arguments, {
+        stdin: "ignore",
+        stderr: "inherit",
+        extendEnv: true,
+      }),
+    )
+    yield* Console.log(output.trim())
+  }),
+).pipe(Command.withDescription("Evaluate the standard large-Thread rendering workload"))
+
 export const command = Command.make("diagnostics").pipe(
   Command.withDescription("Inspect and export local Rika logs"),
-  Command.withSubcommands([pathCommand, statusCommand, exportCommand]),
+  Command.withSubcommands([pathCommand, statusCommand, exportCommand, performanceCommand]),
 )

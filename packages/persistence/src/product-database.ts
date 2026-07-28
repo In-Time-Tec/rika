@@ -610,6 +610,14 @@ const materializedThreadSummaries = Effect.gen(function* () {
     END`
 })
 
+const reconciledChildTrees = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN child_tree_reconciled INTEGER NOT NULL DEFAULT 0
+    CHECK (child_tree_reconciled IN (0, 1))`
+  yield* sql`ALTER TABLE rika_transcript_checkpoints ADD COLUMN projection_generation INTEGER NOT NULL DEFAULT 0
+    CHECK (projection_generation >= 0)`
+})
+
 const migrationNames = [
   "product_baseline",
   "turns",
@@ -632,6 +640,7 @@ const migrationNames = [
   "turn_stop_intent",
   "usage_projection",
   "materialized_thread_summaries",
+  "reconciled_child_trees",
 ] as const
 
 const migrations = SqliteMigrator.fromRecord({
@@ -656,6 +665,7 @@ const migrations = SqliteMigrator.fromRecord({
   "19_turn_stop_intent": turnStopIntent,
   "20_usage_projection": usageProjection,
   "21_materialized_thread_summaries": materializedThreadSummaries,
+  "22_reconciled_child_trees": reconciledChildTrees,
 })
 
 const migrationTableObjects = ["table:rika_migrations"]
@@ -747,6 +757,7 @@ const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   coordinationObjects,
   coordinationObjects,
   usageObjects,
+  materializedSummaryObjects,
   materializedSummaryObjects,
 ]
 

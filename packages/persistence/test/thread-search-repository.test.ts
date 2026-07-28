@@ -214,7 +214,9 @@ describe("thread search repository", () => {
           ALTER TABLE rika_turns DROP COLUMN author_json;
           ALTER TABLE rika_turns DROP COLUMN lineage_json;
           ALTER TABLE rika_turns DROP COLUMN stop_intent;
-          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21);
+          ALTER TABLE rika_transcript_checkpoints DROP COLUMN child_tree_reconciled;
+          ALTER TABLE rika_transcript_checkpoints DROP COLUMN projection_generation;
+          DELETE FROM rika_migrations WHERE migration_id IN (17, 18, 19, 20, 21, 22);
           INSERT INTO rika_workspaces (path, created_at) VALUES ('/work/current', 1);
           INSERT INTO rika_threads (id, workspace, title, labels_json, created_at, updated_at)
             VALUES ('legacy', '/work/current', 'Legacy title', '["legacy-label"]', 1, 2);

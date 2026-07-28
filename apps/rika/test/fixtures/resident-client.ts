@@ -267,6 +267,7 @@ const program = Effect.gen(function* () {
                     createdAt: startedAt,
                     updatedAt: startedAt,
                   }
+                  const seed = Transcript.empty(turn.id, turn.prompt)
                   let state: InteractiveController.State = {
                     model: {
                       ...ViewState.initial(workspace, "medium"),
@@ -277,9 +278,15 @@ const program = Effect.gen(function* () {
                     },
                     selectionEpoch: 0,
                     replayTurns: new Map([[turn.id, turn]]),
-                    entries: [],
+                    entries: seed.units.map((unit) => ({
+                      turn,
+                      unit,
+                      projectionRevision: seed.revision,
+                      projectionModelPhase: seed.modelPhase,
+                    })),
                     revisions: new Map(),
-                    projections: new Map([[turn.id, Transcript.empty(turn.id, turn.prompt)]]),
+                    liveProjections: new Map(),
+                    transientEventCursors: new Set(),
                     threadCostUsd: 0,
                   }
                   const feed = yield* Effect.forkChild(

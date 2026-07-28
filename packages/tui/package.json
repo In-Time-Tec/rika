@@ -6,10 +6,11 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./adapter": "./src/adapter.ts"
+    "./adapter": "./src/adapter.ts",
+    "./performance": "./src/performance.ts"
   },
   "scripts": {
-    "build": "bun build ./src/index.ts ./src/adapter.ts --outdir dist --target bun --format esm --external effect --external '@opentui/core' --external '@opentui/core/*'",
+    "build": "bun build ./src/index.ts ./src/adapter.ts ./src/performance.ts --outdir dist --target bun --format esm --external effect --external '@opentui/core' --external '@opentui/core/*'",
     "lint": "bun --cwd ../.. node_modules/oxlint/dist/cli.js packages/tui/src packages/tui/test",
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },

@@ -1752,7 +1752,8 @@ export const interactiveTui =
         let replayTurns = new Map<string, Turn.Turn>()
         let loadedTranscriptEntries: ReadonlyArray<TranscriptRepository.Entry> = []
         let projectionRevisions = new Map<string, number>()
-        let transcriptProjections = new Map<string, Transcript.Projection>()
+        let liveTranscriptProjections = new Map<string, Transcript.Projection>()
+        let transientTranscriptEventCursors = new Set<string>()
         let attachedChildRevisions: ReadonlyMap<string, number> | undefined
         let threadCostUsd: number | undefined
         const appliedDeltas = new Set<string>()
@@ -1813,7 +1814,8 @@ export const interactiveTui =
                 replayTurns,
                 entries: loadedTranscriptEntries,
                 revisions: projectionRevisions,
-                projections: transcriptProjections,
+                liveProjections: liveTranscriptProjections,
+                transientEventCursors: transientTranscriptEventCursors,
                 ...(attachedChildRevisions === undefined ? {} : { attachedChildRevisions }),
                 ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
               },
@@ -1824,7 +1826,8 @@ export const interactiveTui =
             replayTurns = new Map(controlled.state.replayTurns)
             loadedTranscriptEntries = controlled.state.entries
             projectionRevisions = new Map(controlled.state.revisions)
-            transcriptProjections = new Map(controlled.state.projections)
+            liveTranscriptProjections = new Map(controlled.state.liveProjections)
+            transientTranscriptEventCursors = new Set(controlled.state.transientEventCursors)
             attachedChildRevisions = controlled.state.attachedChildRevisions
             threadCostUsd = controlled.state.threadCostUsd
             if (
@@ -1905,7 +1908,16 @@ export const interactiveTui =
                 fork(session.readQueue(event.threadId))
               }
               replayTurns.set(event.turn.id, event.turn)
-              transcriptProjections.set(event.turn.id, Transcript.empty(event.turn.id, event.turn.prompt))
+              const seed = Transcript.empty(event.turn.id, event.turn.prompt)
+              loadedTranscriptEntries = [
+                ...loadedTranscriptEntries,
+                ...seed.units.map((unit) => ({
+                  turn: event.turn,
+                  unit,
+                  projectionRevision: seed.revision,
+                  projectionModelPhase: seed.modelPhase,
+                })),
+              ]
               model = ViewState.update(model, {
                 _tag: "TurnStarted",
                 turnId: event.turn.id,

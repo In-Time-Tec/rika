@@ -143,6 +143,7 @@ verify_checksum "${staging}/${archive_file}" "${staging}/SHA256SUMS" "$archive_f
 
 tar -xzf "${staging}/${archive_file}" -C "$staging"
 [ -x "${staging}/${archive_root}/bin/rika" ] || fail "release archive is missing bin/rika"
+[ -f "${staging}/${archive_root}/bin/.rika-performance" ] || fail "release archive is missing bin/.rika-performance"
 [ -f "${staging}/${archive_root}/bin/.rika-runtime" ] || fail "release archive is missing bin/.rika-runtime"
 
 previous="${install_parent}/.rika-previous-$$"

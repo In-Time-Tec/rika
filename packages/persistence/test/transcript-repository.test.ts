@@ -103,6 +103,29 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
     }),
   )
 
+  test.effect("keeps a reconciled child-tree marker until a new source event arrives", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(5), threadId: Thread.ThreadId.make("thread-reconciled") }
+      const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const reconciled = yield* repository.replace(target, projection, { childTreeReconciled: true })
+      const equalReplacement = yield* repository.replace(target, projection)
+      const duplicate = yield* repository.append(target, event(1))
+      const changed = yield* repository.append(target, event(2))
+      const changedProjection = Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)])
+      const restored = yield* repository.replace(target, changedProjection, { childTreeReconciled: true })
+      const explicitlyCleared = yield* repository.replace(target, changedProjection, { childTreeReconciled: false })
+      const stale = yield* repository.replace(target, projection, { childTreeReconciled: true })
+      expect(reconciled.childTreeReconciled).toBe(true)
+      expect(equalReplacement.childTreeReconciled).toBe(true)
+      expect(duplicate.childTreeReconciled).toBe(true)
+      expect(changed.childTreeReconciled).toBe(false)
+      expect(restored.childTreeReconciled).toBe(true)
+      expect(explicitlyCleared.childTreeReconciled).toBe(false)
+      expect(stale.childTreeReconciled).toBe(false)
+    }),
+  )
+
   test.effect("does not let an older rebuild overwrite a newer projection", () =>
     Effect.gen(function* () {
       const repository = yield* TranscriptRepository.Service
@@ -114,6 +137,70 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
         revision: 1,
         checkpointCursor: "cursor-1",
       })
+    }),
+  )
+
+  test.effect("rejects a reconciled replacement when an equal-revision usage append wins the race", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(6), threadId: Thread.ThreadId.make("thread-usage-race") }
+      const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const snapshot = yield* repository.replace(target, projection, { childTreeReconciled: true })
+      const usage: Transcript.SourceEvent = {
+        cursor: "usage-late",
+        sequence: 1,
+        type: "model.usage.reported",
+        createdAt: 2,
+        data: usageData(1_000),
+      }
+
+      const appended = yield* repository.append(target, usage)
+      const rejected = yield* repository.replace(target, projection, {
+        childTreeReconciled: true,
+        ifGeneration: snapshot.projectionGeneration,
+      })
+
+      expect(appended.revision).toBe(snapshot.revision)
+      expect(appended.childTreeReconciled).toBe(false)
+      expect(appended.usageCursors).toContain("usage-late")
+      expect(rejected.costUsd).toBe(appended.costUsd)
+      expect(rejected.usageCursors).toEqual(appended.usageCursors)
+      expect(rejected.childTreeReconciled).toBe(false)
+    }),
+  )
+
+  test.effect("rejects stale certifiers after equal-revision replacement and explicit marker clear", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(9), threadId: Thread.ThreadId.make("thread-generation-races") }
+      const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+      const snapshot = yield* repository.replace(target, projection)
+      const replacement = {
+        ...projection,
+        units: projection.units.map((unit, index) =>
+          index === 0 && unit.content._tag === "Entry"
+            ? { ...unit, content: { ...unit.content, text: "equal revision replacement" } }
+            : unit,
+        ),
+      }
+      const replaced = yield* repository.replace(target, replacement)
+      const staleAfterReplacement = yield* repository.replace(target, projection, {
+        childTreeReconciled: true,
+        ifGeneration: snapshot.projectionGeneration,
+      })
+      const certified = yield* repository.replace(target, replacement, { childTreeReconciled: true })
+      const cleared = yield* repository.replace(target, replacement, { childTreeReconciled: false })
+      const staleAfterClear = yield* repository.replace(target, replacement, {
+        childTreeReconciled: true,
+        ifGeneration: certified.projectionGeneration,
+      })
+
+      expect(replaced.projectionGeneration).toBeGreaterThan(snapshot.projectionGeneration)
+      expect(staleAfterReplacement.units).toEqual(replaced.units)
+      expect(staleAfterReplacement.childTreeReconciled).toBe(false)
+      expect(cleared.projectionGeneration).toBeGreaterThan(certified.projectionGeneration)
+      expect(staleAfterClear.childTreeReconciled).toBe(false)
+      expect(staleAfterClear.projectionGeneration).toBe(cleared.projectionGeneration)
     }),
   )
 
@@ -436,7 +523,31 @@ it.effect("persists an execution outcome appended after the initial projection",
           yield* turns.setStatus(targetId, "completed", undefined, 3)
           const target = yield* turns.get(targetId)
           if (target === undefined) return yield* Effect.die("turn was not stored")
-          yield* transcripts.replace(target, Transcript.empty(target.id, target.prompt))
+          const projection = Transcript.project(target.id, target.prompt, [event(0)])
+          const snapshot = yield* transcripts.replace(target, projection)
+          const replacement = {
+            ...projection,
+            units: projection.units.map((unit, index) =>
+              index === 0 && unit.content._tag === "Entry"
+                ? { ...unit, content: { ...unit.content, text: "durable equal revision replacement" } }
+                : unit,
+            ),
+          }
+          const replaced = yield* transcripts.replace(target, replacement)
+          const staleAfterReplacement = yield* transcripts.replace(target, projection, {
+            childTreeReconciled: true,
+            ifGeneration: snapshot.projectionGeneration,
+          })
+          const certified = yield* transcripts.replace(target, replacement, { childTreeReconciled: true })
+          const cleared = yield* transcripts.replace(target, replacement, { childTreeReconciled: false })
+          const staleAfterClear = yield* transcripts.replace(target, replacement, {
+            childTreeReconciled: true,
+            ifGeneration: certified.projectionGeneration,
+          })
+          expect(staleAfterReplacement.units).toEqual(replaced.units)
+          expect(staleAfterReplacement.childTreeReconciled).toBe(false)
+          expect(staleAfterClear.childTreeReconciled).toBe(false)
+          expect(staleAfterClear.projectionGeneration).toBe(cleared.projectionGeneration)
           yield* transcripts.append(target, {
             cursor: "completed",
             sequence: 7,
@@ -496,18 +607,41 @@ it.effect("pages a reopened SQLite transcript without duplicate units", () =>
           const units = Array.from({ length: 125 }, (_, index) =>
             semanticUnit(targetId, index, 0, `sqlite-page-unit-${index.toString().padStart(3, "0")}`),
           )
-          yield* transcripts.replace(target, {
-            ...Transcript.empty(target.id, target.prompt),
-            units,
-            revision: 124,
-            checkpointCursor: "cursor-124",
-          })
+          yield* transcripts.replace(
+            target,
+            {
+              ...Transcript.empty(target.id, target.prompt),
+              units,
+              revision: 124,
+              checkpointCursor: "cursor-124",
+            },
+            { childTreeReconciled: true },
+          )
         }).pipe(provideLayer(makeLayer())),
       )
 
       yield* Effect.scoped(
         Effect.gen(function* () {
           const transcripts = yield* TranscriptRepository.Service
+          const turns = yield* TurnRepository.Service
+          const target = yield* turns.get(targetId)
+          const stored = yield* transcripts.get(targetId)
+          if (target === undefined || stored === undefined) return yield* Effect.die("transcript was not stored")
+          const projection: Transcript.Projection = {
+            units: stored.units,
+            revision: stored.revision,
+            modelPhase: stored.modelPhase,
+            ...(stored.oldestCursor === undefined ? {} : { oldestCursor: stored.oldestCursor }),
+            ...(stored.checkpointCursor === undefined ? {} : { checkpointCursor: stored.checkpointCursor }),
+            ...(stored.costUsd === undefined ? {} : { costUsd: stored.costUsd }),
+            ...(stored.usageCursors === undefined ? {} : { usageCursors: stored.usageCursors }),
+            ...(stored.pricingVersion === undefined ? {} : { pricingVersion: stored.pricingVersion }),
+          }
+          expect(stored.childTreeReconciled).toBe(true)
+          expect((yield* transcripts.replace(target, projection)).childTreeReconciled).toBe(true)
+          expect(
+            (yield* transcripts.replace(target, projection, { childTreeReconciled: false })).childTreeReconciled,
+          ).toBe(false)
           const keys: Array<string> = []
           let before: TranscriptRepository.PageCursor | undefined
           let hasOlder = true

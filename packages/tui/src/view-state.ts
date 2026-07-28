@@ -1205,7 +1205,7 @@ export const update: {
         : {
             ...model,
             threadSidebar: { ...model.threadSidebar, selected: index },
-            pendingAction: { _tag: "SelectThread", id: thread.id },
+            pendingAction: thread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: thread.id },
           }
     }
     case "ThreadPreviewScrolled":
@@ -1890,7 +1890,7 @@ export const update: {
               previewScroll: 0,
             },
             threadPreview: idle,
-            pendingAction: { _tag: "SelectThread", id: thread.id },
+            pendingAction: thread.id === model.currentThreadId ? undefined : { _tag: "SelectThread", id: thread.id },
           }
         }
         if (key.name === "backspace") {

@@ -85,6 +85,7 @@ test("publishes npm packages built from the same attested archives", () => {
 
   // Both binaries must be present in every platform package.
   expect(commands("npm")).toContain("package/bin/rika")
+  expect(commands("npm")).toContain("package/bin/.rika-performance")
   expect(commands("npm")).toContain("package/bin/.rika-runtime")
 
   const npmCommands = commands("npm")

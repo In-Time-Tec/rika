@@ -161,9 +161,10 @@ const program = Effect.gen(function* () {
             const { identity } = yield* buildIdentity()
             yield* checkedBuild("client-main.ts", path.join(bin, "rika"), target, identity)
             yield* checkedBuild("main.ts", path.join(bin, ".rika-runtime"), target, identity)
+            yield* checkedBuild("performance-main.ts", path.join(bin, ".rika-performance"), target, identity)
             yield* fileSystem.writeFileString(
               path.join(stage, "INSTALL"),
-              "Install bin/rika on PATH. Keep bin/.rika-runtime beside it.\n",
+              "Install bin/rika on PATH. Keep the private bin/.rika-runtime and bin/.rika-performance executables beside it.\n",
             )
             const exitCode = yield* spawner.exitCode(
               ChildProcess.make(

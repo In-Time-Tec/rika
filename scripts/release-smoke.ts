@@ -56,6 +56,7 @@ const program = Effect.scoped(
       .pipe(mapFailure("extract archive"))
     if (Number(extracted) !== 0) return yield* failure("extract archive", `tar exited with code ${extracted}`)
     const binary = path.join(temporary, archiveRoot, "bin", "rika")
+    const performanceRuntime = path.join(temporary, archiveRoot, "bin", ".rika-performance")
     const runtime = path.join(temporary, archiveRoot, "bin", ".rika-runtime")
     const workspace = path.join(temporary, "workspace")
     const home = path.join(temporary, "home")
@@ -135,6 +136,16 @@ const program = Effect.scoped(
     const nativeProbe = yield* output([], { RIKA_INTERNAL_OPENTUI_NATIVE_PROBE: "1" }, runtime)
     if (!nativeProbe.includes("RIKA_OPENTUI_NATIVE_OK"))
       return yield* failure("OpenTUI native probe", `Missing native proof marker: ${nativeProbe}`)
+    const performanceReport = yield* output([], {}, performanceRuntime)
+    const decodedPerformance = yield* Schema.decodeUnknownEffect(UnknownJson)(performanceReport).pipe(
+      mapFailure("decode performance report"),
+    )
+    if (
+      typeof decodedPerformance !== "object" ||
+      decodedPerformance === null ||
+      !("schemaVersion" in decodedPerformance)
+    )
+      return yield* failure("performance runtime", "Packaged performance report is invalid")
     const executed = yield* output(["run", "find the needle"])
     if (!executed.includes("SMOKE_COMPLETE"))
       return yield* failure(
