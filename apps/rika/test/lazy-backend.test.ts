@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Context, Effect, Layer } from "effect"
-import { lazyBackendLayer } from "../src/main"
+import { lazyBackendLayer } from "../src/resident-main"
 
 const completedResult = (turnId: string): ExecutionBackend.Result => ({ turnId, status: "completed", events: [] })
 

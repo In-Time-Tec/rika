@@ -28,11 +28,11 @@ import {
   resolveExecutionRouteForSettings,
   resolveExecutionWorkspace,
   validateWebSearchProviders,
-  withClientWorkspace,
   persistedModelRoutesForStartup,
   persistedTitleModelRoutesForStartup,
   withPinnedRouteRegistration,
-} from "../src/main"
+} from "../src/resident-main"
+import { withClientWorkspace } from "../src/interactive-main"
 import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
 import { modelRoutePlan, Service as ModelProviderRuntime } from "../src/model-provider-runtime"
 

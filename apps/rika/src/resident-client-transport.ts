@@ -509,7 +509,10 @@ const connect = Effect.fn("ResidentTransport.connect")(function* (options: {
                     selectThread: (threadId, selectionEpoch) =>
                       invoke({ _tag: "SelectThread", threadId, selectionEpoch }),
                     readQueue: (threadId) => invoke({ _tag: "ReadQueue", threadId }),
-                    loadOlder: invoke({ _tag: "LoadOlder" }),
+                    loadOlder: (threadId, selectionEpoch, before, loadedKeys) =>
+                      invoke({ _tag: "LoadOlder", threadId, selectionEpoch, before, loadedKeys }),
+                    loadNewer: (threadId, selectionEpoch, after) =>
+                      invoke({ _tag: "LoadNewer", threadId, selectionEpoch, after }),
                     previewThread: (threadId) => invoke({ _tag: "PreviewThread", threadId }),
                     reopenThread: (selectionEpoch) => invoke({ _tag: "ReopenThread", selectionEpoch }),
                     replay: (turnId, afterCursor) =>
@@ -1074,7 +1077,10 @@ export const make = Effect.fn("ResidentTransport.make")(() =>
                   yield* retryRead((session) => session.selectThread(threadId, epoch))
                 }),
               readQueue: (threadId) => retryRead((session) => session.readQueue(threadId)),
-              loadOlder: retryRead((session) => session.loadOlder),
+              loadOlder: (threadId, selectionEpoch, before, loadedKeys) =>
+                retryRead((session) => session.loadOlder(threadId, selectionEpoch, before, loadedKeys)),
+              loadNewer: (threadId, selectionEpoch, after) =>
+                retryRead((session) => session.loadNewer(threadId, selectionEpoch, after)),
               previewThread: (threadId) => retryRead((session) => session.previewThread(threadId)),
               reopenThread: (selectionEpoch) =>
                 Effect.gen(function* () {

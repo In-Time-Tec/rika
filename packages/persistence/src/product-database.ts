@@ -618,6 +618,42 @@ const reconciledChildTrees = Effect.gen(function* () {
     CHECK (projection_generation >= 0)`
 })
 
+const consumedExecutionCheckpoints = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`CREATE TABLE rika_transcript_checkpoints_next (
+    turn_id TEXT PRIMARY KEY NOT NULL REFERENCES rika_turns(id) ON DELETE CASCADE,
+    thread_id TEXT NOT NULL REFERENCES rika_threads(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL DEFAULT -1,
+    projection_version INTEGER NOT NULL DEFAULT 1 CHECK (projection_version >= 1),
+    model_phase INTEGER NOT NULL DEFAULT -1,
+    oldest_cursor TEXT,
+    checkpoint_cursor TEXT,
+    cost_usd REAL,
+    usage_cursors_json TEXT,
+    consumed_json TEXT,
+    pricing_version TEXT,
+    child_tree_reconciled INTEGER NOT NULL DEFAULT 0 CHECK (child_tree_reconciled IN (0, 1)),
+    projection_generation INTEGER NOT NULL DEFAULT 0 CHECK (projection_generation >= 0),
+    updated_at INTEGER NOT NULL
+  )`
+  yield* sql`INSERT INTO rika_transcript_checkpoints_next (
+    turn_id, thread_id, revision, projection_version, model_phase, oldest_cursor, checkpoint_cursor,
+    cost_usd, usage_cursors_json, consumed_json, pricing_version, child_tree_reconciled,
+    projection_generation, updated_at
+  )
+  SELECT turn_id, thread_id, revision, 1, model_phase, oldest_cursor, checkpoint_cursor,
+    cost_usd, usage_cursors_json, NULL, pricing_version, child_tree_reconciled,
+    projection_generation, updated_at
+  FROM rika_transcript_checkpoints`
+  yield* sql`DROP TABLE rika_transcript_checkpoints`
+  yield* sql`ALTER TABLE rika_transcript_checkpoints_next RENAME TO rika_transcript_checkpoints`
+})
+
+const dropUsageRepairs = Effect.gen(function* () {
+  const sql = yield* SqlClient
+  yield* sql`DROP TABLE IF EXISTS rika_usage_repairs`
+})
+
 const migrationNames = [
   "product_baseline",
   "turns",
@@ -641,6 +677,8 @@ const migrationNames = [
   "usage_projection",
   "materialized_thread_summaries",
   "reconciled_child_trees",
+  "consumed_execution_checkpoints",
+  "drop_usage_repairs",
 ] as const
 
 const migrations = SqliteMigrator.fromRecord({
@@ -666,6 +704,8 @@ const migrations = SqliteMigrator.fromRecord({
   "20_usage_projection": usageProjection,
   "21_materialized_thread_summaries": materializedThreadSummaries,
   "22_reconciled_child_trees": reconciledChildTrees,
+  "23_consumed_execution_checkpoints": consumedExecutionCheckpoints,
+  "24_drop_usage_repairs": dropUsageRepairs,
 })
 
 const migrationTableObjects = ["table:rika_migrations"]
@@ -735,6 +775,7 @@ const materializedSummaryObjects = [
   "trigger:rika_thread_picker_summary_activity_update",
   "trigger:rika_thread_picker_summary_activity_delete",
 ]
+const droppedUsageRepairObjects = materializedSummaryObjects.filter((object) => object !== "table:rika_usage_repairs")
 const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   migrationTableObjects,
   baselineObjects,
@@ -759,6 +800,8 @@ const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   usageObjects,
   materializedSummaryObjects,
   materializedSummaryObjects,
+  materializedSummaryObjects,
+  droppedUsageRepairObjects,
 ]
 
 const SchemaObject = Schema.Struct({ type: Schema.String, name: Schema.String })

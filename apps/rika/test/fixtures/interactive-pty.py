@@ -15,6 +15,8 @@ import time
 
 executable, cwd, environment_json, actions_json, *arguments = sys.argv[1:]
 entrypoint, *entrypoint_arguments = arguments if arguments else ["src/client-main.ts"]
+# A packaged binary carries its own entrypoint, so "" means "pass no script argument".
+child_argv = [value for value in [entrypoint, *entrypoint_arguments] if value != ""]
 environment = {key: value for key, value in json.loads(environment_json).items() if value is not None}
 actions = json.loads(actions_json)
 master, slave = pty.openpty()
@@ -31,7 +33,7 @@ if pid == 0:
     if slave > 2:
         os.close(slave)
     os.chdir(cwd)
-    os.execve(executable, [executable, entrypoint, *entrypoint_arguments], environment)
+    os.execve(executable, [executable, *child_argv], environment)
 
 os.close(slave)
 

@@ -43,6 +43,7 @@ import {
   PlatformError,
   Queue,
   Redacted,
+  Ref,
   Schedule,
   Schema,
   Semaphore,
@@ -236,7 +237,7 @@ export const routedToolRuntimeLayer: {
         const dependencies = yield* Effect.context<
           ChildProcessSpawner.ChildProcessSpawner | Exclude<R, ProcessRegistry.Service>
         >()
-        const processes = yield* LayerMap.make(() => ProcessRegistry.layer, { idleTimeToLive: Duration.infinity })
+        const processes = yield* LayerMap.make(() => ProcessRegistry.layer, { idleTimeToLive: "15 minutes" })
         const run = ((request: RikaToolRuntime.Request) =>
           Effect.scoped(
             Effect.gen(function* () {
@@ -311,6 +312,81 @@ export const routedToolRuntimeLayer: {
       }),
     ),
 )
+
+const modelSelectionKey = (selection: ModelRegistry.ModelSelection) =>
+  JSON.stringify([selection.provider, selection.model, selection.registrationKey ?? null])
+
+export const lazyModelRegistryLayer = (
+  registrations: ReadonlyArray<ModelRegistry.Registration>,
+): Layer.Layer<ModelRegistry.ModelRegistry> =>
+  Layer.effect(
+    ModelRegistry.ModelRegistry,
+    Effect.gen(function* () {
+      const scope = yield* Effect.scope
+      const memoMap = yield* Layer.makeMemoMap
+      const admission = yield* Semaphore.make(1)
+      type Entry = {
+        readonly registration: ModelRegistry.Registration
+        readonly context: Effect.Effect<Context.Context<ModelRegistry.ModelEnvironment>>
+      }
+      const makeEntry = (registration: ModelRegistry.Registration) =>
+        Effect.cached(
+          Layer.buildWithMemoMap(registration.layer, memoMap, scope).pipe(
+            Effect.map((context) => context as Context.Context<ModelRegistry.ModelEnvironment>),
+          ),
+        ).pipe(Effect.map((context) => ({ registration, context }) satisfies Entry))
+      const initialEntries = yield* Effect.forEach(registrations, makeEntry)
+      const entries = yield* Ref.make(
+        new Map(initialEntries.map((entry) => [modelSelectionKey(entry.registration), entry] as const)),
+      )
+      const find = (selection: ModelRegistry.ModelSelection) =>
+        Ref.get(entries).pipe(
+          Effect.map((current) => current.get(modelSelectionKey(selection))),
+          Effect.flatMap((entry) =>
+            entry === undefined
+              ? Effect.fail(
+                  ModelRegistry.LanguageModelNotRegistered.make({
+                    provider: selection.provider,
+                    model: selection.model,
+                    ...(selection.registrationKey === undefined ? {} : { registration_key: selection.registrationKey }),
+                  }),
+                )
+              : Effect.succeed(entry),
+          ),
+        )
+      const operate: ModelRegistry.Interface["operate"] = (selection, operation) =>
+        find(selection).pipe(
+          Effect.flatMap((entry) => entry.context),
+          Effect.flatMap((context) => operation.pipe(Effect.provide(context))),
+        )
+      const stream = ((selection: ModelRegistry.ModelSelection, operation: Stream.Stream<unknown, unknown, unknown>) =>
+        Stream.unwrap(
+          find(selection).pipe(
+            Effect.flatMap((entry) => entry.context),
+            Effect.map((context) => operation.pipe(Stream.provideContext(context))),
+          ),
+        )) as ModelRegistry.Interface["stream"]
+      return ModelRegistry.ModelRegistry.of({
+        register: ({ registration }) =>
+          admission.withPermits(1)(
+            makeEntry(registration).pipe(
+              Effect.flatMap((entry) =>
+                Ref.update(entries, (current) => {
+                  const updated = new Map(current)
+                  updated.set(modelSelectionKey(registration), entry)
+                  return updated
+                }),
+              ),
+            ),
+          ),
+        registrations: Ref.get(entries).pipe(
+          Effect.map((current) => Array.from(current.values(), (entry) => entry.registration)),
+        ),
+        operate,
+        stream,
+      })
+    }),
+  )
 
 export const defaultModelResilience: ModelResilience.Interface = ModelResilience.make({
   retrySchedule: Schedule.exponential("500 millis", 2).pipe(Schedule.jittered, Schedule.upTo({ times: 3 })),
@@ -608,30 +684,6 @@ const agentSelections = (pin: ExecutionRoutePin) =>
     : (Object.fromEntries(
         agentProfileNames.map((name) => [name, pinnedSelection(routeForProfile(pin, name))]),
       ) as Partial<Readonly<Record<AgentProfile, ModelRegistry.ModelSelection>>>)
-const recoveredDeltaOutput = (events: ReadonlyArray<Execution.ExecutionEvent>, afterSequence: number) => {
-  const groups = new Map<string, { order: number; deltas: Array<{ index: number; delta: string }> }>()
-  for (const event of events) {
-    if (event.type !== "model.output.delta" || event.sequence <= afterSequence) continue
-    const delta = event.data?.delta
-    if (typeof delta !== "string" || delta.length === 0) continue
-    const partId = typeof event.data?.part_id === "string" ? event.data.part_id : ""
-    const group = groups.get(partId) ?? { order: groups.size, deltas: [] }
-    const index = typeof event.data?.delta_index === "number" ? event.data.delta_index : group.deltas.length
-    group.deltas.push({ index, delta })
-    groups.set(partId, group)
-  }
-  const text = [...groups.values()]
-    .toSorted((left, right) => left.order - right.order)
-    .map((group) =>
-      group.deltas
-        .toSorted((left, right) => left.index - right.index)
-        .map((entry) => entry.delta)
-        .join(""),
-    )
-    .join("\n\n")
-  return text.length === 0 ? [] : [{ type: "text", text }]
-}
-
 const scrubbedEventMessage = (data: Readonly<Record<string, unknown>> | undefined): string | undefined => {
   const message = data?.message
   return typeof message === "string" && message.length > 0 && message !== "[object Object]" ? message : undefined
@@ -657,29 +709,22 @@ const childFailureText = (terminal: Execution.ExecutionEvent | undefined) => {
   return message !== undefined ? `${outcome}: ${message}` : outcome
 }
 
-const truncatedStreamClassification = "truncated-stream"
-
-const classifiedTruncated = (event: Execution.ExecutionEvent) => {
-  if (event.type !== "model.attempt.failed" && event.type !== "model.call.failed") return false
-  return event.data?.category === truncatedStreamClassification && event.data?.classification !== "transient"
-}
-
-const truncatedModelStream = (events: ReadonlyArray<Execution.ExecutionEvent>) => {
-  if (events.some(classifiedTruncated)) return true
-  const lastCall = events.findLast((executionEvent) => executionEvent.type === "model.call.started")
-  if (lastCall === undefined) return false
-  return !events.some((executionEvent) => {
-    if (executionEvent.type !== "model.usage.reported" || executionEvent.sequence <= lastCall.sequence) return false
-    const finishReason = executionEvent.data?.finish_reason
-    return typeof finishReason === "string" && finishReason.length > 0
-  })
-}
-
-const truncatedStreamReason =
-  "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced."
 const silentChildReason = "The subagent finished its run without writing a final report."
 const unreconciledReason = (status: string) =>
   `The subagent's execution finished as ${status}, but its final event never reached Rika, so no report was recovered.`
+
+const terminalStatuses: Readonly<Record<string, "completed" | "failed" | "cancelled">> = {
+  "execution.completed": "completed",
+  "execution.failed": "failed",
+  "execution.cancelled": "cancelled",
+}
+
+const durableOutput = (event: Execution.ExecutionEvent | undefined): ReadonlyArray<unknown> | undefined => {
+  if (event === undefined) return undefined
+  if (event.content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true) return event.content
+  const text = event.data?.text
+  return typeof text === "string" && text.trim().length > 0 ? [{ type: "text", text }] : undefined
+}
 
 export interface ChildResultInput {
   readonly childExecutionId: string
@@ -688,53 +733,34 @@ export interface ChildResultInput {
 }
 
 export const resolveChildResult = ({ childExecutionId, events, reconciled }: ChildResultInput): AgentTools.Result => {
-  const terminal = events.findLast(
-    (executionEvent) =>
-      executionEvent.type === "execution.completed" ||
-      executionEvent.type === "execution.failed" ||
-      executionEvent.type === "execution.cancelled",
-  )
-  const lastToolSequence =
+  const terminal = events.findLast((executionEvent) => terminalStatuses[executionEvent.type] !== undefined)
+  const resumed =
+    events.findLast(
+      (executionEvent) => executionEvent.type === "model.call.started" || executionEvent.type === "tool.call.requested",
+    )?.sequence ?? -1
+  const report = durableOutput(
     events.findLast(
       (executionEvent) =>
-        executionEvent.type === "tool.call.requested" || executionEvent.type === "tool.result.received",
-    )?.sequence ?? -1
-  const truncated = truncatedModelStream(events)
-  const finalResponse = truncated
-    ? undefined
-    : events.findLast(
-        (executionEvent) =>
-          (executionEvent.type === "model.output.completed" || executionEvent.type === "model.cycle.completed") &&
-          executionEvent.sequence > lastToolSequence &&
-          executionEvent.content?.some((part) => part.type === "text" && part.text.trim().length > 0) === true,
-      )
-  const recovered = terminal?.type === "execution.failed" && finalResponse !== undefined
-  const terminalContent =
-    truncated || terminal?.content === undefined || terminal.content.length === 0 ? undefined : terminal.content
-  const primary: ReadonlyArray<unknown> =
-    recovered || terminalContent === undefined
-      ? (finalResponse?.content ?? recoveredDeltaOutput(events, lastToolSequence))
-      : terminalContent
+        (executionEvent.type === "model.output.completed" || executionEvent.type === "model.cycle.completed") &&
+        executionEvent.sequence > resumed &&
+        durableOutput(executionEvent) !== undefined,
+    ),
+  )
+  const output = report ?? durableOutput(terminal)
   const failure = childFailureText(terminal)
-  let status: "completed" | "cancelled" | "failed" = reconciled ?? "failed"
-  if (terminal?.type === "execution.completed" || recovered) status = "completed"
-  else if (terminal?.type === "execution.failed") status = "failed"
-  else if (terminal?.type === "execution.cancelled") status = "cancelled"
+  const status = (terminal === undefined ? undefined : terminalStatuses[terminal.type]) ?? reconciled ?? "failed"
   if (status === "cancelled")
     return AgentTools.cancelled({
       childExecutionId,
       reason: failure ?? unreconciledReason(status),
-      output: primary,
+      output: output ?? [],
     })
-  if (!Arr.isReadonlyArrayNonEmpty(primary)) {
-    if (failure !== undefined) return AgentTools.noReport({ childExecutionId, reason: failure })
-    if (terminal === undefined) return AgentTools.noReport({ childExecutionId, reason: unreconciledReason(status) })
-    return AgentTools.noReport({ childExecutionId, reason: truncated ? truncatedStreamReason : silentChildReason })
+  if (output === undefined || !Arr.isReadonlyArrayNonEmpty(output)) {
+    if (status === "completed") return AgentTools.noReport({ childExecutionId, reason: silentChildReason, status })
+    return AgentTools.noReport({ childExecutionId, reason: failure ?? unreconciledReason(status) })
   }
-  if (truncated)
-    return AgentTools.failed({ childExecutionId, reason: failure ?? truncatedStreamReason, output: primary })
-  if (status === "completed") return AgentTools.report({ childExecutionId, output: primary })
-  return AgentTools.failed({ childExecutionId, reason: failure ?? unreconciledReason(status), output: primary })
+  if (status === "completed") return AgentTools.report({ childExecutionId, output })
+  return AgentTools.failed({ childExecutionId, reason: failure ?? unreconciledReason(status), output })
 }
 const awaitChildResult = (client: Client.Interface, childId: string) => {
   const childExecutionId = Ids.ExecutionId.make(childId)
@@ -888,6 +914,7 @@ const event = (value: {
   readonly sequence: number
   readonly type: string
   readonly created_at: number
+  readonly timestamp_source?: string | undefined
   readonly content?: ReadonlyArray<{ readonly type: string; readonly text?: string | undefined }> | undefined
   readonly data?: Readonly<Record<string, unknown>> | undefined
 }): Event => {
@@ -904,6 +931,7 @@ const event = (value: {
     sequence: value.sequence,
     type: value.type,
     createdAt: value.created_at,
+    ...(value.timestamp_source === undefined ? {} : { timestampSource: value.timestamp_source }),
     ...(text === undefined ? {} : { text }),
     ...(value.content === undefined ? {} : { content: [...value.content] }),
     ...(value.data === undefined ? {} : { data: value.data }),
@@ -1005,7 +1033,11 @@ const followExecution = (
   Effect.scoped(
     Effect.gen(function* () {
       const startedAt = yield* Clock.currentTimeMillis
-      yield* Effect.logInfo("execution.follow.started")
+      const followAnnotations = {
+        "rika.follow.cursor": cursorOf(afterCursor) ?? "start",
+        "rika.follow.scope": eventScope,
+      }
+      yield* Effect.logInfo("execution.follow.started").pipe(Effect.annotateLogs(followAnnotations))
       const rootExecutionId = executionId(turnId, reference)
       const committedSequence = typeof afterCursor === "string" ? undefined : afterCursor?.sequence
       const events: Array<Event> = []
@@ -1199,6 +1231,7 @@ const followExecution = (
       const completedAt = yield* Clock.currentTimeMillis
       yield* Effect.logInfo("execution.follow.completed").pipe(
         Effect.annotateLogs({
+          ...followAnnotations,
           "rika.duration.ms": completedAt - startedAt,
           "rika.event.count": events.length,
           "rika.execution.status": status,
@@ -1718,36 +1751,18 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
                 input: executionInput(input),
                 idempotency_key: input.turnId,
                 execution_id: id,
-                started_at: input.startedAt,
-                completed_at: input.startedAt,
                 metadata,
               } as const
-              let acceptanceUnknownLogged = false
-              const start: Effect.Effect<void, Client.ClientError | Client.ResidentNamespaceReserved> = Effect.suspend(
-                () =>
-                  client.executions.startByAgentDefinition(startInput).pipe(
-                    Effect.asVoid,
-                    Effect.catchTag("ClientError", (startError) =>
-                      client.executions.get(id).pipe(
-                        Effect.matchEffect({
-                          onFailure: () => Effect.fail(startError),
-                          onSuccess: (existing) =>
-                            existing === undefined
-                              ? Effect.suspend(() => {
-                                  if (acceptanceUnknownLogged) return Effect.void
-                                  acceptanceUnknownLogged = true
-                                  return Effect.logWarning("execution.acceptance.unknown").pipe(
-                                    Effect.annotateLogs({
-                                      "rika.failure.kind": startError._tag,
-                                      "rika.failure.message": startError.message,
-                                    }),
-                                  )
-                                }).pipe(Effect.andThen(Effect.sleep("1 second")), Effect.andThen(start))
-                              : Effect.void,
-                        }),
-                      ),
-                    ),
+              const start = client.executions.startByAgentDefinition(startInput).pipe(
+                Effect.asVoid,
+                Effect.catchTag("ClientError", (startError) =>
+                  client.executions.get(id).pipe(
+                    Effect.matchEffect({
+                      onFailure: () => Effect.fail(startError),
+                      onSuccess: (existing) => (existing === undefined ? Effect.fail(startError) : Effect.void),
+                    }),
                   ),
+                ),
               )
               const starter = yield* Effect.forkChild(start)
               yield* Effect.yieldNow
@@ -2250,15 +2265,12 @@ export const layer = <
             ThreadHost.handlerLayer(promoterRegistry),
             delegationHandlerLayer,
           )
-          const registrationEffects = [
-            ...registrationsFor(options).map((registration) => Effect.succeed(registration)),
-            ThreadHost.hostRegistration,
-          ]
+          const initialRegistrations = [...registrationsFor(options), yield* ThreadHost.hostRegistration]
           const relayModelContext = yield* Layer.build(
-            ModelHub.layerFromRegistrationEffects(
-              registrationEffects as unknown as ReadonlyArray<
-                Effect.Effect<Parameters<ModelHub.Interface["modelRegistry"]["register"]>[0]["registration"]>
-              >,
+            Layer.unwrap(
+              Layer.build(lazyModelRegistryLayer(initialRegistrations)).pipe(
+                Effect.map((context) => ModelHub.testLayer(Context.get(context, ModelRegistry.ModelRegistry))),
+              ),
             ),
           ).pipe(Effect.mapError(error))
           const modelRegistry = Context.get(relayModelContext, ModelHub.Service).modelRegistry
@@ -2395,7 +2407,6 @@ export const layer = <
                 Deferred.await(relayClient).pipe(
                   Effect.flatMap((client) =>
                     Effect.gen(function* () {
-                      const startedAt = yield* Effect.clockWith((clock) => clock.currentTimeMillis)
                       const override = child.override ?? {}
                       const childToolkit = Toolkit.make(
                         ...Object.values(toolkit.tools).filter(
@@ -2452,8 +2463,6 @@ export const layer = <
                         execution_id: Ids.ExecutionId.make(String(child.child_execution_id)),
                         ...(child.input === undefined ? {} : { input: child.input }),
                         idempotency_key: idempotencyKey,
-                        started_at: startedAt,
-                        completed_at: startedAt,
                         metadata: {
                           child_execution_id: child.child_execution_id,
                           fan_out_id: fanOutState.fan_out_id,
@@ -2513,7 +2522,6 @@ export const layer = <
                 return Deferred.await(relayClient).pipe(
                   Effect.flatMap((client) =>
                     Effect.gen(function* () {
-                      const startedAt = yield* Clock.currentTimeMillis
                       const childToolkit = Toolkit.make(
                         ...Object.values(toolkitFor(options).tools).filter((tool) =>
                           preset.tool_names.includes(tool.name),
@@ -2550,8 +2558,6 @@ export const layer = <
                           execution_id: Ids.ExecutionId.make(String(childId)),
                           input: [Content.text(encodedInput)],
                           idempotency_key: context.idempotency_key,
-                          started_at: startedAt,
-                          completed_at: startedAt,
                           metadata: {
                             parent_execution_id: parentId,
                             child_execution_id: childId,

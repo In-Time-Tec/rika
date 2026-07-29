@@ -12,6 +12,7 @@ export const Event = Schema.Struct({
   sequence: Schema.Finite,
   type: Schema.String,
   createdAt: Schema.Finite,
+  timestampSource: Schema.optionalKey(Schema.String),
   text: Schema.optionalKey(Schema.String),
   content: Schema.optionalKey(Schema.Array(Schema.Unknown)),
   data: Schema.optionalKey(Schema.Record(Schema.String, Schema.Unknown)),

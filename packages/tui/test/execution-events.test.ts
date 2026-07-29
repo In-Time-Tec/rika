@@ -1037,12 +1037,27 @@ describe("ExecutionEvents delegation verdicts", () => {
   })
 
   it("lets a completed child execution override a Report verdict without losing the answer", () => {
-    const { tool } = delegation({
+    const { model, tool } = delegation({
       _tag: "Report",
       childExecutionId: "execution:child",
       status: "completed",
       output: [{ type: "text", text: "The finding" }],
     })
     expect(tool.status).toBe("complete")
+    expect(tool.output).toContain("The finding")
+    expect(renderExpanded(model)).toContain("The finding")
+  })
+
+  it("keeps a completed NoReport explanation when the child execution completes", () => {
+    const { model, tool } = delegation({
+      _tag: "NoReport",
+      childExecutionId: "execution:child",
+      status: "completed",
+      reason: "The subagent finished its run without writing a final report.",
+      recovery: "Re-run this delegation once with the same prompt.",
+    })
+    expect(tool.status).toBe("complete")
+    expect(tool.output).toContain("without writing a final report")
+    expect(renderExpanded(model)).toContain("Re-run this delegation once with the same prompt.")
   })
 })

@@ -1,6 +1,7 @@
 import * as InteractiveController from "../src/interactive-controller"
 import type * as Operation from "@rika/app/operation"
 import * as Thread from "@rika/persistence/thread"
+import type * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as Transcript from "@rika/transcript"
 import { ExecutionEvents, Keys, Palette, ViewState } from "@rika/tui"
@@ -56,6 +57,14 @@ const entries = (
     ),
   )
 }
+
+const cursor = (entry: TranscriptRepository.Entry): TranscriptRepository.PageCursor => ({
+  createdAt: entry.turn.createdAt,
+  turnId: entry.turn.id,
+  sequence: entry.unit.order.sequence,
+  part: entry.unit.order.part,
+  key: entry.unit.key,
+})
 
 const initialState = (): InteractiveController.State => ({
   model: ViewState.initial("/work", "medium"),
@@ -1479,6 +1488,7 @@ it("projects selected-thread active time and ignores stale selection updates", (
     _tag: "ThreadUsageUpdated",
     selectionEpoch: 1,
     threadId: thread.id,
+    revision: 1,
     cost: { _tag: "Unavailable" },
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Available", accumulatedMillis: 5_000, activeSince: 10_000 },
@@ -1487,6 +1497,7 @@ it("projects selected-thread active time and ignores stale selection updates", (
     _tag: "ThreadUsageUpdated",
     selectionEpoch: 0,
     threadId: thread.id,
+    revision: 2,
     cost: { _tag: "Unavailable" },
     tokens: { _tag: "Unavailable" },
     time: { _tag: "Available", accumulatedMillis: 99_000 },
@@ -1498,6 +1509,38 @@ it("projects selected-thread active time and ignores stale selection updates", (
     activeSince: 10_000,
   })
   expect(stale.state.model.usageTime).toBe(active.state.model.usageTime)
+})
+
+it("keeps the newest committed usage revision and drops older ones", () => {
+  const page = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: entries("new", 2),
+    hasOlder: false,
+  })
+  const usage = (revision: number, usd: number, accumulatedMillis: number) =>
+    ({
+      _tag: "ThreadUsageUpdated",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      revision,
+      cost: { _tag: "Available", usd, unpricedAttempts: 0 },
+      tokens: { _tag: "Unavailable" },
+      time: { _tag: "Available", accumulatedMillis },
+    }) as const
+  const committed = InteractiveController.update(page.state, usage(7, 100.0014, 30_000))
+  const late = InteractiveController.update(committed.state, usage(6, 150, 0))
+  const newer = InteractiveController.update(late.state, usage(8, 100.5, 31_000))
+
+  expect(committed.state.model.usageCost).toEqual({ _tag: "Available", usd: 100.0014, unpricedAttempts: 0 })
+  expect(late.state.model.usageCost).toBe(committed.state.model.usageCost)
+  expect(late.state.model.usageTime).toBe(committed.state.model.usageTime)
+  expect(newer.state.model.usageCost).toEqual({ _tag: "Available", usd: 100.5, unpricedAttempts: 0 })
+  expect(newer.state.model.usageTime).toEqual({ _tag: "Available", accumulatedMillis: 31_000 })
 })
 
 it("shows the session total and updates it when child usage arrives", () => {
@@ -1872,4 +1915,90 @@ it("only treats user-blocking requests as urgent feed events", () => {
   expect(InteractiveController.isUrgentFeedEvent(patched("execution.completed"))).toBe(false)
   expect(InteractiveController.isUrgentFeedEvent(patched("execution.failed"))).toBe(false)
   expect(InteractiveController.isUrgentFeedEvent(patched("execution.cancelled"))).toBe(false)
+})
+
+it("keeps bidirectional transcript navigation within the semantic window budget", () => {
+  const pageEntries = (from: number, count: number) =>
+    Array.from({ length: count }, (_, index) => entries(`window-${from + index}`, from + index)[0]!)
+  let state = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: pageEntries(200, 200),
+    hasOlder: true,
+  }).state
+  for (let page = 0; page < 6; page++)
+    state = InteractiveController.update(state, {
+      _tag: "TranscriptPagePrepended",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      entries: pageEntries(150 - page * 50, 50),
+      hasOlder: page < 5,
+    }).state
+
+  expect(state.entries.length).toBeLessThanOrEqual(InteractiveController.transcriptWindowEntryBudget)
+  expect(new Set(state.entries.map((entry) => entry.unit.key)).size).toBe(state.entries.length)
+  expect(state.entries[0]!.turn.createdAt).toBeLessThan(200)
+  expect(state.hasNewer).toBe(true)
+
+  for (let page = 0; page < 6; page++)
+    state = InteractiveController.update(state, {
+      _tag: "TranscriptPageAppended",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      entries: pageEntries(200 + page * 50, 50),
+      hasNewer: page < 5,
+      requestedAfter: cursor(state.entries.at(-1)!),
+    }).state
+
+  expect(state.entries.length).toBeLessThanOrEqual(InteractiveController.transcriptWindowEntryBudget)
+  expect(new Set(state.entries.map((entry) => entry.unit.key)).size).toBe(state.entries.length)
+  expect(state.entries.map((entry) => entry.turn.createdAt)).toEqual(
+    state.entries.map((entry) => entry.turn.createdAt).toSorted((left, right) => left - right),
+  )
+  expect(state.entries.at(-1)!.turn.createdAt).toBeGreaterThanOrEqual(450)
+  expect(state.hasNewer).toBe(false)
+  expect(state.hasOlder).toBe(true)
+  const stale = InteractiveController.update(state, {
+    _tag: "TranscriptPageAppended",
+    selectionEpoch: 1,
+    threadId: thread.id,
+    entries: pageEntries(900, 10),
+    hasNewer: false,
+    requestedAfter: cursor(state.entries[0]!),
+  })
+  expect(stale.state).toBe(state)
+})
+
+it("keeps the active projection outside the bounded contiguous history window", () => {
+  const active = runningTurn("active-window")
+  const pageEntries = (from: number, count: number) =>
+    Array.from({ length: count }, (_, index) => entries(`active-history-${from + index}`, from + index)[0]!)
+  let state = InteractiveController.update(initialState(), {
+    _tag: "SelectionLoaded",
+    selectionEpoch: 1,
+    activitySequence: 0,
+    queueRevision: 0,
+    queue: [],
+    thread,
+    entries: pageEntries(200, 200),
+    hasOlder: true,
+    activeTurn: active,
+  }).state
+  for (let page = 0; page < 6; page += 1)
+    state = InteractiveController.update(state, {
+      _tag: "TranscriptPagePrepended",
+      selectionEpoch: 1,
+      threadId: thread.id,
+      entries: pageEntries(150 - page * 50, 50),
+      hasOlder: page < 5,
+    }).state
+
+  expect(state.entries).toHaveLength(InteractiveController.transcriptWindowEntryBudget)
+  expect(state.entries.some((entry) => entry.turn.id === active.id)).toBe(false)
+  expect(state.model.entries.map((entry) => entry.text)).toContain(active.prompt)
+  expect(state.newestCursor?.turnId).not.toBe(active.id)
 })

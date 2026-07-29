@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Ref, Schema, Semaphore } from "effect"
+import { Clock, Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 
 export const projectionVersion = 1
@@ -30,11 +30,11 @@ export interface TurnUsage extends Materialized {
 
 export interface Aggregate extends Materialized {
   readonly turns: number
+  readonly revision: number
   readonly activeSince?: number
 }
 
 export type CommitResult = { readonly _tag: "Applied"; readonly value: TurnUsage } | { readonly _tag: "Conflict" }
-export type RepairClaim = { readonly _tag: "Claimed"; readonly checkpoint?: string } | { readonly _tag: "Busy" }
 
 export class RepositoryError extends Schema.TaggedErrorClass<RepositoryError>()("UsageRepositoryError", {
   message: Schema.String,
@@ -57,20 +57,6 @@ export interface Interface {
     foldJson: string,
     totals: Materialized,
   ) => Effect.Effect<CommitResult, RepositoryError>
-  readonly commitRepairFold: (
-    turnId: string,
-    token: string,
-    expectedRevision: number,
-    foldJson: string,
-    totals: Materialized,
-  ) => Effect.Effect<CommitResult, RepositoryError>
-  readonly claimRepair: (turnId: string, token: string) => Effect.Effect<RepairClaim, RepositoryError>
-  readonly checkpointRepair: (
-    turnId: string,
-    token: string,
-    checkpoint: string,
-  ) => Effect.Effect<boolean, RepositoryError>
-  readonly finishRepair: (turnId: string, token: string) => Effect.Effect<boolean, RepositoryError>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@rika/persistence/usage-repository/Service") {}
@@ -105,6 +91,7 @@ const validate = (totals: Materialized) => {
 }
 const validateAggregate = (value: Aggregate) => {
   safe(value.turns, "turns")
+  safe(value.revision, "revision")
   safe(value.activeSince, "activeSince")
   validate(value)
   return value
@@ -112,9 +99,10 @@ const validateAggregate = (value: Aggregate) => {
 const unionActiveTime = (
   values: ReadonlyArray<ReadonlyArray<ActiveInterval> | undefined>,
 ): { readonly activeMillis: number; readonly activeSince?: number } | undefined => {
-  if (values.length === 0 || values.some((value) => value === undefined)) return undefined
-  const intervals = values
-    .flatMap((value) => value ?? [])
+  const known = values.filter((value) => value !== undefined)
+  if (known.length === 0) return undefined
+  const intervals = known
+    .flatMap((value) => value)
     .toSorted((left, right) => left.start - right.start || (left.end ?? Infinity) - (right.end ?? Infinity))
   let total = 0
   let start: number | undefined
@@ -138,10 +126,11 @@ const aggregate = (values: ReadonlyArray<TurnUsage>): Aggregate => {
   const active = unionActiveTime(values.map((value) => value.activeIntervals))
   return {
     turns: values.length,
-    ...(values.length > 0 && values.every((value) => value.costNanoUsd !== undefined)
+    revision: values.reduce((sum, value) => sum + value.revision, 0),
+    ...(values.some((value) => value.costNanoUsd !== undefined)
       ? { costNanoUsd: values.reduce((sum, value) => sum + (value.costNanoUsd ?? 0), 0) }
       : {}),
-    ...(values.length > 0 && values.every((value) => value.tokens !== undefined)
+    ...(values.some((value) => value.tokens !== undefined)
       ? { tokens: values.reduce((sum, value) => sum + (value.tokens ?? 0), 0) }
       : {}),
     ...active,
@@ -155,8 +144,6 @@ const aggregate = (values: ReadonlyArray<TurnUsage>): Aggregate => {
 
 const makeMemory = Effect.gen(function* () {
   const rows = yield* Ref.make(new Map<string, TurnUsage>())
-  const repairs = yield* Ref.make(new Map<string, { token: string; checkpoint?: string; updatedAt: number }>())
-  const repairAdmission = yield* Semaphore.make(1)
   const readTurn = Effect.fn("UsageRepository.readTurn")(function* (turnId: string) {
     const value = (yield* Ref.get(rows)).get(turnId)
     return value === undefined ? undefined : clone(value)
@@ -207,74 +194,12 @@ const makeMemory = Effect.gen(function* () {
         return [{ _tag: "Applied", value: clone(value) }, new Map(current).set(turnId, value)]
       })
     }),
-    commitRepairFold: Effect.fn("UsageRepository.commitRepairFold")(
-      (turnId, token, expectedRevision, foldJson, totals) =>
-        repairAdmission.withPermits(1)(
-          Effect.gen(function* () {
-            validate(totals)
-            const now = yield* Clock.currentTimeMillis
-            const repair = (yield* Ref.get(repairs)).get(turnId)
-            return yield* Ref.modify(rows, (current): [CommitResult, Map<string, TurnUsage>] => {
-              const previous = current.get(turnId)
-              if (
-                previous === undefined ||
-                previous.revision !== expectedRevision ||
-                previous.projectionVersion !== projectionVersion ||
-                repair?.token !== token ||
-                repair.updatedAt < now - repairLeaseMillis
-              )
-                return [{ _tag: "Conflict" }, current]
-              const value: TurnUsage = clone({ ...previous, ...totals, foldJson, revision: previous.revision + 1 })
-              return [{ _tag: "Applied", value: clone(value) }, new Map(current).set(turnId, value)]
-            })
-          }),
-        ),
-    ),
-    claimRepair: Effect.fn("UsageRepository.claimRepair")(function* (turnId, token) {
-      const now = yield* Clock.currentTimeMillis
-      return yield* repairAdmission.withPermits(1)(
-        Ref.modify(
-          repairs,
-          (current): [RepairClaim, Map<string, { token: string; checkpoint?: string; updatedAt: number }>] => {
-            const previous = current.get(turnId)
-            if (previous !== undefined && previous.token !== token && previous.updatedAt >= now - repairLeaseMillis)
-              return [{ _tag: "Busy" }, current]
-            const next = previous?.token === token ? { ...previous, updatedAt: now } : { token, updatedAt: now }
-            return [
-              { _tag: "Claimed", ...(next.checkpoint === undefined ? {} : { checkpoint: next.checkpoint }) },
-              new Map(current).set(turnId, next),
-            ]
-          },
-        ),
-      )
-    }),
-    checkpointRepair: Effect.fn("UsageRepository.checkpointRepair")(function* (turnId, token, checkpoint) {
-      const now = yield* Clock.currentTimeMillis
-      return yield* repairAdmission.withPermits(1)(
-        Ref.modify(repairs, (current) => {
-          const previous = current.get(turnId)
-          if (previous?.token !== token || previous.updatedAt < now - repairLeaseMillis) return [false, current]
-          return [true, new Map(current).set(turnId, { token, checkpoint, updatedAt: now })]
-        }),
-      )
-    }),
-    finishRepair: Effect.fn("UsageRepository.finishRepair")(function* (turnId, token) {
-      return yield* repairAdmission.withPermits(1)(
-        Ref.modify(repairs, (current) => {
-          if (current.get(turnId)?.token !== token) return [false, current]
-          const next = new Map(current)
-          next.delete(turnId)
-          return [true, next]
-        }),
-      )
-    }),
   })
 })
 
 export const memoryLayer = Layer.effect(Service, makeMemory)
 
 const error = (cause: unknown) => RepositoryError.make({ message: String(cause) })
-const repairLeaseMillis = 5 * 60 * 1_000
 const Row = Schema.Struct({
   turn_id: Schema.String,
   thread_id: Schema.String,
@@ -399,60 +324,6 @@ export const layer = Layer.effect(
         )
         if (changed.length === 0) return { _tag: "Conflict" } as const
         return { _tag: "Applied", value: yield* decodeRow(changed[0]) } as const
-      }),
-      commitRepairFold: Effect.fn("UsageRepository.commitRepairFold")(
-        function* (turnId, token, expectedRevision, foldJson, totals) {
-          validate(totals)
-          const now = yield* Clock.currentTimeMillis
-          const activeIntervalsJson =
-            totals.activeIntervals === undefined
-              ? null
-              : yield* Schema.encodeEffect(ActiveIntervalsJson)(totals.activeIntervals).pipe(Effect.mapError(error))
-          const changed = yield* sql`UPDATE rika_turn_usage SET revision = revision + 1, fold_json = ${foldJson},
-        cost_nano_usd = ${totals.costNanoUsd ?? null}, tokens = ${totals.tokens ?? null}, active_millis = ${totals.activeMillis ?? null},
-        active_intervals_json = ${activeIntervalsJson},
-        priced_attempts = ${totals.pricedAttempts}, unpriced_attempts = ${totals.unpricedAttempts}, counted_attempts = ${totals.countedAttempts},
-        uncounted_attempts = ${totals.uncountedAttempts}, source_complete = ${totals.sourceComplete ? 1 : 0}, updated_at = ${now}
-        WHERE turn_id = ${turnId} AND revision = ${expectedRevision} AND projection_version = ${projectionVersion}
-          AND EXISTS (SELECT 1 FROM rika_usage_repairs WHERE turn_id = ${turnId} AND claim_token = ${token}
-            AND updated_at >= ${now - repairLeaseMillis})
-        RETURNING *`.pipe(Effect.mapError(error))
-          if (changed.length === 0) return { _tag: "Conflict" } as const
-          return { _tag: "Applied", value: yield* decodeRow(changed[0]) } as const
-        },
-      ),
-      claimRepair: Effect.fn("UsageRepository.claimRepair")(function* (turnId, token) {
-        const now = yield* Clock.currentTimeMillis
-        yield* sql`INSERT OR IGNORE INTO rika_usage_repairs (turn_id, claim_token, updated_at) VALUES (${turnId}, ${token}, ${now})`.pipe(
-          Effect.mapError(error),
-        )
-        yield* sql`UPDATE rika_usage_repairs SET checkpoint_json = CASE WHEN claim_token = ${token} THEN checkpoint_json ELSE NULL END,
-          claim_token = ${token}, updated_at = ${now}
-          WHERE turn_id = ${turnId} AND (claim_token = ${token} OR updated_at < ${now - repairLeaseMillis})`.pipe(
-          Effect.mapError(error),
-        )
-        const rows =
-          yield* sql`SELECT claim_token, checkpoint_json FROM rika_usage_repairs WHERE turn_id = ${turnId}`.pipe(
-            Effect.mapError(error),
-          )
-        const row = rows[0] as { claim_token: string | null; checkpoint_json: string | null }
-        return row.claim_token === token
-          ? { _tag: "Claimed", ...(row.checkpoint_json === null ? {} : { checkpoint: row.checkpoint_json }) }
-          : { _tag: "Busy" }
-      }),
-      checkpointRepair: Effect.fn("UsageRepository.checkpointRepair")(function* (turnId, token, checkpoint) {
-        const now = yield* Clock.currentTimeMillis
-        const rows = yield* sql`UPDATE rika_usage_repairs SET checkpoint_json = ${checkpoint}, updated_at = ${now}
-            WHERE turn_id = ${turnId} AND claim_token = ${token} AND updated_at >= ${now - repairLeaseMillis}
-            RETURNING turn_id`.pipe(Effect.mapError(error))
-        return rows.length === 1
-      }),
-      finishRepair: Effect.fn("UsageRepository.finishRepair")(function* (turnId, token) {
-        const rows =
-          yield* sql`DELETE FROM rika_usage_repairs WHERE turn_id = ${turnId} AND claim_token = ${token} RETURNING turn_id`.pipe(
-            Effect.mapError(error),
-          )
-        return rows.length === 1
       }),
     })
   }),

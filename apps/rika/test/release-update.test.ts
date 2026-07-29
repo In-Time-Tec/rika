@@ -67,7 +67,8 @@ const installedRoot = Effect.fn("ReleaseUpdateTest.installedRoot")(function* (pr
   yield* fileSystem.makeDirectory(path.join(installRoot, "bin"), { recursive: true })
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", "rika"), "installed rika")
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "installed performance")
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-runtime"), "installed runtime")
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "installed interactive")
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-resident"), "installed resident")
   return { root, installRoot, binary: path.join(installRoot, "bin", "rika") }
 })
 
@@ -312,7 +313,8 @@ it.effect("refuses to replace an install this binary does not own", () =>
       yield* fileSystem.makeDirectory(path.join(packaged, "bin"), { recursive: true })
       yield* fileSystem.writeFileString(path.join(packaged, "bin", "rika"), "npm rika")
       yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-performance"), "npm performance")
-      yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-runtime"), "npm runtime")
+      yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-interactive"), "npm interactive")
+      yield* fileSystem.writeFileString(path.join(packaged, "bin", ".rika-resident"), "npm resident")
       const fromNpm = yield* runUpdate({
         currentVersion: "0.0.3",
         executable: path.join(packaged, "bin", "rika"),
@@ -330,7 +332,8 @@ it.effect("refuses to replace an install this binary does not own", () =>
       yield* fileSystem.makeDirectory(path.join(development, "bin"), { recursive: true })
       yield* fileSystem.writeFileString(path.join(development, "bin", "rika"), "dev rika")
       yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-performance"), "dev performance")
-      yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-runtime"), "dev runtime")
+      yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-interactive"), "dev interactive")
+      yield* fileSystem.writeFileString(path.join(development, "bin", ".rika-resident"), "dev resident")
       const fromSource = yield* runUpdate({
         currentVersion: "0.0.3",
         executable: path.join(development, "bin", "rika"),

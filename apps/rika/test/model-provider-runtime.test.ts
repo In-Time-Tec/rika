@@ -15,7 +15,7 @@ import {
   executionRoutePin,
   executionRoutePinFromPrepared,
   modelRoutesForExecution,
-} from "../src/main"
+} from "../src/resident-main"
 import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
 import * as ModelProviderRuntime from "../src/model-provider-runtime"
 

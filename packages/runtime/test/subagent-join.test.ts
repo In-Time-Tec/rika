@@ -216,7 +216,7 @@ test("a silent subagent is collected as a no-report verdict", () => {
         Effect.sync(() => {
           expect(settled.status).toBe("completed")
           expect(join?.output_json).toContain('"_tag":"NoReport"')
-          expect(join?.output_json).toContain("without writing a final report")
+          expect(join?.output_json).toContain("Run ended without output")
           expect(join?.output_json).toContain("Re-run this delegation once")
         }),
       ),

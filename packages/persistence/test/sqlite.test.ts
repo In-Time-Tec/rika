@@ -290,7 +290,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 22, name: "reconciled_child_trees" })
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 24, name: "drop_usage_repairs" })
           expect(yield* sql`SELECT COUNT(*) AS count FROM rika_transcript_entries`).toEqual([{ count: 1 }])
         }).pipe(provideLayer(layer)),
       )
@@ -313,7 +313,7 @@ test("migrates a pre-branch database without losing product or queue data", () =
           expect(yield* transcripts.get(Turn.TurnId.make("completed-turn"))).toMatchObject({
             units: [{ content: { _tag: "Entry", text: "completed prompt" } }],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 22 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 24 }])
         }).pipe(provideLayer(reopened)),
       )
     }),

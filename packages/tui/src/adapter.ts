@@ -1781,6 +1781,7 @@ export class Surface {
   private welcomeChild: TextRenderable | undefined
   private welcomeKey = ""
   private welcomeTimer: Fiber.Fiber<void> | undefined
+  private welcomeStopTimer: Fiber.Fiber<void> | undefined
   private toastTimer: Fiber.Fiber<void> | undefined
   private usageLabelWidth = 0
   private usageLabelHovered = false
@@ -3175,9 +3176,16 @@ export class Surface {
         welcome.content = welcomeContent(width, current.height, this.welcomePhase, current.mode)
         this.renderer.requestRender()
       })
+      this.welcomeStopTimer = this.delayed(1600, () => {
+        this.cancelTimer(this.welcomeTimer)
+        this.welcomeTimer = undefined
+        this.welcomeStopTimer = undefined
+      })
     } else if ((this.options.animate === false || !animateWelcome) && this.welcomeTimer !== undefined) {
       this.cancelTimer(this.welcomeTimer)
       this.welcomeTimer = undefined
+      this.cancelTimer(this.welcomeStopTimer)
+      this.welcomeStopTimer = undefined
     }
     const queue = model.queue as ReadonlyArray<QueueItem>
     const pendingSteering = model.pendingSteering
@@ -3527,6 +3535,8 @@ export class Surface {
     this.cancelWheelReport()
     this.cancelTimer(this.welcomeTimer)
     this.welcomeTimer = undefined
+    this.cancelTimer(this.welcomeStopTimer)
+    this.welcomeStopTimer = undefined
     this.cancelTimer(this.toastTimer)
     this.toastTimer = undefined
     this.cancelTimer(this.junkTimer)
@@ -4007,6 +4017,8 @@ const filePickerContent = (model: Model, entries: ReadonlyArray<string>, innerWi
 }
 
 const panelLoading = (model: Model): string | undefined => {
+  if (model.currentThreadId !== undefined && model.refoldingThreadIds.includes(model.currentThreadId))
+    return "Rebuilding thread projection"
   if (model.threadLoading) return "Loading Thread"
   if (model.changedFilesOpen && isLoading(model.changedFiles)) return "Loading changed files"
   if ((model.workspaceFilesOpen || model.filePicker.open) && isLoading(model.filePicker.items)) return "Loading files"

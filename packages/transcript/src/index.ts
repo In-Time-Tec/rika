@@ -462,15 +462,37 @@ const processResult = (output: unknown): ToolProcess | undefined => {
 
 const usageCost = (value: Record<string, unknown>): number | undefined => usageCostUsd(value)
 
+const foldedUsageCursors = new WeakMap<ReadonlyArray<string>, Set<string>>()
+
+const foldedUsage = (cursors: ReadonlyArray<string>): Set<string> => {
+  const known = foldedUsageCursors.get(cursors)
+  if (known !== undefined) return known
+  const folded = new Set(cursors)
+  foldedUsageCursors.set(cursors, folded)
+  return folded
+}
+
+const foldUsageCursor = (cursors: ReadonlyArray<string> | undefined, identity: string): ReadonlyArray<string> => {
+  const next = cursors === undefined ? [identity] : [...cursors, identity]
+  if (cursors === undefined) {
+    foldedUsageCursors.set(next, new Set(next))
+    return next
+  }
+  const folded = foldedUsage(cursors)
+  foldedUsageCursors.delete(cursors)
+  foldedUsageCursors.set(next, folded.add(identity))
+  return next
+}
+
 const applyUsage = (projection: Projection, event: SourceEvent): Projection => {
   const identity = event.cursor
-  if ((projection.usageCursors ?? []).includes(identity)) return projection
+  if (projection.usageCursors !== undefined && foldedUsage(projection.usageCursors).has(identity)) return projection
   const cost = usageCost(sourcePayload(event))
   if (cost === undefined) return projection
   return {
     ...projection,
     costUsd: (projection.costUsd ?? 0) + cost,
-    usageCursors: [...(projection.usageCursors ?? []), identity],
+    usageCursors: foldUsageCursor(projection.usageCursors, identity),
     ...(projection.costUsd === undefined || projection.pricingVersion === pricingVersion ? { pricingVersion } : {}),
   }
 }

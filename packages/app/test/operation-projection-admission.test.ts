@@ -4,7 +4,8 @@ import * as Thread from "@rika/persistence/thread"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
-import { Deferred, Effect, Layer, Queue, Ref } from "effect"
+import * as UsageRepository from "@rika/persistence/usage-repository"
+import { Context, Deferred, Effect, Layer, Queue, Ref } from "effect"
 import { Operation } from "../src/index"
 import { executionRoute } from "./current-state"
 
@@ -12,7 +13,6 @@ const busyThreadId = Thread.ThreadId.make("busy-thread")
 const openThreadId = Thread.ThreadId.make("open-thread")
 const busyTurnId = Turn.TurnId.make("busy-turn")
 const openTurnId = Turn.TurnId.make("open-turn")
-const selectionRepairPageLimit = 32
 
 const thread = (id: Thread.ThreadId): Thread.Thread => ({
   id,
@@ -91,6 +91,7 @@ type Client = {
   readonly session: Operation.InteractiveSession
   readonly events: Array<Operation.InteractiveEvent>
   readonly turns: TurnRepository.Interface
+  readonly usage: UsageRepository.Interface
 }
 
 const runHarness = <A, E, R>(
@@ -100,6 +101,7 @@ const runHarness = <A, E, R>(
 ) =>
   Effect.gen(function* () {
     const turns = yield* TurnRepository.makeMemory(initialTurns)
+    const usage = Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
     const registrations = yield* Queue.unbounded<{
       readonly session: Operation.InteractiveSession
       readonly events: Array<Operation.InteractiveEvent>
@@ -107,6 +109,7 @@ const runHarness = <A, E, R>(
     const layer = Operation.productLayer({
       repositoryLayer: ThreadRepository.memoryLayer([thread(busyThreadId), thread(openThreadId)]),
       turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+      usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage),
       backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
       defaultWorkspace: "/work",
       makeThreadId: Effect.die("unused"),
@@ -124,7 +127,7 @@ const runHarness = <A, E, R>(
         return yield* Effect.gen(function* () {
           const operation = yield* Operation.Service
           yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
-          return yield* body({ ...(yield* Queue.take(registrations)), turns })
+          return yield* body({ ...(yield* Queue.take(registrations)), turns, usage })
         }).pipe(Effect.provide(context))
       }),
     )
@@ -186,25 +189,33 @@ it.effect("loads an interactive thread while a background projection holds anoth
   })
 })
 
-it.effect("finishes terminal usage reconciliation after bounded selection repair", () =>
+const pricedEvents = (turnId: string): ReadonlyArray<ExecutionBackend.Event> => [
+  {
+    executionId: `execution:${turnId}`,
+    cursor: "priced-usage",
+    sequence: 0,
+    type: "model.attempt.completed",
+    createdAt: 1,
+    data: { model_attempt_id: "priced-attempt", attempt: 1, cost: { amount: 0.25, currency: "USD" } },
+  },
+  { executionId: `execution:${turnId}`, cursor: "priced-done", sequence: 1, type: "execution.completed", createdAt: 2 },
+]
+
+it.effect("reads every child once under the bounded selection repair and keeps committed usage exact", () =>
   Effect.gen(function* () {
     const children = Array.from({ length: 200 }, (_, index) => ({
       executionId: `busy-child-${index}`,
       status: "completed" as const,
     }))
-    const overBudgetChild = `busy-child-${selectionRepairPageLimit}`
     const started = yield* Ref.make(false)
-    const childReplays = yield* Ref.make(0)
-    const overBudgetReplayed = yield* Ref.make(false)
+    const childReads = yield* Ref.make(new Map<string, number>())
+    const countRead = (turnId: string) =>
+      Ref.update(childReads, (counts) => new Map(counts).set(turnId, (counts.get(turnId) ?? 0) + 1))
     const backend = ExecutionBackend.Service.of({
       ...idleBackend,
       start: (input) =>
         Ref.set(started, true).pipe(
-          Effect.as({
-            turnId: input.turnId,
-            status: "completed" as const,
-            events: completedEvents("busy", input.turnId),
-          }),
+          Effect.as({ turnId: input.turnId, status: "completed" as const, events: pricedEvents(input.turnId) }),
         ),
       inspect: (turnId) =>
         Effect.gen(function* () {
@@ -214,11 +225,12 @@ it.effect("finishes terminal usage reconciliation after bounded selection repair
         }),
       replay: (turnId) =>
         Effect.gen(function* () {
-          if (turnId.startsWith("busy-child-")) {
-            yield* Ref.update(childReplays, (count) => count + 1)
-            if (turnId === overBudgetChild) yield* Ref.set(overBudgetReplayed, true)
+          if (turnId.startsWith("busy-child-")) yield* countRead(turnId)
+          return {
+            turnId,
+            status: "completed" as const,
+            events: turnId === String(busyTurnId) ? pricedEvents(turnId) : completedEvents(turnId, turnId),
           }
-          return { turnId, status: "completed" as const, events: completedEvents(turnId, turnId) }
         }),
     })
     yield* runHarness(backend, [], (client) =>
@@ -230,10 +242,20 @@ it.effect("finishes terminal usage reconciliation after bounded selection repair
         expect(
           yield* awaitCondition(client.turns.get(busyTurnId).pipe(Effect.map((turn) => turn?.status === "completed"))),
         ).toBe(true)
-        expect(yield* awaitCondition(Ref.get(overBudgetReplayed))).toBe(true)
-        expect(yield* Ref.get(childReplays)).toBeGreaterThanOrEqual(children.length)
-        expect(yield* Ref.get(childReplays)).toBeLessThanOrEqual(3 * (children.length + selectionRepairPageLimit))
+        expect(
+          yield* awaitCondition(Ref.get(childReads).pipe(Effect.map((counts) => counts.size === children.length))),
+        ).toBe(true)
+
+        const counts = yield* Ref.get(childReads)
+        expect([...counts.values()].every((count) => count === 1)).toBe(true)
         expect(client.events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
+        expect(
+          yield* awaitCondition(
+            client.usage
+              .readThread(String(busyThreadId))
+              .pipe(Effect.map((totals) => totals.costNanoUsd === 250_000_000)),
+          ),
+        ).toBe(true)
       }),
     )
   }),

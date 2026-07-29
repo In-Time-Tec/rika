@@ -16,7 +16,7 @@ import {
   readChangedFiles,
   refreshChangedFilesOn,
   resolveLocalFile,
-} from "../src/main"
+} from "../src/interactive-main"
 
 class TestFailure extends Data.TaggedError("TestFailure")<{ readonly operation: string; readonly cause: unknown }> {}
 

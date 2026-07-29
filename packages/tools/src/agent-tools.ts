@@ -25,7 +25,7 @@ export type Report = typeof Report.Type
 export const NoReport = Schema.Struct({
   _tag: Schema.tag("NoReport"),
   childExecutionId: Schema.String,
-  status: Schema.Literal("failed"),
+  status: Schema.Literals(["completed", "failed"]),
   reason: Schema.String,
   recovery: Schema.String,
 })
@@ -90,10 +90,14 @@ export const report = ({ childExecutionId, output }: Pick<Report, "childExecutio
   output,
 })
 
-export const noReport = ({ childExecutionId, reason }: Pick<NoReport, "childExecutionId" | "reason">): NoReport => ({
+export const noReport = ({
+  childExecutionId,
+  reason,
+  status = "failed",
+}: Pick<NoReport, "childExecutionId" | "reason"> & Partial<Pick<NoReport, "status">>): NoReport => ({
   _tag: "NoReport",
   childExecutionId,
-  status: "failed",
+  status,
   reason,
   recovery: noReportRecovery,
 })

@@ -472,8 +472,6 @@ describe("ExecutionBackend Relay client adapter", () => {
         agent_id: "agent:rika",
         idempotency_key: "turn-a",
         execution_id: "execution:turn-a",
-        started_at: 100,
-        completed_at: 100,
         input: [Content.text("prompt")],
       })
       expect(result.status).toBe("completed")
@@ -699,6 +697,53 @@ describe("ExecutionBackend Relay client adapter", () => {
         "rika.event.type": "tool.call.requested",
       })
       expect(lines.join("\n")).not.toContain("SECRET_")
+    }),
+  )
+
+  it.effect("annotates every follow with its resume cursor and event scope", () =>
+    Effect.gen(function* () {
+      const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
+      const lines: Array<string> = []
+      const logger = Logger.make((options) => lines.push(Logger.formatJson.log(options)))
+      yield* Effect.gen(function* () {
+        const backend = yield* ExecutionBackend.Service
+        if (backend.follow === undefined) return yield* Effect.die("Missing execution follow")
+        yield* backend.follow("turn-a", undefined)
+        yield* backend.follow("turn-a", "cursor-7", undefined, undefined, "execution")
+        yield* backend.follow("turn-a", { cursor: "cursor-9", sequence: 9 })
+      }).pipe(provideConfiguredBackend(fixture.implementation, { selection }, Logger.layer([logger])))
+      const records = yield* Effect.forEach(lines, (line) =>
+        Schema.decodeUnknownEffect(
+          Schema.fromJsonString(
+            Schema.Struct({ message: Schema.String, annotations: Schema.Record(Schema.String, Schema.Unknown) }),
+          ),
+        )(line),
+      )
+      const annotationsFor = (message: string) =>
+        records.filter((record) => record.message === message).map((record) => record.annotations)
+      expect(annotationsFor("execution.follow.started")).toEqual([
+        {
+          "rika.execution.id": "execution:turn-a",
+          "rika.turn.id": "turn-a",
+          "rika.follow.cursor": "start",
+          "rika.follow.scope": "tree",
+        },
+        {
+          "rika.execution.id": "execution:turn-a",
+          "rika.turn.id": "turn-a",
+          "rika.follow.cursor": "cursor-7",
+          "rika.follow.scope": "execution",
+        },
+        {
+          "rika.execution.id": "execution:turn-a",
+          "rika.turn.id": "turn-a",
+          "rika.follow.cursor": "cursor-9",
+          "rika.follow.scope": "tree",
+        },
+      ])
+      expect(
+        annotationsFor("execution.follow.completed").map((annotations) => annotations["rika.follow.cursor"]),
+      ).toEqual(["start", "cursor-7", "cursor-9"])
     }),
   )
 
@@ -1138,27 +1183,21 @@ describe("ExecutionBackend Relay client adapter", () => {
     }),
   )
 
-  it.effect("retries an unknown start outcome with the exact durable identity", () =>
+  it.effect("fails an unknown start outcome loudly without retrying", () =>
     Effect.gen(function* () {
       const fixture = yield* makeClient({ streamEvents: [relayEvent("execution.completed", 1)] })
-      const attempts = yield* Ref.make(0)
       const implementation: Client.Interface = {
         ...fixture.implementation,
         executions: {
           ...fixture.implementation.executions,
           startByAgentDefinition: (input) =>
-            Ref.getAndUpdate(attempts, (count) => count + 1).pipe(
-              Effect.flatMap((attempt) =>
-                attempt === 0
-                  ? Ref.update(fixture.starts, (values) => [...values, input]).pipe(
-                      Effect.andThen(Effect.fail(clientFailure("start outcome unknown"))),
-                    )
-                  : fixture.implementation.executions.startByAgentDefinition(input),
-              ),
+            Ref.update(fixture.starts, (values) => [...values, input]).pipe(
+              Effect.andThen(Effect.fail(clientFailure("start outcome unknown"))),
             ),
+          get: () => Effect.sync(() => undefined),
         },
       }
-      const resultFiber = yield* Effect.gen(function* () {
+      const outcome = yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         return yield* start(backend, {
           threadId: "thread-a",
@@ -1166,14 +1205,10 @@ describe("ExecutionBackend Relay client adapter", () => {
           prompt: "prompt",
           startedAt: 1,
         })
-      }).pipe(provideBackend(implementation), Effect.forkChild)
-
-      yield* TestClock.adjust("1 second")
-      const result = yield* Fiber.join(resultFiber)
+      }).pipe(provideBackend(implementation), Effect.flip)
       const starts = yield* Ref.get(fixture.starts)
-      expect(result.status).toBe("completed")
-      expect(starts).toHaveLength(2)
-      expect(starts[1]).toEqual(starts[0])
+      expect(String(outcome)).toContain("start outcome unknown")
+      expect(starts).toHaveLength(1)
       expect(starts[0]).toMatchObject({
         execution_id: "execution:turn-a",
         idempotency_key: "turn-a",

@@ -30,6 +30,8 @@ import * as ResidentProcessStartup from "./resident-process-startup"
 import * as DataRoot from "@rika/config/data-root"
 import { dataPaths } from "@rika/config/paths"
 
+const encodeLaunchArguments = Schema.encodeSync(Schema.fromJsonString(Schema.Array(Schema.String)))
+
 const provideLayerScoped =
   <ROut, E2, RIn>(layer: Layer.Layer<ROut, E2, RIn>) =>
   <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -106,14 +108,27 @@ export const interactiveRuntimeRestartPlan = (input: {
 
 let interactiveSigintObserved = false
 
-const privateRuntime = Effect.fn("ClientMain.privateRuntime")(function* () {
+const privateRuntime = Effect.fn("ClientMain.privateRuntime")(function* (role: "interactive" | "resident") {
   const path = yield* Path.Path
   const testExecutable = yield* Config.option(Config.string("RIKA_TEST_RUNTIME_EXECUTABLE"))
-  if (Option.isSome(testExecutable)) return { executable: testExecutable.value, prefixArguments: [] }
+  if (Option.isSome(testExecutable))
+    return { executable: testExecutable.value, prefixArguments: [], replaceProcess: false }
+  const entrypoint = role === "interactive" ? "interactive-main.ts" : "resident-main.ts"
   return import.meta.path.startsWith("/$bunfs/")
-    ? { executable: path.join(path.dirname(process.execPath), ".rika-runtime"), prefixArguments: [] }
-    : { executable: process.execPath, prefixArguments: [path.join(import.meta.dir, "main.ts")] }
+    ? {
+        executable: path.join(path.dirname(process.execPath), `.rika-${role}`),
+        prefixArguments: [],
+        replaceProcess: role === "interactive",
+      }
+    : {
+        executable: process.execPath,
+        prefixArguments: [path.join(import.meta.dir, entrypoint)],
+        replaceProcess: false,
+      }
 })
+
+const inheritedEnvironment = (): Record<string, string> =>
+  Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
 
 const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
   Layer.effect(
@@ -137,8 +152,25 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
             const forwardedArguments = argv ?? (yield* stdio.args)
             return yield* Effect.scoped(
               Effect.gen(function* () {
-                const runtime = yield* privateRuntime()
                 if (input._tag === "Interactive") {
+                  const runtime = yield* privateRuntime("interactive")
+                  if (runtime.replaceProcess) {
+                    const environment: Record<string, string> = {
+                      ...inheritedEnvironment(),
+                      RIKA_INTERNAL_CLIENT_RUNTIME: "1",
+                      RIKA_INTERNAL_LAUNCHER_EXECUTABLE: process.execPath,
+                      RIKA_INTERNAL_LAUNCH_ARGUMENTS: encodeLaunchArguments(forwardedArguments),
+                      RIKA_INTERNAL_RUNTIME_RESTART_ATTEMPT: "0",
+                    }
+                    delete environment[ResidentProcessStartup.runtimeRestartFdEnvironment]
+                    const execve = process.execve
+                    if (execve === undefined)
+                      return yield* Operation.OperationUnavailable.make({
+                        operation: "Interactive",
+                        message: "This platform cannot start the packaged interactive runtime.",
+                      })
+                    execve(runtime.executable, [runtime.executable, ...forwardedArguments], environment)
+                  }
                   let attempt = 0
                   let restartEnvironment: Record<string, string> = {}
                   while (true) {
@@ -209,14 +241,15 @@ const dispatcherLayer = (argv?: ReadonlyArray<string>) =>
                 else if (input._tag === "Review") clientKind = "review"
                 else if (input._tag === "Workflow") clientKind = "workflow"
                 else clientKind = "product"
+                const residentRuntime = yield* privateRuntime("resident")
                 const connected = yield* resident.getOrCreate({
                   profile: "default",
                   dataRoot,
                   clientKind,
                   startHost: () =>
                     ResidentProcessStartup.spawn({
-                      executable: runtime.executable,
-                      arguments: runtime.prefixArguments,
+                      executable: residentRuntime.executable,
+                      arguments: residentRuntime.prefixArguments,
                       environment: {
                         RIKA_INTERNAL_RESIDENT_HOST: "1",
                         RIKA_INTERNAL_RESIDENT_PROFILE: "default",

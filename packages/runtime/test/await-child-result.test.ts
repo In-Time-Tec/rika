@@ -27,6 +27,8 @@ const truncatedAttempt = (classification?: string): EventInput => ({
   data: { category: "truncated-stream", ...(classification === undefined ? {} : { classification }) },
 })
 
+const silentReason = "The subagent finished its run without writing a final report."
+
 const resolve = (values: ReadonlyArray<EventInput>, reconciled?: "completed" | "failed" | "cancelled") =>
   resolveChildResult({
     childExecutionId: child,
@@ -35,17 +37,25 @@ const resolve = (values: ReadonlyArray<EventInput>, reconciled?: "completed" | "
   })
 
 describe("resolveChildResult", () => {
-  it("reports no report when a child completes with an empty final model output", () => {
+  it("reports a completed status when a child completes with an empty final model output", () => {
     const result = resolve([...modelTurn(), { type: "model.output.completed" }, { type: "execution.completed" }])
     expect(result._tag).toBe("NoReport")
-    expect(result.status).toBe("failed")
+    expect(result.status).toBe("completed")
     if (result._tag !== "NoReport") throw new Error("expected NoReport")
     expect(result.childExecutionId).toBe(child)
-    expect(result.reason).toContain("ended before the provider reported why it stopped")
+    expect(result.reason).toBe(silentReason)
     expect(result.recovery).toBe(AgentTools.noReportRecovery)
   })
 
-  it("reports no report when the only text is a turn-zero announcement before a truncation", () => {
+  it("treats a silent child the same whether or not the provider reported a finish reason", () => {
+    const result = resolve([...modelTurn("stop"), { type: "model.output.completed" }, { type: "execution.completed" }])
+    expect(result._tag).toBe("NoReport")
+    expect(result.status).toBe("completed")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).toBe(silentReason)
+  })
+
+  it("does not treat a turn-zero announcement outside the durable text contract as a report", () => {
     const result = resolve([
       ...modelTurn("tool-calls"),
       delta("part-a", 0, "I'll investigate the transcript rendering pipeline."),
@@ -56,36 +66,65 @@ describe("resolveChildResult", () => {
       { type: "execution.completed", data: { model_output: "I'll investigate the transcript rendering pipeline." } },
     ])
     expect(result._tag).toBe("NoReport")
+    expect(result.status).toBe("completed")
     if (result._tag !== "NoReport") throw new Error("expected NoReport")
-    expect(result.reason).toContain("ended before the provider reported why it stopped")
+    expect(result.reason).toBe(silentReason)
   })
 
-  it("distinguishes a deliberately silent child from a truncated one", () => {
-    const result = resolve([...modelTurn("stop"), { type: "model.output.completed" }, { type: "execution.completed" }])
-    expect(result._tag).toBe("NoReport")
-    if (result._tag !== "NoReport") throw new Error("expected NoReport")
-    expect(result.reason).toBe("The subagent finished its run without writing a final report.")
-  })
-
-  it("does not trust a stale final response replayed by a truncated turn", () => {
-    const stale = "I'll investigate the transcript rendering pipeline."
+  it("rejects mid-turn narration that a later model call superseded", () => {
     const result = resolve([
       ...modelTurn("tool-calls"),
-      delta("part-a", 0, stale),
+      { type: "model.output.completed", content: [{ type: "text", text: "I'll start by reading the code." }] },
+      { type: "tool.call.requested" },
+      { type: "tool.result.received" },
+      ...modelTurn("stop"),
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("NoReport")
+    expect(result.status).toBe("completed")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).toBe(silentReason)
+  })
+
+  it("keeps a completed child's final report when the provider never reported a finish reason", () => {
+    const result = resolve([
+      ...modelTurn("tool-calls"),
       { type: "tool.call.requested" },
       { type: "tool.result.received" },
       ...modelTurn(),
-      { type: "model.output.completed", content: [{ type: "text", text: stale }] },
-      { type: "execution.completed", content: [{ type: "text", text: stale }] },
+      { type: "model.output.completed", content: [{ type: "text", text: "The finding" }] },
+      { type: "execution.completed", content: [{ type: "text", text: "The finding" }] },
     ])
-    expect(result._tag).toBe("NoReport")
-    if (result._tag !== "NoReport") throw new Error("expected NoReport")
-    expect(result.reason).toBe(
-      "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
-    )
+    expect(result._tag).toBe("Report")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "The finding" }])
   })
 
-  it("keeps genuinely streamed partial work from a truncated turn as a failure", () => {
+  it("keeps a report that lands after a trailing failed tool result", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.cycle.completed", content: [{ type: "text", text: "The finding" }] },
+      { type: "tool.result.received", data: { tool_call_id: "late", error: "tool failed after the report" } },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+    expect(result.status).toBe("completed")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "The finding" }])
+  })
+
+  it("synthesizes a text part from a cycle that carries only durable data text", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.cycle.completed", data: { text: "Durable text only" } },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "Durable text only" }])
+  })
+
+  it("ignores streamed deltas when a child completes without a durable final report", () => {
     const result = resolve([
       ...modelTurn("tool-calls"),
       { type: "tool.call.requested" },
@@ -94,13 +133,13 @@ describe("resolveChildResult", () => {
       delta("part-b", 0, "Here is what I found so far"),
       { type: "execution.completed" },
     ])
-    expect(result._tag).toBe("Failed")
-    if (result._tag !== "Failed") throw new Error("expected Failed")
-    expect(result.reason).toContain("ended before the provider reported why it stopped")
-    expect(result.output).toEqual([{ type: "text", text: "Here is what I found so far" }])
+    expect(result._tag).toBe("NoReport")
+    expect(result.status).toBe("completed")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).toBe(silentReason)
   })
 
-  it("does not remap a failed truncated child to completed", () => {
+  it("keeps a failed child failed and attaches its final response", () => {
     const result = resolve([
       { type: "tool.call.requested" },
       { type: "tool.result.received" },
@@ -108,13 +147,14 @@ describe("resolveChildResult", () => {
       { type: "model.output.completed", content: [{ type: "text", text: "final answer" }] },
       { type: "execution.failed", data: { message: "stream closed" } },
     ])
-    expect(result._tag).toBe("NoReport")
+    expect(result._tag).toBe("Failed")
     expect(result.status).toBe("failed")
-    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    if (result._tag !== "Failed") throw new Error("expected Failed")
     expect(result.reason).toBe("Subagent execution failed: stream closed")
+    expect(result.output).toEqual([{ type: "text", text: "final answer" }])
   })
 
-  it("does not remap a failed child that Relay classified as a truncated stream", () => {
+  it("keeps a failed child failed even when an attempt was classified as a truncated stream", () => {
     const result = resolve([
       { type: "tool.call.requested" },
       { type: "tool.result.received" },
@@ -123,9 +163,23 @@ describe("resolveChildResult", () => {
       truncatedAttempt("terminal"),
       { type: "execution.failed", data: { message: "stream closed" } },
     ])
-    expect(result._tag).toBe("NoReport")
-    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result._tag).toBe("Failed")
+    if (result._tag !== "Failed") throw new Error("expected Failed")
     expect(result.reason).toBe("Subagent execution failed: stream closed")
+    expect(result.output).toEqual([{ type: "text", text: "final answer" }])
+  })
+
+  it("keeps the report when a proxy truncation was followed by a recovered final call", () => {
+    const result = resolve([
+      { type: "model.call.started" },
+      { type: "model.call.failed", data: { category: "truncated-stream" } },
+      ...modelTurn("stop"),
+      { type: "model.output.completed", content: [{ type: "text", text: "recovered finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "recovered finding" }])
   })
 
   it("keeps the report when an earlier transient truncation was retried and recovered", () => {
@@ -163,54 +217,41 @@ describe("resolveChildResult", () => {
     expect(result._tag).toBe("Report")
   })
 
-  it("ignores a retry-scheduled event carrying the truncated-stream category", () => {
+  it("keeps a completed child's report after a terminal truncation classification", () => {
     const result = resolve([
-      { type: "model.call.started" },
-      { type: "model.attempt.started" },
-      truncatedAttempt("transient"),
-      { type: "model.retry.scheduled", data: { category: "truncated-stream" } },
-      { type: "model.attempt.started" },
-      { type: "model.usage.reported", data: { finish_reason: "stop" } },
-      { type: "model.call.completed" },
-      { type: "model.output.completed", content: [{ type: "text", text: "recovered finding" }] },
+      ...modelTurn("stop"),
+      truncatedAttempt("terminal"),
+      { type: "model.output.completed", content: [{ type: "text", text: "the finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "the finding" }])
+  })
+
+  it("keeps a completed child's report when a truncated call failure carries no classification", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      { type: "model.call.failed", data: { category: "truncated-stream" } },
+      { type: "model.output.completed", content: [{ type: "text", text: "the finding" }] },
+      { type: "execution.completed" },
+    ])
+    expect(result._tag).toBe("Report")
+    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result.output).toEqual([{ type: "text", text: "the finding" }])
+  })
+
+  it("keeps a completed child's report when a truncated attempt failure carries no classification", () => {
+    const result = resolve([
+      ...modelTurn("stop"),
+      truncatedAttempt(),
+      { type: "model.output.completed", content: [{ type: "text", text: "the finding" }] },
       { type: "execution.completed" },
     ])
     expect(result._tag).toBe("Report")
   })
 
-  it("discards the report after a terminal truncation classification", () => {
-    const result = resolve([
-      ...modelTurn("stop"),
-      truncatedAttempt("terminal"),
-      { type: "model.output.completed", content: [{ type: "text", text: "tainted finding" }] },
-      { type: "execution.completed" },
-    ])
-    expect(result._tag).toBe("NoReport")
-    if (result._tag !== "NoReport") throw new Error("expected NoReport")
-    expect(result.reason).toContain("the stream was cut off")
-  })
-
-  it("treats a truncated call failure without a classification as terminal", () => {
-    const result = resolve([
-      ...modelTurn("stop"),
-      { type: "model.call.failed", data: { category: "truncated-stream" } },
-      { type: "model.output.completed", content: [{ type: "text", text: "tainted finding" }] },
-      { type: "execution.completed" },
-    ])
-    expect(result._tag).toBe("NoReport")
-  })
-
-  it("treats an attempt failure without a classification as terminal", () => {
-    const result = resolve([
-      ...modelTurn("stop"),
-      truncatedAttempt(),
-      { type: "model.output.completed", content: [{ type: "text", text: "tainted finding" }] },
-      { type: "execution.completed" },
-    ])
-    expect(result._tag).toBe("NoReport")
-  })
-
-  it("remaps a failed child with a complete post-tool response to a report", () => {
+  it("surfaces a failed child as failed with its post-tool response attached", () => {
     const result = resolve([
       { type: "tool.call.requested" },
       { type: "tool.result.received" },
@@ -218,13 +259,14 @@ describe("resolveChildResult", () => {
       { type: "model.output.completed", content: [{ type: "text", text: "final answer" }] },
       { type: "execution.failed", data: { message: "late failure" } },
     ])
-    expect(result._tag).toBe("Report")
-    expect(result.status).toBe("completed")
-    if (result._tag !== "Report") throw new Error("expected Report")
+    expect(result._tag).toBe("Failed")
+    expect(result.status).toBe("failed")
+    if (result._tag !== "Failed") throw new Error("expected Failed")
+    expect(result.reason).toBe("Subagent execution failed: late failure")
     expect(result.output).toEqual([{ type: "text", text: "final answer" }])
   })
 
-  it("recovers streamed output and failure detail when a child fails after finishing its report", () => {
+  it("ignores streamed deltas when a child fails without a durable report", () => {
     const result = resolve([
       delta("part-a", 0, "Full "),
       delta("part-a", 1, "report"),
@@ -234,25 +276,12 @@ describe("resolveChildResult", () => {
         data: { message: "OpenAiClient.createResponse: HTTP 400 Stream must be set to true" },
       },
     ])
-    expect(result._tag).toBe("Failed")
-    if (result._tag !== "Failed") throw new Error("expected Failed")
+    expect(result._tag).toBe("NoReport")
+    expect(result.status).toBe("failed")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
     expect(result.reason).toBe(
       "Subagent execution failed: OpenAiClient.createResponse: HTTP 400 Stream must be set to true",
     )
-    expect(result.output).toEqual([{ type: "text", text: "Full report" }])
-  })
-
-  it("keeps only the final turn's deltas when reconstructing a fallback report", () => {
-    const result = resolve([
-      delta("part-a", 0, "narration from an early turn"),
-      { type: "tool.call.requested" },
-      { type: "tool.result.received" },
-      delta("part-b", 0, "the answer"),
-      { type: "execution.failed", data: {} },
-    ])
-    expect(result._tag).toBe("Failed")
-    if (result._tag !== "Failed") throw new Error("expected Failed")
-    expect(result.output).toEqual([{ type: "text", text: "the answer" }])
   })
 
   it("keeps completed output untouched when model.output.completed exists", () => {
@@ -266,7 +295,7 @@ describe("resolveChildResult", () => {
     expect(result.output).toEqual([{ type: "text", text: "final" }])
   })
 
-  it("prefers terminal content over recovered deltas", () => {
+  it("uses terminal content when no model event carries the report", () => {
     const result = resolve([
       delta("part-a", 0, "draft"),
       { type: "execution.completed", content: [{ type: "text", text: "terminal" }] },
@@ -299,7 +328,7 @@ describe("resolveChildResult", () => {
     expect(result.reason).toBe("Subagent execution failed")
   })
 
-  it("scrubs an unrenderable failure message from a truncated Failed reason", () => {
+  it("scrubs an unrenderable failure message when only deltas were streamed", () => {
     const result = resolve([
       ...modelTurn("tool-calls"),
       { type: "tool.call.requested" },
@@ -309,9 +338,10 @@ describe("resolveChildResult", () => {
       delta("part-a", 0, "Partial finding"),
       { type: "execution.failed", data: { message: "[object Object]" } },
     ])
-    expect(result._tag).toBe("Failed")
-    if (result._tag !== "Failed") throw new Error("expected Failed")
+    expect(result._tag).toBe("NoReport")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
     expect(result.reason).not.toContain("[object Object]")
+    expect(result.reason).toBe("Subagent execution failed")
   })
 
   it("scrubs an unrenderable cancellation message", () => {
@@ -373,19 +403,6 @@ describe("resolveChildResult", () => {
     expect(result.reason).toBe("Subagent execution failed: internal tool failed")
   })
 
-  it("orders recovered deltas by part and delta index", () => {
-    const result = resolve([
-      delta("part-b", 0, "second"),
-      delta("part-a", 1, "one"),
-      delta("part-a", 0, "part "),
-      { type: "execution.failed", data: {} },
-    ])
-    expect(result._tag).toBe("Failed")
-    if (result._tag !== "Failed") throw new Error("expected Failed")
-    expect(result.reason).toBe("Subagent execution failed")
-    expect(result.output).toEqual([{ type: "text", text: "second\n\npart one" }])
-  })
-
   it("classifies a child whose terminal event never arrived from the reconciled execution status", () => {
     const result = resolve([{ type: "model.output.completed", content: [{ type: "text", text: "partial" }] }], "failed")
     expect(result._tag).toBe("Failed")
@@ -393,5 +410,13 @@ describe("resolveChildResult", () => {
     expect(result.reason).toContain("final event never reached Rika")
     expect(result.reason).not.toMatch(/relay/i)
     expect(result.output).toEqual([{ type: "text", text: "partial" }])
+  })
+
+  it("reports no report for an unreconciled child with no durable output", () => {
+    const result = resolve([...modelTurn("stop"), { type: "model.output.completed" }])
+    expect(result._tag).toBe("NoReport")
+    expect(result.status).toBe("failed")
+    if (result._tag !== "NoReport") throw new Error("expected NoReport")
+    expect(result.reason).toContain("final event never reached Rika")
   })
 })

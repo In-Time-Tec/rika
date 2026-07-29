@@ -6,15 +6,17 @@ import { Operation } from "@rika/app"
 import * as Database from "@rika/persistence/database"
 import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
+import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as UsageRepository from "@rika/persistence/usage-repository"
+import * as ExecutionBackend from "@rika/runtime/contract"
 import * as RelayExecutionBackend from "@rika/runtime/relay"
 import { MediaView, ReadWebPage, Runtime as ToolRuntime, WebSearch } from "@rika/tools"
 import { Config, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schema, Scope, Stream } from "effect"
 import { AiError } from "effect/unstable/ai"
 import { FetchHttpClient } from "effect/unstable/http"
-import { interactiveTui } from "../src/main"
+import { interactiveTui } from "../src/interactive-main"
 
 export const model = {
   text: (text: string, delayMs?: number) =>
@@ -56,7 +58,43 @@ export interface TuiAppOptions {
   readonly workspaceFiles?: Readonly<Record<string, string>>
   readonly width?: number
   readonly height?: number
+  readonly holdExecutionFollows?: Deferred.Deferred<void>
 }
+
+export const makeProjectionsLegacy = Effect.fn("TuiApp.makeProjectionsLegacy")(function* (root: string) {
+  const path = yield* Path.Path
+  const database = Database.layer(path.join(root, "rika.db"))
+  const context = yield* Layer.build(
+    Layer.mergeAll(ThreadRepository.layer, TurnRepository.layer, TranscriptRepository.layer).pipe(
+      Layer.provide(database),
+      Layer.provide(BunServices.layer),
+    ),
+  )
+  const transcripts = Context.get(context, TranscriptRepository.Service)
+  const turns = Context.get(context, TurnRepository.Service)
+  const aged: Array<string> = []
+  for (const thread of yield* Context.get(context, ThreadRepository.Service).list())
+    for (const turn of yield* turns.list(thread.id)) {
+      const projection = yield* transcripts.get(turn.id)
+      if (projection === undefined) continue
+      aged.push(String(turn.id))
+      yield* transcripts.replace(
+        turn,
+        {
+          units: projection.units,
+          revision: projection.revision,
+          modelPhase: projection.modelPhase,
+          ...(projection.oldestCursor === undefined ? {} : { oldestCursor: projection.oldestCursor }),
+          ...(projection.checkpointCursor === undefined ? {} : { checkpointCursor: projection.checkpointCursor }),
+          ...(projection.costUsd === undefined ? {} : { costUsd: projection.costUsd }),
+          ...(projection.usageCursors === undefined ? {} : { usageCursors: projection.usageCursors }),
+          ...(projection.pricingVersion === undefined ? {} : { pricingVersion: projection.pricingVersion }),
+        },
+        { projectionVersion: TranscriptRepository.legacyProjectionVersion, consumed: {} },
+      )
+    }
+  return aged
+})
 
 export type CapturedSpans = ReturnType<Awaited<ReturnType<typeof createTestRenderer>>["captureSpans"]>
 
@@ -126,6 +164,10 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const database = Database.layer(path.join(root, "rika.db"))
   const repositoryLayer = ThreadRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const turnRepositoryLayer = TurnRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
+  const transcriptRepositoryLayer = TranscriptRepository.layer.pipe(
+    Layer.provide(database),
+    Layer.provide(BunServices.layer),
+  )
   const usageRepositoryLayer = UsageRepository.layer.pipe(Layer.provide(database), Layer.provide(BunServices.layer))
   const toolRuntimeLayer = (directory: string) =>
     ToolRuntime.layer(directory).pipe(
@@ -140,7 +182,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
       Layer.provide(BunServices.layer),
       Layer.orDie,
     )
-  const backendLayer = RelayExecutionBackend.layer({
+  const relayBackendLayer = RelayExecutionBackend.layer({
     filename: path.join(root, "execution.db"),
     workspace,
     registration,
@@ -150,6 +192,30 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
     toolNeedsApproval: options.toolNeedsApproval ?? (() => false),
     permissionPolicy: { rules: [{ pattern: "*", level: "allow" }] },
   }).pipe(Layer.provide(BunServices.layer), Layer.orDie)
+  const held = options.holdExecutionFollows
+  const backendLayer =
+    held === undefined
+      ? relayBackendLayer
+      : Layer.effect(
+          ExecutionBackend.Service,
+          Effect.gen(function* () {
+            const backend = yield* ExecutionBackend.Service
+            const follow = backend.follow
+            return ExecutionBackend.Service.of({
+              ...backend,
+              ...(follow === undefined
+                ? {}
+                : {
+                    follow: (turnId, afterCursor, onEvent, reference, eventScope) =>
+                      Deferred.await(held).pipe(
+                        Effect.andThen(
+                          Effect.suspend(() => follow(turnId, afterCursor, onEvent, reference, eventScope)),
+                        ),
+                      ),
+                  }),
+            })
+          }),
+        ).pipe(Layer.provide(relayBackendLayer))
   const setup = yield* Effect.acquireRelease(
     Effect.promise(() =>
       createTestRenderer({ width: options.width ?? 100, height: options.height ?? 30, exitOnCtrlC: false }),
@@ -169,6 +235,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const operationLayer = Operation.productLayer({
     repositoryLayer,
     turnRepositoryLayer,
+    transcriptRepositoryLayer,
     usageRepositoryLayer,
     backendLayer,
     toolRuntimeLayer,

@@ -18,6 +18,18 @@ import { EntrySchema, PageCursor, type Entry } from "./transcript-page"
 export { EntrySchema, PageCursor }
 export type { Entry }
 
+export const ConsumedExecution = Schema.Struct({
+  cursor: Schema.String,
+  sequence: Schema.Finite,
+  status: Schema.optionalKey(Schema.Literals(["completed", "failed", "cancelled"])),
+})
+export type ConsumedExecution = typeof ConsumedExecution.Type
+
+export const ConsumedExecutions = Schema.Record(Schema.String, ConsumedExecution)
+export type ConsumedExecutions = typeof ConsumedExecutions.Type
+
+export const legacyProjectionVersion = 1
+
 export interface Projection {
   readonly turn: Turn
   readonly units: ReadonlyArray<Transcript.Unit>
@@ -28,24 +40,31 @@ export interface Projection {
   readonly costUsd: number | undefined
   readonly usageCursors: ReadonlyArray<string> | undefined
   readonly pricingVersion: string | undefined
+  readonly consumed: ConsumedExecutions | undefined
   readonly childTreeReconciled: boolean
   readonly projectionGeneration: number
+  readonly projectionVersion: number
 }
 
 export interface ReplaceOptions {
   readonly childTreeReconciled?: boolean
   readonly ifGeneration?: number
+  readonly consumed?: ConsumedExecutions
+  readonly projectionVersion?: number
 }
 
 export interface PageOptions {
   readonly before?: PageCursor | undefined
+  readonly after?: PageCursor | undefined
   readonly limit?: number
 }
 
 export interface Page {
   readonly entries: ReadonlyArray<Entry>
   readonly hasOlder: boolean
+  readonly hasNewer?: boolean
   readonly oldestCursor: PageCursor | undefined
+  readonly newestCursor?: PageCursor | undefined
   readonly threadCostUsd: number
 }
 
@@ -90,9 +109,11 @@ const CheckpointRow = Schema.Struct({
   checkpoint_cursor: Schema.NullOr(Schema.String),
   cost_usd: Schema.NullOr(Schema.Finite),
   usage_cursors_json: Schema.NullOr(Schema.String),
+  consumed_json: Schema.NullOr(Schema.String),
   pricing_version: Schema.NullOr(Schema.String),
   child_tree_reconciled: Schema.Finite,
   projection_generation: Schema.Finite,
+  projection_version: Schema.Finite,
   created_at: Schema.Finite,
   updated_at: Schema.Finite,
 })
@@ -121,6 +142,7 @@ const LineageJson = Schema.fromJsonString(TurnLineage)
 
 const UnitJson = Schema.fromJsonString(Transcript.Unit)
 const UsageCursorsJson = Schema.fromJsonString(Schema.Array(Schema.String))
+const ConsumedJson = Schema.fromJsonString(ConsumedExecutions)
 const PromptPartsJson = Schema.fromJsonString(Schema.Array(PromptPart))
 const ExecutionRouteJson = Schema.fromJsonString(ExecutionRoutePin)
 const ExtensionPinJson = Schema.fromJsonString(ExecutionExtensionPin)
@@ -138,12 +160,26 @@ const cursorFor = (entry: Entry | undefined): PageCursor | undefined =>
         key: entry.unit.key,
       }
 
-const stored = (
-  turn: Turn,
-  projection: Transcript.Projection,
-  childTreeReconciled: boolean = false,
-  projectionGeneration: number = 0,
-): Projection => ({
+interface CheckpointState {
+  readonly childTreeReconciled: boolean
+  readonly projectionGeneration: number
+  readonly projectionVersion: number
+  readonly consumed: ConsumedExecutions | undefined
+}
+
+const checkpointState = (
+  current: Projection | undefined,
+  childTreeReconciled: boolean,
+  projectionGeneration: number,
+  options: ReplaceOptions = {},
+): CheckpointState => ({
+  childTreeReconciled,
+  projectionGeneration,
+  projectionVersion: options.projectionVersion ?? current?.projectionVersion ?? legacyProjectionVersion,
+  consumed: options.consumed ?? current?.consumed,
+})
+
+const stored = (turn: Turn, projection: Transcript.Projection, state: CheckpointState): Projection => ({
   turn: clone(turn),
   units: clone(projection.units),
   revision: projection.revision,
@@ -153,8 +189,10 @@ const stored = (
   costUsd: projection.costUsd,
   usageCursors: projection.usageCursors === undefined ? undefined : clone(projection.usageCursors),
   pricingVersion: projection.pricingVersion,
-  childTreeReconciled,
-  projectionGeneration,
+  consumed: state.consumed === undefined ? undefined : clone(state.consumed),
+  childTreeReconciled: state.childTreeReconciled,
+  projectionGeneration: state.projectionGeneration,
+  projectionVersion: state.projectionVersion,
 })
 
 const source = (projection: Projection): Transcript.Projection => ({
@@ -196,6 +234,14 @@ const before = (entry: Entry, cursor: PageCursor): boolean =>
             (entry.unit.order.part < cursor.part ||
               (entry.unit.order.part === cursor.part && entry.unit.key < cursor.key)))))))
 
+const after = (entry: Entry, cursor: PageCursor): boolean =>
+  !before(entry, cursor) &&
+  (entry.turn.createdAt !== cursor.createdAt ||
+    entry.turn.id !== cursor.turnId ||
+    entry.unit.order.sequence !== cursor.sequence ||
+    entry.unit.order.part !== cursor.part ||
+    entry.unit.key !== cursor.key)
+
 const compareDescending = (left: Entry, right: Entry): number =>
   right.turn.createdAt - left.turn.createdAt ||
   right.turn.id.localeCompare(left.turn.id) ||
@@ -219,8 +265,11 @@ const makeMemory = Effect.gen(function* () {
       const next = stored(
         turn,
         projection,
-        current?.childTreeReconciled === true && !changed,
-        (current?.projectionGeneration ?? 0) + (changed || current === undefined ? 1 : 0),
+        checkpointState(
+          current,
+          current?.childTreeReconciled === true && !changed,
+          (current?.projectionGeneration ?? 0) + (changed || current === undefined ? 1 : 0),
+        ),
       )
       return [clone(next), new Map(entries).set(turn.id, next)]
     })
@@ -235,7 +284,11 @@ const makeMemory = Effect.gen(function* () {
         const childTreeReconciled =
           options.childTreeReconciled ??
           (current?.childTreeReconciled === true && current.revision === projection.revision)
-        const next = stored(turn, projection, childTreeReconciled, (current?.projectionGeneration ?? 0) + 1)
+        const next = stored(
+          turn,
+          projection,
+          checkpointState(current, childTreeReconciled, (current?.projectionGeneration ?? 0) + 1, options),
+        )
         return [clone(next), new Map(entries).set(turn.id, next)]
       })
     }),
@@ -255,12 +308,21 @@ const makeMemory = Effect.gen(function* () {
           })),
         )
         .filter((entry) => options.before === undefined || before(entry, options.before))
+        .filter((entry) => options.after === undefined || after(entry, options.after))
         .toSorted(compareDescending)
-      const entries = descending.slice(0, limit).toReversed().map(clone)
+      const selected = options.after === undefined ? descending.slice(0, limit) : descending.slice(-limit)
+      const entries = selected.toReversed().map(clone)
       const threadCostUsd = [...(yield* Ref.get(state)).values()]
         .filter((projection) => projection.turn.threadId === threadId)
         .reduce((total, projection) => total + (projection.costUsd ?? 0), 0)
-      return { entries, hasOlder: descending.length > limit, oldestCursor: cursorFor(entries[0]), threadCostUsd }
+      return {
+        entries,
+        hasOlder: options.after === undefined ? descending.length > limit : false,
+        hasNewer: options.after !== undefined && descending.length > limit,
+        oldestCursor: cursorFor(entries[0]),
+        newestCursor: cursorFor(entries.at(-1)),
+        threadCostUsd,
+      }
     }),
     globalCostUsd: Ref.get(state).pipe(
       Effect.map((entries) =>
@@ -333,6 +395,10 @@ export const layer = Layer.effect(
         row.usage_cursors_json === null
           ? undefined
           : yield* Schema.decodeUnknownEffect(UsageCursorsJson)(row.usage_cursors_json).pipe(Effect.mapError(error))
+      const consumed =
+        row.consumed_json === null
+          ? undefined
+          : yield* Schema.decodeUnknownEffect(ConsumedJson)(row.consumed_json).pipe(Effect.mapError(error))
       return {
         turn: yield* decodeTurn(row).pipe(Effect.mapError(error)),
         units,
@@ -343,8 +409,10 @@ export const layer = Layer.effect(
         costUsd: row.cost_usd ?? undefined,
         usageCursors,
         pricingVersion: row.pricing_version ?? undefined,
+        consumed,
         childTreeReconciled: row.child_tree_reconciled === 1,
         projectionGeneration: row.projection_generation,
+        projectionVersion: row.projection_version,
       } satisfies Projection
     })
     const storeUnit = Effect.fn("TranscriptRepository.storeUnit")(function* (turn: Turn, unit: Transcript.Unit) {
@@ -358,20 +426,21 @@ export const layer = Layer.effect(
     const storeCheckpoint = Effect.fn("TranscriptRepository.storeCheckpoint")(function* (
       turn: Turn,
       projection: Transcript.Projection,
-      childTreeReconciled: boolean,
-      projectionGeneration: number,
+      state: CheckpointState,
     ) {
       const usageCursors =
         projection.usageCursors === undefined
           ? null
           : yield* Schema.encodeEffect(UsageCursorsJson)(projection.usageCursors)
-      yield* sql`INSERT INTO rika_transcript_checkpoints (turn_id, thread_id, model_phase, revision, oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, pricing_version, child_tree_reconciled, projection_generation, updated_at)
-          VALUES (${turn.id}, ${turn.threadId}, ${projection.modelPhase}, ${projection.revision}, ${projection.oldestCursor ?? null}, ${projection.checkpointCursor ?? null}, ${projection.costUsd ?? null}, ${usageCursors}, ${projection.pricingVersion ?? null}, ${childTreeReconciled ? 1 : 0}, ${projectionGeneration}, ${turn.updatedAt})
+      const consumed = state.consumed === undefined ? null : yield* Schema.encodeEffect(ConsumedJson)(state.consumed)
+      yield* sql`INSERT INTO rika_transcript_checkpoints (turn_id, thread_id, model_phase, revision, oldest_cursor, checkpoint_cursor, cost_usd, usage_cursors_json, consumed_json, pricing_version, child_tree_reconciled, projection_generation, projection_version, updated_at)
+          VALUES (${turn.id}, ${turn.threadId}, ${projection.modelPhase}, ${projection.revision}, ${projection.oldestCursor ?? null}, ${projection.checkpointCursor ?? null}, ${projection.costUsd ?? null}, ${usageCursors}, ${consumed}, ${projection.pricingVersion ?? null}, ${state.childTreeReconciled ? 1 : 0}, ${state.projectionGeneration}, ${state.projectionVersion}, ${turn.updatedAt})
           ON CONFLICT(turn_id) DO UPDATE SET thread_id = excluded.thread_id, model_phase = excluded.model_phase,
             revision = excluded.revision, oldest_cursor = excluded.oldest_cursor, checkpoint_cursor = excluded.checkpoint_cursor,
             cost_usd = excluded.cost_usd, usage_cursors_json = excluded.usage_cursors_json,
+            consumed_json = excluded.consumed_json,
             pricing_version = excluded.pricing_version, child_tree_reconciled = excluded.child_tree_reconciled,
-            projection_generation = excluded.projection_generation,
+            projection_generation = excluded.projection_generation, projection_version = excluded.projection_version,
             updated_at = excluded.updated_at`
     }, Effect.mapError(error))
     const storedResult = Effect.fn("TranscriptRepository.storedResult")(function* (turnId: TurnId) {
@@ -382,17 +451,21 @@ export const layer = Layer.effect(
     const write = Effect.fn("TranscriptRepository.write")(function* (
       turn: Turn,
       projection: Transcript.Projection,
-      childTreeReconciled?: boolean,
-      ifGeneration?: number,
+      options: ReplaceOptions,
     ) {
       const current = yield* get(turn.id)
-      if (!matchesGeneration(current, ifGeneration)) return current!
+      if (!matchesGeneration(current, options.ifGeneration)) return current!
       if (current !== undefined && current.revision > projection.revision) return current
       const reconciled =
-        childTreeReconciled ?? (current?.childTreeReconciled === true && current.revision === projection.revision)
+        options.childTreeReconciled ??
+        (current?.childTreeReconciled === true && current.revision === projection.revision)
       yield* sql`DELETE FROM rika_transcript_units WHERE turn_id = ${turn.id}`.pipe(Effect.mapError(error))
       yield* Effect.forEach(projection.units, (unit) => storeUnit(turn, unit), { discard: true })
-      yield* storeCheckpoint(turn, projection, reconciled, (current?.projectionGeneration ?? 0) + 1)
+      yield* storeCheckpoint(
+        turn,
+        projection,
+        checkpointState(current, reconciled, (current?.projectionGeneration ?? 0) + 1, options),
+      )
       return yield* storedResult(turn.id)
     })
     const appendAll = Effect.fn("TranscriptRepository.appendAll")(function* (
@@ -415,8 +488,11 @@ export const layer = Layer.effect(
             yield* storeCheckpoint(
               turn,
               projection,
-              current?.childTreeReconciled === true && !changed,
-              (current?.projectionGeneration ?? 0) + (changed || current === undefined ? 1 : 0),
+              checkpointState(
+                current,
+                current?.childTreeReconciled === true && !changed,
+                (current?.projectionGeneration ?? 0) + (changed || current === undefined ? 1 : 0),
+              ),
             )
             return yield* storedResult(turn.id)
           }),
@@ -426,17 +502,15 @@ export const layer = Layer.effect(
     return Service.of({
       get,
       replace: Effect.fn("TranscriptRepository.replace")((turn, projection, options = {}) =>
-        sql
-          .withTransaction(write(turn, projection, options.childTreeReconciled, options.ifGeneration))
-          .pipe(Effect.mapError(error)),
+        sql.withTransaction(write(turn, projection, options)).pipe(Effect.mapError(error)),
       ),
       append: Effect.fn("TranscriptRepository.append")((turn, event) => appendAll(turn, [event])),
       appendAll,
       page: Effect.fn("TranscriptRepository.page")(function* (threadId, options = {}) {
         const limit = pageSize(options.limit)
-        const rows =
-          options.before === undefined
-            ? yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
+        let rows
+        if (options.before === undefined && options.after === undefined) {
+          rows = yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
                   t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.stop_intent, t.created_at, t.updated_at
                 FROM rika_transcript_units u
@@ -445,7 +519,8 @@ export const layer = Layer.effect(
                 WHERE u.thread_id = ${threadId} AND t.status <> 'queued'
                 ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
                 LIMIT ${limit + 1}`.pipe(Effect.mapError(error))
-            : yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
+        } else if (options.before !== undefined) {
+          rows = yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
                   t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
                   t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.stop_intent, t.created_at, t.updated_at
                 FROM rika_transcript_units u
@@ -456,6 +531,19 @@ export const layer = Layer.effect(
                   (${options.before.createdAt}, ${options.before.turnId}, ${options.before.sequence}, ${options.before.part}, ${options.before.key})
                 ORDER BY u.created_at DESC, u.turn_id DESC, u.unit_sequence DESC, u.unit_part DESC, u.unit_key DESC
                 LIMIT ${limit + 1}`.pipe(Effect.mapError(error))
+        } else {
+          rows = yield* sql`SELECT u.unit_json, u.turn_id, c.revision AS projection_revision, c.model_phase, c.cost_usd,
+                  t.prompt, t.prompt_parts_json, t.execution_route_json, t.last_cursor,
+                  t.extension_pin_json, t.review_fan_out_id, t.author_json, t.lineage_json, t.status, t.stop_intent, t.created_at, t.updated_at
+                FROM rika_transcript_units u
+                JOIN rika_transcript_checkpoints c ON c.turn_id = u.turn_id
+                JOIN rika_turns t ON t.id = u.turn_id
+                WHERE u.thread_id = ${threadId} AND t.status <> 'queued' AND
+                  (u.created_at, u.turn_id, u.unit_sequence, u.unit_part, u.unit_key) >
+                  (${options.after!.createdAt}, ${options.after!.turnId}, ${options.after!.sequence}, ${options.after!.part}, ${options.after!.key})
+                ORDER BY u.created_at ASC, u.turn_id ASC, u.unit_sequence ASC, u.unit_part ASC, u.unit_key ASC
+                LIMIT ${limit + 1}`.pipe(Effect.mapError(error))
+        }
         const entries = yield* Effect.all(
           rows.slice(0, limit).map((value) =>
             Schema.decodeUnknownEffect(UnitRow)(value).pipe(
@@ -502,7 +590,7 @@ export const layer = Layer.effect(
             ),
           ),
         )
-        const chronological = entries.toReversed()
+        const chronological = options.after === undefined ? entries.toReversed() : entries
         const totals = yield* sql`SELECT COALESCE(SUM(cost_usd), 0) AS thread_cost_usd
           FROM rika_transcript_checkpoints
           WHERE thread_id = ${threadId}`.pipe(Effect.mapError(error))
@@ -511,8 +599,10 @@ export const layer = Layer.effect(
         ).pipe(Effect.mapError(error))
         return {
           entries: chronological,
-          hasOlder: rows.length > limit,
+          hasOlder: options.after === undefined && rows.length > limit,
+          hasNewer: options.after !== undefined && rows.length > limit,
           oldestCursor: cursorFor(chronological[0]),
+          newestCursor: cursorFor(chronological.at(-1)),
           threadCostUsd: total.thread_cost_usd,
         }
       }),

@@ -50,7 +50,12 @@ const buildArchive = Effect.fn("ReleaseUpdateProc.buildArchive")(function* (opti
     yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-performance"), `performance ${latest}`, {
       mode: 0o755,
     })
-    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-runtime"), `runtime ${latest}`, { mode: 0o755 })
+    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-interactive"), `interactive ${latest}`, {
+      mode: 0o755,
+    })
+    yield* fileSystem.writeFileString(path.join(stage, "bin", ".rika-resident"), `resident ${latest}`, {
+      mode: 0o755,
+    })
   }
   const archive = path.join(options.directory, archiveFile)
   const exitCode = yield* spawner.exitCode(
@@ -75,7 +80,12 @@ const installed = Effect.fn("ReleaseUpdateProc.installed")(function* (prefix: st
   yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-performance"), "performance 0.0.3", {
     mode: 0o755,
   })
-  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-runtime"), "runtime 0.0.3", { mode: 0o755 })
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-interactive"), "interactive 0.0.3", {
+    mode: 0o755,
+  })
+  yield* fileSystem.writeFileString(path.join(installRoot, "bin", ".rika-resident"), "resident 0.0.3", {
+    mode: 0o755,
+  })
   const command = path.join(binDirectory, "rika")
   yield* fileSystem.symlink(path.join(installRoot, "bin", "rika"), command)
   return { home, installRoot, command, binary: path.join(installRoot, "bin", "rika") }
@@ -135,8 +145,11 @@ it.effect("replaces a verified install in one rename and keeps the command on PA
       expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-performance"))).toBe(
         `performance ${latest}`,
       )
-      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-runtime"))).toBe(
-        `runtime ${latest}`,
+      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-interactive"))).toBe(
+        `interactive ${latest}`,
+      )
+      expect(yield* fileSystem.readFileString(path.join(install.installRoot, "bin", ".rika-resident"))).toBe(
+        `resident ${latest}`,
       )
       expect(yield* fileSystem.readFileString(install.command)).toBe(`rika ${latest}`)
       expect(yield* fileSystem.readDirectory(path.dirname(install.installRoot))).toEqual(["current"])

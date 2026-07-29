@@ -1,7 +1,6 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer } from "effect"
-import { TestClock } from "effect/testing"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as Database from "../src/product-database"
 import * as UsageRepository from "../src/usage-repository"
@@ -22,6 +21,7 @@ const exercise = (repository: UsageRepository.Interface) =>
   Effect.gen(function* () {
     expect(yield* repository.readThread("missing")).toEqual({
       turns: 0,
+      revision: 0,
       pricedAttempts: 0,
       unpricedAttempts: 0,
       countedAttempts: 0,
@@ -41,10 +41,13 @@ const exercise = (repository: UsageRepository.Interface) =>
     yield* repository.admit("turn-b", "thread-a")
     expect(yield* repository.readThread("thread-a")).toMatchObject({
       turns: 2,
+      revision: 1,
+      costNanoUsd: 1_250_000_000,
+      tokens: 30,
+      activeMillis: 450,
       pricedAttempts: 1,
       sourceComplete: false,
     })
-    expect((yield* repository.readThread("thread-a")).costNanoUsd).toBeUndefined()
     expect(
       yield* repository.commitFold("turn-b", 0, "fold-b", { ...complete, costNanoUsd: 750_000_000 }),
     ).toMatchObject({
@@ -52,25 +55,16 @@ const exercise = (repository: UsageRepository.Interface) =>
     })
     expect(yield* repository.readGlobal).toMatchObject({
       turns: 2,
+      revision: 2,
       costNanoUsd: 2_000_000_000,
       tokens: 60,
       activeMillis: 450,
       sourceComplete: true,
     })
-    expect(yield* repository.claimRepair("turn-a", "owner-a")).toEqual({ _tag: "Claimed" })
-    expect(yield* repository.claimRepair("turn-a", "owner-b")).toEqual({ _tag: "Busy" })
-    expect(yield* repository.checkpointRepair("turn-a", "owner-b", "bad")).toBe(false)
-    expect(yield* repository.checkpointRepair("turn-a", "owner-a", "cursor-1")).toBe(true)
-    expect(yield* repository.claimRepair("turn-a", "owner-a")).toEqual({
-      _tag: "Claimed",
-      checkpoint: "cursor-1",
-    })
-    expect(yield* repository.finishRepair("turn-a", "owner-b")).toBe(false)
-    expect(yield* repository.finishRepair("turn-a", "owner-a")).toBe(true)
   })
 
 it.layer(UsageRepository.memoryLayer)("memory usage repository", (test) => {
-  test.effect("preserves persisted usage, aggregate partials, CAS, and repair ownership", () =>
+  test.effect("preserves persisted usage, aggregate partials, and compare-and-swap", () =>
     Effect.gen(function* () {
       yield* exercise(yield* UsageRepository.Service)
     }),
@@ -98,20 +92,23 @@ it.layer(UsageRepository.memoryLayer)("memory usage repository", (test) => {
     }),
   )
 
-  test.effect("fences a repair owner after its lease is taken over", () =>
+  test.effect("sums the active time it has and reports none only when every Turn lacks it", () =>
     Effect.gen(function* () {
       const repository = yield* UsageRepository.Service
-      yield* repository.admit("turn", "thread")
-      expect(yield* repository.claimRepair("turn", "owner-a")).toEqual({ _tag: "Claimed" })
-      yield* TestClock.adjust("6 minutes")
-      expect(yield* repository.checkpointRepair("turn", "owner-a", "expired")).toBe(false)
-      expect(yield* repository.commitRepairFold("turn", "owner-a", 0, "expired", complete)).toEqual({
-        _tag: "Conflict",
+      yield* repository.admit("partial-a", "partial-thread")
+      yield* repository.admit("partial-b", "partial-thread")
+      expect((yield* repository.readThread("partial-thread")).activeMillis).toBeUndefined()
+      yield* repository.commitFold("partial-a", 0, "fold-a", {
+        ...complete,
+        activeIntervals: [{ start: 100, end: 550 }],
       })
-      expect(yield* repository.claimRepair("turn", "owner-b")).toEqual({ _tag: "Claimed" })
-      expect(yield* repository.commitRepairFold("turn", "owner-a", 0, "stale", complete)).toEqual({
-        _tag: "Conflict",
+      expect(yield* repository.readThread("partial-thread")).toMatchObject({ activeMillis: 450 })
+      yield* repository.commitFold("partial-b", 0, "fold-b", {
+        ...complete,
+        activeMillis: 100,
+        activeIntervals: [{ start: 900, end: 1_000 }],
       })
+      expect(yield* repository.readThread("partial-thread")).toMatchObject({ activeMillis: 550 })
     }),
   )
 })
@@ -137,7 +134,6 @@ it.layer(BunServices.layer)("SQLite usage repository", (test) => {
           yield* exercise(Context.get(usageContext, UsageRepository.Service))
           yield* sql`DELETE FROM rika_turns WHERE id = 'turn-a'`
           expect(yield* sql`SELECT turn_id FROM rika_turn_usage WHERE turn_id = 'turn-a'`).toEqual([])
-          expect(yield* sql`SELECT turn_id FROM rika_usage_repairs WHERE turn_id = 'turn-a'`).toEqual([])
           yield* sql`UPDATE rika_turn_usage SET projection_version = 2 WHERE turn_id = 'turn-b'`
           expect((yield* Effect.exit(Context.get(usageContext, UsageRepository.Service).readGlobal))._tag).toBe(
             "Failure",

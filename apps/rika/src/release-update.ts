@@ -118,7 +118,8 @@ const failWith = (failure: UpdateFailure, message: string) => ReleaseUpdateError
 export interface InstallLayout {
   readonly installRoot: string
   readonly binary: string
-  readonly runtime: string
+  readonly interactive: string
+  readonly resident: string
 }
 
 export type UpdateOutcome =
@@ -186,15 +187,19 @@ const installLayout = Effect.fn("ReleaseUpdate.installLayout")(function* (execut
   const layout: InstallLayout = {
     installRoot,
     binary: path.join(installRoot, "bin", "rika"),
-    runtime: path.join(installRoot, "bin", ".rika-runtime"),
+    interactive: path.join(installRoot, "bin", ".rika-interactive"),
+    resident: path.join(installRoot, "bin", ".rika-resident"),
   }
-  const present = yield* Effect.all([fileSystem.exists(layout.binary), fileSystem.exists(layout.runtime)], {
-    concurrency: 2,
-  }).pipe(Effect.mapError(platformFailure("inspect the current install")))
+  const present = yield* Effect.all(
+    [fileSystem.exists(layout.binary), fileSystem.exists(layout.interactive), fileSystem.exists(layout.resident)],
+    {
+      concurrency: 2,
+    },
+  ).pipe(Effect.mapError(platformFailure("inspect the current install")))
   if (present.includes(false))
     return yield* failWith(
       "unmanaged-install",
-      `${installRoot} does not contain bin/rika and bin/.rika-runtime, so it is not a released install. Install a release with: curl -fsSL https://raw.githubusercontent.com/${releaseRepository}/main/install.sh | sh`,
+      `${installRoot} does not contain the released Rika executables, so it is not a released install. Install a release with: curl -fsSL https://raw.githubusercontent.com/${releaseRepository}/main/install.sh | sh`,
     )
   return layout
 })
@@ -302,14 +307,15 @@ const publishInstall = Effect.fn("ReleaseUpdate.publishInstall")(function* (opti
   const payloadPresent = yield* Effect.all(
     [
       fileSystem.exists(path.join(payload, "bin", "rika")),
-      fileSystem.exists(path.join(payload, "bin", ".rika-runtime")),
+      fileSystem.exists(path.join(payload, "bin", ".rika-interactive")),
+      fileSystem.exists(path.join(payload, "bin", ".rika-resident")),
     ],
     { concurrency: 2 },
   ).pipe(Effect.mapError(platformFailure(`inspect ${options.archiveFile}`)))
   if (payloadPresent.includes(false))
     return yield* failWith(
       "install-failed",
-      `${options.archiveFile} does not contain bin/rika and bin/.rika-runtime; the install was left unchanged.`,
+      `${options.archiveFile} does not contain the released Rika executables; the install was left unchanged.`,
     )
   const previous = path.join(parent, `${path.basename(options.layout.installRoot)}.previous-${process.pid}`)
   const installExists = yield* fileSystem

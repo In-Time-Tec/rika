@@ -228,6 +228,15 @@ export const isDeliveredDelegationOutput = (output: string | undefined): boolean
   return stringField(decoded, "_tag") === "Report" && stringField(decoded, "status") === "completed"
 }
 
+const succeededDelegationTags = new Set(["Report", "NoReport"])
+
+export const isSucceededDelegationOutput = (output: string | undefined): boolean => {
+  const decoded = decodedOutput(output)
+  if (decoded === undefined) return false
+  const tag = stringField(decoded, "_tag")
+  return tag !== undefined && succeededDelegationTags.has(tag) && stringField(decoded, "status") === "completed"
+}
+
 const noReportText = (decoded: object): string | undefined => {
   if (stringField(decoded, "_tag") !== "NoReport") return undefined
   const reason = stringField(decoded, "reason") ?? agentEmptyFallback

@@ -4,6 +4,7 @@ import {
   type PerformancePhase,
 } from "@rika/tui/performance"
 import { DateTime, Effect } from "effect"
+import { observeProcesses, type ProcessObservation } from "./performance-platform"
 
 const targetPasses = (target: NonNullable<PerformanceMetric["target"]>, value: number): boolean => {
   if (target.operator === "lte") return value <= target.value
@@ -31,6 +32,13 @@ const unsupported = (id: string, unit: PerformanceMetric["unit"], reason: string
 
 export const performanceEvaluation = Effect.gen(function* () {
   const generatedAt = yield* DateTime.now
+  const processes: ProcessObservation = yield* observeProcesses().pipe(
+    Effect.orElseSucceed(() => ({
+      roles: [],
+      executableBytes: { launcher: 0, interactive: 0, resident: 0 },
+      unsupportedReason: "The platform process observer failed before it could collect reliable evidence.",
+    })),
+  )
   const rss = new Map<PerformancePhase, number>()
   const heap = new Map<PerformancePhase, number>()
   const observe = (phase: PerformancePhase) => {
@@ -72,16 +80,65 @@ export const performanceEvaluation = Effect.gen(function* () {
     measured("process.heap-after", "mebibytes", heap.get("completed")!),
     measured("evaluation.cpu", "percent", cpuPercent),
     measured("evaluation.duration", "milliseconds", wallMilliseconds),
-    unsupported("process.combined-idle-rss", "mebibytes", "The in-process renderer does not start a resident."),
-    unsupported("process.idle-cpu", "percent", "The deterministic workload is not an idle observation."),
+    ...(["launcher", "interactive", "resident"] as const).map((role) => {
+      const observation = processes.roles.find((candidate) => candidate.role === role)
+      let target = 250
+      if (role === "launcher") target = 75
+      if (role === "interactive") target = 175
+      return observation === undefined
+        ? unsupported(
+            `process.${role}.idle-rss`,
+            "mebibytes",
+            role === "launcher" && processes.roles.some((candidate) => candidate.role === "interactive")
+              ? "The packaged launcher replaces its process image with the interactive runtime before idle sampling."
+              : (processes.unsupportedReason ?? `${role} was not observed.`),
+          )
+        : measured(`process.${role}.idle-rss`, "mebibytes", observation.rssMebibytes, {
+            operator: "lte",
+            value: target,
+          })
+    }),
+    processes.roles.some((role) => role.role === "interactive") &&
+    processes.roles.some((role) => role.role === "resident")
+      ? measured(
+          "process.combined-idle-rss",
+          "mebibytes",
+          processes.roles.reduce((total, role) => total + role.rssMebibytes, 0),
+          { operator: "lte", value: 350 },
+        )
+      : unsupported(
+          "process.combined-idle-rss",
+          "mebibytes",
+          processes.unsupportedReason ?? "Process roles were incomplete.",
+        ),
+    processes.idleCpuMeanPercent === undefined
+      ? unsupported(
+          "process.idle-cpu.mean",
+          "percent",
+          processes.unsupportedReason ?? "No process samples were available.",
+        )
+      : measured("process.idle-cpu.mean", "percent", processes.idleCpuMeanPercent, { operator: "lte", value: 1 }),
+    processes.idleCpuPeakPercent === undefined
+      ? unsupported(
+          "process.idle-cpu.peak",
+          "percent",
+          processes.unsupportedReason ?? "No process samples were available.",
+        )
+      : measured("process.idle-cpu.peak", "percent", processes.idleCpuPeakPercent, { operator: "lte", value: 3 }),
+    ...(["launcher", "interactive", "resident"] as const).map((role) =>
+      measured(`executable.${role}.file-bytes`, "count", processes.executableBytes[role]),
+    ),
+    processes.startupToRolePresenceMilliseconds === undefined
+      ? unsupported(
+          "process.startup-to-role-presence",
+          "milliseconds",
+          processes.unsupportedReason ?? "No process tree became ready.",
+        )
+      : measured("process.startup-to-role-presence", "milliseconds", processes.startupToRolePresenceMilliseconds),
     unsupported("process.active-navigation-cpu", "percent", "The deterministic workload runs without user pacing."),
     unsupported("tui.real-terminal-frame", "milliseconds", "A real PTY evidence capture was not supplied."),
     unsupported("resident.restart-recovery", "milliseconds", "The in-process renderer does not start a resident."),
-    unsupported(
-      "process.cold-launch.p95",
-      "milliseconds",
-      "The deterministic renderer does not launch a release process tree.",
-    ),
+    unsupported("process.cold-launch.p95", "milliseconds", "One isolated launch cannot honestly establish a p95."),
     unsupported(
       "process.warm-launch.p95",
       "milliseconds",
@@ -133,7 +190,16 @@ export const performanceEvaluation = Effect.gen(function* () {
   return {
     schemaVersion: 1,
     generatedAt: DateTime.formatIso(generatedAt),
-    evidence: tui.evidence,
+    evidence: {
+      renderer: tui.evidence,
+      processRoles: processes.roles.map(({ role, pid, executable }) => ({ role, pid, executable })),
+      processSamples: processes.sampleCount,
+      terminal: {
+        columns: processes.terminalColumns,
+        rows: processes.terminalRows,
+      },
+      isolation: "Effect-scoped temporary HOME and databases",
+    },
     workload: tui.workload,
     process: { platform: process.platform, architecture: process.arch, bun: Bun.version },
     metrics,

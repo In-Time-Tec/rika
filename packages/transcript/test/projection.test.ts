@@ -1465,6 +1465,34 @@ describe("Transcript projection", () => {
     expect(reordered.usageCursors).toEqual(["usage-5", "usage-2"])
   })
 
+  it("folds each usage cursor once whether the fold is batched, incremental, or branched", () => {
+    const cursors = ["usage-1", "usage-2", "usage-3"]
+    const events = cursors.flatMap((cursor, index) => [usage(cursor, index + 1), usage(cursor, index + 1)])
+    const batched = project("turn-a", "prompt", events)
+    const incremental = events.reduce((projection, event) => applyEvent(projection, event), empty("turn-a", "prompt"))
+    const shared = project("turn-a", "prompt", [usage("usage-1", 1)])
+    const left = applyEvent(shared, usage("usage-2", 2))
+    const right = applyEvent(shared, usage("usage-3", 3))
+    const rejoined = applyEvent(left, usage("usage-3", 3))
+    const merged = applyEvent(right, usage("usage-2", 2))
+    const detached = applyEvent({ ...shared, usageCursors: [...(shared.usageCursors ?? [])] }, usage("usage-1", 1))
+
+    expect(batched.usageCursors).toEqual(cursors)
+    expect(incremental.usageCursors).toEqual(cursors)
+    expect(batched.costUsd).toBeCloseTo(3.75, 10)
+    expect(incremental.costUsd).toBeCloseTo(3.75, 10)
+    expect(shared.usageCursors).toEqual(["usage-1"])
+    expect(left.usageCursors).toEqual(["usage-1", "usage-2"])
+    expect(right.usageCursors).toEqual(["usage-1", "usage-3"])
+    expect(right.costUsd).toBeCloseTo(2.5, 10)
+    expect(rejoined.usageCursors).toEqual(["usage-1", "usage-2", "usage-3"])
+    expect(rejoined.costUsd).toBeCloseTo(3.75, 10)
+    expect(merged.usageCursors).toEqual(["usage-1", "usage-3", "usage-2"])
+    expect(merged.costUsd).toBeCloseTo(3.75, 10)
+    expect(detached.usageCursors).toEqual(["usage-1"])
+    expect(detached.costUsd).toBeCloseTo(1.25, 10)
+  })
+
   it("settles running tool and child blocks at every execution terminal boundary", () => {
     const base: ReadonlyArray<SourceEvent> = [
       {

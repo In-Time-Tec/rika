@@ -11,9 +11,11 @@ type TranscriptEvent = Extract<
   | { readonly _tag: "SelectionLoaded" }
   | { readonly _tag: "TranscriptReplaced" }
   | { readonly _tag: "TranscriptPagePrepended" }
+  | { readonly _tag: "TranscriptPageAppended" }
   | { readonly _tag: "TranscriptPatched" }
   | { readonly _tag: "TranscriptResyncRequired" }
   | { readonly _tag: "ThreadUsageUpdated" }
+  | { readonly _tag: "ThreadRefolding" }
 >
 
 type QueueEvent = Extract<
@@ -30,7 +32,54 @@ export interface State {
   readonly liveProjections: ReadonlyMap<string, Transcript.Projection>
   readonly transientEventCursors: ReadonlySet<string>
   readonly threadCostUsd?: number
+  readonly usageRevision?: number
   readonly attachedChildRevisions?: ReadonlyMap<string, number>
+  readonly hasOlder?: boolean
+  readonly hasNewer?: boolean
+  readonly oldestCursor?: TranscriptRepository.PageCursor | undefined
+  readonly newestCursor?: TranscriptRepository.PageCursor | undefined
+}
+
+export const transcriptWindowEntryBudget = 400
+export const transcriptWindowByteBudget = 4 * 1024 * 1024
+
+const entryBytes = (entry: TranscriptRepository.Entry): number =>
+  new TextEncoder().encode(JSON.stringify(entry)).byteLength
+const cursorForEntry = (entry: TranscriptRepository.Entry | undefined): TranscriptRepository.PageCursor | undefined =>
+  entry === undefined
+    ? undefined
+    : {
+        createdAt: entry.turn.createdAt,
+        turnId: entry.turn.id,
+        sequence: entry.unit.order.sequence,
+        part: entry.unit.order.part,
+        key: entry.unit.key,
+      }
+
+const sameCursor = (
+  left: TranscriptRepository.PageCursor | undefined,
+  right: TranscriptRepository.PageCursor | undefined,
+) =>
+  left?.createdAt === right?.createdAt &&
+  left?.turnId === right?.turnId &&
+  left?.sequence === right?.sequence &&
+  left?.part === right?.part &&
+  left?.key === right?.key
+
+const boundWindow = (
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  edge: "oldest" | "newest",
+): { readonly entries: ReadonlyArray<TranscriptRepository.Entry>; readonly evicted: boolean } => {
+  const retained = [...entries]
+  let bytes = retained.reduce((total, entry) => total + entryBytes(entry), 0)
+  let evicted = false
+  while (retained.length > transcriptWindowEntryBudget || bytes > transcriptWindowByteBudget) {
+    const index = edge === "oldest" ? 0 : retained.length - 1
+    bytes -= entryBytes(retained[index]!)
+    retained.splice(index, 1)
+    evicted = true
+  }
+  return { entries: retained, evicted }
 }
 
 export interface Update {
@@ -176,6 +225,32 @@ const project = (
   return displayCostUsd === undefined ? withoutCost : { ...withoutCost, costUsd: displayCostUsd }
 }
 
+const projectionEntries = (
+  turn: Turn.Turn,
+  projection: Transcript.Projection,
+): ReadonlyArray<TranscriptRepository.Entry> =>
+  projection.units.map((unit) => ({
+    turn,
+    unit,
+    projectionRevision: projection.revision,
+    projectionModelPhase: projection.modelPhase,
+    ...(projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd }),
+  }))
+
+const displayedEntries = (
+  entries: ReadonlyArray<TranscriptRepository.Entry>,
+  replayTurns: ReadonlyMap<string, Turn.Turn>,
+  liveProjections: ReadonlyMap<string, Transcript.Projection>,
+  activeTurnId: string | undefined,
+) => {
+  if (activeTurnId === undefined) return entries
+  const turn = replayTurns.get(activeTurnId)
+  const projection = liveProjections.get(activeTurnId)
+  return turn === undefined || projection === undefined
+    ? entries
+    : normalizeEntries([...entries, ...projectionEntries(turn, projection)])
+}
+
 const reconcileTranscriptBlocks = (model: ViewState.Model): ViewState.Model => {
   const blocks: Array<ViewState.TranscriptBlock> = []
   const items: Array<ViewState.TranscriptItem> = []
@@ -244,12 +319,6 @@ const projectionFromEntries = (
   turnId: string,
   prompt: string,
 ): Transcript.Projection => projections(entries).get(turnId) ?? Transcript.empty(turnId, prompt)
-
-const unownedProjections = (
-  liveProjections: ReadonlyMap<string, Transcript.Projection>,
-  replayTurns: ReadonlyMap<string, Turn.Turn>,
-): ReadonlyMap<string, Transcript.Projection> =>
-  new Map([...liveProjections].filter(([turnId]) => !replayTurns.has(turnId)))
 
 const sourceText = (event: Transcript.SourceEvent): string => {
   if (typeof event.text === "string") return event.text
@@ -322,14 +391,29 @@ const normalizeEntries = (
 }
 
 const updateState = (state: State, event: TranscriptEvent): Update => {
+  if (event._tag === "ThreadRefolding")
+    return {
+      state: {
+        ...state,
+        model: ViewState.update(state.model, {
+          _tag: "ThreadRefolding",
+          threadId: String(event.threadId),
+          refolding: event.refolding,
+        }),
+      },
+      preserveAnchor: false,
+    }
   if (event._tag === "ThreadUsageUpdated") {
     if (event.selectionEpoch !== state.selectionEpoch || event.threadId !== state.model.currentThreadId)
+      return { state, preserveAnchor: false }
+    if (state.usageRevision !== undefined && event.revision < state.usageRevision)
       return { state, preserveAnchor: false }
     const threadCostUsd = event.cost._tag === "Available" ? event.cost.usd : state.threadCostUsd
     const { costUsd: _, ...withoutCost } = state.model
     return {
       state: {
         ...state,
+        usageRevision: event.revision,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         model: {
           ...withoutCost,
@@ -394,8 +478,29 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       threadPreview: ViewState.idle,
     })
     const selectedCostUsd = event.threadCostUsd ?? (sameSelection ? state.threadCostUsd : undefined)
-    const selected = normalizeEntries([...entries, ...activeSeedEntries(activeTurn, entries)])
-    const projected = project(model, selected, selectedCostUsd)
+    const activeProjection =
+      activeTurn === undefined
+        ? undefined
+        : projectionFromEntries(
+            normalizeEntries([...entries, ...activeSeedEntries(activeTurn, entries)]),
+            activeTurn.id,
+            activeTurn.prompt,
+          )
+    const history = activeTurn === undefined ? entries : entries.filter((entry) => entry.turn.id !== activeTurn.id)
+    const boundedSelection = boundWindow(history, "oldest")
+    const selected = boundedSelection.entries
+    const replayTurns = new Map([
+      ...selected.map((entry) => [entry.turn.id, entry.turn] as const),
+      ...(activeTurn === undefined ? [] : [[activeTurn.id, activeTurn] as const]),
+    ])
+    const liveProjections = new Map(
+      activeTurn === undefined || activeProjection === undefined ? [] : ([[activeTurn.id, activeProjection]] as const),
+    )
+    const projected = project(
+      model,
+      displayedEntries(selected, replayTurns, liveProjections, activeTurn?.id),
+      selectedCostUsd,
+    )
     if (
       state.model.currentThreadId === String(event.thread.id) &&
       projected.items.length === 0 &&
@@ -419,14 +524,20 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       state: {
         selectionEpoch: event.selectionEpoch,
         model: projected,
-        replayTurns: new Map([
-          ...selected.map((entry) => [entry.turn.id, entry.turn] as const),
-          ...(activeTurn === undefined ? [] : [[activeTurn.id, activeTurn] as const]),
-        ]),
+        replayTurns,
         entries: selected,
-        revisions: new Map(selected.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        liveProjections: new Map(),
+        revisions: new Map([
+          ...selected.map((entry) => [entry.turn.id, entry.projectionRevision] as const),
+          ...(activeTurn === undefined || activeProjection === undefined
+            ? []
+            : ([[activeTurn.id, activeProjection.revision]] as const)),
+        ]),
+        liveProjections,
         transientEventCursors: new Set(),
+        hasOlder: event.hasOlder || boundedSelection.evicted,
+        hasNewer: event.hasNewer ?? false,
+        oldestCursor: event.oldestCursor ?? cursorForEntry(selected[0]),
+        newestCursor: event.newestCursor,
         ...(selectedCostUsd === undefined ? {} : { threadCostUsd: selectedCostUsd }),
       },
       preserveAnchor: false,
@@ -435,33 +546,48 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "TranscriptReplaced") {
     if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
       return { state, preserveAnchor: false }
-    const replacement = normalizeEntries(event.entries)
+    const replacement = normalizeEntries(event.entries).filter((entry) => entry.turn.id !== state.model.activeTurnId)
     const replacementTurns = new Set(replacement.map((entry) => entry.turn.id))
     const staleTurns = new Set(
       replacement
         .filter((entry) => entry.projectionRevision < (state.revisions.get(entry.turn.id) ?? -1))
         .map((entry) => entry.turn.id),
     )
-    const entries = normalizeEntries([
-      ...replacement.filter((entry) => !staleTurns.has(entry.turn.id)),
-      ...state.entries.filter((entry) => staleTurns.has(entry.turn.id) || !replacementTurns.has(entry.turn.id)),
-    ])
+    const bounded = boundWindow(
+      normalizeEntries([
+        ...replacement.filter((entry) => !staleTurns.has(entry.turn.id)),
+        ...state.entries.filter((entry) => staleTurns.has(entry.turn.id) || !replacementTurns.has(entry.turn.id)),
+      ]),
+      "oldest",
+    )
+    const entries = bounded.entries
     const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
+    const replayTurns = new Map([
+      ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
+      ...[...state.replayTurns].filter(
+        ([turnId]) => turnId === state.model.activeTurnId || !entries.some((entry) => entry.turn.id === turnId),
+      ),
+    ])
+    const liveProjections = new Map(
+      [...state.liveProjections].filter(([turnId]) => turnId === state.model.activeTurnId || !replayTurns.has(turnId)),
+    )
     return {
       state: {
         ...stateWithoutCost,
-        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, threadCostUsd)),
-        replayTurns: new Map([
-          ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
-          ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
-        ]),
+        model: reconcileTranscriptBlocks(
+          project(
+            cleared(state.model),
+            displayedEntries(entries, replayTurns, liveProjections, state.model.activeTurnId),
+            threadCostUsd,
+          ),
+        ),
+        replayTurns,
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        liveProjections: unownedProjections(
-          state.liveProjections,
-          new Map(entries.map((entry) => [entry.turn.id, entry.turn] as const)),
-        ),
+        liveProjections,
+        hasOlder: state.hasOlder === true || bounded.evicted,
+        oldestCursor: event.oldestCursor ?? cursorForEntry(entries[0]),
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
       },
       preserveAnchor: true,
@@ -470,26 +596,85 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
   if (event._tag === "TranscriptPagePrepended") {
     if (event.selectionEpoch !== state.selectionEpoch) return { state, preserveAnchor: false }
     if (state.model.currentThreadId !== event.threadId) return { state, preserveAnchor: false }
-    const entries = normalizeEntries([...state.entries, ...event.entries])
+    const bounded = boundWindow(
+      normalizeEntries([...state.entries, ...event.entries]).filter(
+        (entry) => entry.turn.id !== state.model.activeTurnId,
+      ),
+      "newest",
+    )
+    const entries = bounded.entries
     const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
     const { threadCostUsd: _threadCostUsd, ...stateWithoutCost } = state
+    const replayTurns = new Map([
+      ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
+      ...[...state.replayTurns].filter(([turnId]) => turnId === state.model.activeTurnId),
+    ])
+    const liveProjections = new Map(
+      [...state.liveProjections].filter(([turnId]) => turnId === state.model.activeTurnId || !replayTurns.has(turnId)),
+    )
     return {
       state: {
         ...stateWithoutCost,
-        model: reconcileTranscriptBlocks(project(cleared(state.model), entries, threadCostUsd)),
-        replayTurns: new Map([
-          ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
-          ...[...state.replayTurns].filter(([turnId]) => !entries.some((entry) => entry.turn.id === turnId)),
-        ]),
+        model: reconcileTranscriptBlocks(
+          project(
+            cleared(state.model),
+            displayedEntries(entries, replayTurns, liveProjections, state.model.activeTurnId),
+            threadCostUsd,
+          ),
+        ),
+        replayTurns,
         entries,
         revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
-        liveProjections: unownedProjections(
-          state.liveProjections,
-          new Map(entries.map((entry) => [entry.turn.id, entry.turn] as const)),
-        ),
+        liveProjections,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+        hasOlder: event.hasOlder,
+        hasNewer: state.hasNewer === true || bounded.evicted,
+        oldestCursor: event.oldestCursor ?? cursorForEntry(entries[0]),
+        newestCursor: bounded.evicted ? cursorForEntry(entries.at(-1)) : state.newestCursor,
       },
       preserveAnchor: true,
+    }
+  }
+  if (event._tag === "TranscriptPageAppended") {
+    if (event.selectionEpoch !== state.selectionEpoch || state.model.currentThreadId !== event.threadId)
+      return { state, preserveAnchor: false }
+    if (!sameCursor(event.requestedAfter, state.newestCursor)) return { state, preserveAnchor: false }
+    const bounded = boundWindow(
+      normalizeEntries([...state.entries, ...event.entries]).filter(
+        (entry) => entry.turn.id !== state.model.activeTurnId,
+      ),
+      "oldest",
+    )
+    const entries = bounded.entries
+    const threadCostUsd = event.threadCostUsd ?? state.threadCostUsd
+    const replayTurns = new Map([
+      ...entries.map((entry) => [entry.turn.id, entry.turn] as const),
+      ...[...state.replayTurns].filter(([turnId]) => turnId === state.model.activeTurnId),
+    ])
+    const liveProjections = new Map(
+      [...state.liveProjections].filter(([turnId]) => turnId === state.model.activeTurnId || !replayTurns.has(turnId)),
+    )
+    return {
+      state: {
+        ...state,
+        model: reconcileTranscriptBlocks(
+          project(
+            cleared(state.model),
+            displayedEntries(entries, replayTurns, liveProjections, state.model.activeTurnId),
+            threadCostUsd,
+          ),
+        ),
+        replayTurns,
+        entries,
+        revisions: new Map(entries.map((entry) => [entry.turn.id, entry.projectionRevision])),
+        liveProjections,
+        hasOlder: state.hasOlder === true || bounded.evicted,
+        hasNewer: event.hasNewer,
+        oldestCursor: cursorForEntry(entries[0]),
+        newestCursor: event.newestCursor ?? cursorForEntry(entries.at(-1)),
+        ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
+      },
+      preserveAnchor: false,
     }
   }
   if (event._tag === "TranscriptPatched") {
@@ -561,7 +746,9 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
         unattached: attached.unattached,
       }
     }
-    const previous = projectionFromEntries(state.entries, event.turnId, turn.prompt)
+    const active = state.model.activeTurnId === event.turnId
+    const previous =
+      state.liveProjections.get(event.turnId) ?? projectionFromEntries(state.entries, event.turnId, turn.prompt)
     const projected = Transcript.applyEvent(previous, event.event)
     const next =
       event.rootTurnId === event.turnId && event.rootTurnCostUsd !== undefined
@@ -571,23 +758,26 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
       event.event.type === "execution.completed" ||
       event.event.type === "execution.failed" ||
       event.event.type === "execution.cancelled"
-    const known = new Map(state.entries.map((entry, index) => [entry.unit.key, index] as const))
-    const entries = [...state.entries]
-    for (const unit of next.units) {
-      const entry: TranscriptRepository.Entry = {
-        turn,
-        unit,
-        projectionRevision: next.revision,
-        projectionModelPhase: next.modelPhase,
-        ...(next.costUsd === undefined ? {} : { projectionCostUsd: next.costUsd }),
+    let entries = state.entries
+    let evicted = false
+    const liveProjections = new Map(state.liveProjections)
+    if (active && !terminal) liveProjections.set(event.turnId, next)
+    else {
+      const known = new Map(state.entries.map((entry, index) => [entry.unit.key, index] as const))
+      const merged = [...state.entries]
+      for (const entry of projectionEntries(turn, next)) {
+        const index = known.get(entry.unit.key)
+        if (index === undefined) {
+          known.set(entry.unit.key, merged.length)
+          merged.push(entry)
+        } else merged[index] = entry
       }
-      const index = known.get(unit.key)
-      if (index === undefined) {
-        known.set(unit.key, entries.length)
-        entries.push(entry)
-      } else entries[index] = entry
+      const bounded = boundWindow(normalizeEntries(merged), "oldest")
+      entries = bounded.entries
+      evicted = bounded.evicted
+      liveProjections.delete(event.turnId)
     }
-    const attachmentProjections = new Map([...projections(entries), ...state.liveProjections])
+    const attachmentProjections = new Map([...projections(entries), ...liveProjections])
     const attached = TranscriptPresenter.attachChildProjections(
       TranscriptPresenter.applyTurnUnits(state.model, next.units),
       state.replayTurns,
@@ -615,8 +805,9 @@ const updateState = (state: State, event: TranscriptEvent): Update => {
             : new Map([...state.replayTurns, [event.turnId, { ...turn, status: terminalStatus }]]),
         entries,
         revisions,
-        liveProjections: state.liveProjections,
+        liveProjections,
         transientEventCursors,
+        hasOlder: state.hasOlder === true || evicted,
         ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
         attachedChildRevisions: attached.attachments,
       },

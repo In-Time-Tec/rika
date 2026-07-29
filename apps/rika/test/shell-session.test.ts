@@ -19,7 +19,7 @@ import {
   refreshThreadsOnSwitcherOpen,
   settleTuiInitialization,
   tuiSignalExitCode,
-} from "../src/main"
+} from "../src/interactive-main"
 
 test("maps TUI signals to numeric process exit codes", () => {
   expect(tuiSignalExitCode("SIGINT")).toBe(130)
@@ -241,6 +241,7 @@ test("drives bypassed recorded and incognito shell commands through Operation an
           event._tag !== "SelectionLoaded" &&
           event._tag !== "TranscriptReplaced" &&
           event._tag !== "TranscriptPagePrepended" &&
+          event._tag !== "TranscriptPageAppended" &&
           event._tag !== "TranscriptPatched" &&
           event._tag !== "TranscriptResyncRequired" &&
           event._tag !== "QueueResyncRequired" &&

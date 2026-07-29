@@ -26,12 +26,10 @@ import {
   Effect,
   Exit,
   Fiber,
-  FiberSet,
   Function,
   Layer,
   PubSub,
   Queue,
-  Random,
   Ref,
   Schema,
   Semaphore,
@@ -42,6 +40,7 @@ import * as ContextMentions from "./context-mentions"
 import * as ConfigOperations from "./config-operations"
 import * as ResolvedContext from "./resolved-context"
 import * as ThreadActivity from "./thread-activity"
+import * as ExecutionIngest from "./execution-ingest"
 import * as InteractiveFeedOverflow from "./interactive-feed-overflow"
 import * as UsageCost from "./usage-cost"
 import * as RootTurnOwner from "./root-turn-owner"
@@ -79,6 +78,8 @@ const executionStartFailureMessage =
   "Rika could not start this message. Run rika diagnostics status if it keeps happening."
 const operationFailureMessage =
   "Rika could not complete that action. Run rika diagnostics status if it keeps happening."
+const ingestFailureMessage =
+  "Rika lost its place in this thread's event history and stopped recording it. Reopen the thread to rebuild it."
 
 const isTerminalStatus = ExecutionStatus.isTerminalStatus
 
@@ -131,6 +132,7 @@ const withSelectionEpoch = (event: InteractiveEvent, selectionEpoch: number): In
     case "SelectionLoaded":
     case "TranscriptReplaced":
     case "TranscriptPagePrepended":
+    case "TranscriptPageAppended":
     case "TranscriptPatched":
     case "TranscriptResyncRequired":
     case "QueueUpdated":
@@ -286,25 +288,15 @@ const boundPartialTranscriptEntries = (
 const sameTurnCursor = (left: TurnRepository.PageCursor | undefined, right: TurnRepository.PageCursor | undefined) =>
   left !== undefined && right !== undefined && encodeJson(left) === encodeJson(right)
 const selectionRepairNodeLimit = 128
-const selectionRepairPageLimit = 32
+const usageCommitWindow = Duration.millis(250)
 const selectionRepairTurnPageLimit = 4
 const selectionRepairTranscriptPageLimit = 8
 const selectionInitialTurnWindow = 12
 const selectionInitialEntryWindow = 400
 const selectionRepairDeferredPrefix = "selection repair deferred:"
-type RepairBudget = { nodes: number; pages: number; bytes: number }
-const makeRepairBudget = (): RepairBudget => ({ nodes: 0, pages: 0, bytes: 0 })
-type RepairCache = {
-  readonly inspections: Map<string, ExecutionBackend.Inspection | undefined>
-  readonly replays: Map<string, ExecutionBackend.Result>
-  readonly eventPages: Map<string, ExecutionBackend.EventPage>
-}
-const makeRepairCache = (): RepairCache => ({
-  inspections: new Map(),
-  replays: new Map(),
-  eventPages: new Map(),
-})
-const selectionRepairDeferred = (reason: "nodes" | "pages" | "bytes") =>
+type RepairBudget = { nodes: number }
+const makeRepairBudget = (): RepairBudget => ({ nodes: 0 })
+const selectionRepairDeferred = (reason: "nodes") =>
   ExecutionBackend.BackendError.make({ message: `${selectionRepairDeferredPrefix}${reason}` })
 const isSelectionRepairDeferred = (error: ExecutionBackend.BackendError) =>
   error.message.startsWith(selectionRepairDeferredPrefix)
@@ -725,44 +717,37 @@ const fanOutTurnStatus = (state: "joining" | "satisfied" | "failed" | "cancelled
 
 const normalizeChildExecutionId = Transcript.executionKey
 
-const threadUsage = (totals: UsageCost.Snapshot, threadId: string): ThreadUsageEvent["cost"] => {
-  const thread = UsageCost.threadTotals(totals, threadId)
-  return { _tag: "Available", usd: thread.costUsd, unpricedAttempts: thread.unpricedAttempts }
-}
-
-const threadUsageTokens = (totals: UsageCost.Snapshot, threadId: string): ThreadUsageEvent["tokens"] => {
-  const thread = UsageCost.threadTotals(totals, threadId)
-  return { _tag: "Available", total: thread.tokens, uncountedAttempts: thread.uncountedAttempts }
-}
-
-const displayActiveTime = (totals: UsageCost.Snapshot, threadId: string) => {
-  const time = UsageCost.activeTime(totals, threadId)
-  return time._tag === "Unavailable"
-    ? time
-    : {
-        _tag: "Available" as const,
-        accumulatedMillis: Duration.toMillis(time.accumulated),
-        ...(time.activeSince === undefined ? {} : { activeSince: time.activeSince }),
-      }
-}
-
 type ThreadUsageEvent = Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>
-type UsageTime = ThreadUsageEvent["time"]
 
-const sameUsageTime = (left: UsageTime | undefined, right: UsageTime | undefined): boolean =>
-  left?._tag === right?._tag &&
-  (left?._tag !== "Available" ||
-    (right?._tag === "Available" &&
-      left.accumulatedMillis === right.accumulatedMillis &&
-      left.activeSince === right.activeSince))
+const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): ThreadUsageEvent => ({
+  _tag: "ThreadUsageUpdated",
+  selectionEpoch: request,
+  threadId,
+  revision: 0,
+  cost: { _tag: "Unavailable" },
+  tokens: { _tag: "Unavailable" },
+  time: { _tag: "Unavailable" },
+})
 
-const repositoryTotals = (value: UsageRepository.Materialized): UsageCost.Totals => ({
-  costUsd: (value.costNanoUsd ?? 0) / 1_000_000_000,
-  pricedAttempts: value.pricedAttempts,
-  unpricedAttempts: value.unpricedAttempts,
-  tokens: value.tokens ?? 0,
-  countedAttempts: value.countedAttempts,
-  uncountedAttempts: value.uncountedAttempts,
+const persistedThreadUsage = (
+  value: UsageRepository.Aggregate,
+): Pick<ThreadUsageEvent, "cost" | "tokens" | "time"> => ({
+  cost:
+    value.costNanoUsd === undefined
+      ? { _tag: "Unavailable" }
+      : { _tag: "Available", usd: value.costNanoUsd / 1_000_000_000, unpricedAttempts: value.unpricedAttempts },
+  tokens:
+    value.tokens === undefined
+      ? { _tag: "Unavailable" }
+      : { _tag: "Available", total: value.tokens, uncountedAttempts: value.uncountedAttempts },
+  time:
+    value.activeMillis === undefined
+      ? { _tag: "Unavailable" }
+      : {
+          _tag: "Available",
+          accumulatedMillis: value.activeMillis,
+          ...(value.activeSince === undefined ? {} : { activeSince: value.activeSince }),
+        },
 })
 
 const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): InteractiveEvent => {
@@ -786,17 +771,6 @@ const transcriptPatch = (turn: Turn.Turn, event: ExecutionBackend.Event): Intera
   }
 }
 
-const sourceProjection = (projection: TranscriptRepository.Projection): Transcript.Projection => ({
-  units: projection.units,
-  revision: projection.revision,
-  modelPhase: projection.modelPhase,
-  ...(projection.oldestCursor === undefined ? {} : { oldestCursor: projection.oldestCursor }),
-  ...(projection.checkpointCursor === undefined ? {} : { checkpointCursor: projection.checkpointCursor }),
-  ...(projection.costUsd === undefined ? {} : { costUsd: projection.costUsd }),
-  ...(projection.usageCursors === undefined ? {} : { usageCursors: projection.usageCursors }),
-  ...(projection.pricingVersion === undefined ? {} : { pricingVersion: projection.pricingVersion }),
-})
-
 export const rootExecutionEvents: {
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event>
   (events: ReadonlyArray<ExecutionBackend.Event>): (turnId: string) => ReadonlyArray<ExecutionBackend.Event>
@@ -805,6 +779,12 @@ export const rootExecutionEvents: {
   (turnId: string, events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
     events.filter((event) => ExecutionId.ownsExecution(turnId, event.executionId)),
 )
+
+const undeliveredEvents = (
+  events: ReadonlyArray<ExecutionBackend.Event>,
+  delivered: ReadonlySet<string>,
+): ReadonlyArray<ExecutionBackend.Event> =>
+  events.filter((event) => !delivered.has(event.cursor)).toSorted((left, right) => left.sequence - right.sequence)
 
 const completeRootExecutionEvents = Effect.fn("Operation.completeRootExecutionEvents")(function* (
   backend: ExecutionBackend.Interface,
@@ -827,205 +807,16 @@ const completeRootExecutionEvents = Effect.fn("Operation.completeRootExecutionEv
   }
 })
 
-const toolForChild = (projection: Transcript.Projection, childExecutionId: string) =>
-  Transcript.childParentMatch(
-    projection.units.flatMap((unit) =>
-      unit.content._tag === "Block" && unit.content.block._tag === "ToolCall"
-        ? [
-            {
-              id: unit.content.block.id,
-              scope: unit.turnId,
-              childId: unit.content.block.childId,
-              family: unit.content.block.presentation.family,
-              tool: unit.content.block,
-            },
-          ]
-        : [],
-    ),
-    childExecutionId,
-  )?.tool
-
-const realChildUnit = (unit: Transcript.Unit): boolean =>
-  unit.content._tag === "Block" || (unit.content._tag === "Entry" && unit.content.text.length > 0)
-
-const storedChildUnits = (projection: Transcript.Projection): ReadonlyMap<string, ReadonlyArray<Transcript.Unit>> => {
-  const groups = new Map<string, Array<Transcript.Unit>>()
-  for (const unit of projection.units) {
-    if (unit.parentId === undefined) continue
-    const key = normalizeChildExecutionId(unit.turnId)
-    const group = groups.get(key)
-    if (group === undefined) groups.set(key, [unit])
-    else group.push(unit)
-  }
-  return groups
-}
-
-const recordedChildIds = (projection: Transcript.Projection): ReadonlySet<string> => {
-  const ids = new Set<string>()
-  for (const unit of projection.units) {
-    if (unit.parentId !== undefined || unit.content._tag !== "Block") continue
-    const block = unit.content.block
-    if (block._tag === "ToolCall" && block.childId !== undefined) ids.add(normalizeChildExecutionId(block.childId))
-    else if (block._tag === "ChildAgent") ids.add(normalizeChildExecutionId(block.id))
-  }
-  return ids
-}
-
-const childIdsFromRelayEvent = (event: ExecutionBackend.Event): ReadonlyArray<string> => {
-  const ids = new Set<string>()
-  const addAliases = (value: Readonly<Record<string, unknown>> | undefined) => {
-    if (value === undefined) return
-    for (const alias of ["child_execution_id", "child_run_id", "childId", "child_id"] as const) {
-      const id = value[alias]
-      if (typeof id === "string" && id.length > 0) ids.add(id)
-    }
-  }
-  if (event.childExecutionId !== undefined && event.childExecutionId.length > 0) ids.add(event.childExecutionId)
-  addAliases(event.data)
-  const member = event.data?.member
-  if (member !== null && typeof member === "object") addAliases(member as Readonly<Record<string, unknown>>)
-  if (event.type === "child_fan_out.created" && Array.isArray(event.data?.children))
-    for (const child of event.data.children)
-      if (child !== null && typeof child === "object") addAliases(child as Readonly<Record<string, unknown>>)
-  return [...ids]
-}
-
-const childIdsFromRelayEvents = (events: ReadonlyArray<ExecutionBackend.Event>): ReadonlySet<string> =>
-  new Set(events.flatMap(childIdsFromRelayEvent).map(normalizeChildExecutionId))
-
-const hasChildrenAwaitingBackfill = (projection: Transcript.Projection): boolean => {
-  const stored = storedChildUnits(projection)
-  return [...recordedChildIds(projection)].some((childId) => !(stored.get(childId) ?? []).some(realChildUnit))
-}
-
-const pageExecutionHistory = Effect.fn("Operation.pageExecutionHistory")(function* (
-  backend: ExecutionBackend.Interface,
-  executionId: string,
-  reference: boolean,
-) {
-  if (backend.pageEvents === undefined) {
-    const replay = yield* backend.replay(
-      executionId,
-      undefined,
-      reference ? ExecutionBackend.executionReference : undefined,
-    )
-    return {
-      events: replay.events.toSorted((left, right) => left.sequence - right.sequence),
-      finalCursor: undefined,
-      historyComplete: false,
-      replayStatus: replay.status,
-    }
-  }
-  const events: Array<ExecutionBackend.Event> = []
-  let after: string | undefined
-  const cursors = new Set<string>()
-  while (true) {
-    const page = yield* backend.pageEvents(
-      executionId,
-      "forward",
-      after,
-      200,
-      reference ? ExecutionBackend.executionReference : undefined,
-    )
-    events.push(...page.events)
-    const next = page.newestCursor
-    if (after !== undefined && (page.events.length === 0 || next === undefined || next === after || cursors.has(next)))
-      return { events, finalCursor: next, historyComplete: false }
-    if (!page.hasMore)
-      return {
-        events: events.toSorted((left, right) => left.sequence - right.sequence),
-        finalCursor: next,
-        historyComplete: events.length > 0 && next !== undefined,
-      }
-    if (page.events.length === 0 || next === undefined || cursors.has(next))
-      return { events, finalCursor: next, historyComplete: false }
-    cursors.add(next)
-    after = next
-  }
-})
-
-const settledChildStatus = (
-  status: "accepted" | "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled",
-): "complete" | "failed" | "cancelled" | undefined => {
-  if (status === "completed") return "complete"
-  if (status === "failed") return "failed"
-  if (status === "cancelled") return "cancelled"
-  return undefined
-}
-
-const storedChildProjection = (units: ReadonlyArray<Transcript.Unit>): Transcript.Projection => ({
-  units,
-  revision: units.reduce((latest, unit) => Math.max(latest, unit.revision), -1),
-  modelPhase: 0,
-})
-
-const withoutSynthesizedTwins = (
-  projection: Transcript.Projection,
-  parents: ReadonlyMap<string, string>,
-): Transcript.Projection => ({
-  ...projection,
-  units: projection.units.filter((unit) => {
-    if (unit.parentId !== undefined || unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall")
-      return true
-    const block = unit.content.block
-    if (block.childId === undefined) return true
-    const childKey = normalizeChildExecutionId(block.childId)
-    const parent = parents.get(childKey)
-    return block.id !== childKey || parent === undefined || parent === block.id
-  }),
-})
-
-type ChildBackfillWork = {
-  readonly rootPrompt: string
-  readonly stored: ReadonlyMap<string, ReadonlyArray<Transcript.Unit>>
-  readonly nested: Array<Transcript.NestedProjection>
-  readonly descendants: Array<{ readonly executionId: string; readonly status: ExecutionBackend.Status }>
-  readonly parents: Map<string, string>
-  rootProjection: Transcript.Projection
-  readonly pending: Array<{
-    readonly executionId: string
-    readonly nestedIndex: number | undefined
-    readonly reference: boolean
-    childIndex: number
-    initialized: boolean
-    inspection?: ExecutionBackend.Inspection
-  }>
-  readonly seen: Set<string>
-  fullyInspectedTerminalTree: boolean
-}
-
-const makeChildBackfillWork = (
-  rootExecutionId: string,
-  rootPrompt: string,
-  root: Transcript.Projection,
-): ChildBackfillWork => ({
-  rootPrompt,
-  stored: storedChildUnits(root),
-  nested: [],
-  descendants: [],
-  parents: new Map(),
-  rootProjection: root,
-  pending: [
-    { executionId: rootExecutionId, nestedIndex: undefined, reference: false, childIndex: 0, initialized: false },
-  ],
-  seen: new Set([normalizeChildExecutionId(rootExecutionId)]),
-  fullyInspectedTerminalTree: true,
-})
-
 type SelectionEpochState = {
   readonly epoch: number
   readonly thread: Thread.Thread
   readonly loadedKeys: Set<string>
   readonly authoritativeTurns: Map<string, Turn.Turn>
   readonly authoritativeVersions: Map<string, { readonly status: Turn.Status; readonly lastCursor: string | undefined }>
-  readonly descendants: Map<string, { readonly rootTurnId: Turn.TurnId; readonly status: ExecutionBackend.Status }>
-  readonly inspections: Map<string, ExecutionBackend.Inspection | undefined>
-  readonly eventPages: Map<string, ExecutionBackend.EventPage>
-  readonly replays: Map<string, ExecutionBackend.Result>
   readonly pendingTurns: Map<string, { readonly turn: Turn.Turn; readonly window: number }>
-  readonly backfills: Map<string, ChildBackfillWork>
   readonly initialRepairBudget: RepairBudget
   transcriptCursor: TranscriptRepository.PageCursor | undefined
+  newestTranscriptCursor: TranscriptRepository.PageCursor | undefined
   projectedTurnCursor: TurnRepository.PageCursor | undefined
   hasUnprojectedTurns: boolean
   hasOlder: boolean
@@ -1039,187 +830,8 @@ const invalidateSelectionTurn = (state: SelectionEpochState, turn: Turn.Turn) =>
   const turnId = String(turn.id)
   state.authoritativeTurns.set(turnId, turn)
   state.authoritativeVersions.set(turnId, { status: turn.status, lastCursor: turn.lastCursor })
-  const backfill = state.backfills.get(turnId)
-  const executionIds = new Set([
-    turnId,
-    ...(backfill === undefined ? [] : [...backfill.seen]),
-    ...(backfill === undefined ? [] : backfill.pending.map((pending) => pending.executionId)),
-    ...(backfill === undefined ? [] : backfill.descendants.map((descendant) => descendant.executionId)),
-    ...[...state.descendants]
-      .filter(([, descendant]) => String(descendant.rootTurnId) === turnId)
-      .map(([executionId]) => executionId),
-  ])
-  const belongsToTurn = (key: string) =>
-    [...executionIds].some((executionId) =>
-      ["root", "reference"].some((scope) => {
-        const prefix = `${scope}:${executionId}`
-        return key === prefix || key.startsWith(`${prefix}:`)
-      }),
-    )
-  for (const key of state.inspections.keys()) if (belongsToTurn(key)) state.inspections.delete(key)
-  for (const key of state.eventPages.keys()) if (belongsToTurn(key)) state.eventPages.delete(key)
-  for (const key of state.replays.keys()) if (belongsToTurn(key)) state.replays.delete(key)
-  for (const [executionId, descendant] of state.descendants)
-    if (String(descendant.rootTurnId) === turnId) state.descendants.delete(executionId)
-  state.backfills.delete(turnId)
   state.pendingTurns.set(turnId, { turn, window: state.requestedWindow })
 }
-
-const backfillChildTranscripts = Effect.fn("Operation.backfillChildTranscripts")(function* (
-  backend: ExecutionBackend.Interface,
-  rootExecutionId: string,
-  rootPrompt: string,
-  root: Transcript.Projection,
-  existing?: ChildBackfillWork,
-) {
-  const work = existing ?? makeChildBackfillWork(rootExecutionId, rootPrompt, root)
-  while (work.pending.length > 0) {
-    const current = work.pending[0]!
-    const inspection =
-      current.inspection ??
-      (yield* backend.inspect(current.executionId, current.reference ? ExecutionBackend.executionReference : undefined))
-    if (inspection === undefined) {
-      work.fullyInspectedTerminalTree = false
-      work.pending.shift()
-      continue
-    }
-    if (!isTerminalStatus(inspection.status)) work.fullyInspectedTerminalTree = false
-    const parentProjection = () =>
-      current.nestedIndex === undefined ? work.rootProjection : work.nested[current.nestedIndex]!.projection
-    const settleParent = (projection: Transcript.Projection) => {
-      if (current.nestedIndex === undefined) work.rootProjection = projection
-      else work.nested[current.nestedIndex] = { ...work.nested[current.nestedIndex]!, projection }
-    }
-    if (!current.initialized) {
-      const history = yield* pageExecutionHistory(backend, current.executionId, current.reference)
-      const confirmed = yield* backend.inspect(
-        current.executionId,
-        current.reference ? ExecutionBackend.executionReference : undefined,
-      )
-      const inspectedChildren = new Map(
-        inspection.children.map((child) => [normalizeChildExecutionId(child.executionId), child.status]),
-      )
-      const confirmedChildren = new Map(
-        confirmed?.children.map((child) => [normalizeChildExecutionId(child.executionId), child.status]) ?? [],
-      )
-      const replayChildren = new Set(childIdsFromRelayEvents(history.events))
-      replayChildren.delete(normalizeChildExecutionId(current.executionId))
-      const historyCertified =
-        history.historyComplete &&
-        confirmed !== undefined &&
-        isTerminalStatus(inspection.status) &&
-        confirmed.status === inspection.status &&
-        (history.replayStatus === undefined || history.replayStatus === inspection.status) &&
-        (history.replayStatus !== undefined || history.finalCursor === inspection.lastCursor) &&
-        (history.replayStatus !== undefined || history.finalCursor === confirmed.lastCursor) &&
-        inspectedChildren.size === confirmedChildren.size &&
-        [...inspectedChildren].every(([id, status]) => confirmedChildren.get(id) === status) &&
-        replayChildren.size === inspectedChildren.size &&
-        [...replayChildren].every((id) => inspectedChildren.has(id))
-      if (!historyCertified) {
-        work.fullyInspectedTerminalTree = false
-        yield* Effect.logInfo("execution.child.reconciliation_unverified").pipe(
-          Effect.annotateLogs({
-            "rika.execution.id": current.executionId,
-            "rika.reconciliation.history.complete": history.historyComplete,
-            "rika.reconciliation.inspection.confirmed": confirmed !== undefined,
-            "rika.reconciliation.status.terminal": isTerminalStatus(inspection.status),
-            "rika.reconciliation.status.stable": confirmed?.status === inspection.status,
-            "rika.reconciliation.cursor.initial": inspection.lastCursor ?? "",
-            "rika.reconciliation.cursor.replayed": history.finalCursor ?? "",
-            "rika.reconciliation.cursor.confirmed": confirmed?.lastCursor ?? "",
-            "rika.reconciliation.children.inspected": inspectedChildren.size,
-            "rika.reconciliation.children.confirmed": confirmedChildren.size,
-            "rika.reconciliation.children.replayed": replayChildren.size,
-          }),
-        )
-      }
-      {
-        const replayed = Transcript.project(
-          normalizeChildExecutionId(current.executionId),
-          current.nestedIndex === undefined ? work.rootPrompt : "",
-          history.events,
-        )
-        const storedUnits = work.stored.get(normalizeChildExecutionId(current.executionId)) ?? []
-        const storedTranscript = storedUnits.some(realChildUnit) ? storedChildProjection(storedUnits) : undefined
-        const fallback = current.nestedIndex === undefined ? root : storedTranscript
-        if (historyCertified) settleParent(replayed)
-        else if (fallback !== undefined) settleParent(fallback)
-        else if (replayed.revision >= 0) settleParent(replayed)
-        else work.fullyInspectedTerminalTree = false
-      }
-      current.inspection = inspection
-      current.initialized = true
-    }
-    const child = inspection.children[current.childIndex]
-    if (child === undefined) {
-      work.pending.shift()
-      continue
-    }
-    {
-      const childKey = normalizeChildExecutionId(child.executionId)
-      if (work.seen.has(childKey)) {
-        current.childIndex += 1
-        continue
-      }
-      current.childIndex += 1
-      work.seen.add(childKey)
-      work.descendants.push(child)
-      if (!isTerminalStatus(child.status)) work.fullyInspectedTerminalTree = false
-      const storedUnits = work.stored.get(childKey) ?? []
-      const storedTranscript = storedUnits.some(realChildUnit) ? storedChildProjection(storedUnits) : undefined
-      const projection = storedTranscript ?? Transcript.empty(childKey, "")
-      let parent = toolForChild(parentProjection(), child.executionId)
-      if (parent === undefined) {
-        const ensured = Transcript.ensureChildTool(parentProjection(), child.executionId, "task")
-        settleParent(ensured.projection)
-        parent = ensured.tool
-        yield* Effect.logWarning("execution.child.parent_synthesized").pipe(
-          Effect.annotateLogs({
-            "rika.execution.parent": current.executionId,
-            "rika.execution.child": child.executionId,
-          }),
-        )
-      }
-      const settled = settledChildStatus(child.status)
-      if (settled !== undefined)
-        settleParent(
-          Transcript.reconcileChild(parentProjection(), child.executionId, settled, parentProjection().revision),
-        )
-      work.parents.set(childKey, parent.id)
-      work.nested.push({ parentId: parent.id, projection })
-      work.pending.push({
-        executionId: child.executionId,
-        nestedIndex: work.nested.length - 1,
-        reference: true,
-        childIndex: 0,
-        initialized: false,
-      })
-    }
-  }
-  if (!work.fullyInspectedTerminalTree)
-    for (const [childKey, units] of work.stored) {
-      if (work.parents.has(childKey) || !units.some(realChildUnit)) continue
-      const parentId = units[0]!.parentId
-      if (parentId === undefined) continue
-      work.parents.set(childKey, parentId)
-      work.nested.push({ parentId, projection: storedChildProjection(units) })
-    }
-  if (work.nested.length === 0)
-    return {
-      projection: work.rootProjection,
-      descendants: work.descendants,
-      fullyInspectedTerminalTree: work.fullyInspectedTerminalTree,
-    }
-  return {
-    projection: Transcript.withNestedProjections(
-      withoutSynthesizedTwins(work.rootProjection, work.parents),
-      work.nested,
-    ),
-    descendants: work.descendants,
-    fullyInspectedTerminalTree: work.fullyInspectedTerminalTree,
-  }
-})
 
 const sessionQuiescencePollAttempts = 40
 const sessionQuiescenceCandidateLimit = 8
@@ -1440,51 +1052,6 @@ const awaitSessionQuiescence = Effect.fn("Operation.awaitSessionQuiescence")(fun
   return blocked
 })
 
-const sessionOwnershipMarker = "is owned by execution"
-
-const sessionOwnershipRejected = (failure: unknown): boolean => {
-  if (failure === undefined || failure === null) return false
-  if (typeof failure === "object" && "message" in failure) {
-    const message = (failure as { readonly message: unknown }).message
-    if (typeof message === "string" && message.includes(sessionOwnershipMarker)) return true
-  }
-  return String(failure).includes(sessionOwnershipMarker)
-}
-
-const backfillTranscriptTree = Effect.fn("Operation.backfillTranscriptTree")(function* (
-  turn: Turn.Turn,
-  force: boolean,
-  work?: ChildBackfillWork,
-) {
-  const transcripts = yield* TranscriptRepository.Service
-  const current = yield* transcripts.get(turn.id)
-  if (current === undefined) return []
-  if (isTerminalStatus(turn.status) && current.childTreeReconciled) return []
-  const root = sourceProjection(current)
-  if (!force && !hasChildrenAwaitingBackfill(root)) return []
-  const backend = yield* ExecutionBackend.Service
-  const tree = yield* backfillChildTranscripts(backend, turn.id, turn.prompt, root, work)
-  const reconciled =
-    isTerminalStatus(turn.status) && tree.fullyInspectedTerminalTree && !hasChildrenAwaitingBackfill(tree.projection)
-  yield* Effect.logInfo("execution.child.reconciliation_completed").pipe(
-    Effect.annotateLogs({
-      "rika.execution.id": turn.id,
-      "rika.reconciliation.terminal": isTerminalStatus(turn.status),
-      "rika.reconciliation.tree.verified": tree.fullyInspectedTerminalTree,
-      "rika.reconciliation.children.pending": hasChildrenAwaitingBackfill(tree.projection),
-      "rika.reconciliation.certified": reconciled,
-    }),
-  )
-  if (tree.projection !== root || reconciled !== current.childTreeReconciled)
-    yield* transcripts.replace(turn, tree.projection, {
-      childTreeReconciled: reconciled,
-      ifGeneration: current.projectionGeneration,
-    })
-  return tree.descendants
-})
-
-const childExecutionId = (event: ExecutionBackend.Event): string | undefined => childIdsFromRelayEvent(event)[0]
-
 const childTranscriptPatch = (
   threadId: Thread.ThreadId,
   executionId: string,
@@ -1628,6 +1195,7 @@ export const productLayer = <
         for (const [sessionId, sink] of interactiveSinks) if (sessionId !== origin) sink(origin, event)
       }
       const reviewSettlements = new Map<string, Fiber.Fiber<ExecutionBackend.FanOutInspection, OperationError>>()
+      const foldCommitObservers = new Set<(commit: ExecutionIngest.Commit) => void>()
       const resolvedContextLayer =
         options.resolvedContextLayer ??
         ResolvedContext.testLayer({
@@ -1665,17 +1233,43 @@ export const productLayer = <
               Effect.orDie,
             )
       const usageWriteAdmission = yield* Semaphore.make(1)
-      const persistUsageEvents = (threadId: string, turnId: string, events: ReadonlyArray<ExecutionBackend.Event>) =>
+      const usagePending = new Map<
+        string,
+        { readonly threadId: string; readonly events: Array<ExecutionBackend.Event> }
+      >()
+      const usageWake = yield* Queue.bounded<void>(1)
+      let usageLifecyclePending = false
+      const recordUsageEvents = (threadId: string, turnId: string, events: ReadonlyArray<ExecutionBackend.Event>) => {
+        const observed = events.filter(UsageCost.isObservedEvent)
+        if (observed.length === 0) return
+        const pending = usagePending.get(turnId)
+        if (pending === undefined) usagePending.set(turnId, { threadId, events: [...observed] })
+        else pending.events.push(...observed)
+        if (observed.some(UsageCost.isLifecycleEvent)) usageLifecyclePending = true
+        Queue.offerUnsafe(usageWake, undefined)
+      }
+      const commitUsageFold = (turnId: string) =>
         usageWriteAdmission.withPermits(1)(
           Effect.gen(function* () {
-            const observed = events.filter(UsageCost.isObservedEvent)
-            if (observed.length === 0) return yield* usageRepository.readTurn(turnId)
+            const pending = usagePending.get(turnId)
+            if (pending === undefined) return undefined
+            usagePending.delete(turnId)
+            const threadId = pending.threadId
             yield* usageRepository.admit(turnId, threadId)
             while (true) {
               const stored = yield* usageRepository.loadFold(turnId)
-              if (stored === undefined) return
-              let snapshot = stored.foldJson === undefined ? UsageCost.empty : UsageCost.deserialize(stored.foldJson)
-              for (const event of observed) snapshot = UsageCost.observe(snapshot, { threadId, turnId, event })
+              if (stored === undefined) return undefined
+              const decoded = stored.foldJson === undefined ? UsageCost.empty : UsageCost.deserialize(stored.foldJson)
+              if (decoded === undefined)
+                yield* Effect.logWarning("usage-projection.fold.unreadable").pipe(
+                  Effect.annotateLogs({
+                    "rika.thread.id": threadId,
+                    "rika.turn.id": turnId,
+                    "rika.usage.fold.version": UsageCost.foldVersion,
+                  }),
+                )
+              let snapshot = decoded ?? UsageCost.empty
+              for (const event of pending.events) snapshot = UsageCost.observe(snapshot, { threadId, turnId, event })
               const foldJson = UsageCost.serialize(snapshot)
               if (foldJson === stored.foldJson) return yield* usageRepository.readTurn(turnId)
               const committed = yield* usageRepository.commitFold(
@@ -1688,33 +1282,7 @@ export const productLayer = <
             }
           }),
         )
-      const reconcileUsageTree = (threadId: string, turnId: string) =>
-        usageWriteAdmission.withPermits(1)(
-          Effect.gen(function* () {
-            while (true) {
-              const stored = yield* usageRepository.loadFold(turnId)
-              if (stored === undefined || stored.projectionVersion !== UsageRepository.projectionVersion) return
-              const rebuilt = yield* UsageCost.rebuild(rawBackend, [{ threadId, turnId }])
-              const committed = yield* usageRepository.commitFold(
-                turnId,
-                stored.revision,
-                UsageCost.serialize(rebuilt.snapshot),
-                {
-                  ...UsageCost.materialize(rebuilt.snapshot, turnId, threadId),
-                  sourceComplete: rebuilt.sourceComplete,
-                },
-              )
-              if (committed._tag === "Applied") {
-                if (!rebuilt.sourceComplete)
-                  return yield* UsageRepository.RepositoryError.make({
-                    message: `Usage tree for Turn ${turnId} changed or could not be read completely`,
-                  })
-                return committed.value
-              }
-            }
-          }),
-        )
-      const persistedUsageEvent = Effect.fn("Operation.persistedUsageEvent")(function* (
+      const publishThreadUsage = Effect.fn("Operation.publishThreadUsage")(function* (
         value: UsageRepository.TurnUsage | undefined,
       ) {
         if (value === undefined) return
@@ -1725,26 +1293,8 @@ export const productLayer = <
           _tag: "ThreadUsageUpdated",
           selectionEpoch: 0,
           threadId: Thread.ThreadId.make(value.threadId),
-          cost:
-            thread.costNanoUsd === undefined
-              ? { _tag: "Unavailable" }
-              : {
-                  _tag: "Available",
-                  usd: thread.costNanoUsd / 1_000_000_000,
-                  unpricedAttempts: thread.unpricedAttempts,
-                },
-          tokens:
-            thread.tokens === undefined
-              ? { _tag: "Unavailable" }
-              : { _tag: "Available", total: thread.tokens, uncountedAttempts: thread.uncountedAttempts },
-          time:
-            thread.activeMillis === undefined
-              ? { _tag: "Unavailable" }
-              : {
-                  _tag: "Available",
-                  accumulatedMillis: thread.activeMillis,
-                  ...(thread.activeSince === undefined ? {} : { activeSince: thread.activeSince }),
-                },
+          revision: thread.revision,
+          ...persistedThreadUsage(thread),
         })
         if (value.costNanoUsd !== undefined && thread.costNanoUsd !== undefined && global.costNanoUsd !== undefined)
           publishInteractiveActivity(0, {
@@ -1756,21 +1306,42 @@ export const productLayer = <
             globalCostUsd: global.costNanoUsd / 1_000_000_000,
           })
       })
-      const reconcileTerminalUsage = (threadId: string, turnId: string) =>
-        reconcileUsageTree(threadId, turnId).pipe(
-          Effect.retry({ times: 2 }),
+      const commitUsage = (threadId: string, turnId: string) =>
+        commitUsageFold(turnId).pipe(
+          Effect.flatMap(publishThreadUsage),
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause)
               ? Effect.interrupt
-              : Effect.logWarning("usage-projection.reconcile.failed").pipe(
+              : Effect.logWarning("usage-projection.commit.failed").pipe(
                   Effect.annotateLogs({
                     "rika.thread.id": threadId,
                     "rika.turn.id": turnId,
                     "rika.failure.kind": failureKind(cause),
+                    "rika.failure.cause": Cause.pretty(cause),
                   }),
                 ),
           ),
         )
+      const deliverUsageEvents = (threadId: string, turnId: string, events: ReadonlyArray<ExecutionBackend.Event>) =>
+        Effect.suspend(() => {
+          recordUsageEvents(threadId, turnId, events)
+          return commitUsage(threadId, turnId)
+        })
+      yield* Effect.forkIn(
+        Effect.gen(function* () {
+          while (true) {
+            yield* Queue.take(usageWake)
+            if (usageLifecyclePending) usageLifecyclePending = false
+            else yield* Effect.sleep(usageCommitWindow)
+            const owners = [...usagePending].map(([turnId, pending]) => ({ turnId, threadId: pending.threadId }))
+            yield* Effect.forEach(owners, (owner) => commitUsage(owner.threadId, owner.turnId), {
+              concurrency: 1,
+              discard: true,
+            })
+          }
+        }),
+        ownerScope,
+      )
       const replacementAdmission = yield* Semaphore.make(1)
       const replacementState = yield* Ref.make({ closed: false, active: 0 })
       const activeWorkflows = new Map<
@@ -1805,39 +1376,14 @@ export const productLayer = <
           withExecutionAdmission(
             Effect.gen(function* () {
               usageOwners.set(input.turnId, { threadId: input.threadId, turnId: input.turnId })
-              const streamed: Array<ExecutionBackend.Event> = []
               const result = yield* rawBackend.start({
                 ...input,
                 onEvent: (event) => {
-                  if (UsageCost.isObservedEvent(event)) streamed.push(event)
+                  recordUsageEvents(input.threadId, input.turnId, [event])
                   input.onEvent?.(event)
                 },
               })
-              const persisted = yield* persistUsageEvents(input.threadId, input.turnId, [
-                ...streamed,
-                ...result.events,
-              ]).pipe(
-                Effect.tap(persistedUsageEvent),
-                Effect.catchCause((cause) =>
-                  Cause.hasInterruptsOnly(cause)
-                    ? Effect.interrupt
-                    : Effect.logWarning("usage-projection.flush.failed").pipe(
-                        Effect.annotateLogs({
-                          "rika.thread.id": input.threadId,
-                          "rika.turn.id": input.turnId,
-                          "rika.failure.kind": failureKind(cause),
-                        }),
-                        Effect.as(undefined),
-                      ),
-                ),
-              )
-              if (persisted === undefined)
-                yield* Effect.logWarning("usage-projection.turn.partial").pipe(
-                  Effect.annotateLogs({ "rika.thread.id": input.threadId, "rika.turn.id": input.turnId }),
-                )
-              if (isTerminalStatus(result.status)) {
-                yield* reconcileTerminalUsage(input.threadId, input.turnId)
-              }
+              yield* deliverUsageEvents(input.threadId, input.turnId, result.events)
               return result
             }),
           ),
@@ -1867,41 +1413,17 @@ export const productLayer = <
                       yield* admitUsageTurn(storedTurn)
                     }
                   }
-                  const streamed: Array<ExecutionBackend.Event> = []
                   const result = yield* rawBackend.follow!(
                     turnId,
                     afterCursor,
                     (event) => {
-                      if (owner !== undefined && UsageCost.isObservedEvent(event)) streamed.push(event)
+                      if (owner !== undefined) recordUsageEvents(owner.threadId, owner.turnId, [event])
                       onEvent?.(event)
                     },
                     reference,
                     eventScope,
                   )
-                  if (owner !== undefined) {
-                    yield* Effect.gen(function* () {
-                      const persisted = yield* persistUsageEvents(owner!.threadId, owner!.turnId, [
-                        ...streamed,
-                        ...result.events,
-                      ])
-                      yield* persistedUsageEvent(persisted)
-                      if (isTerminalStatus(result.status)) {
-                        yield* reconcileTerminalUsage(owner!.threadId, owner!.turnId)
-                      }
-                    }).pipe(
-                      Effect.catchCause((cause) =>
-                        Cause.hasInterruptsOnly(cause)
-                          ? Effect.interrupt
-                          : Effect.logWarning("usage-projection.flush.failed").pipe(
-                              Effect.annotateLogs({
-                                "rika.thread.id": owner!.threadId,
-                                "rika.turn.id": owner!.turnId,
-                                "rika.failure.kind": failureKind(cause),
-                              }),
-                            ),
-                      ),
-                    )
-                  }
+                  if (owner !== undefined) yield* deliverUsageEvents(owner.threadId, owner.turnId, result.events)
                   return result
                 })
               },
@@ -1919,9 +1441,7 @@ export const productLayer = <
                   if (turn !== undefined) owner = { threadId: String(turn.threadId), turnId: String(turn.id) }
                 }
                 if (owner === undefined) return
-                yield* persistUsageEvents(owner.threadId, owner.turnId, result.events)
-                if (!isTerminalStatus(result.status)) return
-                yield* reconcileTerminalUsage(owner.threadId, owner.turnId)
+                yield* deliverUsageEvents(owner.threadId, owner.turnId, result.events)
               }).pipe(
                 Effect.catchCause((cause) =>
                   Cause.hasInterruptsOnly(cause)
@@ -1977,6 +1497,48 @@ export const productLayer = <
         dependencyContext,
         Context.make(ExecutionBackend.Service, acquiredBackend),
       )
+      const refoldingRoots = new Map<string, number>()
+      const publishRefold = (refold: ExecutionIngest.Refold) => {
+        const key = String(refold.threadId)
+        const current = refoldingRoots.get(key) ?? 0
+        const next = refold.phase === "started" ? current + 1 : Math.max(0, current - 1)
+        if (next === 0) refoldingRoots.delete(key)
+        else refoldingRoots.set(key, next)
+        const refolding = next > 0
+        if (refolding === current > 0) return
+        publishInteractiveActivity(0, {
+          _tag: "ThreadRefolding",
+          selectionEpoch: 0,
+          threadId: refold.threadId,
+          refolding,
+        })
+      }
+      const executionIngest = yield* ExecutionIngest.make({
+        backend: acquiredBackend,
+        transcripts: Context.get(dependencyContext, TranscriptRepository.Service),
+        turns: Context.get(dependencyContext, TurnRepository.Service),
+        onDiscovered: ({ threadId, rootTurnId, executionId }) => {
+          const owner = { threadId: String(threadId), turnId: String(rootTurnId) }
+          usageOwners.set(executionId, owner)
+          usageOwners.set(normalizeChildExecutionId(executionId), owner)
+        },
+        onDelivered: ({ threadId, rootTurnId, executionId, event }) =>
+          publishInteractiveActivity(0, childTranscriptPatch(threadId, executionId, rootTurnId, event)),
+        onCommitted: (commit) => {
+          for (const observer of foldCommitObservers) observer(commit)
+        },
+        onRefold: publishRefold,
+        onFailure: (failure) =>
+          publishInteractiveActivity(0, {
+            _tag: "ExecutionFailed",
+            selectionEpoch: 0,
+            threadId: Thread.ThreadId.make(failure.threadId),
+            turnId: Turn.TurnId.make(failure.turnId),
+            message: ingestFailureMessage,
+          }),
+      })
+      const ensureIngest = (threadId: Thread.ThreadId, turnId: Turn.TurnId) =>
+        executionIngest.ensure({ threadId, turnId })
       const threadInteractions =
         options.threadInteractionRepositoryLayer === undefined
           ? undefined
@@ -1985,89 +1547,6 @@ export const productLayer = <
         Context.get(dependencyContext, TurnRepository.Service).resetQueueClaims,
         executionDependencies,
       )
-      const usageRoots = (thread: Thread.Thread, values: ReadonlyArray<Turn.Turn>) => {
-        const included = values.filter((turn) => turn.status !== "queued")
-        const roots: Array<UsageCost.RootExecution> = included.map((turn) => ({
-          threadId: String(thread.id),
-          turnId: String(turn.id),
-        }))
-        const first = included[0]
-        if (first?.executionRoute.title !== undefined)
-          roots.push({
-            threadId: String(thread.id),
-            turnId: String(first.id),
-            executionId: titleExecutionId(first.id),
-            reference: true,
-            optional: true,
-          })
-        return roots
-      }
-      const readUsageCosts = Effect.fn("Operation.readUsageCosts")(function* () {
-        const value = yield* usageRepository.readGlobal
-        usageGlobalCostAvailable = value.costNanoUsd !== undefined
-        return {
-          roots: [] as Array<UsageCost.RootExecution>,
-          snapshot: { ...UsageCost.empty, global: repositoryTotals(value) },
-        }
-      })
-      const usageCostAdmission = yield* Semaphore.make(1)
-      let usageSnapshot: UsageCost.Snapshot = { ...UsageCost.empty }
-      let usageCostsLoaded = false
-      let usageGlobalCostAvailable = false
-      const deletedUsageThreads = new Set<string>()
-      const pendingUsageEvents: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }> = []
-      const currentUsageCosts = (): UsageCost.Snapshot => usageSnapshot
-      const observeUsage = (input: UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }) => {
-        if (deletedUsageThreads.has(input.threadId)) return usageSnapshot
-        if (!usageCostsLoaded) pendingUsageEvents.push(input)
-        usageSnapshot = UsageCost.observe(usageSnapshot, input)
-        return usageSnapshot
-      }
-      const loadUsageCosts = usageCostAdmission.withPermits(1)(
-        Effect.suspend(() => {
-          if (usageCostsLoaded) return Effect.void
-          return readUsageCosts().pipe(
-            Effect.tap(({ roots, snapshot }) =>
-              Effect.sync(() => {
-                usageSnapshot = pendingUsageEvents.reduce(UsageCost.observe, snapshot)
-                pendingUsageEvents.length = 0
-                usageCostsLoaded = true
-                const threadByTurn = new Map(roots.map((root) => [root.turnId, root.threadId]))
-                for (const [turnId, turn] of usageSnapshot.turns) {
-                  const threadId = threadByTurn.get(turnId)
-                  if (threadId === undefined) continue
-                  publishInteractiveActivity(0, {
-                    _tag: "TitleCostUpdated",
-                    threadId: Thread.ThreadId.make(threadId),
-                    turnId: Turn.TurnId.make(turnId),
-                    turnCostUsd: turn.costUsd,
-                    threadCostUsd: UsageCost.threadTotals(usageSnapshot, threadId).costUsd,
-                    globalCostUsd: usageSnapshot.global.costUsd,
-                  })
-                }
-              }),
-            ),
-            Effect.catchCause((cause) =>
-              Effect.logWarning("usage-cost.read.failed").pipe(
-                Effect.annotateLogs("rika.failure.kind", failureKind(cause)),
-              ),
-            ),
-            Effect.asVoid,
-          )
-        }),
-      )
-      let usageCostLoadStarted = false
-      const startUsageCostLoad = Effect.suspend(() => {
-        if (usageCostLoadStarted) return Effect.void
-        usageCostLoadStarted = true
-        return Effect.forkIn(
-          Effect.sleep("1 second").pipe(
-            Effect.andThen(loadUsageCosts),
-            Effect.ensuring(Effect.sync(() => (usageCostLoadStarted = usageCostsLoaded))),
-          ),
-          ownerScope,
-        ).pipe(Effect.asVoid)
-      })
       const notifyThreadSummaries = Effect.gen(function* () {
         const summaries = yield* ThreadSummaryRepository.Service
         publishInteractiveActivity(0, { _tag: "ThreadsListed", threads: yield* summaries.list() })
@@ -2112,26 +1591,7 @@ export const productLayer = <
             result = yield* backend.follow(executionId, undefined, undefined, ExecutionBackend.executionReference)
           }
           if (result === undefined) return
-          yield* persistUsageEvents(String(thread.id), String(firstTurn.id), result.events).pipe(
-            Effect.tap(persistedUsageEvent),
-          )
-          const previousGlobalCostUsd = currentUsageCosts().global.costUsd
-          for (const event of result.events)
-            observeUsage({
-              threadId: String(thread.id),
-              turnId: String(firstTurn.id),
-              event,
-            })
-          const totals = currentUsageCosts()
-          if (usageGlobalCostAvailable && totals.global.costUsd !== previousGlobalCostUsd)
-            announce({
-              _tag: "TitleCostUpdated",
-              threadId: thread.id,
-              turnId: firstTurn.id,
-              turnCostUsd: UsageCost.turnTotals(totals, firstTurn.id).costUsd,
-              threadCostUsd: UsageCost.threadTotals(totals, thread.id).costUsd,
-              globalCostUsd: totals.global.costUsd,
-            })
+          yield* deliverUsageEvents(String(thread.id), String(firstTurn.id), result.events)
           if (!isTerminalStatus(result.status)) return
           settledTitleExecutions.add(executionId)
           if (result.status !== "completed") return
@@ -2548,16 +2008,6 @@ export const productLayer = <
                 events: [],
                 committed: false,
               }
-        type SelectionUsage = {
-          readonly request: number
-          readonly threadId: string
-          snapshot: UsageCost.Snapshot | undefined
-          readonly pending: Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>
-          costAvailable: boolean
-          tokensAvailable: boolean
-        }
-        let selectedUsage: SelectionUsage | undefined
-        let candidateUsage: SelectionUsage | undefined
         let activeSelectionState: SelectionEpochState | undefined
         let candidateSelectionState: SelectionEpochState | undefined
         const bufferSelectionEvent = (event: InteractiveEvent) => {
@@ -2578,95 +2028,11 @@ export const productLayer = <
           InteractiveFeedOverflow.remember(loading.overflow, selectedEvent)
           return true
         }
-        let observeChildSpawn = ignoreInteractiveEvent
-        const initializeSelectedUsage = (threadId: Thread.ThreadId, request: number): ThreadUsageEvent => {
-          selectedUsage = {
-            request,
-            threadId: String(threadId),
-            snapshot: UsageCost.empty,
-            pending: [],
-            costAvailable: false,
-            tokensAvailable: false,
-          }
-          return {
-            _tag: "ThreadUsageUpdated",
-            selectionEpoch: request,
-            threadId,
-            cost: { _tag: "Unavailable" },
-            tokens: { _tag: "Unavailable" },
-            time: displayActiveTime(UsageCost.empty, String(threadId)),
-          }
-        }
-        const withUsageCosts = (
-          event: InteractiveEvent,
-        ): { readonly event: InteractiveEvent; readonly usage?: ThreadUsageEvent } => {
-          if (event._tag !== "TranscriptPatched" || !UsageCost.isObservedEvent(event.event)) return { event }
-          const rootTurnId = event.rootTurnId ?? event.turnId
-          const observation = {
-            threadId: String(event.threadId),
-            turnId: String(rootTurnId),
-            event: event.event,
-          }
-          observeUsage(observation)
-          const selection = selectedUsage
-          const previousTime =
-            selection?.threadId === String(event.threadId) && selection.snapshot !== undefined
-              ? displayActiveTime(selection.snapshot, selection.threadId)
-              : undefined
-          if (selection !== undefined && selection.threadId === String(event.threadId)) {
-            if (selection.snapshot === undefined) selection.pending.push(observation)
-            else selection.snapshot = UsageCost.observe(selection.snapshot, observation)
-            if (
-              event.event.type === "model.usage.reported" ||
-              event.event.type === "model.attempt.completed" ||
-              event.event.type === "model.attempt.failed"
-            ) {
-              selection.costAvailable = true
-              selection.tokensAvailable = true
-            }
-          }
-          const selectedTotals = selection?.threadId === String(event.threadId) ? selection.snapshot : undefined
-          const timeChanged =
-            selectedTotals !== undefined &&
-            !sameUsageTime(previousTime, displayActiveTime(selectedTotals, String(event.threadId)))
-          const costBearing =
-            event.event.type === "model.usage.reported" ||
-            event.event.type === "model.attempt.completed" ||
-            event.event.type === "model.attempt.failed"
-          if (!costBearing && !timeChanged) return { event }
-          const totals = selectedTotals ?? currentUsageCosts()
-          const patched = {
-            ...event,
-            ...(costBearing ? { rootTurnId } : {}),
-            ...(costBearing && totals.turns.has(rootTurnId)
-              ? { rootTurnCostUsd: UsageCost.turnTotals(totals, rootTurnId).costUsd }
-              : {}),
-            ...(costBearing ? { threadCostUsd: UsageCost.threadTotals(totals, String(event.threadId)).costUsd } : {}),
-            ...(costBearing && usageCostsLoaded ? { globalCostUsd: currentUsageCosts().global.costUsd } : {}),
-          }
-          if (selectedTotals === undefined || selection === undefined) return { event: patched }
-          const threadId = String(event.threadId)
-          return {
-            event: patched,
-            usage: {
-              _tag: "ThreadUsageUpdated",
-              selectionEpoch: selection.request,
-              threadId: event.threadId,
-              cost: selection.costAvailable ? threadUsage(selectedTotals, threadId) : { _tag: "Unavailable" },
-              tokens: selection.tokensAvailable ? threadUsageTokens(selectedTotals, threadId) : { _tag: "Unavailable" },
-              time: displayActiveTime(selectedTotals, threadId),
-            },
-          }
-        }
         const deliver = (
           event: InteractiveEvent,
           deliveryOptions?: { readonly selectionRequest?: number; readonly selectedThreadOnly?: boolean },
         ) => {
-          const enriched = withUsageCosts(event)
-          const selectedEvent = withSelectionEpoch(
-            enriched.event,
-            deliveryOptions?.selectionRequest ?? currentSelectionEpoch,
-          )
+          const selectedEvent = withSelectionEpoch(event, deliveryOptions?.selectionRequest ?? currentSelectionEpoch)
           const envelope: SessionEnvelope = {
             event: selectedEvent,
             ...(deliveryOptions?.selectionRequest === undefined
@@ -2680,15 +2046,7 @@ export const productLayer = <
             InteractiveFeedOverflow.remember(overflow, selectedEvent)
             return false
           }
-          if (Queue.offerUnsafe(sessionEvents, envelope)) {
-            observeChildSpawn(selectedEvent)
-            if (enriched.usage !== undefined)
-              deliver(enriched.usage, {
-                selectionRequest: enriched.usage.selectionEpoch,
-                selectedThreadOnly: true,
-              })
-            return true
-          }
+          if (Queue.offerUnsafe(sessionEvents, envelope)) return true
           overflow = InteractiveFeedOverflow.make()
           InteractiveFeedOverflow.remember(overflow, selectedEvent)
           return false
@@ -2728,7 +2086,6 @@ export const productLayer = <
               )
               if (!restored) return
               if (candidateSelectionState?.epoch === epoch) candidateSelectionState = undefined
-              if (candidateUsage?.request === epoch) candidateUsage = undefined
               if (loading.previousThreadId !== loading.threadId) return
               releaseSelectionEvents(loading, loading.previousEpoch, "Reload activity exceeded its bounded live window")
             }),
@@ -2737,40 +2094,6 @@ export const productLayer = <
           dispatch(event)
           publishInteractiveActivity(sessionId, event)
         }
-        const requeueOwnedSession = Effect.fn("Operation.interactive.requeueOwnedSession")(function* (
-          running: Turn.Turn,
-          dispatch: (event: InteractiveEvent) => void,
-        ) {
-          const turns = yield* TurnRepository.Service
-          const now = yield* Clock.currentTimeMillis
-          const retryId = yield* options.makeTurnId
-          const requeued = yield* turns
-            .copy(
-              {
-                id: retryId,
-                threadId: running.threadId,
-                prompt: running.prompt,
-                ...(running.promptParts === undefined ? {} : { promptParts: running.promptParts }),
-                author: running.author,
-                lineage: running.lineage,
-                status: "queued",
-                stopIntent: "none",
-                executionRoute: running.executionRoute,
-                ...(running.reviewFanOutId === undefined ? {} : { reviewFanOutId: running.reviewFanOutId }),
-                createdAt: now,
-                updatedAt: now,
-              },
-              pendingTurnCapacity,
-            )
-            .pipe(
-              Effect.map((submission) => submission.queue),
-              Effect.orElseSucceed(() => undefined),
-            )
-          if (requeued === undefined) return false
-          yield* setTurnStatus(running.id, "cancelled", running.lastCursor, now)
-          emit(dispatch, queueMutationEvent(requeued))
-          return true
-        })
         const submissionAdmission = yield* Semaphore.make(1)
         const shellPermission =
           typeof options.shellPermission === "function"
@@ -2805,129 +2128,20 @@ export const productLayer = <
         }
         const transcriptPageAdmission = yield* Semaphore.make(1)
         const selectionAdmission = yield* Semaphore.make(1)
-        const backfillTree = (
-          turn: Turn.Turn,
-          force: boolean,
-          backend?: ExecutionBackend.Interface,
-          work?: ChildBackfillWork,
-        ) =>
-          withProjectionAdmission(
-            turn.id,
-            backfillTranscriptTree(turn, force, work).pipe(
-              backend === undefined ? Function.identity : Effect.provideService(ExecutionBackend.Service, backend),
-            ),
-          )
-        const budgetedBackend = (backend: ExecutionBackend.Interface, budget: RepairBudget, wanted: () => boolean) => {
-          const reservePage = Effect.suspend(() => {
-            if (budget.pages >= selectionRepairPageLimit) return Effect.fail(selectionRepairDeferred("pages"))
-            budget.pages += 1
-            return Effect.void
-          })
-          const consume = (events: ReadonlyArray<ExecutionBackend.Event>) =>
-            Effect.gen(function* () {
-              const eventBytes = transcriptPageEncoder.encode(encodeJson(events)).byteLength
-              if (budget.bytes + eventBytes > maximumTranscriptPageBytes) return yield* selectionRepairDeferred("bytes")
-              budget.bytes += eventBytes
-            })
-          return ExecutionBackend.Service.of({
+        const repairBackend = (state: SelectionEpochState, backend: ExecutionBackend.Interface, budget: RepairBudget) =>
+          ExecutionBackend.Service.of({
             ...backend,
             inspect: (executionId, reference) => {
               if (budget.nodes >= selectionRepairNodeLimit) return Effect.fail(selectionRepairDeferred("nodes"))
               budget.nodes += 1
-              return backend
-                .inspect(executionId, reference)
-                .pipe(Effect.filterOrFail(wanted, () => selectionRepairDeferred("nodes")))
+              return backend.inspect(executionId, reference).pipe(
+                Effect.filterOrFail(
+                  () => isCurrentSelectionState(state),
+                  () => selectionRepairDeferred("nodes"),
+                ),
+              )
             },
-            replay: (executionId, after, reference) =>
-              reservePage.pipe(
-                Effect.andThen(backend.replay(executionId, after, reference)),
-                Effect.filterOrFail(wanted, () => selectionRepairDeferred("pages")),
-                Effect.tap((result) => consume(result.events)),
-              ),
-            ...(backend.pageEvents === undefined
-              ? {}
-              : {
-                  pageEvents: (executionId, direction, cursor, limit, reference) =>
-                    reservePage.pipe(
-                      Effect.andThen(backend.pageEvents!(executionId, direction, cursor, limit, reference)),
-                      Effect.filterOrFail(wanted, () => selectionRepairDeferred("pages")),
-                      Effect.flatMap((page) =>
-                        page.hasMore &&
-                        (page.events.length === 0 || page.newestCursor === undefined || page.newestCursor === cursor)
-                          ? Effect.fail(
-                              ExecutionBackend.BackendError.make({
-                                message: `Execution event cursor did not advance for ${executionId}`,
-                              }),
-                            )
-                          : consume(page.events).pipe(Effect.as(page)),
-                      ),
-                    ),
-                }),
           })
-        }
-        const cachedBackend = (backend: ExecutionBackend.Interface, cache: RepairCache) =>
-          ExecutionBackend.Service.of({
-            ...backend,
-            inspect: backend.inspect,
-            replay: (executionId, after, reference) => {
-              const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${after ?? ""}`
-              const cached = cache.replays.get(key)
-              if (cached !== undefined) return Effect.succeed(cached)
-              return backend
-                .replay(executionId, after, reference)
-                .pipe(Effect.tap((result) => Effect.sync(() => cache.replays.set(key, result))))
-            },
-            ...(backend.pageEvents === undefined
-              ? {}
-              : {
-                  pageEvents: (executionId, direction, cursor, limit, reference) => {
-                    const key = `${reference === undefined ? "root" : "reference"}:${executionId}:${direction}:${cursor ?? ""}:${limit ?? ""}`
-                    const cached = cache.eventPages.get(key)
-                    if (cached !== undefined) return Effect.succeed(cached)
-                    return backend.pageEvents!(executionId, direction, cursor, limit, reference).pipe(
-                      Effect.tap((page) => Effect.sync(() => cache.eventPages.set(key, page))),
-                    )
-                  },
-                }),
-          })
-        const repairBackend = (state: SelectionEpochState, backend: ExecutionBackend.Interface, budget: RepairBudget) =>
-          cachedBackend(
-            budgetedBackend(backend, budget, () => isCurrentSelectionState(state)),
-            state,
-          )
-        const reclaimBackfillTree = Effect.fn("Operation.interactive.reclaimBackfillTree")(function* (turn: Turn.Turn) {
-          const backend = yield* ExecutionBackend.Service
-          const budget = makeRepairBudget()
-          yield* backfillTree(
-            turn,
-            true,
-            cachedBackend(
-              budgetedBackend(backend, budget, () => true),
-              makeRepairCache(),
-            ),
-          ).pipe(
-            Effect.catchTag("ExecutionBackendError", (error) =>
-              isSelectionRepairDeferred(error)
-                ? Effect.logInfo("execution.reclaim.backfill_deferred").pipe(
-                    Effect.annotateLogs({
-                      "rika.turn.id": String(turn.id),
-                      "rika.repair.nodes": budget.nodes,
-                      "rika.repair.pages": budget.pages,
-                      "rika.repair.bytes": budget.bytes,
-                    }),
-                  )
-                : Effect.fail(error),
-            ),
-          )
-        })
-        const appendProjection = (turn: Turn.Turn, events: ReadonlyArray<ExecutionBackend.Event>) =>
-          withProjectionAdmission(
-            turn.id,
-            Effect.gen(function* () {
-              const transcripts = yield* TranscriptRepository.Service
-              yield* transcripts.appendAll(turn, rootExecutionEvents(turn.id, events))
-            }),
-          )
         const flushProjection = Effect.void
         const shellApprovals = new Map<string, Deferred.Deferred<boolean>>()
         const lifecycleAdmission = yield* Semaphore.make(1)
@@ -2945,137 +2159,6 @@ export const productLayer = <
           selectionLoadFiber = undefined
           return fiber === undefined ? Effect.void : Fiber.interrupt(fiber)
         })
-        type ChildFollowerSelection = {
-          readonly generation: number
-          readonly threadId: string | undefined
-          readonly stopped: Deferred.Deferred<void>
-        }
-        type ChildFollowerJob = {
-          readonly key: string
-          readonly executionId: string
-          readonly threadId: Thread.ThreadId
-          readonly rootTurnId: Turn.TurnId
-          readonly selection: ChildFollowerSelection
-        }
-        type ChildFollowerState =
-          | { readonly _tag: "Idle"; readonly afterCursor?: string }
-          | {
-              readonly _tag: "Following"
-              readonly selection: ChildFollowerSelection
-              readonly afterCursor?: string
-            }
-          | {
-              readonly _tag: "Waiting"
-              readonly executionId: string
-              readonly threadId: Thread.ThreadId
-              readonly rootTurnId: Turn.TurnId
-              readonly afterCursor?: string
-            }
-          | { readonly _tag: "Terminal"; readonly afterCursor?: string }
-        const childFollowerStates = new Map<string, ChildFollowerState>()
-        const deliveredChildCursors = new Map<string, Set<string>>()
-        let runChildFollower: (job: ChildFollowerJob) => void
-        let childFollowerSelection: ChildFollowerSelection = {
-          generation: 0,
-          threadId: settings.initialThreadId,
-          stopped: yield* Deferred.make<void>(),
-        }
-        const activateChildFollowers = Effect.fn("Operation.interactive.activateChildFollowers")(function* (
-          threadId: Thread.ThreadId,
-        ) {
-          const previous = childFollowerSelection
-          for (const [key, state] of childFollowerStates)
-            if (state._tag === "Following" && state.selection === previous)
-              childFollowerStates.set(
-                key,
-                state.afterCursor === undefined ? { _tag: "Idle" } : { _tag: "Idle", afterCursor: state.afterCursor },
-              )
-          childFollowerSelection = {
-            generation: previous.generation + 1,
-            threadId: String(threadId),
-            stopped: yield* Deferred.make<void>(),
-          }
-          yield* Deferred.succeed(previous.stopped, undefined)
-        })
-        const enqueueChildFollower = (
-          threadId: Thread.ThreadId,
-          executionId: string,
-          rootTurnId: Turn.TurnId,
-          status?: ExecutionBackend.Status,
-        ) => {
-          const key = normalizeChildExecutionId(executionId)
-          usageOwners.set(String(executionId), { threadId: String(threadId), turnId: String(rootTurnId) })
-          usageOwners.set(key, { threadId: String(threadId), turnId: String(rootTurnId) })
-          const selection = childFollowerSelection
-          if (selection.threadId !== String(threadId)) return
-          const current = childFollowerStates.get(key) ?? { _tag: "Idle" as const }
-          if (status === "cancelled" && current.afterCursor !== undefined) {
-            childFollowerStates.set(key, { _tag: "Terminal", afterCursor: current.afterCursor })
-            return
-          }
-          if (current._tag === "Terminal") return
-          if (
-            (current._tag === "Waiting" && (status === undefined || status === "waiting")) ||
-            (current._tag === "Following" && current.selection === selection)
-          )
-            return
-          const following: ChildFollowerState =
-            current.afterCursor === undefined
-              ? { _tag: "Following", selection }
-              : { _tag: "Following", selection, afterCursor: current.afterCursor }
-          childFollowerStates.set(key, following)
-          runChildFollower({ key, executionId, threadId, rootTurnId, selection })
-        }
-        const resumeWaitingChildFollowers = (threadId: Thread.ThreadId) => {
-          for (const [key, state] of childFollowerStates) {
-            if (state._tag !== "Waiting" || state.threadId !== threadId) continue
-            childFollowerStates.set(
-              key,
-              state.afterCursor === undefined ? { _tag: "Idle" } : { _tag: "Idle", afterCursor: state.afterCursor },
-            )
-            enqueueChildFollower(state.threadId, state.executionId, state.rootTurnId)
-          }
-        }
-        const deliverChildEvent = (
-          threadId: Thread.ThreadId,
-          executionId: string,
-          rootTurnId: Turn.TurnId,
-          event: ExecutionBackend.Event,
-          publishUsage: boolean,
-        ) => {
-          if (Transcript.isTransientEvent(event)) {
-            sessionDispatch(childTranscriptPatch(threadId, executionId, rootTurnId, event))
-            return
-          }
-          const key = normalizeChildExecutionId(executionId)
-          const delivered = deliveredChildCursors.get(key) ?? new Set<string>()
-          if (delivered.has(event.cursor)) return
-          delivered.add(event.cursor)
-          deliveredChildCursors.set(key, delivered)
-          const state = childFollowerStates.get(key)
-          if (state !== undefined) {
-            const terminal =
-              event.type === "execution.completed" ||
-              event.type === "execution.failed" ||
-              event.type === "execution.cancelled"
-            childFollowerStates.set(
-              key,
-              terminal && state._tag !== "Following"
-                ? { _tag: "Terminal", afterCursor: event.cursor }
-                : { ...state, afterCursor: event.cursor },
-            )
-          }
-          const patch = childTranscriptPatch(threadId, executionId, rootTurnId, event)
-          sessionDispatch(patch)
-          if (publishUsage && (event.type === "model.usage.reported" || event.type === "model.attempt.completed"))
-            publishInteractiveActivity(sessionId, patch)
-        }
-        observeChildSpawn = (event) => {
-          if (event._tag !== "TranscriptPatched") return
-          const executionId = childExecutionId(event.event)
-          if (executionId !== undefined)
-            enqueueChildFollower(event.threadId, executionId, event.rootTurnId ?? event.turnId)
-        }
         let lifecycle: "open" | "closed" = "open"
         let feedAttached = false
         const sessionClosed = OperationUnavailable.make({
@@ -3124,7 +2207,6 @@ export const productLayer = <
           let observerTurn: Turn.Turn | undefined
           let executionLaunched = false
           const program = Effect.gen(function* () {
-            yield* startUsageCostLoad
             const threads = yield* ThreadRepository.Service
             const turns = yield* TurnRepository.Service
             const backend = yield* ExecutionBackend.Service
@@ -3140,7 +2222,6 @@ export const productLayer = <
               })
               yield* Ref.set(interactiveThread, thread)
               selectedThreadId = String(thread.id)
-              yield* activateChildFollowers(thread.id)
             }
             if (isNewThread) {
               dispatch({ _tag: "ThreadActivated", threadId: String(thread.id), title: thread.title })
@@ -3228,6 +2309,7 @@ export const productLayer = <
                         turn: runningTurn,
                         ...(submissionId === undefined ? {} : { submissionId }),
                       })
+                      yield* ensureIngest(thread.id, turn.id)
                       const result = yield* rootTurnOwner.start({
                         threadId: thread.id,
                         turnId: turn.id,
@@ -3239,6 +2321,7 @@ export const productLayer = <
                         eventScope: "execution",
                         onEvent: (event) => {
                           deliveredCursors.add(event.cursor)
+                          executionIngest.deliver(turn.id, event)
                           emit(dispatch, transcriptPatch(turn, event))
                         },
                         ...(prepared.extensionPin === undefined ? {} : { extensionPin: prepared.extensionPin }),
@@ -3257,16 +2340,6 @@ export const productLayer = <
                         if (Cause.hasInterruptsOnly(outcome.cause)) return
                         yield* flushProjection
                         const failedAt = yield* Clock.currentTimeMillis
-                        if (sessionOwnershipRejected(outcome.cause) && (yield* requeueOwnedSession(turn, dispatch))) {
-                          yield* Effect.logInfo("execution.admission.rejected").pipe(
-                            Effect.annotateLogs({
-                              "rika.thread.id": String(thread.id),
-                              "rika.turn.id": String(turn.id),
-                            }),
-                          )
-                          yield* settleThread(thread, dispatch)
-                          return
-                        }
                         yield* Effect.logError("turn.failed").pipe(
                           Effect.annotateLogs({
                             "rika.duration.ms": failedAt - startedAt,
@@ -3291,8 +2364,10 @@ export const productLayer = <
                         yield* settleThread(thread, dispatch)
                         return
                       }
-                      for (const event of result.events)
-                        if (!deliveredCursors.has(event.cursor)) emit(dispatch, transcriptPatch(turn, event))
+                      for (const event of undeliveredEvents(result.events, deliveredCursors)) {
+                        executionIngest.deliver(turn.id, event)
+                        emit(dispatch, transcriptPatch(turn, event))
+                      }
                       const completedAt = yield* Clock.currentTimeMillis
                       yield* Effect.logInfo("turn.finished").pipe(
                         Effect.annotateLogs({
@@ -3311,8 +2386,7 @@ export const productLayer = <
                         completedAt,
                       )
                       yield* projectExecutionResult(thread.id, result)
-                      yield* appendProjection(updatedTurn, result.events)
-                      yield* reclaimBackfillTree(updatedTurn)
+                      yield* ensureIngest(updatedTurn.threadId, updatedTurn.id)
                       if (result.status === "completed") {
                         yield* settleThread(thread, dispatch)
                         if (isFirstTurn)
@@ -3396,92 +2470,6 @@ export const productLayer = <
             Effect.scoped,
             Effect.catch((error) => Effect.sync(() => dispatchFailure(dispatch, error))),
           )
-        const followChildExecution = Effect.fn("Operation.interactive.followChildExecution")(function* (
-          job: ChildFollowerJob,
-        ) {
-          const follow = acquiredBackend.follow
-          if (follow === undefined) return
-          while (true) {
-            const state = childFollowerStates.get(job.key)
-            if (state?._tag !== "Following" || state.selection !== job.selection) return
-            const deliverEvent = (event: ExecutionBackend.Event) => {
-              if (childFollowerSelection !== job.selection) return
-              deliverChildEvent(job.threadId, job.executionId, job.rootTurnId, event, true)
-            }
-            const result = yield* Effect.raceFirst(
-              follow(
-                job.executionId,
-                state.afterCursor,
-                deliverEvent,
-                ExecutionBackend.executionReference,
-                "execution",
-              ),
-              Deferred.await(job.selection.stopped).pipe(Effect.as(undefined)),
-            )
-            if (result === undefined || childFollowerSelection !== job.selection) {
-              const current = childFollowerStates.get(job.key)
-              if (current?._tag === "Following" && current.selection === job.selection)
-                childFollowerStates.set(
-                  job.key,
-                  current.afterCursor === undefined
-                    ? { _tag: "Idle" }
-                    : { _tag: "Idle", afterCursor: current.afterCursor },
-                )
-              return
-            }
-            for (const event of result.events) deliverEvent(event)
-            const current = childFollowerStates.get(job.key)
-            if (current?._tag !== "Following" || current.selection !== job.selection) return
-            if (isTerminalStatus(result.status)) {
-              childFollowerStates.delete(job.key)
-              deliveredChildCursors.delete(job.key)
-              return
-            }
-            if (result.status === "waiting") {
-              childFollowerStates.set(job.key, {
-                _tag: "Waiting",
-                executionId: job.executionId,
-                threadId: job.threadId,
-                rootTurnId: job.rootTurnId,
-                ...(current.afterCursor === undefined ? {} : { afterCursor: current.afterCursor }),
-              })
-              return
-            }
-            const nextCursor = ThreadActivity.latestCursor(result.turnId, result.events)
-            if (nextCursor === undefined || nextCursor === state.afterCursor) {
-              childFollowerStates.set(
-                job.key,
-                current.afterCursor === undefined
-                  ? { _tag: "Idle" }
-                  : { _tag: "Idle", afterCursor: current.afterCursor },
-              )
-              return
-            }
-          }
-        })
-        const forkChildFollower = yield* FiberSet.makeRuntime<never, void, never>().pipe(
-          Effect.provideService(Scope.Scope, sessionScope),
-        )
-        runChildFollower = (job) => {
-          forkChildFollower(
-            Effect.yieldNow.pipe(
-              Effect.andThen(followChildExecution(job)),
-              Effect.catch((error) =>
-                (String(error).includes("ExecutionNotFound")
-                  ? Effect.logInfo("child-execution.absent")
-                  : Effect.logError("child-execution.follow.failed").pipe(
-                      Effect.annotateLogs("rika.failure.kind", String(error)),
-                    )
-                ).pipe(
-                  Effect.annotateLogs({
-                    "rika.execution.id": job.executionId,
-                    "rika.thread.id": String(job.threadId),
-                  }),
-                ),
-              ),
-            ),
-          )
-        }
         const readQueue = Effect.fn("Operation.interactive.readQueue")(function* (
           threadId: Thread.ThreadId,
           dispatch: (event: InteractiveEvent) => void,
@@ -3541,6 +2529,7 @@ export const productLayer = <
                 threadId: thread.id,
                 turn: runningTurn,
               })
+              yield* ensureIngest(thread.id, promotedTurn.id)
               const result = yield* rootTurnOwner.start({
                 threadId: thread.id,
                 turnId: promotedTurn.id,
@@ -3551,6 +2540,7 @@ export const productLayer = <
                 eventScope: "execution",
                 onEvent: (event) => {
                   deliveredCursors.add(event.cursor)
+                  executionIngest.deliver(promotedTurn.id, event)
                   emit(dispatch, transcriptPatch(promotedTurn, event))
                 },
                 ...(prepared.extensionPin === undefined ? {} : { extensionPin: prepared.extensionPin }),
@@ -3563,23 +2553,6 @@ export const productLayer = <
             )
             if (outcome._tag === "Failure") {
               const current = yield* turns.get(promotedTurn.id)
-              if (
-                sessionOwnershipRejected(outcome.error) &&
-                current?.status === "running" &&
-                (yield* requeueOwnedSession(current, dispatch))
-              ) {
-                yield* Effect.logInfo("execution.admission.rejected").pipe(
-                  Effect.annotateLogs({
-                    "rika.thread.id": String(thread.id),
-                    "rika.turn.id": String(promotedTurn.id),
-                  }),
-                )
-                yield* flushProjection
-                const wake = yield* turns.requestQueueWake(thread.id)
-                if (wake !== undefined && backend.wakeThreadHost !== undefined)
-                  yield* backend.wakeThreadHost({ ...wake, now: yield* Clock.currentTimeMillis })
-                return false
-              }
               yield* Effect.logError("turn.failed").pipe(
                 Effect.annotateLogs({
                   "rika.failure.cause": String(outcome.error),
@@ -3615,8 +2588,10 @@ export const productLayer = <
             }
             const result = outcome.value
             if (result === undefined) return true
-            for (const event of result.events)
-              if (!deliveredCursors.has(event.cursor)) emit(dispatch, transcriptPatch(promotedTurn, event))
+            for (const event of undeliveredEvents(result.events, deliveredCursors)) {
+              executionIngest.deliver(promotedTurn.id, event)
+              emit(dispatch, transcriptPatch(promotedTurn, event))
+            }
             const updatedTurn = yield* setTurnStatus(
               promotedTurn.id,
               result.status,
@@ -3626,8 +2601,7 @@ export const productLayer = <
               yield* Clock.currentTimeMillis,
             )
             yield* projectExecutionResult(thread.id, result)
-            yield* appendProjection(updatedTurn, result.events)
-            yield* reclaimBackfillTree(updatedTurn)
+            yield* ensureIngest(updatedTurn.threadId, updatedTurn.id)
             return isTerminalStatus(result.status) && result.status !== "failed"
           })
           const runNext = Effect.fn("Operation.interactive.runNextQueued")(function* () {
@@ -3735,21 +2709,23 @@ export const productLayer = <
           const turn = yield* turns.get(turnId)
           if (turn === undefined) return yield* operationError(`Turn ${turnId} does not exist`)
           const thread = yield* threadForTurn(turn)
+          yield* ensureIngest(turn.threadId, turn.id)
           const deliveredCursors = new Set<string>()
           const result = yield* rootTurnOwner.follow(
             turn.id,
             turn.lastCursor,
             (event) => {
               deliveredCursors.add(event.cursor)
+              executionIngest.deliver(turn.id, event)
               emit(dispatch, transcriptPatch(turn, event))
             },
             undefined,
             "execution",
           )
-          for (const event of result.events)
-            if (!deliveredCursors.has(event.cursor)) {
-              emit(dispatch, transcriptPatch(turn, event))
-            }
+          for (const event of undeliveredEvents(result.events, deliveredCursors)) {
+            executionIngest.deliver(turn.id, event)
+            emit(dispatch, transcriptPatch(turn, event))
+          }
           const updatedTurn = yield* setTurnStatus(
             turn.id,
             result.status,
@@ -3757,8 +2733,7 @@ export const productLayer = <
             yield* Clock.currentTimeMillis,
           )
           yield* projectExecutionResult(turn.threadId, result)
-          yield* appendProjection(updatedTurn, result.events)
-          yield* reclaimBackfillTree(updatedTurn)
+          yield* ensureIngest(updatedTurn.threadId, updatedTurn.id)
           if (isTerminalStatus(result.status)) {
             yield* settleThread(thread, dispatch)
             if (result.status === "completed" && (yield* turns.list(thread.id))[0]?.id === updatedTurn.id)
@@ -3808,61 +2783,6 @@ export const productLayer = <
             ),
           )
         })
-        const projectExecutionPages = Effect.fn("Operation.interactive.projectExecutionPages")(function* (
-          backend: ExecutionBackend.Interface,
-          turn: Turn.Turn,
-          status: Turn.Status,
-        ) {
-          const transcripts = yield* TranscriptRepository.Service
-          const current = yield* transcripts.get(turn.id)
-          const boundary = current?.checkpointCursor
-          if (backend.pageEvents === undefined) {
-            const result = yield* backend.replay(turn.id, boundary)
-            yield* appendProjection({ ...turn, status }, result.events)
-            return
-          }
-          const cursors = new Set<string>()
-          let after = boundary
-          while (true) {
-            const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
-            yield* appendProjection({ ...turn, status }, page.events)
-            if (!page.hasMore) return
-            const next = page.newestCursor
-            if (next === undefined || cursors.has(next)) {
-              return yield* operationError(`Transcript event cursor did not advance for Turn ${turn.id}`)
-            }
-            cursors.add(next)
-            after = next
-          }
-        })
-        const rebuildExecutionProjection = Effect.fn("Operation.interactive.rebuildExecutionProjection")(function* (
-          backend: ExecutionBackend.Interface,
-          turn: Turn.Turn,
-        ) {
-          let projection = Transcript.empty(turn.id, turn.prompt)
-          if (backend.pageEvents === undefined) {
-            const result = yield* backend.replay(turn.id)
-            projection = Transcript.project(turn.id, turn.prompt, rootExecutionEvents(turn.id, result.events))
-          } else {
-            const cursors = new Set<string>()
-            let after: string | undefined
-            while (true) {
-              const page = yield* backend.pageEvents(turn.id, "forward", after, 200)
-              for (const event of rootExecutionEvents(turn.id, page.events).toSorted(
-                (left, right) => left.sequence - right.sequence,
-              ))
-                projection = Transcript.applyEvent(projection, event)
-              if (!page.hasMore) break
-              const next = page.newestCursor
-              if (next === undefined || cursors.has(next))
-                return yield* operationError(`Transcript event cursor did not advance for Turn ${turn.id}`)
-              cursors.add(next)
-              after = next
-            }
-          }
-          const transcripts = yield* TranscriptRepository.Service
-          yield* withProjectionAdmission(turn.id, transcripts.replace(turn, projection, { childTreeReconciled: false }))
-        })
         const repairSelectionTurn = Effect.fn("Operation.interactive.repairSelectionTurn")(function* (
           state: SelectionEpochState,
           backend: ExecutionBackend.Interface,
@@ -3878,10 +2798,6 @@ export const productLayer = <
           const execution = yield* backend.inspect(turn.id)
           if (!isCurrentSelectionState(state)) return
           let authoritativeTurn = turn
-          let descendants: ReadonlyArray<{
-            readonly executionId: string
-            readonly status: ExecutionBackend.Status
-          }> = []
           if (execution === undefined) {
             if (projected === undefined)
               yield* withProjectionAdmission(
@@ -3889,7 +2805,6 @@ export const productLayer = <
                 transcripts.replace(turn, Transcript.empty(turn.id, turn.prompt), { childTreeReconciled: false }),
               )
           } else {
-            const terminalTransition = isTerminalStatus(execution.status) && execution.status !== turn.status
             if (isTerminalStatus(execution.status)) {
               const { lastCursor: _lastCursor, ...turnWithoutCursor } = turn
               authoritativeTurn =
@@ -3897,23 +2812,7 @@ export const productLayer = <
                   ? { ...turnWithoutCursor, status: execution.status }
                   : { ...turn, status: execution.status, lastCursor: execution.lastCursor }
             }
-            if (terminalTransition) {
-              yield* rebuildExecutionProjection(backend, authoritativeTurn)
-              if (!isCurrentSelectionState(state)) return
-            } else if (projected === undefined || projected.checkpointCursor !== execution.lastCursor) {
-              yield* projectExecutionPages(backend, authoritativeTurn, execution.status)
-              if (!isCurrentSelectionState(state)) return
-            }
-            const latest = yield* transcripts.get(turn.id)
-            if (latest !== undefined) {
-              const key = String(turn.id)
-              const work =
-                state.backfills.get(key) ??
-                makeChildBackfillWork(String(turn.id), authoritativeTurn.prompt, sourceProjection(latest))
-              state.backfills.set(key, work)
-              descendants = yield* backfillTree(authoritativeTurn, true, backend, work)
-              state.backfills.delete(key)
-            }
+            yield* ensureIngest(turn.threadId, turn.id)
             if (!isCurrentSelectionState(state)) return
           }
           state.authoritativeTurns.set(String(turn.id), authoritativeTurn)
@@ -3921,10 +2820,6 @@ export const productLayer = <
             status: turn.status,
             lastCursor: turn.lastCursor,
           })
-          for (const descendant of descendants) {
-            const key = normalizeChildExecutionId(descendant.executionId)
-            state.descendants.set(key, { rootTurnId: turn.id, status: descendant.status })
-          }
           state.pendingTurns.delete(String(turn.id))
         })
         const projectTurnPage = Effect.fn("Operation.interactive.projectTurnPage")(function* (
@@ -4019,6 +2914,7 @@ export const productLayer = <
           dispatch: (event: InteractiveEvent) => void,
           before?: TranscriptRepository.PageCursor,
           repair: boolean = true,
+          clientLoadedKeys?: ReadonlySet<string>,
         ) {
           const thread = state.thread
           const request = state.epoch
@@ -4031,7 +2927,8 @@ export const productLayer = <
             state.requestedWindow += 1
           }
           if (before === undefined && repair) {
-            if (!(yield* projectTurnPage(state))) return
+            const projected = yield* projectTurnPage(state)
+            if (!projected) return
             while (state.hasUnprojectedTurns && transcriptPages < selectionRepairTranscriptPageLimit - 1) {
               const available = yield* transcripts.page(thread.id, { limit: 200 })
               transcriptPages += 1
@@ -4102,31 +2999,27 @@ export const productLayer = <
               { concurrency: 1, discard: true },
             )
           }
-          const usageCosts = currentUsageCosts()
           const authoritativeTurns = state.authoritativeTurns
           let entries = storedEntries.flatMap((storedEntry) => {
-            const authoritativeTurn = authoritativeTurns.get(String(storedEntry.turn.id))
             if (state.pendingTurns.has(String(storedEntry.turn.id))) return []
-            const entry =
+            const authoritativeTurn = authoritativeTurns.get(String(storedEntry.turn.id))
+            return [
               authoritativeTurn === undefined
                 ? storedEntry
-                : Object.assign({}, storedEntry, { turn: authoritativeTurn })
-            const costUsd = usageCosts.turns.get(entry.turn.id)?.costUsd
-            return [
-              costUsd === undefined || (costUsd === 0 && entry.projectionCostUsd === undefined)
-                ? entry
-                : Object.assign({}, entry, { projectionCostUsd: costUsd }),
+                : Object.assign({}, storedEntry, { turn: authoritativeTurn }),
             ]
           })
           const hasOlder = storedHasOlder || state.hasUnprojectedTurns
           if (transcriptPageEncoder.encode(encodeJson(entries)).byteLength > maximumTranscriptPayloadBytes)
             return yield* operationError("Transcript page exceeds the transcript event limit")
-          const loadedKeys = state.loadedKeys
           const deliveredEntries =
-            before === undefined ? entries : entries.filter((entry) => !loadedKeys.has(entry.unit.key))
+            clientLoadedKeys === undefined ? entries : entries.filter((entry) => !clientLoadedKeys.has(entry.unit.key))
           const completedAt = yield* Clock.currentTimeMillis
           if (!isCurrentSelectionState(state)) return
           state.transcriptCursor = oldestCursor
+          if (before === undefined)
+            state.newestTranscriptCursor =
+              "newestCursor" in page ? page.newestCursor : transcriptCursorFor(page.entries.at(-1))
           state.hasOlder = hasOlder
           if (before !== undefined) for (const entry of deliveredEntries) state.loadedKeys.add(entry.unit.key)
           const threadCostUsd = undefined
@@ -4166,22 +3059,15 @@ export const productLayer = <
               Effect.uninterruptible(
                 Effect.gen(function* () {
                   if ((yield* Ref.get(selectionRequest)) !== request || candidateSelectionState !== state) return
-                  const usage = candidateUsage
-                  if (usage === undefined || usage.request !== request) return
                   const loading = selectionLoad
                   if (loading === undefined || loading.epoch !== request || loading.threadId !== String(thread.id))
                     return
                   yield* interruptSelectionBackground
-                  yield* activateChildFollowers(thread.id)
                   activeSelectionState = state
                   candidateSelectionState = undefined
-                  selectedUsage = usage
-                  candidateUsage = undefined
                   currentSelectionEpoch = request
                   yield* Ref.set(interactiveThread, thread)
                   selectedThreadId = String(thread.id)
-                  for (const [executionId, descendant] of state.descendants)
-                    enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
                   loading.committed = true
                   dispatch({
                     _tag: "SelectionLoaded",
@@ -4190,9 +3076,13 @@ export const productLayer = <
                     thread,
                     entries,
                     hasOlder,
+                    hasNewer: false,
                     ...(threadCostUsd === undefined ? {} : { threadCostUsd }),
                     ...(globalCostUsd === undefined ? {} : { globalCostUsd }),
                     ...(oldestCursor === undefined ? {} : { oldestCursor }),
+                    ...("newestCursor" in page && page.newestCursor !== undefined
+                      ? { newestCursor: page.newestCursor }
+                      : {}),
                     queueRevision: queue.revision,
                     queuedCount: queue.queuedCount,
                     queue: queue.turns.map(queueItem),
@@ -4201,15 +3091,12 @@ export const productLayer = <
                   releaseSelectionEvents(loading, request, "Selection activity exceeded its bounded live window")
                   selectionLoad = undefined
                   yield* startSelectionContinuation(state, dispatch)
-                  yield* startSelectionUsage(state, usage, dispatch)
+                  yield* startSelectionUsage(state, dispatch)
                 }),
               ),
             )
-            yield* startUsageCostLoad
           } else {
             if (!isCurrentSelectionState(state)) return
-            for (const [executionId, descendant] of state.descendants)
-              enqueueChildFollower(thread.id, executionId, descendant.rootTurnId, descendant.status)
             dispatch({
               _tag: "TranscriptPagePrepended",
               selectionEpoch: request,
@@ -4231,16 +3118,84 @@ export const productLayer = <
             }),
           )
         })
+        const publishSelectionTurn = Effect.fn("Operation.interactive.publishSelectionTurn")(function* (
+          state: SelectionEpochState,
+          turn: Turn.Turn,
+          dispatch: (event: InteractiveEvent) => void,
+        ) {
+          const transcripts = yield* TranscriptRepository.Service
+          const turns = yield* TurnRepository.Service
+          return yield* transcriptPageAdmission.withPermits(1)(
+            Effect.gen(function* () {
+              if (activeSelectionState !== state) return false
+              const projection = yield* transcripts.get(turn.id)
+              const current = yield* turns.get(turn.id)
+              const version = state.authoritativeVersions.get(String(turn.id))
+              if (
+                current === undefined ||
+                version === undefined ||
+                current.status !== version.status ||
+                current.lastCursor !== version.lastCursor
+              ) {
+                if (current !== undefined) invalidateSelectionTurn(state, current)
+                return false
+              }
+              if (activeSelectionState !== state) return false
+              const authoritativeTurn = state.authoritativeTurns.get(String(turn.id))
+              if (projection === undefined || authoritativeTurn === undefined) return false
+              const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
+                Object.assign(
+                  {
+                    turn: authoritativeTurn,
+                    unit,
+                    projectionRevision: projection.revision,
+                    projectionModelPhase: projection.modelPhase,
+                  },
+                  projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
+                ),
+              )
+              const bounded = boundTranscriptEntries(entries)
+              if (bounded.oversizedEntry) {
+                dispatch({
+                  _tag: "ExecutionFailed",
+                  selectionEpoch: state.epoch,
+                  message: `Repaired Turn ${turn.id} exceeds the transcript event limit`,
+                })
+                return true
+              }
+              if (activeSelectionState !== state) return false
+              if (bounded.truncated) {
+                for (const unit of projection.units) state.loadedKeys.delete(unit.key)
+                for (const entry of bounded.entries) state.loadedKeys.add(entry.unit.key)
+                const partialCursor = bounded.partialCursor ?? transcriptCursorFor(bounded.entries[0])
+                if (
+                  partialCursor !== undefined &&
+                  (state.transcriptCursor === undefined ||
+                    compareTranscriptCursors(partialCursor, state.transcriptCursor) > 0)
+                )
+                  state.transcriptCursor = partialCursor
+                state.hasOlder = true
+              } else for (const entry of bounded.entries) state.loadedKeys.add(entry.unit.key)
+              dispatch({
+                _tag: "TranscriptReplaced",
+                selectionEpoch: state.epoch,
+                threadId: state.thread.id,
+                entries: bounded.entries,
+                hasOlder: state.hasOlder,
+                ...(state.transcriptCursor === undefined ? {} : { oldestCursor: state.transcriptCursor }),
+              })
+              return true
+            }),
+          )
+        })
         const continueSelectionRepair = Effect.fn("Operation.interactive.continueSelectionRepair")(function* (
           state: SelectionEpochState,
           dispatch: (event: InteractiveEvent) => void,
         ) {
           const sourceBackend = yield* ExecutionBackend.Service
-          const transcripts = yield* TranscriptRepository.Service
-          const turns = yield* TurnRepository.Service
           while (state.pendingTurns.size > 0) {
             if (activeSelectionState !== state) return
-            const beforeProgress = state.inspections.size + state.eventPages.size + state.replays.size
+            const beforeProgress = state.pendingTurns.size
             const backend = repairBackend(state, sourceBackend, makeRepairBudget())
             const pending = [...state.pendingTurns.values()]
             for (const work of pending) {
@@ -4254,75 +3209,11 @@ export const productLayer = <
                 ),
               )
               if (!completed || activeSelectionState !== state) continue
-              const committed = yield* transcriptPageAdmission.withPermits(1)(
-                Effect.gen(function* () {
-                  if (activeSelectionState !== state) return false
-                  const projection = yield* transcripts.get(turn.id)
-                  const current = yield* turns.get(turn.id)
-                  const version = state.authoritativeVersions.get(String(turn.id))
-                  if (
-                    current === undefined ||
-                    version === undefined ||
-                    current.status !== version.status ||
-                    current.lastCursor !== version.lastCursor
-                  ) {
-                    if (current !== undefined) invalidateSelectionTurn(state, current)
-                    return false
-                  }
-                  if (activeSelectionState !== state) return false
-                  const authoritativeTurn = state.authoritativeTurns.get(String(turn.id))
-                  if (projection === undefined || authoritativeTurn === undefined) return false
-                  const entries: ReadonlyArray<TranscriptRepository.Entry> = projection.units.map((unit) =>
-                    Object.assign(
-                      {
-                        turn: authoritativeTurn,
-                        unit,
-                        projectionRevision: projection.revision,
-                        projectionModelPhase: projection.modelPhase,
-                      },
-                      projection.costUsd === undefined ? {} : { projectionCostUsd: projection.costUsd },
-                    ),
-                  )
-                  const bounded = boundTranscriptEntries(entries)
-                  if (bounded.oversizedEntry) {
-                    dispatch({
-                      _tag: "ExecutionFailed",
-                      selectionEpoch: state.epoch,
-                      message: `Repaired Turn ${turn.id} exceeds the transcript event limit`,
-                    })
-                    return true
-                  }
-                  if (activeSelectionState !== state) return false
-                  if (bounded.truncated) {
-                    for (const unit of projection.units) state.loadedKeys.delete(unit.key)
-                    for (const entry of bounded.entries) state.loadedKeys.add(entry.unit.key)
-                    const partialCursor = bounded.partialCursor ?? transcriptCursorFor(bounded.entries[0])
-                    if (
-                      partialCursor !== undefined &&
-                      (state.transcriptCursor === undefined ||
-                        compareTranscriptCursors(partialCursor, state.transcriptCursor) > 0)
-                    )
-                      state.transcriptCursor = partialCursor
-                    state.hasOlder = true
-                  } else for (const entry of bounded.entries) state.loadedKeys.add(entry.unit.key)
-                  dispatch({
-                    _tag: "TranscriptReplaced",
-                    selectionEpoch: state.epoch,
-                    threadId: state.thread.id,
-                    entries: bounded.entries,
-                    hasOlder: state.hasOlder,
-                    ...(state.transcriptCursor === undefined ? {} : { oldestCursor: state.transcriptCursor }),
-                  })
-                  return true
-                }),
-              )
+              const committed = yield* publishSelectionTurn(state, turn, dispatch)
               if (!committed || activeSelectionState !== state) continue
-              for (const [executionId, descendant] of state.descendants)
-                enqueueChildFollower(state.thread.id, executionId, descendant.rootTurnId, descendant.status)
             }
             if (state.pendingTurns.size > 0) {
-              const afterProgress = state.inspections.size + state.eventPages.size + state.replays.size
-              if (afterProgress === beforeProgress) {
+              if (state.pendingTurns.size >= beforeProgress) {
                 dispatch({
                   _tag: "TranscriptResyncRequired",
                   selectionEpoch: state.epoch,
@@ -4349,55 +3240,19 @@ export const productLayer = <
               ),
             )
           })
-        const startSelectionUsage = (
-          state: SelectionEpochState,
-          usageState: SelectionUsage,
-          dispatch: (event: InteractiveEvent) => void,
-        ) =>
+        const startSelectionUsage = (state: SelectionEpochState, dispatch: (event: InteractiveEvent) => void) =>
           Effect.gen(function* () {
             selectionBackground.push(
               yield* Effect.forkIn(
                 Effect.gen(function* () {
                   const totals = yield* usageRepository.readThread(String(state.thread.id))
-                  const snapshot: UsageCost.Snapshot = {
-                    ...UsageCost.empty,
-                    threads: new Map([[String(state.thread.id), repositoryTotals(totals)]]),
-                    global: repositoryTotals(totals),
-                    ...(totals.activeMillis === undefined
-                      ? { timeMalformedThreads: new Set([String(state.thread.id)]) }
-                      : {
-                          activeObservedThreads: new Set([String(state.thread.id)]),
-                          threadActiveTime: new Map([
-                            [
-                              String(state.thread.id),
-                              {
-                                accumulated: Duration.millis(totals.activeMillis),
-                                ...(totals.activeSince === undefined ? {} : { activeSince: totals.activeSince }),
-                              },
-                            ],
-                          ]),
-                        }),
-                  }
-                  if (selectedUsage !== usageState) return
-                  usageState.snapshot = usageState.pending.reduce(UsageCost.observe, snapshot)
-                  usageState.pending.length = 0
-                  usageState.costAvailable = totals.costNanoUsd !== undefined
-                  usageState.tokensAvailable = totals.tokens !== undefined
-                  const selectedSnapshot = usageState.snapshot
-                  const threadId = String(state.thread.id)
+                  if (activeSelectionState !== state) return
                   dispatch({
                     _tag: "ThreadUsageUpdated",
                     selectionEpoch: state.epoch,
                     threadId: state.thread.id,
-                    cost:
-                      totals.costNanoUsd === undefined
-                        ? { _tag: "Unavailable" }
-                        : threadUsage(selectedSnapshot, threadId),
-                    tokens:
-                      totals.tokens === undefined
-                        ? { _tag: "Unavailable" }
-                        : threadUsageTokens(selectedSnapshot, threadId),
-                    time: displayActiveTime(selectedSnapshot, threadId),
+                    revision: totals.revision,
+                    ...persistedThreadUsage(totals),
                   })
                 }).pipe(Effect.provide(executionDependencies)),
                 sessionScope,
@@ -4416,14 +3271,10 @@ export const productLayer = <
             loadedKeys: new Set(),
             authoritativeTurns: new Map(),
             authoritativeVersions: new Map(),
-            descendants: new Map(),
-            inspections: new Map(),
-            eventPages: new Map(),
-            replays: new Map(),
             pendingTurns: new Map(),
-            backfills: new Map(),
             initialRepairBudget: makeRepairBudget(),
             transcriptCursor: undefined,
+            newestTranscriptCursor: undefined,
             projectedTurnCursor: undefined,
             hasUnprojectedTurns: false,
             hasOlder: false,
@@ -4432,16 +3283,7 @@ export const productLayer = <
             continuationRunning: false,
             requestedWindow: 0,
           }
-          const usageState: SelectionUsage = {
-            request,
-            threadId: String(thread.id),
-            snapshot: undefined as UsageCost.Snapshot | undefined,
-            pending: [] as Array<UsageCost.RootExecution & { readonly event: ExecutionBackend.Event }>,
-            costAvailable: false,
-            tokensAvailable: false,
-          }
           candidateSelectionState = state
-          candidateUsage = usageState
           yield* transcriptPageAdmission.withPermits(1)(loadTranscriptPage(state, dispatch))
           if (activeSelectionState !== state) return
           const summaries = yield* ThreadSummaryRepository.Service
@@ -4471,7 +3313,6 @@ export const productLayer = <
         const createAndSelectThread = Effect.fn("Operation.interactive.createAndSelectThread")(function* () {
           activeSelectionState = undefined
           candidateSelectionState = undefined
-          candidateUsage = undefined
           yield* interruptSelectionLoad
           yield* interruptSelectionBackground
           const threads = yield* ThreadRepository.Service
@@ -4484,7 +3325,6 @@ export const productLayer = <
           })
           const epoch = currentSelectionEpoch + 1
           const queue = yield* turns.readQueue(thread.id)
-          yield* activateChildFollowers(thread.id)
           currentSelectionEpoch = epoch
           selectedThreadId = String(thread.id)
           const initialUsage = initializeSelectedUsage(thread.id, epoch)
@@ -4496,14 +3336,10 @@ export const productLayer = <
             loadedKeys: new Set(),
             authoritativeTurns: new Map(),
             authoritativeVersions: new Map(),
-            descendants: new Map(),
-            inspections: new Map(),
-            eventPages: new Map(),
-            replays: new Map(),
             pendingTurns: new Map(),
-            backfills: new Map(),
             initialRepairBudget: makeRepairBudget(),
             transcriptCursor: undefined,
+            newestTranscriptCursor: undefined,
             projectedTurnCursor: undefined,
             hasUnprojectedTurns: false,
             hasOlder: false,
@@ -4526,7 +3362,6 @@ export const productLayer = <
             queue: queue.turns.map(queueItem),
           })
           sessionDispatch(initialUsage)
-          yield* startUsageCostLoad
           yield* notifyThreadSummaries
         })
         const supervise =
@@ -4570,7 +3405,11 @@ export const productLayer = <
                     setTurnStatus(turnId, status, cursor, settledAt).pipe(Effect.asVoid),
                   )
                   const recover = Effect.gen(function* () {
-                    for (const turn of yield* turns.listNonterminal) if (turn.status !== "queued") yield* launch(turn)
+                    for (const turn of yield* turns.listNonterminal)
+                      if (turn.status !== "queued") {
+                        yield* ensureIngest(turn.threadId, turn.id)
+                        yield* launch(turn)
+                      }
                   })
                   const scanDirty = Effect.gen(function* () {
                     const dirty = [...dirtyTurnObservers]
@@ -4589,6 +3428,39 @@ export const productLayer = <
                   }
                 }),
               ).pipe(Effect.provide(executionDependencies))
+        const selectionRefreshes = yield* Queue.bounded<void>(1)
+        const selectionRefreshTurns = new Set<string>()
+        const observeFoldCommit = (commit: ExecutionIngest.Commit) => {
+          const state = activeSelectionState
+          if (state === undefined || String(state.thread.id) !== String(commit.threadId)) return
+          if (!state.authoritativeTurns.has(String(commit.rootTurnId))) return
+          selectionRefreshTurns.add(String(commit.rootTurnId))
+          Queue.offerUnsafe(selectionRefreshes, undefined)
+        }
+        foldCommitObservers.add(observeFoldCommit)
+        yield* Scope.addFinalizer(
+          sessionScope,
+          Effect.sync(() => {
+            foldCommitObservers.delete(observeFoldCommit)
+          }),
+        )
+        yield* Effect.forkIn(
+          Effect.gen(function* () {
+            while (true) {
+              yield* Queue.take(selectionRefreshes)
+              const dirty = [...selectionRefreshTurns]
+              selectionRefreshTurns.clear()
+              const state = activeSelectionState
+              if (state === undefined) continue
+              for (const turnId of dirty) {
+                const turn = state.authoritativeTurns.get(turnId)
+                if (turn !== undefined) yield* publishSelectionTurn(state, turn, sessionDispatch)
+              }
+              yield* startSelectionContinuation(state, sessionDispatch)
+            }
+          }).pipe(Effect.provide(executionDependencies)),
+          sessionScope,
+        )
         if (!registerPromoter) sessionThreadViews.set(sessionId, () => selectedThreadId)
         if (!registerPromoter)
           interactiveSinks.set(sessionId, (_origin, event) => {
@@ -4959,9 +3831,7 @@ export const productLayer = <
               yield* Clock.currentTimeMillis,
             )
             yield* projectExecutionResult(turn.threadId, result)
-            if (result.status === "cancelled") {
-              yield* activateChildFollowers(thread.id)
-            } else if (isTerminalStatus(result.status)) yield* activateChildFollowers(thread.id)
+            if (isTerminalStatus(result.status)) yield* ensureIngest(turn.threadId, turn.id)
             if (result.status === "cancelled")
               emit(sessionDispatch, {
                 _tag: "ExecutionControlled",
@@ -5025,7 +3895,7 @@ export const productLayer = <
                       else resolution = "Always"
                       yield* backend.resolvePermission(waitId, resolution, resolvedAt)
                     }
-                    resumeWaitingChildFollowers(activeTurn.threadId)
+                    yield* ensureIngest(activeTurn.threadId, activeTurn.id)
                     emit(sessionDispatch, {
                       _tag: "ExecutionControlled",
                       selectionEpoch: 0,
@@ -5069,19 +3939,42 @@ export const productLayer = <
             ),
           readQueue: (id) =>
             safe(sessionDispatch, readQueue(Thread.ThreadId.make(id), selectionDispatch(currentSelectionEpoch))),
-          loadOlder: safe(
-            sessionDispatch,
-            Effect.gen(function* () {
-              const state = activeSelectionState
-              if (state === undefined || !state.hasOlder) return
-              const before = state.transcriptCursor
-              if (before === undefined) return
-              yield* transcriptPageAdmission.withPermits(1)(
-                loadTranscriptPage(state, selectionDispatch(state.epoch), before),
-              )
-              yield* startSelectionContinuation(state, selectionDispatch(state.epoch))
-            }),
-          ),
+          loadOlder: (threadId, selectionEpoch, before, loadedKeys) =>
+            safe(
+              sessionDispatch,
+              Effect.gen(function* () {
+                const state = activeSelectionState
+                if (state === undefined || state.thread.id !== threadId || state.epoch !== selectionEpoch) return
+                yield* transcriptPageAdmission.withPermits(1)(
+                  loadTranscriptPage(state, selectionDispatch(state.epoch), before, true, new Set(loadedKeys)),
+                )
+                yield* startSelectionContinuation(state, selectionDispatch(state.epoch))
+              }),
+            ),
+          loadNewer: (threadId, selectionEpoch, after: TranscriptRepository.PageCursor) =>
+            safe(
+              sessionDispatch,
+              transcriptPageAdmission.withPermits(1)(
+                Effect.gen(function* () {
+                  const state = activeSelectionState
+                  if (state === undefined || state.thread.id !== threadId || state.epoch !== selectionEpoch) return
+                  const page = yield* (yield* TranscriptRepository.Service).page(state.thread.id, { after, limit: 50 })
+                  if (!isCurrentSelectionState(state)) return
+                  const entries = page.entries
+                  state.newestTranscriptCursor = page.newestCursor ?? state.newestTranscriptCursor
+                  sessionDispatch({
+                    _tag: "TranscriptPageAppended",
+                    selectionEpoch: state.epoch,
+                    threadId: state.thread.id,
+                    entries,
+                    hasNewer: page.hasNewer ?? false,
+                    requestedAfter: after,
+                    ...(page.threadCostUsd === undefined ? {} : { threadCostUsd: page.threadCostUsd }),
+                    ...(page.newestCursor === undefined ? {} : { newestCursor: page.newestCursor }),
+                  })
+                }),
+              ),
+            ),
           previewThread: (id) =>
             Effect.gen(function* () {
               const threads = yield* ThreadRepository.Service
@@ -5093,17 +3986,15 @@ export const productLayer = <
               const recent = yield* turns.listRecentNonqueued(thread.id, 4)
               const previewTurns = yield* Effect.forEach(recent, (turn) =>
                 Effect.gen(function* () {
-                  let projection = yield* transcripts.get(turn.id)
+                  const projection = yield* transcripts.get(turn.id)
                   const execution = yield* backend.inspect(turn.id).pipe(Effect.orElseSucceed(() => undefined))
                   if (
                     execution !== undefined &&
                     (!isTerminalStatus(execution.status) ||
                       projection === undefined ||
                       projection.checkpointCursor !== execution.lastCursor)
-                  ) {
-                    yield* projectExecutionPages(backend, turn, execution.status)
-                    projection = yield* transcripts.get(turn.id)
-                  }
+                  )
+                    yield* ensureIngest(turn.threadId, turn.id)
                   return {
                     prompt: turn.prompt,
                     units: projection?.units ?? Transcript.empty(turn.id, turn.prompt).units,
@@ -5188,7 +4079,9 @@ export const productLayer = <
             admitLocal(implementation.resolvePermission(waitId, kind, decision)),
           selectThread: (threadId, epoch) => admitLocal(implementation.selectThread(threadId, epoch)),
           readQueue: (threadId) => admitLocal(implementation.readQueue(threadId)),
-          loadOlder: admitLocal(implementation.loadOlder),
+          loadOlder: (threadId, epoch, before, loadedKeys) =>
+            admitLocal(implementation.loadOlder(threadId, epoch, before, loadedKeys)),
+          loadNewer: (threadId, epoch, after) => admitLocal(implementation.loadNewer(threadId, epoch, after)),
           previewThread: (threadId) => admitLocal(implementation.previewThread(threadId)),
           reopenThread: (epoch) => admitLocal(implementation.reopenThread(epoch)),
           replay: (turnId, afterCursor) => admitLocal(implementation.replay(turnId, afterCursor)),
@@ -5458,6 +4351,7 @@ export const productLayer = <
                     threadId: thread.id,
                     turn: runningTurn,
                   })
+                  yield* ensureIngest(turn.threadId, turn.id)
                   const startCompleted = yield* Deferred.make<void>()
                   const started = yield* Effect.forkChild(
                     rootTurnOwner
@@ -5471,6 +4365,7 @@ export const productLayer = <
                           if (!directDelivery) return
                           receivedDirectEvent = true
                           deliveredCursors.add(event.cursor)
+                          executionIngest.deliver(turn.id, event)
                           publishInteractiveActivity(0, transcriptPatch(turn, event))
                         },
                         ...(prepared.promptParts === undefined ? {} : { promptParts: prepared.promptParts }),
@@ -5529,9 +4424,13 @@ export const productLayer = <
                   }),
                 )
                 if (!followed) {
-                  for (const event of result.events)
-                    if (!directDelivery || !deliveredCursors.has(event.cursor))
-                      publishInteractiveActivity(0, transcriptPatch(turn, event))
+                  for (const event of undeliveredEvents(
+                    result.events,
+                    directDelivery ? deliveredCursors : new Set<string>(),
+                  )) {
+                    executionIngest.deliver(turn.id, event)
+                    publishInteractiveActivity(0, transcriptPatch(turn, event))
+                  }
                   const updated = yield* setTurnStatus(
                     turn.id,
                     result.status,
@@ -5539,11 +4438,8 @@ export const productLayer = <
                     completedAt,
                   )
                   yield* projectExecutionResult(thread.id, result)
-                  yield* (yield* TranscriptRepository.Service).appendAll(
-                    updated,
-                    rootExecutionEvents(updated.id, result.events),
-                  )
-                  yield* backfillTranscriptTree(updated, true)
+                  yield* ensureIngest(updated.threadId, updated.id)
+                  yield* executionIngest.settled(updated.id)
                 }
                 return result
               })
@@ -5626,7 +4522,17 @@ export const productLayer = <
                 .filter((event) => event.type === "model.output.completed")
                 .map((event) => event.text ?? "")
                 .join("")
-              yield* Console.log(text)
+              if (text.length > 0) yield* Console.log(text)
+              if (result.status === "cancelled")
+                return yield* operationError(`Turn ${submitted.id} was cancelled before it completed`)
+              if (result.status === "failed") {
+                const failure = result.events.findLast((event) => event.type === "execution.failed")?.text
+                return yield* operationError(
+                  failure === undefined ? `Turn ${submitted.id} failed` : `Turn ${submitted.id} failed: ${failure}`,
+                )
+              }
+              if (result.status === "completed" && text.length === 0)
+                return yield* operationError(`Turn ${submitted.id} completed without output`)
             })
             yield* program.pipe(
               Effect.provide(executionDependencies),
@@ -5855,65 +4761,6 @@ export const productLayer = <
             )
             return
           }
-          if (input._tag === "Migrate") {
-            yield* Effect.gen(function* () {
-              const threads = Context.get(dependencyContext, ThreadRepository.Service)
-              const turns = Context.get(dependencyContext, TurnRepository.Service)
-              const token = `usage-${yield* Clock.currentTimeMillis}-${yield* Random.next}`
-              let repaired = 0
-              for (const thread of yield* threads.listAll) {
-                const threadTurns = yield* turns.list(thread.id)
-                const roots = usageRoots(thread, threadTurns)
-                for (const turn of threadTurns) {
-                  if (turn.status === "queued" || !isTerminalStatus(turn.status)) continue
-                  const admitted = yield* usageRepository.admit(String(turn.id), String(thread.id))
-                  if (admitted.sourceComplete) continue
-                  const claim = yield* usageRepository.claimRepair(String(turn.id), token)
-                  if (claim._tag === "Busy") continue
-                  yield* Effect.gen(function* () {
-                    while (true) {
-                      const stored = yield* usageRepository.loadFold(String(turn.id))
-                      if (stored === undefined) break
-                      if (stored.projectionVersion !== UsageRepository.projectionVersion)
-                        return yield* operationError(
-                          `Usage projection ${stored.projectionVersion} for Turn ${turn.id} is not supported`,
-                        )
-                      if (!(yield* usageRepository.checkpointRepair(String(turn.id), token, "collecting")))
-                        return yield* operationError(`Usage repair claim was lost for Turn ${turn.id}`)
-                      const rebuilt = yield* UsageCost.rebuild(
-                        acquiredBackend,
-                        roots.filter((root) => root.turnId === String(turn.id)),
-                      )
-                      if (!(yield* usageRepository.checkpointRepair(String(turn.id), token, "committing")))
-                        return yield* operationError(`Usage repair claim was lost for Turn ${turn.id}`)
-                      const materialized = UsageCost.materialize(rebuilt.snapshot, String(turn.id), String(thread.id))
-                      const committed = yield* usageRepository.commitRepairFold(
-                        String(turn.id),
-                        token,
-                        stored.revision,
-                        UsageCost.serialize(rebuilt.snapshot),
-                        { ...materialized, sourceComplete: rebuilt.sourceComplete },
-                      )
-                      if (committed._tag === "Applied") {
-                        repaired += 1
-                        break
-                      }
-                    }
-                  }).pipe(
-                    Effect.ensuring(
-                      usageRepository.finishRepair(String(turn.id), token).pipe(
-                        Effect.orElseSucceed(() => false),
-                        Effect.asVoid,
-                      ),
-                    ),
-                  )
-                }
-              }
-              const global = yield* usageRepository.readGlobal
-              yield* Console.log(encodeJson({ repaired, sourceComplete: global.sourceComplete }))
-            }).pipe(Effect.mapError((error) => unavailable(input, String(error))))
-            return
-          }
           if (input._tag !== "Thread") return yield* unavailable(input)
           const program = Effect.gen(function* () {
             const repository = yield* ThreadRepository.Service
@@ -6022,18 +4869,7 @@ export const productLayer = <
                 yield* notifyThreadSummaries
                 return
               case "delete":
-                yield* Effect.uninterruptible(
-                  Effect.gen(function* () {
-                    yield* repository.remove(Thread.ThreadId.make(input.threadId))
-                    deletedUsageThreads.add(input.threadId)
-                    usageSnapshot = { ...UsageCost.empty }
-                    usageCostsLoaded = false
-                    usageGlobalCostAvailable = false
-                    usageCostLoadStarted = false
-                    pendingUsageEvents.length = 0
-                  }),
-                )
-                yield* loadUsageCosts
+                yield* repository.remove(Thread.ThreadId.make(input.threadId))
                 yield* notifyThreadSummaries
                 return
               case "export": {

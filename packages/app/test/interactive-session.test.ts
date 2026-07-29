@@ -3,13 +3,16 @@ import * as ThreadRepository from "@rika/persistence/repository"
 import * as Thread from "@rika/persistence/thread"
 import * as TranscriptRepository from "@rika/persistence/transcript-repository"
 import * as TurnRepository from "@rika/persistence/turn-repository"
+import * as UsageRepository from "@rika/persistence/usage-repository"
 import * as Turn from "@rika/persistence/turn"
 import * as ExecutionBackend from "@rika/runtime/contract"
 import { Runtime as ToolRuntime } from "@rika/tools"
 import * as Transcript from "@rika/transcript"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
+import * as ExecutionIngest from "../src/execution-ingest"
 import { Operation } from "../src/index"
+import * as UsageCost from "../src/usage-cost"
 import { createTurn, executionRoute } from "./current-state"
 
 const collectEvents = (session: Operation.InteractiveSession, events: Array<Operation.InteractiveEvent>) =>
@@ -436,6 +439,7 @@ describe("InteractiveSession controls", () => {
           _tag: "ThreadUsageUpdated",
           selectionEpoch: 0,
           threadId: "created",
+          revision: 0,
           cost: { _tag: "Unavailable" },
           tokens: { _tag: "Unavailable" },
           time: { _tag: "Unavailable" },
@@ -655,9 +659,6 @@ describe("InteractiveSession controls", () => {
         ["replay", "active", undefined],
         ["steer", "active", "change course", "rika:interactive-steer:active:0"],
         ["cancel", "active", 0],
-        ["replay", "active", undefined],
-        ["replay", "active", undefined],
-        ["replay", "active", undefined],
       ])
       expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
         status: "cancelled",
@@ -1044,21 +1045,15 @@ describe("InteractiveSession controls", () => {
       yield* session.replay("latest-active", "cursor-7")
       while (!events.some((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2))
         yield* Effect.yieldNow
-      expect(events.find((event) => event._tag === "SelectionLoaded" && event.thread.id === "older")).toMatchObject({
-        _tag: "SelectionLoaded",
-        thread: { id: "older" },
-        entries: [{ turn: { id: "active" } }],
-      })
-      expect(events.find((event) => event._tag === "SelectionLoaded" && event.thread.id === "latest")).toMatchObject({
-        _tag: "SelectionLoaded",
-        thread: { id: "latest" },
-        entries: [{ turn: { id: "latest-active" } }],
-      })
+      yield* awaitSelectionEntries(events, (entries) => entries.some((entry) => entry.turn.id === "latest-active"))
+      expect(events.some((event) => event._tag === "SelectionLoaded" && event.thread.id === "older")).toBe(true)
+      expect(latestSelectionEntries(events)?.map((entry) => entry.turn.id)).toEqual(["latest-active"])
       expect(events.filter((event) => event._tag === "TranscriptPatched")).toEqual([])
       expect(events.find((event) => event._tag === "ThreadUsageUpdated" && event.selectionEpoch === 2)).toEqual({
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 2,
         threadId: "latest",
+        revision: 0,
         cost: { _tag: "Unavailable" },
         tokens: { _tag: "Unavailable" },
         time: { _tag: "Unavailable" },
@@ -1090,9 +1085,11 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
 
-      const received = events.find((event) => event._tag === "SelectionLoaded")
-      const projected =
-        received?._tag === "SelectionLoaded" ? received.entries.filter((entry) => entry.turn.id === "active") : []
+      const received = yield* awaitSelectionEntries(
+        events,
+        (entries) => entries.filter((entry) => entry.turn.id === "active").length >= 2,
+      )
+      const projected = received.filter((entry) => entry.turn.id === "active")
       expect(projected).toHaveLength(2)
       expect(projected.at(-1)?.unit).toMatchObject({
         revision: 450,
@@ -1106,7 +1103,7 @@ describe("InteractiveSession controls", () => {
     }),
   )
 
-  it.effect("fails transcript loading when forward paging stops advancing", () =>
+  it.effect("stops ingesting and reports a failure when forward paging stops advancing", () =>
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
@@ -1126,7 +1123,9 @@ describe("InteractiveSession controls", () => {
       yield* Effect.yieldNow
 
       expect(events.find((event) => event._tag === "ExecutionFailed")).toMatchObject({
-        message: expect.stringContaining("cursor did not advance"),
+        threadId: older.id,
+        turnId: Turn.TurnId.make("active"),
+        message: expect.stringContaining("lost its place"),
       })
       expect(yield* Ref.get(controls)).toEqual([
         ["page", "active", "forward", undefined, 200],
@@ -1165,13 +1164,11 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
 
-      expect(events.find((event) => event._tag === "SelectionLoaded")).toMatchObject({
-        queue: [{ id: queued.id }],
-        entries: [
-          { turn: { id: "active" }, unit: { content: { _tag: "Entry" } } },
-          { turn: { id: shell.id, status: "completed" }, unit: { content: { _tag: "Entry" } } },
-        ],
-      })
+      expect(events.find((event) => event._tag === "SelectionLoaded")).toMatchObject({ queue: [{ id: queued.id }] })
+      expect(yield* awaitSelectionEntries(events, (entries) => entries.length >= 2)).toMatchObject([
+        { turn: { id: "active" }, unit: { content: { _tag: "Entry" } } },
+        { turn: { id: shell.id, status: "completed" }, unit: { content: { _tag: "Entry" } } },
+      ])
       expect(yield* Ref.get(controls)).toEqual([["replay", "active", undefined]])
     }),
   )
@@ -1196,16 +1193,37 @@ describe("InteractiveSession controls", () => {
       yield* Effect.yieldNow
       const initial = events.find((event) => event._tag === "SelectionLoaded")
       expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
+      if (initial?._tag !== "SelectionLoaded" || initial.oldestCursor === undefined)
+        return yield* Effect.die("missing initial transcript cursor")
       const loaded = initial?._tag === "SelectionLoaded" ? [...initial.entries] : []
       expect(loaded.length).toBeGreaterThan(0)
       expect(loaded.length).toBeLessThanOrEqual(200)
       const turnPagesBeforeIdle = (yield* Ref.get(turnPageRequests)).length
       for (let attempt = 0; attempt < 100; attempt += 1) yield* Effect.yieldNow
       expect(yield* Ref.get(turnPageRequests)).toHaveLength(turnPagesBeforeIdle)
+      yield* session.loadOlder(
+        "different-thread",
+        1,
+        initial.oldestCursor,
+        loaded.map((entry) => entry.unit.key),
+      )
+      yield* session.loadOlder(
+        older.id,
+        2,
+        initial.oldestCursor,
+        loaded.map((entry) => entry.unit.key),
+      )
+      expect(yield* Ref.get(turnPageRequests)).toHaveLength(turnPagesBeforeIdle)
       let hasOlder = true
+      let before = initial.oldestCursor
       for (let page = 0; page < 10 && hasOlder; page += 1) {
         const previous = events.filter((event) => event._tag === "TranscriptPagePrepended").length
-        yield* session.loadOlder
+        yield* session.loadOlder(
+          older.id,
+          1,
+          before,
+          loaded.map((entry) => entry.unit.key),
+        )
         for (
           let attempt = 0;
           attempt < 400 && events.filter((event) => event._tag === "TranscriptPagePrepended").length === previous;
@@ -1216,17 +1234,15 @@ describe("InteractiveSession controls", () => {
         if (prepended?._tag !== "TranscriptPagePrepended") break
         loaded.unshift(...prepended.entries)
         hasOlder = prepended.hasOlder
+        if (prepended.oldestCursor !== undefined) before = prepended.oldestCursor
       }
-      for (
-        let attempt = 0;
-        attempt < 400 &&
-        !events.some(
-          (event) =>
-            event._tag === "TranscriptReplaced" && event.entries.some((entry) => entry.unit.key === "turn:active:user"),
-        );
-        attempt += 1
-      )
+      let replacements = -1
+      for (let idle = 0, attempt = 0; idle < 100 && attempt < 20000; attempt += 1) {
+        const observed = events.filter((event) => event._tag === "TranscriptReplaced").length
+        idle = observed === replacements ? idle + 1 : 0
+        replacements = observed
         yield* Effect.yieldNow
+      }
       const loadedKeys = new Set(loaded.map((entry) => entry.unit.key))
       for (const replacement of events) {
         if (replacement._tag !== "TranscriptReplaced") continue
@@ -1290,8 +1306,15 @@ describe("InteractiveSession controls", () => {
       expect(loaded.length).toBeGreaterThan(0)
       expect(loaded[0]?.unit.key).toBe(`turn:${loaded[0]?.turn.id}:user`)
       expect(initial?._tag === "SelectionLoaded" ? initial.hasOlder : false).toBe(true)
+      if (initial?._tag !== "SelectionLoaded" || initial.oldestCursor === undefined)
+        return yield* Effect.die("missing initial transcript cursor")
 
-      yield* session.loadOlder
+      yield* session.loadOlder(
+        older.id,
+        1,
+        initial.oldestCursor,
+        loaded.map((entry) => entry.unit.key),
+      )
       yield* Effect.yieldNow
       const prepended = events.find((event) => event._tag === "TranscriptPagePrepended")
       const olderEntries = prepended?._tag === "TranscriptPagePrepended" ? prepended.entries : []
@@ -1372,9 +1395,12 @@ describe("InteractiveSession controls", () => {
       yield* session.selectThread(older.id, 1)
       yield* Effect.yieldNow
 
+      const loaded = yield* awaitSelectionEntries(events, (entries) =>
+        entries.some((entry) => entry.unit.key === "turn:active:user"),
+      )
       const initial = events.find((event) => event._tag === "SelectionLoaded")
-      const loaded = initial?._tag === "SelectionLoaded" ? initial.entries : []
       const cursor = initial?._tag === "SelectionLoaded" ? initial.oldestCursor : undefined
+      if (cursor === undefined) return yield* Effect.die("missing initial transcript cursor")
       const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(initial)
       expect(new TextEncoder().encode(encoded).byteLength).toBeLessThan(10 * 1024 * 1024)
       expect(loaded.some((entry) => entry.unit.key === "turn:active:user")).toBe(true)
@@ -1387,9 +1413,15 @@ describe("InteractiveSession controls", () => {
 
       const olderEntries: Array<TranscriptRepository.Entry> = []
       let hasOlder = initial?._tag === "SelectionLoaded" ? initial.hasOlder : false
+      let before = cursor
       for (let page = 0; page < 20 && hasOlder; page += 1) {
         const previousPages = events.filter((event) => event._tag === "TranscriptPagePrepended").length
-        yield* session.loadOlder
+        yield* session.loadOlder(
+          older.id,
+          1,
+          before,
+          [...olderEntries, ...loaded].map((entry) => entry.unit.key),
+        )
         for (
           let attempt = 0;
           attempt < 400 && events.filter((event) => event._tag === "TranscriptPagePrepended").length === previousPages;
@@ -1400,6 +1432,7 @@ describe("InteractiveSession controls", () => {
         if (prepended?._tag !== "TranscriptPagePrepended") break
         olderEntries.unshift(...prepended.entries)
         hasOlder = prepended.hasOlder
+        if (prepended.oldestCursor !== undefined) before = prepended.oldestCursor
       }
       expect(olderEntries.length).toBeGreaterThan(0)
       const cursorEntry = loaded.find((entry) => entry.unit.key === cursor?.key)
@@ -1592,7 +1625,6 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
   readonly inspection?: (executionId: string) => ExecutionBackend.Inspection | undefined
   readonly replayEvents?: (executionId: string) => ReadonlyArray<ExecutionBackend.Event>
   readonly pageEvents?: (executionId: string, after: string | undefined) => ExecutionBackend.EventPage
-  readonly pageGate?: { readonly after: string; readonly open: Deferred.Deferred<void> }
 }) {
   const subagentThread = thread("subagent-thread", 1)
   const doneTurn: Turn.Turn = {
@@ -1638,23 +1670,29 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
     cancelWorkflow: () => Effect.die("unused"),
     start: () => Effect.die("unused"),
     inspect: (turnId) => Effect.succeed(inspection(turnId)),
-    follow: (turnId, _cursor, onEvent) => {
-      if (turnId === "done") return Effect.never
-      const events = eventsFor(turnId)
+    follow: (turnId, cursor, onEvent) => {
+      const after = typeof cursor === "string" ? cursor : cursor?.cursor
+      const all = eventsFor(turnId)
+      const boundary = after === undefined ? -1 : all.findIndex((event) => event.cursor === after)
+      const events = all.slice(boundary + 1)
+      const inspected = inspection(turnId)
       return (
         options.followed === undefined ? Effect.void : Ref.update(options.followed, (followed) => [...followed, turnId])
       ).pipe(
+        Effect.andThen(
+          inspected === undefined
+            ? ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${turnId}` })
+            : Effect.void,
+        ),
         Effect.tap(() => Effect.sync(() => events.forEach((event) => onEvent?.(event)))),
-        Effect.as({ turnId, status: "completed" as const, events }),
+        Effect.as({ turnId, status: inspected?.status ?? ("completed" as const), events }),
       )
     },
     steer: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
     replay: (turnId) => Effect.succeed({ turnId, status: "completed" as const, events: eventsFor(turnId) }),
     pageEvents: (turnId, _direction, cursor) =>
-      Effect.gen(function* () {
-        const pageGate = options.pageGate
-        if (pageGate !== undefined && cursor === pageGate.after) yield* Deferred.await(pageGate.open)
+      Effect.sync(() => {
         if (options.pageEvents !== undefined) return options.pageEvents(turnId, cursor)
         const events = eventsFor(turnId)
         const boundary = cursor === undefined ? -1 : events.findIndex((event) => event.cursor === cursor)
@@ -1689,9 +1727,40 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
   return { session, subagentThread, transcripts, turns }
 })
 
+const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent>) => {
+  let entries: ReadonlyArray<TranscriptRepository.Entry> | undefined
+  for (const event of events) {
+    if (event._tag === "SelectionLoaded") entries = event.entries
+    else if (event._tag === "TranscriptReplaced") {
+      const replaced = new Set(event.entries.map((entry) => entry.turn.id))
+      entries = [...(entries ?? []).filter((entry) => !replaced.has(entry.turn.id)), ...event.entries].toSorted(
+        (left, right) =>
+          left.turn.createdAt - right.turn.createdAt ||
+          left.unit.order.sequence - right.unit.order.sequence ||
+          left.unit.order.part - right.unit.order.part,
+      )
+    }
+  }
+  return entries
+}
+
+const awaitSelectionEntries = (
+  events: ReadonlyArray<Operation.InteractiveEvent>,
+  until: (entries: ReadonlyArray<TranscriptRepository.Entry>) => boolean,
+) =>
+  Effect.gen(function* () {
+    for (let attempt = 0; attempt < 2_000; attempt += 1) {
+      const entries = latestSelectionEntries(events)
+      if (entries !== undefined && until(entries)) return entries
+      yield* Effect.yieldNow
+    }
+    return latestSelectionEntries(events) ?? []
+  })
+
 const selectionEntriesFor = (
   session: Operation.InteractiveSession,
   threadId: Thread.ThreadId,
+  until?: (entries: ReadonlyArray<TranscriptRepository.Entry>) => boolean,
 ): Effect.Effect<
   {
     readonly entries: ReadonlyArray<TranscriptRepository.Entry>
@@ -1703,13 +1772,14 @@ const selectionEntriesFor = (
     const events: Array<Operation.InteractiveEvent> = []
     yield* collectEvents(session, events)
     yield* session.selectThread(threadId, 1)
-    for (let attempt = 0; attempt < 400; attempt += 1) {
-      const loaded = events.find((event) => event._tag === "SelectionLoaded")
-      if (loaded !== undefined) return { entries: loaded._tag === "SelectionLoaded" ? loaded.entries : [], events }
-      yield* Effect.yieldNow
-    }
-    return { entries: [], events }
+    const entries = yield* awaitSelectionEntries(events, (loaded) => until === undefined || until(loaded))
+    return { entries, events }
   })
+
+const nestedSubagentReady = (entries: ReadonlyArray<TranscriptRepository.Entry>) => {
+  const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
+  return nestedTool && nestedAnswer
+}
 
 const nestedSubagentExpectations = (entries: ReadonlyArray<TranscriptRepository.Entry>) => {
   const nested = entries.filter((entry) => entry.unit.parentId === subagentToolId)
@@ -1753,14 +1823,19 @@ describe("InteractiveSession subagent reload", () => {
         turnStatus: "failed",
       })
 
-      const { entries } = yield* selectionEntriesFor(session, subagentThread.id)
-      const parent = entries.find(
-        (entry) =>
-          entry.unit.parentId === undefined &&
-          entry.unit.content._tag === "Block" &&
-          entry.unit.content.block._tag === "ToolCall" &&
-          entry.unit.content.block.id === subagentToolId,
-      )
+      const reconciledParent = (entries: ReadonlyArray<TranscriptRepository.Entry>) =>
+        entries.find(
+          (entry) =>
+            entry.unit.parentId === undefined &&
+            entry.unit.content._tag === "Block" &&
+            entry.unit.content.block._tag === "ToolCall" &&
+            entry.unit.content.block.id === subagentToolId,
+        )
+      const { entries } = yield* selectionEntriesFor(session, subagentThread.id, (loaded) => {
+        const content = reconciledParent(loaded)?.unit.content
+        return content?._tag === "Block" && content.block._tag === "ToolCall" && content.block.status === "complete"
+      })
+      const parent = reconciledParent(entries)
       expect(parent?.unit.content).toMatchObject({
         _tag: "Block",
         block: { _tag: "ToolCall", status: "complete" },
@@ -2015,7 +2090,7 @@ describe("InteractiveSession subagent reload", () => {
             entry.unit.content.block.status === "running",
         ),
       ).toBe(false)
-      expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toEqual({
+      expect(events.find((event) => event._tag === "ThreadUsageUpdated")).toMatchObject({
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 1,
         threadId: "subagent-thread",
@@ -2026,7 +2101,7 @@ describe("InteractiveSession subagent reload", () => {
     }),
   )
 
-  it.effect("follows an already-completed child so the live view receives its tools and final response", () =>
+  it.effect("renders an already-completed child from persisted units after following it once", () =>
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
       const rootProjection = Transcript.project("done", "delegate", subagentRootEvents.slice(0, 2))
@@ -2037,25 +2112,12 @@ describe("InteractiveSession subagent reload", () => {
         turnStatus: "running",
         followed,
       })
-      const events: Array<Operation.InteractiveEvent> = []
-      yield* collectEvents(session, events)
-      yield* session.selectThread(subagentThread.id, 1)
-      for (
-        let attempt = 0;
-        attempt < 400 &&
-        !events.some(
-          (event) => event._tag === "TranscriptPatched" && event.event.cursor === subagentChildEvents.at(-1)!.cursor,
-        );
-        attempt += 1
-      )
-        yield* Effect.yieldNow
 
-      expect(yield* Ref.get(followed)).toContain(subagentChildId)
-      expect(
-        events.flatMap((event) =>
-          event._tag === "TranscriptPatched" && event.turnId === subagentChildId ? [event.event.cursor] : [],
-        ),
-      ).toEqual(subagentChildEvents.map((event) => event.cursor))
+      const { entries } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
+      const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
+      expect(nestedTool).toBe(true)
+      expect(nestedAnswer).toBe(true)
+      expect((yield* Ref.get(followed)).filter((executionId) => executionId === subagentChildId)).toHaveLength(1)
     }),
   )
 
@@ -2151,42 +2213,42 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
       })
-      const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id)
+      const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
       expect(events.filter((event) => event._tag === "SelectionLoaded")).toHaveLength(1)
-      expect(events.some((event) => event._tag === "TranscriptReplaced")).toBe(false)
+      expect(events.filter((event) => event._tag === "TranscriptReplaced").length).toBeLessThanOrEqual(1)
       const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
       expect(nestedTool).toBe(true)
       expect(nestedAnswer).toBe(true)
     }),
   )
 
-  it.effect("retries child reconciliation when Relay has no replayable child transcript", () =>
+  it.effect("consumes a child with no replayable transcript once and never follows it again", () =>
     Effect.gen(function* () {
-      let inspections = 0
+      const followed = yield* Ref.make<ReadonlyArray<string>>([])
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
         storedTree: Transcript.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: [],
-        inspection: (executionId) => {
-          inspections += 1
-          return {
-            turnId: executionId,
-            status: "completed",
-            ...(executionId === "done" ? { lastCursor: "done-final" } : {}),
-            waits: [],
-            pendingTools: [],
-            children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
-          }
-        },
+        followed,
+        inspection: (executionId) => ({
+          turnId: executionId,
+          status: "completed",
+          ...(executionId === "done" ? { lastCursor: "done-final" } : {}),
+          waits: [],
+          pendingTools: [],
+          children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
+        }),
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
-      const firstInspections = inspections
+      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(stored?.consumed?.[subagentChildId]?.status).toBe("completed")
+      expect(stored?.childTreeReconciled).toBe(true)
+      const consumedFollows = yield* Ref.get(followed)
 
       yield* session.reopenThread(2)
-      expect(inspections).toBeGreaterThan(firstInspections)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      for (let attempt = 0; attempt < 200; attempt += 1) yield* Effect.yieldNow
+      expect(yield* Ref.get(followed)).toEqual(consumedFollows)
     }),
   )
 
@@ -2220,7 +2282,7 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-later",
         childReplayEvents: [],
       })
-      const { entries } = yield* selectionEntriesFor(session, subagentThread.id)
+      const { entries } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
       const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
       expect(nestedTool).toBe(true)
       expect(nestedAnswer).toBe(true)
@@ -2303,7 +2365,7 @@ describe("InteractiveSession subagent reload", () => {
     }),
   )
 
-  it.effect("does not mark a child tree reconciled when a descendant inspection is missing or active", () =>
+  it.effect("leaves a descendant unconsumed until Relay can read it", () =>
     Effect.gen(function* () {
       let childAvailable = false
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
@@ -2333,14 +2395,32 @@ describe("InteractiveSession subagent reload", () => {
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      const unreadable = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(unreadable?.childTreeReconciled).toBe(false)
+      expect(unreadable?.consumed?.[subagentChildId]?.status).toBeUndefined()
+
       childAvailable = true
       yield* session.reopenThread(2)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      for (
+        let attempt = 0;
+        attempt < 400 && (yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled !== true;
+        attempt += 1
+      )
+        yield* Effect.yieldNow
+      const readable = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(readable?.consumed?.[subagentChildId]?.status).toBe("completed")
+      expect(
+        readable?.units.some(
+          (unit) =>
+            unit.parentId === subagentToolId &&
+            unit.content._tag === "Entry" &&
+            unit.content.text.includes("All tests pass."),
+        ),
+      ).toBe(true)
     }),
   )
 
-  it.effect("does not mark a child tree reconciled when confirmation discovers another child", () =>
+  it.effect("consumes a child that only inspection reveals before reconciling the tree", () =>
     Effect.gen(function* () {
       const lateChild = `${subagentChildId}:late`
       let rootInspections = 0
@@ -2369,7 +2449,10 @@ describe("InteractiveSession subagent reload", () => {
 
       yield* selectionEntriesFor(session, subagentThread.id)
       expect(rootInspections).toBeGreaterThan(1)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      expect(Object.keys(stored?.consumed ?? {}).toSorted()).toEqual(["done", subagentChildId, lateChild].toSorted())
+      expect(stored?.consumed?.[lateChild]?.status).toBe("completed")
+      expect(stored?.childTreeReconciled).toBe(true)
     }),
   )
 
@@ -2429,78 +2512,7 @@ describe("InteractiveSession subagent reload", () => {
     }),
   )
 
-  it.effect("finishes an interrupted paged replay before certifying persisted content", () =>
-    Effect.gen(function* () {
-      const pageGate = yield* Deferred.make<void>()
-      const replayedRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
-        ...Array.from({ length: 31 }, (_, index) => ({
-          executionId: "done",
-          cursor: `root-page-${index}`,
-          sequence: index,
-          type: "model.output.delta" as const,
-          createdAt: index,
-          text: `replayed-${index}`,
-        })),
-        ...subagentRootEvents.map((event, index) => ({
-          ...event,
-          cursor: `root-page-${index + 31}`,
-          sequence: index + 31,
-          createdAt: index + 31,
-        })),
-      ]
-      const finalRootCursor = replayedRootEvents.at(-1)!.cursor
-      const staleRoot = Transcript.project("done", "stale stored root", [
-        {
-          cursor: "stale-root",
-          sequence: 0,
-          type: "model.output.completed",
-          createdAt: 0,
-          text: "stale stored content",
-        },
-      ])
-      const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: staleRoot,
-        turnLastCursor: finalRootCursor,
-        childReplayEvents: subagentChildEvents,
-        pageGate: { after: "root-page-31", open: pageGate },
-        inspection: (executionId) => ({
-          turnId: executionId,
-          status: "completed",
-          lastCursor: executionId === "done" ? finalRootCursor : "childdone~a4",
-          waits: [],
-          pendingTools: [],
-          children: executionId === "done" ? [{ executionId: subagentChildId, status: "completed" }] : [],
-        }),
-        pageEvents: (executionId, after) => {
-          const events = executionId === "done" ? replayedRootEvents : subagentChildEvents
-          const boundary = after === undefined ? -1 : events.findIndex((event) => event.cursor === after)
-          const event = events[boundary + 1]
-          return event === undefined
-            ? { events: [], hasMore: false, ...(after === undefined ? {} : { newestCursor: after }) }
-            : { events: [event], hasMore: boundary + 2 < events.length, newestCursor: event.cursor }
-        },
-      })
-
-      yield* selectionEntriesFor(session, subagentThread.id)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
-      yield* Deferred.succeed(pageGate, undefined)
-
-      for (let attempt = 0; attempt < 800; attempt += 1) {
-        if ((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled === true) break
-        yield* Effect.yieldNow
-      }
-      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(stored?.childTreeReconciled).toBe(true)
-      expect(
-        stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text.includes("stale stored")),
-      ).toBe(false)
-      expect(
-        stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text.includes("replayed-30")),
-      ).toBe(true)
-    }),
-  )
-
-  it.effect("keeps an incomplete root replay as an uncertified display fallback", () =>
+  it.effect("keeps persisted root units when Relay can no longer replay the root", () =>
     Effect.gen(function* () {
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
         storedTree: Transcript.project("done", "delegate", subagentRootEvents),
@@ -2509,30 +2521,378 @@ describe("InteractiveSession subagent reload", () => {
         replayEvents: (executionId) => (executionId === subagentChildId ? subagentChildEvents : []),
       })
 
-      yield* selectionEntriesFor(session, subagentThread.id)
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
+      const { entries } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
+      expect(
+        entries.some(
+          (entry) =>
+            entry.unit.parentId === undefined &&
+            entry.unit.content._tag === "Block" &&
+            entry.unit.content.block._tag === "ToolCall" &&
+            entry.unit.content.block.id === subagentToolId,
+        ),
+      ).toBe(true)
+      const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
+      expect(nestedTool).toBe(true)
+      expect(nestedAnswer).toBe(true)
+      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.consumed?.done?.status).toBe("completed")
+    }),
+  )
+})
+
+const spendThread = thread("spend-thread", 1)
+const spendTurnId = Turn.TurnId.make("spend-turn")
+const spendExecutionId = `execution:${String(spendTurnId)}`
+
+const stamped = (
+  cursor: string,
+  type: "execution.started" | "execution.completed",
+  createdAt: number,
+  sequence: number,
+): ExecutionBackend.Event =>
+  ({
+    executionId: spendExecutionId,
+    cursor,
+    sequence,
+    type,
+    createdAt,
+    timestampSource: "server",
+  }) as ExecutionBackend.Event
+
+const spendEvents: ReadonlyArray<ExecutionBackend.Event> = [
+  stamped("spend-started", "execution.started", 10_000, 1),
+  {
+    executionId: spendExecutionId,
+    cursor: "spend-usage",
+    sequence: 2,
+    type: "model.attempt.completed",
+    createdAt: 20_000,
+    data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
+  },
+  {
+    executionId: spendExecutionId,
+    cursor: "spend-answer",
+    sequence: 3,
+    type: "model.output.completed",
+    createdAt: 30_000,
+    text: "spent",
+  },
+]
+
+const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
+
+const spendTimeline: ReadonlyArray<ExecutionBackend.Event> = [...spendEvents, spendCompleted]
+
+const legacyUsageRow = () => {
+  const snapshot = spendTimeline.reduce(
+    (folded, event) =>
+      UsageCost.observe(folded, { threadId: String(spendThread.id), turnId: String(spendTurnId), event }),
+    UsageCost.empty,
+  )
+  const totals = UsageCost.materialize(snapshot, String(spendTurnId), String(spendThread.id))
+  return {
+    foldJson: JSON.stringify({
+      ...(JSON.parse(UsageCost.serialize(snapshot)) as Record<string, unknown>),
+      version: UsageCost.foldVersion - 1,
+    }),
+    totals: {
+      ...(totals.costNanoUsd === undefined ? {} : { costNanoUsd: totals.costNanoUsd }),
+      ...(totals.tokens === undefined ? {} : { tokens: totals.tokens }),
+      pricedAttempts: totals.pricedAttempts,
+      unpricedAttempts: totals.unpricedAttempts,
+      countedAttempts: totals.countedAttempts,
+      uncountedAttempts: totals.uncountedAttempts,
+      sourceComplete: false,
+    },
+  }
+}
+
+const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(function* (options: {
+  readonly gate?: Deferred.Deferred<void>
+  readonly turnStatus?: Turn.Status
+  readonly legacy?: boolean
+}) {
+  const spendTurn: Turn.Turn = {
+    id: spendTurnId,
+    threadId: spendThread.id,
+    prompt: "spend prompt",
+    author: { _tag: "Human" },
+    lineage: { _tag: "Original" },
+    executionRoute: executionRoute(),
+    status: options.turnStatus ?? "running",
+    stopIntent: "none",
+    createdAt: 1,
+    updatedAt: 1,
+  }
+  const repositories = yield* ThreadRepository.makeMemory([spendThread])
+  const turns = yield* TurnRepository.makeMemory([spendTurn])
+  const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
+  const transcripts = Context.get(yield* Layer.build(TranscriptRepository.memoryLayer), TranscriptRepository.Service)
+  const usage = Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
+  const follows = yield* Ref.make(0)
+  const blocked = yield* Ref.make(0)
+  if (options.legacy === true) {
+    yield* transcripts.replace(spendTurn, Transcript.project(String(spendTurnId), spendTurn.prompt, spendTimeline), {})
+    const legacy = legacyUsageRow()
+    yield* usage.admit(String(spendTurnId), String(spendThread.id))
+    yield* usage.commitFold(String(spendTurnId), 0, legacy.foldJson, legacy.totals)
+  }
+  const terminal = {
+    turnId: String(spendTurnId),
+    status: "completed" as const,
+    waits: [],
+    pendingTools: [],
+    children: [],
+  }
+  const backend = ExecutionBackend.Service.of({
+    invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
+    createFanOut: () => Effect.die("unused"),
+    inspectFanOut: () => Effect.die("unused"),
+    cancelFanOut: () => Effect.die("unused"),
+    registerWorkflows: () => Effect.die("unused"),
+    startWorkflow: () => Effect.die("unused"),
+    inspectWorkflow: () => Effect.die("unused"),
+    cancelWorkflow: () => Effect.die("unused"),
+    start: () => Effect.die("unused"),
+    inspect: () =>
+      Effect.succeed(
+        options.turnStatus === undefined
+          ? { ...terminal, status: "running" as const, lastCursor: "spend-answer" }
+          : { ...terminal, lastCursor: "spend-completed" },
+      ),
+    follow: (turnId, cursor, onEvent) =>
+      options.legacy === true
+        ? Ref.update(follows, (count) => count + 1).pipe(
+            Effect.andThen(options.gate === undefined ? Effect.void : Deferred.await(options.gate)),
+            Effect.andThen(
+              Effect.sync(() => {
+                const after = typeof cursor === "string" ? cursor : cursor?.cursor
+                const boundary =
+                  after === undefined ? -1 : spendTimeline.findIndex((candidate) => candidate.cursor === after)
+                const pending = spendTimeline.slice(boundary + 1)
+                for (const event of pending) onEvent?.(event)
+                return { turnId: String(turnId), status: "completed" as const, events: pending }
+              }),
+            ),
+          )
+        : Ref.update(blocked, (count) => count + 1).pipe(
+            Effect.andThen(options.gate === undefined ? Effect.void : Deferred.await(options.gate)),
+            Effect.andThen(Ref.updateAndGet(follows, (count) => count + 1)),
+            Effect.tap((count) =>
+              Effect.sync(() => {
+                for (const event of count === 1 ? spendEvents : spendTimeline) onEvent?.(event)
+              }),
+            ),
+            Effect.map((count) => ({
+              turnId: String(turnId),
+              status: count === 1 ? ("running" as const) : ("completed" as const),
+              events: count === 1 ? spendEvents : spendTimeline,
+            })),
+          ),
+    steer: () => Effect.die("unused"),
+    cancel: () => Effect.die("unused"),
+    replay: (turnId) =>
+      Ref.update(blocked, (count) => count + 1).pipe(
+        Effect.andThen(options.gate === undefined ? Effect.void : Deferred.await(options.gate)),
+        Effect.as({ turnId: String(turnId), status: "completed" as const, events: spendTimeline }),
+      ),
+    pageEvents: (turnId, _direction, cursor) =>
+      Ref.update(blocked, (count) => count + 1).pipe(
+        Effect.andThen(options.gate === undefined ? Effect.void : Deferred.await(options.gate)),
+        Effect.as({
+          events: cursor === undefined ? spendTimeline : [],
+          hasMore: false,
+          newestCursor: "spend-completed",
+          turnId: String(turnId),
+        }),
+      ),
+    listApprovals: () => Effect.succeed([]),
+    resolveToolApproval: () => Effect.void,
+    resolvePermission: () => Effect.void,
+    resolveInvocationSource: () => Effect.die("unused"),
+  })
+  const layer = Operation.productLayer({
+    repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
+    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+    transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
+    usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage),
+    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    defaultWorkspace: "/work",
+    makeThreadId: Effect.die("unused"),
+    makeTurnId: Effect.die("unused"),
+    interactive: (_, session) =>
+      Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
+  })
+  const context = yield* Layer.build(layer)
+  const operation = Context.get(context, Operation.Service)
+  yield* Effect.forkChild(operation.run({ _tag: "Interactive", prompt: [], ephemeral: false }))
+  yield* waitForSessions(sessions)
+  const session = (yield* Ref.get(sessions))[0]
+  if (session === undefined) return yield* Effect.die("Missing interactive session")
+  return { session, usage, turns, transcripts, follows, blocked }
+})
+
+describe("InteractiveSession persisted usage", () => {
+  it.effect("never displays more than the persisted total when the same events are delivered again", () =>
+    Effect.gen(function* () {
+      const { session, usage, follows } = yield* makeSpendHarness({})
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(spendThread.id, 1)
+      const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
+        Effect.andThen(TestClock.adjust("1 second")),
+        Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
+      )
+      for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
+      const persisted = yield* usage.readThread(String(spendThread.id))
+      const updates = events.flatMap((event) => (event._tag === "ThreadUsageUpdated" ? [event] : []))
+      const shown = updates.flatMap((event) => (event.cost._tag === "Available" ? [event.cost.usd] : []))
+
+      expect(yield* Ref.get(follows)).toBeGreaterThan(1)
+      expect(persisted.costNanoUsd).toBe(750_000_000)
+      expect(shown.length).toBeGreaterThan(0)
+      expect(Math.max(...shown)).toBe(0.75)
+      expect(shown.every((usd) => usd <= 0.75)).toBe(true)
+      expect(shown).toEqual([...shown].toSorted((left, right) => left - right))
+      const availability = updates.map((event) => event.time._tag)
+      expect(availability.slice(availability.indexOf("Available")).includes("Unavailable")).toBe(false)
+      expect(updates.at(-1)?.time).toEqual({ _tag: "Available", accumulatedMillis: 30_000 })
+      expect(persisted.activeMillis).toBe(30_000)
     }),
   )
 
-  for (const malformedTerminal of ["empty", "nonadvancing"] as const)
-    it.effect(`rejects a final ${malformedTerminal} continuation page`, () =>
-      Effect.gen(function* () {
-        const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-          storedTree: Transcript.project("done", "delegate", subagentRootEvents),
-          turnLastCursor: "done-final",
-          childReplayEvents: subagentChildEvents,
-          pageEvents: (executionId, after) => {
-            const events = executionId === "done" ? subagentRootEvents : subagentChildEvents
-            if (executionId !== "done") return { events, hasMore: false, newestCursor: events.at(-1)!.cursor }
-            if (after === undefined) return { events: events.slice(0, 2), hasMore: true, newestCursor: "root-page-one" }
-            return malformedTerminal === "empty"
-              ? { events: [], hasMore: false, newestCursor: "root-page-two" }
-              : { events: events.slice(2), hasMore: false, newestCursor: after }
-          },
-        })
+  it.effect("holds the displayed total when the same events are replayed into the feed after reselecting", () =>
+    Effect.gen(function* () {
+      const { session, usage } = yield* makeSpendHarness({ turnStatus: "completed" })
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
+        Effect.andThen(TestClock.adjust("1 second")),
+        Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
+      )
+      yield* session.selectThread(spendThread.id, 1)
+      for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
+      const persisted = yield* usage.readThread(String(spendThread.id))
+      expect(persisted.costNanoUsd).toBe(750_000_000)
 
-        yield* selectionEntriesFor(session, subagentThread.id)
-        expect((yield* transcripts.get(Turn.TurnId.make("done")))?.childTreeReconciled).toBe(false)
-      }),
-    )
+      yield* session.selectThread(spendThread.id, 2)
+      for (let attempt = 0; attempt < 5; attempt += 1) yield* settle
+      const beforeReplay = events.length
+      yield* session.replay(String(spendTurnId), undefined)
+      for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
+
+      const patched = events
+        .slice(beforeReplay)
+        .filter((event) => event._tag === "TranscriptPatched" && String(event.turnId) === String(spendTurnId))
+      const updates = events.flatMap((event) => (event._tag === "ThreadUsageUpdated" ? [event] : []))
+      const shown = updates.flatMap((event) => (event.cost._tag === "Available" ? [event.cost.usd] : []))
+
+      expect(patched.length).toBeGreaterThan(0)
+      expect(updates.some((event) => event.selectionEpoch === 2)).toBe(true)
+      expect(shown.length).toBeGreaterThan(0)
+      expect(Math.max(...shown)).toBe(0.75)
+      expect(shown.every((usd) => usd <= 0.75)).toBe(true)
+      expect(updates.at(-1)?.cost).toEqual({ _tag: "Available", usd: 0.75, unpricedAttempts: 0 })
+      const availability = updates.map((event) => event.time._tag)
+      expect(availability.slice(availability.indexOf("Available")).includes("Unavailable")).toBe(false)
+      expect((yield* usage.readThread(String(spendThread.id))).costNanoUsd).toBe(750_000_000)
+    }),
+  )
+
+  it.effect("recomputes cost and elapsed time for a legacy turn whose stored fold is unreadable", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const { session, usage, transcripts, follows } = yield* makeSpendHarness({
+        turnStatus: "completed",
+        legacy: true,
+        gate,
+      })
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
+        Effect.andThen(TestClock.adjust("1 second")),
+        Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
+      )
+      expect((yield* transcripts.get(spendTurnId))?.projectionVersion).toBe(
+        TranscriptRepository.legacyProjectionVersion,
+      )
+      expect((yield* transcripts.get(spendTurnId))?.consumed).toBeUndefined()
+      expect((yield* usage.readTurn(String(spendTurnId)))?.costNanoUsd).toBe(750_000_000)
+      expect((yield* usage.readTurn(String(spendTurnId)))?.activeMillis).toBeUndefined()
+      expect((yield* usage.readThread(String(spendThread.id))).activeMillis).toBeUndefined()
+
+      yield* session.selectThread(spendThread.id, 1)
+      for (let attempt = 0; attempt < 5; attempt += 1) yield* settle
+      const beforeRefold = events.flatMap((event) => (event._tag === "ThreadUsageUpdated" ? [event] : []))
+      expect(beforeRefold.length).toBeGreaterThan(0)
+      expect(beforeRefold.every((event) => event.time._tag === "Unavailable")).toBe(true)
+
+      yield* Deferred.succeed(gate, undefined)
+      for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
+
+      const refolded = yield* transcripts.get(spendTurnId)
+      const persistedTurn = yield* usage.readTurn(String(spendTurnId))
+      const updates = events.flatMap((event) => (event._tag === "ThreadUsageUpdated" ? [event] : []))
+      const availability = updates.map((event) => event.time._tag)
+      const shown = updates.flatMap((event) => (event.cost._tag === "Available" ? [event.cost.usd] : []))
+
+      expect(refolded?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
+      expect(refolded?.consumed?.[Transcript.executionKey(String(spendTurnId))]?.status).toBe("completed")
+      expect(persistedTurn?.activeMillis).toBe(30_000)
+      expect(persistedTurn?.costNanoUsd).toBe(750_000_000)
+      expect((yield* usage.readThread(String(spendThread.id))).activeMillis).toBe(30_000)
+      expect(availability[0]).toBe("Unavailable")
+      expect(availability).toContain("Available")
+      expect(availability.slice(availability.indexOf("Available")).includes("Unavailable")).toBe(false)
+      expect(updates.at(-1)?.time).toEqual({ _tag: "Available", accumulatedMillis: 30_000 })
+      expect(shown.length).toBeGreaterThan(0)
+      expect(Math.max(...shown)).toBe(0.75)
+      expect(shown.every((usd) => usd <= 0.75)).toBe(true)
+      expect(events.some((event) => event._tag === "ExecutionFailed")).toBe(false)
+      expect(yield* Ref.get(follows)).toBe(1)
+    }),
+  )
+
+  it.effect("announces the refold while a legacy thread rebuilds and withdraws it once the projection lands", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const { session } = yield* makeSpendHarness({ turnStatus: "completed", legacy: true, gate })
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      const settle = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true }).pipe(
+        Effect.andThen(TestClock.adjust("1 second")),
+        Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
+      )
+
+      yield* session.selectThread(spendThread.id, 1)
+      for (let attempt = 0; attempt < 5; attempt += 1) yield* settle
+      const announced = events.flatMap((event) => (event._tag === "ThreadRefolding" ? [event] : []))
+      expect(announced.map((event) => event.refolding)).toEqual([true])
+      expect(announced.every((event) => event.threadId === spendThread.id)).toBe(true)
+
+      yield* Deferred.succeed(gate, undefined)
+      for (let attempt = 0; attempt < 10; attempt += 1) yield* settle
+
+      expect(events.flatMap((event) => (event._tag === "ThreadRefolding" ? [event.refolding] : []))).toEqual([
+        true,
+        false,
+      ])
+    }),
+  )
+
+  it.effect("loads a selection while ingest catch-up is still blocked", () =>
+    Effect.gen(function* () {
+      const gate = yield* Deferred.make<void>()
+      const { session, turns, blocked } = yield* makeSpendHarness({ gate, turnStatus: "completed" })
+      const events: Array<Operation.InteractiveEvent> = []
+      yield* collectEvents(session, events)
+      yield* session.selectThread(spendThread.id, 1)
+      for (let attempt = 0; attempt < 400 && !events.some((event) => event._tag === "SelectionLoaded"); attempt += 1)
+        yield* Effect.yieldNow
+
+      expect(events.some((event) => event._tag === "SelectionLoaded")).toBe(true)
+      expect(yield* Ref.get(blocked)).toBeGreaterThan(0)
+      expect(yield* turns.get(spendTurnId)).toMatchObject({ status: "completed" })
+      yield* Deferred.succeed(gate, undefined)
+    }),
+  )
 })

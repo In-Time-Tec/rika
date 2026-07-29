@@ -511,6 +511,7 @@ export const Model = Schema.Struct({
   changedFiles: ChangedFilesSchema,
   sidebarWidth: Schema.Finite,
   threadLoading: Schema.Boolean,
+  refoldingThreadIds: Schema.Array(Schema.String),
   threadPreview: ThreadPreviewSchema,
 })
 export type Model = typeof Model.Type
@@ -588,6 +589,7 @@ export type Message =
   | { readonly _tag: "ThreadPreviewRequested" }
   | { readonly _tag: "ThreadOpenRequested" }
   | { readonly _tag: "ThreadOpenCompleted" }
+  | { readonly _tag: "ThreadRefolding"; readonly threadId: string; readonly refolding: boolean }
   | {
       readonly _tag: "ThreadPreviewLoaded"
       readonly threadId: string
@@ -765,6 +767,7 @@ export const initial: {
     changedFiles: idle,
     sidebarWidth: 36,
     threadLoading: false,
+    refoldingThreadIds: [],
     threadPreview: idle,
   }),
 )
@@ -1754,6 +1757,10 @@ export const update: {
       return { ...model, threadLoading: true }
     case "ThreadOpenCompleted":
       return { ...model, threadLoading: false }
+    case "ThreadRefolding": {
+      const others = model.refoldingThreadIds.filter((threadId) => threadId !== message.threadId)
+      return { ...model, refoldingThreadIds: message.refolding ? [...others, message.threadId] : others }
+    }
     case "ThreadPreviewLoaded":
       return {
         ...model,

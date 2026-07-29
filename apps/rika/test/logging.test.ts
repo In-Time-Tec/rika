@@ -1,17 +1,29 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
+import { Cause, Duration, Effect, FileSystem, Layer, Path, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import * as Logging from "../src/logging"
 
 const LogRecord = Schema.fromJsonString(
   Schema.Struct({
     message: Schema.String,
+    detail: Schema.optionalKey(Schema.String),
+    cause: Schema.optionalKey(Schema.String),
     annotations: Schema.Record(Schema.String, Schema.Unknown),
   }),
 )
 
 const decodeRecord = Schema.decodeUnknownEffect(LogRecord)
+
+const writtenRecords = (root: string) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const diagnostics = yield* Logging.directory(root)
+    const [name] = yield* fs.readDirectory(diagnostics)
+    const content = (yield* fs.readFileString(path.join(diagnostics, name!))).trim()
+    return { content, records: yield* Effect.forEach(content.split("\n"), (line) => decodeRecord(line)) }
+  })
 
 describe("Logging", () => {
   it.layer(BunServices.layer)((test) => {
@@ -71,7 +83,7 @@ describe("Logging", () => {
           Effect.flatMap(
             Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
             (logging) =>
-              Effect.logError(secrets[0], secrets[1]).pipe(
+              Effect.logError("usage repository refused an incomplete tree", 14).pipe(
                 Effect.annotateLogs({
                   prompt: secrets[0],
                   "model.body": secrets[1],
@@ -103,6 +115,7 @@ describe("Logging", () => {
         for (const secret of secrets) assert.notInclude(content, secret)
         const record = yield* decodeRecord(content.trim())
         assert.strictEqual(record.message, "diagnostic.unstructured")
+        assert.strictEqual(record.detail, "usage repository refused an incomplete tree 14")
         assert.deepStrictEqual(record.annotations, {
           "rika.execution.id": "execution-42",
           "rika.failure.category": "invalid_input",
@@ -117,6 +130,98 @@ describe("Logging", () => {
           "rika.duration.ms": 9_876,
           "rika.tool.name": "read",
         })
+      }),
+    )
+
+    test.effect("keeps message text as bounded detail beside the operation name", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-detail-" })
+        const overflowing = "d".repeat(2_500)
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.all([
+                Effect.logWarning("usage repository refused an incomplete tree", 14),
+                Effect.logInfo("execution.follow.started", "resumed from checkpoint"),
+                Effect.logInfo("execution.follow.completed"),
+                Effect.logError(overflowing),
+              ]).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(
+          records.map((record) => record.message),
+          [
+            "diagnostic.unstructured",
+            "execution.follow.started",
+            "execution.follow.completed",
+            "diagnostic.unstructured",
+          ],
+        )
+        assert.strictEqual(records[0]?.detail, "usage repository refused an incomplete tree 14")
+        assert.strictEqual(records[1]?.detail, "resumed from checkpoint")
+        assert.strictEqual(records[2]?.detail, undefined)
+        assert.strictEqual(records[3]?.detail?.length, 2_000)
+      }),
+    )
+
+    test.effect("keeps the failure cause as a bounded rendering", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-cause-" })
+        const overflowing = "c".repeat(6_000)
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.all([
+                Effect.logWarning("usage-cost.read.failed", Cause.fail("UsageRepositoryError: incomplete usage tree")),
+                Effect.logWarning("usage-cost.read.failed", Cause.fail(overflowing)),
+                Effect.logInfo("execution.follow.started"),
+              ]).pipe(Effect.provide(logging)),
+          ),
+        )
+        const { records } = yield* writtenRecords(root)
+        assert.include(records[0]?.cause ?? "", "UsageRepositoryError: incomplete usage tree")
+        assert.strictEqual(records[1]?.cause?.length, 4_000)
+        assert.strictEqual(records[2]?.cause, undefined)
+      }),
+    )
+
+    test.effect("records follow and reconnect annotations without unknown keys", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const root = yield* fs.makeTempDirectoryScoped({ prefix: "rika-logging-annotations-" })
+        yield* Effect.scoped(
+          Effect.flatMap(
+            Layer.build(Logging.layer({ dataRoot: root, role: "client", version: "1", pid: 42 })),
+            (logging) =>
+              Effect.logInfo("execution.follow.started").pipe(
+                Effect.annotateLogs({
+                  "rika.failure.cause": "UsageRepositoryError",
+                  "rika.follow.cursor": "cursor-42",
+                  "rika.follow.reason": "thread-open",
+                  "rika.follow.scope": "tree",
+                  "rika.reconnect.attempt": 3,
+                  "rika.reconnect.message": "relay stream closed",
+                  "rika.unknown.annotation": "dropped-annotation-a41c",
+                }),
+                Effect.provide(logging),
+              ),
+          ),
+        )
+        const { content, records } = yield* writtenRecords(root)
+        assert.deepStrictEqual(records[0]?.annotations, {
+          "rika.failure.cause": "UsageRepositoryError",
+          "rika.follow.cursor": "cursor-42",
+          "rika.follow.reason": "thread-open",
+          "rika.follow.scope": "tree",
+          "rika.reconnect.attempt": 3,
+          "rika.reconnect.message": "relay stream closed",
+        })
+        assert.notInclude(content, "dropped-annotation-a41c")
       }),
     )
 

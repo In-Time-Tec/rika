@@ -9,6 +9,7 @@ export interface State {
   readonly queueThreadIds: Set<string>
   readonly critical: Array<InteractiveEvent>
   readonly usage: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadUsageUpdated" }>>
+  readonly refolds: Map<string, Extract<InteractiveEvent, { readonly _tag: "ThreadRefolding" }>>
   criticalOverflowed: boolean
   activated?: Extract<InteractiveEvent, { readonly _tag: "ThreadActivated" }>
   summaries?: Extract<InteractiveEvent, { readonly _tag: "ThreadsListed" }>
@@ -19,6 +20,7 @@ export const make = (): State => ({
   queueThreadIds: new Set(),
   critical: [],
   usage: new Map(),
+  refolds: new Map(),
   criticalOverflowed: false,
 })
 
@@ -55,6 +57,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "TranscriptReplaced":
       return true
     case "ThreadsListed":
+    case "ThreadRefolding":
     case "TranscriptPatched":
     case "TranscriptResyncRequired":
     case "QueueUpdated":
@@ -63,6 +66,7 @@ export const isCritical = (event: InteractiveEvent): boolean => {
     case "SubmissionAdmitted":
     case "SelectionLoaded":
     case "TranscriptPagePrepended":
+    case "TranscriptPageAppended":
     case "ThreadActivated":
       return false
   }
@@ -77,6 +81,7 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
     case "TurnStarted":
     case "SelectionLoaded":
     case "TranscriptPagePrepended":
+    case "TranscriptPageAppended":
     case "TranscriptReplaced":
       if (id !== undefined) rememberThread(state, state.transcriptThreadIds, id)
       return
@@ -92,6 +97,9 @@ const rememberImpl = (state: State, event: InteractiveEvent) => {
       return
     case "ThreadUsageUpdated":
       if (id !== undefined) state.usage.set(id, event)
+      return
+    case "ThreadRefolding":
+      if (id !== undefined) state.refolds.set(id, event)
       return
     case "AssistantCompleted":
     case "ContextDiagnostics":
@@ -121,6 +129,7 @@ const eventsImpl = (state: State, selectionEpoch: number, reason: string): Reado
   if (state.summaries !== undefined) recovered.push(state.summaries)
   recovered.push(...state.critical)
   recovered.push(...state.usage.values())
+  recovered.push(...state.refolds.values())
   for (const id of state.transcriptThreadIds)
     recovered.push({
       _tag: "TranscriptResyncRequired",

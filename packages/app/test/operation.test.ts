@@ -53,6 +53,8 @@ const openInteractiveSession = Effect.fn("OperationTest.openInteractiveSession")
 
 const settleEvents = Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })
 
+const settleUsage = settleEvents.pipe(Effect.andThen(TestClock.adjust("1 second")), Effect.andThen(settleEvents))
+
 const nonActivation = (list: ReadonlyArray<Operation.InteractiveEvent>) =>
   list.filter((event) => event._tag !== "ThreadActivated")
 
@@ -678,7 +680,18 @@ describe("Operation", () => {
           session.resolvePermission("wait", "permission", "allow"),
           session.selectThread("thread", 1),
           session.readQueue("thread"),
-          session.loadOlder,
+          session.loadOlder(
+            "thread",
+            1,
+            {
+              createdAt: 0,
+              turnId: Turn.TurnId.make("turn"),
+              sequence: 0,
+              part: 0,
+              key: "turn:user",
+            },
+            [],
+          ),
           session.previewThread("thread"),
           session.reopenThread(1),
           session.replay("turn", undefined),
@@ -2573,7 +2586,7 @@ describe("Operation", () => {
             }
             yield* harness.releaseUsage
             yield* source.steer("control committed turn")
-            yield* settleEvents
+            yield* settleUsage
             if (candidate !== undefined) yield* Fiber.interrupt(candidate)
             yield* settleEvents
 
@@ -3628,26 +3641,23 @@ describe("Operation", () => {
     }),
   )
 
-  it.effect("requeues and retries a submission the session owner transiently rejected", () =>
+  it.effect("fails a submission loudly when the session owner rejects the start", () =>
     Effect.gen(function* () {
       const thread = selectionThread("owned-session-thread")
       const turns = yield* TurnRepository.makeMemory()
       const starts = yield* Ref.make<ReadonlyArray<string>>([])
-      const failNext = yield* Ref.make(true)
       const ownerBackend = ExecutionBackend.Service.of({
         ...backend,
         inspect: inspectFromTurns(turns),
         start: (input) =>
-          Effect.gen(function* () {
-            yield* Ref.update(starts, (all) => [...all, String(input.turnId)])
-            if (yield* Ref.getAndSet(failNext, false))
-              return yield* ExecutionBackend.BackendError.make({
+          Ref.update(starts, (all) => [...all, String(input.turnId)]).pipe(
+            Effect.andThen(
+              ExecutionBackend.BackendError.make({
                 message: `Session session:${input.turnId} is owned by execution execution:old at epoch 2`,
-              })
-            return yield* backend.start(input)
-          }),
+              }),
+            ),
+          ),
       })
-      const turnSequence = yield* Ref.make(0)
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const events: Array<Operation.InteractiveEvent> = []
       yield* Effect.gen(function* () {
@@ -3670,17 +3680,14 @@ describe("Operation", () => {
             backendLayer: Layer.succeed(ExecutionBackend.Service, ownerBackend),
             defaultWorkspace: "/work",
             makeThreadId: Effect.die("unused"),
-            makeTurnId: Ref.updateAndGet(turnSequence, (value) => value + 1).pipe(
-              Effect.map((value) => Turn.TurnId.make(value === 1 ? "submitted" : "retry")),
-            ),
+            makeTurnId: Effect.succeed(Turn.TurnId.make("submitted")),
             interactive: holdSession(sessions),
           }),
         ),
       )
-      expect(yield* turns.get(Turn.TurnId.make("submitted"))).toMatchObject({ status: "cancelled" })
-      expect(yield* turns.get(Turn.TurnId.make("retry"))).toMatchObject({ status: "completed", prompt: "hello" })
-      expect(yield* Ref.get(starts)).toEqual(["submitted", "retry"])
-      expect(nonActivation(events).filter((event) => event._tag === "ExecutionFailed")).toEqual([])
+      expect(yield* turns.get(Turn.TurnId.make("submitted"))).toMatchObject({ status: "failed" })
+      expect(yield* Ref.get(starts)).toEqual(["submitted"])
+      expect(nonActivation(events).filter((event) => event._tag === "ExecutionFailed").length).toBeGreaterThan(0)
     }),
   )
 
@@ -4671,6 +4678,137 @@ describe("Operation", () => {
     }),
   )
 
+  it.effect("persists nested child units for a delegated Run turn", () =>
+    Effect.gen(function* () {
+      const repository = yield* ThreadRepository.makeMemory()
+      const turns = yield* TurnRepository.makeMemory()
+      const transcripts = Context.get(
+        yield* Layer.build(TranscriptRepository.memoryLayer),
+        TranscriptRepository.Service,
+      )
+      const childId = "child:execution%3Aturn-new:call_1"
+      const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+        {
+          executionId: childId,
+          cursor: "child-tool",
+          sequence: 1,
+          type: "tool.call.requested",
+          createdAt: 2,
+          data: { tool_call_id: "child-call", tool_name: "bash", input: { command: "bun test" } },
+        },
+        {
+          executionId: childId,
+          cursor: "child-answer",
+          sequence: 2,
+          type: "model.output.completed",
+          createdAt: 3,
+          text: "child finished the review",
+        },
+        { executionId: childId, cursor: "child-done", sequence: 3, type: "execution.completed", createdAt: 4 },
+      ]
+      const runBackend = ExecutionBackend.Service.of({
+        ...backend,
+        inspect: (executionId) =>
+          Effect.succeed({
+            turnId: String(executionId),
+            status: "completed" as const,
+            waits: [],
+            pendingTools: [],
+            children:
+              String(executionId) === "turn-new" ? [{ executionId: childId, status: "completed" as const }] : [],
+          }),
+        follow: (executionId, _afterCursor, onEvent) =>
+          Effect.sync(() => {
+            const events = String(executionId) === childId ? childEvents : []
+            for (const event of events) onEvent?.(event)
+            return { turnId: String(executionId), status: "completed" as const, events }
+          }),
+        start: (input) =>
+          Effect.succeed({
+            turnId: input.turnId,
+            status: "completed" as const,
+            events: [
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "root-tool",
+                sequence: 1,
+                type: "tool.call.requested",
+                createdAt: 1,
+                data: { tool_call_id: "call_1", tool_name: "task", input: { prompt: "review" } },
+              },
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "root-spawn",
+                sequence: 2,
+                type: "child_run.spawned",
+                createdAt: 2,
+                data: { child_execution_id: childId, preset_name: "Oracle" },
+              },
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "root-answer",
+                sequence: 3,
+                type: "model.output.completed",
+                createdAt: 4,
+                text: "delegated review finished",
+              },
+              {
+                executionId: `execution:${input.turnId}`,
+                cursor: "root-done",
+                sequence: 4,
+                type: "execution.completed",
+                createdAt: 5,
+              },
+            ],
+          }),
+      })
+      yield* Effect.gen(function* () {
+        const operation = yield* Operation.Service
+        yield* operation.run({
+          _tag: "Run",
+          prompt: [],
+          ephemeral: false,
+          streamJson: false,
+          streamJsonInput: false,
+          streamJsonThinking: false,
+        })
+      }).pipe(
+        provideLayer(
+          Layer.mergeAll(
+            TestConsole.layer,
+            Operation.productLayer({
+              repositoryLayer: Layer.succeed(ThreadRepository.Service, repository),
+              turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+              transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
+              backendLayer: Layer.succeed(ExecutionBackend.Service, runBackend),
+              defaultWorkspace: "/default-workspace",
+              makeThreadId: Effect.succeed(Thread.ThreadId.make("thread-new")),
+              makeTurnId: Effect.succeed(Turn.TurnId.make("turn-new")),
+            }),
+          ),
+        ),
+      )
+
+      const stored = yield* transcripts.get(Turn.TurnId.make("turn-new"))
+      const parentTool = stored?.units.find(
+        (unit) =>
+          unit.parentId === undefined && unit.content._tag === "Block" && unit.content.block._tag === "ToolCall",
+      )
+      const parentId =
+        parentTool?.content._tag === "Block" && parentTool.content.block._tag === "ToolCall"
+          ? parentTool.content.block.id
+          : undefined
+      const nested = stored?.units.filter((unit) => unit.parentId !== undefined) ?? []
+      expect(parentId).toBeDefined()
+      expect(nested.every((unit) => unit.parentId === parentId)).toBe(true)
+      expect(
+        nested.some((unit) => unit.content._tag === "Entry" && unit.content.text === "child finished the review"),
+      ).toBe(true)
+      expect(stored?.consumed?.[childId]?.status).toBe("completed")
+      expect(stored?.childTreeReconciled).toBe(true)
+    }),
+  )
+
   it.effect("reuses a requested thread and streams every event as JSON", () =>
     Effect.gen(function* () {
       const thread: Thread.Thread = {
@@ -4955,7 +5093,20 @@ describe("Operation", () => {
         ...backend,
         start: (input) =>
           Ref.update(starts, (all) => [...all, input]).pipe(
-            Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+            Effect.as({
+              turnId: input.turnId,
+              status: "completed" as const,
+              events: [
+                {
+                  executionId: `execution:${input.turnId}`,
+                  cursor: `${input.turnId}-answer`,
+                  sequence: 1,
+                  type: "model.output.completed",
+                  createdAt: 1,
+                  text: "answer",
+                },
+              ],
+            }),
           ),
       })
       yield* Effect.gen(function* () {
@@ -5151,7 +5302,20 @@ describe("Operation", () => {
         ...backend,
         start: (input) =>
           Ref.update(prompts, (all) => [...all, input.prompt]).pipe(
-            Effect.as({ turnId: input.turnId, status: "completed" as const, events: [] }),
+            Effect.as({
+              turnId: input.turnId,
+              status: "completed" as const,
+              events: [
+                {
+                  executionId: `execution:${input.turnId}`,
+                  cursor: "cursor-a",
+                  sequence: 1,
+                  type: "model.output.completed",
+                  createdAt: 1,
+                  text: "answer",
+                },
+              ],
+            }),
           ),
       })
       yield* Effect.gen(function* () {

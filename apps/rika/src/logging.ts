@@ -1,4 +1,4 @@
-import { Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect"
+import { Cause, Clock, DateTime, Duration, Effect, FileSystem, Layer, Logger, Option, Path, References } from "effect"
 
 export type ProcessRole = "client" | "resident"
 export type LogLevel = "debug" | "info" | "warning" | "error"
@@ -17,10 +17,14 @@ const diagnosticAnnotations = new Set([
   "rika.event.type",
   "rika.execution.id",
   "rika.failure.category",
+  "rika.failure.cause",
   "rika.failure.interrupted",
   "rika.failure.kind",
   "rika.failure.outcome",
   "rika.failure.reason",
+  "rika.follow.cursor",
+  "rika.follow.reason",
+  "rika.follow.scope",
   "rika.model.alias",
   "rika.model.backend.kind",
   "rika.model.name",
@@ -44,6 +48,8 @@ const diagnosticAnnotations = new Set([
   "rika.reconciliation.status.terminal",
   "rika.reconciliation.terminal",
   "rika.reconciliation.tree.verified",
+  "rika.reconnect.attempt",
+  "rika.reconnect.message",
   "rika.resident.client.kind",
   "rika.resident.command.sequence",
   "rika.resident.command.tag",
@@ -78,12 +84,30 @@ const diagnosticAnnotations = new Set([
   "rika.version",
 ])
 
-const structuredLogger = Logger.make(({ date, fiber, logLevel, message }) => {
-  const [candidate] = Array.isArray(message) ? message : [message]
+const detailCharacters = 2_000
+const causeCharacters = 4_000
+
+const renderText = (render: () => string) => {
+  try {
+    return render()
+  } catch {
+    return ""
+  }
+}
+
+const structuredLogger = Logger.make(({ cause, date, fiber, logLevel, message }) => {
+  const elements: ReadonlyArray<unknown> = Array.isArray(message) ? message : [message]
+  const [candidate] = elements
   const operation =
     typeof candidate === "string" && /^[a-z][a-z0-9]*(?:[._][a-z0-9]+)+$/.test(candidate) && candidate.length <= 100
       ? candidate
-      : "diagnostic.unstructured"
+      : undefined
+  const detail = (operation === undefined ? elements : elements.slice(1))
+    .map((element) => renderText(() => String(element)))
+    .filter((text) => text.length > 0)
+    .join(" ")
+    .slice(0, detailCharacters)
+  const failure = cause.reasons.length === 0 ? "" : renderText(() => Cause.pretty(cause)).slice(0, causeCharacters)
   const current = fiber.getRef(References.CurrentLogAnnotations)
   const annotations: Record<string, string | number | boolean> = {}
   for (const [key, value] of Object.entries(current)) {
@@ -94,9 +118,11 @@ const structuredLogger = Logger.make(({ date, fiber, logLevel, message }) => {
       annotations[key] = value
   }
   return JSON.stringify({
-    message: operation,
+    message: operation ?? "diagnostic.unstructured",
     level: logLevel.toUpperCase(),
     timestamp: date.toISOString(),
+    ...(detail === "" ? {} : { detail }),
+    ...(failure === "" ? {} : { cause: failure }),
     annotations,
   })
 })

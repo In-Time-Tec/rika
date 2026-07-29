@@ -1,5 +1,6 @@
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { access, readFile, readdir, stat } from "node:fs/promises"
 import { describe, expect, test } from "vitest"
 import {
   archiveName,
@@ -24,15 +25,24 @@ const sourceImports = (source: string) => {
 
 const resolveSource = async (path: string) => {
   for (const candidate of [path, `${path}.ts`, join(path, "index.ts")])
-    if (await Bun.file(candidate).exists()) return candidate
+    try {
+      await access(candidate)
+      if ((await stat(candidate)).isFile()) return candidate
+    } catch {}
   return undefined
 }
 
-const clientSourceGraph = async () => {
+const sourceGraph = async (entrypoint: string) => {
   const root = fileURLToPath(new URL("../..", import.meta.url))
   const packages = new Map<string, { readonly root: string; readonly exports: Record<string, string> }>()
-  for await (const manifestPath of new Bun.Glob("packages/*/package.json").scan({ cwd: root, absolute: true })) {
-    const manifest = (await Bun.file(manifestPath).json()) as {
+  for (const directory of await readdir(join(root, "packages"))) {
+    const manifestPath = join(root, "packages", directory, "package.json")
+    try {
+      await access(manifestPath)
+    } catch {
+      continue
+    }
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as {
       readonly name: string
       readonly exports: Record<string, string>
     }
@@ -40,12 +50,12 @@ const clientSourceGraph = async () => {
   }
   const files = new Set<string>()
   const external = new Set<string>()
-  const pending = [join(root, "apps/rika/src/client-main.ts")]
+  const pending = [join(root, "apps/rika/src", entrypoint)]
   while (pending.length > 0) {
     const file = pending.pop()!
     if (files.has(file)) continue
     files.add(file)
-    for (const specifier of sourceImports(await Bun.file(file).text())) {
+    for (const specifier of sourceImports(await readFile(file, "utf8"))) {
       if (specifier.startsWith(".")) {
         const resolved = await resolveSource(resolve(dirname(file), specifier))
         if (resolved !== undefined) pending.push(resolved)
@@ -106,7 +116,7 @@ describe("release target construction", () => {
   })
 
   test("keeps the full public client graph out of the resident, SQL, model, and TUI runtimes", async () => {
-    const graph = await clientSourceGraph()
+    const graph = await sourceGraph("client-main.ts")
     const files = [...graph.files].join("\n")
     const external = [...graph.external].join("\n")
     for (const forbidden of [
@@ -125,5 +135,17 @@ describe("release target construction", () => {
       expect(external).not.toContain(forbidden)
     expect(files).toContain("/operation-contract.ts")
     expect(files).toContain("/resident-client-transport.ts")
+  })
+
+  test("keeps executable dependency sets separated", async () => {
+    const interactive = await sourceGraph("interactive-main.ts")
+    const resident = await sourceGraph("resident-main.ts")
+    const interactiveFiles = [...interactive.files].join("\n")
+    const residentFiles = [...resident.files].join("\n")
+    expect(interactiveFiles).not.toContain("/resident-host-transport.ts")
+    expect(interactiveFiles).not.toContain("/model-provider-runtime.ts")
+    expect([...interactive.external].join("\n")).not.toContain("@batonfx/providers")
+    expect(residentFiles).not.toContain("/packages/tui/")
+    expect([...resident.external].join("\n")).not.toContain("@opentui/")
   })
 })

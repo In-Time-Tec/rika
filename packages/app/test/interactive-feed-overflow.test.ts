@@ -34,6 +34,34 @@ describe("interactive feed overflow", () => {
     ])
   })
 
+  it("survives a transcript patch storm with one resync per thread and no terminal overflow", () => {
+    const state = InteractiveFeedOverflow.make()
+    const threadIds = ["thread-a", "thread-b"]
+    for (let index = 0; index < InteractiveFeedOverflow.capacity * 4; index += 1)
+      InteractiveFeedOverflow.remember(state, {
+        _tag: "TranscriptPatched",
+        selectionEpoch: 3,
+        threadId: Thread.ThreadId.make(threadIds[index % threadIds.length]!),
+        turnId: Turn.TurnId.make("turn"),
+        event: {
+          executionId: "execution:turn",
+          cursor: String(index),
+          sequence: index,
+          type: "model.output.delta",
+          createdAt: index,
+          text: "x",
+        },
+        revision: index,
+      })
+
+    expect(state.criticalOverflowed).toBe(false)
+    expect(state.critical).toHaveLength(0)
+    expect(InteractiveFeedOverflow.events(state, 3, "bounded")).toEqual([
+      { _tag: "TranscriptResyncRequired", selectionEpoch: 3, threadId: "thread-a", reason: "bounded" },
+      { _tag: "TranscriptResyncRequired", selectionEpoch: 3, threadId: "thread-b", reason: "bounded" },
+    ])
+  })
+
   it("retains distinct outcomes in arrival order", () => {
     const state = InteractiveFeedOverflow.make()
     for (let index = 0; index < 12; index += 1)
@@ -55,6 +83,7 @@ describe("interactive feed overflow", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 7,
         threadId: Thread.ThreadId.make("thread"),
+        revision: index,
         cost: { _tag: "Available", usd: index, unpricedAttempts: 0 },
         tokens: { _tag: "Available", total: index, uncountedAttempts: 0 },
         time: { _tag: "Available", accumulatedMillis: index },
@@ -66,6 +95,7 @@ describe("interactive feed overflow", () => {
         _tag: "ThreadUsageUpdated",
         selectionEpoch: 7,
         threadId: "thread",
+        revision: InteractiveFeedOverflow.capacity + 19,
         cost: { _tag: "Available", usd: InteractiveFeedOverflow.capacity + 19, unpricedAttempts: 0 },
         tokens: { _tag: "Available", total: InteractiveFeedOverflow.capacity + 19, uncountedAttempts: 0 },
         time: { _tag: "Available", accumulatedMillis: InteractiveFeedOverflow.capacity + 19 },

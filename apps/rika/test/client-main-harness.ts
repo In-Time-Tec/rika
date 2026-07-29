@@ -5,6 +5,8 @@ import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
 import { Cause, Config, Duration, Effect, FileSystem, Function, Layer, Schema, Scope, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import * as ResidentEndpoint from "../src/resident-endpoint"
+import { alive, awaitExit } from "./resident-transport-harness"
 
 export const run = <A, E>(effect: Effect.Effect<A, E, BunServices.BunServices | Scope.Scope>) =>
   Effect.runPromise(
@@ -57,6 +59,19 @@ export const stripTerminalControl = (text: string) =>
     .replaceAll(new RegExp(`${escape}\\[[0-?]*[ -/]*[@-~]`, "g"), "")
     .replaceAll(new RegExp(`${escape}[@-_]`, "g"), "")
 
+// A live resident keeps an open diagnostics log under its own data root, so the isolated root names
+// every resident this harness is responsible for without inspecting ports or shelling out.
+export const reapResidents = (dataRoot: string) =>
+  Effect.gen(function* () {
+    const endpoint = yield* ResidentEndpoint.resolve("default", dataRoot)
+    const recorded = yield* ResidentEndpoint.recordedResidentProcesses(endpoint)
+    const pids = recorded.map((entry) => entry.pid).filter(alive)
+    yield* Effect.forEach(pids, (pid) => Effect.ignore(Effect.sync(() => process.kill(pid, "SIGKILL"))), {
+      discard: true,
+    })
+    yield* awaitExit(pids)
+  }).pipe(Effect.ignore)
+
 export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(function* (
   actions: ReadonlyArray<{
     readonly after: string
@@ -79,6 +94,7 @@ export const interactivePty = Effect.fn("ClientMainTest.interactivePty")(functio
   const workspace = `${root}/workspace`
   const state = `${root}/state`
   yield* Effect.forEach([home, workspace, state], (directory) => fs.makeDirectory(directory))
+  yield* Effect.addFinalizer(() => reapResidents(state))
   const directory = fileURLToPath(new URL(".", import.meta.url))
   const helper = `${directory}/fixtures/interactive-pty.py`
   const path = yield* Config.string("PATH").pipe(

@@ -199,7 +199,6 @@ const Extension = Schema.Struct({
 })
 const ExtensionList = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Extension"), action: Schema.tag("list") })
 const Doctor = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Doctor") })
-const Migrate = Schema.Struct({ ...ClientWorkspace, _tag: Schema.tag("Migrate"), action: Schema.tag("usage") })
 const WorkflowStart = Schema.Struct({
   ...ClientWorkspace,
   _tag: Schema.tag("Workflow"),
@@ -246,7 +245,6 @@ export const Input = Schema.Union([
   Extension,
   ExtensionList,
   Doctor,
-  Migrate,
   WorkflowStart,
   WorkflowInspect,
 ])
@@ -306,6 +304,7 @@ export type InteractiveEvent =
       readonly _tag: "ThreadUsageUpdated"
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
+      readonly revision: number
       readonly cost:
         | { readonly _tag: "Available"; readonly usd: number; readonly unpricedAttempts: number }
         | { readonly _tag: "Unavailable" }
@@ -352,6 +351,12 @@ export type InteractiveEvent =
       readonly selectionEpoch: number
       readonly threadId: Thread.ThreadId
       readonly reason: string
+    }
+  | {
+      readonly _tag: "ThreadRefolding"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly refolding: boolean
     }
   | { readonly _tag: "AssistantCompleted"; readonly text: string }
   | {
@@ -413,9 +418,11 @@ export type InteractiveEvent =
       readonly thread: Thread.Thread
       readonly entries: ReadonlyArray<TranscriptPage.Entry>
       readonly hasOlder: boolean
+      readonly hasNewer?: boolean
       readonly threadCostUsd?: number
       readonly globalCostUsd?: number
       readonly oldestCursor?: TranscriptPage.PageCursor
+      readonly newestCursor?: TranscriptPage.PageCursor
       readonly queueRevision: number
       readonly queuedCount?: number
       readonly queue: ReadonlyArray<QueueItem>
@@ -440,6 +447,16 @@ export type InteractiveEvent =
       readonly threadCostUsd?: number
       readonly globalCostUsd?: number
       readonly oldestCursor?: TranscriptPage.PageCursor
+    }
+  | {
+      readonly _tag: "TranscriptPageAppended"
+      readonly selectionEpoch: number
+      readonly threadId: Thread.ThreadId
+      readonly entries: ReadonlyArray<TranscriptPage.Entry>
+      readonly hasNewer: boolean
+      readonly requestedAfter: TranscriptPage.PageCursor
+      readonly threadCostUsd?: number
+      readonly newestCursor?: TranscriptPage.PageCursor
     }
   | { readonly _tag: "ShellPermissionRequested"; readonly id: string; readonly command: string }
   | { readonly _tag: "ShellPermissionCancelled"; readonly id: string }
@@ -467,6 +484,7 @@ export const InteractiveEventSchema = Schema.Union([
     _tag: Schema.tag("ThreadUsageUpdated"),
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
+    revision: Schema.Int,
     cost: Schema.Union([
       Schema.Struct({ _tag: Schema.tag("Available"), usd: Schema.Finite, unpricedAttempts: Schema.Int }),
       Schema.Struct({ _tag: Schema.tag("Unavailable") }),
@@ -516,6 +534,12 @@ export const InteractiveEventSchema = Schema.Union([
     selectionEpoch: Schema.Int,
     threadId: Thread.ThreadId,
     reason: Schema.String,
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("ThreadRefolding"),
+    selectionEpoch: Schema.Int,
+    threadId: Thread.ThreadId,
+    refolding: Schema.Boolean,
   }),
   Schema.Struct({ _tag: Schema.tag("ThreadsListed"), threads: Schema.Array(ThreadSummary.ThreadSummary) }),
   Schema.Struct({ _tag: Schema.tag("AssistantCompleted"), text: Schema.String }),
@@ -597,9 +621,11 @@ export const InteractiveEventSchema = Schema.Union([
     thread: Thread.Thread,
     entries: Schema.Array(TranscriptPage.EntrySchema),
     hasOlder: Schema.Boolean,
+    hasNewer: Schema.optionalKey(Schema.Boolean),
     threadCostUsd: Schema.optionalKey(Schema.Finite),
     globalCostUsd: Schema.optionalKey(Schema.Finite),
     oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
+    newestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
     queueRevision: Schema.Int,
     queuedCount: Schema.optionalKey(Schema.Int),
     queue: Schema.Array(
@@ -630,6 +656,16 @@ export const InteractiveEventSchema = Schema.Union([
     threadCostUsd: Schema.optionalKey(Schema.Finite),
     globalCostUsd: Schema.optionalKey(Schema.Finite),
     oldestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("TranscriptPageAppended"),
+    selectionEpoch: Schema.Int,
+    threadId: Thread.ThreadId,
+    entries: Schema.Array(TranscriptPage.EntrySchema),
+    hasNewer: Schema.Boolean,
+    requestedAfter: TranscriptPage.PageCursor,
+    threadCostUsd: Schema.optionalKey(Schema.Finite),
+    newestCursor: Schema.optionalKey(TranscriptPage.PageCursor),
   }),
   Schema.Struct({ _tag: Schema.tag("ShellPermissionRequested"), id: Schema.String, command: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("ShellPermissionCancelled"), id: Schema.String }),
@@ -701,7 +737,19 @@ export const InteractiveCommand = Schema.Union([
     selectionEpoch: Schema.Int,
   }),
   Schema.Struct({ _tag: Schema.tag("ReadQueue"), threadId: Schema.String }),
-  Schema.Struct({ _tag: Schema.tag("LoadOlder") }),
+  Schema.Struct({
+    _tag: Schema.tag("LoadOlder"),
+    threadId: Schema.String,
+    selectionEpoch: Schema.Int,
+    before: TranscriptPage.PageCursor,
+    loadedKeys: Schema.Array(Schema.String),
+  }),
+  Schema.Struct({
+    _tag: Schema.tag("LoadNewer"),
+    threadId: Schema.String,
+    selectionEpoch: Schema.Int,
+    after: TranscriptPage.PageCursor,
+  }),
   Schema.Struct({ _tag: Schema.tag("PreviewThread"), threadId: Schema.String }),
   Schema.Struct({ _tag: Schema.tag("ReopenThread"), selectionEpoch: Schema.Int }),
   Schema.Struct({
@@ -737,7 +785,17 @@ export interface InteractiveSession {
   ) => Effect.Effect<void, OperationUnavailable>
   readonly selectThread: (threadId: string, selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
   readonly readQueue: (threadId: string) => Effect.Effect<void, OperationUnavailable>
-  readonly loadOlder: Effect.Effect<void, OperationUnavailable>
+  readonly loadOlder: (
+    threadId: string,
+    selectionEpoch: number,
+    before: TranscriptPage.PageCursor,
+    loadedKeys: ReadonlyArray<string>,
+  ) => Effect.Effect<void, OperationUnavailable>
+  readonly loadNewer: (
+    threadId: string,
+    selectionEpoch: number,
+    after: TranscriptPage.PageCursor,
+  ) => Effect.Effect<void, OperationUnavailable>
   readonly previewThread: (threadId: string) => Effect.Effect<void, OperationUnavailable>
   readonly reopenThread: (selectionEpoch: number) => Effect.Effect<void, OperationUnavailable>
   readonly replay: (turnId: string, afterCursor: string | undefined) => Effect.Effect<void, OperationUnavailable>
@@ -778,7 +836,9 @@ const executeInteractiveCommandImpl = (session: InteractiveSession, command: Int
     case "ReadQueue":
       return session.readQueue(command.threadId)
     case "LoadOlder":
-      return session.loadOlder
+      return session.loadOlder(command.threadId, command.selectionEpoch, command.before, command.loadedKeys)
+    case "LoadNewer":
+      return session.loadNewer(command.threadId, command.selectionEpoch, command.after)
     case "PreviewThread":
       return session.previewThread(command.threadId)
     case "ReopenThread":

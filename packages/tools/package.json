@@ -5,7 +5,9 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./local-path": "./src/local-path.ts",
+    "./workspace-index": "./src/workspace-index.ts"
   },
   "scripts": {
     "build": "bun build ./src/index.ts --outdir dist --target bun --format esm --external effect --external 'effect/*' --external '@effect/*' --external '@ff-labs/fff-bun'",

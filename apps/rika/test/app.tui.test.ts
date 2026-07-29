@@ -1,6 +1,6 @@
 import { expect, test } from "vitest"
 import { Theme } from "@rika/tui"
-import { Effect, FileSystem, Path } from "effect"
+import { Deferred, Effect, FileSystem, Path } from "effect"
 import * as TuiApp from "./tui-app"
 
 const activeTimePattern = /◷ [0-9]+s/u
@@ -375,12 +375,12 @@ test(
 
         yield* delegate("Delegate work that reports nothing.", "ROOT_AFTER_NO_REPORT")
         const unreported = app.frame()
-        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(2)
-        expect(unreported).not.toContain("Subagent failed")
+        expect(unreported.match(/Subagent finished/g) ?? []).toHaveLength(1)
+        expect(unreported.match(/Subagent failed/g) ?? []).toHaveLength(1)
 
         yield* delegate("Delegate work that fails outright.", "ROOT_AFTER_FAILURE")
         const failed = app.frame()
-        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(1)
+        expect(failed.match(/Subagent failed/g) ?? []).toHaveLength(2)
         yield* app.quit
       }),
     ),
@@ -732,6 +732,50 @@ test(
         expect(steered).toContain("\u2503 Answer in one sentence.")
         expect(steered).toContain("\u2503 Focus on the exact fixture text.")
         yield* app.quit
+      }),
+    ),
+  240_000,
+)
+
+test(
+  "reports rebuild progress while a legacy thread refolds and clears it once the projection lands",
+  () =>
+    TuiApp.run(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem
+        const root = yield* fileSystem.makeTempDirectoryScoped({ directory: "/tmp", prefix: "rika-refold-" })
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const app = yield* TuiApp.tuiApp({ root, script: [TuiApp.model.text("LEGACY_TURN_COMPLETE")] })
+            yield* Effect.promise(() => app.type("Persist a legacy turn."))
+            app.pressEnter()
+            yield* app.waitFrame("LEGACY_TURN_COMPLETE")
+            yield* app.settled
+            yield* app.quit
+          }),
+        )
+
+        expect(yield* TuiApp.makeProjectionsLegacy(root)).toContain("tui-turn-0")
+        const held = yield* Deferred.make<void>()
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const app = yield* TuiApp.tuiApp({
+              root,
+              initialThreadId: "tui-thread-0",
+              idStart: 10,
+              script: [],
+              holdExecutionFollows: held,
+            })
+            const rebuilding = yield* app.waitFrame("Rebuilding thread projection")
+            expect(rebuilding).toContain("Persist a legacy turn.")
+            yield* Deferred.succeed(held, undefined)
+            const rebuilt = yield* app.waitGone("Rebuilding thread projection")
+            expect(rebuilt).toContain("LEGACY_TURN_COMPLETE")
+            yield* app.quit
+          }),
+        )
       }),
     ),
   240_000,

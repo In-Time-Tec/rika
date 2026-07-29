@@ -1,7 +1,7 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import * as Transcript from "@rika/transcript"
 import { expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import * as Database from "../src/product-database"
 import * as Thread from "../src/thread-schema"
@@ -56,6 +56,49 @@ const semanticUnit = (turnId: Turn.TurnId, sequence: number, part: number, key: 
   revision: 0,
   content: { _tag: "Entry", role: "assistant", text: key },
 })
+
+const childExecutionKey = (target: Turn.Turn) => Transcript.executionKey(`execution:${target.id}:child:agent`)
+
+const consumedScript = (repository: TranscriptRepository.Interface, target: Turn.Turn) =>
+  Effect.gen(function* () {
+    const child = childExecutionKey(target)
+    const projection = Transcript.project(target.id, target.prompt, [event(0), event(1)])
+    const legacy = yield* repository.replace(target, projection)
+    const folded = yield* repository.replace(target, projection, {
+      consumed: { [target.id]: { cursor: "cursor-1", sequence: 1 }, [child]: { cursor: "child-3", sequence: 3 } },
+      projectionVersion: 2,
+    })
+    const appended = yield* repository.appendAll(target, [event(2)])
+    const terminal = yield* repository.replace(
+      target,
+      Transcript.project(target.id, target.prompt, [event(0), event(1), event(2)]),
+      {
+        consumed: {
+          [target.id]: { cursor: "cursor-2", sequence: 2, status: "completed" },
+          [child]: { cursor: "child-9", sequence: 9, status: "failed" },
+        },
+      },
+    )
+    return [legacy, folded, appended, terminal].map((state) => ({
+      consumed: state.consumed,
+      projectionVersion: state.projectionVersion,
+    }))
+  })
+
+const consumedTimeline = (target: Turn.Turn) => {
+  const child = childExecutionKey(target)
+  const inFlight = { [target.id]: { cursor: "cursor-1", sequence: 1 }, [child]: { cursor: "child-3", sequence: 3 } }
+  const settled = {
+    [target.id]: { cursor: "cursor-2", sequence: 2, status: "completed" },
+    [child]: { cursor: "child-9", sequence: 9, status: "failed" },
+  }
+  return [
+    { consumed: undefined, projectionVersion: 1 },
+    { consumed: inFlight, projectionVersion: 2 },
+    { consumed: inFlight, projectionVersion: 2 },
+    { consumed: settled, projectionVersion: 2 },
+  ]
+}
 
 it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
   test.effect("stores a bounded semantic projection and ignores duplicate source events", () =>
@@ -241,6 +284,28 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
         Turn.TurnId.make("turn-0"),
         Turn.TurnId.make("turn-0"),
       ])
+    }),
+  )
+
+  test.effect("navigates older, newer, then older again without gaps", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const threadId = Thread.ThreadId.make("thread-bidirectional")
+      for (let index = 0; index < 5; index += 1) {
+        const target = { ...turn(index), threadId }
+        yield* repository.replace(target, Transcript.project(target.id, target.prompt, [event(index)]))
+      }
+      const newest = yield* repository.page(threadId, { limit: 4 })
+      const older = yield* repository.page(threadId, { before: newest.oldestCursor, limit: 4 })
+      if (older.newestCursor === undefined) return yield* Effect.die("missing older page cursor")
+      const newer = yield* repository.page(threadId, { after: older.newestCursor, limit: 4 })
+      if (newer.oldestCursor === undefined) return yield* Effect.die("missing newer page cursor")
+      const olderAgain = yield* repository.page(threadId, { before: newer.oldestCursor, limit: 4 })
+
+      expect(olderAgain.entries.map((entry) => entry.unit.key)).toEqual(older.entries.map((entry) => entry.unit.key))
+      expect(new Set([...older.entries, ...newer.entries].map((entry) => entry.unit.key)).size).toBe(
+        older.entries.length + newer.entries.length,
+      )
     }),
   )
 
@@ -486,6 +551,42 @@ it.layer(TranscriptRepository.memoryLayer)("transcript repository", (test) => {
       expect(redelivered.costUsd).toBeCloseTo(2, 10)
       expect(redelivered.usageCursors).toEqual(["usage-1", "late-usage"])
       expect(after - before).toBeCloseTo(2.5, 10)
+    }),
+  )
+
+  test.effect("carries per-execution consumption state and projection version across checkpoint writes", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(61), threadId: Thread.ThreadId.make("thread-consumed") }
+      const timeline = yield* consumedScript(repository, target)
+      const reread = yield* repository.get(target.id)
+
+      expect(timeline).toEqual(consumedTimeline(target))
+      expect(reread?.consumed).toEqual(consumedTimeline(target).at(-1)?.consumed)
+      expect(reread?.projectionVersion).toBe(2)
+    }),
+  )
+
+  test.effect("keeps consumption state out of the source projection it folds", () =>
+    Effect.gen(function* () {
+      const repository = yield* TranscriptRepository.Service
+      const target = { ...turn(62), threadId: Thread.ThreadId.make("thread-consumed-source") }
+      const usage: Transcript.SourceEvent = {
+        cursor: "usage-consumed",
+        sequence: 3,
+        type: "model.usage.reported",
+        createdAt: 3,
+        data: usageData(250_000),
+      }
+      yield* repository.replace(target, Transcript.project(target.id, target.prompt, [event(0)]), {
+        consumed: { [target.id]: { cursor: "cursor-0", sequence: 0 } },
+        projectionVersion: 2,
+      })
+      const appended = yield* repository.appendAll(target, [usage])
+
+      expect(appended.costUsd).toBeCloseTo(1.25, 10)
+      expect(appended.consumed).toEqual({ [target.id]: { cursor: "cursor-0", sequence: 0 } })
+      expect(appended.projectionVersion).toBe(2)
     }),
   )
 })
@@ -859,6 +960,146 @@ it.effect("keyset-paginates a durable subagent tree whose nested units outnumber
           expect(new Set(collected).size).toBe(live.units.length)
           expect(collected.length).toBe(live.units.length)
           expect(new Set(collected)).toEqual(new Set(live.units.map((unit) => unit.key)))
+        }).pipe(provideLayer(layer)),
+      )
+    }),
+  ).pipe(provideLayer(BunServices.layer)),
+)
+
+it.effect("persists per-execution consumption state and projection version across reopen", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-consumed-" })
+      const filename = `${directory}/rika.db`
+      const threadId = Thread.ThreadId.make("thread-consumed-durable")
+      const targetId = Turn.TurnId.make("turn-consumed-durable")
+      const makeLayer = () => {
+        const database = Database.layer(filename)
+        return Layer.mergeAll(
+          database,
+          ThreadRepository.layer.pipe(Layer.provide(database)),
+          TurnRepository.layer.pipe(Layer.provide(database)),
+          TranscriptRepository.layer.pipe(Layer.provide(database)),
+        )
+      }
+
+      const target = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const threads = yield* ThreadRepository.Service
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          const sql = yield* SqlClient
+          yield* threads.create({ id: threadId, workspace: "/work/consumed", title: "Consumed", now: 1 })
+          yield* turns.createForSubmission({
+            id: targetId,
+            threadId,
+            prompt: "fold me",
+            executionRoute: Turn.testExecutionRoute(),
+            queueCapacity: 128,
+            now: 2,
+          })
+          const stored = yield* turns.setStatus(targetId, "completed", undefined, 3)
+          yield* transcripts.replace(stored, Transcript.project(stored.id, stored.prompt, [event(0)]))
+          expect(
+            yield* sql`SELECT consumed_json, projection_version FROM rika_transcript_checkpoints
+            WHERE turn_id = ${targetId}`,
+          ).toEqual([{ consumed_json: null, projection_version: 1 }])
+          const timeline = yield* consumedScript(transcripts, stored)
+          expect(timeline).toEqual(consumedTimeline(stored))
+          return stored
+        }).pipe(provideLayer(makeLayer())),
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const transcripts = yield* TranscriptRepository.Service
+          const sql = yield* SqlClient
+          const reopened = yield* transcripts.get(targetId)
+          expect(reopened?.consumed).toEqual(consumedTimeline(target).at(-1)?.consumed)
+          expect(reopened?.projectionVersion).toBe(2)
+          expect((yield* transcripts.appendAll(target, [event(2)])).consumed).toEqual(reopened?.consumed)
+
+          yield* sql`UPDATE rika_transcript_checkpoints SET consumed_json = ${'{"root":{"cursor":1}}'}
+            WHERE turn_id = ${targetId}`
+          const failure = yield* Effect.flip(transcripts.get(targetId))
+          expect(failure).toBeInstanceOf(TranscriptRepository.RepositoryError)
+        }).pipe(provideLayer(makeLayer())),
+      )
+    }),
+  ).pipe(provideLayer(BunServices.layer)),
+)
+
+it.effect("commits durable units and consumption state in one transaction", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "rika-transcript-atomic-" })
+      const threadId = Thread.ThreadId.make("thread-consumed-atomic")
+      const targetId = Turn.TurnId.make("turn-consumed-atomic")
+      const database = Database.layer(`${directory}/rika.db`)
+      const layer = Layer.mergeAll(
+        database,
+        ThreadRepository.layer.pipe(Layer.provide(database)),
+        TurnRepository.layer.pipe(Layer.provide(database)),
+        TranscriptRepository.layer.pipe(Layer.provide(database)),
+      )
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const threads = yield* ThreadRepository.Service
+          const turns = yield* TurnRepository.Service
+          const transcripts = yield* TranscriptRepository.Service
+          const sql = yield* SqlClient
+          yield* threads.create({ id: threadId, workspace: "/work/atomic", title: "Atomic", now: 1 })
+          yield* turns.createForSubmission({
+            id: targetId,
+            threadId,
+            prompt: "fold me",
+            executionRoute: Turn.testExecutionRoute(),
+            queueCapacity: 128,
+            now: 2,
+          })
+          const target = yield* turns.setStatus(targetId, "completed", undefined, 3)
+          const committed = yield* transcripts.replace(
+            target,
+            Transcript.project(target.id, target.prompt, [event(0), event(1)]),
+            { consumed: { [targetId]: { cursor: "cursor-1", sequence: 1 } }, projectionVersion: 2 },
+          )
+          const malformed = {
+            ...Transcript.project(target.id, target.prompt, [event(0), event(1)]),
+            revision: 3,
+            units: [
+              {
+                key: "invalid",
+                turnId: target.id,
+                order: { sequence: 3, part: 0 },
+                revision: 3,
+                content: { _tag: "Entry", role: "invalid", text: "invalid" },
+              },
+            ],
+          } as unknown as Transcript.Projection
+          const rejected = yield* Effect.result(
+            transcripts.replace(target, malformed, {
+              consumed: { [targetId]: { cursor: "cursor-3", sequence: 3, status: "completed" } },
+              projectionVersion: 2,
+            }),
+          )
+
+          const durable = yield* Schema.decodeUnknownEffect(
+            Schema.Array(
+              Schema.Struct({
+                consumed_json: Schema.fromJsonString(TranscriptRepository.ConsumedExecutions),
+              }),
+            ),
+          )(yield* sql`SELECT consumed_json FROM rika_transcript_checkpoints WHERE turn_id = ${targetId}`)
+
+          expect(rejected._tag).toBe("Failure")
+          expect(yield* transcripts.get(targetId)).toEqual(committed)
+          expect(durable).toEqual([{ consumed_json: { [targetId]: { cursor: "cursor-1", sequence: 1 } } }])
+          expect(yield* sql`SELECT COUNT(*) AS units FROM rika_transcript_units WHERE turn_id = ${targetId}`).toEqual([
+            { units: committed.units.length },
+          ])
         }).pipe(provideLayer(layer)),
       )
     }),

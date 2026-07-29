@@ -1,7 +1,21 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect } from "vitest"
 import { fileURLToPath } from "node:url"
-import { Cause, Config, Data, Effect, FileSystem, Function, Layer, Queue, Ref, Schema, Scope, Stream } from "effect"
+import {
+  Cause,
+  Config,
+  Data,
+  Duration,
+  Effect,
+  FileSystem,
+  Function,
+  Layer,
+  Queue,
+  Ref,
+  Schema,
+  Scope,
+  Stream,
+} from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 export type Event = {
@@ -309,11 +323,26 @@ export const nextTypeEffect: {
     }),
 )
 
+const exitPoll = Duration.millis(20)
+const exitTimeout = Duration.seconds(10)
+
+export const awaitExit = (pids: ReadonlyArray<number>) =>
+  Effect.gen(function* () {
+    let remaining = pids.filter(alive)
+    while (remaining.length > 0) {
+      yield* Effect.sleep(exitPoll)
+      remaining = remaining.filter(alive)
+    }
+    return remaining
+  }).pipe(Effect.timeoutOrElse({ duration: exitTimeout, orElse: () => Effect.sync(() => pids.filter(alive)) }))
+
 export const killTrackedHosts = () => {
-  for (const pid of hostPids) {
+  const pids = [...hostPids]
+  hostPids.clear()
+  for (const pid of pids) {
     try {
       globalThis.process.kill(pid, "SIGKILL")
     } catch {}
   }
-  hostPids.clear()
+  return Effect.runPromise(awaitExit(pids))
 }
