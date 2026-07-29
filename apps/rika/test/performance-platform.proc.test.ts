@@ -21,6 +21,11 @@ live(
       const services = yield* Layer.buildWithScope(BunServices.layer, scope)
       const observation = yield* Effect.scoped(observeProcesses().pipe(Effect.provide(services)))
       yield* Effect.sleep("100 millis")
+      if (process.platform !== "darwin") {
+        expect(observation.roles).toEqual([])
+        expect(observation.unsupportedReason).toBeDefined()
+        return
+      }
       expect(observation.roles.map((role) => role.role)).toEqual(["launcher", "interactive", "resident"])
       for (const role of observation.roles) expect(isRunning(role.pid)).toBe(false)
     }),
