@@ -1,11 +1,20 @@
+import {
+  continueAsNewAfterTurns,
+  entityKind,
+  hostAgentId,
+  hostMaxWaitTurns,
+  hostSelection,
+} from "./host/relay-thread-host-constants"
+import { Registry, makeRegistry } from "./host/relay-thread-host-registry"
+import { toolkit, wakeThreadHost } from "./host/relay-thread-host"
 import { Effect, Layer, Option, Semaphore } from "effect"
 import { Tool } from "effect/unstable/ai"
 import { Client, Ids } from "@relayfx/sdk"
 import { ModelRegistry } from "@batonfx/core"
 import { Service } from "@rika/product/execution-service"
 import type { Resident } from "@relayfx/sdk"
-import * as ThreadHost from "./host/relay-thread-host"
-import * as ExecutionMapping from "./relay-event-mapping"
+import { error } from "./relay-event-payload"
+import { traceWithoutResult as traceExecutionWithoutResult } from "./relay-event-trace"
 import { failureKind } from "./relay-execution-tree"
 import * as Follow from "./relay-execution-follow"
 import { childExecutionMethods } from "./relay-child-execution-methods"
@@ -42,30 +51,29 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
     Effect.gen(function* () {
       const client = yield* Client.Service
       if (options.onClientReady !== undefined) yield* options.onClientReady(client)
-      const registry =
-        Option.getOrUndefined(yield* Effect.serviceOption(ThreadHost.Registry)) ?? (yield* ThreadHost.makeRegistry)
+      const registry = Option.getOrUndefined(yield* Effect.serviceOption(Registry)) ?? (yield* makeRegistry)
       const hostInstances = new Map<string, Resident.Instance>()
       const hostReady = yield* Effect.cached(
         Effect.gen(function* () {
           yield* client.agents.register({
-            id: ThreadHost.hostAgentId,
+            id: hostAgentId,
             name: "rika-thread-host",
             instructions: "Promote pending Rika turns delivered to this thread host.",
-            model: ThreadHost.hostSelection,
-            tools: Object.values(ThreadHost.toolkit.tools).map((tool) => ({ name: tool.name })),
+            model: hostSelection,
+            tools: Object.values(toolkit.tools).map((tool) => ({ name: tool.name })),
             permissions: [
               { name: "relay.inbox.wait", value: true },
               { name: "relay.inbox.send", value: true },
             ],
-            max_wait_turns: ThreadHost.hostMaxWaitTurns,
+            max_wait_turns: hostMaxWaitTurns,
             metadata: { steering_enabled: false, inbox_enabled: true },
           })
           yield* client.residents.registerKind({
-            kind: ThreadHost.entityKind,
-            agent_id: ThreadHost.hostAgentId,
+            kind: entityKind,
+            agent_id: hostAgentId,
             inbox: { drain: "all" },
             state_enabled: false,
-            continue_as_new_after_turns: ThreadHost.continueAsNewAfterTurns,
+            continue_as_new_after_turns: continueAsNewAfterTurns,
             metadata: { product: "rika" },
           })
         }),
@@ -74,7 +82,7 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
       const { hostInstance, awaitParkedHost } = makeThreadHostLifecycle({ client, hostReady, hostInstances })
       return Service.of({
         ...(options.registerModels === undefined ? {} : { registerModels: options.registerModels }),
-        wakeThreadHost: ThreadHost.wakeThreadHost({
+        wakeThreadHost: wakeThreadHost({
           client,
           addressId,
           hostGate,
@@ -100,9 +108,9 @@ export const layerFromClient = <AdditionalTools extends Record<string, Tool.Any>
               reference,
               eventScope: eventScope ?? "tree",
               attemptCost: options.attemptCost,
-            }).pipe(Effect.mapError(ExecutionMapping.error))
+            }).pipe(Effect.mapError(error))
           },
-          (effect) => ExecutionMapping.traceWithoutResult({ name: "ExecutionBackend.follow", effect }),
+          (effect) => traceExecutionWithoutResult({ name: "ExecutionBackend.follow", effect }),
         ),
         ...controlMethods(client),
       })

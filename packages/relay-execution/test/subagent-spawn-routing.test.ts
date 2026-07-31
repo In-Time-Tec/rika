@@ -10,7 +10,7 @@ import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Ref } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
@@ -53,7 +53,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
         registrationKey: "sol-medium",
       })
       const transcriptReads = yield* Ref.make(0)
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
@@ -167,7 +167,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
         title: executionModelRoute("title", { provider: "legacy", model: "luna" }, "low"),
         compactionSummary: executionModelRoute("compaction", { provider: "legacy", model: "terra" }, "medium"),
       }
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: sol.registration,

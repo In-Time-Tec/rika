@@ -1,6 +1,14 @@
-import * as Identifier from "./relay-execution-identifier"
-import * as Mapping from "./relay-event-mapping"
-import * as Recovery from "./relay-execution-recovery"
+import { checkpointForExecution, cursorOf } from "./relay-execution-checkpoint"
+import { childJoinWaitMode, terminalExecutionStatus } from "./relay-recovery-policy"
+import { childExecutionIdFromEvent } from "./relay-event-payload"
+import {
+  event,
+  isActionableWait,
+  isExecutionNotFound,
+  observableEventTypes,
+  statusFromEvents,
+} from "./relay-event-state"
+import * as IdentifierCodec from "./relay-execution-id-codec"
 import * as Tree from "./relay-execution-tree"
 import { Client, Ids, type Execution } from "@relayfx/sdk"
 import { Cause, Clock, Effect, Queue, Schedule, Scope, Stream } from "effect"
@@ -32,11 +40,11 @@ export const followExecution = (input: {
       const onEvent = input.onEvent
       const attemptCost = input.attemptCost
       const followAnnotations = {
-        "rika.follow.cursor": Identifier.cursorOf(afterCursor) ?? "start",
+        "rika.follow.cursor": cursorOf(afterCursor) ?? "start",
         "rika.follow.scope": eventScope,
       }
       yield* Effect.logInfo("execution.follow.started").pipe(Effect.annotateLogs(followAnnotations))
-      const rootExecutionId = Identifier.executionId({ turnId, reference })
+      const rootExecutionId = IdentifierCodec.executionId({ turnId, reference })
       const committedSequence = typeof afterCursor === "string" ? undefined : afterCursor?.sequence
       const events: Array<Event> = []
       const followed = new Set<string>()
@@ -52,7 +60,7 @@ export const followExecution = (input: {
         | { readonly _tag: "failed"; readonly error: BackendError }
       >(1_024)
       const attributedEvent = (item: Execution.ExecutionEvent, childExecutionId: string | undefined) =>
-        Mapping.event(
+        event(
           childExecutionId === undefined
             ? item
             : {
@@ -104,7 +112,7 @@ export const followExecution = (input: {
                 item.event.sequence <= committedSequence
               )
                 return Effect.succeed(true)
-              const spawnedChild = Mapping.childExecutionIdFromEvent(item.event)
+              const spawnedChild = childExecutionIdFromEvent(item.event)
               const attributed = attributedEvent(item.event, root ? undefined : String(execution))
               const mapped =
                 attemptCost !== undefined &&
@@ -114,7 +122,7 @@ export const followExecution = (input: {
                   : attributed
               const terminal: Status | undefined = ExecutionStatus.terminalEventStatus(mapped.type)
               const inspectActionable =
-                stopAtActionableWait && Mapping.isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
+                stopAtActionableWait && isActionableWait(mapped) && typeof mapped.data?.wait_id === "string"
                   ? client.executions
                       .inspect(execution)
                       .pipe(
@@ -142,13 +150,13 @@ export const followExecution = (input: {
         return Effect.gen(function* () {
           const inspection = yield* client.executions.inspect(execution).pipe(
             Effect.retry({
-              while: Mapping.isExecutionNotFound,
+              while: isExecutionNotFound,
               schedule: Schedule.spaced("10 millis"),
               times: 100,
             }),
           )
           if (root && cursor !== undefined && inspection.last_event_cursor === cursor) {
-            if (Recovery.terminalExecutionStatus(inspection.status)) {
+            if (terminalExecutionStatus(inspection.status)) {
               yield* Queue.offer(updates, {
                 _tag: "stopped",
                 status: Status.make(inspection.status),
@@ -156,10 +164,7 @@ export const followExecution = (input: {
               })
               return
             }
-            if (
-              stopAtActionableWait &&
-              inspection.waiting_on.some((wait) => wait.mode !== Recovery.childJoinWaitMode)
-            ) {
+            if (stopAtActionableWait && inspection.waiting_on.some((wait) => wait.mode !== childJoinWaitMode)) {
               yield* Queue.offer(updates, { _tag: "stopped", status: "waiting", actionable: true })
               return
             }
@@ -182,9 +187,7 @@ export const followExecution = (input: {
               ? Queue.offer(updates, {
                   _tag: "failed",
                   error: BackendError.make({
-                    message: Mapping.isExecutionNotFound(Cause.squash(cause))
-                      ? "ExecutionNotFound"
-                      : Cause.pretty(cause),
+                    message: isExecutionNotFound(Cause.squash(cause)) ? "ExecutionNotFound" : Cause.pretty(cause),
                   }),
                 }).pipe(Effect.asVoid)
               : Effect.logWarning("execution.child.follow.failed").pipe(
@@ -203,7 +206,7 @@ export const followExecution = (input: {
           followed.add(key)
           return followOne(execution, root, cursor).pipe(Effect.forkScoped, Effect.asVoid)
         })
-      yield* launch(rootExecutionId, true, Identifier.cursorOf(afterCursor))
+      yield* launch(rootExecutionId, true, cursorOf(afterCursor))
       let stoppedAtActionableWait = false
       let stoppedStatus: Status | undefined
       while (stoppedStatus === undefined) {
@@ -222,7 +225,7 @@ export const followExecution = (input: {
           update.event.type === "model.toolcall.delta"
         if (!traceDelta || !tracedDeltas.has(update.event.type)) {
           if (traceDelta) tracedDeltas.add(update.event.type)
-          if (traceDelta || Mapping.observableEventTypes.has(update.event.type))
+          if (traceDelta || observableEventTypes.has(update.event.type))
             yield* Effect.logInfo("execution.event.received").pipe(
               Effect.annotateLogs({
                 "rika.event.cursor": update.event.cursor,
@@ -236,7 +239,7 @@ export const followExecution = (input: {
           stoppedStatus = "waiting"
         } else if (update.terminal !== undefined) stoppedStatus = update.terminal
       }
-      const status = stoppedStatus ?? Mapping.statusFromEvents(events)
+      const status = stoppedStatus ?? statusFromEvents(events)
       const completedAt = yield* Clock.currentTimeMillis
       yield* Effect.logInfo("execution.follow.completed").pipe(
         Effect.annotateLogs({
@@ -250,9 +253,8 @@ export const followExecution = (input: {
       if (stoppedAtActionableWait && (status === "running" || status === "queued")) {
         finalStatus = Status.make("waiting")
       }
-      if (Recovery.terminalExecutionStatus(finalStatus))
-        yield* Tree.cancelOutlivingChildren({ client, root: rootExecutionId })
-      const checkpoint = yield* Identifier.checkpointForExecution({ client, id: rootExecutionId })
+      if (terminalExecutionStatus(finalStatus)) yield* Tree.cancelOutlivingChildren({ client, root: rootExecutionId })
+      const checkpoint = yield* checkpointForExecution({ client, id: rootExecutionId })
       return {
         turnId,
         status: finalStatus,
@@ -272,7 +274,7 @@ export const followExecution = (input: {
       }),
     ),
     Effect.annotateLogs({
-      "rika.execution.id": String(Identifier.executionId({ turnId: input.turnId, reference: input.reference })),
+      "rika.execution.id": String(IdentifierCodec.executionId({ turnId: input.turnId, reference: input.reference })),
       "rika.turn.id": input.turnId,
     }),
   )

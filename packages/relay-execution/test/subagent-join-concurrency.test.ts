@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite"
 import { Deferred, Effect, FileSystem, Layer, Ref, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 
 import { start } from "./current-execution-route"
 
@@ -51,7 +51,7 @@ test("delegations issued in separate model cycles run at the same time", () => {
         }),
       ).pipe(Layer.provide(child.layer))
       const childRegistration = yield* ModelRegistry.registration({ ...child.selection, layer: overlapping })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,

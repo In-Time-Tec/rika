@@ -3,23 +3,23 @@ import { createHash } from "node:crypto"
 import { Effect, Function, Option, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
 
-export const Config = Schema.Struct({
+const Config = Schema.Struct({
   contextWindow: Schema.Finite,
   reserveTokens: Schema.Finite,
   keepRecentTokens: Schema.Finite,
   toolOutputMaxBytes: Schema.Finite,
 })
-export type Config = typeof Config.Type
+type Config = typeof Config.Type
 
-export const Checkpoint = Schema.Struct({
+const Checkpoint = Schema.Struct({
   cursor: Schema.String,
   digest: Schema.String,
   summary: Schema.String,
   firstKeptEntryId: Schema.String,
 })
-export type Checkpoint = typeof Checkpoint.Type
+type Checkpoint = typeof Checkpoint.Type
 
-export interface CompactInput {
+interface CompactInput {
   readonly compactionId: string
   readonly agentName: string
   readonly sessionId: string
@@ -28,12 +28,6 @@ export interface CompactInput {
   readonly prompt: Prompt.Prompt
   readonly path: ReadonlyArray<Session.Entry>
   readonly contextTokens: number
-  readonly checkpoint?: Checkpoint
-}
-
-export interface CompactOutput {
-  readonly history: Prompt.Prompt
-  readonly prompt: Prompt.Prompt
   readonly checkpoint?: Checkpoint
 }
 

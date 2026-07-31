@@ -1,4 +1,10 @@
-import * as Runtime from "./model-provider-runtime"
+import {
+  isNativeOpenAiRoute,
+  normalizedBaseUrl,
+  RuntimeError,
+  type ProviderRuntimePin,
+  type RuntimeModelRoute,
+} from "./model-provider-route"
 import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
@@ -14,13 +20,6 @@ import { Config, Context, Effect, Layer, Option, Redacted, Schema } from "effect
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
 
-type RuntimeModelRoute = Runtime.RuntimeModelRoute
-type ProviderRuntimePin = Runtime.ProviderRuntimePin
-const RuntimeError = Runtime.RuntimeError
-type RuntimeError = Runtime.RuntimeError
-type NormalizedRuntime = typeof Runtime.normalizedBaseUrl
-const normalizedBaseUrl: NormalizedRuntime = Runtime.normalizedBaseUrl
-const isNativeOpenAiRoute = Runtime.isNativeOpenAiRoute
 interface Resolution {
   readonly runtime: ProviderRuntimePin
   readonly options: Readonly<Record<string, unknown>>
@@ -40,11 +39,11 @@ export interface Adapter {
     route: ModelRouteResolution.ResolvedModelRoute,
     resolution: Resolution,
     account?: Account,
-  ) => Effect.Effect<ModelRegistry.Registration, Runtime.RuntimeError, import("effect").Scope.Scope>
+  ) => Effect.Effect<ModelRegistry.Registration, RuntimeError, import("effect").Scope.Scope>
   readonly restore: (
     route: RuntimeModelRoute,
     runtime: ProviderRuntimePin,
-  ) => Effect.Effect<ModelRegistry.Registration, Runtime.RuntimeError, import("effect").Scope.Scope>
+  ) => Effect.Effect<ModelRegistry.Registration, RuntimeError, import("effect").Scope.Scope>
 }
 
 const canonical = (value: unknown): string => {

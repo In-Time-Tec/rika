@@ -1,15 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { TurnPolicy } from "@batonfx/core"
 import { Effect } from "effect"
-import {
-  childRunSpawnPermission,
-  mainInstructions,
-  names,
-  presets,
-  resolve,
-  resolvePainter,
-  subagentHandoffTargets,
-} from "../src/agent/definition/baton-agent-definition"
+import { mainInstructions, presets, resolve } from "../src/agent/definition/baton-agent-definition"
+import { names } from "../src/agent/definition/agent-names"
+import { childRunSpawnPermission, subagentHandoffTargets } from "../src/agent/definition/agent-permissions"
+import { resolvePainter } from "../src/agent/definition/agent-media-resolution"
 
 const model = { provider: "test", model: "deterministic" }
 const threadRecoveryTools = ["search_threads", "read_thread_transcript"]

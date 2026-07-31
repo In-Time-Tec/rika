@@ -3,7 +3,7 @@ import { TestModel } from "@batonfx/test"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema } from "effect"
 import { Prompt } from "effect/unstable/ai"
-import { ContextCompaction } from "@rika/relay-execution/relay-execution-layer"
+import * as ContextCompaction from "../src/context-compaction"
 
 const message = (text: string) => Prompt.makeMessage("user", { content: [Prompt.makePart("text", { text })] })
 const toolResult = (text: string) =>

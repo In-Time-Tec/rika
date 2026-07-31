@@ -3,7 +3,7 @@ import * as AgentSelection from "@rika/coding-tools/agent-tool-contract"
 import * as ThreadDefinitions from "@rika/coding-tools/thread-tool-contract"
 import { Agent, type ModelRegistry, TurnPolicy } from "@batonfx/core"
 import * as RuntimeTools from "@rika/coding-tools/coding-tool-runtime"
-import { Effect, Function, Schema } from "effect"
+import { Function } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import childPrompt from "../../prompts/child.prompt.txt"
 import librarianPrompt from "../../prompts/librarian.prompt.txt"
@@ -16,18 +16,7 @@ import surgeonPrompt from "../../prompts/surgeon.prompt.txt"
 import taskPrompt from "../../prompts/task.prompt.txt"
 import titlePrompt from "../../prompts/title.prompt.txt"
 
-export const names = ["Oracle", "Librarian", "Painter", "Review", "ReadThread", "Surgeon", "Task"] as const
-export type Name = (typeof names)[number]
-
-export type AgentKey = "librarian" | "painter" | "review" | "readThread" | "surgeon" | "task"
-
-export const agentKeyForName = (name: Name): AgentKey | undefined =>
-  name === "Oracle" ? undefined : ((name.charAt(0).toLowerCase() + name.slice(1)) as AgentKey)
-
-export class PainterUnavailableError extends Schema.TaggedErrorClass<PainterUnavailableError>()(
-  "PainterUnavailableError",
-  { message: Schema.String, provider: Schema.String, model: Schema.String },
-) {}
+import { names, type Name } from "./agent-names"
 
 const instructions = (name: string, prompt: string) => {
   const normalized = prompt.trim()
@@ -163,26 +152,16 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   }
 }
 
+export const profilePermissions = Object.fromEntries(
+  names.map((name) => [name, definitions[name].permissions]),
+) as unknown as Record<Name, ReadonlyArray<string>>
+
 type ResolvedProfile = ReturnType<typeof resolveImpl>
 
 export const resolve: {
   (name: Name, model: ModelRegistry.ModelSelection): ResolvedProfile
   (model: ModelRegistry.ModelSelection): (name: Name) => ResolvedProfile
 } = Function.dual(2, resolveImpl)
-
-export const resolvePainter = Effect.fn("AgentProfiles.resolvePainter")(function* (
-  model: ModelRegistry.ModelSelection,
-  mediaAvailable: boolean,
-) {
-  if (!mediaAvailable) {
-    return yield* PainterUnavailableError.make({
-      message: "The configured model route does not provide the required media capability",
-      provider: model.provider,
-      model: model.model,
-    })
-  }
-  return resolve("Painter", model)
-})
 
 export const presets = (options: {
   readonly model: ModelRegistry.ModelSelection
@@ -199,25 +178,3 @@ export const presets = (options: {
       ).preset,
     ]),
   )
-
-export const parentPermissions = [...new Set(names.flatMap((name) => definitions[name].permissions))].map((name) => ({
-  name,
-  value: true,
-}))
-
-export const rootPermissions = [
-  ...parentPermissions,
-  { name: "thread.coordinate", value: true },
-  { name: "thread.control", value: true },
-]
-
-export const childRunSpawnPermission = { name: "relay.child_run.spawn", value: true }
-
-export const subagentHandoffTargets = [
-  { name: "oracle", preset_name: "Oracle" },
-  { name: "librarian", preset_name: "Librarian" },
-  { name: "review", preset_name: "Review" },
-  { name: "read_thread", preset_name: "ReadThread" },
-  { name: "surgeon", preset_name: "Surgeon" },
-  { name: "task", preset_name: "Task" },
-] as const

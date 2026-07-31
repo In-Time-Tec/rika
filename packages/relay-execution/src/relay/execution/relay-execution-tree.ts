@@ -1,7 +1,7 @@
 import { Client, Ids } from "@relayfx/sdk"
 import { Cause, Clock, Effect } from "effect"
-import { isExecutionNotFound } from "./relay-event-mapping"
-import { terminalExecutionStatus, outlivedParentReason } from "./relay-execution-recovery"
+import { isExecutionNotFound } from "./relay-event-state"
+import { terminalExecutionStatus, outlivedParentReason } from "./relay-recovery-policy"
 
 export const executionTreeIds = (input: { readonly client: Client.Interface; readonly root: Ids.ExecutionId }) =>
   Effect.gen(function* () {

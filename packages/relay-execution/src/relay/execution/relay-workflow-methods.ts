@@ -1,8 +1,8 @@
+import { error, workflow } from "./relay-event-payload"
 import type { Tool } from "effect/unstable/ai"
 import { Effect } from "effect"
 import type { ChildExecutionMethodsInput } from "./relay-child-execution-context"
-import * as Mapping from "./relay-event-mapping"
-import * as Identifier from "./relay-execution-identifier"
+import { workflowExecutionId } from "./relay-execution-id-codec"
 import { definitions, idFor } from "../relay-workflow-compiler"
 
 export const workflowMethods = <AdditionalTools extends Record<string, Tool.Any>>(
@@ -21,7 +21,7 @@ export const workflowMethods = <AdditionalTools extends Record<string, Tool.Any>
             digest: record.digest,
           })),
         ),
-        Effect.mapError(Mapping.error),
+        Effect.mapError(error),
       )
     }),
     startWorkflow: Effect.fn("ExecutionBackend.startWorkflow")(function* (
@@ -33,12 +33,12 @@ export const workflowMethods = <AdditionalTools extends Record<string, Tool.Any>
     ) {
       const result = yield* client.workflows
         .startRun({
-          execution_id: Identifier.workflowExecutionId({ runId, ownerTurnId, workspace }),
+          execution_id: workflowExecutionId({ runId, ownerTurnId, workspace }),
           workflow_definition_id: idFor(name),
           ...(revision === undefined ? {} : { revision }),
         })
-        .pipe(Effect.mapError(Mapping.error))
-      return Mapping.workflow(result)
+        .pipe(Effect.mapError(error))
+      return workflow(result)
     }),
     inspectWorkflow: Effect.fn("ExecutionBackend.inspectWorkflow")(function* (
       runId: string,
@@ -46,9 +46,9 @@ export const workflowMethods = <AdditionalTools extends Record<string, Tool.Any>
       workspace: string | undefined,
     ) {
       const result = yield* client.workflows
-        .inspectRun(Identifier.workflowExecutionId({ runId, ownerTurnId, workspace }))
-        .pipe(Effect.mapError(Mapping.error))
-      return result === undefined ? undefined : Mapping.workflow(result)
+        .inspectRun(workflowExecutionId({ runId, ownerTurnId, workspace }))
+        .pipe(Effect.mapError(error))
+      return result === undefined ? undefined : workflow(result)
     }),
     cancelWorkflow: Effect.fn("ExecutionBackend.cancelWorkflow")(function* (
       runId: string,
@@ -56,9 +56,9 @@ export const workflowMethods = <AdditionalTools extends Record<string, Tool.Any>
       workspace: string | undefined,
     ) {
       const result = yield* client.workflows
-        .cancelRun(Identifier.workflowExecutionId({ runId, ownerTurnId, workspace }))
-        .pipe(Effect.mapError(Mapping.error))
-      return result === undefined ? undefined : Mapping.workflow(result)
+        .cancelRun(workflowExecutionId({ runId, ownerTurnId, workspace }))
+        .pipe(Effect.mapError(error))
+      return result === undefined ? undefined : workflow(result)
     }),
   }
 }

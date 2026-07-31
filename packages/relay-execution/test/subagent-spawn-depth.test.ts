@@ -9,7 +9,7 @@ import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
@@ -71,7 +71,7 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
         oracle: executionModelRoute("oracle", sol.selection),
         title: executionModelRoute("title", terra.selection),
       }
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: terraRegistration,

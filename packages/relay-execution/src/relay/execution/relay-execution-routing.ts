@@ -1,19 +1,31 @@
+import { withResilience } from "../../model/routing/relay-model-registry"
 import { Client, Ids } from "@relayfx/sdk"
 import { Effect } from "effect"
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry, type ModelResilience } from "@batonfx/core"
 import type { Tool } from "effect/unstable/ai"
 import type { LayerOptions } from "./relay-execution-adapter"
-import * as Identifier from "./relay-execution-identifier"
-import * as ModelRouting from "../../model/routing/relay-model-registry"
+import { decodeExecutionRouteMetadata } from "./relay-execution-id-codec"
 
 export const registrationsFor = <AdditionalTools extends Record<string, Tool.Any>, R>(
   options: LayerOptions<AdditionalTools, R>,
 ) => [
-  ModelRouting.withResilience({ registration: options.registration, resilience: options.modelResilience }),
+  withResilience({ registration: options.registration, resilience: options.modelResilience }),
   ...(options.additionalRegistrations ?? []).map((registration) =>
-    ModelRouting.withResilience({ registration, resilience: options.modelResilience }),
+    withResilience({ registration, resilience: options.modelResilience }),
   ),
 ]
+
+export const registerModel: (
+  registry: ModelRegistry.Interface,
+  registration: ModelRegistry.Registration,
+  resilience: ModelResilience.Interface | undefined,
+) => Effect.Effect<void> = Effect.fn("RelayExecution.registerModel")(function* (
+  registry: ModelRegistry.Interface,
+  registration: ModelRegistry.Registration,
+  resilience: ModelResilience.Interface | undefined,
+): Effect.fn.Return<void> {
+  yield* registry.register({ registration: withResilience({ registration, resilience }) })
+})
 
 export const zeroPriceFromMetadata = (metadata: ModelRegistry.Metadata | undefined) =>
   metadata?.pricing !== undefined &&
@@ -31,7 +43,7 @@ export const pinnedRouteForExecution = (input: {
   Effect.gen(function* () {
     let current: import("@relayfx/sdk").Execution.Execution | undefined = input.execution
     for (let depth = 0; depth < 3 && current !== undefined; depth += 1) {
-      const route = Identifier.decodeExecutionRouteMetadata(current.metadata)
+      const route = decodeExecutionRouteMetadata(current.metadata)
       if (route !== undefined) return route
       const parentId: unknown = current.metadata?.parent_execution_id
       current =

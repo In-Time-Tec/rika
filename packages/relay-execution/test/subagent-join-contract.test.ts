@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { planJoin } from "../src/relay/execution/relay-child-result"
+import { planJoin } from "../src/relay/execution/relay-child-join-plan"
 
 describe("planJoin", () => {
   it("separates pending children from terminal children", () => {

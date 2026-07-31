@@ -1,9 +1,12 @@
+import { childSessionId } from "../relay-execution-id-codec"
+import { relayModelSelection } from "../../../model/routing/relay-model-selection"
+import { toolkitFor } from "../../../model/routing/relay-model-tools"
+import { compactionPolicy } from "../../../model/routing/relay-model-compaction"
 import { WorkflowDefinitionHost, Client, Content, Ids } from "@relayfx/sdk"
 import { Deferred, Effect, Layer, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import type { LayerOptions } from "../relay-execution-adapter"
-import * as Identifier from "../relay-execution-identifier"
-import * as ModelRouting from "../../../model/routing/relay-model-registry"
+import * as IdentifierCodec from "../relay-execution-id-codec"
 import * as ToolAdapter from "../relay-tool-runtime"
 import { presets } from "../../../agent/definition/baton-agent-definition"
 
@@ -27,7 +30,7 @@ export const makeWorkflowHost = <AdditionalTools extends Record<string, Tool.Any
     WorkflowDefinitionHost.Service.of({
       child: (parentId, operation, context) => {
         const parentExecutionId = String(parentId)
-        const childId = Identifier.makeChildExecutionId({
+        const childId = IdentifierCodec.makeChildExecutionId({
           parentTurnId: parentExecutionId,
           childId: String(operation.id),
         })
@@ -43,7 +46,7 @@ export const makeWorkflowHost = <AdditionalTools extends Record<string, Tool.Any
         const childAgentId = Ids.AgentId.make(
           `agent:rika:workflow:${encodeURIComponent(parentExecutionId)}:${String(operation.id)}`,
         )
-        const policy = ModelRouting.compactionPolicy({
+        const policy = compactionPolicy({
           compaction:
             profileName === "Oracle"
               ? (deps.options.oracleCompaction ?? deps.options.compaction)
@@ -54,7 +57,7 @@ export const makeWorkflowHost = <AdditionalTools extends Record<string, Tool.Any
           Effect.flatMap((client) =>
             Effect.gen(function* () {
               const childToolkit = Toolkit.make(
-                ...Object.values(ModelRouting.toolkitFor(deps.options).tools).filter((tool) =>
+                ...Object.values(toolkitFor(deps.options).tools).filter((tool) =>
                   preset.tool_names.includes(tool.name),
                 ),
               )
@@ -65,7 +68,7 @@ export const makeWorkflowHost = <AdditionalTools extends Record<string, Tool.Any
                 address: grounded ? operation.address_id : deps.addressId,
                 name: `rika-workflow-${String(childId)}`,
                 instructions: preset.instructions,
-                model: ModelRouting.relayModelSelection(childSelection),
+                model: relayModelSelection(childSelection),
                 tools: Object.values(childToolkit.tools).map((tool) => ({ name: tool.name })),
                 tool_execution: deps.toolExecutionPolicy,
                 permissions: preset.permissions.map((name) => ({ name, value: true })),
@@ -80,7 +83,7 @@ export const makeWorkflowHost = <AdditionalTools extends Record<string, Tool.Any
               yield* client.executions
                 .startByAgentDefinition({
                   root_address_id: grounded ? operation.address_id : deps.addressId,
-                  session_id: Identifier.childSessionId(childId),
+                  session_id: childSessionId(childId),
                   agent_id: childAgentId,
                   agent_revision: registered.record.current_revision,
                   execution_id: Ids.ExecutionId.make(String(childId)),

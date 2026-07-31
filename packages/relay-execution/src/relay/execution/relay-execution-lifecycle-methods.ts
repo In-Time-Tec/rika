@@ -1,10 +1,14 @@
+import { awaitExecutionAvailable } from "./relay-execution-wait"
+import { checkpointForExecution } from "./relay-execution-checkpoint"
+import { error } from "./relay-event-payload"
+import { event } from "./relay-event-state"
 import { Client, Ids, type Execution } from "@relayfx/sdk"
 import { Clock, Effect, Schema } from "effect"
 import type { ExecutionReference } from "@rika/product/execution-identifier"
 import { BackendError } from "@rika/product/execution-service"
 import { Status } from "@rika/product/execution-status"
 import * as Identifier from "./relay-execution-identifier"
-import * as Mapping from "./relay-event-mapping"
+import * as IdentifierCodec from "./relay-execution-id-codec"
 import * as Tree from "./relay-execution-tree"
 
 const InvocationProfile = Schema.Literals([
@@ -21,8 +25,8 @@ const InvocationProfile = Schema.Literals([
 export const lifecycleMethods = (client: Client.Interface) => ({
   cancel: Effect.fn("ExecutionBackend.cancel")(function* (turnId: string, reference: ExecutionReference | undefined) {
     return yield* Effect.gen(function* () {
-      const id = Identifier.executionId({ turnId, reference })
-      yield* Identifier.awaitExecutionAvailable({ client, id }).pipe(
+      const id = IdentifierCodec.executionId({ turnId, reference })
+      yield* awaitExecutionAvailable({ client, id }).pipe(
         Effect.timeoutOrElse({
           duration: "15 seconds",
           orElse: () =>
@@ -34,18 +38,18 @@ export const lifecycleMethods = (client: Client.Interface) => ({
       const tree = yield* Tree.executionTreeIds({ client, root: id })
       yield* Tree.cancelOutlivingChildren({ client, root: id, cancelledAt, knownTree: tree })
       const replay = yield* client.executions.replay({ execution_id: id })
-      const events = replay.events.map(Mapping.event)
-      const checkpoint = yield* Identifier.checkpointForExecution({ client, id })
+      const events = replay.events.map(event)
+      const checkpoint = yield* checkpointForExecution({ client, id })
       return {
         turnId,
         status: Status.make(accepted.status),
         events,
         ...(checkpoint === undefined ? {} : { checkpoint }),
       }
-    }).pipe(Effect.mapError(Mapping.error))
+    }).pipe(Effect.mapError(error))
   }),
   inspect: Effect.fn("ExecutionBackend.inspect")(function* (turnId: string, reference: ExecutionReference | undefined) {
-    const id = Identifier.executionId({ turnId, reference })
+    const id = IdentifierCodec.executionId({ turnId, reference })
     const existing = yield* client.executions.get(id)
     if (existing === undefined) return undefined
     return yield* client.executions.inspect(id).pipe(
@@ -71,7 +75,7 @@ export const lifecycleMethods = (client: Client.Interface) => ({
         })),
       })),
     )
-  }, Effect.mapError(Mapping.error)),
+  }, Effect.mapError(error)),
   resolveInvocationSource: Effect.fn("ExecutionBackend.resolveInvocationSource")(function* (requestedId: string) {
     return yield* Effect.gen(function* () {
       const visited = new Set<string>()
@@ -112,6 +116,6 @@ export const lifecycleMethods = (client: Client.Interface) => ({
         callerProfile,
         threadCreationDepth: depth,
       }
-    }).pipe(Effect.mapError(Mapping.error))
+    }).pipe(Effect.mapError(error))
   }),
 })

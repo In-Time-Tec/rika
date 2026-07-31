@@ -1,8 +1,11 @@
+import { checkpointForExecution, cursorOf } from "./relay-execution-checkpoint"
+import { error } from "./relay-event-payload"
+import { event, statusFromEvents } from "./relay-event-state"
 import { Client } from "@relayfx/sdk"
 import { Effect } from "effect"
 import type { OpenRootExecution, ExecutionReference } from "@rika/product/execution-identifier"
 import * as Identifier from "./relay-execution-identifier"
-import * as Mapping from "./relay-event-mapping"
+import * as IdentifierCodec from "./relay-execution-id-codec"
 
 export const historyMethods = (client: Client.Interface) => ({
   replay: Effect.fn("ExecutionBackend.replay")(function* (
@@ -10,8 +13,8 @@ export const historyMethods = (client: Client.Interface) => ({
     afterCursor: string | import("@rika/product/execution-event").ExecutionCheckpoint | undefined,
     reference: ExecutionReference | undefined,
   ) {
-    const id = Identifier.executionId({ turnId, reference })
-    const cursor = Identifier.cursorOf(afterCursor)
+    const id = IdentifierCodec.executionId({ turnId, reference })
+    const cursor = cursorOf(afterCursor)
     return yield* client.executions
       .replay({
         execution_id: id,
@@ -19,18 +22,18 @@ export const historyMethods = (client: Client.Interface) => ({
       })
       .pipe(
         Effect.flatMap((result) =>
-          Identifier.checkpointForExecution({ client, id }).pipe(Effect.map((checkpoint) => ({ result, checkpoint }))),
+          checkpointForExecution({ client, id }).pipe(Effect.map((checkpoint) => ({ result, checkpoint }))),
         ),
         Effect.map(({ result, checkpoint }) => {
-          const events = result.events.map(Mapping.event)
+          const events = result.events.map(event)
           return {
             turnId,
-            status: Mapping.statusFromEvents(events),
+            status: statusFromEvents(events),
             events,
             ...(checkpoint === undefined ? {} : { checkpoint }),
           }
         }),
-        Effect.mapError(Mapping.error),
+        Effect.mapError(error),
       )
   }),
   pageEvents: Effect.fn("ExecutionBackend.pageEvents")(function* (
@@ -47,19 +50,19 @@ export const historyMethods = (client: Client.Interface) => ({
     }
     return yield* client.executions
       .pageEvents({
-        execution_id: Identifier.executionId({ turnId, reference }),
+        execution_id: IdentifierCodec.executionId({ turnId, reference }),
         direction,
         ...cursorPage,
         ...(limit === undefined ? {} : { limit }),
       })
       .pipe(
         Effect.map((result) => ({
-          events: result.events.map(Mapping.event),
+          events: result.events.map(event),
           hasMore: result.has_more,
           ...(result.oldest_cursor === undefined ? {} : { oldestCursor: result.oldest_cursor }),
           ...(result.newest_cursor === undefined ? {} : { newestCursor: result.newest_cursor }),
         })),
-        Effect.mapError(Mapping.error),
+        Effect.mapError(error),
       )
   }),
   listOpenRootExecutions: Effect.gen(function* () {
@@ -72,7 +75,7 @@ export const historyMethods = (client: Client.Interface) => ({
           limit: 200,
           ...(cursor === undefined ? {} : { cursor }),
         })
-        .pipe(Effect.mapError(Mapping.error))
+        .pipe(Effect.mapError(error))
       for (const record of page.records) {
         const turnId = Identifier.turnIdFromExecutionId(String(record.execution_id))
         if (turnId === undefined) continue

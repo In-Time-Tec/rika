@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 
 import { start } from "./current-execution-route"
 
@@ -31,7 +31,7 @@ test("a delegation returns a running handle and await_subagents collects the rep
         model: "gpt-5.6-sol",
         registrationKey: "sol-medium",
       })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
@@ -110,7 +110,7 @@ test("a silent subagent is collected as a no-report verdict", () => {
         model: "gpt-5.6-sol",
         registrationKey: "sol-medium",
       })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
@@ -185,7 +185,7 @@ test("one root batch can start more than four delegations", () => {
         Array.from({ length: 6 }, (_, index) => TestModel.text(`Child ${index} reported.`)),
         { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-medium" },
       )
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
@@ -267,7 +267,7 @@ test("collecting one batch allows a later delegation", () => {
         Array.from({ length: 5 }, (_, index) => TestModel.text(`Child ${index} reported.`)),
         { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-medium" },
       )
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,

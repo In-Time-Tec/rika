@@ -1,11 +1,11 @@
+import { childSessionId } from "../relay-execution-id-codec"
+import { relayModelSelection } from "../../../model/routing/relay-model-selection"
 import { ChildFanOutHost, Client, Ids } from "@relayfx/sdk"
 import { Clock, Deferred, Effect, Layer, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ToolAdapter from "../relay-tool-runtime"
 import type { LayerOptions } from "../relay-execution-adapter"
-import * as ModelRouting from "../../../model/routing/relay-model-registry"
-import * as Identifier from "../relay-execution-identifier"
-import { parentPermissions } from "../../../agent/definition/baton-agent-definition"
+import { parentPermissions } from "../../../agent/definition/agent-permissions"
 
 export const childResult = (input: { readonly client: Client.Interface; readonly childId: string }) => {
   const childExecutionId = Ids.ExecutionId.make(input.childId)
@@ -89,7 +89,7 @@ export const makeFanOutHost = (context: {
                 address: child.address_id,
                 name: `rika-fan-out-${String(child.child_execution_id)}`,
                 ...(override.instructions === undefined ? {} : { instructions: override.instructions }),
-                model: ModelRouting.relayModelSelection(childSelection),
+                model: relayModelSelection(childSelection),
                 tools: Object.values(childToolkit.tools).map((tool) => ({ name: tool.name })),
                 tool_execution: context.toolExecutionPolicy,
                 permissions:
@@ -103,7 +103,7 @@ export const makeFanOutHost = (context: {
               })
               yield* client.executions.startByAgentDefinition({
                 root_address_id: child.address_id,
-                session_id: Identifier.childSessionId(child.child_execution_id),
+                session_id: childSessionId(child.child_execution_id),
                 agent_id: childAgentId,
                 agent_revision: registered.record.current_revision,
                 execution_id: Ids.ExecutionId.make(String(child.child_execution_id)),

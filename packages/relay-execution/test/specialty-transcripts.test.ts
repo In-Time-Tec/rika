@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as AgentProfiles from "../src/agent/definition/baton-agent-definition"
+import { resolve } from "../src/agent/definition/baton-agent-definition"
+import { resolvePainter } from "../src/agent/definition/agent-media-resolution"
+import { parentPermissions } from "../src/agent/definition/agent-permissions"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Function, Layer, Schema } from "effect"
@@ -108,11 +110,11 @@ describe("specialty durable transcripts", () => {
         const agents = yield* ProductAgent.Service
         for (const entry of cases) {
           const definition = Catalog.get(entry.tool)
-          const profile = AgentProfiles.resolve(entry.profile, model)
+          const profile = resolve(entry.profile, model)
           expect(profile.preset.permissions).toEqual(entry.permissions)
           expect(
             profile.preset.permissions.every((permission: string) =>
-              AgentProfiles.parentPermissions.some((p) => p.name === permission),
+              parentPermissions.some((p) => p.name === permission),
             ),
           ).toBe(true)
           if (definition !== undefined)
@@ -198,9 +200,9 @@ describe("specialty durable transcripts", () => {
 
   it.effect("reports Painter unavailable and accepts an injected media-capable route", () =>
     Effect.gen(function* () {
-      const unavailable = yield* Effect.exit(AgentProfiles.resolvePainter(model, false))
+      const unavailable = yield* Effect.exit(resolvePainter(model, false))
       expect(unavailable._tag).toBe("Failure")
-      const painter = yield* AgentProfiles.resolvePainter(model, true)
+      const painter = yield* resolvePainter(model, true)
       expect(painter.preset.tool_names).toEqual([
         "view_media",
         "read_thread",

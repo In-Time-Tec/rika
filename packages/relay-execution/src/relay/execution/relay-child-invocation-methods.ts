@@ -1,11 +1,14 @@
+import { error } from "./relay-event-payload"
+import { pinnedSelection, routeForProfile } from "../../model/routing/relay-model-selection"
+import { availableTools } from "../../model/routing/relay-model-tools"
+import { pinnedCompactionPolicy } from "../../model/routing/relay-model-compaction"
 import { Content } from "@relayfx/sdk"
 import type { Tool } from "effect/unstable/ai"
 import { Effect, Schema } from "effect"
 import type { InvokeChildInput } from "@rika/product/execution-child-run"
 import { BackendError } from "@rika/product/execution-service"
-import * as Mapping from "./relay-event-mapping"
 import * as Identifier from "./relay-execution-identifier"
-import * as ModelRouting from "../../model/routing/relay-model-registry"
+import * as IdentifierCodec from "./relay-execution-id-codec"
 import { resolve, resolveTitle } from "../../agent/definition/baton-agent-definition"
 import type { ChildExecutionMethodsInput } from "./relay-child-execution-context"
 
@@ -15,28 +18,26 @@ export const childInvocationMethods = <AdditionalTools extends Record<string, To
   const { client, options, context } = input
   return {
     invokeChild: Effect.fn("ExecutionBackend.invokeChild")(function* (child: InvokeChildInput) {
-      const parentExecutionId = Identifier.executionId({ turnId: child.parentTurnId, reference: undefined })
-      const parent = yield* client.executions.get(parentExecutionId).pipe(Effect.mapError(Mapping.error))
-      const routePin = parent === undefined ? undefined : Identifier.decodeExecutionRouteMetadata(parent.metadata)
+      const parentExecutionId = IdentifierCodec.executionId({ turnId: child.parentTurnId, reference: undefined })
+      const parent = yield* client.executions.get(parentExecutionId).pipe(Effect.mapError(error))
+      const routePin = parent === undefined ? undefined : IdentifierCodec.decodeExecutionRouteMetadata(parent.metadata)
       if (parent === undefined || routePin === undefined)
         return yield* BackendError.make({ message: `Execution ${child.parentTurnId} has no pinned model route` })
       const route =
-        child.profile === "Title"
-          ? routePin.title
-          : ModelRouting.routeForProfile({ pin: routePin, profile: child.profile })
+        child.profile === "Title" ? routePin.title : routeForProfile({ pin: routePin, profile: child.profile })
       if (route === undefined)
         return yield* BackendError.make({ message: `Execution ${child.parentTurnId} has no pinned title route` })
       const preset =
         child.profile === "Title"
-          ? resolveTitle(ModelRouting.pinnedSelection(route))
-          : resolve(child.profile, ModelRouting.pinnedSelection(route)).preset
+          ? resolveTitle(pinnedSelection(route))
+          : resolve(child.profile, pinnedSelection(route)).preset
       const depth = context.childExecutionDepth(String(parentExecutionId)) + 1
-      const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(Mapping.error))
+      const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(Effect.mapError(error))
       const threadId = Identifier.threadIdFromMetadata(parent.metadata)
       yield* client.childRuns
         .spawn({
           execution_id: parentExecutionId,
-          child_execution_id: Identifier.makeChildExecutionId({
+          child_execution_id: IdentifierCodec.makeChildExecutionId({
             parentTurnId: child.parentTurnId,
             childId: child.childId,
           }),
@@ -55,7 +56,7 @@ export const childInvocationMethods = <AdditionalTools extends Record<string, To
           tool_names:
             child.profile === "Title"
               ? []
-              : ModelRouting.availableTools({
+              : availableTools({
                   options,
                   names: context.toolsAtDepth(preset.tool_names, depth),
                 }),
@@ -63,7 +64,7 @@ export const childInvocationMethods = <AdditionalTools extends Record<string, To
           ...(child.profile === "Title"
             ? {}
             : {
-                compaction_policy: ModelRouting.pinnedCompactionPolicy({
+                compaction_policy: pinnedCompactionPolicy({
                   route,
                   summaryModel: routePin.compactionSummary,
                 }),
@@ -79,7 +80,7 @@ export const childInvocationMethods = <AdditionalTools extends Record<string, To
           },
           wait: false,
         })
-        .pipe(Effect.mapError(Mapping.error))
+        .pipe(Effect.mapError(error))
       return {
         parentTurnId: child.parentTurnId,
         childId: child.childId,

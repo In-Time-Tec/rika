@@ -9,7 +9,8 @@ import { Database } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schedule } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
+import { turnIdFromExecutionId } from "../src/relay/execution/relay-execution-identifier"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
@@ -41,7 +42,7 @@ test("model spawns a durable Oracle child through the handoff tool and resumes w
         ],
       })
       const runtimeLayer = Runtime.testLayer(() => Effect.succeed({ text: "runtime", truncated: false }))
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,
@@ -162,7 +163,7 @@ test("handoff children resolve real workspace tools through their parent Rika tu
         ],
       })
       const workspaces = new Map([["turn-review", workspace]])
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,
@@ -175,7 +176,7 @@ test("handoff children resolve real workspace tools through their parent Rika tu
             ),
           ),
         resolveWorkspace: (executionId) => {
-          const turnId = RelayExecutionBackend.turnIdFromExecutionId(executionId)
+          const turnId = turnIdFromExecutionId(executionId)
           const resolved = turnId === undefined ? undefined : workspaces.get(turnId)
           return resolved === undefined
             ? Effect.fail(
@@ -256,7 +257,7 @@ test("parent and handoff child may reuse a model tool-call identifier", () => {
           },
         ],
       })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: fixture.registration,

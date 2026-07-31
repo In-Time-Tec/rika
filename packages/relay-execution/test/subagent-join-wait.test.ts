@@ -7,7 +7,7 @@ import { Database } from "bun:sqlite"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Schedule, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 
 import { start } from "./current-execution-route"
 
@@ -44,7 +44,7 @@ test("await_subagents suspends on an open child and resumes when the child termi
         }),
       ).pipe(Layer.provide(child.layer))
       const childRegistration = yield* ModelRegistry.registration({ ...child.selection, layer: held })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
@@ -148,7 +148,7 @@ test("a parent that answers without collecting its subagents cancels them", () =
         }),
       ).pipe(Layer.provide(child.layer))
       const childRegistration = yield* ModelRegistry.registration({ ...child.selection, layer: stalled })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,

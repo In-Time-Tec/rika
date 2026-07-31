@@ -5,7 +5,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 import { start } from "./current-execution-route"
 
 const cases = [
@@ -49,7 +49,7 @@ for (const [name, parameters, malformedField] of cases) {
             ? Effect.succeed({ text: "[REDACTED]", truncated: false })
             : Effect.succeed({ text: bounded, truncated: true }),
         )
-        const backendLayer = RelayExecutionBackend.layer({
+        const backendLayer = layer({
           filename: `${directory}/execution.db`,
           workspace: directory,
           registration: fixture.registration,
@@ -116,7 +116,7 @@ for (const [name, parameters, malformedField] of cases) {
                   ),
                 )
                 const backendContext = yield* Layer.build(
-                  RelayExecutionBackend.layer({
+                  layer({
                     filename: `${directory}/execution.db`,
                     workspace: directory,
                     registration: fixture.registration,

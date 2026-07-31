@@ -11,8 +11,9 @@ import * as ExecutionBackend from "@rika/product/execution-service"
 
 import { start } from "./current-execution-route"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer as relayLayer } from "../src/relay/execution/relay-execution-layer"
 import { fixture as testSupport } from "./execution-backend-relay-fixture"
+import type { LayerOptions } from "../src/relay/execution/relay-execution-adapter"
 const { runNative, encodeJson } = testSupport
 const provide = <A, E, R, ROut, E2, RIn>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<ROut, E2, RIn>) =>
   Effect.scoped(
@@ -28,7 +29,7 @@ const withBackend = <A, E extends object, AdditionalTools extends Record<string,
     directory: string,
   ) => Effect.Effect<A, E, ExecutionBackend.Service | FileSystem.FileSystem>,
   options?: Pick<
-    RelayExecutionBackend.LayerOptions<AdditionalTools>,
+    LayerOptions<AdditionalTools>,
     "modelResilience" | "compaction" | "modelVariantPolicy" | "additionalToolkit" | "additionalHandlerLayer"
   > & {
     readonly registration?: (fixture: TestModel.Fixture) => ModelRegistry.Registration
@@ -42,7 +43,7 @@ const withBackend = <A, E extends object, AdditionalTools extends Record<string,
       const { registration, ...layerOptions } = options ?? {}
       return yield* provide(
         run(fixture, directory),
-        RelayExecutionBackend.layer({
+        relayLayer({
           filename: `${directory}/execution.db`,
           workspace: directory,
           registration: registration?.(fixture) ?? fixture.registration,
@@ -201,7 +202,7 @@ test(
               prompt: "read fixture.txt and finish",
             }
             const run = <A, E>(effect: Effect.Effect<A, E, ExecutionBackend.Service>) =>
-              provide(effect, RelayExecutionBackend.layer(options))
+              provide(effect, relayLayer(options))
             const completed = yield* run(
               Effect.gen(function* () {
                 const backend = yield* ExecutionBackend.Service

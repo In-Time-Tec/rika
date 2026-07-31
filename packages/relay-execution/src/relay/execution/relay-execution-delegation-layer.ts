@@ -1,3 +1,7 @@
+import { type RegistryInterface } from "./host/relay-thread-host-registry"
+import { handlerLayer, promoteTurnTool } from "./host/relay-thread-host"
+import { pinnedSelection, routeForProfile } from "../../model/routing/relay-model-selection"
+import { toolkitFor } from "../../model/routing/relay-model-tools"
 import { Deferred, Effect, Layer, Schema } from "effect"
 import { Client, Content, Ids } from "@relayfx/sdk"
 import { Toolkit } from "effect/unstable/ai"
@@ -9,12 +13,12 @@ import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import { AgentProfile } from "@rika/product/execution-child-run"
 import type { LayerOptions } from "./relay-execution-adapter"
-import * as ThreadHost from "./host/relay-thread-host"
 import { childExecutionDepth, delegationAvailableAtDepth } from "../../agent-depth"
-import { parentPermissions, resolve } from "../../agent/definition/baton-agent-definition"
+import { parentPermissions } from "../../agent/definition/agent-permissions"
+import { resolve } from "../../agent/definition/baton-agent-definition"
 import * as Identifier from "./relay-execution-identifier"
+import * as IdentifierCodec from "./relay-execution-id-codec"
 import { pinnedRouteForExecution } from "./relay-execution-routing"
-import * as ModelRouting from "../../model/routing/relay-model-registry"
 
 export const makeDelegationLayer = <
   AdditionalTools extends Record<string, import("effect/unstable/ai").Tool.Any>,
@@ -22,14 +26,14 @@ export const makeDelegationLayer = <
 >(input: {
   readonly relayClient: Deferred.Deferred<Client.Interface>
   readonly options: LayerOptions<AdditionalTools, RuntimeRequirements>
-  readonly promoterRegistry: ThreadHost.RegistryInterface
+  readonly promoterRegistry: RegistryInterface
   readonly addressId: Ids.AddressId
 }) => {
   const { relayClient, options, promoterRegistry, addressId } = input
-  const toolkit = ModelRouting.toolkitFor(options)
+  const toolkit = toolkitFor(options)
   const runnerToolkit = Toolkit.make(
     ...Object.values(toolkit.tools).filter((tool) => tool.name !== AgentSelection.AgentContract.awaitSubagentsToolName),
-    ThreadHost.promoteTurnTool,
+    promoteTurnTool,
   )
   const delegation = Effect.fn("ExecutionBackend.delegateAgent")(function* (
     toolName: AgentSelection.DelegationToolName,
@@ -76,15 +80,15 @@ export const makeDelegationLayer = <
         ? `Requested thread ID: ${delegationInput.threadId}\n\n${delegationInput.prompt}`
         : delegationInput.prompt
     const childDepth = parentDepth + 1
-    const childRoute = ModelRouting.routeForProfile({ pin: routePin, profile })
-    const childPreset = resolve(profile, ModelRouting.pinnedSelection(childRoute)).preset
+    const childRoute = routeForProfile({ pin: routePin, profile })
+    const childPreset = resolve(profile, pinnedSelection(childRoute)).preset
     const durableRoute = yield* Schema.decodeUnknownEffect(Schema.Json)(routePin).pipe(
       Effect.mapError((cause) =>
         AgentErrors.AgentContract.AgentToolError.make({ tool: toolName, message: String(cause) }),
       ),
     )
     const child = {
-      child_execution_id: Identifier.makeChildExecutionId({
+      child_execution_id: IdentifierCodec.makeChildExecutionId({
         parentTurnId: invocation.executionId,
         childId: invocation.callId,
       }),
@@ -138,7 +142,7 @@ export const makeDelegationLayer = <
       options.additionalHandlerLayer === undefined
         ? ToolCatalog.handlerLayer
         : Layer.merge(ToolCatalog.handlerLayer, options.additionalHandlerLayer),
-      ThreadHost.handlerLayer(promoterRegistry),
+      handlerLayer(promoterRegistry),
       delegationHandlerLayer,
     ),
     parentPermissions,

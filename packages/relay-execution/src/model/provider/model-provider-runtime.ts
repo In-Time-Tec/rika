@@ -1,114 +1,23 @@
 import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
-export interface RuntimeModelRoute {
-  readonly role:
-    | "main"
-    | "oracle"
-    | "title"
-    | "compaction"
-    | "librarian"
-    | "painter"
-    | "review"
-    | "readThread"
-    | "surgeon"
-    | "task"
-  readonly alias: string
-  readonly provider: string
-  readonly model: string
-  readonly registrationKey: string
-  readonly providerProtocol: string
-  readonly providerBaseUrl: string
-  readonly providerApiKeyEnv?: string
-  readonly providerRuntime?: {
-    readonly adapter: string
-    readonly credentialIdentity?: string
-    readonly connectionIdentity?: Readonly<Record<string, string>>
-  }
-  readonly openAiAccountFingerprint?: string
-  readonly effort: string
-  readonly fast: boolean
-  readonly requestVariant: string
-  readonly providerOptions?: Readonly<Record<string, unknown>>
-  readonly compaction: {
-    readonly contextWindow: number
-    readonly reserveTokens: number
-    readonly keepRecentTokens: number
-  }
-}
+import type { ProviderRuntimePin, RuntimeModelRoute } from "./model-provider-route"
+import { isNativeOpenAiRoute, normalizedBaseUrl, RuntimeError } from "./model-provider-route"
 import { Compaction, ModelRegistry } from "@batonfx/core"
-export { TestModel } from "@batonfx/test"
-import * as Anthropic from "@batonfx/providers/anthropic"
-export { Anthropic }
 import * as AmazonBedrock from "@batonfx/providers/amazon-bedrock"
-import * as OpenAi from "@batonfx/providers/openai"
-export { OpenAi }
-export { ModelRegistry } from "@batonfx/core"
 import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import { Context, Deferred, Effect, Function, Layer, Ref, Schema, Scope, Semaphore } from "effect"
 import { createHash } from "node:crypto"
 
-export type ModelRegistration = ModelRegistry.Registration
-
-export const runtimeRouteFromSnapshot = (
-  route: import("@rika/product/execution-route-snapshot").ExecutionRouteModelSnapshot,
-): RuntimeModelRoute => ({
-  role: route.role,
-  alias: route.alias,
-  provider: route.providerConnection.provider,
-  model: route.model,
-  registrationKey: route.registrationIdentity,
-  providerProtocol: route.providerConnection.protocol,
-  providerBaseUrl: route.providerConnection.baseUrl,
-  ...(route.providerConnection.apiKeyEnvironment === undefined
-    ? {}
-    : { providerApiKeyEnv: route.providerConnection.apiKeyEnvironment }),
-  ...(route.providerConnection.authentication === "account" && route.providerConnection.credentialIdentity !== undefined
-    ? { openAiAccountFingerprint: route.providerConnection.credentialIdentity }
-    : {}),
-  effort: route.effort,
-  fast: route.fast,
-  requestVariant: route.requestVariant,
-  ...(route.providerOptions === undefined ? {} : { providerOptions: route.providerOptions }),
-  compaction: route.compaction,
-})
-export type ModelSelection = ModelRegistry.ModelSelection
-export type CompactionOptions = Compaction.DefaultOptions
 import * as BedrockAuthRefresh from "./bedrock-auth-refresh"
 import { ProviderAdapters, type Adapter as ProviderAdapter } from "./provider-adapters"
 const { adapters, authRefreshFingerprint, canonical, normalizePinnedRuntime, unavailableRestore } = ProviderAdapters
 type Adapter = ProviderAdapter
-export const bedrockAuthRefreshService = BedrockAuthRefresh.Service
-export const bedrockAuthRefreshLiveLayer = BedrockAuthRefresh.liveLayer
-export const bedrockAuthRefreshTestLayer = BedrockAuthRefresh.testLayer
-
-export interface ProviderRuntimePin {
-  readonly adapter: string
-  readonly credentialIdentity?: string
-  readonly connectionIdentity?: Readonly<Record<string, string>>
-}
-
-export class RuntimeError extends Schema.TaggedErrorClass<RuntimeError>()("ModelProviderRuntimeError", {
-  message: Schema.String,
-}) {}
 
 interface Account {
   readonly fingerprint: string
   readonly auth: OpenAiAuth.ServiceInterface
 }
-
-export const normalizedBaseUrl = (value: string) => {
-  const url = new URL(value)
-  url.hash = ""
-  url.pathname = url.pathname.replace(/\/+$/, "") || "/"
-  return url.toString().replace(/\/(?=\?|$)/, "")
-}
-
-export const isNativeOpenAiRoute = (route: ModelRouteResolution.ResolvedModelRoute) =>
-  route.providerId === "openai" &&
-  route.providerConnection.protocol === "openai" &&
-  normalizedBaseUrl(route.providerConnection.baseUrl!) ===
-    normalizedBaseUrl(SettingsDefaults.Defaults.defaults.providers.openai!.baseUrl!)
 
 const accountStatus = (auth: OpenAiAuth.ServiceInterface) =>
   auth.status.pipe(
@@ -127,7 +36,7 @@ const accountStatus = (auth: OpenAiAuth.ServiceInterface) =>
     ),
   )
 
-export interface PreparedRoutes {
+interface PreparedRoutes {
   readonly routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>
   readonly plans: ReadonlyArray<ReturnType<typeof plan>>
   readonly registrations: ReadonlyArray<ModelRegistry.Registration>
@@ -201,7 +110,7 @@ export const requestOptions = Function.dual(
   (fingerprint?: string): (route: ModelRouteResolution.ResolvedModelRoute) => Readonly<Record<string, unknown>>
 }
 
-export interface ServiceInterface {
+interface ServiceInterface {
   readonly prepare: (
     routes: ReadonlyArray<ModelRouteResolution.ResolvedModelRoute>,
   ) => Effect.Effect<PreparedRoutes, RuntimeError>
@@ -344,7 +253,7 @@ export class Service extends Context.Service<Service, ServiceInterface>()(
   )
 }
 
-export const bypassLayer = Layer.succeed(
+const _bypassLayer = Layer.succeed(
   Service,
   Service.of({
     prepare: () => Effect.die("Model provider runtime is unavailable for test models"),

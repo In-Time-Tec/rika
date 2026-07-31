@@ -3,12 +3,33 @@ import * as ThreadToolkits from "@rika/coding-tools/thread-tool-contract"
 import { vi } from "vitest"
 
 import { ChildFanOutHost, Client, Execution, Ids, WorkflowDefinitionHost } from "@relayfx/sdk"
+import { ModelResilience } from "@batonfx/core"
 import { Effect, Layer, Ref, Stream } from "effect"
 
 import { Tool } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
+import { layerFromClient } from "../src/relay/execution/relay-execution-client-layer"
+import { buildChildRunInput } from "../src/relay/execution/relay-execution-input"
+import { defaultModelResilience } from "../src/model/routing/relay-model-registry"
+import { toolkitFor, webSearchFactories } from "../src/model/routing/relay-model-tools"
+import { modelVariantKey } from "../src/model/routing/relay-model-selection"
+import { eventHistoryOption } from "../src/model/routing/relay-model-registry"
+import { turnIdFromExecutionId, workspaceFromExecutionId } from "../src/relay/execution/relay-execution-identifier"
+
+const RelayExecutionBackend = {
+  layer,
+  layerFromClient,
+  buildChildRunInput,
+  defaultModelResilience: defaultModelResilience as ModelResilience.Interface,
+  toolkitFor,
+  webSearchFactories,
+  modelVariantKey,
+  eventHistoryOption,
+  turnIdFromExecutionId,
+  workspaceFromExecutionId,
+}
 
 const MockEffect = vi.hoisted(() => (require("effect") as typeof import("effect")).Effect)
 
@@ -357,11 +378,11 @@ const makeClientImpl: (options?: MakeClientOptions) => Effect.Effect<ClientFixtu
 
 const provideConfiguredBackend = <AdditionalTools extends Record<string, Tool.Any> = {}>(
   implementation: Client.Interface,
-  options: Parameters<typeof RelayExecutionBackend.layerFromClient<AdditionalTools>>[0],
+  options: Parameters<typeof layerFromClient<AdditionalTools>>[0],
   additionalLayer: Layer.Layer<never> = Layer.empty,
 ) => {
   const contextLayer = Layer.merge(
-    RelayExecutionBackend.layerFromClient(options).pipe(Layer.provide(Layer.succeed(Client.Service, implementation))),
+    layerFromClient(options).pipe(Layer.provide(Layer.succeed(Client.Service, implementation))),
     additionalLayer,
   )
   return <A, E>(effect: Effect.Effect<A, E, ExecutionBackend.Service>) =>
@@ -374,7 +395,7 @@ const provideConfiguredBackend = <AdditionalTools extends Record<string, Tool.An
 const provideBackend = (implementation: Client.Interface) => provideConfiguredBackend(implementation, { selection })
 
 const provideBackendWithThreadTools = (implementation: Client.Interface) => {
-  const contextLayer = RelayExecutionBackend.layerFromClient({
+  const contextLayer = layerFromClient({
     selection,
     additionalToolkit: ThreadToolkits.ThreadContract.toolkit,
   }).pipe(Layer.provide(Layer.succeed(Client.Service, implementation)))

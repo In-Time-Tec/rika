@@ -1,6 +1,6 @@
+import { entityKind } from "./host/relay-thread-host-constants"
 import { Client, Ids, type Resident } from "@relayfx/sdk"
 import { Duration, Effect, Schedule } from "effect"
-import * as ThreadHost from "./host/relay-thread-host"
 
 export const makeThreadHostLifecycle = (input: {
   readonly client: Client.Interface
@@ -11,7 +11,7 @@ export const makeThreadHostLifecycle = (input: {
   const entityFor = Effect.fn("ExecutionBackend.entityFor")(function* (threadId: string, now: number) {
     let recovering = false
     const existing = yield* client.residents.get({
-      kind: ThreadHost.entityKind,
+      kind: entityKind,
       key: Ids.ResidentKey.make(threadId),
     })
     if (existing?.status === "active") {
@@ -27,7 +27,7 @@ export const makeThreadHostLifecycle = (input: {
           }),
         )
         yield* client.residents.destroy({
-          kind: ThreadHost.entityKind,
+          kind: entityKind,
           key: Ids.ResidentKey.make(threadId),
           reason: "thread host execution ended; recreating a fresh generation",
           destroyed_at: now,
@@ -36,7 +36,7 @@ export const makeThreadHostLifecycle = (input: {
       }
     }
     const instance = yield* client.residents.spawn({
-      kind: ThreadHost.entityKind,
+      kind: entityKind,
       key: Ids.ResidentKey.make(threadId),
       metadata: { rika_thread_id: threadId },
       created_at: now,
@@ -77,7 +77,7 @@ export const makeThreadHostLifecycle = (input: {
     )
     if (outcome !== "terminal") return instance
     yield* client.residents.destroy({
-      kind: ThreadHost.entityKind,
+      kind: entityKind,
       key: Ids.ResidentKey.make(threadId),
       reason: "thread host execution ended; recreating a fresh generation",
       destroyed_at: now,

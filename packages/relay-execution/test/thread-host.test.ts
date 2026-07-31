@@ -3,6 +3,9 @@ import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import { Context, Effect, Layer, Schema } from "effect"
 import { LanguageModel, Prompt, Tool, Toolkit } from "effect/unstable/ai"
 import * as ThreadHost from "../src/relay/execution/host/relay-thread-host"
+import { waitToolName } from "../src/relay/execution/host/relay-thread-host-constants"
+import { pendingQueueWakes } from "../src/relay/execution/host/relay-thread-host-queue"
+import { makeRegistry } from "../src/relay/execution/host/relay-thread-host-registry"
 
 const promptWith = (messages: ReadonlyArray<Prompt.MessageEncoded>) => Prompt.make(messages)
 
@@ -28,14 +31,14 @@ const waitResultMessage = (result: unknown): Prompt.MessageEncoded => ({
     {
       type: "tool-result",
       id: "wait-0",
-      name: ThreadHost.waitToolName,
+      name: waitToolName,
       isFailure: false,
       result,
     },
   ],
 })
 
-const waitTool = Tool.make(ThreadHost.waitToolName, {
+const waitTool = Tool.make(waitToolName, {
   description: "test stand-in for the relay inbox wait",
   parameters: Schema.Struct({}),
   success: Schema.Unknown,
@@ -54,7 +57,7 @@ describe("ThreadHost", () => {
           ]),
         ),
       ])
-      expect(ThreadHost.pendingQueueWakes(prompt)).toEqual([
+      expect(pendingQueueWakes(prompt)).toEqual([
         { threadId: "thread-a", generation: 2, queueRevision: 5 },
         { threadId: "thread-b", generation: 1, queueRevision: 3 },
       ])
@@ -64,20 +67,16 @@ describe("ThreadHost", () => {
   it.effect("returns no thread ids without a trailing wait result", () =>
     Effect.gen(function* () {
       const encoded = yield* Schema.encodeEffect(Schema.UnknownFromJsonString)(pendingPayload("t", 1, 1))
-      expect(ThreadHost.pendingQueueWakes(promptWith([]))).toEqual([])
-      expect(
-        ThreadHost.pendingQueueWakes(promptWith([{ role: "user", content: [{ type: "text", text: encoded }] }])),
-      ).toEqual([])
-      expect(
-        ThreadHost.pendingQueueWakes(promptWith([waitResultMessage({ status: "timed_out", messages: [] })])),
-      ).toEqual([])
+      expect(pendingQueueWakes(promptWith([]))).toEqual([])
+      expect(pendingQueueWakes(promptWith([{ role: "user", content: [{ type: "text", text: encoded }] }]))).toEqual([])
+      expect(pendingQueueWakes(promptWith([waitResultMessage({ status: "timed_out", messages: [] })]))).toEqual([])
     }),
   )
 
   it.effect("waits for messages, promotes the delivered batch, and waits again", () =>
     Effect.gen(function* () {
       const crypto = yield* Layer.build(BunCrypto.layer)
-      const registry = yield* ThreadHost.makeRegistry
+      const registry = yield* makeRegistry
       const promoted: Array<readonly [string, number]> = []
       yield* registry.register((threadId, generation) =>
         Effect.sync(() => {
@@ -90,7 +89,7 @@ describe("ThreadHost", () => {
       const handlers = toolkit.toLayer({
         promote_turn: ({ threadId, generation }) =>
           registry.promote(threadId, generation).pipe(Effect.map((count) => ({ promoted: count }))),
-        [ThreadHost.waitToolName]: () => Effect.succeed(batch),
+        [waitToolName]: () => Effect.succeed(batch),
       })
       const registration = yield* ThreadHost.hostRegistration.pipe(Effect.provide(crypto))
       const provideModel = Effect.provide(
@@ -100,7 +99,7 @@ describe("ThreadHost", () => {
         prompt: promptWith([{ role: "user", content: [{ type: "text", text: "create" }] }]),
         toolkit,
       }).pipe(provideModel)
-      expect(parked.toolCalls.map((call) => call.name)).toEqual([ThreadHost.waitToolName])
+      expect(parked.toolCalls.map((call) => call.name)).toEqual([waitToolName])
       const woken = yield* LanguageModel.generateText({
         prompt: promptWith([{ role: "user", content: [{ type: "text", text: "create" }] }, waitResultMessage(batch)]),
         toolkit,
@@ -117,7 +116,7 @@ describe("ThreadHost", () => {
       const crypto = yield* Layer.build(BunCrypto.layer)
       const toolkit = Toolkit.make(waitTool)
       const handlers = toolkit.toLayer({
-        [ThreadHost.waitToolName]: () => Effect.succeed({ status: "timed_out", messages: [] }),
+        [waitToolName]: () => Effect.succeed({ status: "timed_out", messages: [] }),
       })
       const runInitialCall = Effect.gen(function* () {
         const registration = yield* ThreadHost.hostRegistration.pipe(Effect.provide(crypto))
@@ -136,7 +135,7 @@ describe("ThreadHost", () => {
 
   it.effect("registry promotes through the registered promoter and defaults to zero", () =>
     Effect.gen(function* () {
-      const registry = yield* ThreadHost.makeRegistry
+      const registry = yield* makeRegistry
       expect(yield* registry.promote("thread-a", 1)).toBe(0)
       const promoted: Array<readonly [string, number]> = []
       yield* registry.register((threadId, generation) =>

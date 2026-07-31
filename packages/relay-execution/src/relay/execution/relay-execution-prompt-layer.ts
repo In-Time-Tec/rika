@@ -1,7 +1,8 @@
+import { hasLiveSubagentWork, recoveryRetrySchedule } from "./relay-recovery-policy"
+import { reconcileUnsafeRecovery } from "./relay-execution-recovery"
 import { createHash } from "node:crypto"
 import { Deferred, Duration, Effect, Scope } from "effect"
 import { Client, Ids, PromptAssembler } from "@relayfx/sdk"
-import * as Recovery from "./relay-execution-recovery"
 
 export const makePromptAssemblerLayer = (input: {
   readonly relayClient: Deferred.Deferred<Client.Interface>
@@ -25,10 +26,10 @@ export const makePromptAssemblerLayer = (input: {
               Effect.annotateLogs({ "rika.execution.id": execution }),
             ),
           ),
-          Effect.retry({ schedule: Recovery.recoveryRetrySchedule }),
+          Effect.retry({ schedule: recoveryRetrySchedule }),
           Effect.orDie,
         )
-        const unsafe = Recovery.hasLiveSubagentWork(inspection)
+        const unsafe = hasLiveSubagentWork(inspection)
         yield* Effect.logInfo("execution.context.baseline.assembled").pipe(
           Effect.annotateLogs({
             "rika.context.baseline.hash": hash,
@@ -37,7 +38,7 @@ export const makePromptAssemblerLayer = (input: {
           }),
         )
         if (unsafe) {
-          yield* Recovery.reconcileUnsafeRecovery({
+          yield* reconcileUnsafeRecovery({
             client,
             execution,
             childSettlementGrace,

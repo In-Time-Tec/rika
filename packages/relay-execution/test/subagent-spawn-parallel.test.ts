@@ -10,7 +10,7 @@ import { Database } from "bun:sqlite"
 import { Clock, Effect, FileSystem, Layer, Ref, Schema, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 
-import * as RelayExecutionBackend from "../src/relay/execution/relay-execution-layer"
+import { layer } from "../src/relay/execution/relay-execution-layer"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
 
@@ -84,7 +84,7 @@ test("three Task calls in one model turn run as overlapping durable children", (
         ...fixture.selection,
         layer: trackingLayer,
       })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration,
@@ -212,7 +212,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
         model: "gpt-5.6-sol",
         registrationKey: "sol-medium",
       })
-      const backendLayer = RelayExecutionBackend.layer({
+      const backendLayer = layer({
         filename: `${directory}/execution.db`,
         workspace: directory,
         registration: main.registration,
