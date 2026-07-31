@@ -12,7 +12,7 @@ import { Clock, Duration, Effect, Fiber, FileSystem, Layer, Schedule, Schema } f
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
-import * as RelayExecutionBackend from "../src/execution-backend"
+import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
 import { createFanOut, start } from "./current-execution-route"
 
 const executionModelRoute = (

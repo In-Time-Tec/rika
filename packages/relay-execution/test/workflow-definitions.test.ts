@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { compile, definitions, type DynamicDefinition } from "../src/workflow-definitions"
+import { compile, definitions, type DynamicDefinition } from "../src/relay/relay-workflow-compiler"
 
 describe("workflow definitions", () => {
   it("compiles pinned v2 product workflows with grounded children and joins", () => {

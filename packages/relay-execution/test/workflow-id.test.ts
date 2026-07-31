@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { idFor, workflowDefinitionName, workflowDefinitionVersion } from "../src/workflow-definitions"
+import { idFor, workflowDefinitionName, workflowDefinitionVersion } from "../src/relay/relay-workflow-compiler"
 
 describe("workflow definition ids", () => {
   it("round-trips a built id back to its name", () => {

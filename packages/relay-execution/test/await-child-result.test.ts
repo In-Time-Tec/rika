@@ -1,7 +1,7 @@
 import * as AgentOutcomes from "@rika/coding-tools/agent-tool-contract"
 import { describe, expect, it } from "@effect/vitest"
 import type { Execution } from "@relayfx/sdk"
-import { resolveChildResult } from "../src/execution-backend"
+import { resolveChildResult } from "../src/relay/execution/execution-backend"
 
 type EventInput = Record<string, unknown>
 

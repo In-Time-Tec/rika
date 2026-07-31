@@ -3,7 +3,7 @@ import { TestModel } from "@batonfx/test"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { AiError } from "effect/unstable/ai"
-import * as MediaAnalyzerRuntime from "../src/media-analyzer"
+import * as MediaAnalyzerRuntime from "../src/model/provider/media-analysis-adapter"
 
 describe("MediaAnalyzer", () => {
   it.effect("analyzes attached bytes through the selected registered model", () =>

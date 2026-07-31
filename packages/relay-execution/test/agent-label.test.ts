@@ -1,6 +1,6 @@
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { describe, expect, it } from "vitest"
-import { names } from "../src/agent-profiles"
+import { names } from "../src/agent/definition/baton-agent-definition"
 
 const expected: Readonly<Record<string, string>> = {
   Oracle: "Oracle exploring",

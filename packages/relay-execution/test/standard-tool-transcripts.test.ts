@@ -5,7 +5,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as RelayExecutionBackend from "../src/execution-backend"
+import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
 import { start } from "./current-execution-route"
 
 const cases = [

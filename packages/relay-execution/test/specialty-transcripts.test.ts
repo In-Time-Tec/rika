@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as AgentProfiles from "../src/agent-profiles"
+import * as AgentProfiles from "../src/agent/definition/baton-agent-definition"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Catalog } from "@rika/coding-tools/coding-tool-catalog"
 import { Effect, Function, Layer, Schema } from "effect"

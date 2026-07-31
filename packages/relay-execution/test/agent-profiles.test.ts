@@ -9,7 +9,7 @@ import {
   resolve,
   resolvePainter,
   subagentHandoffTargets,
-} from "../src/agent-profiles"
+} from "../src/agent/definition/baton-agent-definition"
 
 const model = { provider: "test", model: "deterministic" }
 const threadRecoveryTools = ["search_threads", "read_thread_transcript"]

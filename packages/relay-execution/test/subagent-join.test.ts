@@ -7,8 +7,8 @@ import { Database } from "bun:sqlite"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schedule, Stream } from "effect"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
-import * as RelayExecutionBackend from "../src/execution-backend"
-import { planJoin } from "../src/subagent-join"
+import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
+import { planJoin } from "../src/relay/execution/subagent-join"
 import { start } from "./current-execution-route"
 
 const encodeJson = (value: unknown) => JSON.stringify(value)

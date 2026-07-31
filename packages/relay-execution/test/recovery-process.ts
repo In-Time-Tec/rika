@@ -5,7 +5,7 @@ import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import { Config, Context, Effect, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
 import * as ExecutionBackend from "@rika/product/execution-service"
-import * as RelayExecutionBackend from "../src/execution-backend"
+import * as RelayExecutionBackend from "../src/relay/execution/execution-backend"
 import { start } from "./current-execution-route"
 
 class FixtureError extends Schema.TaggedErrorClass<FixtureError>()("RecoveryProcessFixtureError", {
