@@ -1,25 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
-import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-search-repository"
-import * as Thread from "@rika/product/thread-record"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as Turn from "@rika/product/turn-record"
-import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
-import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
-import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
+import { Fixtures } from "./thread-query-support"
 import { Context, Effect, Layer, Schema, Stream } from "effect"
 import { ThreadQuery, ThreadToolHandlers } from "@rika/product/product-operation"
 import { provideLayer } from "../support/product-test-layer"
 import { delegationUnit, storeProjection } from "../support/product-test-transcript-fixture"
 
 const workspace = "/work/acme"
-const invocation = ToolInvocation.ToolInvocation.of({
+const invocation = Fixtures.ToolInvocation.ToolInvocation.of({
   executionId: "execution-one",
   callId: "call-one",
   toolName: "find_thread",
@@ -27,8 +14,8 @@ const invocation = ToolInvocation.ToolInvocation.of({
   createdAt: 1,
   idempotencyKeyDigest: "digest",
 })
-const storedThread: Thread.Thread = {
-  id: Thread.ThreadId.make("one"),
+const storedThread: Fixtures.Thread.Thread = {
+  id: Fixtures.Thread.ThreadId.make("one"),
   workspace,
   title: "Fix auth",
   labels: ["bug"],
@@ -38,12 +25,12 @@ const storedThread: Thread.Thread = {
   createdAt: 1,
   updatedAt: 2,
 }
-const storedTurn: Turn.Turn = {
+const storedTurn: Fixtures.Turn.Turn = {
   _tag: "AgentExecution",
-  id: Turn.TurnId.make("turn-1"),
+  id: Fixtures.Turn.TurnId.make("turn-1"),
   threadId: storedThread.id,
   prompt: "fix auth",
-  executionRoute: Turn.testExecutionRoute(),
+  executionRoute: Fixtures.Turn.testExecutionRoute(),
   author: { _tag: "Human" },
   lineage: { _tag: "Original" },
   status: "completed",
@@ -51,14 +38,16 @@ const storedTurn: Turn.Turn = {
   createdAt: 1,
   updatedAt: 2,
 }
-const projection = (units: ReadonlyArray<TranscriptUnit.Unit>): TranscriptProjectionModel.Projection => ({
+const projection = (
+  units: ReadonlyArray<Fixtures.TranscriptUnit.Unit>,
+): Fixtures.TranscriptProjectionModel.Projection => ({
   units,
   revision: units.reduce((maximum, unit) => Math.max(maximum, unit.revision), -1),
   modelPhase: 0,
 })
-const relatedThread: Thread.Thread = {
+const relatedThread: Fixtures.Thread.Thread = {
   ...storedThread,
-  id: Thread.ThreadId.make("two"),
+  id: Fixtures.Thread.ThreadId.make("two"),
   title: "Related work",
   createdAt: 3,
   updatedAt: 3,
@@ -66,24 +55,24 @@ const relatedThread: Thread.Thread = {
 const stateThreads = (["waiting", "running", "queued", "failed"] as const).map((status, index) => ({
   thread: {
     ...storedThread,
-    id: Thread.ThreadId.make(`state-${status}`),
+    id: Fixtures.Thread.ThreadId.make(`state-${status}`),
     title: status,
     createdAt: 10 + index,
     updatedAt: 10 + index,
   },
   turn: {
     ...storedTurn,
-    id: Turn.TurnId.make(`turn-${status}`),
-    threadId: Thread.ThreadId.make(`state-${status}`),
+    id: Fixtures.Turn.TurnId.make(`turn-${status}`),
+    threadId: Fixtures.Thread.ThreadId.make(`state-${status}`),
     status,
     createdAt: 10 + index,
     updatedAt: 10 + index,
   },
 }))
-const search = ThreadSearchRepository.Service.of({
+const search = Fixtures.ThreadSearchRepository.Service.of({
   search: (input) =>
     Effect.sync(() => {
-      let results: ThreadSearchRepository.SearchPage["results"] = []
+      let results: Fixtures.ThreadSearchRepository.SearchPage["results"] = []
       if (input.workspace === workspace && input.query === "states") {
         results = stateThreads.map(({ thread }) => ({
           schemaVersion: 2,
@@ -128,13 +117,13 @@ const search = ThreadSearchRepository.Service.of({
   removeThread: () => Effect.void,
 })
 const repositories = Layer.mergeAll(
-  ThreadRepository.memoryLayer([storedThread, relatedThread, ...stateThreads.map(({ thread }) => thread)]),
-  TurnRepository.memoryLayer([storedTurn, ...stateThreads.map(({ turn }) => turn)]),
-  TranscriptRepository.memoryLayer,
-  Layer.succeed(ThreadSearchRepository.Service, search),
+  Fixtures.ThreadRepository.memoryLayer([storedThread, relatedThread, ...stateThreads.map(({ thread }) => thread)]),
+  Fixtures.TurnRepository.memoryLayer([storedTurn, ...stateThreads.map(({ turn }) => turn)]),
+  Fixtures.TranscriptRepository.memoryLayer,
+  Layer.succeed(Fixtures.ThreadSearchRepository.Service, search),
   Layer.effect(
-    ThreadInteractionRepository.Service,
-    ThreadInteractionRepository.makeMemory({ threads: [storedThread, relatedThread], turns: [storedTurn] }),
+    Fixtures.ThreadInteractionRepository.Service,
+    Fixtures.ThreadInteractionRepository.makeMemory({ threads: [storedThread, relatedThread], turns: [storedTurn] }),
   ),
 )
 const queryLayer = Layer.merge(ThreadQuery.layerForWorkspace(workspace).pipe(Layer.provide(repositories)), repositories)
@@ -160,31 +149,36 @@ describe("ThreadQuery", () => {
 
   it.effect("repairs search from current Thread metadata and messages without crossing workspaces", () =>
     Effect.gen(function* () {
-      const local = { ...storedThread, id: Thread.ThreadId.make("fresh-local"), title: "Initial title" }
+      const local = { ...storedThread, id: Fixtures.Thread.ThreadId.make("fresh-local"), title: "Initial title" }
       const foreign = {
         ...storedThread,
-        id: Thread.ThreadId.make("fresh-foreign"),
+        id: Fixtures.Thread.ThreadId.make("fresh-foreign"),
         workspace: "/other/workspace",
         title: "renamed needle",
       }
-      const localTurn = { ...storedTurn, id: Turn.TurnId.make("fresh-turn"), threadId: local.id, prompt: "initial" }
-      const threadRepository = yield* ThreadRepository.makeMemory([local, foreign])
-      const turns = yield* TurnRepository.makeMemory([localTurn])
+      const localTurn = {
+        ...storedTurn,
+        id: Fixtures.Turn.TurnId.make("fresh-turn"),
+        threadId: local.id,
+        prompt: "initial",
+      }
+      const threadRepository = yield* Fixtures.ThreadRepository.makeMemory([local, foreign])
+      const turns = yield* Fixtures.TurnRepository.makeMemory([localTurn])
       const transcripts = Context.get(
-        yield* Layer.build(TranscriptRepository.memoryLayer),
-        TranscriptRepository.Service,
+        yield* Layer.build(Fixtures.TranscriptRepository.memoryLayer),
+        Fixtures.TranscriptRepository.Service,
       )
-      const searches = yield* ThreadSearchRepository.makeMemory
-      const interactions = yield* ThreadInteractionRepository.makeMemory({
+      const searches = yield* Fixtures.ThreadSearchRepository.makeMemory
+      const interactions = yield* Fixtures.ThreadInteractionRepository.makeMemory({
         threads: [local, foreign],
         turns: [localTurn],
       })
       const dependencies = Layer.mergeAll(
-        Layer.succeed(ThreadRepository.Service, threadRepository),
-        Layer.succeed(TurnRepository.Service, turns),
-        Layer.succeed(TranscriptRepository.Service, transcripts),
-        Layer.succeed(ThreadSearchRepository.Service, searches),
-        Layer.succeed(ThreadInteractionRepository.Service, interactions),
+        Layer.succeed(Fixtures.ThreadRepository.Service, threadRepository),
+        Layer.succeed(Fixtures.TurnRepository.Service, turns),
+        Layer.succeed(Fixtures.TranscriptRepository.Service, transcripts),
+        Layer.succeed(Fixtures.ThreadSearchRepository.Service, searches),
+        Layer.succeed(Fixtures.ThreadInteractionRepository.Service, interactions),
       )
       const layer = Layer.merge(
         ThreadQuery.layerForWorkspace(workspace).pipe(Layer.provide(dependencies)),
@@ -201,7 +195,7 @@ describe("ThreadQuery", () => {
         yield* turns.copy(
           {
             ...localTurn,
-            id: Turn.TurnId.make("fresh-message"),
+            id: Fixtures.Turn.TurnId.make("fresh-message"),
             prompt: "message needle",
             createdAt: 4,
             updatedAt: 4,
@@ -239,7 +233,7 @@ describe("ThreadQuery", () => {
   it.effect("represents unavailable subtrees and traverses related Threads", () =>
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
-      const interactions = yield* ThreadInteractionRepository.Service
+      const interactions = yield* Fixtures.ThreadInteractionRepository.Service
       yield* interactions.appendMessage({
         invocationDigest: "related",
         schemaInputDigest: "related",
@@ -250,7 +244,7 @@ describe("ThreadQuery", () => {
         maximumAdmissions: 8,
         maximumWorkspaceActive: 8,
         queueCapacity: 4,
-        turnId: Turn.TurnId.make("turn-2"),
+        turnId: Fixtures.Turn.TurnId.make("turn-2"),
         prompt: "continue",
         executionRoute: storedTurn.executionRoute,
         targetThreadId: relatedThread.id,
@@ -277,11 +271,11 @@ describe("ThreadQuery", () => {
 
   it.effect("reads a standalone ChildAgent subtree through the same child selector as delegated tools", () =>
     Effect.gen(function* () {
-      const transcripts = yield* TranscriptRepository.Service
-      const childAgent: TranscriptUnit.Unit = {
+      const transcripts = yield* Fixtures.TranscriptRepository.Service
+      const childAgent: Fixtures.TranscriptUnit.Unit = {
         key: "child-agent:reviewer",
         turnId: storedTurn.id,
-        order: TranscriptOrdering.unitOrder("child-agent:reviewer", 1),
+        order: Fixtures.TranscriptOrdering.unitOrder("child-agent:reviewer", 1),
         revision: 1,
         content: {
           _tag: "Block",
@@ -296,7 +290,7 @@ describe("ThreadQuery", () => {
         },
       }
       yield* storeProjection(transcripts, storedTurn, {
-        units: [TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!, childAgent],
+        units: [Fixtures.TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!, childAgent],
         revision: 1,
         modelPhase: 0,
       })
@@ -324,15 +318,15 @@ describe("ThreadQuery", () => {
 
   it.effect("returns schema-valid subtree continuations that advance through oversized nested output", () =>
     Effect.gen(function* () {
-      const transcripts = yield* TranscriptRepository.Service
-      const entry = (executionId: string, id: string, sequence: number): TranscriptUnit.Unit => ({
+      const transcripts = yield* Fixtures.TranscriptRepository.Service
+      const entry = (executionId: string, id: string, sequence: number): Fixtures.TranscriptUnit.Unit => ({
         key: `entry:${id}`,
         turnId: executionId,
-        order: TranscriptOrdering.unitOrder(`entry:${id}`, sequence),
+        order: Fixtures.TranscriptOrdering.unitOrder(`entry:${id}`, sequence),
         revision: sequence,
         content: { _tag: "Entry", role: "assistant", text: `${id}:${"y".repeat(12_000)}` },
       })
-      const child = (executionId: string, id: string, sequence: number): TranscriptUnit.Unit => {
+      const child = (executionId: string, id: string, sequence: number): Fixtures.TranscriptUnit.Unit => {
         const unit = delegationUnit(executionId, `${id}-call`, id, sequence)
         if (unit.content._tag !== "Block" || unit.content.block._tag !== "ToolCall")
           throw new TypeError(`Delegation ${id} did not project a tool block`)
@@ -351,21 +345,21 @@ describe("ThreadQuery", () => {
       const nestedFour = child("nested-three", "nested-four", 2)
       const siblingAgent = child(storedTurn.id, "sibling-agent", 8)
       const root = projection([
-        TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!,
+        Fixtures.TranscriptProjection.Projection.empty(storedTurn.id, storedTurn.prompt).units[0]!,
         rootAgent,
         siblingAgent,
         ...Array.from(
           { length: 201 },
-          (_, index): TranscriptUnit.Unit => ({
+          (_, index): Fixtures.TranscriptUnit.Unit => ({
             key: `newer:${index}`,
             turnId: storedTurn.id,
-            order: TranscriptOrdering.unitOrder(`newer:${index}`, index + 10),
+            order: Fixtures.TranscriptOrdering.unitOrder(`newer:${index}`, index + 10),
             revision: index + 10,
             content: { _tag: "Entry", role: "assistant", text: `unrelated-${index}` },
           }),
         ),
       ])
-      const nested = TranscriptNestedProjection.withNestedProjections(root, [
+      const nested = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         {
           parentId:
             rootAgent.content._tag === "Block" && rootAgent.content.block._tag === "ToolCall"
@@ -415,7 +409,9 @@ describe("ThreadQuery", () => {
       })
 
       const query = yield* ThreadQuery.Service
-      type StructuredRead = { readonly selection: NonNullable<(typeof ThreadTools.ReadThreadInput.Type)["selection"]> }
+      type StructuredRead = {
+        readonly selection: NonNullable<(typeof Fixtures.ThreadRead.ReadThreadInput.Type)["selection"]>
+      }
       const read = (selection: StructuredRead["selection"]) =>
         query
           .readStructured({
@@ -430,7 +426,7 @@ describe("ThreadQuery", () => {
                       : {
                           before: {
                             ...selection.cursor.before,
-                            turnId: Turn.TurnId.make(selection.cursor.before.turnId),
+                            turnId: Fixtures.Turn.TurnId.make(selection.cursor.before.turnId),
                           },
                         }),
                     ...(selection.cursor !== undefined && "offset" in selection.cursor
@@ -453,7 +449,7 @@ describe("ThreadQuery", () => {
         const omission = pages.at(-1)?.omissions[0]
         if (omission === undefined) break
         const continuation = omission.continuation
-        const nextInput = yield* Schema.decodeUnknownEffect(ThreadTools.ReadThreadInput)({
+        const nextInput = yield* Schema.decodeUnknownEffect(Fixtures.ThreadRead.ReadThreadInput)({
           threadId: storedThread.id,
           selection: continuation,
         })
@@ -491,7 +487,7 @@ describe("ThreadQuery", () => {
   it.effect("paginates tied incoming and outgoing Thread relationships without gaps", () =>
     Effect.gen(function* () {
       const query = yield* ThreadQuery.Service
-      const interactions = yield* ThreadInteractionRepository.Service
+      const interactions = yield* Fixtures.ThreadInteractionRepository.Service
       for (let index = 0; index < 11; index += 1) {
         const suffix = String(index).padStart(2, "0")
         yield* interactions.appendMessage({
@@ -504,7 +500,7 @@ describe("ThreadQuery", () => {
           maximumAdmissions: 30,
           maximumWorkspaceActive: 30,
           queueCapacity: 30,
-          turnId: Turn.TurnId.make(`outgoing-${suffix}`),
+          turnId: Fixtures.Turn.TurnId.make(`outgoing-${suffix}`),
           prompt: `outgoing ${suffix}`,
           executionRoute: storedTurn.executionRoute,
           targetThreadId: relatedThread.id,
@@ -515,13 +511,13 @@ describe("ThreadQuery", () => {
           invocationDigest: `incoming-${suffix}`,
           schemaInputDigest: `incoming-${suffix}`,
           sourceThreadId: relatedThread.id,
-          sourceRootTurnId: Turn.TurnId.make("outgoing-00"),
+          sourceRootTurnId: Fixtures.Turn.TurnId.make("outgoing-00"),
           now: 50,
           maximumDepth: 3,
           maximumAdmissions: 30,
           maximumWorkspaceActive: 30,
           queueCapacity: 30,
-          turnId: Turn.TurnId.make(`incoming-${suffix}`),
+          turnId: Fixtures.Turn.TurnId.make(`incoming-${suffix}`),
           prompt: `incoming ${suffix}`,
           executionRoute: storedTurn.executionRoute,
           targetThreadId: storedThread.id,
@@ -546,21 +542,24 @@ describe("ThreadQuery", () => {
 
   it.effect("exposes separate public find handler and maps failures", () =>
     Effect.gen(function* () {
-      const toolkit = yield* ThreadTools.findToolkit
+      const toolkit = yield* Fixtures.ThreadToolkits.findToolkit
       const chunks = yield* toolkit
         .handle("find_thread", { query: "auth" })
-        .pipe(Effect.flatMap(Stream.runCollect), Effect.provideService(ToolInvocation.ToolInvocation, invocation))
+        .pipe(
+          Effect.flatMap(Stream.runCollect),
+          Effect.provideService(Fixtures.ToolInvocation.ToolInvocation, invocation),
+        )
       expect(yield* Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])).toContain("Fix auth")
     }).pipe(provideLayer(ThreadToolHandlers.findHandlerLayer.pipe(Layer.provide(queryLayer)))),
   )
 
   it.effect("resolves the invocation workspace and hides threads in another workspace", () =>
     Effect.gen(function* () {
-      const toolkit = yield* ThreadTools.findToolkit
+      const toolkit = yield* Fixtures.ThreadToolkits.findToolkit
       const handle = (executionId: string) =>
         toolkit.handle("find_thread", { query: "auth" }).pipe(
           Effect.flatMap(Stream.runCollect),
-          Effect.provideService(ToolInvocation.ToolInvocation, { ...invocation, executionId }),
+          Effect.provideService(Fixtures.ToolInvocation.ToolInvocation, { ...invocation, executionId }),
           Effect.flatMap((chunks) => Schema.encodeEffect(Schema.UnknownFromJsonString)([...chunks])),
         )
       expect(yield* handle("acme-execution")).toContain("Fix auth")

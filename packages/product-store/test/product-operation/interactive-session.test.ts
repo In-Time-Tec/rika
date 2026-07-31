@@ -1,26 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
-import * as SummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
-import * as Turn from "@rika/product/turn-record"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptIdentity from "@rika/transcript/transcript-unit-identity"
-import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
-import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
-import * as TranscriptUnit from "@rika/transcript/transcript-unit"
-import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
+import { Fixtures as RuntimeFixtures } from "./interactive-session-runtime-support"
+import { Fixtures as TranscriptFixtures } from "./interactive-session-transcript-support"
 import { Context, Deferred, Effect, Fiber, Layer, Queue, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { ExecutionIngest } from "@rika/product/product-operation"
 import { Operation } from "@rika/product/product-operation"
-import * as UsageCost from "@rika/product/usage-projection"
 import { createTurn, executionRoute } from "../support/product-test-current-state"
 import { delegationUnit, invalidatedProjection, storeProjection } from "../support/product-test-transcript-fixture"
 
@@ -47,14 +31,17 @@ const productLayer = <
     ...options,
     threadSummaryRepositoryLayer:
       options.threadSummaryRepositoryLayer ??
-      SummaryRepository.memoryLayer.pipe(
+      RuntimeFixtures.SummaryRepository.memoryLayer.pipe(
         Layer.provide(Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)),
         Layer.orDie,
       ),
     transcriptRepositoryLayer:
       options.transcriptRepositoryLayer ??
-      TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(options.turnRepositoryLayer), Layer.orDie),
-    usageRepositoryLayer: options.usageRepositoryLayer ?? UsageRepository.memoryLayer.pipe(Layer.orDie),
+      RuntimeFixtures.TranscriptRepository.memoryLayerWithTurns.pipe(
+        Layer.provide(options.turnRepositoryLayer),
+        Layer.orDie,
+      ),
+    usageRepositoryLayer: options.usageRepositoryLayer ?? RuntimeFixtures.UsageRepository.memoryLayer.pipe(Layer.orDie),
   })
 
 const collectEvents = (session: Operation.InteractiveSession, events: Array<Operation.InteractiveEvent>) =>
@@ -65,8 +52,8 @@ const waitForSessions = (sessions: Ref.Ref<ReadonlyArray<Operation.InteractiveSe
     while ((yield* Ref.get(sessions)).length < count) yield* Effect.yieldNow
   })
 
-const thread = (id: string, updatedAt: number): Thread.Thread => ({
-  id: Thread.ThreadId.make(id),
+const thread = (id: string, updatedAt: number): RuntimeFixtures.Thread.Thread => ({
+  id: RuntimeFixtures.Thread.ThreadId.make(id),
   workspace: "/work",
   title: id,
   labels: [],
@@ -77,9 +64,9 @@ const thread = (id: string, updatedAt: number): Thread.Thread => ({
   updatedAt,
 })
 
-const active = (threadId: Thread.ThreadId, id = "active"): Turn.AgentExecutionTurn => ({
+const active = (threadId: RuntimeFixtures.Thread.ThreadId, id = "active"): RuntimeFixtures.Turn.AgentExecutionTurn => ({
   _tag: "AgentExecution",
-  id: Turn.TurnId.make(id),
+  id: RuntimeFixtures.Turn.TurnId.make(id),
   threadId,
   prompt: "active prompt",
   author: { _tag: "Human" },
@@ -92,12 +79,14 @@ const active = (threadId: Thread.ThreadId, id = "active"): Turn.AgentExecutionTu
   lastCursor: "active-cursor",
 })
 
-const serverEvents = (events: ReadonlyArray<ExecutionBackend.Event>): ReadonlyArray<ExecutionBackend.Event> =>
+const serverEvents = (
+  events: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
+): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> =>
   events.map((event) => ({ ...event, timestampSource: "server" as const }))
 
 const completeServerTimeline = (
-  events: ReadonlyArray<ExecutionBackend.Event>,
-): ReadonlyArray<ExecutionBackend.Event> => {
+  events: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
+): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
   if (events.length === 0) return events
   const stamped = serverEvents(events)
   if (stamped.some((event) => event.type === "execution.started" || event.type === "execution.accepted")) return stamped
@@ -116,11 +105,11 @@ const completeServerTimeline = (
 }
 
 const storeCompletedTranscript = Effect.fn("InteractiveSessionTest.storeCompletedTranscript")(function* (
-  transcripts: TranscriptRepository.Interface,
-  turn: Turn.AgentExecutionTurn,
+  transcripts: RuntimeFixtures.TranscriptRepository.Interface,
+  turn: RuntimeFixtures.Turn.AgentExecutionTurn,
   cursor: string,
 ) {
-  const projection = TranscriptProjection.Projection.project(String(turn.id), turn.prompt, [
+  const projection = TranscriptFixtures.TranscriptProjection.Projection.project(String(turn.id), turn.prompt, [
     {
       cursor,
       sequence: 0,
@@ -135,25 +124,25 @@ const storeCompletedTranscript = Effect.fn("InteractiveSessionTest.storeComplete
 })
 
 const completeActive = Effect.fn("InteractiveSessionTest.completeActive")(function* (
-  turns: TurnRepository.Interface,
-  transcripts: TranscriptRepository.Interface,
+  turns: RuntimeFixtures.TurnRepository.Interface,
+  transcripts: RuntimeFixtures.TranscriptRepository.Interface,
   updatedAt: number,
 ) {
-  const turn = yield* turns.setStatus(Turn.TurnId.make("active"), "completed", "done", updatedAt)
+  const turn = yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "completed", "done", updatedAt)
   yield* storeCompletedTranscript(transcripts, turn, "done")
   return turn
 })
 
 const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
-  pagedEvents?: ReadonlyArray<ExecutionBackend.Event>,
+  pagedEvents?: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>,
   stalePageCursor: boolean = false,
-  turnPageRequests?: Ref.Ref<ReadonlyArray<TurnRepository.PageCursor | undefined>>,
+  turnPageRequests?: Ref.Ref<ReadonlyArray<RuntimeFixtures.TurnRepository.PageCursor | undefined>>,
   cancelFailure: boolean = false,
   initialTurnsCompleted: boolean = false,
   completion?: {
     readonly release: Deferred.Deferred<void, never>
     readonly finished: Deferred.Deferred<void, never>
-    readonly finalTurnId: Turn.TurnId
+    readonly finalTurnId: RuntimeFixtures.Turn.TurnId
   },
 ) {
   const older = thread("older", 1)
@@ -167,18 +156,18 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
         })
       : turn,
   )
-  const repositories = yield* ThreadRepository.makeMemory([older, latest])
-  const turns = yield* TurnRepository.makeMemory(initialTurns)
+  const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([older, latest])
+  const turns = yield* RuntimeFixtures.TurnRepository.makeMemory(initialTurns)
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   const controls = yield* Ref.make<ReadonlyArray<ReadonlyArray<unknown>>>([])
   const hiddenExecutions = yield* Ref.make<ReadonlySet<string>>(new Set())
-  const transcripts = yield* TranscriptRepository.makeMemory({ turns })
+  const transcripts = yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
   if (initialTurnsCompleted)
     yield* Effect.forEach(initialTurns, (turn) => storeCompletedTranscript(transcripts, turn, turn.lastCursor!), {
       discard: true,
     })
   const record = (...call: ReadonlyArray<unknown>) => Ref.update(controls, (calls) => [...calls, call])
-  const backend = ExecutionBackend.Service.of({
+  const backend = RuntimeFixtures.ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
@@ -219,11 +208,11 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       ? {
           follow: (
             turnId: string,
-            checkpoint: string | ExecutionBackend.ExecutionCheckpoint | undefined,
-            onEvent?: (event: ExecutionBackend.Event) => void,
+            checkpoint: string | RuntimeFixtures.ExecutionBackend.ExecutionCheckpoint | undefined,
+            onEvent?: (event: RuntimeFixtures.ExecutionBackend.Event) => void,
           ) => {
             const afterCursor = typeof checkpoint === "string" ? checkpoint : checkpoint?.cursor
-            const output: ExecutionBackend.Event = {
+            const output: RuntimeFixtures.ExecutionBackend.Event = {
               executionId: turnId,
               cursor: "resumed-output",
               sequence: 2,
@@ -232,7 +221,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
               timestampSource: "server",
               text: "created file",
             }
-            const completed: ExecutionBackend.Event = {
+            const completed: RuntimeFixtures.ExecutionBackend.Event = {
               executionId: turnId,
               cursor: "resumed-done",
               sequence: 3,
@@ -265,7 +254,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
       record("cancel", turnId).pipe(
         Effect.andThen(
           cancelFailure
-            ? Effect.fail(ExecutionBackend.BackendError.make({ message: "cancel unavailable" }))
+            ? Effect.fail(RuntimeFixtures.ExecutionBackend.BackendError.make({ message: "cancel unavailable" }))
             : Effect.void,
         ),
         Effect.as({
@@ -343,7 +332,7 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
         }),
     resolveInvocationSource: () => Effect.die("unused"),
   })
-  const selectionTurns: TurnRepository.Interface =
+  const selectionTurns: RuntimeFixtures.TurnRepository.Interface =
     turnPageRequests === undefined
       ? turns
       : {
@@ -354,13 +343,13 @@ const makeHarness = Effect.fn("InteractiveSessionTest.makeHarness")(function* (
             ),
         }
   const layer = productLayer({
-    repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, selectionTurns),
-    transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+    turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, selectionTurns),
+    transcriptRepositoryLayer: Layer.succeed(RuntimeFixtures.TranscriptRepository.Service, transcripts),
+    backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
-    makeTurnId: Effect.succeed(Turn.TurnId.make("pending")),
+    makeTurnId: Effect.succeed(RuntimeFixtures.Turn.TurnId.make("pending")),
     interactive: (_, session) =>
       Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
   })
@@ -406,13 +395,13 @@ describe("InteractiveSession controls", () => {
 
   it.effect("keeps simultaneous interactive sessions independent and uses each request workspace", () =>
     Effect.gen(function* () {
-      const repositories = yield* ThreadRepository.makeMemory()
-      const turns = yield* TurnRepository.makeMemory()
+      const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory()
+      const turns = yield* RuntimeFixtures.TurnRepository.makeMemory()
       const sessions = new Map<string, Operation.InteractiveSession>()
       const toolWorkspaces: Array<string> = []
       const threadSequence = yield* Ref.make(0)
       const turnSequence = yield* Ref.make(0)
-      const backend = ExecutionBackend.Service.of({
+      const backend = RuntimeFixtures.ExecutionBackend.Service.of({
         invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
         createFanOut: () => Effect.die("unused"),
         inspectFanOut: () => Effect.die("unused"),
@@ -430,19 +419,19 @@ describe("InteractiveSession controls", () => {
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = productLayer({
-        repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+        turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
         toolRuntimeLayer: (workspace) => {
           toolWorkspaces.push(workspace)
-          return ToolRuntime.testLayer(() => Effect.succeed({ text: workspace, truncated: false }))
+          return RuntimeFixtures.ToolRuntime.testLayer(() => Effect.succeed({ text: workspace, truncated: false }))
         },
         defaultWorkspace: "/default",
         makeThreadId: Ref.updateAndGet(threadSequence, (value) => value + 1).pipe(
-          Effect.map((value) => Thread.ThreadId.make(`thread-${value}`)),
+          Effect.map((value) => RuntimeFixtures.Thread.ThreadId.make(`thread-${value}`)),
         ),
         makeTurnId: Ref.updateAndGet(turnSequence, (value) => value + 1).pipe(
-          Effect.map((value) => Turn.TurnId.make(`turn-${value}`)),
+          Effect.map((value) => RuntimeFixtures.Turn.TurnId.make(`turn-${value}`)),
         ),
         interactive: (input, session) =>
           Effect.sync(() => sessions.set(input.workspace ?? "/default", session)).pipe(Effect.andThen(Effect.never)),
@@ -474,26 +463,24 @@ describe("InteractiveSession controls", () => {
       expect(alphaThreadId).not.toBe(betaThreadId)
       yield* Effect.all([alpha.selectThread(alphaThreadId!, 1), beta.selectThread(betaThreadId!, 1)])
       yield* Effect.all([alpha.submit("alpha follow-up"), beta.submit("beta follow-up")])
-      expect((yield* repositories.get(Thread.ThreadId.make(alphaThreadId!)))?.workspace).toBe("/alpha")
-      expect((yield* repositories.get(Thread.ThreadId.make(betaThreadId!)))?.workspace).toBe("/beta")
-      expect((yield* turns.list(Thread.ThreadId.make(alphaThreadId!))).map((turn) => turn.prompt)).toEqual([
-        "alpha prompt",
-        "alpha follow-up",
-      ])
-      expect((yield* turns.list(Thread.ThreadId.make(betaThreadId!))).map((turn) => turn.prompt)).toEqual([
-        "beta prompt",
-        "beta follow-up",
-      ])
+      expect((yield* repositories.get(RuntimeFixtures.Thread.ThreadId.make(alphaThreadId!)))?.workspace).toBe("/alpha")
+      expect((yield* repositories.get(RuntimeFixtures.Thread.ThreadId.make(betaThreadId!)))?.workspace).toBe("/beta")
+      expect(
+        (yield* turns.list(RuntimeFixtures.Thread.ThreadId.make(alphaThreadId!))).map((turn) => turn.prompt),
+      ).toEqual(["alpha prompt", "alpha follow-up"])
+      expect(
+        (yield* turns.list(RuntimeFixtures.Thread.ThreadId.make(betaThreadId!))).map((turn) => turn.prompt),
+      ).toEqual(["beta prompt", "beta follow-up"])
       expect(toolWorkspaces.toSorted()).toEqual(["/alpha", "/beta"])
     }),
   )
 
   it.effect("submits a prompt through every returned session callback", () =>
     Effect.gen(function* () {
-      const repositories = yield* ThreadRepository.makeMemory()
-      const turns = yield* TurnRepository.makeMemory()
+      const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory()
+      const turns = yield* RuntimeFixtures.TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
-      const submittedBackend = ExecutionBackend.Service.of({
+      const submittedBackend = RuntimeFixtures.ExecutionBackend.Service.of({
         invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
         createFanOut: () => Effect.die("unused"),
         inspectFanOut: () => Effect.die("unused"),
@@ -537,12 +524,12 @@ describe("InteractiveSession controls", () => {
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = productLayer({
-        repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, submittedBackend),
+        repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+        turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, submittedBackend),
         defaultWorkspace: "/work",
-        makeThreadId: Effect.succeed(Thread.ThreadId.make("created")),
-        makeTurnId: Effect.succeed(Turn.TurnId.make("created-turn")),
+        makeThreadId: Effect.succeed(RuntimeFixtures.Thread.ThreadId.make("created")),
+        makeTurnId: Effect.succeed(RuntimeFixtures.Turn.TurnId.make("created-turn")),
         interactive: (_, session) =>
           Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
       })
@@ -556,7 +543,8 @@ describe("InteractiveSession controls", () => {
       yield* collectEvents(session, events)
       yield* session.reopenThread(1)
       yield* session.submit("")
-      while ((yield* turns.get(Turn.TurnId.make("created-turn")))?.status !== "completed") yield* Effect.yieldNow
+      while ((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("created-turn")))?.status !== "completed")
+        yield* Effect.yieldNow
       while (!events.some((event) => event._tag === "TranscriptProjectionStopped")) yield* Effect.yieldNow
       expect(
         events.filter(
@@ -657,8 +645,10 @@ describe("InteractiveSession controls", () => {
           time: { _tag: "Available", accumulatedMillis: 2 },
         },
       ])
-      expect(yield* repositories.get(Thread.ThreadId.make("created"))).toMatchObject({ title: "New thread" })
-      expect(yield* turns.get(Turn.TurnId.make("created-turn"))).toMatchObject({
+      expect(yield* repositories.get(RuntimeFixtures.Thread.ThreadId.make("created"))).toMatchObject({
+        title: "New thread",
+      })
+      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("created-turn"))).toMatchObject({
         status: "completed",
         lastCursor: "done",
       })
@@ -667,15 +657,15 @@ describe("InteractiveSession controls", () => {
 
   it.effect("admits, edits, and dequeues pending turns while the active turn is still executing", () =>
     Effect.gen(function* () {
-      const repositories = yield* ThreadRepository.makeMemory()
-      const turns = yield* TurnRepository.makeMemory()
+      const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory()
+      const turns = yield* RuntimeFixtures.TurnRepository.makeMemory()
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const nextTurn = yield* Ref.make(0)
       const activeStarted = yield* Deferred.make<void>()
       const activeSubmitted = yield* Deferred.make<void>()
       const releaseActive = yield* Deferred.make<void>()
       const pendingStarted = yield* Deferred.make<void>()
-      const backend = ExecutionBackend.Service.of({
+      const backend = RuntimeFixtures.ExecutionBackend.Service.of({
         invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
         createFanOut: () => Effect.die("unused"),
         inspectFanOut: () => Effect.die("unused"),
@@ -700,14 +690,14 @@ describe("InteractiveSession controls", () => {
         resolveInvocationSource: () => Effect.die("unused"),
       })
       const layer = productLayer({
-        repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+        repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+        turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
         defaultWorkspace: "/work",
         pendingTurnCapacity: 2,
-        makeThreadId: Effect.succeed(Thread.ThreadId.make("thread")),
+        makeThreadId: Effect.succeed(RuntimeFixtures.Thread.ThreadId.make("thread")),
         makeTurnId: Ref.getAndUpdate(nextTurn, (value) => value + 1).pipe(
-          Effect.map((value) => Turn.TurnId.make(`turn-${value}`)),
+          Effect.map((value) => RuntimeFixtures.Turn.TurnId.make(`turn-${value}`)),
         ),
         interactive: (_, session) =>
           Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
@@ -732,7 +722,7 @@ describe("InteractiveSession controls", () => {
       yield* session.submit("overflow")
       yield* Effect.yieldNow
 
-      expect(yield* turns.readQueue(Thread.ThreadId.make("thread"))).toMatchObject({
+      expect(yield* turns.readQueue(RuntimeFixtures.Thread.ThreadId.make("thread"))).toMatchObject({
         queuedCount: 2,
         turns: [
           { id: "turn-1", prompt: "pending", status: "queued" },
@@ -752,10 +742,10 @@ describe("InteractiveSession controls", () => {
         capacity: 2,
         count: 2,
       })
-      expect(yield* turns.get(Turn.TurnId.make("turn-3"))).toBeUndefined()
+      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("turn-3"))).toBeUndefined()
       yield* session.editQueued("turn-1", "edited")
       yield* session.dequeue("turn-2")
-      expect(yield* turns.readQueue(Thread.ThreadId.make("thread"))).toMatchObject({
+      expect(yield* turns.readQueue(RuntimeFixtures.Thread.ThreadId.make("thread"))).toMatchObject({
         queuedCount: 1,
         turns: [{ id: "turn-1", prompt: "edited", status: "queued" }],
       })
@@ -767,7 +757,7 @@ describe("InteractiveSession controls", () => {
       yield* Fiber.join(activeFiber)
       yield* Fiber.join(pending)
       yield* Fiber.join(removed)
-      expect(yield* turns.get(Turn.TurnId.make("turn-1"))).toMatchObject({ status: "completed" })
+      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("turn-1"))).toMatchObject({ status: "completed" })
       expect(events.filter((event) => event._tag === "TurnStarted").map((event) => event.turn.id)).toEqual([
         "turn-0",
         "turn-1",
@@ -778,13 +768,18 @@ describe("InteractiveSession controls", () => {
   it.effect("edits and dequeues queued turns and reports the remaining queue", () =>
     Effect.gen(function* () {
       const { session, turns, older } = yield* makeHarness()
-      yield* createTurn(turns, { id: Turn.TurnId.make("queued"), threadId: older.id, prompt: "before", now: 2 })
+      yield* createTurn(turns, {
+        id: RuntimeFixtures.Turn.TurnId.make("queued"),
+        threadId: older.id,
+        prompt: "before",
+        now: 2,
+      })
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 2)
       yield* session.editQueued("queued", "after")
       yield* Effect.yieldNow
-      expect((yield* turns.get(Turn.TurnId.make("queued")))?.prompt).toBe("after")
+      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("queued")))?.prompt).toBe("after")
       expect(events.at(-1)).toEqual({
         _tag: "QueueUpdated",
         selectionEpoch: 2,
@@ -802,7 +797,7 @@ describe("InteractiveSession controls", () => {
       )
       yield* session.dequeue("queued")
       yield* Effect.yieldNow
-      expect(yield* turns.get(Turn.TurnId.make("queued"))).toBeUndefined()
+      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("queued"))).toBeUndefined()
       expect(events.at(-1)).toEqual({
         _tag: "QueueUpdated",
         selectionEpoch: 3,
@@ -835,7 +830,7 @@ describe("InteractiveSession controls", () => {
         ["steer", "active", "change course", "rika:interactive-steer:active:0"],
         ["cancel", "active"],
       ])
-      expect(yield* turns.get(Turn.TurnId.make("active"))).toMatchObject({
+      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active"))).toMatchObject({
         status: "cancelled",
         lastCursor: "cancel-cursor",
       })
@@ -865,10 +860,10 @@ describe("InteractiveSession controls", () => {
   it.effect("quit materializes a durable user transcript before the turn is cancelled", () =>
     Effect.gen(function* () {
       const { session, turns, transcripts } = yield* makeHarness()
-      expect(yield* transcripts.get(Turn.TurnId.make("active"))).toBeUndefined()
+      expect(yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))).toBeUndefined()
       yield* session.quit
-      expect((yield* turns.get(Turn.TurnId.make("active")))?.status).toBe("cancelled")
-      const projection = yield* transcripts.get(Turn.TurnId.make("active"))
+      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active")))?.status).toBe("cancelled")
+      const projection = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))
       expect(projection?.units.some((unit) => unit.key === "turn:active:user")).toBe(true)
     }),
   )
@@ -876,9 +871,9 @@ describe("InteractiveSession controls", () => {
   it.effect("selects a cancelled turn without durable projection using the prompt seed", () =>
     Effect.gen(function* () {
       const { session, turns, transcripts, older } = yield* makeHarness()
-      yield* turns.requestStop(Turn.TurnId.make("active"), 2)
-      yield* turns.setStatus(Turn.TurnId.make("active"), "cancelled", "cancel-cursor", 3)
-      expect(yield* transcripts.get(Turn.TurnId.make("active"))).toBeUndefined()
+      yield* turns.requestStop(RuntimeFixtures.Turn.TurnId.make("active"), 2)
+      yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "cancelled", "cancel-cursor", 3)
+      expect(yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active"))).toBeUndefined()
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
       yield* session.selectThread(older.id, 1)
@@ -894,9 +889,11 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const { session, turns, transcripts, older } = yield* makeHarness()
       yield* session.quit
-      expect((yield* turns.get(Turn.TurnId.make("active")))?.status).toBe("cancelled")
+      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active")))?.status).toBe("cancelled")
       expect(
-        (yield* transcripts.get(Turn.TurnId.make("active")))?.units.some((unit) => unit.key === "turn:active:user"),
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("active")))?.units.some(
+          (unit) => unit.key === "turn:active:user",
+        ),
       ).toBe(true)
       const events: Array<Operation.InteractiveEvent> = []
       yield* collectEvents(session, events)
@@ -905,7 +902,7 @@ describe("InteractiveSession controls", () => {
         event.entries.some((entry) => entry.unit.key === "turn:active:user"),
       )
       expect(loaded.entries.find((entry) => entry.unit.key === "turn:active:user")?.turn.prompt).toBe("active prompt")
-      const tokensOnly = UsageCost.observe(UsageCost.empty, {
+      const tokensOnly = TranscriptFixtures.UsageCost.observe(TranscriptFixtures.UsageCost.empty, {
         threadId: String(older.id),
         turnId: "active",
         event: {
@@ -929,7 +926,7 @@ describe("InteractiveSession controls", () => {
       if (Result.isFailure(tokensOnly)) return yield* Effect.die(tokensOnly.failure)
       expect(tokensOnly.success.global.costUsd).toBe(0)
       expect(tokensOnly.success.global.tokens).toBe(1_100)
-      const priced = UsageCost.observe(tokensOnly.success, {
+      const priced = TranscriptFixtures.UsageCost.observe(tokensOnly.success, {
         threadId: String(older.id),
         turnId: "active",
         event: {
@@ -953,8 +950,8 @@ describe("InteractiveSession controls", () => {
   it.effect("persists interrupt-and-send before cancelling the active turn", () =>
     Effect.gen(function* () {
       const { turns, controls, older } = yield* makeHarness()
-      const persistedAtCancel = yield* Ref.make<Turn.Turn | undefined>(undefined)
-      const checkingBackend = ExecutionBackend.Service.of({
+      const persistedAtCancel = yield* Ref.make<RuntimeFixtures.Turn.Turn | undefined>(undefined)
+      const checkingBackend = RuntimeFixtures.ExecutionBackend.Service.of({
         invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
         createFanOut: () => Effect.die("unused"),
         inspectFanOut: () => Effect.die("unused"),
@@ -986,7 +983,7 @@ describe("InteractiveSession controls", () => {
           }),
         replay: (turnId) => Effect.succeed({ turnId, status: "running", events: [] }),
         inspect: (turnId) =>
-          turns.get(Turn.TurnId.make(turnId)).pipe(
+          turns.get(RuntimeFixtures.Turn.TurnId.make(turnId)).pipe(
             Effect.orDie,
             Effect.map((turn) =>
               turn === undefined
@@ -996,7 +993,7 @@ describe("InteractiveSession controls", () => {
           ),
         steer: (turnId) => Effect.succeed({ steeringMessageId: `steering:${turnId}:steering:0`, sequence: 0 }),
         cancel: (turnId) =>
-          turns.get(Turn.TurnId.make("pending")).pipe(
+          turns.get(RuntimeFixtures.Turn.TurnId.make("pending")).pipe(
             Effect.orDie,
             Effect.flatMap((pending) => Ref.set(persistedAtCancel, pending)),
             Effect.as({
@@ -1024,12 +1021,12 @@ describe("InteractiveSession controls", () => {
       })
       const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
       const layer = productLayer({
-        repositoryLayer: ThreadRepository.memoryLayer([older]),
-        turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-        backendLayer: Layer.succeed(ExecutionBackend.Service, checkingBackend),
+        repositoryLayer: RuntimeFixtures.ThreadRepository.memoryLayer([older]),
+        turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+        backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, checkingBackend),
         defaultWorkspace: "/work",
         makeThreadId: Effect.die("unused"),
-        makeTurnId: Effect.succeed(Turn.TurnId.make("pending")),
+        makeTurnId: Effect.succeed(RuntimeFixtures.Turn.TurnId.make("pending")),
         interactive: (_, value) =>
           Ref.update(sessions, (values) => [...values, value]).pipe(Effect.andThen(Effect.never)),
       })
@@ -1052,9 +1049,9 @@ describe("InteractiveSession controls", () => {
         )
       for (let attempts = 0; attempts < 100 && !cancellationProjected(); attempts += 1) yield* Effect.yieldNow
       expect(yield* Ref.get(persistedAtCancel)).toMatchObject({ prompt: "next prompt", status: "queued" })
-      expect((yield* turns.get(Turn.TurnId.make("active")))?.status).toBe("cancelled")
+      expect((yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active")))?.status).toBe("cancelled")
       expect(cancellationProjected()).toBe(true)
-      expect(yield* turns.get(Turn.TurnId.make("pending"))).toMatchObject({
+      expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("pending"))).toMatchObject({
         status: "completed",
         lastCursor: "replacement-done",
       })
@@ -1070,17 +1067,17 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const release = yield* Deferred.make<void>()
       const finished = yield* Deferred.make<void>()
-      const finalTurnId = Turn.TurnId.make("promoted-three")
+      const finalTurnId = RuntimeFixtures.Turn.TurnId.make("promoted-three")
       const { session, turns, controls, older } = yield* makeHarness(undefined, false, undefined, false, false, {
         release,
         finished,
         finalTurnId,
       })
       const events: Array<Operation.InteractiveEvent> = []
-      yield* turns.setStatus(Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
+      yield* turns.setStatus(RuntimeFixtures.Turn.TurnId.make("active"), "waiting", "wait-cursor", 2)
       for (const [index, id] of ["promoted-one", "promoted-two", "promoted-three"].entries())
         yield* createTurn(turns, {
-          id: Turn.TurnId.make(id),
+          id: RuntimeFixtures.Turn.TurnId.make(id),
           threadId: older.id,
           prompt: id,
           now: 10 + index,
@@ -1104,17 +1101,17 @@ describe("InteractiveSession controls", () => {
     "runs shell input without approval, keeps incognito output transient, and records alongside active work",
     () =>
       Effect.gen(function* () {
-        const repositories = yield* ThreadRepository.makeMemory()
-        const turns = yield* TurnRepository.makeMemory()
+        const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory()
+        const turns = yield* RuntimeFixtures.TurnRepository.makeMemory()
         const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
         const commands = yield* Ref.make<ReadonlyArray<string>>([])
         let turnNumber = 0
         const layer = productLayer({
-          repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-          turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
+          repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+          turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
           backendLayer: Layer.succeed(
-            ExecutionBackend.Service,
-            ExecutionBackend.Service.of({
+            RuntimeFixtures.ExecutionBackend.Service,
+            RuntimeFixtures.ExecutionBackend.Service.of({
               invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
               createFanOut: () => Effect.die("unused"),
               inspectFanOut: () => Effect.die("unused"),
@@ -1132,15 +1129,15 @@ describe("InteractiveSession controls", () => {
             }),
           ),
           toolRuntimeLayer: () =>
-            ToolRuntime.testLayer((request) => {
+            RuntimeFixtures.ToolRuntime.testLayer((request) => {
               const command = request._tag === "Shell" ? request.args.join(" ") : request._tag
               return Ref.update(commands, (values) => [...values, command]).pipe(
                 Effect.as({ text: `output:${command}`, truncated: false, exitCode: 0 }),
               )
             }),
           defaultWorkspace: "/work",
-          makeThreadId: Effect.succeed(Thread.ThreadId.make("shell-thread")),
-          makeTurnId: Effect.sync(() => Turn.TurnId.make(`shell-turn-${turnNumber++}`)),
+          makeThreadId: Effect.succeed(RuntimeFixtures.Thread.ThreadId.make("shell-thread")),
+          makeTurnId: Effect.sync(() => RuntimeFixtures.Turn.TurnId.make(`shell-turn-${turnNumber++}`)),
           interactive: (_, session) =>
             Ref.update(sessions, (values) => [...values, session]).pipe(Effect.andThen(Effect.never)),
         })
@@ -1176,7 +1173,7 @@ describe("InteractiveSession controls", () => {
         })
         expect(persisted.filter((event) => event._tag === "TranscriptProjectionStarted")).toHaveLength(1)
         expect(persisted.find((event) => event._tag === "ShellCompleted")).toMatchObject({ incognito: false })
-        expect((yield* turns.list(Thread.ThreadId.make("shell-thread")))[0]).toMatchObject({
+        expect((yield* turns.list(RuntimeFixtures.Thread.ThreadId.make("shell-thread")))[0]).toMatchObject({
           _tag: "RecordedShell",
           prompt: "$ printf persisted",
           status: "completed",
@@ -1185,15 +1182,15 @@ describe("InteractiveSession controls", () => {
 
         expect(yield* Ref.get(commands)).toEqual(["-lc printf persisted"])
 
-        const beforeIncognito = (yield* turns.list(Thread.ThreadId.make("shell-thread"))).length
+        const beforeIncognito = (yield* turns.list(RuntimeFixtures.Thread.ThreadId.make("shell-thread"))).length
         const incognito = yield* runShell("printf secret", true)
         expect(incognito.find((event) => event._tag === "ShellCompleted")).toMatchObject({ incognito: true })
-        expect((yield* turns.list(Thread.ThreadId.make("shell-thread"))).length).toBe(beforeIncognito)
+        expect((yield* turns.list(RuntimeFixtures.Thread.ThreadId.make("shell-thread"))).length).toBe(beforeIncognito)
         expect(yield* Ref.get(commands)).toEqual(["-lc printf persisted", "-lc printf secret"])
 
         yield* turns.copy(
           {
-            ...active(Thread.ThreadId.make("shell-thread"), "active-shell-blocker"),
+            ...active(RuntimeFixtures.Thread.ThreadId.make("shell-thread"), "active-shell-blocker"),
             prompt: "active",
             createdAt: 2,
             updatedAt: 2,
@@ -1201,21 +1198,23 @@ describe("InteractiveSession controls", () => {
           128,
         )
         const concurrentStart = allEvents.length
-        yield* session.shell(Thread.ThreadId.make("shell-thread"), "printf alongside", false)
+        yield* session.shell(RuntimeFixtures.Thread.ThreadId.make("shell-thread"), "printf alongside", false)
         while (!allEvents.slice(concurrentStart).some((event) => event._tag === "ShellCompleted"))
           yield* Effect.yieldNow
         const concurrent = allEvents.slice(concurrentStart)
         expect(concurrent.some((event) => event._tag === "QueueUpdated")).toBe(false)
         expect(
-          (yield* turns.list(Thread.ThreadId.make("shell-thread"))).find(
-            (turn) => Turn.isRecordedShell(turn) && turn.command === "printf alongside",
+          (yield* turns.list(RuntimeFixtures.Thread.ThreadId.make("shell-thread"))).find(
+            (turn) => RuntimeFixtures.Turn.isRecordedShell(turn) && turn.command === "printf alongside",
           ),
         ).toMatchObject({
           _tag: "RecordedShell",
           status: "completed",
           result: { text: "output:-lc printf alongside", exitCode: 0 },
         })
-        expect(yield* turns.get(Turn.TurnId.make("active-shell-blocker"))).toMatchObject({ status: "running" })
+        expect(yield* turns.get(RuntimeFixtures.Turn.TurnId.make("active-shell-blocker"))).toMatchObject({
+          status: "running",
+        })
       }),
   )
 
@@ -1251,7 +1250,7 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
-        (_, index): ExecutionBackend.Event => ({
+        (_, index): RuntimeFixtures.ExecutionBackend.Event => ({
           executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
@@ -1288,7 +1287,7 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const pagedEvents = Array.from(
         { length: 450 },
-        (_, index): ExecutionBackend.Event => ({
+        (_, index): RuntimeFixtures.ExecutionBackend.Event => ({
           executionId: "execution:active",
           cursor: `cursor-${index + 1}`,
           sequence: index + 1,
@@ -1305,7 +1304,7 @@ describe("InteractiveSession controls", () => {
 
       expect(events.find((event) => event._tag === "ExecutionFailed")).toMatchObject({
         threadId: older.id,
-        turnId: Turn.TurnId.make("active"),
+        turnId: RuntimeFixtures.Turn.TurnId.make("active"),
         message: expect.stringContaining("lost its place"),
       })
       expect(yield* Ref.get(controls)).toEqual([
@@ -1319,14 +1318,14 @@ describe("InteractiveSession controls", () => {
     Effect.gen(function* () {
       const { session, turns, transcripts, controls, older } = yield* makeHarness()
       const queued = yield* createTurn(turns, {
-        id: Turn.TurnId.make("queued-selection"),
+        id: RuntimeFixtures.Turn.TurnId.make("queued-selection"),
         threadId: older.id,
         prompt: "queued prompt",
         now: 2,
       })
-      const shell: Turn.TerminalRecordedShellTurn = {
+      const shell: RuntimeFixtures.Turn.TerminalRecordedShellTurn = {
         _tag: "RecordedShell",
-        id: Turn.TurnId.make("recorded-shell"),
+        id: RuntimeFixtures.Turn.TurnId.make("recorded-shell"),
         threadId: older.id,
         prompt: "$ printf recorded",
         command: "printf recorded",
@@ -1362,12 +1361,12 @@ describe("InteractiveSession controls", () => {
 
   it.effect("bounds the initial page and exhausts older pages without duplicate units", () =>
     Effect.gen(function* () {
-      const turnPageRequests = yield* Ref.make<ReadonlyArray<TurnRepository.PageCursor | undefined>>([])
+      const turnPageRequests = yield* Ref.make<ReadonlyArray<RuntimeFixtures.TurnRepository.PageCursor | undefined>>([])
       const { session, turns, transcripts, older } = yield* makeHarness(undefined, false, turnPageRequests)
       yield* completeActive(turns, transcripts, 2)
       for (let index = 0; index < 240; index += 1) {
         const created = yield* createTurn(turns, {
-          id: Turn.TurnId.make(`history-${index.toString().padStart(3, "0")}`),
+          id: RuntimeFixtures.Turn.TurnId.make(`history-${index.toString().padStart(3, "0")}`),
           threadId: older.id,
           prompt: `history ${index}`,
           now: index + 10,
@@ -1440,20 +1439,20 @@ describe("InteractiveSession controls", () => {
       yield* completeActive(turns, transcripts, 2)
       for (let turnIndex = 0; turnIndex < 5; turnIndex += 1) {
         const created = yield* createTurn(turns, {
-          id: Turn.TurnId.make(`boundary-${turnIndex}`),
+          id: RuntimeFixtures.Turn.TurnId.make(`boundary-${turnIndex}`),
           threadId: older.id,
           prompt: `boundary ${turnIndex}`,
           now: turnIndex + 10,
         })
         const completed = yield* turns.setStatus(created.id, "completed", undefined, turnIndex + 10)
-        const units: Array<TranscriptUnit.Unit> = [
-          TranscriptProjection.Projection.empty(created.id, created.prompt).units[0]!,
+        const units: Array<TranscriptFixtures.TranscriptUnit.Unit> = [
+          TranscriptFixtures.TranscriptProjection.Projection.empty(created.id, created.prompt).units[0]!,
           ...Array.from(
             { length: 72 },
-            (_, index): TranscriptUnit.Unit => ({
+            (_, index): TranscriptFixtures.TranscriptUnit.Unit => ({
               key: `${created.id}:assistant:${index.toString().padStart(2, "0")}`,
               turnId: created.id,
-              order: TranscriptOrdering.unitOrder(
+              order: TranscriptFixtures.TranscriptOrdering.unitOrder(
                 `${created.id}:assistant:${index.toString().padStart(2, "0")}`,
                 index + 1,
               ),
@@ -1463,7 +1462,7 @@ describe("InteractiveSession controls", () => {
           ),
         ]
         yield* storeProjection(transcripts, completed, {
-          ...TranscriptProjection.Projection.empty(created.id, created.prompt),
+          ...TranscriptFixtures.TranscriptProjection.Projection.empty(created.id, created.prompt),
           units,
           revision: 72,
         })
@@ -1505,7 +1504,7 @@ describe("InteractiveSession controls", () => {
       const { session, turns, transcripts, older } = yield* makeHarness()
       yield* completeActive(turns, transcripts, 2)
       const created = yield* createTurn(turns, {
-        id: Turn.TurnId.make("oversized"),
+        id: RuntimeFixtures.Turn.TurnId.make("oversized"),
         threadId: older.id,
         prompt: "oversized prompt",
         now: 10,
@@ -1516,19 +1515,19 @@ describe("InteractiveSession controls", () => {
       if (parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
         return yield* Effect.die("missing nested parent tool")
       const parentId = parent.content.block.id
-      const units: Array<TranscriptUnit.Unit> = [
-        TranscriptProjection.Projection.empty(created.id, created.prompt).units[0]!,
+      const units: Array<TranscriptFixtures.TranscriptUnit.Unit> = [
+        TranscriptFixtures.TranscriptProjection.Projection.empty(created.id, created.prompt).units[0]!,
         {
           key: `${created.id}:assistant:opening`,
           turnId: created.id,
-          order: TranscriptOrdering.unitOrder(`${created.id}:assistant:opening`, 1),
+          order: TranscriptFixtures.TranscriptOrdering.unitOrder(`${created.id}:assistant:opening`, 1),
           revision: 1,
           content: { _tag: "Entry", role: "assistant", text: "opening response" },
         },
         {
           key: `compaction:${created.id}`,
           turnId: created.id,
-          order: TranscriptOrdering.unitOrder(`compaction:${created.id}`, 1, 1),
+          order: TranscriptFixtures.TranscriptOrdering.unitOrder(`compaction:${created.id}`, 1, 1),
           revision: 2,
           content: {
             _tag: "Block",
@@ -1543,12 +1542,12 @@ describe("InteractiveSession controls", () => {
         parent,
         ...Array.from(
           { length: 260 },
-          (_, index): TranscriptUnit.Unit =>
-            TranscriptNestedProjection.attachUnit(
+          (_, index): TranscriptFixtures.TranscriptUnit.Unit =>
+            TranscriptFixtures.TranscriptNestedProjection.attachUnit(
               {
                 key: `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
                 turnId: childExecutionId,
-                order: TranscriptOrdering.unitOrder(
+                order: TranscriptFixtures.TranscriptOrdering.unitOrder(
                   `${created.id}:assistant:${index.toString().padStart(3, "0")}`,
                   index,
                 ),
@@ -1566,13 +1565,13 @@ describe("InteractiveSession controls", () => {
         {
           key: `${created.id}:assistant:final`,
           turnId: created.id,
-          order: TranscriptOrdering.unitOrder(`${created.id}:assistant:final`, 262),
+          order: TranscriptFixtures.TranscriptOrdering.unitOrder(`${created.id}:assistant:final`, 262),
           revision: 262,
           content: { _tag: "Entry", role: "assistant", text: "final response" },
         },
       ]
       yield* storeProjection(transcripts, completed, {
-        ...TranscriptProjection.Projection.empty(created.id, created.prompt),
+        ...TranscriptFixtures.TranscriptProjection.Projection.empty(created.id, created.prompt),
         units,
         revision: 262,
       })
@@ -1596,10 +1595,12 @@ describe("InteractiveSession controls", () => {
       expect(loaded.some((entry) => entry.unit.key === `${created.id}:assistant:final`)).toBe(true)
       expect(loaded.filter((entry) => entry.unit.key === `compaction:${created.id}`)).toHaveLength(1)
       expect(cursor.orderKey).not.toBe(
-        TranscriptOrdering.encodeUnitOrder(TranscriptOrdering.unitOrder(`turn:${created.id}:user`, 0)),
+        TranscriptFixtures.TranscriptOrdering.encodeUnitOrder(
+          TranscriptFixtures.TranscriptOrdering.unitOrder(`turn:${created.id}:user`, 0),
+        ),
       )
 
-      const olderEntries: Array<TranscriptRepository.Entry> = []
+      const olderEntries: Array<RuntimeFixtures.TranscriptRepository.Entry> = []
       let hasOlder = initial.hasOlder
       let before = cursor
       for (let page = 0; page < 20 && hasOlder; page += 1) {
@@ -1624,10 +1625,13 @@ describe("InteractiveSession controls", () => {
       }
       expect(olderEntries.length).toBeGreaterThan(0)
       const cursorEntry = loaded.find(
-        (entry) => TranscriptOrdering.encodeUnitOrder(entry.unit.order) === cursor.orderKey,
+        (entry) => TranscriptFixtures.TranscriptOrdering.encodeUnitOrder(entry.unit.order) === cursor.orderKey,
       )
       expect(
-        TranscriptOrdering.compareUnitOrder(olderEntries.at(-1)!.unit.order, cursorEntry!.unit.order),
+        TranscriptFixtures.TranscriptOrdering.compareUnitOrder(
+          olderEntries.at(-1)!.unit.order,
+          cursorEntry!.unit.order,
+        ),
       ).toBeLessThan(0)
       const allEntries = [...olderEntries, ...loaded]
       expect(new Set(allEntries.map((entry) => entry.unit.key)).size).toBe(allEntries.length)
@@ -1648,7 +1652,7 @@ describe("InteractiveSession controls", () => {
       ]
       for (const [index, entry] of conversation.entries()) {
         const created = yield* createTurn(turns, {
-          id: Turn.TurnId.make(entry.id),
+          id: RuntimeFixtures.Turn.TurnId.make(entry.id),
           threadId: older.id,
           prompt: entry.prompt,
           now: index + 10,
@@ -1657,24 +1661,27 @@ describe("InteractiveSession controls", () => {
         const childExecutionId = `child:${created.id}`
         const parent =
           entry.children === 0 ? undefined : delegationUnit(created.id, `delegate-${created.id}`, childExecutionId, 2)
-        const units: Array<TranscriptUnit.Unit> = [
-          TranscriptProjection.Projection.empty(created.id, entry.prompt).units[0]!,
+        const units: Array<TranscriptFixtures.TranscriptUnit.Unit> = [
+          TranscriptFixtures.TranscriptProjection.Projection.empty(created.id, entry.prompt).units[0]!,
           {
             key: `assistant:${created.id}:0`,
             turnId: created.id,
-            order: TranscriptOrdering.unitOrder(`assistant:${created.id}:0`, 1),
+            order: TranscriptFixtures.TranscriptOrdering.unitOrder(`assistant:${created.id}:0`, 1),
             revision: 1,
             content: { _tag: "Entry", role: "assistant", text: entry.reply },
           },
           ...(parent === undefined ? [] : [parent]),
-          ...Array.from({ length: entry.children }, (_, child): TranscriptUnit.Unit => {
+          ...Array.from({ length: entry.children }, (_, child): TranscriptFixtures.TranscriptUnit.Unit => {
             if (parent === undefined || parent.content._tag !== "Block" || parent.content.block._tag !== "ToolCall")
               throw new TypeError(`Turn ${created.id} has no child parent tool`)
-            return TranscriptNestedProjection.attachUnit(
+            return TranscriptFixtures.TranscriptNestedProjection.attachUnit(
               {
                 key: `${created.id}:child:${child.toString().padStart(3, "0")}`,
                 turnId: childExecutionId,
-                order: TranscriptOrdering.unitOrder(`${created.id}:child:${child.toString().padStart(3, "0")}`, child),
+                order: TranscriptFixtures.TranscriptOrdering.unitOrder(
+                  `${created.id}:child:${child.toString().padStart(3, "0")}`,
+                  child,
+                ),
                 revision: child,
                 content: { _tag: "Block", block: { _tag: "Reasoning", text: `child ${child}` } },
               },
@@ -1685,7 +1692,7 @@ describe("InteractiveSession controls", () => {
           }),
         ]
         yield* storeProjection(transcripts, completed, {
-          ...TranscriptProjection.Projection.empty(created.id, created.prompt),
+          ...TranscriptFixtures.TranscriptProjection.Projection.empty(created.id, created.prompt),
           units,
           revision: units.length,
         })
@@ -1749,7 +1756,7 @@ describe("InteractiveSession controls", () => {
 const subagentToolId = "done:call_1"
 const subagentChildId = "child:execution%3Adone:call_1"
 
-const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents([
+const subagentRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = serverEvents([
   {
     executionId: "execution:done",
     cursor: "done-started",
@@ -1792,7 +1799,7 @@ const subagentRootEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents([
   { executionId: "execution:done", cursor: "done-final", sequence: 5, type: "execution.completed", createdAt: 5 },
 ])
 
-const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents([
+const subagentChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = serverEvents([
   {
     executionId: subagentChildId,
     cursor: "childstarted~a0",
@@ -1828,26 +1835,26 @@ const subagentChildEvents: ReadonlyArray<ExecutionBackend.Event> = serverEvents(
 ])
 
 const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagentReloadHarness")(function* (options: {
-  readonly storedTree: TranscriptProjectionModel.Projection
+  readonly storedTree: TranscriptFixtures.TranscriptProjectionModel.Projection
   readonly turnLastCursor: string
-  readonly childReplayEvents: ReadonlyArray<ExecutionBackend.Event>
+  readonly childReplayEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
   readonly consumed?: Readonly<
     Record<
       string,
       { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
     >
   >
-  readonly turnStatus?: Turn.Status
+  readonly turnStatus?: RuntimeFixtures.Turn.Status
   readonly followed?: Ref.Ref<ReadonlyArray<string>>
-  readonly inspection?: (executionId: string) => ExecutionBackend.Inspection | undefined
-  readonly replayEvents?: (executionId: string) => ReadonlyArray<ExecutionBackend.Event>
-  readonly pageEvents?: (executionId: string, after: string | undefined) => ExecutionBackend.EventPage
+  readonly inspection?: (executionId: string) => RuntimeFixtures.ExecutionBackend.Inspection | undefined
+  readonly replayEvents?: (executionId: string) => ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>
+  readonly pageEvents?: (executionId: string, after: string | undefined) => RuntimeFixtures.ExecutionBackend.EventPage
   readonly projectionVersion?: number
 }) {
   const subagentThread = thread("subagent-thread", 1)
-  const doneTurn: Turn.AgentExecutionTurn = {
+  const doneTurn: RuntimeFixtures.Turn.AgentExecutionTurn = {
     _tag: "AgentExecution",
-    id: Turn.TurnId.make("done"),
+    id: RuntimeFixtures.Turn.TurnId.make("done"),
     threadId: subagentThread.id,
     prompt: "delegate",
     stopIntent: "none",
@@ -1859,22 +1866,22 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
     updatedAt: 1,
     lastCursor: options.turnLastCursor,
   }
-  const repositories = yield* ThreadRepository.makeMemory([subagentThread])
-  const turns = yield* TurnRepository.makeMemory([doneTurn])
+  const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([subagentThread])
+  const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([doneTurn])
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   const transcripts =
-    options.projectionVersion === TranscriptRepository.invalidatedProjectionVersion
-      ? yield* TranscriptRepository.makeMemory({
+    options.projectionVersion === RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion
+      ? yield* RuntimeFixtures.TranscriptRepository.makeMemory({
           initial: [invalidatedProjection(doneTurn, options.storedTree.revision)],
           turns,
         })
-      : yield* TranscriptRepository.makeMemory({ turns })
-  if (options.projectionVersion !== TranscriptRepository.invalidatedProjectionVersion)
+      : yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
+  if (options.projectionVersion !== RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
     yield* storeProjection(transcripts, doneTurn, options.storedTree, {
       ...(options.consumed === undefined ? {} : { consumed: options.consumed }),
       ...(options.projectionVersion === undefined ? {} : { projectionVersion: options.projectionVersion }),
     })
-  const inspection = (turnId: string): ExecutionBackend.Inspection | undefined => {
+  const inspection = (turnId: string): RuntimeFixtures.ExecutionBackend.Inspection | undefined => {
     if (options.inspection !== undefined) return options.inspection(turnId)
     if (turnId !== "done") return { turnId, status: "completed", waits: [], pendingTools: [], children: [] }
     return {
@@ -1886,7 +1893,7 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
       children: [{ executionId: subagentChildId, status: "completed" }],
     }
   }
-  const eventsFor = (turnId: string): ReadonlyArray<ExecutionBackend.Event> => {
+  const eventsFor = (turnId: string): ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> => {
     const replay = options.replayEvents?.(turnId)
     if (replay !== undefined)
       return completeServerTimeline(replay).map((event) => Object.assign({}, event, { executionId: turnId }))
@@ -1900,7 +1907,7 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
       )
     return []
   }
-  const backend = ExecutionBackend.Service.of({
+  const backend = RuntimeFixtures.ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
@@ -1922,7 +1929,7 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
       ).pipe(
         Effect.andThen(
           inspected === undefined
-            ? ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${turnId}` })
+            ? RuntimeFixtures.ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${turnId}` })
             : Effect.void,
         ),
         Effect.tap(() => Effect.sync(() => events.forEach((event) => onEvent?.(event)))),
@@ -1946,10 +1953,10 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
     resolveInvocationSource: () => Effect.die("unused"),
   })
   const layer = productLayer({
-    repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-    transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+    turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+    transcriptRepositoryLayer: Layer.succeed(RuntimeFixtures.TranscriptRepository.Service, transcripts),
+    backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
     makeTurnId: Effect.die("unused"),
@@ -1966,15 +1973,17 @@ const makeSubagentReloadHarness = Effect.fn("InteractiveSessionTest.makeSubagent
 })
 
 interface ObservedProjectionStream {
-  readonly turn: Turn.AgentExecutionTurn
+  readonly turn: RuntimeFixtures.Turn.AgentExecutionTurn
   readonly streamId: string
   readonly patchRevision: number
   readonly state: Extract<Operation.InteractiveEvent, { readonly _tag: "TranscriptProjectionStarted" }>["state"]
-  readonly units: ReadonlyMap<string, TranscriptUnit.Unit>
+  readonly units: ReadonlyMap<string, TranscriptFixtures.TranscriptUnit.Unit>
   readonly rootStatus?: "completed" | "failed" | "cancelled"
 }
 
-const observedProjectionEntries = (stream: ObservedProjectionStream): ReadonlyArray<TranscriptRepository.Entry> => {
+const observedProjectionEntries = (
+  stream: ObservedProjectionStream,
+): ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> => {
   const turn = stream.rootStatus === undefined ? stream.turn : { ...stream.turn, status: stream.rootStatus }
   return [...stream.units.values()].map((unit) => ({
     turn,
@@ -1984,16 +1993,16 @@ const observedProjectionEntries = (stream: ObservedProjectionStream): ReadonlyAr
   }))
 }
 
-const sortObservedEntries = (entries: ReadonlyArray<TranscriptRepository.Entry>) =>
+const sortObservedEntries = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) =>
   entries.toSorted(
     (left, right) =>
       left.turn.createdAt - right.turn.createdAt ||
       String(left.turn.id).localeCompare(String(right.turn.id)) ||
-      TranscriptOrdering.compareUnitOrder(left.unit.order, right.unit.order),
+      TranscriptFixtures.TranscriptOrdering.compareUnitOrder(left.unit.order, right.unit.order),
   )
 
 const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent>) => {
-  let entries: ReadonlyArray<TranscriptRepository.Entry> | undefined
+  let entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry> | undefined
   let selectionEpoch: number | undefined
   let threadId: string | undefined
   const streams = new Map<string, ObservedProjectionStream>()
@@ -2006,7 +2015,7 @@ const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent
       continue
     }
     if (event._tag === "TranscriptProjectionStarted") {
-      if (!Turn.isAgentExecution(event.turn)) continue
+      if (!RuntimeFixtures.Turn.isAgentExecution(event.turn)) continue
       if (
         selectionEpoch !== undefined &&
         (event.selectionEpoch !== selectionEpoch || String(event.threadId) !== threadId)
@@ -2066,7 +2075,7 @@ const latestSelectionEntries = (events: ReadonlyArray<Operation.InteractiveEvent
 
 const awaitSelectionEntries = (
   events: ReadonlyArray<Operation.InteractiveEvent>,
-  until: (entries: ReadonlyArray<TranscriptRepository.Entry>) => boolean,
+  until: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
 ) =>
   Effect.gen(function* () {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
@@ -2121,11 +2130,11 @@ const awaitPrependedPage = (events: ReadonlyArray<Operation.InteractiveEvent>, p
 
 const selectionEntriesFor = (
   session: Operation.InteractiveSession,
-  threadId: Thread.ThreadId,
-  until?: (entries: ReadonlyArray<TranscriptRepository.Entry>) => boolean,
+  threadId: RuntimeFixtures.Thread.ThreadId,
+  until?: (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => boolean,
 ): Effect.Effect<
   {
-    readonly entries: ReadonlyArray<TranscriptRepository.Entry>
+    readonly entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>
     readonly events: ReadonlyArray<Operation.InteractiveEvent>
   },
   Operation.OperationUnavailable
@@ -2138,12 +2147,12 @@ const selectionEntriesFor = (
     return { entries, events }
   })
 
-const nestedSubagentReady = (entries: ReadonlyArray<TranscriptRepository.Entry>) => {
+const nestedSubagentReady = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => {
   const { nestedTool, nestedAnswer } = nestedSubagentExpectations(entries)
   return nestedTool && nestedAnswer
 }
 
-const nestedSubagentExpectations = (entries: ReadonlyArray<TranscriptRepository.Entry>) => {
+const nestedSubagentExpectations = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) => {
   const nested = entries.filter((entry) => entry.unit.parentId === subagentToolId)
   const nestedTool = nested.some(
     (entry) =>
@@ -2163,7 +2172,7 @@ const nestedSubagentExpectations = (entries: ReadonlyArray<TranscriptRepository.
 describe("InteractiveSession subagent reload", () => {
   it.effect("refolds terminal child outcomes from Relay after a projection-version change", () =>
     Effect.gen(function* () {
-      const failedRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
@@ -2174,9 +2183,17 @@ describe("InteractiveSession subagent reload", () => {
           text: "root failed after delegation",
         },
       ]
-      const failedRoot = TranscriptProjection.Projection.project("done", "delegate", failedRootEvents)
-      const completedChild = TranscriptProjection.Projection.project(subagentChildId, "", subagentChildEvents)
-      const storedTree = TranscriptNestedProjection.withNestedProjections(failedRoot, [
+      const failedRoot = TranscriptFixtures.TranscriptProjection.Projection.project(
+        "done",
+        "delegate",
+        failedRootEvents,
+      )
+      const completedChild = TranscriptFixtures.TranscriptProjection.Projection.project(
+        subagentChildId,
+        "",
+        subagentChildEvents,
+      )
+      const storedTree = TranscriptFixtures.TranscriptNestedProjection.withNestedProjections(failedRoot, [
         { parentId: subagentToolId, projection: completedChild },
       ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
@@ -2185,10 +2202,10 @@ describe("InteractiveSession subagent reload", () => {
         childReplayEvents: subagentChildEvents,
         turnStatus: "failed",
         replayEvents: (executionId) => (executionId === "done" ? failedRootEvents : subagentChildEvents),
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       })
 
-      const reconciledParent = (entries: ReadonlyArray<TranscriptRepository.Entry>) =>
+      const reconciledParent = (entries: ReadonlyArray<RuntimeFixtures.TranscriptRepository.Entry>) =>
         entries.find(
           (entry) =>
             entry.unit.parentId === undefined &&
@@ -2221,7 +2238,7 @@ describe("InteractiveSession subagent reload", () => {
       const completedChildId = "child:execution%3Adone:completed"
       const failedChildId = "child:execution%3Adone:failed"
       const nestedChildId = `child:${encodeURIComponent(completedChildId)}:nested`
-      const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const rootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         {
           executionId: "execution:done",
           cursor: "root-completed-tool",
@@ -2295,7 +2312,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "resident was replaced during execution",
         },
       ]
-      const completedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const completedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         {
           executionId: completedChildId,
           cursor: "nested-tool",
@@ -2320,7 +2337,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 7,
         },
       ]
-      const failedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const failedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         {
           executionId: failedChildId,
           cursor: "failed-child",
@@ -2330,7 +2347,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "child checks failed",
         },
       ]
-      const nestedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const nestedChildEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         {
           executionId: nestedChildId,
           cursor: "nested-answer",
@@ -2347,8 +2364,12 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 6,
         },
       ]
-      const stale = TranscriptProjection.Projection.project("done", "delegate", rootEvents.slice(0, 4))
-      const inspections: Readonly<Record<string, ExecutionBackend.Inspection>> = {
+      const stale = TranscriptFixtures.TranscriptProjection.Projection.project(
+        "done",
+        "delegate",
+        rootEvents.slice(0, 4),
+      )
+      const inspections: Readonly<Record<string, RuntimeFixtures.ExecutionBackend.Inspection>> = {
         done: {
           turnId: "done",
           status: "failed",
@@ -2385,7 +2406,7 @@ describe("InteractiveSession subagent reload", () => {
           children: [],
         },
       }
-      const replayEvents: Readonly<Record<string, ReadonlyArray<ExecutionBackend.Event>>> = {
+      const replayEvents: Readonly<Record<string, ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event>>> = {
         done: rootEvents,
         [completedChildId]: completedChildEvents,
         [failedChildId]: failedChildEvents,
@@ -2398,7 +2419,7 @@ describe("InteractiveSession subagent reload", () => {
         turnStatus: "running",
         inspection: (executionId) => inspections[executionId],
         replayEvents: (executionId) => replayEvents[executionId] ?? [],
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       })
 
       const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id)
@@ -2422,7 +2443,7 @@ describe("InteractiveSession subagent reload", () => {
       expect(
         root.every(
           (entry) =>
-            Turn.isAgentExecution(entry.turn) &&
+            RuntimeFixtures.Turn.isAgentExecution(entry.turn) &&
             entry.turn.status === "failed" &&
             entry.turn.lastCursor === "root-failed",
         ),
@@ -2450,7 +2471,8 @@ describe("InteractiveSession subagent reload", () => {
             entry.unit.turnId === completedChildId &&
             entry.unit.content._tag === "Block" &&
             entry.unit.content.block._tag === "ToolCall" &&
-            entry.unit.content.block.id === TranscriptIdentity.scopedIdentity(completedChildId, "nested"),
+            entry.unit.content.block.id ===
+              TranscriptFixtures.TranscriptIdentity.scopedIdentity(completedChildId, "nested"),
         )?.unit.content,
       ).toMatchObject({ _tag: "Block", block: { _tag: "ToolCall", status: "complete" } })
       expect(
@@ -2483,9 +2505,16 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("renders an already-completed child from persisted units after following it once", () =>
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
-      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents.slice(0, 3))
-      const storedTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
-        { parentId: subagentToolId, projection: TranscriptProjection.Projection.empty(subagentChildId, "") },
+      const rootProjection = TranscriptFixtures.TranscriptProjection.Projection.project(
+        "done",
+        "delegate",
+        subagentRootEvents.slice(0, 3),
+      )
+      const storedTree = TranscriptFixtures.TranscriptNestedProjection.withNestedProjections(rootProjection, [
+        {
+          parentId: subagentToolId,
+          projection: TranscriptFixtures.TranscriptProjection.Projection.empty(subagentChildId, ""),
+        },
       ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
         storedTree,
@@ -2508,7 +2537,7 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       const nestedId = `child:${encodeURIComponent(subagentChildId)}:nested`
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
-      const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const childEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         {
           executionId: subagentChildId,
           cursor: "nested-call",
@@ -2533,7 +2562,7 @@ describe("InteractiveSession subagent reload", () => {
           createdAt: 5,
         },
       ]
-      const nestedEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const nestedEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         {
           executionId: nestedId,
           cursor: "nested-started",
@@ -2543,7 +2572,7 @@ describe("InteractiveSession subagent reload", () => {
           timestampSource: "server",
         },
       ]
-      const failedRootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const failedRootEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
         ...subagentRootEvents.slice(0, 3),
         {
           executionId: "execution:done",
@@ -2554,11 +2583,11 @@ describe("InteractiveSession subagent reload", () => {
           text: "root failed after its descendants finished",
         },
       ]
-      const inspection = (executionId: string): ExecutionBackend.Inspection => {
-        let children: ExecutionBackend.Inspection["children"] = []
+      const inspection = (executionId: string): RuntimeFixtures.ExecutionBackend.Inspection => {
+        let children: RuntimeFixtures.ExecutionBackend.Inspection["children"] = []
         if (executionId === "done") children = [{ executionId: subagentChildId, status: "completed" }]
         else if (executionId === subagentChildId) children = [{ executionId: nestedId, status: "running" }]
-        let status: ExecutionBackend.Status = "running"
+        let status: RuntimeFixtures.ExecutionBackend.Status = "running"
         if (executionId === "done") status = "failed"
         else if (executionId === subagentChildId) status = "completed"
         return {
@@ -2569,9 +2598,16 @@ describe("InteractiveSession subagent reload", () => {
           children,
         }
       }
-      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", failedRootEvents)
-      const storedTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
-        { parentId: subagentToolId, projection: TranscriptProjection.Projection.empty(subagentChildId, "") },
+      const rootProjection = TranscriptFixtures.TranscriptProjection.Projection.project(
+        "done",
+        "delegate",
+        failedRootEvents,
+      )
+      const storedTree = TranscriptFixtures.TranscriptNestedProjection.withNestedProjections(rootProjection, [
+        {
+          parentId: subagentToolId,
+          projection: TranscriptFixtures.TranscriptProjection.Projection.empty(subagentChildId, ""),
+        },
       ])
       const { session, subagentThread } = yield* makeSubagentReloadHarness({
         storedTree,
@@ -2579,7 +2615,7 @@ describe("InteractiveSession subagent reload", () => {
         childReplayEvents: childEvents,
         consumed: {
           done: { cursor: "root-failed", sequence: 3, status: "failed" },
-          [TranscriptCorrelation.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
+          [TranscriptFixtures.TranscriptCorrelation.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
         },
         turnStatus: "failed",
         followed,
@@ -2614,17 +2650,24 @@ describe("InteractiveSession subagent reload", () => {
 
   it.effect("resumes an exact empty child checkpoint from its durable event suffix", () =>
     Effect.gen(function* () {
-      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents)
-      const brokenTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
-        { parentId: subagentToolId, projection: TranscriptProjection.Projection.empty(subagentChildId, "") },
+      const rootProjection = TranscriptFixtures.TranscriptProjection.Projection.project(
+        "done",
+        "delegate",
+        subagentRootEvents,
+      )
+      const brokenTree = TranscriptFixtures.TranscriptNestedProjection.withNestedProjections(rootProjection, [
+        {
+          parentId: subagentToolId,
+          projection: TranscriptFixtures.TranscriptProjection.Projection.empty(subagentChildId, ""),
+        },
       ])
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: { ...brokenTree, pricingVersion: TranscriptUsage.pricingVersion },
+        storedTree: { ...brokenTree, pricingVersion: TranscriptFixtures.TranscriptUsage.pricingVersion },
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         consumed: {
           done: { cursor: "done-final", sequence: 5, status: "completed" },
-          [TranscriptCorrelation.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
+          [TranscriptFixtures.TranscriptCorrelation.executionKey(subagentChildId)]: { cursor: "", sequence: -1 },
         },
       })
       const { entries, events } = yield* selectionEntriesFor(session, subagentThread.id, nestedSubagentReady)
@@ -2633,15 +2676,17 @@ describe("InteractiveSession subagent reload", () => {
       for (
         let attempt = 0;
         attempt < 400 &&
-        (yield* transcripts.get(Turn.TurnId.make("done")))?.executionCheckpoints.find(
-          (checkpoint) => checkpoint.executionKey === TranscriptCorrelation.executionKey(subagentChildId),
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.executionCheckpoints.find(
+          (checkpoint) =>
+            checkpoint.executionKey === TranscriptFixtures.TranscriptCorrelation.executionKey(subagentChildId),
         )?.cursor !== "childdone~a4";
         attempt += 1
       )
         yield* Effect.yieldNow
       expect(
-        (yield* transcripts.get(Turn.TurnId.make("done")))?.executionCheckpoints.find(
-          (checkpoint) => checkpoint.executionKey === TranscriptCorrelation.executionKey(subagentChildId),
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.executionCheckpoints.find(
+          (checkpoint) =>
+            checkpoint.executionKey === TranscriptFixtures.TranscriptCorrelation.executionKey(subagentChildId),
         ),
       ).toMatchObject({ cursor: "childdone~a4", status: "completed" })
       expect(
@@ -2669,11 +2714,11 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       const followed = yield* Ref.make<ReadonlyArray<string>>([])
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptFixtures.TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: [],
         followed,
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => ({
           turnId: executionId,
           status: "completed",
@@ -2685,8 +2730,8 @@ describe("InteractiveSession subagent reload", () => {
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
-      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(stored?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
+      expect(stored?.projectionVersion).toBe(RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
       expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === subagentChildId)).toBeUndefined()
       const failedFollows = yield* Ref.get(followed)
 
@@ -2699,14 +2744,14 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("keeps an invalidated projection empty when Relay cannot refold its child", () =>
     Effect.gen(function* () {
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptFixtures.TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-later",
         childReplayEvents: [],
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       })
       yield* selectionEntriesFor(session, subagentThread.id)
-      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(stored?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
+      expect(stored?.projectionVersion).toBe(RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
       expect(stored?.units).toEqual([])
       expect(stored?.executionCheckpoints).toEqual([])
     }),
@@ -2714,18 +2759,26 @@ describe("InteractiveSession subagent reload", () => {
 
   it.effect("does not replay a refolded terminal child tree when the thread reopens", () =>
     Effect.gen(function* () {
-      const rootProjection = TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents)
-      const childProjection = TranscriptProjection.Projection.project(subagentChildId, "", subagentChildEvents)
+      const rootProjection = TranscriptFixtures.TranscriptProjection.Projection.project(
+        "done",
+        "delegate",
+        subagentRootEvents,
+      )
+      const childProjection = TranscriptFixtures.TranscriptProjection.Projection.project(
+        subagentChildId,
+        "",
+        subagentChildEvents,
+      )
       const attributedChildEvents = subagentChildEvents.map((event) => ({
         ...event,
         childExecutionId: subagentChildId,
       }))
-      const storedTree = TranscriptNestedProjection.withNestedProjections(rootProjection, [
+      const storedTree = TranscriptFixtures.TranscriptNestedProjection.withNestedProjections(rootProjection, [
         { parentId: subagentToolId, projection: childProjection },
       ])
       let inspections = 0
       let eventPages = 0
-      const inspection = (executionId: string): ExecutionBackend.Inspection => {
+      const inspection = (executionId: string): RuntimeFixtures.ExecutionBackend.Inspection => {
         inspections += 1
         return {
           turnId: executionId,
@@ -2741,7 +2794,7 @@ describe("InteractiveSession subagent reload", () => {
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
         inspection,
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         replayEvents: (executionId) => {
           eventPages += 1
           if (executionId === "done") return subagentRootEvents
@@ -2765,10 +2818,10 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       let inspections = 0
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptFixtures.TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: [],
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => {
           inspections += 1
           return {
@@ -2789,8 +2842,8 @@ describe("InteractiveSession subagent reload", () => {
         attempt += 1
       )
         yield* Effect.yieldNow
-      expect((yield* transcripts.get(Turn.TurnId.make("done")))?.projectionVersion).toBe(
-        TranscriptRepository.invalidatedProjectionVersion,
+      expect((yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion).toBe(
+        RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       )
       expect(events.some((event) => event._tag === "TranscriptProjectionFailed")).toBe(true)
       const firstInspections = inspections
@@ -2803,10 +2856,10 @@ describe("InteractiveSession subagent reload", () => {
     Effect.gen(function* () {
       let childAvailable = false
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptFixtures.TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => {
           if (executionId !== "done")
             return childAvailable
@@ -2830,8 +2883,8 @@ describe("InteractiveSession subagent reload", () => {
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
-      const unreadable = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(unreadable?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      const unreadable = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
+      expect(unreadable?.projectionVersion).toBe(RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
       expect(
         unreadable?.executionCheckpoints.find((entry) => entry.executionKey === subagentChildId)?.status,
       ).toBeUndefined()
@@ -2841,11 +2894,12 @@ describe("InteractiveSession subagent reload", () => {
       for (
         let attempt = 0;
         attempt < 400 &&
-        (yield* transcripts.get(Turn.TurnId.make("done")))?.projectionVersion !== ExecutionIngest.projectionVersion;
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion !==
+          ExecutionIngest.projectionVersion;
         attempt += 1
       )
         yield* Effect.yieldNow
-      const readable = yield* transcripts.get(Turn.TurnId.make("done"))
+      const readable = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
       expect(readable?.executionCheckpoints.find((entry) => entry.executionKey === subagentChildId)?.status).toBe(
         "completed",
       )
@@ -2865,10 +2919,10 @@ describe("InteractiveSession subagent reload", () => {
       const lateChild = `${subagentChildId}:late`
       let rootInspections = 0
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptFixtures.TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         inspection: (executionId) => {
           if (executionId === "done") rootInspections += 1
           return {
@@ -2892,12 +2946,13 @@ describe("InteractiveSession subagent reload", () => {
       for (
         let attempt = 0;
         attempt < 400 &&
-        (yield* transcripts.get(Turn.TurnId.make("done")))?.projectionVersion !== ExecutionIngest.projectionVersion;
+        (yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done")))?.projectionVersion !==
+          ExecutionIngest.projectionVersion;
         attempt += 1
       )
         yield* Effect.yieldNow
       expect(rootInspections).toBeGreaterThan(1)
-      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
       expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
       expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === lateChild)).toBeUndefined()
     }),
@@ -2905,7 +2960,7 @@ describe("InteractiveSession subagent reload", () => {
 
   it.effect("refolds only durable root and child events and excludes stale stored children", () =>
     Effect.gen(function* () {
-      const staleChild = TranscriptProjection.Projection.project(subagentChildId, "", [
+      const staleChild = TranscriptFixtures.TranscriptProjection.Projection.project(subagentChildId, "", [
         ...subagentChildEvents,
         {
           cursor: "stale-child",
@@ -2915,7 +2970,7 @@ describe("InteractiveSession subagent reload", () => {
           text: "stale stored child",
         },
       ])
-      const orphan = TranscriptProjection.Projection.project("orphan-child", "", [
+      const orphan = TranscriptFixtures.TranscriptProjection.Projection.project("orphan-child", "", [
         {
           cursor: "orphan-answer",
           sequence: 200,
@@ -2924,8 +2979,8 @@ describe("InteractiveSession subagent reload", () => {
           text: "orphan stored child",
         },
       ])
-      const staleTree = TranscriptNestedProjection.withNestedProjections(
-        TranscriptProjection.Projection.project("done", "wrong stored prompt", subagentRootEvents),
+      const staleTree = TranscriptFixtures.TranscriptNestedProjection.withNestedProjections(
+        TranscriptFixtures.TranscriptProjection.Projection.project("done", "wrong stored prompt", subagentRootEvents),
         [{ parentId: subagentToolId, projection: staleChild }],
       )
       const staleParent = staleTree.units.find(
@@ -2935,7 +2990,12 @@ describe("InteractiveSession subagent reload", () => {
         ...staleTree,
         units: staleTree.units.concat(
           orphan.units.map((unit) =>
-            TranscriptNestedProjection.attachUnit(unit, staleParent, "orphan-parent", "orphan-child"),
+            TranscriptFixtures.TranscriptNestedProjection.attachUnit(
+              unit,
+              staleParent,
+              "orphan-parent",
+              "orphan-child",
+            ),
           ),
         ),
       }
@@ -2943,7 +3003,7 @@ describe("InteractiveSession subagent reload", () => {
         storedTree,
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         replayEvents: (executionId) => (executionId === "done" ? subagentRootEvents : subagentChildEvents),
         inspection: (executionId) => ({
           turnId: executionId,
@@ -2956,7 +3016,7 @@ describe("InteractiveSession subagent reload", () => {
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
-      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
+      const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
       expect(stored?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
       expect(stored?.units.some((unit) => unit.content._tag === "Entry" && unit.content.text === "delegate")).toBe(true)
       expect(
@@ -2971,32 +3031,32 @@ describe("InteractiveSession subagent reload", () => {
   it.effect("does not promote a refold when Relay cannot replay the root", () =>
     Effect.gen(function* () {
       const { session, subagentThread, transcripts } = yield* makeSubagentReloadHarness({
-        storedTree: TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
+        storedTree: TranscriptFixtures.TranscriptProjection.Projection.project("done", "delegate", subagentRootEvents),
         turnLastCursor: "done-final",
         childReplayEvents: subagentChildEvents,
-        projectionVersion: TranscriptRepository.invalidatedProjectionVersion,
+        projectionVersion: RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
         replayEvents: (executionId) => (executionId === subagentChildId ? subagentChildEvents : []),
       })
 
       yield* selectionEntriesFor(session, subagentThread.id)
-      const stored = yield* transcripts.get(Turn.TurnId.make("done"))
-      expect(stored?.projectionVersion).toBe(TranscriptRepository.invalidatedProjectionVersion)
+      const stored = yield* transcripts.get(RuntimeFixtures.Turn.TurnId.make("done"))
+      expect(stored?.projectionVersion).toBe(RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion)
       expect(stored?.executionCheckpoints.find((entry) => entry.executionKey === "done")).toBeUndefined()
     }),
   )
 })
 
 const spendThread = thread("spend-thread", 1)
-const spendTurnId = Turn.TurnId.make("spend-turn")
+const spendTurnId = RuntimeFixtures.Turn.TurnId.make("spend-turn")
 const spendExecutionId = String(spendTurnId)
 
 const stamped = (
   cursor: string,
-  type: ExecutionBackend.Event["type"],
+  type: RuntimeFixtures.ExecutionBackend.Event["type"],
   createdAt: number,
   sequence: number,
   fields: Record<string, unknown> = {},
-): ExecutionBackend.Event =>
+): RuntimeFixtures.ExecutionBackend.Event =>
   ({
     executionId: spendExecutionId,
     cursor,
@@ -3005,9 +3065,9 @@ const stamped = (
     createdAt,
     timestampSource: "server",
     ...fields,
-  }) as ExecutionBackend.Event
+  }) as RuntimeFixtures.ExecutionBackend.Event
 
-const spendEvents: ReadonlyArray<ExecutionBackend.Event> = [
+const spendEvents: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [
   stamped("spend-started", "execution.started", 10_000, 1),
   stamped("spend-usage", "model.attempt.completed", 20_000, 2, {
     data: { model_attempt_id: "spend-attempt", attempt: 1, cost: { amount: 0.75, currency: "USD" } },
@@ -3017,11 +3077,11 @@ const spendEvents: ReadonlyArray<ExecutionBackend.Event> = [
 
 const spendCompleted = stamped("spend-completed", "execution.completed", 40_000, 4)
 
-const spendTimeline: ReadonlyArray<ExecutionBackend.Event> = [...spendEvents, spendCompleted]
+const spendTimeline: ReadonlyArray<RuntimeFixtures.ExecutionBackend.Event> = [...spendEvents, spendCompleted]
 
 const legacyUsageRow = () => {
-  const folded = UsageCost.foldBatch(
-    UsageCost.empty,
+  const folded = TranscriptFixtures.UsageCost.foldBatch(
+    TranscriptFixtures.UsageCost.empty,
     spendTimeline.map((event) => ({
       threadId: String(spendThread.id),
       turnId: String(spendTurnId),
@@ -3031,11 +3091,11 @@ const legacyUsageRow = () => {
   )
   if (Result.isFailure(folded)) throw folded.failure
   const snapshot = folded.success
-  const totals = UsageCost.materialize(snapshot, String(spendTurnId), String(spendThread.id))
+  const totals = TranscriptFixtures.UsageCost.materialize(snapshot, String(spendTurnId), String(spendThread.id))
   return {
     foldJson: JSON.stringify({
-      ...(JSON.parse(UsageCost.serialize(snapshot)) as Record<string, unknown>),
-      version: UsageCost.foldVersion - 1,
+      ...(JSON.parse(TranscriptFixtures.UsageCost.serialize(snapshot)) as Record<string, unknown>),
+      version: TranscriptFixtures.UsageCost.foldVersion - 1,
     }),
     totals: {
       ...(totals.costNanoUsd === undefined ? {} : { costNanoUsd: totals.costNanoUsd }),
@@ -3051,10 +3111,10 @@ const legacyUsageRow = () => {
 
 const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(function* (options: {
   readonly gate?: Deferred.Deferred<void>
-  readonly turnStatus?: Turn.Status
+  readonly turnStatus?: RuntimeFixtures.Turn.Status
   readonly legacy?: boolean
 }) {
-  const spendTurn: Turn.AgentExecutionTurn = {
+  const spendTurn: RuntimeFixtures.Turn.AgentExecutionTurn = {
     _tag: "AgentExecution",
     id: spendTurnId,
     threadId: spendThread.id,
@@ -3068,25 +3128,29 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
     updatedAt: 1,
     ...(options.turnStatus === undefined ? {} : { lastCursor: "spend-completed" }),
   }
-  const repositories = yield* ThreadRepository.makeMemory([spendThread])
-  const turns = yield* TurnRepository.makeMemory([spendTurn])
+  const repositories = yield* RuntimeFixtures.ThreadRepository.makeMemory([spendThread])
+  const turns = yield* RuntimeFixtures.TurnRepository.makeMemory([spendTurn])
   const sessions = yield* Ref.make<ReadonlyArray<Operation.InteractiveSession>>([])
   const transcripts =
     options.legacy === true
-      ? yield* TranscriptRepository.makeMemory({
+      ? yield* RuntimeFixtures.TranscriptRepository.makeMemory({
           initial: [
             invalidatedProjection(
               spendTurn,
-              TranscriptProjection.Projection.project(String(spendTurnId), spendTurn.prompt, spendTimeline).revision,
+              TranscriptFixtures.TranscriptProjection.Projection.project(
+                String(spendTurnId),
+                spendTurn.prompt,
+                spendTimeline,
+              ).revision,
             ),
           ],
           turns,
         })
-      : yield* TranscriptRepository.makeMemory({ turns })
+      : yield* RuntimeFixtures.TranscriptRepository.makeMemory({ turns })
   const follows = yield* Ref.make(0)
   const blocked = yield* Ref.make(0)
   const legacy = options.legacy === true ? legacyUsageRow() : undefined
-  const usage = yield* UsageRepository.makeMemory({
+  const usage = yield* RuntimeFixtures.UsageRepository.makeMemory({
     initial:
       legacy === undefined
         ? []
@@ -3096,7 +3160,7 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
               turnId: String(spendTurnId),
               threadId: String(spendThread.id),
               revision: 1,
-              projectionVersion: UsageRepository.projectionVersion - 1,
+              projectionVersion: RuntimeFixtures.UsageRepository.projectionVersion - 1,
               foldJson: legacy.foldJson,
               ...legacy.totals,
             },
@@ -3109,7 +3173,7 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
     pendingTools: [],
     children: [],
   }
-  const backend = ExecutionBackend.Service.of({
+  const backend = RuntimeFixtures.ExecutionBackend.Service.of({
     invokeChild: (input) => Effect.succeed({ ...input, type: "accepted" }),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
@@ -3175,11 +3239,11 @@ const makeSpendHarness = Effect.fn("InteractiveSessionTest.makeSpendHarness")(fu
     resolveInvocationSource: () => Effect.die("unused"),
   })
   const layer = productLayer({
-    repositoryLayer: Layer.succeed(ThreadRepository.Service, repositories),
-    turnRepositoryLayer: Layer.succeed(TurnRepository.Service, turns),
-    transcriptRepositoryLayer: Layer.succeed(TranscriptRepository.Service, transcripts),
-    usageRepositoryLayer: Layer.succeed(UsageRepository.Service, usage),
-    backendLayer: Layer.succeed(ExecutionBackend.Service, backend),
+    repositoryLayer: Layer.succeed(RuntimeFixtures.ThreadRepository.Service, repositories),
+    turnRepositoryLayer: Layer.succeed(RuntimeFixtures.TurnRepository.Service, turns),
+    transcriptRepositoryLayer: Layer.succeed(RuntimeFixtures.TranscriptRepository.Service, transcripts),
+    usageRepositoryLayer: Layer.succeed(RuntimeFixtures.UsageRepository.Service, usage),
+    backendLayer: Layer.succeed(RuntimeFixtures.ExecutionBackend.Service, backend),
     defaultWorkspace: "/work",
     makeThreadId: Effect.die("unused"),
     makeTurnId: Effect.die("unused"),
@@ -3278,7 +3342,7 @@ describe("InteractiveSession persisted usage", () => {
         Effect.andThen(Effect.forEach(Array.from({ length: 100 }), () => Effect.yieldNow, { discard: true })),
       )
       expect((yield* transcripts.get(spendTurnId))?.projectionVersion).toBe(
-        TranscriptRepository.invalidatedProjectionVersion,
+        RuntimeFixtures.TranscriptRepository.invalidatedProjectionVersion,
       )
       expect((yield* transcripts.get(spendTurnId))?.executionCheckpoints).toEqual([])
       expect((yield* usage.readTurn(String(spendTurnId)))?.costNanoUsd).toBe(750_000_000)
@@ -3303,7 +3367,7 @@ describe("InteractiveSession persisted usage", () => {
       expect(refolded?.projectionVersion).toBe(ExecutionIngest.projectionVersion)
       expect(
         refolded?.executionCheckpoints.find(
-          (entry) => entry.executionKey === TranscriptCorrelation.executionKey(String(spendTurnId)),
+          (entry) => entry.executionKey === TranscriptFixtures.TranscriptCorrelation.executionKey(String(spendTurnId)),
         )?.status,
       ).toBe("completed")
       expect(persistedTurn?.activeMillis).toBe(30_000)

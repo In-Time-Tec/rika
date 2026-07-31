@@ -1,3 +1,7 @@
+import * as WebSearchInput from "@rika/coding-tools/web-search-input-contract"
+import * as WebSearchResult from "@rika/coding-tools/web-search-result-contract"
+import * as WebSearchProvider from "@rika/coding-tools/web-search-provider-contract"
+import * as WebSearchProviderImpl from "@rika/coding-tools/web-search-provider"
 import { describe, expect, it } from "@effect/vitest"
 import { Clock, Effect, Fiber, Layer, Redacted, Schema } from "effect"
 import { TestClock } from "effect/testing"
@@ -10,9 +14,9 @@ const result = { url: "https://example.com", title: null, publishedAt: null, exc
 const makeProvider = (
   id: string,
   priority: number,
-  capabilities: ReadonlyArray<WebSearch.Capability> = ["web"],
-  search: WebSearch.SearchProvider["search"] = () => Effect.succeed({ results: [result] }),
-): WebSearch.SearchProvider => ({ id, priority, capabilities: new Set(capabilities), search })
+  capabilities: ReadonlyArray<WebSearchInput.Capability> = ["web"],
+  search: WebSearchProvider.SearchProvider["search"] = () => Effect.succeed({ results: [result] }),
+): WebSearchProvider.SearchProvider => ({ id, priority, capabilities: new Set(capabilities), search })
 
 const response = (httpRequest: HttpClientRequest.HttpClientRequest, body: unknown, status = 200, headers = {}) =>
   HttpClientResponse.fromWeb(
@@ -39,10 +43,10 @@ const body = (httpRequest: HttpClientRequest.HttpClientRequest) => {
 describe("WebSearch registry", () => {
   it("selects the read-page credential and reserves GitHub-kind search for GitHub through the provider registry", () => {
     const parallel = Redacted.make("parallel")
-    expect(WebSearch.configuredReadPageCredential({ exa: Redacted.make("exa") })).toBeUndefined()
-    expect(WebSearch.configuredReadPageCredential({ exa: Redacted.make("exa"), parallel })).toBe(parallel)
+    expect(WebSearchProviderImpl.configuredReadPageCredential({ exa: Redacted.make("exa") })).toBeUndefined()
+    expect(WebSearchProviderImpl.configuredReadPageCredential({ exa: Redacted.make("exa"), parallel })).toBe(parallel)
     expect(
-      WebSearch.providerRegistry.flatMap(({ id, capabilities }) =>
+      WebSearchProviderImpl.providerRegistry.flatMap(({ id, capabilities }) =>
         capabilities.some((capability) => capability === "github") ? [id] : [],
       ),
     ).toEqual(["github"])
@@ -92,7 +96,7 @@ describe("WebSearch registry", () => {
   it.effect("reports partial failures and fails when every automatically selected provider fails", () =>
     Effect.gen(function* () {
       const failed = makeProvider("failed", 2, ["web"], () =>
-        Effect.fail(WebSearch.ProviderFailure.make({ provider: "failed", kind: "timeout", message: "late" })),
+        Effect.fail(WebSearchResult.ProviderFailure.make({ provider: "failed", kind: "timeout", message: "late" })),
       )
       const search = WebSearch.make([makeProvider("ok", 1), failed])
       const partial = yield* search.search({ ...input, strategy: "compare" })
@@ -114,7 +118,11 @@ describe("WebSearch registry", () => {
           attemptTimes.push(yield* Clock.currentTimeMillis)
           transientAttempts += 1
           return transientAttempts === 1
-            ? yield* WebSearch.ProviderFailure.make({ provider: "transient", kind: "transport", message: "reset" })
+            ? yield* WebSearchResult.ProviderFailure.make({
+                provider: "transient",
+                kind: "transport",
+                message: "reset",
+              })
             : { results: [result] }
         }),
       )
@@ -129,7 +137,7 @@ describe("WebSearch registry", () => {
         let attempts = 0
         const provider = makeProvider(kind, 1, ["web"], () => {
           attempts += 1
-          return Effect.fail(WebSearch.ProviderFailure.make({ provider: kind, kind, message: kind }))
+          return Effect.fail(WebSearchResult.ProviderFailure.make({ provider: kind, kind, message: kind }))
         })
         yield* Effect.flip(WebSearch.make([provider]).search(input))
         expect(attempts).toBe(1)
@@ -160,7 +168,7 @@ describe("WebSearch HTTP providers", () => {
       { preconnect: () => {} },
     )
     return Effect.gen(function* () {
-      const parallel = yield* WebSearch.parallel({
+      const parallel = yield* WebSearchProviderImpl.parallel({
         apiKey: Redacted.make("parallel"),
         baseUrl: "https://parallel.test",
         fetch,
@@ -185,7 +193,7 @@ describe("WebSearch HTTP providers", () => {
   it.effect("builds and normalizes Exa web and code requests", () => {
     const captured: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function* () {
-      const exa = yield* WebSearch.exa({ apiKey: Redacted.make("exa"), baseUrl: "https://exa.test" })
+      const exa = yield* WebSearchProviderImpl.exa({ apiKey: Redacted.make("exa"), baseUrl: "https://exa.test" })
       expect([...exa.capabilities]).toEqual(["web", "code"])
       const webResult = yield* exa.search({ ...input, kind: "web", strategy: "auto" })
       const codeResult = yield* exa.search({ ...input, kind: "code", strategy: "auto" })
@@ -211,8 +219,14 @@ describe("WebSearch HTTP providers", () => {
   it.effect("builds Firecrawl web and GitHub REST requests without treating Firecrawl as GitHub search", () => {
     const captured: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function* () {
-      const firecrawl = yield* WebSearch.firecrawl({ apiKey: Redacted.make("fire"), baseUrl: "https://fire.test" })
-      const github = yield* WebSearch.github({ apiKey: Redacted.make("github"), baseUrl: "https://github.test" })
+      const firecrawl = yield* WebSearchProviderImpl.firecrawl({
+        apiKey: Redacted.make("fire"),
+        baseUrl: "https://fire.test",
+      })
+      const github = yield* WebSearchProviderImpl.github({
+        apiKey: Redacted.make("github"),
+        baseUrl: "https://github.test",
+      })
       expect([...firecrawl.capabilities]).toEqual(["web"])
       const fireResult = yield* firecrawl.search({ ...input, kind: "web", strategy: "auto" })
       const githubResult = yield* github.search({
@@ -248,11 +262,14 @@ describe("WebSearch HTTP providers", () => {
 
   it.effect("normalizes authentication, rate-limit, and malformed response failures", () =>
     Effect.gen(function* () {
-      const missing = yield* WebSearch.parallel({})
+      const missing = yield* WebSearchProviderImpl.parallel({})
       expect((yield* Effect.flip(missing.search({ ...input, kind: "web", strategy: "auto" }))).kind).toBe(
         "authentication",
       )
-      const limited = yield* WebSearch.github({ apiKey: Redacted.make("key"), baseUrl: "https://github.test" })
+      const limited = yield* WebSearchProviderImpl.github({
+        apiKey: Redacted.make("key"),
+        baseUrl: "https://github.test",
+      })
       expect((yield* Effect.flip(limited.search({ ...input, kind: "github", strategy: "auto" }))).kind).toBe(
         "rate-limit",
       )

@@ -1,20 +1,15 @@
 import { Effect, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import * as WebSearch from "./web-search-service"
-
-export interface ProviderOptions {
-  readonly apiKey?: Redacted.Redacted<string>
-  readonly baseUrl?: string
-  readonly priority?: number
-  readonly fetch?: typeof globalThis.fetch
-}
+import * as Request from "./web-search-provider-contract"
+import * as Result from "./web-search-result-contract"
+import type { ProviderOptions } from "./web-search-provider-options"
 
 const unknownJson = Schema.UnknownFromJsonString
 const decodeBody = (response: HttpClientResponse.HttpClientResponse) =>
   response.text.pipe(Effect.flatMap(Schema.decodeEffect(unknownJson)))
 
-const failure = (provider: string, kind: WebSearch.ProviderFailureKind, message: string) =>
-  WebSearch.ProviderFailure.make({ provider, kind, message })
+const failure = (provider: string, kind: Result.ProviderFailureKind, message: string) =>
+  Result.ProviderFailure.make({ provider, kind, message })
 
 const mapTransport = (provider: string, cause: unknown) => {
   const message = String(cause)
@@ -35,7 +30,7 @@ const execute = (
   client: HttpClient.HttpClient,
   provider: string,
   request: HttpClientRequest.HttpClientRequest,
-): Effect.Effect<unknown, WebSearch.ProviderFailure> =>
+): Effect.Effect<unknown, Result.ProviderFailure> =>
   Effect.gen(function* () {
     const response = yield* client.execute(request).pipe(Effect.mapError((cause) => mapTransport(provider, cause)))
     if (response.status < 200 || response.status >= 300) {
@@ -56,7 +51,7 @@ const credential = (provider: string, name: string, apiKey: ProviderOptions["api
     ? Effect.fail(failure(provider, "authentication", `${name} is not configured`))
     : Effect.succeed(Redacted.value(apiKey))
 
-const object = (provider: string, value: unknown): Effect.Effect<Record<string, unknown>, WebSearch.ProviderFailure> =>
+const object = (provider: string, value: unknown): Effect.Effect<Record<string, unknown>, Result.ProviderFailure> =>
   typeof value === "object" && value !== null && !Array.isArray(value)
     ? Effect.succeed(value as Record<string, unknown>)
     : Effect.fail(failure(provider, "response", "Malformed response: expected an object"))
@@ -67,7 +62,7 @@ const excerpts = (value: unknown) => array(value).flatMap((item) => (typeof item
 const urlResult = (
   item: Record<string, unknown>,
   excerptValues: ReadonlyArray<string>,
-): WebSearch.SearchResult | undefined => {
+): Result.SearchResult | undefined => {
   const url = text(item.url) ?? text(item.html_url)
   if (url === null) return undefined
   return {
@@ -104,8 +99,8 @@ const ParallelRequestJson = Schema.fromJsonString(
 const parallelRequest = (
   options: ProviderOptions,
   key: string,
-  request: WebSearch.SearchRequest,
-): Effect.Effect<typeof ParallelResponse.Type, WebSearch.ProviderFailure> => {
+  request: Request.SearchRequest,
+): Effect.Effect<typeof ParallelResponse.Type, Result.ProviderFailure> => {
   const body = Schema.encodeSync(ParallelRequestJson)({
     objective: request.objective,
     search_queries: [...request.searchQueries],
@@ -144,7 +139,7 @@ const parallelRequest = (
   })
 }
 
-const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
+const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
   id: "parallel",
   capabilities: new Set(["web"]),
   priority: options.priority ?? 100,
@@ -164,9 +159,9 @@ const makeParallel = (_client: HttpClient.HttpClient, options: ProviderOptions):
 })
 
 const exaHeaders = (key: string) => ({ "x-api-key": key })
-const combinedQuery = (request: WebSearch.SearchRequest) => [request.objective, ...request.searchQueries].join("\n")
+const combinedQuery = (request: Request.SearchRequest) => [request.objective, ...request.searchQueries].join("\n")
 
-const makeExa = (client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
+const makeExa = (client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
   id: "exa",
   capabilities: new Set(["web", "code"]),
   priority: options.priority ?? 90,
@@ -210,7 +205,7 @@ const makeExa = (client: HttpClient.HttpClient, options: ProviderOptions): WebSe
     }),
 })
 
-const makeFirecrawl = (client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
+const makeFirecrawl = (client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
   id: "firecrawl",
   capabilities: new Set(["web"]),
   priority: options.priority ?? 80,
@@ -254,7 +249,7 @@ const githubExcerpts = (item: Record<string, unknown>) => {
   return matches.concat([item.body, item.description].flatMap((value) => (typeof value === "string" ? [value] : [])))
 }
 
-const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): WebSearch.SearchProvider => ({
+const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): Request.SearchProvider => ({
   id: "github",
   capabilities: new Set(["github"]),
   priority: options.priority ?? 100,
@@ -292,7 +287,7 @@ const makeGithub = (client: HttpClient.HttpClient, options: ProviderOptions): We
 })
 
 const providerFactory =
-  (make: (client: HttpClient.HttpClient, options: ProviderOptions) => WebSearch.SearchProvider) =>
+  (make: (client: HttpClient.HttpClient, options: ProviderOptions) => Request.SearchProvider) =>
   (options: ProviderOptions) =>
     Effect.map(HttpClient.HttpClient, (client) => make(client, options))
 
@@ -352,8 +347,3 @@ export const configuredReadPageCredential = (credentials: Readonly<Record<string
   const descriptor = providerRegistry.find((provider) => provider.readPage && credentials[provider.id] !== undefined)
   return descriptor === undefined ? undefined : credentials[descriptor.id]
 }
-
-export const providerAvailability = (credentials: Readonly<Record<string, Redacted.Redacted<string>>>) => ({
-  search: providerRegistry.some((provider) => credentials[provider.id] !== undefined),
-  readPage: configuredReadPageCredential(credentials) !== undefined,
-})

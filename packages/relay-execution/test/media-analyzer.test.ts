@@ -1,9 +1,9 @@
+import { MediaAnalyzer } from "@rika/coding-tools/media-analysis-service"
 import { TestModel } from "@batonfx/test"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { AiError } from "effect/unstable/ai"
-import * as MediaAnalyzer from "../src/media-analyzer"
+import * as MediaAnalyzerRuntime from "../src/media-analyzer"
 
 describe("MediaAnalyzer", () => {
   it.effect("analyzes attached bytes through the selected registered model", () =>
@@ -12,11 +12,11 @@ describe("MediaAnalyzer", () => {
       const services = yield* Layer.build(
         Layer.merge(
           fixture.registryLayer,
-          MediaAnalyzer.layer(fixture.selection).pipe(Layer.provide(fixture.registryLayer)),
+          MediaAnalyzerRuntime.layer(fixture.selection).pipe(Layer.provide(fixture.registryLayer)),
         ),
       )
       const result = yield* Effect.gen(function* () {
-        const analyzer = yield* MediaView.MediaAnalyzer
+        const analyzer = yield* MediaAnalyzer
         return yield* analyzer.analyze({
           path: "fixture.pdf",
           mimeType: "application/pdf",
@@ -48,11 +48,11 @@ describe("MediaAnalyzer", () => {
       const services = yield* Layer.build(
         Layer.merge(
           fixture.registryLayer,
-          MediaAnalyzer.layer(fixture.selection).pipe(Layer.provide(fixture.registryLayer)),
+          MediaAnalyzerRuntime.layer(fixture.selection).pipe(Layer.provide(fixture.registryLayer)),
         ),
       )
       const failure = yield* Effect.gen(function* () {
-        const analyzer = yield* MediaView.MediaAnalyzer
+        const analyzer = yield* MediaAnalyzer
         return yield* Effect.flip(
           analyzer.analyze({
             path: "image.png",

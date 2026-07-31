@@ -1,157 +1,21 @@
 import { Config, ConfigProvider, Context, Data, Effect, FileSystem, Layer, Option, Path, Schema } from "effect"
 import * as LocalPath from "../workspace/local-path"
 import * as LocalSafetyPolicy from "../policy/local-safety-policy"
-import { Toolkit } from "effect/unstable/ai"
 import * as WebSearchService from "../web-research/web-search-service"
+import * as WebSearchErrors from "../web-research/web-search-errors"
 import * as ReadWebPageService from "../web-research/read-web-page-service"
 import * as ProcessRegistry from "../process/shell-process-registry"
 import * as MediaView from "../media/media-view-service"
-import * as ToolPolicy from "../policy/coding-tool-policy"
 import * as CodingToolResult from "./coding-tool-result"
 import { RuntimeFilesystem } from "./coding-tool-runtime-filesystem"
 import * as WorkspaceIndex from "../workspace/workspace-file-search"
 import { unifiedDiff } from "../workspace/unified-diff"
 
-import * as GrepContract from "../workspace/grep-files-tool"
-import * as ReadContract from "../workspace/read-file-tool"
-import * as WriteContract from "../workspace/write-file-tool"
-import * as EditContract from "../workspace/edit-file-tool"
-import * as BashContract from "../process/bash-tool"
-import * as ShellCommandStatusContract from "../process/shell-command-status-tool"
-import * as WebSearchContract from "../web-research/web-search-tool"
-import * as ReadWebPageContract from "../web-research/read-web-page-tool"
-import * as ViewMediaContract from "../media/view-media-tool"
-
-export const Grep = GrepContract.Request
-export const Read = ReadContract.Request
-export const Write = WriteContract.Request
-export const Edit = EditContract.Request
-export const Bash = BashContract.Request
-export const ShellCommandStatus = ShellCommandStatusContract.Request
-export const WebSearch = WebSearchContract.Request
-export const ReadWebPage = ReadWebPageContract.Request
-export const ViewMedia = ViewMediaContract.Request
-export const Shell = Schema.Struct({
-  _tag: Schema.tag("Shell"),
-  command: Schema.String,
-  args: Schema.Array(Schema.String),
-  cwd: Schema.optionalKey(Schema.String),
-  waitMillis: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-})
-
-export const Request = Schema.Union([
-  Grep,
-  Read,
-  Write,
-  Edit,
-  Bash,
-  Shell,
-  ShellCommandStatus,
-  WebSearch,
-  ReadWebPage,
-  ViewMedia,
-])
-export type Request = typeof Request.Type
-export const Result = CodingToolResult.Result
-export type Result = typeof Result.Type
-
-export class ToolError extends Schema.TaggedErrorClass<ToolError>()("ToolError", {
-  tool: Schema.String,
-  message: Schema.String,
-  kind: Schema.Literals(["operation", "timeout"]),
-  category: CodingToolResult.FailureCategory,
-  outcome: Schema.Literals(["known", "unknown"]),
-  recovery: CodingToolResult.Recovery,
-  nextAction: Schema.String,
-}) {}
-
-export const grepTool = GrepContract.tool
-export const readTool = ReadContract.tool
-export const writeTool = WriteContract.tool
-export const editTool = EditContract.tool
-export const bashTool = BashContract.tool
-export const shellCommandStatusTool = ShellCommandStatusContract.tool
-export const webSearchTool = WebSearchContract.tool
-export const readWebPageTool = ReadWebPageContract.tool
-export const viewMediaTool = ViewMediaContract.tool
-
-export const registrations: ReadonlyArray<ToolPolicy.Registration> = [
-  GrepContract.registration,
-  ReadContract.registration,
-  WriteContract.registration,
-  EditContract.registration,
-  BashContract.registration,
-  ShellCommandStatusContract.registration,
-  WebSearchContract.registration,
-  ReadWebPageContract.registration,
-  ViewMediaContract.registration,
-]
-
-export const toolkit = Toolkit.make(
-  grepTool,
-  readTool,
-  writeTool,
-  editTool,
-  bashTool,
-  shellCommandStatusTool,
-  webSearchTool,
-  readWebPageTool,
-  viewMediaTool,
-)
-
-const policyForName = (name: string) => registrations.find((registration) => registration.tool.name === name)?.policy
-const toolName = (request: Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
-const contract = (request: Request) => policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
-
-export const handlerLayer = toolkit.toLayer(
-  Effect.gen(function* () {
-    const runtime = yield* Service
-    return {
-      grep: ({ pattern, regex }) => runtime.run({ _tag: "Grep", pattern, regex }),
-      read: ({ path, read_range }) =>
-        runtime.run({ _tag: "Read", path, ...(read_range === undefined ? {} : { readRange: read_range }) }),
-      write: ({ path, content }) => runtime.run({ _tag: "Write", path, content }),
-      edit: ({ path, old_str, new_str, replace_all }) =>
-        runtime.run({
-          _tag: "Edit",
-          path,
-          oldStr: old_str,
-          newStr: new_str,
-          ...(replace_all === undefined ? {} : { replaceAll: replace_all }),
-        }),
-      bash: ({ command, workdir, timeout_ms }) =>
-        runtime.run({
-          _tag: "Bash",
-          command,
-          ...(workdir === undefined ? {} : { workdir }),
-          ...(timeout_ms === undefined ? {} : { timeoutMillis: timeout_ms }),
-        }),
-      shell_command_status: ({ processId, waitMillis }) =>
-        runtime.run({ _tag: "ShellCommandStatus", processId, ...(waitMillis == null ? {} : { waitMillis }) }),
-      web_search: ({ objective, searchQueries, kind, strategy, githubSearchType }) =>
-        runtime.run({
-          _tag: "WebSearch",
-          objective,
-          searchQueries,
-          ...(kind === undefined ? {} : { kind }),
-          ...(strategy === undefined ? {} : { strategy }),
-          ...(githubSearchType === undefined ? {} : { githubSearchType }),
-        }),
-      read_web_page: ({ url, objective, fullContent, forceRefetch }) =>
-        runtime.run({
-          _tag: "ReadWebPage",
-          url,
-          ...(objective === undefined ? {} : { objective }),
-          ...(fullContent === undefined ? {} : { fullContent }),
-          ...(forceRefetch === undefined ? {} : { forceRefetch }),
-        }),
-      view_media: ({ path }) => runtime.run({ _tag: "ViewMedia", path }),
-    }
-  }),
-)
+import * as RuntimeContract from "./coding-tool-runtime-contract"
+import * as RuntimeTools from "./coding-tool-runtime-tools"
 
 export interface Interface {
-  readonly run: (request: Request) => Effect.Effect<Result, ToolError>
+  readonly run: (request: RuntimeContract.Request) => Effect.Effect<RuntimeContract.Result, RuntimeContract.ToolError>
 }
 
 export class Service extends Context.Service<Service, Interface>()(
@@ -159,8 +23,15 @@ export class Service extends Context.Service<Service, Interface>()(
 ) {}
 
 const maxOutput = 40_000
-const bounded = (text: string, limit = maxOutput): Result => RuntimeFilesystem.boundedText<Result>(text, limit)
-const boundResult = (request: Request, result: Result): Result => {
+const bounded = (text: string, limit = maxOutput): RuntimeContract.Result =>
+  RuntimeFilesystem.boundedText<RuntimeContract.Result>(text, limit)
+const policyForName = (name: string) =>
+  RuntimeTools.registrations.find((registration) => registration.tool.name === name)?.policy
+const toolName = (request: RuntimeContract.Request) => request._tag.replaceAll(/([a-z])([A-Z])/g, "$1_$2").toLowerCase()
+const contract = (request: RuntimeContract.Request) =>
+  policyForName(request._tag === "Shell" ? "bash" : toolName(request))!
+
+const boundResult = (request: RuntimeContract.Request, result: RuntimeContract.Result): RuntimeContract.Result => {
   const limit = contract(request).outputLimit
   let remaining = limit
   const trim = (value: string | undefined) => {
@@ -207,7 +78,7 @@ const tagOf = (cause: unknown) =>
 
 const operationError = (cause: unknown): RuntimeOperationError => {
   if (cause instanceof RuntimeOperationError) return cause
-  if (Schema.is(WebSearchService.SelectionError)(cause))
+  if (Schema.is(WebSearchErrors.SelectionError)(cause))
     return runtimeError({
       category: "dependency_unavailable",
       message: cause.message,
@@ -215,7 +86,7 @@ const operationError = (cause: unknown): RuntimeOperationError => {
       recovery: "after_change",
       nextAction: "Configure a provider that supports this search kind or choose a configured search kind",
     })
-  if (Schema.is(WebSearchService.ExecutionError)(cause)) {
+  if (Schema.is(WebSearchErrors.ExecutionError)(cause)) {
     const rateLimited =
       cause.outcomes.length > 0 && cause.outcomes.every((outcome) => outcome.error?.kind === "rate-limit")
     return rateLimited
@@ -306,7 +177,7 @@ const actionableMessage = (details: FailureDetails) =>
     details.outcome === "known" ? "The call did not change state." : "The call may have changed state."
   } Next action: ${details.nextAction.replace(/[.\s]+$/, "")}.`
 
-const toolError = (request: Request, cause: unknown, kind: "operation" | "timeout") => {
+const toolError = (request: RuntimeContract.Request, cause: unknown, kind: "operation" | "timeout") => {
   const unsafe = contract(request).idempotency === "unsafe"
   let details: FailureDetails
   if (kind !== "timeout") details = operationError(cause)
@@ -336,7 +207,7 @@ const toolError = (request: Request, cause: unknown, kind: "operation" | "timeou
           nextAction: "Inspect the workspace and process state before deciding whether another call is safe",
         }
       : details
-  return ToolError.make({
+  return RuntimeContract.ToolError.make({
     tool: toolName(request),
     message: actionableMessage(finalDetails),
     kind,

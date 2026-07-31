@@ -1,10 +1,6 @@
-import * as BehaviorMode from "@rika/configuration/behavior-mode"
-import * as ModelRoute from "@rika/configuration/model-route"
-import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
+import * as AgentOutcomes from "@rika/coding-tools/agent-tool-outcomes"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
-import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
@@ -19,7 +15,6 @@ import { AgentDepth } from "@rika/product/execution-service"
 import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
 import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
 import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
 import { Catalog as ToolCatalog } from "@rika/coding-tools/coding-tool-catalog"
 import * as ExecutionExtensions from "@rika/extensions/execution-extension-service"
 import * as PluginRegistry from "@rika/extensions/plugin-registry"
@@ -6367,7 +6362,7 @@ describe("Operation", () => {
   it.effect("projects a truncated subagent as a failed delegation instead of a silent completion", () =>
     Effect.scoped(
       Effect.gen(function* () {
-        const noReport = AgentTools.noReport({
+        const noReport = AgentOutcomes.noReport({
           childExecutionId: "child:execution%3Atruncated-turn:call-1",
           reason:
             "The subagent's final model turn ended before the provider reported why it stopped, so the stream was cut off and no report was produced.",
@@ -6430,7 +6425,7 @@ describe("Operation", () => {
         expect(delegation).toHaveLength(1)
         expect(delegation?.[0]?.status).toBe("failed")
         expect(delegation?.[0]?.output).toContain(noReport.reason)
-        expect(delegation?.[0]?.output).toContain(AgentTools.noReportRecovery)
+        expect(delegation?.[0]?.output).toContain(AgentOutcomes.noReportRecovery)
       }),
     ),
   )

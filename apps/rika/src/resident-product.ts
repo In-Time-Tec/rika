@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
+import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
 import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
@@ -34,11 +37,11 @@ import * as Turn from "@rika/product/turn-record"
 import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
+import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
+import * as McpOAuthStore from "@rika/extensions/mcp-oauth-store"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -139,7 +142,7 @@ class OperationProductError extends Schema.TaggedErrorClass<OperationProductErro
 
 const relayBackendLayerImpl = (
   options: Omit<
-    RelayExecutionBackend.LayerOptions<typeof ThreadTools.allToolkit.tools>,
+    RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.allToolkit.tools>,
     "additionalToolkit" | "additionalHandlerLayer"
   >,
   repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
@@ -156,10 +159,10 @@ const relayBackendLayerImpl = (
     never
   >,
   gateway: ThreadToolService.Gateway,
-): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadTools.allToolkit.tools>> =>
+): ReturnType<typeof RelayExecutionBackend.layer<typeof ThreadToolkits.allToolkit.tools>> =>
   RelayExecutionBackend.layer({
     ...options,
-    additionalToolkit: ThreadTools.allToolkit,
+    additionalToolkit: ThreadToolkits.allToolkit,
     additionalHandlerLayer: Layer.merge(
       Layer.merge(
         ThreadToolHandlers.handlerLayerForWorkspace(
@@ -209,13 +212,13 @@ export const relayBackendLayer: {
     gateway: ThreadToolService.Gateway,
   ): (
     options: Omit<
-      RelayExecutionBackend.LayerOptions<typeof ThreadTools.allToolkit.tools>,
+      RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.allToolkit.tools>,
       "additionalToolkit" | "additionalHandlerLayer"
     >,
   ) => ReturnType<typeof relayBackendLayerImpl>
   (
     options: Omit<
-      RelayExecutionBackend.LayerOptions<typeof ThreadTools.allToolkit.tools>,
+      RelayExecutionBackend.LayerOptions<typeof ThreadToolkits.allToolkit.tools>,
       "additionalToolkit" | "additionalHandlerLayer"
     >,
     repositoryLayer: Layer.Layer<ThreadRepository.Service, ThreadRepository.RepositoryError, never>,
@@ -603,7 +606,7 @@ export const configuredBackendLayer = ({
           return yield* ConfigurationService.effectiveConfiguration().pipe(
             provideLayerScoped(
               ConfigurationService.liveConfigurationLayer({
-                webProviders: WebSearch.providerRegistry,
+                webProviders: WebSearchProvider.providerRegistry,
                 global: globalSettings,
                 workspace: runtimeSettings,
               }),
@@ -737,16 +740,16 @@ export const configuredBackendLayer = ({
               effectiveConfigForWorkspace(runtimeWorkspace).pipe(
                 Effect.flatMap((config) => {
                   const credentials = config.environment.webSearchCredentials
-                  const readPageCredential = WebSearch.configuredReadPageCredential(credentials)
+                  const readPageCredential = WebSearchProvider.configuredReadPageCredential(credentials)
                   return validateWebSearchProviders(credentials).pipe(
                     Effect.as(
                       ToolRuntime.layerWithProcessRegistry(runtimeWorkspace).pipe(
                         Layer.provide(
                           testMediaAnalyzerResponse._tag === "Some"
-                            ? MediaView.analyzerTestLayer(() => Effect.succeed(testMediaAnalyzerResponse.value))
-                            : MediaView.analyzerTestLayer(() =>
+                            ? analyzerTestLayer(() => Effect.succeed(testMediaAnalyzerResponse.value))
+                            : analyzerTestLayer(() =>
                                 Effect.fail(
-                                  MediaView.MediaAnalysisError.make({
+                                  MediaAnalysisError.make({
                                     message:
                                       testMediaAnalyzerError._tag === "Some"
                                         ? testMediaAnalyzerError.value
@@ -878,8 +881,8 @@ const createExtensionLayerImpl = (home: string, workspace: string) => {
     }),
     SkillRegistry.fileSystemLayer,
     McpOAuthService.layer.pipe(
-      Layer.provide(McpOAuthService.hostLayer),
-      Layer.provide(McpOAuthService.tokenStoreLayer(globalLayout.mcpOAuth)),
+      Layer.provide(McpOAuthStore.hostLayer),
+      Layer.provide(McpOAuthStore.tokenStoreLayer(globalLayout.mcpOAuth)),
     ),
   ).pipe(Layer.provide(BunServices.layer), Layer.merge(BunServices.layer), Layer.merge(FetchHttpClient.layer))
 }
@@ -916,7 +919,7 @@ export const createAuthOperations = (options: {
       const globalSettings = yield* loadSettingsFile(options.globalConfig)
       const settings = yield* loadSettingsFile(workspacePaths(workspace).settings)
       const workspaceConfigLayer = ConfigurationService.liveConfigurationLayer({
-        webProviders: WebSearch.providerRegistry,
+        webProviders: WebSearchProvider.providerRegistry,
         global: globalSettings,
         workspace: settings,
       })
@@ -1041,7 +1044,7 @@ const createOperationLayerImpl = (
       const globalSettings = yield* loadSettingsFile(globalConfig)
       const workspaceSettings = yield* loadSettingsFile(workspaceConfig)
       const applicationConfigLayer = ConfigurationService.liveConfigurationLayer({
-        webProviders: WebSearch.providerRegistry,
+        webProviders: WebSearchProvider.providerRegistry,
         global: globalSettings,
         workspace: workspaceSettings,
       })
@@ -1065,7 +1068,7 @@ const createOperationLayerImpl = (
           return yield* ConfigurationService.effectiveConfiguration().pipe(
             provideLayerScoped(
               ConfigurationService.liveConfigurationLayer({
-                webProviders: WebSearch.providerRegistry,
+                webProviders: WebSearchProvider.providerRegistry,
                 global: globalSettings,
                 workspace: settings,
               }),
@@ -1229,12 +1232,12 @@ const createOperationLayerImpl = (
             effectiveConfigForWorkspace(workspace).pipe(
               Effect.map((config) => {
                 const credentials = config.environment.webSearchCredentials
-                const readPageCredential = WebSearch.configuredReadPageCredential(credentials)
+                const readPageCredential = WebSearchProvider.configuredReadPageCredential(credentials)
                 return ToolRuntime.layer(workspace).pipe(
                   Layer.provide(
-                    MediaView.analyzerTestLayer(() =>
+                    analyzerTestLayer(() =>
                       Effect.fail(
-                        MediaView.MediaAnalysisError.make({
+                        MediaAnalysisError.make({
                           message: "Media analysis is unavailable",
                         }),
                       ),
@@ -1277,7 +1280,7 @@ const createOperationLayerImpl = (
                 layer: Layer.merge(
                   configAdapter,
                   ConfigurationService.liveConfigurationLayer({
-                    webProviders: WebSearch.providerRegistry,
+                    webProviders: WebSearchProvider.providerRegistry,
                     global: globalSettings,
                     workspace: settings,
                   }),

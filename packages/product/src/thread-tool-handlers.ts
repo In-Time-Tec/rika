@@ -1,4 +1,5 @@
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
+import * as ThreadRead from "@rika/coding-tools/thread-tool-read-contract"
 import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import * as Turn from "@rika/product/turn-record"
 import { Effect, Option } from "effect"
@@ -6,7 +7,7 @@ import * as ThreadQuery from "./thread-query"
 import * as ThreadToolService from "./thread-tool-service"
 
 const error = (tool: string, cause: { readonly _tag: string }) =>
-  ThreadTools.ToolError.make({ tool, message: JSON.stringify(cause) })
+  ThreadRead.ToolError.make({ tool, message: JSON.stringify(cause) })
 
 const publicError = (tool: string, cause: { readonly _tag: string }) => ({
   _tag: "ThreadToolError" as const,
@@ -74,7 +75,7 @@ export const publicReadResult = (result: ThreadQuery.ReadSuccess) => ({
 })
 
 export const handlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
-  ThreadTools.toolkit.toLayer(
+  ThreadToolkits.toolkit.toLayer(
     Effect.gen(function* () {
       const factory = yield* ThreadQuery.Factory
       return {
@@ -155,7 +156,7 @@ export const handlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
   )
 
 export const findHandlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver) =>
-  ThreadTools.findToolkit.toLayer(
+  ThreadToolkits.findToolkit.toLayer(
     Effect.gen(function* () {
       const factory = yield* ThreadQuery.Factory
       return {
@@ -168,7 +169,7 @@ export const findHandlerLayerForWorkspace = (resolveWorkspace: WorkspaceResolver
     }),
   )
 
-export const findHandlerLayer = ThreadTools.findToolkit.toLayer(
+export const findHandlerLayer = ThreadToolkits.findToolkit.toLayer(
   Effect.gen(function* () {
     const query = yield* ThreadQuery.Service
     return {
@@ -178,7 +179,7 @@ export const findHandlerLayer = ThreadTools.findToolkit.toLayer(
 )
 
 export const coordinationHandlerLayer = (gateway: ThreadToolService.Gateway) =>
-  ThreadTools.coordinationToolkit.toLayer(
+  ThreadToolkits.coordinationToolkit.toLayer(
     Effect.succeed(
       (() => {
         const invocation = Effect.serviceOption(ToolInvocation.ToolInvocation).pipe(

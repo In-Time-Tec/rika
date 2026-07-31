@@ -1,9 +1,6 @@
 import { OAuth } from "@batonfx/mcp"
 import { Context, Crypto, Effect, Layer, Option, Schema } from "effect"
 import * as McpOAuthStore from "./mcp-oauth-store"
-export const hostLayer = McpOAuthStore.hostLayer
-export const tokenStoreLayer = McpOAuthStore.tokenStoreLayer
-
 export class McpOAuthError extends Schema.TaggedErrorClass<McpOAuthError>()("@rika/extensions/McpOAuthError", {
   server: Schema.String,
   operation: Schema.String,

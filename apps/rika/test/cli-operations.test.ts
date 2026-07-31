@@ -1,7 +1,3 @@
-import * as BehaviorMode from "@rika/configuration/behavior-mode"
-import * as ModelRoute from "@rika/configuration/model-route"
-import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
-import * as SettingsDefaults from "@rika/configuration/configuration-settings"
 import * as ConfigurationService from "@rika/configuration/configuration-service"
 import * as SettingsDecoder from "@rika/configuration/configuration-settings"
 import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
@@ -14,7 +10,7 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as WebSearch from "@rika/coding-tools/web-search-service"
+import * as WebSearchProvider from "@rika/coding-tools/web-search-provider"
 import { Cause, ConfigProvider, Effect, Exit, FileSystem, Layer, Path, Schema, Scope } from "effect"
 import { TestConsole } from "effect/testing"
 import { expect, it } from "@effect/vitest"
@@ -111,7 +107,7 @@ const configServiceLayer = (input: {
   readonly env?: Readonly<Record<string, string>>
 }) =>
   ConfigurationService.liveConfigurationLayer({
-    webProviders: WebSearch.providerRegistry,
+    webProviders: WebSearchProvider.providerRegistry,
     global: {},
     workspace: input.workspace ?? {},
   }).pipe(

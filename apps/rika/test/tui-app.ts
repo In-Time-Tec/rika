@@ -1,3 +1,5 @@
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
+import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { LanguageModel } from "effect/unstable/ai"
 import { ModelRegistry, TestModel } from "@rika/relay-execution/model-provider-runtime"
@@ -13,7 +15,6 @@ import * as Turn from "@rika/product/turn-record"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
@@ -193,9 +194,7 @@ export const tuiApp = Effect.fn("TuiApp.start")(function* (options: TuiAppOption
   const toolRuntimeLayer = (directory: string) =>
     ToolRuntime.layer(directory).pipe(
       Layer.provide(
-        MediaView.analyzerTestLayer(() =>
-          Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
-        ),
+        analyzerTestLayer(() => Effect.fail(MediaAnalysisError.make({ message: "Media analysis is unavailable" }))),
       ),
       Layer.provide(
         Layer.merge(WebSearch.factoryLayer([]), ReadWebPage.layer({})).pipe(Layer.provide(FetchHttpClient.layer)),

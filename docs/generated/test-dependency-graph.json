@@ -871,14 +871,6 @@
       "package": "os"
     },
     {
-      "id": "external:parallel-web",
-      "workspace": "root",
-      "kind": "external",
-      "production": true,
-      "publicExports": [],
-      "package": "parallel-web"
-    },
-    {
       "id": "external:path",
       "workspace": "root",
       "kind": "external",
@@ -1159,8 +1151,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/configuration/test/config-contract.test.ts",
-      "path": "packages/configuration/test/config-contract.test.ts",
+      "id": "packages/configuration/src/model-routing/behavior-mode.test.ts",
+      "path": "packages/configuration/src/model-routing/behavior-mode.test.ts",
       "workspace": "@rika/configuration",
       "package": "@rika/configuration",
       "kind": "source",
@@ -1169,8 +1161,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/configuration/test/config-service.test.ts",
-      "path": "packages/configuration/test/config-service.test.ts",
+      "id": "packages/configuration/src/path-resolution/canonical-data-root.test.ts",
+      "path": "packages/configuration/src/path-resolution/canonical-data-root.test.ts",
       "workspace": "@rika/configuration",
       "package": "@rika/configuration",
       "kind": "source",
@@ -1179,8 +1171,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/configuration/test/data-root.test.ts",
-      "path": "packages/configuration/test/data-root.test.ts",
+      "id": "packages/configuration/src/path-resolution/profile-data-paths.test.ts",
+      "path": "packages/configuration/src/path-resolution/profile-data-paths.test.ts",
       "workspace": "@rika/configuration",
       "package": "@rika/configuration",
       "kind": "source",
@@ -1189,8 +1181,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/configuration/test/modes.test.ts",
-      "path": "packages/configuration/test/modes.test.ts",
+      "id": "packages/configuration/src/settings/configuration-service.test.ts",
+      "path": "packages/configuration/src/settings/configuration-service.test.ts",
       "workspace": "@rika/configuration",
       "package": "@rika/configuration",
       "kind": "source",
@@ -1199,8 +1191,8 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/configuration/test/paths.test.ts",
-      "path": "packages/configuration/test/paths.test.ts",
+      "id": "packages/configuration/src/settings/configuration-settings-decoder.test.ts",
+      "path": "packages/configuration/src/settings/configuration-settings-decoder.test.ts",
       "workspace": "@rika/configuration",
       "package": "@rika/configuration",
       "kind": "source",
@@ -1209,74 +1201,84 @@
       "testKind": "unit-test"
     },
     {
-      "id": "packages/extensions/test/coverage.test.ts",
-      "path": "packages/extensions/test/coverage.test.ts",
-      "workspace": "@rika/extensions",
-      "package": "@rika/extensions",
+      "id": "packages/configuration/test/contract/configuration-exports.contract.test.ts",
+      "path": "packages/configuration/test/contract/configuration-exports.contract.test.ts",
+      "workspace": "@rika/configuration",
+      "package": "@rika/configuration",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
     },
     {
-      "id": "packages/extensions/test/error-branches.test.ts",
-      "path": "packages/extensions/test/error-branches.test.ts",
+      "id": "packages/extensions/test/contract/extension-activation.contract.test.ts",
+      "path": "packages/extensions/test/contract/extension-activation.contract.test.ts",
       "workspace": "@rika/extensions",
       "package": "@rika/extensions",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
     },
     {
-      "id": "packages/extensions/test/mcp-oauth.test.ts",
-      "path": "packages/extensions/test/mcp-oauth.test.ts",
+      "id": "packages/extensions/test/contract/extension-error-branches.contract.test.ts",
+      "path": "packages/extensions/test/contract/extension-error-branches.contract.test.ts",
       "workspace": "@rika/extensions",
       "package": "@rika/extensions",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
     },
     {
-      "id": "packages/extensions/test/mcp.test.ts",
-      "path": "packages/extensions/test/mcp.test.ts",
+      "id": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
+      "path": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "workspace": "@rika/extensions",
       "package": "@rika/extensions",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
     },
     {
-      "id": "packages/extensions/test/plugin.test.ts",
-      "path": "packages/extensions/test/plugin.test.ts",
+      "id": "packages/extensions/test/contract/mcp-runtime.contract.test.ts",
+      "path": "packages/extensions/test/contract/mcp-runtime.contract.test.ts",
       "workspace": "@rika/extensions",
       "package": "@rika/extensions",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
     },
     {
-      "id": "packages/extensions/test/skill-registry-filesystem.test.ts",
-      "path": "packages/extensions/test/skill-registry-filesystem.test.ts",
+      "id": "packages/extensions/test/contract/plugin-lifecycle.contract.test.ts",
+      "path": "packages/extensions/test/contract/plugin-lifecycle.contract.test.ts",
       "workspace": "@rika/extensions",
       "package": "@rika/extensions",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
     },
     {
-      "id": "packages/extensions/test/skill-registry.test.ts",
-      "path": "packages/extensions/test/skill-registry.test.ts",
+      "id": "packages/extensions/test/contract/skill-file-system.contract.test.ts",
+      "path": "packages/extensions/test/contract/skill-file-system.contract.test.ts",
       "workspace": "@rika/extensions",
       "package": "@rika/extensions",
       "kind": "source",
       "production": false,
       "publicExports": [],
-      "testKind": "unit-test"
+      "testKind": "contract-test"
+    },
+    {
+      "id": "packages/extensions/test/contract/skill-registry.contract.test.ts",
+      "path": "packages/extensions/test/contract/skill-registry.contract.test.ts",
+      "workspace": "@rika/extensions",
+      "package": "@rika/extensions",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
     },
     {
       "id": "packages/product-store/test/contract/transcript-checkpoint-delta.test.ts",
@@ -2497,6 +2499,16 @@
       "production": false,
       "publicExports": [],
       "testKind": "unit-test"
+    },
+    {
+      "id": "packages/transcript/test/contract/transcript-projection.contract.test.ts",
+      "path": "packages/transcript/test/contract/transcript-projection.contract.test.ts",
+      "workspace": "@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "source",
+      "production": false,
+      "publicExports": [],
+      "testKind": "contract-test"
     },
     {
       "id": "packages/transcript/test/fold.test.ts",
@@ -4140,31 +4152,15 @@
       "production": false
     },
     {
-      "from": "packages/configuration/test/config-contract.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
+      "from": "packages/configuration/src/model-routing/behavior-mode.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/configuration/test/config-service.test.ts",
-      "to": "external:@effect/vitest",
-      "specifier": "@effect/vitest",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/configuration/test/config-service.test.ts",
-      "to": "external:effect",
-      "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "packages/configuration/test/data-root.test.ts",
+      "from": "packages/configuration/src/path-resolution/canonical-data-root.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4172,7 +4168,7 @@
       "production": false
     },
     {
-      "from": "packages/configuration/test/data-root.test.ts",
+      "from": "packages/configuration/src/path-resolution/canonical-data-root.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4180,7 +4176,7 @@
       "production": false
     },
     {
-      "from": "packages/configuration/test/data-root.test.ts",
+      "from": "packages/configuration/src/path-resolution/canonical-data-root.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4188,7 +4184,7 @@
       "production": false
     },
     {
-      "from": "packages/configuration/test/modes.test.ts",
+      "from": "packages/configuration/src/path-resolution/profile-data-paths.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4196,15 +4192,39 @@
       "production": false
     },
     {
-      "from": "packages/configuration/test/paths.test.ts",
-      "to": "external:vitest",
-      "specifier": "vitest",
+      "from": "packages/configuration/src/settings/configuration-service.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
       "kind": "import",
       "relationship": "test",
       "production": false
     },
     {
-      "from": "packages/extensions/test/coverage.test.ts",
+      "from": "packages/configuration/src/settings/configuration-service.test.ts",
+      "to": "external:effect",
+      "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/src/settings/configuration-settings-decoder.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/configuration/test/contract/configuration-exports.contract.test.ts",
+      "to": "external:@effect/vitest",
+      "specifier": "@effect/vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/extensions/test/contract/extension-activation.contract.test.ts",
       "to": "external:@batonfx/mcp",
       "specifier": "@batonfx/mcp",
       "kind": "import",
@@ -4212,7 +4232,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/coverage.test.ts",
+      "from": "packages/extensions/test/contract/extension-activation.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4220,7 +4240,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/coverage.test.ts",
+      "from": "packages/extensions/test/contract/extension-activation.contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4228,7 +4248,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/coverage.test.ts",
+      "from": "packages/extensions/test/contract/extension-activation.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4236,7 +4256,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/error-branches.test.ts",
+      "from": "packages/extensions/test/contract/extension-error-branches.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4244,7 +4264,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/error-branches.test.ts",
+      "from": "packages/extensions/test/contract/extension-error-branches.contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4252,7 +4272,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/error-branches.test.ts",
+      "from": "packages/extensions/test/contract/extension-error-branches.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4260,7 +4280,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:@batonfx/mcp",
       "specifier": "@batonfx/mcp",
       "kind": "import",
@@ -4268,7 +4288,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:@effect/platform-bun/BunHttpServer",
       "specifier": "@effect/platform-bun/BunHttpServer",
       "kind": "import",
@@ -4276,7 +4296,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4284,7 +4304,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4292,7 +4312,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4300,7 +4320,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:effect/unstable/http",
       "specifier": "effect/unstable/http",
       "kind": "import",
@@ -4308,7 +4328,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp-oauth.test.ts",
+      "from": "packages/extensions/test/contract/mcp-oauth-service.contract.test.ts",
       "to": "external:effect/unstable/process",
       "specifier": "effect/unstable/process",
       "kind": "import",
@@ -4316,7 +4336,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp.test.ts",
+      "from": "packages/extensions/test/contract/mcp-runtime.contract.test.ts",
       "to": "external:@batonfx/mcp",
       "specifier": "@batonfx/mcp",
       "kind": "import",
@@ -4324,7 +4344,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp.test.ts",
+      "from": "packages/extensions/test/contract/mcp-runtime.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4332,7 +4352,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp.test.ts",
+      "from": "packages/extensions/test/contract/mcp-runtime.contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4340,7 +4360,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/mcp.test.ts",
+      "from": "packages/extensions/test/contract/mcp-runtime.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4348,7 +4368,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/plugin.test.ts",
+      "from": "packages/extensions/test/contract/plugin-lifecycle.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4356,7 +4376,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/plugin.test.ts",
+      "from": "packages/extensions/test/contract/plugin-lifecycle.contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4364,7 +4384,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/plugin.test.ts",
+      "from": "packages/extensions/test/contract/plugin-lifecycle.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4372,7 +4392,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/skill-registry-filesystem.test.ts",
+      "from": "packages/extensions/test/contract/skill-file-system.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4380,7 +4400,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/skill-registry-filesystem.test.ts",
+      "from": "packages/extensions/test/contract/skill-file-system.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -4388,7 +4408,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/skill-registry-filesystem.test.ts",
+      "from": "packages/extensions/test/contract/skill-file-system.contract.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",
@@ -4396,7 +4416,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/skill-registry.test.ts",
+      "from": "packages/extensions/test/contract/skill-registry.contract.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -4404,7 +4424,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/skill-registry.test.ts",
+      "from": "packages/extensions/test/contract/skill-registry.contract.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -4412,7 +4432,7 @@
       "production": false
     },
     {
-      "from": "packages/extensions/test/skill-registry.test.ts",
+      "from": "packages/extensions/test/contract/skill-registry.contract.test.ts",
       "to": "external:effect",
       "specifier": "effect",
       "kind": "import",
@@ -6365,6 +6385,14 @@
     },
     {
       "from": "packages/terminal/test/visual.test.ts",
+      "to": "external:vitest",
+      "specifier": "vitest",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "packages/transcript/test/contract/transcript-projection.contract.test.ts",
       "to": "external:vitest",
       "specifier": "vitest",
       "kind": "import",

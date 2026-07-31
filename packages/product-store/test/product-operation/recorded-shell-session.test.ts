@@ -1,3 +1,4 @@
+import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -330,7 +331,7 @@ describe("recorded shell session", () => {
       const harness = yield* makeHarness({
         runTool: () =>
           Effect.fail(
-            ToolRuntime.ToolError.make({
+            RuntimeContract.ToolError.make({
               tool: "shell",
               message: "process launch failed",
               kind: "operation",

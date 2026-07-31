@@ -14,7 +14,7 @@ import {
 } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
-export interface Output {
+interface Output {
   readonly processId: string
   readonly stdout: string
   readonly stderr: string
@@ -35,7 +35,7 @@ interface PendingOutput {
   readonly truncated: boolean
 }
 
-export interface BoundedText {
+interface BoundedText {
   readonly text: string
   readonly truncated: boolean
 }

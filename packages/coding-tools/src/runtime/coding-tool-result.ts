@@ -1,5 +1,5 @@
+import { Artifact } from "@rika/coding-tools/media-view-contract"
 import { Schema } from "effect"
-import * as MediaView from "../media/media-view-service"
 
 export const Result = Schema.Struct({
   text: Schema.String,
@@ -10,7 +10,7 @@ export const Result = Schema.Struct({
   stdout: Schema.optionalKey(Schema.String),
   stderr: Schema.optionalKey(Schema.String),
   diff: Schema.optionalKey(Schema.String),
-  artifact: Schema.optionalKey(MediaView.Artifact),
+  artifact: Schema.optionalKey(Artifact),
 })
 export type Result = typeof Result.Type
 

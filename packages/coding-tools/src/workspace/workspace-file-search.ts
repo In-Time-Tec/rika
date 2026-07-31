@@ -3,53 +3,9 @@ import { ChildProcess } from "effect/unstable/process"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { containedRelativePath } from "../policy/workspace-boundary-policy"
 
-export interface GlobOptions {
-  readonly pageIndex?: number
-  readonly pageSize?: number
-}
-
-export interface SearchOptions {
-  readonly pageSize?: number
-}
-
-export interface GrepOptions {
-  readonly mode?: "plain" | "regex"
-  readonly smartCase?: boolean
-  readonly maxMatchesPerFile?: number
-  readonly pageSize?: number
-  readonly cursor?: string | null
-}
-
-export interface PathItem {
-  readonly relativePath: string
-  readonly fileName: string
-}
-
-export interface SearchResult {
-  readonly items: ReadonlyArray<PathItem>
-  readonly scores: ReadonlyArray<number>
-  readonly totalMatched: number
-  readonly totalFiles: number
-}
-
-export interface GrepMatch {
-  readonly relativePath: string
-  readonly lineNumber: number
-  readonly lineContent: string
-}
-
-export interface GrepResult {
-  readonly items: ReadonlyArray<GrepMatch>
-  readonly totalMatched: number
-  readonly totalFilesSearched: number
-  readonly totalFiles: number
-  readonly filteredFileCount: number
-  readonly nextCursor: string | null
-  readonly regexFallbackError?: string
-}
-
-export const Operation = Schema.Literals(["initialize", "fileSearch", "glob", "grep"])
-export type Operation = typeof Operation.Type
+import type { GlobOptions, SearchOptions, GrepOptions, PathItem, SearchResult } from "./workspace-search-options"
+import type { GrepMatch, GrepResult } from "./workspace-search-results"
+import { Operation } from "./workspace-search-operation"
 
 export class WorkspaceIndexError extends Schema.TaggedErrorClass<WorkspaceIndexError>()("WorkspaceIndexError", {
   operation: Operation,

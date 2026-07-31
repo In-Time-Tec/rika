@@ -1,13 +1,6 @@
 import { Context, Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-
-export const Input = Schema.Struct({
-  url: Schema.String,
-  objective: Schema.optionalKey(Schema.String),
-  fullContent: Schema.optionalKey(Schema.Boolean),
-  forceRefetch: Schema.optionalKey(Schema.Boolean),
-})
-export type Input = typeof Input.Type
+import { Input } from "./read-web-page-contract"
 
 export class HttpError extends Schema.TaggedErrorClass<HttpError>()("ReadWebPageHttpError", {
   message: Schema.String,

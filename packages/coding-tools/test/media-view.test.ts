@@ -1,3 +1,7 @@
+import type { AnalyzerInterface } from "@rika/coding-tools/media-analysis-service"
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
+import { AnalysisInput } from "@rika/coding-tools/media-view-contract"
+import { MediaAnalyzer, analyzerTestLayer, analyzerUnavailableLayer } from "@rika/coding-tools/media-analysis-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, PlatformError } from "effect"
@@ -12,7 +16,7 @@ const bytes = (signature: ReadonlyArray<number>, size = signature.length) => {
 
 const view = (
   content: Uint8Array,
-  analyze: MediaView.AnalyzerInterface["analyze"] = (_: MediaView.AnalysisInput) => Effect.succeed("analysis"),
+  analyze: AnalyzerInterface["analyze"] = (_: AnalysisInput) => Effect.succeed("analysis"),
 ) =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -22,7 +26,7 @@ const view = (
       return yield* Effect.gen(function* () {
         const service = yield* MediaView.Service
         return yield* service.view("media")
-      }).pipe(provide(MediaView.layer(workspace).pipe(Layer.provide(MediaView.analyzerTestLayer(analyze)))))
+      }).pipe(provide(MediaView.layer(workspace).pipe(Layer.provide(analyzerTestLayer(analyze)))))
     }),
   ).pipe(provide(BunServices.layer))
 
@@ -72,14 +76,12 @@ describe("MediaView", () => {
       const result = yield* view(pdf, () => Effect.succeed("x".repeat(40_001)))
       expect(result.text).toHaveLength(40_000)
       expect(result.truncated).toBe(true)
-      const error = yield* Effect.flip(
-        view(pdf, () => Effect.fail(MediaView.MediaAnalysisError.make({ message: "no route" }))),
-      )
+      const error = yield* Effect.flip(view(pdf, () => Effect.fail(MediaAnalysisError.make({ message: "no route" }))))
       expect(error.message).toBe("no route")
       const unavailable = yield* Effect.gen(function* () {
-        const analyzer = yield* MediaView.MediaAnalyzer
+        const analyzer = yield* MediaAnalyzer
         return yield* Effect.flip(analyzer.analyze({ path: "x", mimeType: "x", kind: "pdf", size: 0, bytes: pdf }))
-      }).pipe(provide(MediaView.analyzerUnavailableLayer))
+      }).pipe(provide(analyzerUnavailableLayer))
       expect(unavailable.message).toContain("not configured")
       const fixture = yield* Effect.gen(function* () {
         const service = yield* MediaView.Service
@@ -99,7 +101,7 @@ describe("MediaView", () => {
       }).pipe(
         provide(
           MediaView.layer("/workspace").pipe(
-            Layer.provide(MediaView.analyzerUnavailableLayer),
+            Layer.provide(analyzerUnavailableLayer),
             Layer.provide(FileSystem.layerNoop({ realPath: (path) => Effect.succeed(path), ...overrides })),
             Layer.provide(Path.layer),
           ),
@@ -136,7 +138,7 @@ describe("MediaView", () => {
           yield* fs.symlink(`${outside}/outside.png`, `${workspace}/outside-link.png`)
           yield* fs.writeFile(`${workspace}/maximum`, bytes([0x89, 0x50, 0x4e, 0x47], 25 * 1024 * 1024))
           yield* fs.writeFile(`${workspace}/huge`, bytes([0x89, 0x50, 0x4e, 0x47], 25 * 1024 * 1024 + 1))
-          const layer = MediaView.layer(workspace).pipe(Layer.provide(MediaView.analyzerUnavailableLayer))
+          const layer = MediaView.layer(workspace).pipe(Layer.provide(analyzerUnavailableLayer))
           const result = yield* Effect.gen(function* () {
             const service = yield* MediaView.Service
             const insideLink = yield* service.view("inside-link.png")

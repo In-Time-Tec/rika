@@ -1,8 +1,8 @@
+import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { LanguageModel, ModelRegistry } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Clock, Effect, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
@@ -251,8 +251,8 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
         registration: main.registration,
         additionalRegistrations: [oracle.registration],
         selection: main.selection,
-        additionalToolkit: ThreadTools.toolkit,
-        additionalHandlerLayer: ThreadTools.toolkit.toLayer({
+        additionalToolkit: ThreadToolkits.toolkit,
+        additionalHandlerLayer: ThreadToolkits.toolkit.toLayer({
           search_threads: () => Effect.succeed({ text: "", truncated: false }),
           read_thread_transcript: () => Effect.succeed({ text: "", truncated: false }),
         }),
@@ -366,8 +366,8 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
         registration: main.registration,
         additionalRegistrations: [oracle.registration],
         selection: main.selection,
-        additionalToolkit: ThreadTools.toolkit,
-        additionalHandlerLayer: ThreadTools.toolkit.toLayer({
+        additionalToolkit: ThreadToolkits.toolkit,
+        additionalHandlerLayer: ThreadToolkits.toolkit.toLayer({
           search_threads: () => Effect.succeed({ text: "", truncated: false }),
           read_thread_transcript: () =>
             Ref.update(transcriptReads, (count) => count + 1).pipe(

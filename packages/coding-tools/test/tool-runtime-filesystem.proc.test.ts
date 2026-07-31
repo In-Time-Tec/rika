@@ -1,7 +1,7 @@
+import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Schema } from "effect"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
@@ -116,7 +116,7 @@ test("runs filesystem, shell, and git tools across and beyond the workspace", ()
       }).pipe(
         provide(
           Runtime.layer(workspace).pipe(
-            Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
+            Layer.provide(analyzerTestLayer(() => Effect.succeed("analysis"))),
             Layer.provide(
               Layer.merge(
                 WebSearch.testLayer(() => Effect.succeed([])),
@@ -213,7 +213,7 @@ test("bounds grep results to one thousand matches", () =>
         }).pipe(
           provide(
             Runtime.layer(workspace).pipe(
-              Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
+              Layer.provide(analyzerTestLayer(() => Effect.succeed("analysis"))),
               Layer.provide(
                 Layer.merge(
                   WebSearch.testLayer(() => Effect.succeed([])),
@@ -247,7 +247,7 @@ test("views image metadata and routes documents through the injected analyzer", 
         yield* fileSystem.writeFile(`${workspace}/oversized.png`, oversizedBytes)
         const runtimeLayer = Runtime.layer(workspace).pipe(
           Layer.provide(
-            MediaView.analyzerTestLayer((input) =>
+            analyzerTestLayer((input) =>
               Effect.sync(() => {
                 analyzed.push(`${input.kind}:${input.mimeType}`)
                 return "summary"

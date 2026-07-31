@@ -1,3 +1,4 @@
+import * as RuntimeContract from "@rika/coding-tools/coding-tool-runtime-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -94,7 +95,7 @@ describe("Operation review dispatcher", () => {
 
   it.effect("builds staged and base git diffs and reports empty reviews in text and JSON", () =>
     Effect.gen(function* () {
-      const requests = yield* Ref.make<ReadonlyArray<ToolRuntime.Request>>([])
+      const requests = yield* Ref.make<ReadonlyArray<RuntimeContract.Request>>([])
       const tool = ToolRuntime.Service.of({
         run: (request) =>
           Ref.update(requests, (all) => [...all, request]).pipe(
@@ -160,7 +161,7 @@ describe("Operation review dispatcher", () => {
 
   it.effect("rejects conflicting and option-shaped selectors before running Git", () =>
     Effect.gen(function* () {
-      const requests = yield* Ref.make<ReadonlyArray<ToolRuntime.Request>>([])
+      const requests = yield* Ref.make<ReadonlyArray<RuntimeContract.Request>>([])
       const tool = ToolRuntime.Service.of({
         run: (request) =>
           Ref.update(requests, (all) => [...all, request]).pipe(Effect.as({ text: "", truncated: false, exitCode: 0 })),

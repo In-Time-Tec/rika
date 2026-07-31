@@ -1,7 +1,5 @@
 import { Function, Schema } from "effect"
-
-export const Idempotency = Schema.Literals(["safe", "unsafe"])
-export type Idempotency = typeof Idempotency.Type
+import { Idempotency } from "./policy-idempotency"
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThan(0))
 

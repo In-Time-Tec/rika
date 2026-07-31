@@ -1,3 +1,4 @@
+import * as ThreadCoordination from "@rika/coding-tools/thread-tool-coordination-contract"
 import { describe, expect, it } from "@effect/vitest"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
 import * as Thread from "@rika/product/thread-record"
@@ -5,7 +6,6 @@ import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Effect, Exit, Ref, Scope } from "effect"
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
 import * as ToolInvocation from "@rika/coding-tools/tool-invocation"
 import * as ThreadToolService from "@rika/product/thread-tool-service"
 
@@ -18,7 +18,7 @@ const invocation: ToolInvocation.Value = {
   idempotencyKeyDigest: "digest",
 }
 
-const input: typeof ThreadTools.CreateThreadInput.Type = { prompt: "Coordinate this work" }
+const input: typeof ThreadCoordination.CreateThreadInput.Type = { prompt: "Coordinate this work" }
 
 const sourceThread: Thread.Thread = {
   id: Thread.ThreadId.make("source"),

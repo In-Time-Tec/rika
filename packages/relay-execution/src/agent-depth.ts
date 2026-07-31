@@ -1,4 +1,4 @@
-import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
+import * as AgentSelection from "@rika/coding-tools/agent-tool-selection"
 import { Function } from "effect"
 
 export const decodeParentExecutionId = (value: string) => {
@@ -30,18 +30,18 @@ export const childExecutionDepth = (executionId: string) => {
   return depth
 }
 
-const delegationAvailableAtDepthImpl = (name: AgentTools.DelegationToolName, depth: number) =>
+const delegationAvailableAtDepthImpl = (name: AgentSelection.DelegationToolName, depth: number) =>
   depth === 0 || (depth === 1 && name !== "task")
 
 export const delegationAvailableAtDepth: {
-  (depth: number): (name: AgentTools.DelegationToolName) => boolean
-  (name: AgentTools.DelegationToolName, depth: number): boolean
+  (depth: number): (name: AgentSelection.DelegationToolName) => boolean
+  (name: AgentSelection.DelegationToolName, depth: number): boolean
 } = Function.dual(2, delegationAvailableAtDepthImpl)
 
 const toolsAtDepthImpl = (names: ReadonlyArray<string>, depth: number) =>
   names.filter((name) => {
-    if (AgentTools.isDelegationToolName(name)) return delegationAvailableAtDepth(name, depth)
-    if (name === AgentTools.awaitSubagentsToolName) return depth < 2
+    if (AgentSelection.isDelegationToolName(name)) return delegationAvailableAtDepth(name, depth)
+    if (name === AgentSelection.awaitSubagentsToolName) return depth < 2
     return true
   })
 

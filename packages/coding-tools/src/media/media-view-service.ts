@@ -1,56 +1,7 @@
 import { Context, Effect, FileSystem, Layer, Path, Schema } from "effect"
-
-export const MediaKind = Schema.Literals(["image", "pdf", "audio", "video"])
-export type MediaKind = typeof MediaKind.Type
-
-export const AnalysisInput = Schema.Struct({
-  path: Schema.String,
-  mimeType: Schema.String,
-  kind: MediaKind,
-  size: Schema.Finite,
-  bytes: Schema.Uint8Array,
-})
-export type AnalysisInput = typeof AnalysisInput.Type
-
-export const Artifact = Schema.Struct({
-  path: Schema.String,
-  mimeType: Schema.String,
-  kind: MediaKind,
-  size: Schema.Finite,
-  width: Schema.optionalKey(Schema.Finite),
-  height: Schema.optionalKey(Schema.Finite),
-})
-export type Artifact = typeof Artifact.Type
-
-export const Output = Schema.Struct({ text: Schema.String, artifact: Artifact, truncated: Schema.Boolean })
-export type Output = typeof Output.Type
-
-export class MediaAnalysisError extends Schema.TaggedErrorClass<MediaAnalysisError>()("MediaAnalysisError", {
-  message: Schema.String,
-}) {}
-export class MediaMissingError extends Schema.TaggedErrorClass<MediaMissingError>()("MediaMissingError", {
-  path: Schema.String,
-}) {}
-export class MediaOversizedError extends Schema.TaggedErrorClass<MediaOversizedError>()("MediaOversizedError", {
-  path: Schema.String,
-  size: Schema.Finite,
-  maximum: Schema.Finite,
-}) {}
-export class UnsupportedMediaError extends Schema.TaggedErrorClass<UnsupportedMediaError>()("UnsupportedMediaError", {
-  path: Schema.String,
-}) {}
-
-export interface AnalyzerInterface {
-  readonly analyze: (input: AnalysisInput) => Effect.Effect<string, MediaAnalysisError>
-}
-export class MediaAnalyzer extends Context.Service<MediaAnalyzer, AnalyzerInterface>()(
-  "@rika/coding-tools/media/media-view-service/MediaAnalyzer",
-) {}
-export const analyzerTestLayer = (analyze: AnalyzerInterface["analyze"]) =>
-  Layer.succeed(MediaAnalyzer, MediaAnalyzer.of({ analyze }))
-export const analyzerUnavailableLayer = analyzerTestLayer(() =>
-  Effect.fail(MediaAnalysisError.make({ message: "Media analysis route is not configured" })),
-)
+import { Output, type MediaKind } from "./media-view-contract"
+import { MediaAnalysisError, MediaMissingError, MediaOversizedError, UnsupportedMediaError } from "./media-view-errors"
+import { MediaAnalyzer } from "./media-analysis-service"
 
 export interface Interface {
   readonly view: (

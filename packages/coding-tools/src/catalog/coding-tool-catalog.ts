@@ -1,22 +1,16 @@
+import * as RuntimeTools from "@rika/coding-tools/coding-tool-runtime-tools"
+import * as AgentSelection from "@rika/coding-tools/agent-tool-selection"
+import * as AgentToolkits from "@rika/coding-tools/agent-tool-toolkits"
+import * as AgentRegistrations from "@rika/coding-tools/agent-tool-registrations"
+import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
 import { Function, Schema } from "effect"
-import * as AgentTools from "../delegation/agent-tool-contract"
-import * as ThreadTools from "./thread-tool-contract"
-import * as Runtime from "../runtime/coding-tool-runtime"
 import * as ToolPolicy from "../policy/coding-tool-policy"
-import * as ParallelSearch from "../web-research/parallel-web-search"
-import * as WebSearch from "../web-research/web-search-service"
-import * as ReadWebPage from "../web-research/read-web-page-service"
-import * as ProcessRegistry from "../process/shell-process-registry"
-import * as MediaView from "../media/media-view-service"
-import * as LocalPath from "../workspace/local-path"
-import * as LocalSafetyPolicy from "../policy/local-safety-policy"
-import * as WorkspaceIndex from "../workspace/workspace-file-search"
-import * as ToolInvocation from "./tool-invocation"
+import { Idempotency } from "../policy/policy-idempotency"
 
 const Definition = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
-  idempotency: ToolPolicy.Idempotency,
+  idempotency: Idempotency,
   timeoutMillis: Schema.Int.check(Schema.isGreaterThan(0)),
   outputLimit: Schema.Int.check(Schema.isGreaterThan(0)),
   presentation: ToolPolicy.Presentation,
@@ -24,16 +18,16 @@ const Definition = Schema.Struct({
 export type Definition = typeof Definition.Type
 
 const tools: ReadonlyArray<ToolPolicy.RegisteredTool> = [
-  ...Object.values(Runtime.toolkit.tools),
-  ...Object.values(AgentTools.modelToolkit.tools),
-  ...Object.values(AgentTools.joinToolkit.tools),
-  ...Object.values(ThreadTools.allToolkit.tools),
+  ...Object.values(RuntimeTools.toolkit.tools),
+  ...Object.values(AgentToolkits.modelToolkit.tools),
+  ...Object.values(AgentToolkits.joinToolkit.tools),
+  ...Object.values(ThreadToolkits.allToolkit.tools),
 ]
 
 const registrations: ReadonlyArray<ToolPolicy.Registration> = [
-  ...Runtime.registrations,
-  ...AgentTools.registrations,
-  ...ThreadTools.registrations,
+  ...RuntimeTools.registrations,
+  ...AgentRegistrations.registrations,
+  ...ThreadToolkits.registrations,
 ]
 
 const makeDefinitions: {
@@ -122,7 +116,7 @@ const agentDisplay = (name: string): string => {
 const resolveAgentPresentation = (name: string): ToolPolicy.Presentation => {
   const profile = agentProfile(name).toLowerCase()
   const toolName = agentToolName(profile)
-  const defined = AgentTools.isDelegationToolName(toolName) ? get(toolName)?.presentation : undefined
+  const defined = AgentSelection.isDelegationToolName(toolName) ? get(toolName)?.presentation : undefined
   if (defined !== undefined) return defined
   const display = agentDisplay(name)
   return agentPresentation(profile, `${display} working`, `${display} finished`)

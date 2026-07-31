@@ -1,3 +1,5 @@
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
+import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Operation } from "@rika/product/product-operation"
@@ -8,7 +10,6 @@ import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-rep
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as ToolRuntime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
@@ -196,8 +197,8 @@ test("drives bypassed recorded and incognito shell commands through Operation an
         toolRuntimeLayer: (directory) =>
           ToolRuntime.layer(directory).pipe(
             Layer.provide(
-              MediaView.analyzerTestLayer(() =>
-                Effect.fail(MediaView.MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
+              analyzerTestLayer(() =>
+                Effect.fail(MediaAnalysisError.make({ message: "Media analysis is unavailable" })),
               ),
             ),
             Layer.provide(

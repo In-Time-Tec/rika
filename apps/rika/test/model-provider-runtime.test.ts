@@ -1,10 +1,8 @@
+import * as RikaToolRuntimeTools from "@rika/coding-tools/coding-tool-runtime-tools"
+import * as RuntimeHandler from "@rika/coding-tools/coding-tool-runtime-handler-layer"
 import * as BehaviorMode from "@rika/configuration/behavior-mode"
-import * as ModelRoute from "@rika/configuration/model-route"
 import * as ModelRouteResolution from "@rika/configuration/model-route-resolution"
 import * as SettingsDefaults from "@rika/configuration/configuration-settings"
-import * as ConfigurationService from "@rika/configuration/configuration-service"
-import * as SettingsDecoder from "@rika/configuration/configuration-settings"
-import * as ConfigurationSettingsInput from "@rika/configuration/configuration-settings"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import { expect, test } from "vitest"
@@ -169,7 +167,7 @@ test("sends configured reasoning effort and summary to custom OpenAI requests", 
 
 test("assembles each fragmented OpenAI function call once and sends supported stream options", () => {
   const requests = new Array<Record<string, unknown>>()
-  const handled = new Array<RikaToolRuntime.Request>()
+  const handled = new Array<RikaToolRuntimeContract.Request>()
   const calls = [
     { id: "item-1", callId: "call-1", path: "first.txt" },
     { id: "item-2", callId: "call-2", path: "second.txt" },
@@ -221,7 +219,7 @@ test("assembles each fragmented OpenAI function call once and sends supported st
         const prepared = yield* runtime.prepare([route])
         const context = yield* Layer.build(prepared.registrations[0]!.layer)
         const toolkitContext = yield* Layer.build(
-          RikaToolRuntime.handlerLayer.pipe(
+          RuntimeHandler.handlerLayer.pipe(
             Layer.provide(
               RikaToolRuntime.testLayer((request) =>
                 Effect.sync(() => {
@@ -232,7 +230,7 @@ test("assembles each fragmented OpenAI function call once and sends supported st
             ),
           ),
         )
-        const toolkit = yield* RikaToolRuntime.toolkit.pipe(Effect.provide(toolkitContext))
+        const toolkit = yield* RikaToolRuntimeTools.toolkit.pipe(Effect.provide(toolkitContext))
         const parts = yield* LanguageModel.streamText({ prompt: "read three files", toolkit }).pipe(
           Stream.runCollect,
           Effect.provide(context),
@@ -274,11 +272,11 @@ test("rejects a malformed OpenAI terminal without completing a partial function 
         const prepared = yield* runtime.prepare([route])
         const context = yield* Layer.build(prepared.registrations[0]!.layer)
         const toolkitContext = yield* Layer.build(
-          RikaToolRuntime.handlerLayer.pipe(
+          RuntimeHandler.handlerLayer.pipe(
             Layer.provide(RikaToolRuntime.testLayer(() => Effect.die("tool handlers are not executed by this test"))),
           ),
         )
-        const toolkit = yield* RikaToolRuntime.toolkit.pipe(Effect.provide(toolkitContext))
+        const toolkit = yield* RikaToolRuntimeTools.toolkit.pipe(Effect.provide(toolkitContext))
         const exit = yield* Effect.exit(
           LanguageModel.streamText({ prompt: "read one file", toolkit }).pipe(
             Stream.runCollect,

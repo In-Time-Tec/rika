@@ -1,31 +1,21 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Thread from "@rika/product/thread-record"
-import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as Turn from "@rika/product/turn-record"
-import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
-import * as ExecutionBackend from "@rika/product/execution-service"
-import * as TranscriptCorrelation from "@rika/transcript/child-parent-correlation"
-import * as TranscriptNestedProjection from "@rika/transcript/nested-transcript-projection"
-import * as TranscriptOrdering from "@rika/transcript/transcript-unit-order"
-import * as TranscriptProjection from "@rika/transcript/transcript-projection"
-import * as TranscriptProjectionModel from "@rika/transcript/transcript-projection-model"
-import * as TranscriptUsage from "@rika/transcript/model-usage-fallback"
+import { Fixtures } from "./execution-ingest-support"
 import { Context, Deferred, Effect, Exit, Layer, Ref, Scope, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ExecutionIngest } from "@rika/product/product-operation"
-import * as UsageCost from "@rika/product/usage-projection"
 import { executionRoute } from "../support/product-test-current-state"
 import { storeProjection } from "../support/product-test-transcript-fixture"
 
-const threadId = Thread.ThreadId.make("ingest-thread")
-const rootId = Turn.TurnId.make("root")
+const threadId = Fixtures.Thread.ThreadId.make("ingest-thread")
+const rootId = Fixtures.Turn.TurnId.make("root")
 const childId = "child:root:call_1"
 const grandchildId = "child:child%3Aroot%3Acall_1:call_2"
-const checkpoint = (projection: TranscriptRepository.Projection | undefined, key: string) =>
-  projection?.executionCheckpoints.find((entry) => entry.executionKey === TranscriptCorrelation.executionKey(key))
+const checkpoint = (projection: Fixtures.TranscriptRepository.Projection | undefined, key: string) =>
+  projection?.executionCheckpoints.find(
+    (entry) => entry.executionKey === Fixtures.TranscriptCorrelation.executionKey(key),
+  )
 
-const makeTurn = (status: Turn.Status): Turn.AgentExecutionTurn => ({
+const makeTurn = (status: Fixtures.Turn.Status): Fixtures.Turn.AgentExecutionTurn => ({
   _tag: "AgentExecution",
   id: rootId,
   threadId,
@@ -44,8 +34,8 @@ const event = (
   cursor: string,
   sequence: number,
   type: string,
-  extra: Partial<ExecutionBackend.Event> = {},
-): ExecutionBackend.Event => ({
+  extra: Partial<Fixtures.ExecutionBackend.Event> = {},
+): Fixtures.ExecutionBackend.Event => ({
   executionId,
   cursor,
   sequence,
@@ -55,10 +45,10 @@ const event = (
   ...extra,
 })
 
-const started = (executionId: string): ExecutionBackend.Event =>
+const started = (executionId: string): Fixtures.ExecutionBackend.Event =>
   event(executionId, `${executionId}:started`, 0, "execution.started", { createdAt: 0 })
 
-const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
+const rootEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
   started("root"),
   event("root", "r1", 1, "tool.call.requested", {
     data: { tool_call_id: "call_1", tool_name: "task", input: { prompt: "go" } },
@@ -67,7 +57,7 @@ const rootEvents: ReadonlyArray<ExecutionBackend.Event> = [
   event("root", "r3", 3, "execution.completed"),
 ]
 
-const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
+const childEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
   started(childId),
   event(childId, "c1", 1, "tool.call.requested", {
     data: { tool_call_id: "child_call", tool_name: "bash", input: { command: "bun test" } },
@@ -77,12 +67,12 @@ const childEvents: ReadonlyArray<ExecutionBackend.Event> = [
 ]
 
 interface ScriptEntry {
-  readonly events: ReadonlyArray<ExecutionBackend.Event>
-  readonly status: ExecutionBackend.Status
+  readonly events: ReadonlyArray<Fixtures.ExecutionBackend.Event>
+  readonly status: Fixtures.ExecutionBackend.Status
   readonly children?: ReadonlyArray<string>
   readonly hold?: Deferred.Deferred<void>
   readonly ignoreCursor?: boolean
-  readonly pages?: (after: string | undefined) => ExecutionBackend.EventPage
+  readonly pages?: (after: string | undefined) => Fixtures.ExecutionBackend.EventPage
 }
 
 interface Followed {
@@ -97,18 +87,18 @@ interface DeltaWrite {
 
 const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (options: {
   readonly script: Readonly<Record<string, ScriptEntry>>
-  readonly turnStatus?: Turn.Status
-  readonly stored?: TranscriptProjectionModel.Projection
-  readonly executionCheckpoints?: ReadonlyArray<TranscriptRepository.ExecutionCheckpoint>
+  readonly turnStatus?: Fixtures.Turn.Status
+  readonly stored?: Fixtures.TranscriptProjectionModel.Projection
+  readonly executionCheckpoints?: ReadonlyArray<Fixtures.TranscriptRepository.ExecutionCheckpoint>
   readonly consumed?: Readonly<
     Record<
       string,
       { readonly cursor: string; readonly sequence: number; readonly status?: "completed" | "failed" | "cancelled" }
     >
   >
-  readonly executionStates?: Readonly<Record<string, TranscriptProjectionModel.ProjectionState>>
+  readonly executionStates?: Readonly<Record<string, Fixtures.TranscriptProjectionModel.ProjectionState>>
   readonly storedProjectionVersion?: number
-  readonly exposeStored?: (stored: TranscriptRepository.Projection) => TranscriptRepository.Projection
+  readonly exposeStored?: (stored: Fixtures.TranscriptRepository.Projection) => Fixtures.TranscriptRepository.Projection
   readonly commitEvents?: number
   readonly watchCapacity?: number
   readonly commitOutcome?: "failure" | "stale"
@@ -119,8 +109,8 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
   readonly onCommitted?: (commit: ExecutionIngest.Commit) => void
 }) {
   const turn = makeTurn(options.turnStatus ?? "completed")
-  const turns = yield* TurnRepository.makeMemory([turn])
-  const usage = Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service)
+  const turns = yield* Fixtures.TurnRepository.makeMemory([turn])
+  const usage = Context.get(yield* Layer.build(Fixtures.UsageRepository.memoryLayer), Fixtures.UsageRepository.Service)
   if (options.consumed !== undefined) {
     const observations = Object.entries(options.consumed).flatMap(([executionId, consumed]) =>
       (options.script[executionId]?.events ?? [])
@@ -131,25 +121,25 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
           event: candidate,
         })),
     )
-    const folded = UsageCost.foldBatch(UsageCost.empty, observations)
+    const folded = Fixtures.UsageCost.foldBatch(Fixtures.UsageCost.empty, observations)
     if (folded._tag === "Failure") return yield* Effect.die(folded.failure)
     yield* usage.admitSource(String(rootId), String(rootId), String(threadId))
-    yield* usage.commitSource(String(rootId), String(rootId), 0, UsageCost.serialize(folded.success), {
-      ...UsageCost.materialize(folded.success, String(rootId), String(threadId)),
+    yield* usage.commitSource(String(rootId), String(rootId), 0, Fixtures.UsageCost.serialize(folded.success), {
+      ...Fixtures.UsageCost.materialize(folded.success, String(rootId), String(threadId)),
       sourceComplete: false,
     })
   }
-  const memory = yield* TranscriptRepository.makeMemory({ turns })
+  const memory = yield* Fixtures.TranscriptRepository.makeMemory({ turns })
   if (options.stored !== undefined)
     yield* storeProjection(memory, turn, options.stored, {
       ...(options.executionCheckpoints === undefined ? {} : { executionCheckpoints: options.executionCheckpoints }),
       ...(options.consumed === undefined ? {} : { consumed: options.consumed }),
       ...(options.executionStates === undefined ? {} : { executionStates: options.executionStates }),
-      projectionVersion: options.storedProjectionVersion ?? TranscriptRepository.invalidatedProjectionVersion,
+      projectionVersion: options.storedProjectionVersion ?? Fixtures.TranscriptRepository.invalidatedProjectionVersion,
     })
   const commits: Array<number> = []
   const writes: Array<DeltaWrite> = []
-  const transcripts = TranscriptRepository.Service.of({
+  const transcripts = Fixtures.TranscriptRepository.Service.of({
     ...memory,
     get: (turnId) =>
       memory
@@ -173,7 +163,7 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
         Effect.flatMap((selected) => {
           if (selected === "failure")
             return Effect.fail(
-              TranscriptRepository.RepositoryError.make({ message: "injected transcript write failure" }),
+              Fixtures.TranscriptRepository.RepositoryError.make({ message: "injected transcript write failure" }),
             )
           if (selected === "stale") return Effect.succeed("stale" as const)
           return memory.commitDelta(committedTurn, state, delta, commitOptions)
@@ -196,7 +186,7 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
   })
   const follows: Array<Followed> = []
   const inspections: Array<string> = []
-  const backend = ExecutionBackend.Service.of({
+  const backend = Fixtures.ExecutionBackend.Service.of({
     invokeChild: () => Effect.die("unused"),
     createFanOut: () => Effect.die("unused"),
     inspectFanOut: () => Effect.die("unused"),
@@ -247,7 +237,7 @@ const makeHarness = Effect.fn("ExecutionIngestTest.makeHarness")(function* (opti
         follows.push({ executionId, after })
         const entry = options.script[executionId]
         if (entry === undefined)
-          return yield* ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${executionId}` })
+          return yield* Fixtures.ExecutionBackend.BackendError.make({ message: `ExecutionNotFound ${executionId}` })
         const boundary =
           after === undefined || entry.ignoreCursor === true
             ? -1
@@ -369,7 +359,9 @@ describe("ExecutionIngest", () => {
       }
       const stored = yield* transcripts.get(rootId)
       expect(
-        [...visible.values()].toSorted((left, right) => TranscriptOrdering.compareUnitOrder(left.order, right.order)),
+        [...visible.values()].toSorted((left, right) =>
+          Fixtures.TranscriptOrdering.compareUnitOrder(left.order, right.order),
+        ),
       ).toEqual(stored?.units)
       expect(projectionChanges.at(-1)).toMatchObject({
         _tag: "ProjectionStopped",
@@ -382,7 +374,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("rejects one durable cursor reused at a different sequence", () =>
     Effect.gen(function* () {
-      const duplicateCursorEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const duplicateCursorEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
         started("root"),
         event("root", "duplicate", 1, "model.output.completed", { text: "first" }),
         event("root", "duplicate", 2, "model.output.completed", { text: "second" }),
@@ -491,7 +483,7 @@ describe("ExecutionIngest", () => {
   it.effect("keeps ingest live while streamed parallel tool calls resolve one at a time", () =>
     Effect.gen(function* () {
       const toolIds = ["call-a", "call-b", "call-c", "call-d", "call-e"] as const
-      const events: ReadonlyArray<ExecutionBackend.Event> = [
+      const events: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
         started("root"),
         ...toolIds.map((toolId, index) =>
           event("root", `transient-${toolId}`, 0, "model.toolcall.delta", {
@@ -581,13 +573,13 @@ describe("ExecutionIngest", () => {
           [childId]: { events: childEvents, status: "completed" },
         },
         stored: {
-          units: TranscriptProjection.Projection.empty(String(rootId), "go").units,
+          units: Fixtures.TranscriptProjection.Projection.empty(String(rootId), "go").units,
           revision: 4,
           modelPhase: 0,
         },
       })
       expect((yield* transcripts.get(rootId))?.projectionVersion).toBe(
-        TranscriptRepository.invalidatedProjectionVersion,
+        Fixtures.TranscriptRepository.invalidatedProjectionVersion,
       )
 
       yield* ingest.ensure({ threadId, turnId: rootId })
@@ -607,14 +599,14 @@ describe("ExecutionIngest", () => {
 
   it.effect("authoritatively corrects a completed turn from a versioned Relay refold", () =>
     Effect.gen(function* () {
-      const failedEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const failedEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
         started("root"),
         event("root", "failed", 1, "execution.failed", { text: "backend failed" }),
       ]
       const { ingest, transcripts, turns } = yield* makeHarness({
         script: { root: { events: failedEvents, status: "failed" } },
         turnStatus: "completed",
-        stored: TranscriptProjection.Projection.empty(String(rootId), "delegate"),
+        stored: Fixtures.TranscriptProjection.Projection.empty(String(rootId), "delegate"),
       })
 
       yield* ingest.ensure({ threadId, turnId: rootId })
@@ -648,7 +640,7 @@ describe("ExecutionIngest", () => {
           [childId]: { events: childEvents, status: "completed" },
         },
         stored: {
-          units: TranscriptProjection.Projection.empty(String(rootId), "go").units,
+          units: Fixtures.TranscriptProjection.Projection.empty(String(rootId), "go").units,
           revision: 4,
           modelPhase: 0,
         },
@@ -677,7 +669,7 @@ describe("ExecutionIngest", () => {
           [childId]: { events: childEvents, status: "completed" },
         },
         stored: {
-          units: TranscriptProjection.Projection.empty(String(rootId), "go").units,
+          units: Fixtures.TranscriptProjection.Projection.empty(String(rootId), "go").units,
           revision: 4,
           modelPhase: 0,
         },
@@ -754,13 +746,13 @@ describe("ExecutionIngest", () => {
 
   it.effect("resumes a partially consumed execution from its stored cursor", () =>
     Effect.gen(function* () {
-      const partial: ReadonlyArray<ExecutionBackend.Event> = rootEvents.slice(0, 3)
+      const partial: ReadonlyArray<Fixtures.ExecutionBackend.Event> = rootEvents.slice(0, 3)
       const { ingest, transcripts, follows } = yield* makeHarness({
         script: {
           root: { events: rootEvents, status: "completed", children: [childId] },
           [childId]: { events: childEvents, status: "completed" },
         },
-        stored: TranscriptProjection.Projection.project("root", "delegate", partial),
+        stored: Fixtures.TranscriptProjection.Projection.project("root", "delegate", partial),
         consumed: { root: { cursor: "r2", sequence: 2 } },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
@@ -781,9 +773,9 @@ describe("ExecutionIngest", () => {
   it.effect("resumes unfinished children without inspecting an already-terminal root", () =>
     Effect.gen(function* () {
       const partialChildEvents = childEvents.slice(0, 3)
-      const root = TranscriptProjection.Projection.project("root", "delegate", rootEvents)
-      const child = TranscriptProjection.Projection.project(childId, "", partialChildEvents)
-      const stored = TranscriptNestedProjection.withNestedProjections(root, [
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", partialChildEvents)
+      const stored = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
       const { ingest, transcripts, follows, inspections } = yield* makeHarness({
@@ -798,8 +790,8 @@ describe("ExecutionIngest", () => {
           [childId]: { cursor: "c2", sequence: 2 },
         },
         executionStates: {
-          root: TranscriptProjection.Projection.projectionState(root),
-          [childId]: TranscriptProjection.Projection.projectionState(child),
+          root: Fixtures.TranscriptProjection.Projection.projectionState(root),
+          [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
         },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
@@ -816,7 +808,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("restores a child's fold state before resuming its durable suffix", () =>
     Effect.gen(function* () {
-      const partialChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const partialChildEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
         started(childId),
         event(childId, "c1", 1, "model.input.prepared"),
         event(childId, "c2", 2, "model.output.completed", { text: "first child answer" }),
@@ -828,17 +820,17 @@ describe("ExecutionIngest", () => {
         event(childId, "c4", 4, "model.output.completed", { text: "second child answer" }),
         event(childId, "c5", 5, "execution.completed"),
       )
-      const root = TranscriptProjection.Projection.project("root", "delegate", rootEvents)
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents)
       const child = {
-        ...TranscriptProjection.Projection.project(childId, "", partialChildEvents),
+        ...Fixtures.TranscriptProjection.Projection.project(childId, "", partialChildEvents),
         costUsd: 1.25,
         usageCursors: ["usage-cursor"],
-        pricingVersion: TranscriptUsage.pricingVersion,
+        pricingVersion: Fixtures.TranscriptUsage.pricingVersion,
       }
-      let expectedChild: TranscriptProjectionModel.Projection = child
+      let expectedChild: Fixtures.TranscriptProjectionModel.Projection = child
       for (const suffix of completeChildEvents.slice(partialChildEvents.length))
-        expectedChild = TranscriptProjection.Projection.applyEvent(expectedChild, suffix)
-      const stored = TranscriptNestedProjection.withNestedProjections(root, [
+        expectedChild = Fixtures.TranscriptProjection.Projection.applyEvent(expectedChild, suffix)
+      const stored = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
       const { ingest, transcripts, follows } = yield* makeHarness({
@@ -852,8 +844,8 @@ describe("ExecutionIngest", () => {
           [childId]: { cursor: "c3", sequence: 3 },
         },
         executionStates: {
-          root: TranscriptProjection.Projection.projectionState(root),
-          [childId]: TranscriptProjection.Projection.projectionState(child),
+          root: Fixtures.TranscriptProjection.Projection.projectionState(root),
+          [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
         },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
@@ -871,7 +863,7 @@ describe("ExecutionIngest", () => {
         ),
       ).toEqual(["first child answer", "second child answer"])
       expect(checkpoint(resumed, childId)?.state).toEqual(
-        TranscriptProjection.Projection.projectionState(expectedChild),
+        Fixtures.TranscriptProjection.Projection.projectionState(expectedChild),
       )
       expect(checkpoint(resumed, childId)).toEqual(
         expect.objectContaining({ cursor: "c5", sequence: 5, status: "completed" }),
@@ -941,9 +933,9 @@ describe("ExecutionIngest", () => {
 
   it.effect("rejects a current parent status that contradicts its child's projected outcome", () =>
     Effect.gen(function* () {
-      const root = TranscriptProjection.Projection.project("root", "delegate", rootEvents)
-      const child = TranscriptProjection.Projection.project(childId, "", childEvents)
-      const stored = TranscriptNestedProjection.withNestedProjections(root, [
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", childEvents)
+      const stored = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
       const { ingest, writes } = yield* makeHarness({
@@ -954,8 +946,8 @@ describe("ExecutionIngest", () => {
           [childId]: { cursor: "c3", sequence: 3, status: "completed" },
         },
         executionStates: {
-          root: TranscriptProjection.Projection.projectionState(root),
-          [childId]: TranscriptProjection.Projection.projectionState(child),
+          root: Fixtures.TranscriptProjection.Projection.projectionState(root),
+          [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
         },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
@@ -982,9 +974,9 @@ describe("ExecutionIngest", () => {
           data: { tool_call_id: "shell", tool_name: "bash", input: { command: "sleep 10" } },
         }),
       ]
-      const root = TranscriptProjection.Projection.project("root", "delegate", failedRootEvents)
-      const child = TranscriptProjection.Projection.project(childId, "", runningChildEvents)
-      const nested = TranscriptNestedProjection.withNestedProjections(root, [
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", failedRootEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", runningChildEvents)
+      const nested = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
       const stored = {
@@ -1008,8 +1000,8 @@ describe("ExecutionIngest", () => {
           [childId]: { cursor: "running-tool", sequence: 1 },
         },
         executionStates: {
-          root: TranscriptProjection.Projection.projectionState(root),
-          [childId]: TranscriptProjection.Projection.projectionState(child),
+          root: Fixtures.TranscriptProjection.Projection.projectionState(root),
+          [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
         },
         storedProjectionVersion: ExecutionIngest.projectionVersion,
       })
@@ -1027,15 +1019,15 @@ describe("ExecutionIngest", () => {
 
   it.effect("rejects contradictory current child attachment paths instead of normalizing them", () =>
     Effect.gen(function* () {
-      const root = TranscriptProjection.Projection.project("root", "delegate", rootEvents)
-      const child = TranscriptProjection.Projection.project(childId, "", childEvents)
-      const valid = TranscriptNestedProjection.withNestedProjections(root, [
+      const root = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents)
+      const child = Fixtures.TranscriptProjection.Projection.project(childId, "", childEvents)
+      const valid = Fixtures.TranscriptNestedProjection.withNestedProjections(root, [
         { parentId: "root:call_1", projection: child },
       ])
       const childUnit = valid.units.find((unit) => unit.turnId === childId)
       const rootPrompt = valid.units.find((unit) => unit.turnId === rootId && unit.parentId === undefined)
       if (childUnit === undefined || rootPrompt === undefined) return yield* Effect.die("missing attachment fixture")
-      const variants: ReadonlyArray<TranscriptProjectionModel.Projection> = [
+      const variants: ReadonlyArray<Fixtures.TranscriptProjectionModel.Projection> = [
         {
           ...valid,
           units: valid.units.map((unit) =>
@@ -1048,10 +1040,10 @@ describe("ExecutionIngest", () => {
             unit.key === childUnit.key
               ? {
                   ...unit,
-                  order: TranscriptOrdering.childOrder(
+                  order: Fixtures.TranscriptOrdering.childOrder(
                     rootPrompt.order,
                     childId,
-                    TranscriptOrdering.localOrder(unit.order),
+                    Fixtures.TranscriptOrdering.localOrder(unit.order),
                   ),
                 }
               : unit,
@@ -1071,8 +1063,8 @@ describe("ExecutionIngest", () => {
             [childId]: { cursor: "c3", sequence: 3, status: "completed" },
           },
           executionStates: {
-            root: TranscriptProjection.Projection.projectionState(root),
-            [childId]: TranscriptProjection.Projection.projectionState(child),
+            root: Fixtures.TranscriptProjection.Projection.projectionState(root),
+            [childId]: Fixtures.TranscriptProjection.Projection.projectionState(child),
           },
           storedProjectionVersion: ExecutionIngest.projectionVersion,
         })
@@ -1085,11 +1077,11 @@ describe("ExecutionIngest", () => {
 
   it.effect("rejects contradictory current root projections instead of repairing them", () =>
     Effect.gen(function* () {
-      const valid = TranscriptProjection.Projection.project("root", "delegate", [
+      const valid = Fixtures.TranscriptProjection.Projection.project("root", "delegate", [
         event("root", "answer", 1, "model.output.completed", { text: "answer" }),
       ])
       const promptKey = "turn:root:user"
-      const variants: ReadonlyArray<TranscriptProjectionModel.Projection> = [
+      const variants: ReadonlyArray<Fixtures.TranscriptProjectionModel.Projection> = [
         { ...valid, units: valid.units.filter((unit) => unit.key !== promptKey) },
         {
           ...valid,
@@ -1160,7 +1152,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("folds a grandchild under the child tool that requested it", () =>
     Effect.gen(function* () {
-      const nestedChildEvents: ReadonlyArray<ExecutionBackend.Event> = [
+      const nestedChildEvents: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
         started(childId),
         event(childId, "c1", 1, "tool.call.requested", {
           data: { tool_call_id: "call_2", tool_name: "task", input: { prompt: "deeper" } },
@@ -1207,15 +1199,15 @@ describe("ExecutionIngest", () => {
     Effect.gen(function* () {
       const failures: Array<ExecutionIngest.Failure> = []
       const turn = makeTurn("completed")
-      const turns = yield* TurnRepository.makeMemory([turn])
+      const turns = yield* Fixtures.TurnRepository.makeMemory([turn])
       const transcripts = Context.get(
-        yield* Layer.build(TranscriptRepository.memoryLayer),
-        TranscriptRepository.Service,
+        yield* Layer.build(Fixtures.TranscriptRepository.memoryLayer),
+        Fixtures.TranscriptRepository.Service,
       )
-      const partial = TranscriptProjection.Projection.project("root", "delegate", rootEvents.slice(0, 3))
+      const partial = Fixtures.TranscriptProjection.Projection.project("root", "delegate", rootEvents.slice(0, 3))
       yield* transcripts.commitDelta(
         turn,
-        TranscriptProjection.Projection.projectionState(partial),
+        Fixtures.TranscriptProjection.Projection.projectionState(partial),
         { upsert: partial.units, remove: [] },
         {
           expectedGeneration: undefined,
@@ -1225,13 +1217,13 @@ describe("ExecutionIngest", () => {
               executionId: "root",
               cursor: "r2",
               sequence: 2,
-              state: TranscriptProjection.Projection.projectionState(partial),
+              state: Fixtures.TranscriptProjection.Projection.projectionState(partial),
             },
           ],
           projectionVersion: ExecutionIngest.projectionVersion,
         },
       )
-      const backend = ExecutionBackend.Service.of({
+      const backend = Fixtures.ExecutionBackend.Service.of({
         invokeChild: () => Effect.die("unused"),
         createFanOut: () => Effect.die("unused"),
         inspectFanOut: () => Effect.die("unused"),
@@ -1263,7 +1255,7 @@ describe("ExecutionIngest", () => {
         backend,
         transcripts,
         turns,
-        usage: Context.get(yield* Layer.build(UsageRepository.memoryLayer), UsageRepository.Service),
+        usage: Context.get(yield* Layer.build(Fixtures.UsageRepository.memoryLayer), Fixtures.UsageRepository.Service),
         onFailure: (failure) => failures.push(failure),
       })
 
@@ -1548,7 +1540,7 @@ describe("ExecutionIngest", () => {
       const result = event("root", "result", 41, "tool.result.received", {
         data: { tool_call_id: "call_20", output: "updated result" },
       })
-      const stored = TranscriptProjection.Projection.project("root", "delegate", history)
+      const stored = Fixtures.TranscriptProjection.Projection.project("root", "delegate", history)
       const { ingest, transcripts, writes } = yield* makeHarness({
         script: { root: { events: history.concat(result), status: "running" } },
         turnStatus: "running",
@@ -1693,7 +1685,7 @@ describe("ExecutionIngest", () => {
   it.effect("finishes a held catch-up page before recording terminal state and drops stale stored units", () =>
     Effect.gen(function* () {
       const gate = yield* Deferred.make<void>()
-      const paged: ReadonlyArray<ExecutionBackend.Event> = [
+      const paged: ReadonlyArray<Fixtures.ExecutionBackend.Event> = [
         started("root"),
         event("root", "p1", 1, "model.output.completed", { text: "replayed one" }),
         event("root", "p2", 2, "model.output.completed", { text: "replayed two" }),
@@ -1714,7 +1706,7 @@ describe("ExecutionIngest", () => {
           },
         },
         turnStatus: "running",
-        stored: TranscriptProjection.Projection.project("root", "stale stored prompt", [
+        stored: Fixtures.TranscriptProjection.Projection.project("root", "stale stored prompt", [
           event("root", "stale", 9, "model.output.completed", { text: "stale stored content" }),
         ]),
         pageHold: { after: "p1", open: gate },
@@ -1785,7 +1777,7 @@ describe("ExecutionIngest", () => {
       })
 
       yield* ingest.ensure({ threadId, turnId: rootId })
-      yield* ingest.ensure({ threadId, turnId: Turn.TurnId.make("absent") })
+      yield* ingest.ensure({ threadId, turnId: Fixtures.Turn.TurnId.make("absent") })
       yield* settle(ingest)
 
       expect(follows).toHaveLength(0)
@@ -1794,7 +1786,7 @@ describe("ExecutionIngest", () => {
 
   it.effect("replaces invalidated units only with projections derived from Relay events", () =>
     Effect.gen(function* () {
-      const stored = TranscriptProjection.Projection.project("root", "delegate", [
+      const stored = Fixtures.TranscriptProjection.Projection.project("root", "delegate", [
         event("root", "stale", 1, "model.output.completed", { text: "stale projected text" }),
         event("root", "stale-done", 2, "execution.completed"),
       ])

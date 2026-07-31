@@ -1,5 +1,6 @@
+import { MediaAnalysisError } from "@rika/coding-tools/media-view-errors"
+import { MediaAnalyzer } from "@rika/coding-tools/media-analysis-service"
 import { LanguageModel, ModelRegistry, Prompt, Toolkit } from "@batonfx/core"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import { Effect, Layer } from "effect"
 
 const instructions =
@@ -7,12 +8,12 @@ const instructions =
 
 export const layer = (
   selection: ModelRegistry.ModelSelection,
-): Layer.Layer<MediaView.MediaAnalyzer, never, ModelRegistry.ModelRegistry> =>
+): Layer.Layer<MediaAnalyzer, never, ModelRegistry.ModelRegistry> =>
   Layer.effect(
-    MediaView.MediaAnalyzer,
+    MediaAnalyzer,
     Effect.gen(function* () {
       const registry = yield* ModelRegistry.ModelRegistry
-      return MediaView.MediaAnalyzer.of({
+      return MediaAnalyzer.of({
         analyze: Effect.fn("MediaAnalyzer.analyze")(function* (input) {
           const prompt = Prompt.fromMessages([
             Prompt.makeMessage("user", {
@@ -33,7 +34,7 @@ export const layer = (
             )
             .pipe(
               Effect.mapError((cause) =>
-                MediaView.MediaAnalysisError.make({
+                MediaAnalysisError.make({
                   message: `Media analysis failed for ${input.kind} (${input.mimeType}): ${String(cause)}`,
                 }),
               ),

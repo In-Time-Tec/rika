@@ -1,7 +1,9 @@
+import * as AgentTools from "@rika/coding-tools/agent-tool-tools"
+import * as AgentSelection from "@rika/coding-tools/agent-tool-selection"
+import * as ThreadDefinitions from "@rika/coding-tools/thread-tool-definitions"
 import { Agent, type ModelRegistry, TurnPolicy } from "@batonfx/core"
-import * as AgentTools from "@rika/coding-tools/agent-tool-contract"
-import * as Tools from "@rika/coding-tools/coding-tool-runtime"
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
+import * as RuntimeCoreTools from "@rika/coding-tools/coding-tool-runtime-tool-definitions"
+import * as RuntimeServiceTools from "@rika/coding-tools/coding-tool-runtime-services"
 import { Effect, Function, Schema } from "effect"
 import { Toolkit } from "effect/unstable/ai"
 import childPrompt from "./prompts/child.prompt.txt"
@@ -53,43 +55,43 @@ export const resolveTitle = (model: ModelRegistry.ModelSelection) => ({
 const definitions = {
   Oracle: {
     instructions: instructions("Oracle", oraclePrompt),
-    tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
+    tools: [RuntimeCoreTools.grepTool, RuntimeCoreTools.readTool, RuntimeServiceTools.webSearchTool],
     permissions: ["workspace.read", "network.read", "thread.read"],
     maxToolTurns: 60,
   },
   Librarian: {
     instructions: instructions("Librarian", librarianPrompt),
-    tools: [Tools.webSearchTool, Tools.readWebPageTool],
+    tools: [RuntimeServiceTools.webSearchTool, RuntimeServiceTools.readWebPageTool],
     permissions: ["network.read", "thread.read"],
     maxToolTurns: 30,
   },
   Painter: {
     instructions: instructions("Painter", painterPrompt),
-    tools: [Tools.viewMediaTool],
+    tools: [RuntimeServiceTools.viewMediaTool],
     permissions: ["workspace.read", "thread.read"],
     maxToolTurns: 30,
   },
   Review: {
     instructions: instructions("Review", reviewPrompt),
-    tools: [Tools.grepTool, Tools.readTool, Tools.webSearchTool],
+    tools: [RuntimeCoreTools.grepTool, RuntimeCoreTools.readTool, RuntimeServiceTools.webSearchTool],
     permissions: ["workspace.read", "network.read", "thread.read"],
     maxToolTurns: 60,
   },
   ReadThread: {
     instructions: instructions("ReadThread", readThreadPrompt),
-    tools: [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool],
+    tools: [ThreadDefinitions.searchThreadsTool, ThreadDefinitions.readThreadTranscriptTool],
     permissions: ["thread.read"],
     maxToolTurns: 30,
   },
   Surgeon: {
     instructions: instructions("Surgeon", surgeonPrompt),
     tools: [
-      Tools.grepTool,
-      Tools.readTool,
-      Tools.writeTool,
-      Tools.editTool,
-      Tools.bashTool,
-      Tools.shellCommandStatusTool,
+      RuntimeCoreTools.grepTool,
+      RuntimeCoreTools.readTool,
+      RuntimeCoreTools.writeTool,
+      RuntimeCoreTools.editTool,
+      RuntimeCoreTools.bashTool,
+      RuntimeServiceTools.shellCommandStatusTool,
     ],
     permissions: ["workspace.read", "workspace.write", "process.run", "thread.read"],
     maxToolTurns: 80,
@@ -97,13 +99,13 @@ const definitions = {
   Task: {
     instructions: instructions("Task", taskPrompt),
     tools: [
-      Tools.grepTool,
-      Tools.readTool,
-      Tools.writeTool,
-      Tools.editTool,
-      Tools.bashTool,
-      Tools.shellCommandStatusTool,
-      Tools.webSearchTool,
+      RuntimeCoreTools.grepTool,
+      RuntimeCoreTools.readTool,
+      RuntimeCoreTools.writeTool,
+      RuntimeCoreTools.editTool,
+      RuntimeCoreTools.bashTool,
+      RuntimeServiceTools.shellCommandStatusTool,
+      RuntimeServiceTools.webSearchTool,
     ],
     permissions: ["workspace.read", "workspace.write", "process.run", "network.read", "thread.read"],
     maxToolTurns: 80,
@@ -114,18 +116,18 @@ const resolveImpl = (name: Name, model: ModelRegistry.ModelSelection) => {
   const definition = definitions[name]
   const delegationTools = (() => {
     if (name === "ReadThread") return []
-    if (name !== "Task") return [AgentTools.readThreadTool, AgentTools.awaitSubagentsTool]
+    if (name !== "Task") return [AgentTools.readThreadTool, AgentSelection.awaitSubagentsTool]
     return [
       AgentTools.oracleTool,
       AgentTools.librarianTool,
       AgentTools.reviewTool,
       AgentTools.surgeonTool,
       AgentTools.readThreadTool,
-      AgentTools.awaitSubagentsTool,
+      AgentSelection.awaitSubagentsTool,
     ]
   })()
   const recoveryTools =
-    name === "ReadThread" ? [] : [ThreadTools.searchThreadsTool, ThreadTools.readThreadTranscriptTool]
+    name === "ReadThread" ? [] : [ThreadDefinitions.searchThreadsTool, ThreadDefinitions.readThreadTranscriptTool]
   const toolkit = Toolkit.make(...definition.tools, ...delegationTools, ...recoveryTools)
   const profileInstructions =
     name === "ReadThread"

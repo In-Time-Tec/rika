@@ -1,10 +1,10 @@
+import * as ThreadToolkits from "@rika/coding-tools/thread-toolkits"
 import { describe, expect, it } from "@effect/vitest"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { vi } from "vitest"
 import { ModelResilience } from "@batonfx/core"
 import { TestModel } from "@batonfx/test"
 import { ChildFanOutHost, Client, Content, Execution, Ids, WorkflowDefinitionHost } from "@relayfx/sdk"
-import * as ThreadTools from "@rika/coding-tools/thread-tool-contract"
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, Schema, Stream, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { AiError, Tool, Toolkit } from "effect/unstable/ai"
@@ -365,7 +365,7 @@ const provideBackend = (implementation: Client.Interface) => provideConfiguredBa
 const provideBackendWithThreadTools = (implementation: Client.Interface) => {
   const contextLayer = RelayExecutionBackend.layerFromClient({
     selection,
-    additionalToolkit: ThreadTools.toolkit,
+    additionalToolkit: ThreadToolkits.toolkit,
   }).pipe(Layer.provide(Layer.succeed(Client.Service, implementation)))
   return <A, E>(effect: Effect.Effect<A, E, ExecutionBackend.Service>) =>
     Effect.gen(function* () {
@@ -1911,7 +1911,7 @@ describe("ExecutionBackend Relay client adapter", () => {
           oracleSelection,
           compaction: mainCompaction,
           oracleCompaction,
-          additionalToolkit: ThreadTools.allToolkit,
+          additionalToolkit: ThreadToolkits.allToolkit,
           resolveWorkspace: (execution) => Effect.succeed(execution.includes("other-turn") ? "/configured" : "/plain"),
         }),
       )

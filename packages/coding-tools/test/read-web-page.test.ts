@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Redacted, Schema } from "effect"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
+import * as ReadWebPageContract from "@rika/coding-tools/read-web-page-contract"
 import { provide } from "./test-layer"
 
 const response = (request: HttpClientRequest.HttpClientRequest, body: unknown, status = 200) =>
@@ -49,7 +50,7 @@ const apiResponse = (overrides: Record<string, unknown> = {}) => ({
 const decodeRequestBody = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
 
 const run = (
-  input: ReadWebPage.Input,
+  input: ReadWebPageContract.Input,
   handler: (request: HttpClientRequest.HttpClientRequest) => HttpClientResponse.HttpClientResponse,
   apiKey = Redacted.make("secret"),
 ) =>

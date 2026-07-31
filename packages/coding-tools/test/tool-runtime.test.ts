@@ -1,12 +1,15 @@
+import * as WebSearchInput from "@rika/coding-tools/web-search-input-contract"
+import * as WebSearchResult from "@rika/coding-tools/web-search-result-contract"
+import { analyzerTestLayer } from "@rika/coding-tools/media-analysis-service"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, FileSystem, Layer, Option, Path, PlatformError, Ref, Schema, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as MediaView from "@rika/coding-tools/media-view-service"
 import * as ProcessRegistry from "@rika/coding-tools/shell-process-registry"
 import * as ReadWebPage from "@rika/coding-tools/read-web-page-service"
 import * as Runtime from "@rika/coding-tools/coding-tool-runtime"
 import * as WebSearch from "@rika/coding-tools/web-search-service"
+import * as WebSearchErrors from "@rika/coding-tools/web-search-errors"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import { provide } from "./test-layer"
 
@@ -192,7 +195,7 @@ const testEnvironment = (
     Layer.provide(index),
     Layer.provide(dependencies),
     Layer.provide(Layer.merge(WebSearch.testLayer(search), ReadWebPage.testLayer(read))),
-    Layer.provide(MediaView.analyzerTestLayer(() => Effect.succeed("analysis"))),
+    Layer.provide(analyzerTestLayer(() => Effect.succeed("analysis"))),
   )
   return { files, directories, commands, killed, runtime }
 }
@@ -420,11 +423,13 @@ describe("Runtime", () => {
       {
         id: "fixture",
         priority: 1,
-        capabilities: new Set<WebSearch.Capability>(["web"]),
+        capabilities: new Set<WebSearchInput.Capability>(["web"]),
         search: () => {
           attempts += 1
           return attempts === 1
-            ? Effect.fail(WebSearch.ProviderFailure.make({ provider: "fixture", kind: "transport", message: "reset" }))
+            ? Effect.fail(
+                WebSearchResult.ProviderFailure.make({ provider: "fixture", kind: "transport", message: "reset" }),
+              )
             : Effect.never
         },
       },
@@ -561,17 +566,21 @@ describe("Runtime", () => {
     Effect.gen(function* () {
       const unavailable = testEnvironment("success", () =>
         Effect.fail(
-          WebSearch.SelectionError.make({ message: "No configured web search provider supports 'web' searches" }),
+          WebSearchErrors.SelectionError.make({ message: "No configured web search provider supports 'web' searches" }),
         ),
       )
       const rateLimited = testEnvironment("success", () =>
         Effect.fail(
-          WebSearch.ExecutionError.make({
+          WebSearchErrors.ExecutionError.make({
             message: "All selected web search providers failed",
             outcomes: [
               {
                 provider: "fixture",
-                error: WebSearch.ProviderFailure.make({ provider: "fixture", kind: "rate-limit", message: "limited" }),
+                error: WebSearchResult.ProviderFailure.make({
+                  provider: "fixture",
+                  kind: "rate-limit",
+                  message: "limited",
+                }),
               },
             ],
           }),

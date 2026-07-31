@@ -4,20 +4,9 @@ import { foldOperations } from "./transcript-event-fold"
 import type { FoldMutation } from "./transcript-event-fold"
 const {
   applyFoldEvent: applyFoldEventImpl,
-  applyAncestorOutcome,
-  applyChildOutcome,
-  foldExecutionOutcome,
-  foldHasRunningUnits,
-  foldUnit,
-  foldUnits,
-  isTransientEvent,
   makeProjectionFold,
-  parentToolForChild,
   restoreProjectionFold,
-  settleFoldChild,
-  settleFoldRunning,
   snapshotFoldProjection,
-  snapshotFoldState,
 } = foldOperations
 export const Fold = foldOperations
 export type { FoldMutation, ProjectionFold } from "./transcript-event-fold"

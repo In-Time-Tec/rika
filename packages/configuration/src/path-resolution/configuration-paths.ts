@@ -27,6 +27,6 @@ export const globalPaths = (home: string) => ({
 
 export const executionEventHistoryFor = (executionDatabase: string): string => {
   const separator = executionDatabase.lastIndexOf("/")
-  const parent = separator < 0 ? "." : separator === 0 ? "/" : executionDatabase.slice(0, separator)
+  const parent = separator < 0 ? "." : executionDatabase.slice(0, separator) || "/"
   return under(parent, "execution-event-history")
 }
