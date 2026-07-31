@@ -799,8 +799,9 @@ describe("Surface", () => {
       { _tag: "Diff", path: "a", patch: "+x" },
       { _tag: "ContextUsage", text: "80%", cost: "$0.12" },
       { _tag: "ContextUsage", text: "unknown" },
-      { _tag: "Compaction", summary: "Kept recent turns", checkpoint: "42" },
-      { _tag: "Compaction", summary: "No checkpoint" },
+      { _tag: "Compaction", summary: "Kept recent turns", checkpoint: "42", status: "complete" as const },
+      { _tag: "Compaction", summary: "No checkpoint", status: "complete" as const },
+      { _tag: "Compaction", summary: "", status: "running" as const },
       { _tag: "Notification", title: "Complete", detail: "Review finished" },
       {
         _tag: "Error",
@@ -817,6 +818,9 @@ describe("Surface", () => {
     ] as const
     const renderedBlocks = blocks.map((block) => renderBlock(block)).join("\n")
     expect(renderedBlocks).toContain("✕ Result")
+    expect(renderedBlocks).toContain("↻ Auto-compacting context…")
+    expect(renderedBlocks).toContain("✓ Auto-compacted context at 42\n  Kept recent turns")
+    expect(renderedBlocks).toContain("✓ Auto-compacted context\n  No checkpoint")
     expect(renderedBlocks).toContain(
       "✖ ERROR: Execution failed · Turn turn-4\n  Model unavailable\n  Next: Press Enter to retry.",
     )

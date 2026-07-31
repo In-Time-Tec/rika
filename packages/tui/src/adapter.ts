@@ -259,7 +259,10 @@ export const renderBlock: {
       case "Compaction":
         if (block.status === "running") return `↻ Auto-compacting context…`
         if (block.status === "failed") return `✗ Auto-compaction failed\n${body(block.summary)}`
-        return `↻ Compacted context${block.checkpoint === undefined ? "" : ` at ${block.checkpoint}`}\n${body(block.summary)}`
+        if (block.status === "cancelled") return `⊘ Auto-compaction cancelled`
+        return `✓ Auto-compacted context${block.checkpoint === undefined ? "" : ` at ${block.checkpoint}`}${
+          block.summary.length === 0 ? "" : `\n${body(block.summary)}`
+        }`
       case "Notification":
         return `${head(`! ${block.title}`)}\n${body(block.detail)}`
       case "Error":
