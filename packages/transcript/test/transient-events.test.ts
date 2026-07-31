@@ -349,121 +349,83 @@ describe("transient events", () => {
     ])
   })
 
-  it("rejects a result for a streamed tool whose durable request never arrived", () => {
+  it("lets durable tool boundaries advance while unrelated display overlays remain", () => {
     const retained = restoreProjectionFold(
       fold(
         [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-result-without-request", "prompt"),
-      ),
-    )
-    applyFoldEvent(retained, transientTool(1, "missing", 4))
-    const before = snapshotFoldProjection(retained)
-
-    expect(() =>
-      applyFoldEvent(retained, durableEvent(5, "tool.result.received", { tool_call_id: "missing", output: "result" })),
-    ).toThrow("unresolved transient units tool:turn-result-without-request:missing")
-    expect(snapshotFoldProjection(retained)).toEqual(before)
-  })
-
-  it("rejects unresolved assistant and reasoning content at request and result boundaries", () => {
-    const transients = [
-      {
-        key: "assistant:turn-tool-boundary:%n0",
-        event: transientDelta(1, "partial", 4),
-      },
-      {
-        key: "reasoning:turn-tool-boundary:%n0",
-        event: transientReasoning(1, "partial", 4),
-      },
-    ] as const
-    const boundaries = [
-      durableEvent(5, "tool.call.requested", { tool_call_id: "call", tool_name: "read", input: {} }),
-      durableEvent(5, "tool.result.received", { tool_call_id: "call", output: "result" }),
-    ]
-
-    for (const transient of transients)
-      for (const boundary of boundaries) {
-        const retained = restoreProjectionFold(
-          fold(
-            [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-            empty("turn-tool-boundary", "prompt"),
-          ),
-        )
-        applyFoldEvent(retained, transient.event)
-        expect(() => applyFoldEvent(retained, boundary)).toThrow(`unresolved transient units ${transient.key}`)
-      }
-  })
-
-  it("keeps the fold unchanged when another transient blocks a matching tool request", () => {
-    const retained = restoreProjectionFold(
-      fold(
-        [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-rejected-request", "prompt"),
+        empty("turn-tool-boundary", "prompt"),
       ),
     )
     applyFoldEvent(retained, transientDelta(1, "partial", 4))
     applyFoldEvent(retained, transientTool(2, "call", 4))
-    const before = snapshotFoldProjection(retained)
 
     expect(() =>
       applyFoldEvent(
         retained,
         durableEvent(5, "tool.call.requested", { tool_call_id: "call", tool_name: "read", input: {} }),
       ),
-    ).toThrow("unresolved transient units assistant:turn-rejected-request:%n0")
-    expect(snapshotFoldProjection(retained)).toEqual(before)
+    ).not.toThrow()
+    const projected = snapshotFoldProjection(retained)
+    expect(projected.revision).toBe(5)
+    expect(keysOf(projected)).toContain("tool:turn-tool-boundary:call")
   })
 
-  it("rejects a missing sibling tool at the next model and terminal boundaries", () => {
-    const orphanedSibling = () => {
+  it("discards one failed attempt overlay before applying its durable failure", () => {
+    const retained = restoreProjectionFold(
+      fold(
+        [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
+        empty("turn-attempt-failed", "prompt"),
+      ),
+    )
+    applyFoldEvent(retained, transientReasoning(1, "unfinished private reasoning", 4))
+    applyFoldEvent(
+      retained,
+      durableEvent(5, "model.attempt.failed", {
+        ...attemptData("a"),
+        category: "truncated-stream",
+        classification: "terminal",
+      }),
+    )
+
+    const projected = snapshotFoldProjection(retained)
+    expect(projected.revision).toBe(5)
+    expect(reasoningText(projected)).toBe("")
+  })
+
+  it("commits every execution terminal and discards all unfinished overlays", () => {
+    for (const terminal of ["execution.completed", "execution.failed", "execution.cancelled"]) {
       const retained = restoreProjectionFold(
         fold(
           [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-          empty("turn-missing-sibling", "prompt"),
+          empty(`turn-${terminal}`, "prompt"),
         ),
       )
-      applyFoldEvent(retained, transientTool(1, "requested", 4))
-      applyFoldEvent(retained, transientTool(2, "missing", 4))
-      applyFoldEvent(
-        retained,
-        durableEvent(5, "tool.call.requested", { tool_call_id: "requested", tool_name: "read", input: {} }),
-      )
-      applyFoldEvent(retained, durableEvent(6, "tool.result.received", { tool_call_id: "requested", output: "result" }))
-      return retained
+      applyFoldEvent(retained, transientReasoning(1, "unfinished reasoning", 4))
+      applyFoldEvent(retained, transientDelta(2, "unfinished answer", 4))
+      applyFoldEvent(retained, transientTool(3, "unfinished-tool", 4))
+
+      expect(() => applyFoldEvent(retained, durableEvent(5, terminal))).not.toThrow()
+      const projected = snapshotFoldProjection(retained)
+      expect(projected.revision).toBe(5)
+      expect(reasoningText(projected)).toBe("")
+      expect(assistantText(projected)).toBe("")
+      expect(keysOf(projected)).not.toContain(`tool:turn-${terminal}:unfinished-tool`)
     }
-
-    for (const boundary of [durableEvent(7, "model.input.prepared"), durableEvent(7, "execution.completed")])
-      expect(() => applyFoldEvent(orphanedSibling(), boundary)).toThrow(
-        "unresolved transient units tool:turn-missing-sibling:missing",
-      )
   })
 
-  it("rejects a terminal boundary when a streamed tool call never becomes durable", () => {
-    const retained = restoreProjectionFold(
-      fold(
-        [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-missing-tool", "prompt"),
-      ),
-    )
-    applyFoldEvent(retained, transientTool(1, "missing", 4))
+  it("matches replay after a child terminal arrives over streamed reasoning", () => {
+    const durable = [
+      durableEvent(2, "model.input.prepared"),
+      durableEvent(4, "model.attempt.started", attemptData("a")),
+      durableEvent(5, "model.attempt.first_output", attemptData("a")),
+      durableEvent(6, "execution.failed", { message: "Execution owner was lost" }),
+    ]
+    const retained = restoreProjectionFold(empty("turn-child-terminal", "prompt"))
+    for (const event of durable.slice(0, 3)) applyFoldEvent(retained, event)
+    applyFoldEvent(retained, transientReasoning(1, "still thinking", 5))
+    applyFoldEvent(retained, durable[3]!)
 
-    expect(() => applyFoldEvent(retained, durableEvent(5, "execution.completed"))).toThrow(
-      "unresolved transient units tool:turn-missing-tool:missing",
-    )
-  })
-
-  it("rejects a terminal boundary with unresolved transient content", () => {
-    const retained = restoreProjectionFold(
-      fold(
-        [durableEvent(2, "model.input.prepared"), durableEvent(4, "model.attempt.started")],
-        empty("turn-f", "prompt"),
-      ),
-    )
-    applyFoldEvent(retained, transientDelta(1, "partial", 4))
-
-    expect(() => applyFoldEvent(retained, durableEvent(5, "execution.completed"))).toThrow(
-      "unresolved transient units assistant:turn-f:%n0",
-    )
+    expect(snapshotFoldProjection(retained)).toEqual(project("turn-child-terminal", "prompt", durable))
   })
 
   it("keeps legacy durable delta histories advancing the revision", () => {

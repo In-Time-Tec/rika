@@ -1918,37 +1918,51 @@ describe("Transcript projection", () => {
     expect(replayed.units.filter((candidate) => candidate.key === "steering:turn:%n1:%n0")).toHaveLength(1)
   })
 
-  it("shows a notice when a model attempt is retried after the stream was cut off", () => {
-    const truncated: SourceEvent = {
-      cursor: "truncated",
+  it("shows one stable notice only after a model retry is accepted", () => {
+    const attemptFailed: SourceEvent = {
+      cursor: "attempt-failed",
       sequence: 4,
       type: "model.attempt.failed",
       createdAt: 4,
-      data: { category: "truncated-stream", classification: "transient" },
+      data: { model_call_id: "call-a", category: "truncated-stream", classification: "transient" },
     }
-    const projection = applyEvent(empty("turn-a", "prompt"), truncated)
-    expect(projection.units.map((unit) => unit.content)).toContainEqual({
+    const callFailed: SourceEvent = {
+      cursor: "call-failed",
+      sequence: 5,
+      type: "model.call.failed",
+      createdAt: 5,
+      data: { model_call_id: "call-a", category: "truncated-stream", classification: "terminal" },
+    }
+    const retry: SourceEvent = {
+      cursor: "retry",
+      sequence: 6,
+      type: "model.retry.scheduled",
+      createdAt: 6,
+      data: { model_call_id: "call-a", category: "truncated-stream", reason: "provider-resilience" },
+    }
+    const retryAgain: SourceEvent = { ...retry, cursor: "retry-2", sequence: 7, createdAt: 7 }
+    const beforeRetry = [attemptFailed, callFailed].reduce(
+      (current, event) => applyEvent(current, event),
+      empty("turn-a", "prompt"),
+    )
+    expect(
+      beforeRetry.units.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Notification"),
+    ).toBe(false)
+
+    const projection = [retry, retryAgain].reduce((current, event) => applyEvent(current, event), beforeRetry)
+    const notices = projection.units.filter(
+      (unit) => unit.content._tag === "Block" && unit.content.block._tag === "Notification",
+    )
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.key).toBe("model-retry:turn-a:call-a")
+    expect(notices[0]?.content).toEqual({
       _tag: "Block",
       block: {
         _tag: "Notification",
-        title: "Model response was cut off",
-        detail: "The provider ended the response before it finished. Rika is retrying that step.",
+        title: "Retrying model response",
+        detail: "The model call failed before any output was shown. Rika is retrying the call.",
       },
     })
-  })
-
-  it("stays silent for model failures that are not a cut-off stream", () => {
-    const failed: SourceEvent = {
-      cursor: "rate-limit",
-      sequence: 4,
-      type: "model.attempt.failed",
-      createdAt: 4,
-      data: { category: "rate-limit", classification: "transient" },
-    }
-    const projection = applyEvent(empty("turn-a", "prompt"), failed)
-    expect(
-      projection.units.some((unit) => unit.content._tag === "Block" && unit.content.block._tag === "Notification"),
-    ).toBe(false)
   })
 
   it("does not rewrite a cut-off execution failure into a complete turn", () => {

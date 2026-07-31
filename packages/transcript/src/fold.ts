@@ -72,6 +72,7 @@ interface OwnedFold {
   readonly transientBases: Map<string, Unit | undefined>
   readonly transientAttemptsByUnit: Map<string, Set<string>>
   readonly transientUnitsByAttempt: Map<string, Set<string>>
+  readonly transientCallByAttempt: Map<string, string>
   latestRootToolKey: string | undefined
   readonly observer: ProjectionFoldObserver | undefined
 }
@@ -352,6 +353,7 @@ const makeFold = (projection: Projection, options?: ProjectionFoldOptions): Proj
     transientBases: new Map(),
     transientAttemptsByUnit: new Map(),
     transientUnitsByAttempt: new Map(),
+    transientCallByAttempt: new Map(),
     latestRootToolKey: undefined,
     observer: options?.observer,
   }
@@ -1312,20 +1314,37 @@ const applyKnownEvent = (value: OwnedFold, change: MutableMutation, event: Sourc
   if (event.type === "tool.result.received") return applyToolResult(value, change, turnId, event)
   if (event.type === "steering.delivered") return applySteeringDelivered(value, change, turnId, event)
   if (event.type === "model.usage.reported") return applyUsage(value, change, event)
-  if (event.type === "model.attempt.failed" || event.type === "model.call.failed") {
-    if (!isTruncatedStream(event)) return
+  if (event.type === "model.attempt.failed" || event.type === "model.call.failed") return
+  if (event.type === "model.retry.scheduled") {
+    const payload = sourcePayload(event)
+    const reason = string(payload.reason)
+    const category = string(payload.category)
     const block: Block = {
       _tag: "Notification",
-      title: "Model response was cut off",
-      detail: "The provider ended the response before it finished. Rika is retrying that step.",
+      title:
+        reason === "invalid-tool-call-correction"
+          ? "Correcting model tool call"
+          : category === "timeout"
+            ? "Model response timed out"
+            : "Retrying model response",
+      detail:
+        reason === "invalid-tool-call-correction"
+          ? "The model produced an invalid tool call. Rika is asking it to correct the call."
+          : category === "timeout"
+            ? "The model stopped responding before the configured deadline. Rika is retrying the call."
+            : "The model call failed before any output was shown. Rika is retrying the call.",
     }
     upsertUnit(
       value,
       change,
-      makeUnit(identityKey("truncated", turnId, event.sequence), turnId, event.sequence, 0, event.sequence, {
-        _tag: "Block",
-        block,
-      }),
+      makeUnit(
+        identityKey("model-retry", turnId, string(payload.model_call_id, event.cursor)),
+        turnId,
+        event.sequence,
+        0,
+        event.sequence,
+        { _tag: "Block", block },
+      ),
     )
     return
   }
@@ -1441,29 +1460,44 @@ const restoreTransientBase = (value: OwnedFold, change: MutableMutation, key: st
     if (units?.size === 0) {
       value.transientUnitsByAttempt.delete(attempt)
       value.transientIndexes.delete(attempt)
+      value.transientCallByAttempt.delete(attempt)
     }
   }
   value.transientAttemptsByUnit.delete(key)
 }
 
-const requiresResolvedTransients = (event: SourceEvent): boolean =>
-  event.type === "model.input.prepared" ||
-  event.type === "tool.call.requested" ||
-  event.type === "tool.result.received" ||
-  event.type === "steering.delivered" ||
-  event.type === "execution.completed" ||
-  event.type === "execution.failed" ||
-  event.type === "execution.cancelled"
+const clearTransientAttempt = (value: OwnedFold, change: MutableMutation, attempt: string): void => {
+  for (const key of [...(value.transientUnitsByAttempt.get(attempt) ?? [])]) restoreTransientBase(value, change, key)
+  value.transientUnitsByAttempt.delete(attempt)
+  value.transientIndexes.delete(attempt)
+  value.transientCallByAttempt.delete(attempt)
+}
 
-const blockingTransientKeys = (value: OwnedFold, event: SourceEvent): ReadonlyArray<string> => {
-  const toolBatchBoundary = event.type === "tool.call.requested" || event.type === "tool.result.received"
-  const unresolvedResultKey =
-    event.type === "tool.result.received" ? toolKey(value.turnId, rawToolId(event)) : undefined
-  return [...value.transientBases.keys()].filter((key) => {
-    if (!toolBatchBoundary || key === unresolvedResultKey) return true
-    const unit = value.units.get(key)
-    return unit?.content._tag !== "Block" || unit.content.block._tag !== "ToolCall"
-  })
+const clearTransientCall = (value: OwnedFold, change: MutableMutation, callId: string): void => {
+  for (const [attempt, candidate] of [...value.transientCallByAttempt])
+    if (candidate === callId) clearTransientAttempt(value, change, attempt)
+}
+
+const clearAllTransients = (value: OwnedFold, change: MutableMutation): void => {
+  for (const key of [...value.transientBases.keys()]) restoreTransientBase(value, change, key)
+  value.transientIndexes.clear()
+  value.transientUnitsByAttempt.clear()
+  value.transientAttemptsByUnit.clear()
+  value.transientCallByAttempt.clear()
+}
+
+const clearResolvedOverlay = (value: OwnedFold, change: MutableMutation, event: SourceEvent): void => {
+  const payload = sourcePayload(event)
+  if (event.type === "model.attempt.failed") {
+    clearTransientAttempt(value, change, transientAttempt(event))
+    return
+  }
+  if (event.type === "model.call.failed") {
+    clearTransientCall(value, change, string(payload.model_call_id))
+    return
+  }
+  if (event.type === "execution.completed" || event.type === "execution.failed" || event.type === "execution.cancelled")
+    clearAllTransients(value, change)
 }
 
 export const applyFoldEvent: {
@@ -1475,6 +1509,7 @@ export const applyFoldEvent: {
   if (isTransientEvent(event)) {
     if (event.sequence < value.state.revision) return result(change)
     const attempt = transientAttempt(event)
+    const payload = sourcePayload(event)
     const index = transientIndex(event)
     if (index <= (value.transientIndexes.get(attempt) ?? -1)) return result(change)
     const key = transientUnitKey(value, event)
@@ -1486,6 +1521,7 @@ export const applyFoldEvent: {
       const units = value.transientUnitsByAttempt.get(attempt) ?? new Set<string>()
       units.add(key)
       value.transientUnitsByAttempt.set(attempt, units)
+      value.transientCallByAttempt.set(attempt, string(payload.model_call_id))
     }
     applyKnownEvent(value, change, event)
     value.transientIndexes.set(attempt, index)
@@ -1495,11 +1531,7 @@ export const applyFoldEvent: {
     if (event.type === "model.usage.reported") applyUsage(value, change, event)
     return result(change)
   }
-  const unresolved = requiresResolvedTransients(event) ? blockingTransientKeys(value, event) : []
-  if (unresolved.length > 0)
-    throw new TypeError(
-      `Transcript ${value.turnId} reached ${event.type} with unresolved transient units ${unresolved.join(", ")}`,
-    )
+  clearResolvedOverlay(value, change, event)
   const resolvedKey = durableResolutionKey(value, event)
   if (resolvedKey !== undefined) restoreTransientBase(value, change, resolvedKey)
   applyKnownEvent(value, change, event)
