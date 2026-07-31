@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/thread-repository"
+export { Service }
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId, ThreadLineage } from "@rika/product/thread-record"
@@ -37,8 +39,6 @@ export interface Interface {
   readonly setArchived: (id: ThreadId, archived: boolean, now: number) => Effect.Effect<Thread, RepositoryError>
   readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
-
-export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-repository/Service") {}
 
 const Row = Schema.Struct({
   id: Schema.String,

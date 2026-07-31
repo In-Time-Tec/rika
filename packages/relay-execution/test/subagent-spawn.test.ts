@@ -5,7 +5,8 @@ import { Runtime, ThreadTools } from "@rika/coding-tools/coding-tool-catalog"
 import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Clock, Effect, FileSystem, Layer, Ref, Schedule, Schema, Stream } from "effect"
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { routedModel } from "./routed-model"
 import { start } from "./current-execution-route"
@@ -32,11 +33,14 @@ const executionModelRoute = (
 ): ExecutionBackend.ExecutionModelRoute => ({
   role,
   alias: role,
-  provider: selection.provider,
   model: selection.model,
-  registrationKey: selection.registrationKey ?? role,
-  providerProtocol: "test",
-  providerBaseUrl: "test://model",
+  providerConnection: {
+    provider: selection.provider,
+    protocol: "test",
+    baseUrl: "test://model",
+    authentication: "none",
+  },
+  registrationIdentity: modelRegistrationIdentity(selection.registrationKey ?? role),
   effort,
   fast: false,
   requestVariant: selection.registrationKey ?? role,
@@ -257,6 +261,7 @@ test("ReadThread uses the Oracle route and receives the current Thread identity"
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         const route: ExecutionBackend.ExecutionRoutePin = {
+          version: 1 as const,
           mode: "medium",
           main: executionModelRoute("main", main.selection, "xhigh"),
           oracle: executionModelRoute("oracle", oracle.selection, "medium"),
@@ -374,6 +379,7 @@ test("a nested subagent delegates ReadThread without broadening its Relay scope"
       return yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         const route: ExecutionBackend.ExecutionRoutePin = {
+          version: 1 as const,
           mode: "medium",
           main: executionModelRoute("main", main.selection, "xhigh"),
           oracle: executionModelRoute("oracle", oracle.selection, "medium"),
@@ -457,6 +463,7 @@ test("parallel Task calls fall back to the pinned main Sol route when no agent r
         { provider: "test", model: "gpt-5.6-sol", registrationKey: "sol-xhigh" },
       )
       const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+        version: 1 as const,
         mode: "high",
         main: executionModelRoute("main", sol.selection, "xhigh"),
         oracle: executionModelRoute(
@@ -596,6 +603,7 @@ test("depth-one Task agents can use specialists but cannot delegate more Tasks",
       })
       const solRegistration = yield* ModelRegistry.registration({ ...sol.selection, layer: sol.layer })
       const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+        version: 1 as const,
         mode: "test",
         main: executionModelRoute("main", terra.selection),
         oracle: executionModelRoute("oracle", sol.selection),

@@ -20,7 +20,16 @@ const model = (role: string) => ({
 })
 
 test("route conversion preserves every branch and removes adapter-shaped fields", () => {
-  const route = { mode: "default", main: model("main"), oracle: model("oracle"), title: model("title"), compactionSummary: model("compaction"), agents: Object.fromEntries(["librarian", "painter", "review", "readThread", "surgeon", "task"].map((role) => [role, model(role)])) }
+  const route = {
+    mode: "default",
+    main: model("main"),
+    oracle: model("oracle"),
+    title: model("title"),
+    compactionSummary: model("compaction"),
+    agents: Object.fromEntries(
+      ["librarian", "painter", "review", "readThread", "surgeon", "task"].map((role) => [role, model(role)]),
+    ),
+  }
   const snapshot = toExecutionRouteSnapshot(route)
   expect(snapshot.main.registrationIdentity).toBe("stable-id")
   expect(snapshot.agents?.task.providerConnection.provider).toBe("openai")
@@ -30,6 +39,8 @@ test("route conversion preserves every branch and removes adapter-shaped fields"
 })
 
 test("malformed and missing required route branches are rejected", () => {
-  expect(() => toExecutionRouteSnapshot({ mode: "default", main: model("main") })).toThrow("Malformed execution route branches")
-  expect(() => toExecutionRouteSnapshot({ mode: "default", main: {}, oracle: model("oracle") })).toThrow("Malformed execution route model")
+  expect(() => toExecutionRouteSnapshot({ mode: "default", main: model("main") })).toThrow("Malformed execution route")
+  expect(() => toExecutionRouteSnapshot({ mode: "default", main: {}, oracle: model("oracle") })).toThrow(
+    "Malformed execution route",
+  )
 })

@@ -8,7 +8,8 @@ import { ThreadTools } from "@rika/coding-tools/coding-tool-catalog"
 import { Deferred, Effect, Exit, Fiber, Layer, Logger, Redacted, Ref, Schedule, Schema, Stream, Tracer } from "effect"
 import { TestClock } from "effect/testing"
 import { AiError, Tool, Toolkit } from "effect/unstable/ai"
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, currentExecutionRoute, start } from "./current-execution-route"
 
@@ -28,10 +29,14 @@ const routeFor = (
 ) => ({
   role,
   alias: role,
-  ...model,
-  registrationKey: model.registrationKey ?? "default",
-  providerProtocol: "test" as const,
-  providerBaseUrl: "test://model",
+  model: model.model,
+  providerConnection: {
+    provider: model.provider,
+    protocol: "test" as const,
+    baseUrl: "test://model",
+    authentication: "none" as const,
+  },
+  registrationIdentity: modelRegistrationIdentity(model.registrationKey ?? "default"),
   effort: "medium",
   fast: false,
   requestVariant: "test",
@@ -985,7 +990,7 @@ describe("ExecutionBackend Relay client adapter", () => {
               ...currentExecutionRoute().main,
               effort: "xhigh",
               fast: true,
-              registrationKey: "effort:xhigh:fast",
+              registrationIdentity: modelRegistrationIdentity("effort:xhigh:fast"),
             },
           },
           reasoningEffort: "xhigh",
@@ -1849,6 +1854,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       yield* Effect.gen(function* () {
         const backend = yield* ExecutionBackend.Service
         const route = {
+          version: 1 as const,
           mode: "test" as const,
           compactionSummary: routeFor("compaction", summarySelection, mainCompaction),
           main: routeFor("main", selection, mainCompaction),
@@ -2010,6 +2016,7 @@ describe("ExecutionBackend Relay client adapter", () => {
       const mainCompaction = { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 }
       const oracleCompaction = { contextWindow: 1_000_000, reserveTokens: 128_000, keepRecentTokens: 64_000 }
       const route = {
+        version: 1 as const,
         mode: "test" as const,
         main: routeFor("main", mainSelection, mainCompaction),
         oracle: routeFor("oracle", oracleSelection, oracleCompaction),

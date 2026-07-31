@@ -1075,6 +1075,7 @@ const schemaObjectsByMigration: ReadonlyArray<ReadonlyArray<string>> = [
   stableTranscriptObjects,
   stableTranscriptObjects,
   stableTranscriptObjects,
+  stableTranscriptObjects,
 ]
 
 const SchemaObject = Schema.Struct({ type: Schema.String, name: Schema.String })

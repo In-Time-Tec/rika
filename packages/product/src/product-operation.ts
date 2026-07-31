@@ -1,3 +1,4 @@
+export * from "./operation-contract"
 export * as Operation from "./operation"
 export * as ContextFileSystem from "./context-file-system"
 export * as ContextUsage from "./context-usage"

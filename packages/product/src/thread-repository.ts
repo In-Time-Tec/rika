@@ -37,5 +37,4 @@ export interface Interface {
   readonly remove: (id: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/sqlite-thread-repository-repository/Service") {}
-
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-repository/Service") {}

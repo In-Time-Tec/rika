@@ -1,7 +1,9 @@
 import { expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 
-const loadApp = Effect.fn("DependencyBoundary.loadApp")(() => Effect.tryPromise(() => import("@rika/product/product-operation")))
+const loadApp = Effect.fn("DependencyBoundary.loadApp")(() =>
+  Effect.tryPromise(() => import("@rika/product/product-operation")),
+)
 const loadCommand = Effect.fn("DependencyBoundary.loadCommand")(() => Effect.tryPromise(() => import("../src/command")))
 
 it.effect(

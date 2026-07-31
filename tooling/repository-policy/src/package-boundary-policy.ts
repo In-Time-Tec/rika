@@ -67,12 +67,7 @@ const allowedPackageEdges: Readonly<Record<string, ReadonlySet<string>>> = {
   "@rika/transcript": new Set(["@rika/coding-tools"]),
   "@rika/product-store": new Set(["@rika/product", "@rika/transcript"]),
   "@rika/relay-execution": new Set(["@rika/configuration", "@rika/coding-tools", "@rika/product"]),
-  "@rika/product": new Set([
-    "@rika/configuration",
-    "@rika/extensions",
-    "@rika/coding-tools",
-    "@rika/transcript",
-  ]),
+  "@rika/product": new Set(["@rika/configuration", "@rika/extensions", "@rika/coding-tools", "@rika/transcript"]),
   "@rika/terminal": new Set(["@rika/configuration", "@rika/transcript"]),
   "@rika/cli": new Set([
     "@rika/configuration",

@@ -4,7 +4,10 @@ import { expect, test } from "vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
 import { Effect, FileSystem, Layer, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import { Database, Thread, ThreadRepository, ThreadSummaryRepository } from "@rika/product-store/sqlite-thread-repository"
+import * as Database from "@rika/product-store/product-database-layer"
+import * as Thread from "@rika/product/thread-record"
+import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
+import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as TurnRepository from "../src/turn-repository"
 import * as TranscriptRepository from "../src/transcript-repository"
 import * as Turn from "@rika/product/turn-record"
@@ -146,13 +149,27 @@ const createPreBranchDatabase = (filename: string) => {
   ]
   const insertMigration = database.query("INSERT INTO rika_migrations (migration_id, name) VALUES (?, ?)")
   for (const [index, name] of migrations.entries()) insertMigration.run(index + 1, name)
-  const executionRoute = JSON.stringify({ version: 1, ...Turn.testExecutionRoute() })
-    .replaceAll('"providerProtocol"', '"gatewayProtocol"')
-    .replaceAll('"providerBaseUrl"', '"gatewayBaseUrl"')
-    .replaceAll(
-      '"gatewayBaseUrl":"test://model"',
-      '"gatewayBaseUrl":"test://model","gatewayAuth":"bearer-env:TEST_API_KEY","providerOptions":{"gatewayProtocol":"opaque"}',
-    )
+  const currentRoute = Turn.testExecutionRoute()
+  const legacyModel = (model: (typeof currentRoute)["main"]) => {
+    const { providerConnection, registrationIdentity, ...rest } = model
+    return {
+      ...rest,
+      provider: providerConnection.provider,
+      registrationKey: registrationIdentity,
+      providerProtocol: providerConnection.protocol,
+      providerBaseUrl: providerConnection.baseUrl,
+      providerApiKeyEnv: "TEST_API_KEY",
+      providerOptions: { gatewayProtocol: "opaque" },
+    }
+  }
+  const executionRoute = JSON.stringify({
+    ...currentRoute,
+    main: legacyModel(currentRoute.main),
+    oracle: legacyModel(currentRoute.oracle),
+    title: legacyModel(currentRoute.title!),
+    compactionSummary: legacyModel(currentRoute.compactionSummary!),
+    agents: Object.fromEntries(Object.entries(currentRoute.agents!).map(([role, model]) => [role, legacyModel(model)])),
+  }).replaceAll('"providerApiKeyEnv":"TEST_API_KEY"', '"gatewayAuth":"bearer-env:TEST_API_KEY"')
   database.query("INSERT INTO rika_workspaces (path, created_at) VALUES (?, ?)").run("/work/pre-branch", 1)
   database
     .query(
@@ -249,17 +266,19 @@ test("migrates a pre-branch database while invalidating its rebuildable transcri
           ])
           const migratedRoute = storedAgentTurns.find((turn) => turn.id === "completed-turn")?.executionRoute
           expect(migratedRoute).toMatchObject({
-            main: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
-            oracle: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
-            title: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
-            compactionSummary: {
-              providerProtocol: "test",
-              providerBaseUrl: "test://model",
-              providerApiKeyEnv: "TEST_API_KEY",
+            main: {
+              providerConnection: {
+                provider: "test",
+                protocol: "test",
+                baseUrl: "test://model",
+                authentication: "api-key",
+                apiKeyEnvironment: "TEST_API_KEY",
+              },
             },
-            agents: {
-              task: { providerProtocol: "test", providerBaseUrl: "test://model", providerApiKeyEnv: "TEST_API_KEY" },
-            },
+            oracle: { providerConnection: { authentication: "api-key", apiKeyEnvironment: "TEST_API_KEY" } },
+            title: { providerConnection: { authentication: "api-key", apiKeyEnvironment: "TEST_API_KEY" } },
+            compactionSummary: { providerConnection: { authentication: "api-key", apiKeyEnvironment: "TEST_API_KEY" } },
+            agents: { task: { providerConnection: { authentication: "api-key", apiKeyEnvironment: "TEST_API_KEY" } } },
           })
           expect(migratedRoute?.main.providerOptions).toEqual({ gatewayProtocol: "opaque" })
           expect(migratedRoute?.main).not.toHaveProperty("gatewayProtocol")
@@ -296,7 +315,7 @@ test("migrates a pre-branch database while invalidating its rebuildable transcri
           expect(added).toMatchObject({ status: "queued", queue: { revision: 3, queuedCount: 2 } })
           expect(yield* turns.dequeue(added.id)).toMatchObject({ revision: 4, queuedCount: 1 })
           const migrationRows = yield* sql`SELECT migration_id, name FROM rika_migrations ORDER BY migration_id`
-          expect(migrationRows.at(-1)).toEqual({ migration_id: 27, name: "usage_projection_sources" })
+          expect(migrationRows.at(-1)).toEqual({ migration_id: 28, name: "product_route_snapshot" })
           expect(yield* sql`SELECT name FROM sqlite_schema WHERE name = 'rika_transcript_entries'`).toEqual([])
         }).pipe(provideLayer(layer)),
       )
@@ -320,7 +339,7 @@ test("migrates a pre-branch database while invalidating its rebuildable transcri
             projectionVersion: 2,
             units: [],
           })
-          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 27 }])
+          expect(yield* sql`SELECT COUNT(*) AS count FROM rika_migrations`).toEqual([{ count: 28 }])
         }).pipe(provideLayer(reopened)),
       )
     }),

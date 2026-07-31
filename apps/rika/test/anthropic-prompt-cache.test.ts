@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ModelRegistry } from "@batonfx/core"
-import * as Anthropic from "@batonfx/providers/anthropic"
+import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
+import { Anthropic } from "@rika/relay-execution/model-provider-runtime"
 import { PromptCache } from "@rika/relay-execution/relay-execution-layer"
 import { withStreamingOnlyModel } from "@rika/relay-execution/relay-execution-layer"
 import { Config, Effect, Layer, Redacted, Schema, Stream } from "effect"

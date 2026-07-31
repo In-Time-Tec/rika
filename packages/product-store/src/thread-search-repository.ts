@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/thread-search-repository"
+export { Service }
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -76,10 +78,6 @@ export interface Interface {
   readonly rebuildThread: (input: RebuildInput) => Effect.Effect<void, RepositoryError>
   readonly removeThread: (threadId: ThreadId) => Effect.Effect<void, RepositoryError>
 }
-
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread-search-repository/Service",
-) {}
 
 interface Document {
   readonly thread: Thread

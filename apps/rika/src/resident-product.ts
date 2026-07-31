@@ -1,8 +1,6 @@
 #!/usr/bin/env bun
 import * as BunCrypto from "@effect/platform-bun/BunCrypto"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { AiError, Compaction, ModelRegistry, Response as AiResponse } from "@batonfx/core"
-import type { TestModel as TestModelTypes } from "@batonfx/test"
 import {
   ConfigOperations,
   ContextFileSystem,
@@ -18,17 +16,25 @@ import { ConfigContract, ConfigService, Models } from "@rika/configuration/confi
 import { McpOAuth, SkillRegistry } from "@rika/extensions/plugin-contract"
 import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
 import * as ThreadSummaryRepository from "@rika/product-store/sqlite-thread-summary-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
 import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-search-repository"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
 import * as UsageRepository from "@rika/product-store/sqlite-usage-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
-import { MediaView, ReadWebPage, Runtime as ToolRuntime, ThreadTools, WebSearch, WorkspaceIndex } from "@rika/coding-tools/coding-tool-catalog"
+import {
+  MediaView,
+  ReadWebPage,
+  Runtime as ToolRuntime,
+  ThreadTools,
+  WebSearch,
+  WorkspaceIndex,
+} from "@rika/coding-tools/coding-tool-catalog"
 import { FetchHttpClient } from "effect/unstable/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
@@ -49,9 +55,10 @@ import {
   Semaphore,
 } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
-import * as BedrockAuthRefresh from "./bedrock-auth-refresh"
+import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
 import { lazyBackendLayer } from "./lazy-backend"
-import * as ModelProviderRuntime from "./model-provider-runtime"
+import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
+import * as ScriptedModelRuntime from "@rika/relay-execution/scripted-model-runtime"
 import { modeIds } from "@rika/configuration/behavior-mode"
 import { globalPaths, workspacePaths } from "@rika/configuration/configuration-paths"
 import * as OpenAiAuthAdapter from "./openai-auth-adapter"
@@ -229,117 +236,6 @@ export const relayBackendLayer: {
   ): ReturnType<typeof relayBackendLayerImpl>
 } = Function.dual(7, relayBackendLayerImpl)
 
-const testModelPartSchema = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("reasoning"), text: Schema.String }),
-  Schema.Struct({
-    type: Schema.Literal("toolCall"),
-    name: Schema.String,
-    params: Schema.Unknown,
-    id: Schema.optionalKey(Schema.String),
-  }),
-])
-
-const testModelUsageSchema = Schema.Struct({
-  inputTokens: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
-  outputTokens: Schema.optionalKey(Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))),
-})
-
-const testModelTurnSchema = Schema.Union([
-  Schema.Struct({
-    parts: Schema.NonEmptyArray(testModelPartSchema),
-    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-    usage: Schema.optionalKey(testModelUsageSchema),
-  }),
-  Schema.Struct({
-    object: Schema.Unknown,
-    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-    usage: Schema.optionalKey(testModelUsageSchema),
-  }),
-  Schema.Struct({
-    failure: Schema.String,
-    delayMs: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-    usage: Schema.optionalKey(testModelUsageSchema),
-  }),
-])
-
-const testModelScriptSchema = Schema.NonEmptyArray(testModelTurnSchema)
-
-export const parseTestModelScript = (json: string) =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(testModelScriptSchema))(json)
-
-export const buildTestModelScript: (
-  json: string,
-) => Effect.Effect<ReadonlyArray<TestModelTypes.Step>, ExternalBoundaryError | Schema.SchemaError> = Effect.fn(
-  "Main.buildTestModelScript",
-)(function* (json: string) {
-  const script = yield* parseTestModelScript(json)
-  const { TestModel } = yield* Effect.tryPromise({
-    try: () => import("@batonfx/test"),
-    catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
-  })
-  return script.map((turn) => {
-    const options = {
-      ...(turn.delayMs === undefined ? {} : { delay: turn.delayMs }),
-      ...(turn.usage === undefined
-        ? {}
-        : {
-            usage: AiResponse.Usage.make({
-              inputTokens: {
-                uncached: turn.usage.inputTokens,
-                total: turn.usage.inputTokens,
-                cacheRead: undefined,
-                cacheWrite: undefined,
-              },
-              outputTokens: {
-                total: turn.usage.outputTokens,
-                text: turn.usage.outputTokens,
-                reasoning: undefined,
-              },
-            }),
-          }),
-    }
-    if ("object" in turn) return TestModel.object(turn.object, options)
-    if ("failure" in turn)
-      return TestModel.failure(
-        AiError.make({
-          module: "rika/test-model",
-          method: "streamText",
-          reason: AiError.UnknownError.make({ description: turn.failure }),
-        }),
-        options,
-      )
-    return TestModel.turn(
-      turn.parts.map((part) => {
-        if (part.type === "text") return TestModel.text(part.text)
-        if (part.type === "reasoning") return TestModel.reasoning(part.text)
-        return TestModel.toolCall(part.name, part.params, part.id === undefined ? {} : { id: part.id })
-      }),
-      options,
-    )
-  })
-})
-
-export const makeReloadingTestModel = Effect.fn("Main.makeReloadingTestModel")(function* (path: string) {
-  const { TestModel } = yield* Effect.tryPromise({
-    try: () => import("@batonfx/test"),
-    catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
-  })
-  const load = Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem
-    const script = yield* fileSystem.readFileString(path)
-    return yield* TestModel.make(yield* buildTestModelScript(script))
-  })
-  const initial = yield* load
-  return {
-    ...initial,
-    registration: {
-      ...initial.registration,
-      layer: Layer.unwrap(load.pipe(Effect.map((fixture) => fixture.registration.layer))),
-    },
-  }
-})
-
 const resolveTunedModeRoute = (
   settings: ConfigContract.Settings,
   mode: ConfigContract.ModeId,
@@ -403,21 +299,25 @@ const executionModelRoute = (
 ): Turn.ExecutionModelRoute => ({
   role,
   alias: route.alias,
-  provider: plan.selection.provider,
   model: plan.selection.model,
-  registrationKey: plan.registrationKey,
-  providerProtocol: route.providerConnection.protocol,
-  providerBaseUrl:
-    route.providerConnection.protocol === "amazon-bedrock"
-      ? (route.providerConnection.endpoint ?? "bedrock://default")
-      : ModelProviderRuntime.normalizedBaseUrl(route.providerConnection.baseUrl),
-  ...(route.providerConnection.apiKeyEnv === undefined
-    ? {}
-    : { providerApiKeyEnv: route.providerConnection.apiKeyEnv }),
-  ...(plan.runtime.adapter === "openai-account" && plan.runtime.credentialIdentity !== undefined
-    ? { openAiAccountFingerprint: plan.runtime.credentialIdentity }
-    : {}),
-  providerRuntime: plan.runtime,
+  providerConnection: {
+    provider: plan.selection.provider,
+    protocol: route.providerConnection.protocol,
+    baseUrl:
+      route.providerConnection.protocol === "amazon-bedrock"
+        ? (route.providerConnection.endpoint ?? "bedrock://default")
+        : ModelProviderRuntime.normalizedBaseUrl(route.providerConnection.baseUrl),
+    authentication:
+      plan.runtime.adapter === "openai-account"
+        ? "openai-account"
+        : route.providerConnection.apiKeyEnv === undefined
+          ? "none"
+          : "api-key",
+    ...(route.providerConnection.apiKeyEnv === undefined
+      ? {}
+      : { apiKeyEnvironment: route.providerConnection.apiKeyEnv }),
+  },
+  registrationIdentity: modelRegistrationIdentity(plan.registrationKey),
   effort: route.effort,
   fast: route.fast,
   requestVariant: plan.registrationKey,
@@ -444,9 +344,11 @@ const executionRoutePinFromPreparedImpl = (
     task: executionModelRoute(routes[9]!, plans[9]!, "task"),
   }
   const inherited = (agent: keyof typeof agents) =>
-    agents[agent].registrationKey === (agent === "task" || agent === "surgeon" ? main : oracle).registrationKey
+    agents[agent].registrationIdentity ===
+    (agent === "task" || agent === "surgeon" ? main : oracle).registrationIdentity
   const allInherited = (Object.keys(agents) as Array<keyof typeof agents>).every(inherited)
   return {
+    version: 1,
     mode,
     main,
     oracle,
@@ -511,17 +413,20 @@ export const resolveExecutionRouteForSettings = Effect.fn("Main.resolveExecution
 
 export const productionCompaction = (
   route?: Pick<ConfigContract.ResolvedModelRoute, "compaction">,
-): Compaction.DefaultOptions => ({
+): ModelProviderRuntime.CompactionOptions => ({
   contextWindow: route?.compaction.contextWindow ?? Models.defaultCompaction.contextWindow,
   reserveTokens: route?.compaction.reserveTokens ?? Models.defaultCompaction.reserveTokens,
   keepRecentTokens: route?.compaction.keepRecentTokens ?? Models.defaultCompaction.keepRecentTokens,
 })
 
-const registrationTuple = (candidate: {
-  readonly provider: string
-  readonly model: string
-  readonly registrationKey?: string
-}) => `${candidate.provider}\0${candidate.model}\0${candidate.registrationKey ?? ""}`
+const registrationTuple = (
+  candidate:
+    | { readonly provider: string; readonly model: string; readonly registrationKey?: string }
+    | Turn.ExecutionModelRoute,
+) =>
+  "providerConnection" in candidate
+    ? `${candidate.providerConnection.provider}\0${candidate.model}\0${candidate.registrationIdentity}`
+    : `${candidate.provider}\0${candidate.model}\0${candidate.registrationKey ?? ""}`
 
 export interface PersistedRouteRegistrationFailure {
   readonly route: Turn.ExecutionModelRoute
@@ -542,7 +447,9 @@ export const executionModelRoutes = (route: Turn.ExecutionRoutePin): ReadonlyArr
 ]
 
 export const isLegacyUnavailableExecutionRoute = (route: Turn.ExecutionRoutePin) =>
-  executionModelRoutes(route).some((candidate) => candidate.registrationKey === "legacy-unavailable")
+  executionModelRoutes(route).some(
+    (candidate) => candidate.registrationIdentity === modelRegistrationIdentity("legacy-unavailable"),
+  )
 
 const unavailableRouteError = (failure: PersistedRouteRegistrationFailure) =>
   ExecutionBackend.BackendError.make({
@@ -590,101 +497,21 @@ export const resolveExecutionWorkspace = Effect.fn("Main.resolveExecutionWorkspa
 export const withPinnedRouteRegistration = Effect.fn("Main.withPinnedRouteRegistration")(function* (
   backend: ExecutionBackend.Interface,
   options: {
-    readonly registeredRoutes: ReadonlyArray<{
-      readonly provider: string
-      readonly model: string
-      readonly registrationKey?: string
-    }>
-    readonly unavailable: ReadonlyArray<PersistedRouteRegistrationFailure>
-    readonly registerPinnedRoutes: (
-      routes: ReadonlyArray<Turn.ExecutionModelRoute>,
-    ) => Effect.Effect<ReadonlyArray<ModelRegistry.Registration>, ModelProviderRuntime.RuntimeError>
-    readonly resolveLegacyRoute?: (input: ExecutionBackend.StartInput) => Effect.Effect<
-      {
-        readonly executionRoute: Turn.ExecutionRoutePin
-        readonly registrations: ReadonlyArray<ModelRegistry.Registration>
-      },
-      ExecutionBackend.BackendError
-    >
+    readonly resolveLegacyRoute?: (
+      input: ExecutionBackend.StartInput,
+    ) => Effect.Effect<{ readonly executionRoute: Turn.ExecutionRoutePin }, ExecutionBackend.BackendError>
   },
 ) {
-  const admission = yield* Semaphore.make(1)
-  const registered = new Set(options.registeredRoutes.map(registrationTuple))
-  const unavailable = new Map(options.unavailable.map((failure) => [registrationTuple(failure.route), failure]))
-  const backendRegisterModels = backend.registerModels
-  const registerModelsUnlocked =
-    backendRegisterModels === undefined
-      ? undefined
-      : (registrations: ReadonlyArray<ModelRegistry.Registration>) =>
-          backendRegisterModels(registrations).pipe(
-            Effect.tap(() =>
-              Effect.sync(() => {
-                for (const registration of registrations) registered.add(registrationTuple(registration))
-              }),
-            ),
-          )
-  const registerModels =
-    registerModelsUnlocked === undefined
-      ? undefined
-      : (registrations: ReadonlyArray<ModelRegistry.Registration>) =>
-          admission.withPermits(1)(
-            Effect.gen(function* () {
-              const missing = registrations.filter((registration) => !registered.has(registrationTuple(registration)))
-              if (missing.length > 0) yield* registerModelsUnlocked(missing)
-            }),
-          )
-  const register = (route: Turn.ExecutionRoutePin) =>
-    admission.withPermits(1)(
-      Effect.gen(function* () {
-        const missing = executionModelRoutes(route).filter(
-          (candidate, index, all) =>
-            candidate.providerProtocol !== "test" &&
-            !registered.has(registrationTuple(candidate)) &&
-            all.findIndex((other) => registrationTuple(other) === registrationTuple(candidate)) === index,
-        )
-        const blocked = missing.map((candidate) => unavailable.get(registrationTuple(candidate))).find(Boolean)
-        if (blocked !== undefined) return yield* unavailableRouteError(blocked)
-        if (missing.length === 0) return
-        if (registerModelsUnlocked === undefined)
-          return yield* ExecutionBackend.BackendError.make({
-            message: `Model route ${missing[0]!.alias}/${missing[0]!.effort} is unavailable: the backend cannot register models`,
-          })
-        const registrations = yield* options.registerPinnedRoutes(missing).pipe(
-          Effect.matchCauseEffect({
-            onFailure: (cause) =>
-              Cause.hasInterruptsOnly(cause)
-                ? Effect.interrupt
-                : Effect.fail(unavailableRouteError({ route: missing[0]!, message: causeMessage(cause) })),
-            onSuccess: Effect.succeed,
-          }),
-        )
-        yield* registerModelsUnlocked(registrations)
-        for (const candidate of missing) registered.add(registrationTuple(candidate))
-      }),
-    )
   return ExecutionBackend.Service.of({
     ...backend,
-    ...(registerModels === undefined ? {} : { registerModels }),
     start: (input) =>
       Effect.gen(function* () {
-        let resolved
-        if (isLegacyUnavailableExecutionRoute(input.executionRoute)) {
-          if (options.resolveLegacyRoute === undefined)
-            return yield* ExecutionBackend.BackendError.make({
-              message: `Turn ${input.turnId} uses the legacy unavailable model route and cannot be started`,
-            })
-          resolved = yield* options.resolveLegacyRoute(input)
-        } else {
-          resolved = { executionRoute: input.executionRoute, registrations: [] }
-        }
-        if (resolved.registrations.length > 0) {
-          if (registerModels === undefined)
-            return yield* ExecutionBackend.BackendError.make({
-              message: `Turn ${input.turnId} resolved a model route that the backend cannot register`,
-            })
-          yield* registerModels(resolved.registrations)
-        }
-        yield* register(resolved.executionRoute)
+        if (!isLegacyUnavailableExecutionRoute(input.executionRoute)) return yield* backend.start(input)
+        if (options.resolveLegacyRoute === undefined)
+          return yield* ExecutionBackend.BackendError.make({
+            message: `Turn ${input.turnId} uses the legacy unavailable model route and cannot be started`,
+          })
+        const resolved = yield* options.resolveLegacyRoute(input)
         return yield* backend.start({ ...input, executionRoute: resolved.executionRoute })
       }),
   })
@@ -716,7 +543,7 @@ export interface ConfiguredBackendOptions {
   readonly resolveLegacyRoute?: (input: ExecutionBackend.StartInput) => Effect.Effect<
     {
       readonly executionRoute: Turn.ExecutionRoutePin
-      readonly registrations: ReadonlyArray<ModelRegistry.Registration>
+      readonly registrations: ReadonlyArray<ModelProviderRuntime.ModelRegistration>
     },
     ExecutionBackend.BackendError
   >
@@ -780,9 +607,9 @@ export const configuredBackendLayer = ({
       yield* Effect.logInfo("model.backend.configured").pipe(
         Effect.annotateLogs("rika.model.backend.kind", backendKind),
       )
-      let registration: ModelRegistry.Registration
-      let selection: ModelRegistry.ModelSelection
-      let additionalRegistrations: Array<ModelRegistry.Registration> = []
+      let registration: ModelProviderRuntime.ModelRegistration
+      let selection: ModelProviderRuntime.ModelSelection
+      let additionalRegistrations: Array<ModelProviderRuntime.ModelRegistration> = []
       let unavailablePersistedRoutes: ReadonlyArray<PersistedRouteRegistrationFailure> = []
       let modelVariantPolicy: RelayExecutionBackend.ModelVariantPolicy = "registration-key"
       let providerPlans:
@@ -793,20 +620,12 @@ export const configuredBackendLayer = ({
           }
         | undefined
       if (testScript._tag === "Some") {
-        const { TestModel } = yield* Effect.tryPromise({
-          try: () => import("@batonfx/test"),
-          catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
-        })
-        const fixture = yield* TestModel.make(yield* buildTestModelScript(testScript.value))
+        const fixture = yield* ScriptedModelRuntime.makeScriptedModel(testScript.value)
         registration = fixture.registration
         selection = fixture.selection
         modelVariantPolicy = "fixed-selection"
       } else if (testResponse._tag === "Some") {
-        const { TestModel } = yield* Effect.tryPromise({
-          try: () => import("@batonfx/test"),
-          catch: (cause) => ExternalBoundaryError.make({ operation: "load test model", message: String(cause) }),
-        })
-        const fixture = yield* TestModel.make(Array.from({ length: 4 }, () => TestModel.text(testResponse.value)))
+        const fixture = yield* ScriptedModelRuntime.makeConstantModel(testResponse.value)
         registration = fixture.registration
         selection = fixture.selection
         modelVariantPolicy = "fixed-selection"
@@ -823,7 +642,7 @@ export const configuredBackendLayer = ({
         const restored = yield* Effect.forEach(
           persistedRoutesToRestore,
           (persistedRoute) =>
-            runtime.restoreOne(persistedRoute).pipe(
+            runtime.restoreOne(ModelProviderRuntime.runtimeRouteFromSnapshot(persistedRoute)).pipe(
               Effect.matchCauseEffect({
                 onFailure: (cause) =>
                   Cause.hasInterruptsOnly(cause)
@@ -831,9 +650,9 @@ export const configuredBackendLayer = ({
                     : Effect.logWarning("model.route.persisted.unavailable").pipe(
                         Effect.annotateLogs({
                           "rika.model.alias": persistedRoute.alias,
-                          "rika.model.provider": persistedRoute.provider,
+                          "rika.model.provider": persistedRoute.providerConnection.provider,
                           "rika.model.name": persistedRoute.model,
-                          "rika.model.registration_key": persistedRoute.registrationKey,
+                          "rika.model.registration_key": persistedRoute.registrationIdentity,
                           "rika.failure.kind": failureKind(cause),
                         }),
                         Effect.as({
@@ -951,16 +770,9 @@ export const configuredBackendLayer = ({
         ExecutionBackend.Service,
         ExecutionBackend.Service.pipe(
           Effect.flatMap((backend) =>
-            ModelProviderRuntime.Service.pipe(
-              Effect.flatMap((runtime) =>
-                withPinnedRouteRegistration(backend, {
-                  registeredRoutes: [registration, ...additionalRegistrations],
-                  unavailable: unavailablePersistedRoutes,
-                  registerPinnedRoutes: runtime.restore,
-                  ...(resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute }),
-                }),
-              ),
-            ),
+            withPinnedRouteRegistration(backend, {
+              ...(resolveLegacyRoute === undefined ? {} : { resolveLegacyRoute }),
+            }),
           ),
         ),
       ).pipe(Layer.provide(backendLayer))
@@ -1257,10 +1069,6 @@ const createOperationLayerImpl = (
       ) =>
         Effect.gen(function* () {
           const resolvedRoute = yield* workspaceExecutionRoutePlan(mode, tuning, workspace)
-          if (resolvedRoute.registrations.length > 0) {
-            const backend = yield* ExecutionBackend.Service
-            if (backend.registerModels !== undefined) yield* backend.registerModels(resolvedRoute.registrations)
-          }
           return resolvedRoute.executionRoute
         })
       const webSearchCredentials = effectiveConfig.environment.webSearchCredentials
@@ -1351,7 +1159,19 @@ const createOperationLayerImpl = (
           })
         }),
       )
-      return Operation.productLayer({
+      const makeThreadId: Effect.Effect<Thread.ThreadId, never, never> = Crypto.Crypto.pipe(
+        Effect.flatMap((crypto) => crypto.randomUUIDv4),
+        Effect.map(Thread.ThreadId.make),
+        Effect.orDie,
+        provideLayerScoped(BunCrypto.layer),
+      )
+      const makeTurnId: Effect.Effect<Turn.TurnId, never, never> = Crypto.Crypto.pipe(
+        Effect.flatMap((crypto) => crypto.randomUUIDv4),
+        Effect.map(Turn.TurnId.make),
+        Effect.orDie,
+        provideLayerScoped(BunCrypto.layer),
+      )
+      const operationLayer: Layer.Layer<Operation.Service, OperationProductError, never> = Operation.productLayer({
         repositoryLayer: repositories,
         turnRepositoryLayer: repositories,
         threadSummaryRepositoryLayer: repositories,
@@ -1404,18 +1224,8 @@ const createOperationLayerImpl = (
         recoveredWorkGrace: Duration.millis(
           Number(environment.recoveryAbandon._tag === "Some" ? environment.recoveryAbandon.value : "15000"),
         ),
-        makeThreadId: Crypto.Crypto.pipe(
-          Effect.flatMap((crypto) => crypto.randomUUIDv4),
-          Effect.map(Thread.ThreadId.make),
-          Effect.orDie,
-          provideLayerScoped(BunCrypto.layer),
-        ),
-        makeTurnId: Crypto.Crypto.pipe(
-          Effect.flatMap((crypto) => crypto.randomUUIDv4),
-          Effect.map(Turn.TurnId.make),
-          Effect.orDie,
-          provideLayerScoped(BunCrypto.layer),
-        ),
+        makeThreadId,
+        makeTurnId,
         configOperations: {
           layer: Layer.merge(configAdapter, applicationConfigLayer).pipe(
             Layer.provide(BunServices.layer),
@@ -1472,7 +1282,12 @@ const createOperationLayerImpl = (
         },
         authOperations,
         interactive: injectedInteractive,
-      })
+      }).pipe(
+        Layer.catchCause((cause) =>
+          Layer.effectContext(Effect.fail(OperationProductError.make({ message: Cause.pretty(cause) }))),
+        ),
+      )
+      return operationLayer
     }),
   )
 }

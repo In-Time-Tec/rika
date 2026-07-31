@@ -208,9 +208,6 @@ export interface OpenRootExecution {
 }
 
 export interface Interface {
-  readonly registerModels?: (
-    registrations: ReadonlyArray<unknown>,
-  ) => Effect.Effect<void, BackendError>
   readonly invokeChild: (input: InvokeChildInput) => Effect.Effect<ChildEvent, BackendError>
   readonly createFanOut: (input: FanOutInput) => Effect.Effect<FanOutInspection, BackendError>
   readonly inspectFanOut: (fanOutId: string) => Effect.Effect<FanOutInspection | undefined, BackendError>
@@ -298,6 +295,8 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@rika/product/execution-service/Service") {}
 
 export const AgentDepth = {
+  childExecutionId: (parentExecutionId: string, childId: string): string =>
+    `child:${encodeURIComponent(parentExecutionId)}:${childId}`,
   childExecutionDepth: (executionId: string): number => {
     let depth = 0
     let current = executionId

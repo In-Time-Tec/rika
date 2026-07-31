@@ -42,16 +42,21 @@ export const ExecutionExtensionPin = Schema.Struct({
 export type ExecutionExtensionPin = typeof ExecutionExtensionPin.Type
 
 export const ExecutionModelRoute = ExecutionRouteModelSnapshot
-export type ExecutionModelRoute = typeof ExecutionModelRoute.Type
+export type ExecutionModelRoute = typeof ExecutionRouteModelSnapshot.Type
 
 export const ExecutionRoutePin = ExecutionRouteSnapshot
-export type ExecutionRoutePin = typeof ExecutionRoutePin.Type
+export type ExecutionRoutePin = typeof ExecutionRouteSnapshot.Type
 
 export const testExecutionRoute = (mode: RouteModeId = "test"): ExecutionRoutePin => {
   const route = {
     alias: "test",
     model: "test",
-    providerConnection: { provider: "test", protocol: "test", baseUrl: "test://model" },
+    providerConnection: {
+      provider: "test",
+      protocol: "test",
+      baseUrl: "test://model",
+      authentication: "none" as const,
+    },
     registrationIdentity: "test" as ExecutionModelRoute["registrationIdentity"],
     effort: "medium",
     fast: false,
@@ -59,6 +64,7 @@ export const testExecutionRoute = (mode: RouteModeId = "test"): ExecutionRoutePi
     compaction: { contextWindow: 372_000, reserveTokens: 128_000, keepRecentTokens: 32_000 },
   }
   return {
+    version: 1,
     mode,
     title: { ...route, role: "title", effort: "low" },
     compactionSummary: { ...route, role: "compaction" },

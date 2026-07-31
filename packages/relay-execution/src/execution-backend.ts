@@ -67,7 +67,7 @@ import {
   Service,
   type StartInput,
   Status,
-} from "./execution-contract"
+} from "@rika/product/execution-service"
 import {
   agentKeyForName,
   mainInstructions,
@@ -481,9 +481,9 @@ const pinnedCompactionPolicy = (
 })
 
 const pinnedSelection = (route: ExecutionRoutePin["main"]): ModelRegistry.ModelSelection => ({
-  provider: route.provider,
+  provider: route.providerConnection.provider,
   model: route.model,
-  registrationKey: route.registrationKey,
+  registrationKey: route.registrationIdentity,
 })
 
 export const toolkitFor = <AdditionalTools extends Record<string, Tool.Any>>(

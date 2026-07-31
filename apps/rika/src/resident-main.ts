@@ -118,41 +118,57 @@ const start = () => {
       Effect.flatMap((scope) =>
         Effect.gen(function* () {
           const productLoaded = yield* Ref.make(false)
-          const loadProduct = yield* Effect.cached(
-            Clock.currentTimeMillis.pipe(
-              Effect.flatMap((startedAt) =>
-                Effect.gen(function* () {
-                  const product = yield* Effect.tryPromise({
-                    try: () => import("./resident-product"),
-                    catch: (cause) =>
-                      Operation.OperationUnavailable.make({
-                        operation: "ResidentProduct",
-                        message: String(cause),
-                      }),
-                  })
-                  const authOperations = product.createAuthOperations(authOptions)
-                  return yield* Layer.buildWithScope(
-                    product
-                      .createOperationLayer({ ...productOptions, authOperations }, interactive)
-                      .pipe(Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer))),
-                    scope,
-                  ).pipe(
-                    Effect.map((context) => Context.get(context, Operation.Service)),
-                    Effect.tap(() => Ref.set(productLoaded, true)),
-                    Effect.tap(() =>
-                      Clock.currentTimeMillis.pipe(
-                        Effect.flatMap((completedAt) =>
-                          Effect.logInfo("resident.product.loaded").pipe(
-                            Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+          const loadProduct: Effect.Effect<Operation.Interface, Operation.OperationUnavailable, never> =
+            yield* Effect.cached(
+              Clock.currentTimeMillis
+                .pipe(
+                  Effect.flatMap((startedAt) =>
+                    Effect.gen(function* () {
+                      const product = yield* Effect.tryPromise({
+                        try: () => import("./resident-product"),
+                        catch: (cause) =>
+                          Operation.OperationUnavailable.make({
+                            operation: "ResidentProduct",
+                            message: String(cause),
+                          }),
+                      })
+                      const authOperations = product.createAuthOperations(authOptions)
+                      return yield* Layer.buildWithScope(
+                        product
+                          .createOperationLayer({ ...productOptions, authOperations }, interactive)
+                          .pipe(
+                            Layer.provide(Layer.mergeAll(BunServices.layer, BunCrypto.layer, FetchHttpClient.layer)),
                           ),
-                        ),
-                      ),
-                    ),
-                  )
-                }),
-              ),
-            ),
-          )
+                        scope,
+                      )
+                        .pipe(
+                          Effect.map((context) => Context.get(context, Operation.Service)),
+                          Effect.tap(() => Ref.set(productLoaded, true)),
+                          Effect.tap(() =>
+                            Clock.currentTimeMillis.pipe(
+                              Effect.flatMap((completedAt) =>
+                                Effect.logInfo("resident.product.loaded").pipe(
+                                  Effect.annotateLogs("rika.duration.ms", completedAt - startedAt),
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                        .pipe(
+                          Effect.mapError((error) =>
+                            Schema.is(Operation.OperationUnavailable)(error)
+                              ? error
+                              : Operation.OperationUnavailable.make({
+                                  operation: "ResidentProduct",
+                                  message: String(error),
+                                }),
+                          ),
+                        )
+                    }),
+                  ),
+                )
+                .pipe(Effect.provide(BunServices.layer)),
+            )
           return Operation.Service.of({
             hasActiveExecutionWork: Ref.get(productLoaded).pipe(
               Effect.flatMap((loaded) =>

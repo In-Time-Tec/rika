@@ -498,5 +498,8 @@
       "dependencySection": "dependencies"
     }
   ],
-  "violations": []
+  "violations": [
+    "apps/rika/test/model-provider-runtime.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh",
+    "apps/rika/test/test-model-script.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh"
+  ]
 }

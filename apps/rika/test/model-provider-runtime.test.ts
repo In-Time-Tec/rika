@@ -1,9 +1,9 @@
 import * as BunServices from "@effect/platform-bun/BunServices"
-import { ModelRegistry } from "@batonfx/core"
+import { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import { expect, test } from "vitest"
 import { OpenAiAuth } from "@rika/product/product-operation"
 import { ConfigContract } from "@rika/configuration/configuration-settings"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import * as RelayExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { Runtime as RikaToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
@@ -16,8 +16,8 @@ import {
   executionRoutePinFromPrepared,
   modelRoutesForExecution,
 } from "../src/resident-product"
-import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
-import * as ModelProviderRuntime from "../src/model-provider-runtime"
+import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
+import * as ModelProviderRuntime from "@rika/relay-execution/model-provider-runtime"
 
 const credential = (fingerprint: string): OpenAiAuth.Credential => ({
   accessToken: Redacted.make("account-access-token"),

@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, Fiber, Layer, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
+import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
 
 const processHandle = (exitCode: Effect.Effect<ChildProcessSpawner.ExitCode>, killed: Array<string>) =>
   ChildProcessSpawner.makeHandle({

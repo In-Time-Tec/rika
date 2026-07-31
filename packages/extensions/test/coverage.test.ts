@@ -5,7 +5,9 @@ import { Crypto, Effect, Layer, PlatformError } from "effect"
 import * as Extensions from "@rika/extensions/plugin-contract"
 import { provideLayer } from "./layer"
 
-const loadEntrypoint = Effect.fn("ExtensionsTest.loadEntrypoint")(() => Effect.tryPromise(() => import("@rika/extensions/plugin-contract")))
+const loadEntrypoint = Effect.fn("ExtensionsTest.loadEntrypoint")(() =>
+  Effect.tryPromise(() => import("@rika/extensions/plugin-contract")),
+)
 
 it.effect("exports every extension namespace from the package entrypoint", () =>
   Effect.gen(function* () {

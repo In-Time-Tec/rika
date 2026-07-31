@@ -3,10 +3,14 @@ import { Schema } from "effect"
 export const ModelRegistrationIdentity = Schema.String.pipe(Schema.brand("ModelRegistrationIdentity"))
 export type ModelRegistrationIdentity = typeof ModelRegistrationIdentity.Type
 
+export const ProviderAuthentication = Schema.Literals(["api-key", "openai-account", "none"])
+export type ProviderAuthentication = typeof ProviderAuthentication.Type
+
 export const ProviderConnectionSnapshot = Schema.Struct({
   provider: Schema.String,
   protocol: Schema.String,
   baseUrl: Schema.String,
+  authentication: ProviderAuthentication,
   apiKeyEnvironment: Schema.optionalKey(Schema.String),
 })
 export type ProviderConnectionSnapshot = typeof ProviderConnectionSnapshot.Type
@@ -23,6 +27,7 @@ const ModelRouteRole = Schema.Literals([
   "surgeon",
   "task",
 ])
+type ModelRouteRole = typeof ModelRouteRole.Type
 
 export const ExecutionRouteModelSnapshot = Schema.Struct({
   role: ModelRouteRole,
@@ -43,6 +48,7 @@ export const ExecutionRouteModelSnapshot = Schema.Struct({
 export type ExecutionRouteModelSnapshot = typeof ExecutionRouteModelSnapshot.Type
 
 export const ExecutionRouteSnapshot = Schema.Struct({
+  version: Schema.Literal(1),
   mode: Schema.String,
   tokenBudget: Schema.optionalKey(Schema.Finite),
   title: Schema.optionalKey(ExecutionRouteModelSnapshot),
@@ -62,56 +68,203 @@ export const ExecutionRouteSnapshot = Schema.Struct({
 })
 export type ExecutionRouteSnapshot = typeof ExecutionRouteSnapshot.Type
 
-export const modelRegistrationIdentity = (value: string): ModelRegistrationIdentity => value as ModelRegistrationIdentity
+export const modelRegistrationIdentity = (value: string): ModelRegistrationIdentity =>
+  value as ModelRegistrationIdentity
 
-export const toExecutionRouteSnapshot = (route: Record<string, unknown>): ExecutionRouteSnapshot => {
-  const convert = (input: Record<string, unknown>): ExecutionRouteModelSnapshot => {
-    const provider = typeof input.provider === "string" ? input.provider : undefined
-    const protocol = typeof input.providerProtocol === "string" ? input.providerProtocol : undefined
-    const baseUrl = typeof input.providerBaseUrl === "string" ? input.providerBaseUrl : undefined
-    const model = typeof input.model === "string" ? input.model : undefined
-    const alias = typeof input.alias === "string" ? input.alias : undefined
-    const role = typeof input.role === "string" ? input.role : undefined
-    const registrationKey = typeof input.registrationKey === "string" ? input.registrationKey : undefined
-    if (!provider || !protocol || !baseUrl || !model || !alias || !role || !registrationKey) throw new Error("Malformed execution route model")
-    const compaction = input.compaction
-    if (!compaction || typeof compaction !== "object") throw new Error("Malformed execution route compaction")
-    return {
-      role: role as ExecutionRouteModelSnapshot["role"],
-      alias,
-      model,
-      providerConnection: {
-        provider,
-        protocol,
-        baseUrl,
-        ...(typeof input.providerApiKeyEnv === "string" ? { apiKeyEnvironment: input.providerApiKeyEnv } : {}),
-      },
-      registrationIdentity: modelRegistrationIdentity(registrationKey),
-      effort: typeof input.effort === "string" ? input.effort : "medium",
-      fast: input.fast === true,
-      requestVariant: typeof input.requestVariant === "string" ? input.requestVariant : "default",
-      ...(input.providerOptions && typeof input.providerOptions === "object" ? { providerOptions: input.providerOptions as Record<string, unknown> } : {}),
-      compaction: {
-        contextWindow: Number((compaction as Record<string, unknown>).contextWindow),
-        reserveTokens: Number((compaction as Record<string, unknown>).reserveTokens),
-        keepRecentTokens: Number((compaction as Record<string, unknown>).keepRecentTokens),
-      },
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const requireRecord = (value: unknown, message: string): Record<string, unknown> => {
+  if (!isRecord(value)) throw new Error(message)
+  return value
+}
+
+const requireKeys = (value: Record<string, unknown>, allowed: ReadonlyArray<string>, message: string) => {
+  const allowedSet = new Set(allowed)
+  if (Object.keys(value).some((key) => !allowedSet.has(key))) throw new Error(message)
+}
+
+const requireString = (value: unknown, message: string) => {
+  if (typeof value !== "string" || value.length === 0) throw new Error(message)
+  return value
+}
+
+const requireFinite = (value: unknown, message: string) => {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(message)
+  return value
+}
+
+const roles: ReadonlyArray<ModelRouteRole> = [
+  "main",
+  "oracle",
+  "title",
+  "compaction",
+  "librarian",
+  "painter",
+  "review",
+  "readThread",
+  "surgeon",
+  "task",
+]
+
+const convertModel = (inputValue: unknown, expectedRole: ModelRouteRole): ExecutionRouteModelSnapshot => {
+  const input = requireRecord(inputValue, "Malformed execution route model")
+  requireKeys(
+    input,
+    [
+      "role",
+      "alias",
+      "provider",
+      "model",
+      "registrationKey",
+      "providerProtocol",
+      "providerBaseUrl",
+      "providerApiKeyEnv",
+      "providerRuntime",
+      "openAiAccountFingerprint",
+      "effort",
+      "fast",
+      "requestVariant",
+      "providerOptions",
+      "compaction",
+    ],
+    "Unsupported execution route model field",
+  )
+  const role = requireString(input.role, "Malformed execution route role")
+  if (role !== expectedRole || !roles.includes(role as ModelRouteRole))
+    throw new Error("Malformed execution route role")
+  const provider = requireString(input.provider, "Malformed execution route provider")
+  const protocol = requireString(input.providerProtocol, "Malformed execution route protocol")
+  const baseUrl = requireString(input.providerBaseUrl, "Malformed execution route base URL")
+  const alias = requireString(input.alias, "Malformed execution route alias")
+  const model = requireString(input.model, "Malformed execution route model")
+  const identity = requireString(input.registrationKey, "Malformed execution route identity")
+  const effort = requireString(input.effort, "Malformed execution route effort")
+  const requestVariant = requireString(input.requestVariant, "Malformed execution route request variant")
+  if (typeof input.fast !== "boolean") throw new Error("Malformed execution route fast flag")
+  const compaction = requireRecord(input.compaction, "Malformed execution route compaction")
+  requireKeys(
+    compaction,
+    ["contextWindow", "reserveTokens", "keepRecentTokens"],
+    "Unsupported execution route compaction field",
+  )
+  const runtime = input.providerRuntime
+  if (runtime !== undefined) {
+    const runtimeRecord = requireRecord(runtime, "Malformed execution route provider runtime")
+    requireKeys(
+      runtimeRecord,
+      ["adapter", "credentialIdentity", "connectionIdentity"],
+      "Unsupported provider runtime field",
+    )
+    requireString(runtimeRecord.adapter, "Malformed execution route provider runtime")
+  }
+  const fingerprint = input.openAiAccountFingerprint
+  if (fingerprint !== undefined) requireString(fingerprint, "Malformed execution route account identity")
+  const apiKeyEnvironment =
+    input.providerApiKeyEnv === undefined
+      ? undefined
+      : requireString(input.providerApiKeyEnv, "Malformed execution route API key environment")
+  const authentication: ProviderAuthentication =
+    (isRecord(runtime) && runtime.adapter === "openai-account") || fingerprint !== undefined
+      ? "openai-account"
+      : apiKeyEnvironment === undefined
+        ? "none"
+        : "api-key"
+  const providerOptions = input.providerOptions
+  if (providerOptions !== undefined && !isRecord(providerOptions)) throw new Error("Malformed execution route options")
+  return {
+    role: expectedRole,
+    alias,
+    model,
+    providerConnection: {
+      provider,
+      protocol,
+      baseUrl,
+      authentication,
+      ...(apiKeyEnvironment === undefined ? {} : { apiKeyEnvironment }),
+    },
+    registrationIdentity: modelRegistrationIdentity(identity),
+    effort,
+    fast: input.fast,
+    requestVariant,
+    ...(providerOptions === undefined ? {} : { providerOptions }),
+    compaction: {
+      contextWindow: requireFinite(compaction.contextWindow, "Malformed execution route context window"),
+      reserveTokens: requireFinite(compaction.reserveTokens, "Malformed execution route reserve tokens"),
+      keepRecentTokens: requireFinite(compaction.keepRecentTokens, "Malformed execution route recent tokens"),
+    },
+  }
+}
+
+export const toExecutionRouteSnapshot = (routeValue: Record<string, unknown>): ExecutionRouteSnapshot => {
+  const route = requireRecord(routeValue, "Malformed execution route")
+  requireKeys(
+    route,
+    ["version", "mode", "tokenBudget", "title", "compactionSummary", "main", "oracle", "agents"],
+    "Unsupported execution route field",
+  )
+  if (route.version !== undefined && route.version !== 1) throw new Error("Unsupported execution route version")
+  const mode = requireString(route.mode, "Malformed execution route mode")
+  const modelValues = [
+    route.main,
+    route.oracle,
+    route.title,
+    route.compactionSummary,
+    ...(isRecord(route.agents) ? Object.values(route.agents) : []),
+  ]
+  if (modelValues.some((value) => isRecord(value) && value.providerConnection !== undefined)) {
+    for (const value of modelValues) {
+      if (value === undefined) continue
+      const model = requireRecord(value, "Malformed execution route model")
+      requireKeys(
+        model,
+        [
+          "role",
+          "alias",
+          "model",
+          "providerConnection",
+          "registrationIdentity",
+          "effort",
+          "fast",
+          "requestVariant",
+          "providerOptions",
+          "compaction",
+        ],
+        "Unsupported execution route model field",
+      )
+      const connection = requireRecord(model.providerConnection, "Malformed provider connection")
+      requireKeys(
+        connection,
+        ["provider", "protocol", "baseUrl", "authentication", "apiKeyEnvironment"],
+        "Unsupported provider connection field",
+      )
     }
+    return Schema.decodeUnknownSync(ExecutionRouteSnapshot)(route)
   }
-  const result: Record<string, unknown> = { mode: route.mode }
-  if (typeof route.tokenBudget === "number") result.tokenBudget = route.tokenBudget
-  for (const key of ["title", "compactionSummary", "main", "oracle"] as const) {
-    const value = route[key]
-    if (value && typeof value === "object") result[key] = convert(value as Record<string, unknown>)
+  const result: Record<string, unknown> = {
+    version: 1,
+    mode,
+    main: convertModel(route.main, "main"),
+    oracle: convertModel(route.oracle, "oracle"),
   }
-  if (!result.main || !result.oracle) throw new Error("Malformed execution route branches")
-  if (route.agents && typeof route.agents === "object") {
-    const agents = route.agents as Record<string, unknown>
-    result.agents = Object.fromEntries(["librarian", "painter", "review", "readThread", "surgeon", "task"].map((key) => {
-      const value = agents[key]
-      if (!value || typeof value !== "object") throw new Error("Malformed execution route agent branch")
-      return [key, convert(value as Record<string, unknown>)]
-    }))
+  if (route.tokenBudget !== undefined)
+    result.tokenBudget = requireFinite(route.tokenBudget, "Malformed execution route token budget")
+  if (route.title !== undefined) result.title = convertModel(route.title, "title")
+  if (route.compactionSummary !== undefined)
+    result.compactionSummary = convertModel(route.compactionSummary, "compaction")
+  if (route.agents !== undefined) {
+    const agents = requireRecord(route.agents, "Malformed execution route agents")
+    requireKeys(
+      agents,
+      ["librarian", "painter", "review", "readThread", "surgeon", "task"],
+      "Unsupported execution route agent",
+    )
+    result.agents = Object.fromEntries(
+      (["librarian", "painter", "review", "readThread", "surgeon", "task"] as const).map((role) => [
+        role,
+        convertModel(agents[role], role),
+      ]),
+    )
   }
-  return result as ExecutionRouteSnapshot
+  return Schema.decodeUnknownSync(ExecutionRouteSnapshot)(result)
 }

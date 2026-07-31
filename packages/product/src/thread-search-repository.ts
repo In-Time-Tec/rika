@@ -76,9 +76,7 @@ export interface Interface {
   readonly removeThread: (threadId: ThreadId) => Effect.Effect<void, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/sqlite-thread-search-repository/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-search-repository/Service") {}
 
 interface Document {
   readonly thread: Thread
@@ -90,4 +88,3 @@ interface Document {
   readonly childAssistant: string
   readonly files: string
 }
-

@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/thread-summary-repository"
+export { Service }
 import * as ExecutionStatus from "@rika/product/execution-status"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -34,10 +36,6 @@ export interface Interface {
   readonly markRead: (threadId: ThreadId, now: number) => Effect.Effect<void, RepositoryError>
   readonly listRepairCandidates: (limit?: number) => Effect.Effect<ReadonlyArray<RepairCandidate>, RepositoryError>
 }
-
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread-summary-repository/Service",
-) {}
 
 interface Activity {
   readonly turnId: TurnId

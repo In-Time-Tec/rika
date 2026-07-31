@@ -16,7 +16,12 @@ import { ExecutionExtensions } from "@rika/extensions/plugin-contract"
 import { ConfigService } from "@rika/configuration/configuration-settings"
 import * as ExtensionOperations from "./extension-operations"
 import * as OpenAiAuth from "./openai-auth"
-import { Catalog as ToolCatalog, ExecutionId, ExecutionStatus, Runtime as ToolRuntime } from "@rika/coding-tools/coding-tool-catalog"
+import {
+  Catalog as ToolCatalog,
+  ExecutionId,
+  ExecutionStatus,
+  Runtime as ToolRuntime,
+} from "@rika/coding-tools/coding-tool-catalog"
 import {
   Cause,
   Clock,
@@ -1292,15 +1297,19 @@ export const productLayer = <
       const repositories = Layer.merge(options.repositoryLayer, options.turnRepositoryLayer)
       const threadSummaryRepositoryLayer =
         options.threadSummaryRepositoryLayer ?? ThreadSummaryRepository.memoryLayer.pipe(Layer.provide(repositories))
+      const transcriptRepositoryLayer =
+        options.transcriptRepositoryLayer ?? TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(repositories))
+      const usageRepositoryLayer = options.usageRepositoryLayer ?? UsageRepository.memoryLayer
+      const threadInteractionRepositoryLayer = options.threadInteractionRepositoryLayer ?? Layer.empty
+      const executionExtensionsLayer = options.executionExtensions?.layer ?? Layer.empty
       const dependencies = Layer.mergeAll(
         repositories,
         threadSummaryRepositoryLayer,
-        options.transcriptRepositoryLayer ??
-          TranscriptRepository.memoryLayerWithTurns.pipe(Layer.provide(repositories)),
-        options.usageRepositoryLayer ?? UsageRepository.memoryLayer,
-        ...(options.threadInteractionRepositoryLayer === undefined ? [] : [options.threadInteractionRepositoryLayer]),
+        transcriptRepositoryLayer,
+        usageRepositoryLayer,
+        threadInteractionRepositoryLayer,
         resolvedContextLayer,
-        ...(options.executionExtensions === undefined ? [] : [options.executionExtensions.layer]),
+        executionExtensionsLayer,
       )
       const dependencyContext = yield* Layer.buildWithScope(dependencies, ownerScope)
       const acquiredDependencies = Layer.succeedContext(dependencyContext)
@@ -4580,13 +4589,13 @@ export const productLayer = <
                   ...(input.includeArchived === undefined ? {} : { includeArchived: input.includeArchived }),
                   limit: 100,
                 })
-                const terms = input.query.map((term) => term.toLowerCase())
+                const terms = input.query.map((term: string) => term.toLowerCase())
                 const matches = candidates
                   .filter((thread) => {
                     const fields = [thread.id, thread.title, thread.workspace, ...thread.labels].map((field) =>
                       field.toLowerCase(),
                     )
-                    return terms.every((term) => fields.some((field) => field.includes(term)))
+                    return terms.every((term: string) => fields.some((field) => field.includes(term)))
                   })
                   .slice(0, Math.min(Math.max(input.limit ?? 50, 1), 100))
                 yield* Console.log(encodeJson(matches))
@@ -4608,7 +4617,9 @@ export const productLayer = <
                     if (thread === undefined) return yield* operationError("No threads exist")
                     selected = thread
                   } else {
-                    selected = yield* Effect.forEach(input.threadIds, (id) => requireThread(repository, id))
+                    selected = yield* Effect.forEach(input.threadIds as ReadonlyArray<string>, (id) =>
+                      requireThread(repository, id),
+                    )
                   }
                   const selectedThreads = Array.isArray(selected) ? selected : [selected]
                   const continued = yield* Effect.forEach(selectedThreads, (thread) =>

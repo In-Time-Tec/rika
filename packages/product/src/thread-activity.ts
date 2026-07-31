@@ -1,5 +1,6 @@
 import { ExecutionId, ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
-import type { ThreadSummary, ThreadSummaryRepository } from "@rika/product/thread-summary"
+import * as ThreadSummary from "./thread-summary-schema"
+import * as ThreadSummaryRepository from "./thread-summary-repository"
 import type * as Thread from "@rika/product/thread-record"
 import * as Turn from "@rika/product/turn-record"
 import type * as ExecutionBackend from "@rika/product/execution-service"

@@ -1,7 +1,7 @@
 import * as BunRuntime from "@effect/platform-bun/BunRuntime"
 import * as BunServices from "@effect/platform-bun/BunServices"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { ViewState } from "@rika/terminal/terminal-state"
 import {

@@ -1,5 +1,5 @@
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
 import { Effect, Function } from "effect"
 
 export const executionRoute = () => Turn.testExecutionRoute()

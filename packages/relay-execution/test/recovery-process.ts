@@ -4,7 +4,7 @@ import { TestModel } from "@batonfx/test"
 import { Runtime } from "@rika/coding-tools/coding-tool-catalog"
 import { Config, Context, Effect, Layer, Logger, Schema, Semaphore, Stdio, Stream } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { start } from "./current-execution-route"
 

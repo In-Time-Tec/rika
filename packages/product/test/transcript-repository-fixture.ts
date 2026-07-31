@@ -1,5 +1,5 @@
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Function } from "effect"
 import { projectionVersion } from "../src/execution-ingest"

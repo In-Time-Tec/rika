@@ -1,6 +1,6 @@
 import type * as Operation from "@rika/product/product-operation"
 import type * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { TranscriptPresenter, ViewState } from "@rika/terminal/terminal-state"
 import { Effect, Function, HashMap } from "effect"

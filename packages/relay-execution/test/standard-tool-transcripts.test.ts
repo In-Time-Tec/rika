@@ -3,7 +3,7 @@ import { TestModel } from "@batonfx/test"
 import { Catalog, Runtime } from "@rika/coding-tools/coding-tool-catalog"
 import { expect, test } from "vitest"
 import { Effect, FileSystem, Layer, Redacted, Schema } from "effect"
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { start } from "./current-execution-route"
 

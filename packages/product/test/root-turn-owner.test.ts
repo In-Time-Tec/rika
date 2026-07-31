@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as ExecutionBackend from "@rika/product/execution-service"
 import { Deferred, Effect, Ref } from "effect"

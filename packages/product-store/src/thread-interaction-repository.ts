@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/thread-interaction-repository"
+export { Service }
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { Thread, ThreadId } from "@rika/product/thread-record"
@@ -177,9 +179,6 @@ export interface Interface {
   ) => Effect.Effect<ReadonlyArray<ResultRoute>, RepositoryError>
   readonly listReadyResults: (limit?: number) => Effect.Effect<ReadonlyArray<ResultRoute>, RepositoryError>
 }
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/thread-interaction-repository/Service",
-) {}
 
 interface Receipt {
   readonly digest: string

@@ -43,7 +43,9 @@ export interface DevicePrompt {
 export interface PresenterInterface {
   readonly device: (prompt: DevicePrompt) => Effect.Effect<void, AuthError>
 }
-export class Presenter extends Context.Service<Presenter, PresenterInterface>()("@rika/product/openai-auth/Presenter") {}
+export class Presenter extends Context.Service<Presenter, PresenterInterface>()(
+  "@rika/product/openai-auth/Presenter",
+) {}
 
 export const TokenResponse = Schema.Struct({
   access_token: Schema.optionalKey(Schema.String),

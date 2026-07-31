@@ -2,7 +2,14 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Fiber, FileSystem, Layer, Option, Path, PlatformError, Ref, Schema, Sink, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { MediaView, ProcessRegistry, ReadWebPage, Runtime, WebSearch, WorkspaceIndex } from "@rika/coding-tools/coding-tool-catalog"
+import {
+  MediaView,
+  ProcessRegistry,
+  ReadWebPage,
+  Runtime,
+  WebSearch,
+  WorkspaceIndex,
+} from "@rika/coding-tools/coding-tool-catalog"
 import { provide } from "./test-layer"
 
 const workspace = "/workspace"

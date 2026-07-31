@@ -1,13 +1,51 @@
 import { ConfigContract, Models } from "@rika/configuration/configuration-settings"
-import type * as Turn from "@rika/product-store/sqlite-turn-repository"
-import { PromptCache } from "@rika/relay-execution/relay-execution-layer"
-import { withStreamingOnlyModel } from "@rika/relay-execution/relay-execution-layer"
+interface RuntimeModelRoute {
+  readonly role:
+    | "main"
+    | "oracle"
+    | "title"
+    | "compaction"
+    | "librarian"
+    | "painter"
+    | "review"
+    | "readThread"
+    | "surgeon"
+    | "task"
+  readonly alias: string
+  readonly provider: string
+  readonly model: string
+  readonly registrationKey: string
+  readonly providerProtocol: string
+  readonly providerBaseUrl: string
+  readonly providerApiKeyEnv?: string
+  readonly providerRuntime?: {
+    readonly adapter: string
+    readonly credentialIdentity?: string
+    readonly connectionIdentity?: Readonly<Record<string, string>>
+  }
+  readonly openAiAccountFingerprint?: string
+  readonly effort: string
+  readonly fast: boolean
+  readonly requestVariant: string
+  readonly providerOptions?: Readonly<Record<string, unknown>>
+  readonly compaction: {
+    readonly contextWindow: number
+    readonly reserveTokens: number
+    readonly keepRecentTokens: number
+  }
+}
+import * as PromptCache from "../../prompt-cache"
+import { withStreamingOnlyModel } from "../../streaming-only-model"
 import { Compaction, ModelRegistry } from "@batonfx/core"
+export { TestModel } from "@batonfx/test"
 import * as Anthropic from "@batonfx/providers/anthropic"
+export { Anthropic }
 import * as AmazonBedrock from "@batonfx/providers/amazon-bedrock"
 import * as OpenAi from "@batonfx/providers/openai"
+export { OpenAi }
+export { ModelRegistry } from "@batonfx/core"
 import { OpenAiAccountCredentialError, type OpenAiAccountCredentials } from "@batonfx/providers/openai"
-import { OpenAiAuth } from "@rika/product/product-operation"
+import * as OpenAiAuth from "@rika/product/openai-auth-service"
 import {
   Config,
   Context,
@@ -24,6 +62,34 @@ import {
 } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
+
+export type ModelRegistration = ModelRegistry.Registration
+
+export const runtimeRouteFromSnapshot = (
+  route: import("@rika/product/execution-route-snapshot").ExecutionRouteModelSnapshot,
+): RuntimeModelRoute => ({
+  role: route.role,
+  alias: route.alias,
+  provider: route.providerConnection.provider,
+  model: route.model,
+  registrationKey: route.registrationIdentity,
+  providerProtocol: route.providerConnection.protocol,
+  providerBaseUrl: route.providerConnection.baseUrl,
+  ...(route.providerConnection.apiKeyEnvironment === undefined
+    ? {}
+    : { providerApiKeyEnv: route.providerConnection.apiKeyEnvironment }),
+  ...(route.providerConnection.authentication === "openai-account"
+    ? { openAiAccountFingerprint: route.providerConnection.apiKeyEnvironment }
+    : {}),
+  effort: route.effort,
+  fast: route.fast,
+  requestVariant: route.requestVariant,
+  ...(route.providerOptions === undefined ? {} : { providerOptions: route.providerOptions }),
+  compaction: route.compaction,
+})
+export type ModelSelection = ModelRegistry.ModelSelection
+export type CompactionOptions = Compaction.DefaultOptions
+export * from "./bedrock-auth-refresh"
 import * as BedrockAuthRefresh from "./bedrock-auth-refresh"
 
 export interface ProviderRuntimePin {
@@ -45,7 +111,7 @@ interface Resolution {
 interface Adapter {
   readonly id: string
   readonly matchesConfigured: (route: ConfigContract.ResolvedModelRoute, account?: Account) => boolean
-  readonly matchesPinned: (route: Turn.ExecutionModelRoute) => boolean
+  readonly matchesPinned: (route: RuntimeModelRoute) => boolean
   readonly resolve: (route: ConfigContract.ResolvedModelRoute, account?: Account) => ProviderRuntimePin
   readonly options: (route: ConfigContract.ResolvedModelRoute) => Readonly<Record<string, unknown>>
   readonly register: (
@@ -54,7 +120,7 @@ interface Adapter {
     account?: Account,
   ) => Effect.Effect<ModelRegistry.Registration, RuntimeError, Scope.Scope>
   readonly restore: (
-    route: Turn.ExecutionModelRoute,
+    route: RuntimeModelRoute,
     runtime: ProviderRuntimePin,
   ) => Effect.Effect<ModelRegistry.Registration, RuntimeError, Scope.Scope>
 }
@@ -289,11 +355,11 @@ const registerAnthropic = (route: ConfigContract.ResolvedModelRoute, resolution:
     ),
   )
 
-const unavailableRestore = (route: Turn.ExecutionModelRoute) =>
+const unavailableRestore = (route: RuntimeModelRoute) =>
   Effect.fail(RuntimeError.make({ message: `Pinned provider adapter for ${route.provider} is unavailable` }))
 
 const configuredFromPin = (
-  route: Turn.ExecutionModelRoute,
+  route: RuntimeModelRoute,
   runtime: ProviderRuntimePin,
 ): ConfigContract.ResolvedModelRoute => ({
   alias: route.alias,
@@ -457,7 +523,7 @@ const adapters = (
   },
 ]
 
-export const normalizePinnedRuntime = (route: Turn.ExecutionModelRoute): ProviderRuntimePin =>
+export const normalizePinnedRuntime = (route: RuntimeModelRoute): ProviderRuntimePin =>
   route.providerRuntime ??
   (route.openAiAccountFingerprint !== undefined
     ? { adapter: "openai-account", credentialIdentity: route.openAiAccountFingerprint }
@@ -561,10 +627,10 @@ export interface ServiceInterface {
     routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>,
   ) => Effect.Effect<PreparedRoutes, RuntimeError>
   readonly restore: (
-    routes: ReadonlyArray<Turn.ExecutionModelRoute>,
+    routes: ReadonlyArray<RuntimeModelRoute>,
   ) => Effect.Effect<ReadonlyArray<ModelRegistry.Registration>, RuntimeError>
-  readonly restoreOne: (route: Turn.ExecutionModelRoute) => Effect.Effect<ModelRegistry.Registration, RuntimeError>
-  readonly normalizePinned: (route: Turn.ExecutionModelRoute) => ProviderRuntimePin
+  readonly restoreOne: (route: RuntimeModelRoute) => Effect.Effect<ModelRegistry.Registration, RuntimeError>
+  readonly normalizePinned: (route: RuntimeModelRoute) => ProviderRuntimePin
 }
 
 export class Service extends Context.Service<Service, ServiceInterface>()("@rika/cli/model-provider-runtime/Service") {

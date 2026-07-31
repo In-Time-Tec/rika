@@ -166,5 +166,4 @@ export interface Interface {
   ) => Effect.Effect<boolean, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/sqlite-turn-repository/Service") {}
-
+export class Service extends Context.Service<Service, Interface>()("@rika/product/turn-repository/Service") {}

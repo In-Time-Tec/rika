@@ -6,9 +6,9 @@ import * as Operation from "@rika/product/product-operation"
 import * as ResidentService from "@rika/product/resident-service"
 import { ConfigContract, ConfigService } from "@rika/configuration/configuration-settings"
 import * as DataRoot from "@rika/configuration/canonical-data-root"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
 import * as LocalPath from "@rika/coding-tools/local-path"
 import * as WorkspaceIndex from "@rika/coding-tools/workspace-file-search"
 import * as Transcript from "@rika/transcript/transcript-unit"
@@ -1145,7 +1145,7 @@ export const interactiveTui =
               }),
               Effect.catch((failure) =>
                 Effect.logWarning("tui.quit.stop_work.failed").pipe(
-                  Effect.annotateLogs("rika.failure.kind", failure._tag),
+                  Effect.annotateLogs("rika.failure.kind", failure instanceof Error ? failure.name : "unknown"),
                 ),
               ),
               Effect.andThen(teardown(showGoodbye)),

@@ -48,7 +48,6 @@
         "rika": "./dist/client-main.js",
       },
       "dependencies": {
-        "@batonfx/providers": "catalog:",
         "@effect/platform-bun": "catalog:",
         "@opentui/core": "catalog:",
         "@rika/coding-tools": "workspace:*",

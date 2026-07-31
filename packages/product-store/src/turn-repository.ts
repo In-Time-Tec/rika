@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/turn-repository"
+export { Service }
 import { Context, Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { ThreadId } from "@rika/product/thread-record"
@@ -166,8 +168,6 @@ export interface Interface {
     cursor: string | undefined,
   ) => Effect.Effect<boolean, RepositoryError>
 }
-
-export class Service extends Context.Service<Service, Interface>()("@rika/product/turn-repository/Service") {}
 
 const isTerminalStatus = ExecutionStatus.isTerminalStatus
 const MemoryCoordinatorTypeId = Symbol("@rika/product/turn-repository/MemoryCoordinator")

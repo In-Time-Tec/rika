@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
 import * as ThreadActivity from "../src/thread-activity"
 
 const event = (overrides: Partial<import("@rika/product/execution-service").Event> = {}) => ({

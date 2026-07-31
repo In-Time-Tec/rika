@@ -5,7 +5,8 @@ import { Runtime } from "@rika/coding-tools/coding-tool-catalog"
 import { describe, expect, it, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Deferred, Effect, Fiber, FileSystem, Layer, Ref, Schedule, Stream } from "effect"
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { planJoin } from "../src/subagent-join"
 import { start } from "./current-execution-route"
@@ -18,11 +19,14 @@ const executionModelRoute = (
 ): ExecutionBackend.ExecutionModelRoute => ({
   role,
   alias: role,
-  provider: selection.provider,
   model: selection.model,
-  registrationKey: selection.registrationKey ?? role,
-  providerProtocol: "test",
-  providerBaseUrl: "test://model",
+  providerConnection: {
+    provider: selection.provider,
+    protocol: "test",
+    baseUrl: "test://model",
+    authentication: "none",
+  },
+  registrationIdentity: modelRegistrationIdentity(selection.registrationKey ?? role),
   effort: "medium",
   fast: false,
   requestVariant: selection.registrationKey ?? role,
@@ -101,6 +105,7 @@ test("a delegation returns a running handle and await_subagents collects the rep
           turnId: "turn-join",
           prompt: "Ask the Oracle to investigate the boundary.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", oracle.selection),
@@ -180,6 +185,7 @@ test("a silent subagent is collected as a no-report verdict", () => {
           turnId: "turn-join-silent",
           prompt: "Ask the Oracle to say nothing.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", oracle.selection),
@@ -255,6 +261,7 @@ test("one root batch can start more than four delegations", () => {
           turnId: "turn-budget",
           prompt: "Explore six things at once.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", child.selection),
@@ -337,6 +344,7 @@ test("collecting one batch allows a later delegation", () => {
           turnId: "turn-budget-reuse",
           prompt: "Explore four things, collect them, then explore once more.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", child.selection),
@@ -427,6 +435,7 @@ test("await_subagents suspends on an open child and resumes when the child termi
           turnId: "turn-join-suspend",
           prompt: "Ask the Oracle to investigate slowly.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", child.selection),
@@ -531,6 +540,7 @@ test("a parent that answers without collecting its subagents cancels them", () =
           turnId: "turn-join-abandon",
           prompt: "Ask the Oracle to investigate forever.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", child.selection),
@@ -616,6 +626,7 @@ test("delegations issued in separate model cycles run at the same time", () => {
           turnId: "turn-join-parallel",
           prompt: "Explore alpha and beta.",
           executionRoute: {
+            version: 1 as const,
             mode: "test",
             main: executionModelRoute("main", main.selection),
             oracle: executionModelRoute("oracle", child.selection),

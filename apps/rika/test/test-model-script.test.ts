@@ -1,5 +1,6 @@
 import { expect, test } from "vitest"
-import { LanguageModel, type ModelRegistry } from "@batonfx/core"
+import { LanguageModel } from "effect/unstable/ai"
+import type { ModelRegistry } from "@rika/relay-execution/model-provider-runtime"
 import * as BunServices from "@effect/platform-bun/BunServices"
 import { createTestRenderer } from "@opentui/core/testing"
 import { Cause, Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Redacted, Schema } from "effect"
@@ -9,10 +10,10 @@ import * as Database from "@rika/product-store/product-database-layer"
 import * as ThreadRepository from "@rika/product-store/sqlite-thread-repository"
 import * as ThreadInteractionRepository from "@rika/product-store/sqlite-thread-interaction-repository"
 import * as ThreadSearchRepository from "@rika/product-store/sqlite-thread-search-repository"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
+import * as Thread from "@rika/product/thread-record"
 import * as TurnRepository from "@rika/product-store/sqlite-turn-repository"
 import * as TranscriptRepository from "@rika/product-store/sqlite-transcript-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Turn from "@rika/product/turn-record"
 import * as ExecutionBackend from "@rika/relay-execution/relay-execution-layer"
 import { ViewState } from "@rika/terminal/terminal-state"
 import { Surface } from "@rika/terminal/opentui-surface"
@@ -33,8 +34,8 @@ import {
   withPinnedRouteRegistration,
 } from "../src/resident-product"
 import { withClientWorkspace } from "../src/interactive-main"
-import * as BedrockAuthRefresh from "../src/bedrock-auth-refresh"
-import { modelRoutePlan, Service as ModelProviderRuntime } from "../src/model-provider-runtime"
+import * as BedrockAuthRefresh from "@rika/relay-execution/model-provider-runtime"
+import { modelRoutePlan, Service as ModelProviderRuntime } from "@rika/relay-execution/model-provider-runtime"
 
 const distinctModelRoutes = (routes: ReadonlyArray<ConfigContract.ResolvedModelRoute>) =>
   routes.filter(

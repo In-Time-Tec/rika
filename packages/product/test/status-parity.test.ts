@@ -1,5 +1,5 @@
 import * as ExecutionContract from "@rika/product/execution-service"
-import * as TurnSchema from "@rika/product-store/sqlite-turn-repository"
+import * as TurnSchema from "@rika/product/turn-record"
 import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
 import { describe, expect, it } from "vitest"
 

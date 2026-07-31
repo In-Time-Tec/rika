@@ -1,14 +1,13 @@
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import { Effect, Function } from "effect"
 
 const model = (role: ExecutionBackend.ExecutionModelRoute["role"]): ExecutionBackend.ExecutionModelRoute => ({
   role,
   alias: role,
-  provider: "test",
   model: "test",
-  registrationKey: "test",
-  providerProtocol: "test",
-  providerBaseUrl: "test://model",
+  providerConnection: { provider: "test", protocol: "test", baseUrl: "test://model", authentication: "none" },
+  registrationIdentity: modelRegistrationIdentity("test"),
   effort: "medium",
   fast: false,
   requestVariant: "test",
@@ -16,6 +15,7 @@ const model = (role: ExecutionBackend.ExecutionModelRoute["role"]): ExecutionBac
 })
 
 export const currentExecutionRoute = (): ExecutionBackend.ExecutionRoutePin => ({
+  version: 1 as const,
   mode: "test",
   main: model("main"),
   oracle: model("oracle"),

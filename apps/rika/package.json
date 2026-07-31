@@ -15,7 +15,6 @@
     "typecheck": "bun ../../node_modules/typescript/lib/tsc.js --noEmit"
   },
   "dependencies": {
-    "@batonfx/providers": "catalog:",
     "@effect/platform-bun": "catalog:",
     "@opentui/core": "catalog:",
     "@rika/product": "workspace:*",

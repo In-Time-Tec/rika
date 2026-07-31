@@ -1,4 +1,4 @@
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { ThreadId } from "@rika/product/thread-record"
 import * as TurnRepository from "./turn-repository"
@@ -134,5 +134,46 @@ export interface Interface {
   readonly globalCostUsd: Effect.Effect<number, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/sqlite-transcript-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/transcript-repository/Service") {}
 
+const emptyProjection = (turn: Turn, projectionVersion: number): Projection => ({
+  turn,
+  units: [],
+  checkpointGeneration: 0,
+  revision: 0,
+  modelPhase: -1,
+  usableCompletionSequence: undefined,
+  oldestCursor: undefined,
+  checkpointCursor: undefined,
+  costUsd: undefined,
+  usageCursors: undefined,
+  pricingVersion: undefined,
+  executionCheckpoints: [],
+  projectionVersion,
+})
+
+export const memoryLayerWithTurns = Layer.succeed(
+  Service,
+  Service.of({
+    get: () => Effect.succeed<Projection | undefined>(undefined),
+    listProjectionRecoveryCandidates: () => Effect.succeed<ReadonlyArray<ProjectionRecoveryCandidate>>([]),
+    commitDelta: () => Effect.succeed<WriteResult>("committed"),
+    replaceForRefold: (turn: AgentExecutionTurn) => Effect.succeed<RefoldWriteResult>({ _tag: "Committed", turn }),
+    createRecordedShell: (turn: RunningRecordedShellTurn, projectionVersion: number) =>
+      Effect.succeed(emptyProjection(turn, projectionVersion)),
+    copyRecordedShell: (turn: TerminalRecordedShellTurn, projectionVersion: number) =>
+      Effect.succeed(emptyProjection(turn, projectionVersion)),
+    settleRecordedShell: (
+      _expected: RunningRecordedShellTurn,
+      turn: TerminalRecordedShellTurn,
+      _generation: number,
+      projectionVersion: number,
+    ) =>
+      Effect.succeed<RecordedShellWriteResult>({
+        _tag: "Committed",
+        projection: emptyProjection(turn, projectionVersion),
+      }),
+    page: () => Effect.succeed<Page>({ entries: [], hasOlder: false, oldestCursor: undefined, threadCostUsd: 0 }),
+    globalCostUsd: Effect.succeed(0),
+  }),
+)

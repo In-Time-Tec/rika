@@ -8,7 +8,8 @@ import { expect, test } from "vitest"
 import { Database } from "bun:sqlite"
 import { Clock, Duration, Effect, Fiber, FileSystem, Layer, Schedule, Schema } from "effect"
 import { Tool, Toolkit } from "effect/unstable/ai"
-import * as ExecutionBackend from "../src/execution-contract"
+import * as ExecutionBackend from "@rika/product/execution-service"
+import { modelRegistrationIdentity } from "@rika/product/execution-route-snapshot"
 import * as RelayExecutionBackend from "../src/execution-backend"
 import { createFanOut, start } from "./current-execution-route"
 
@@ -18,11 +19,14 @@ const executionModelRoute = (
 ): ExecutionBackend.ExecutionModelRoute => ({
   role,
   alias: role,
-  provider: selection.provider,
   model: selection.model,
-  registrationKey: selection.registrationKey ?? role,
-  providerProtocol: "test",
-  providerBaseUrl: "test://model",
+  providerConnection: {
+    provider: selection.provider,
+    protocol: "test",
+    baseUrl: "test://model",
+    authentication: "none",
+  },
+  registrationIdentity: modelRegistrationIdentity(selection.registrationKey ?? role),
   effort: "medium",
   fast: false,
   requestVariant: selection.registrationKey ?? role,
@@ -352,19 +356,14 @@ test(
     runNative(
       withBackend(
         [TestModel.text("unused")],
-        () =>
+        (fixture) =>
           Effect.gen(function* () {
-            const dynamic = yield* TestModel.make([TestModel.text("dynamic image received")], {
-              provider: "test",
-              model: "dynamic-image",
-              registrationKey: "dynamic-image",
-            })
             const backend = yield* ExecutionBackend.Service
-            yield* backend.registerModels!([dynamic.registration])
             const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+              version: 1 as const,
               mode: "test",
-              main: executionModelRoute("main", dynamic.selection),
-              oracle: executionModelRoute("oracle", dynamic.selection),
+              main: executionModelRoute("main", fixture.selection),
+              oracle: executionModelRoute("oracle", fixture.selection),
             }
             const result = yield* start(backend, {
               threadId: "thread-dynamic-image",
@@ -373,7 +372,7 @@ test(
               promptParts: [{ type: "image", mediaType: "image/png", data: "AQID", filename: "shot.png" }],
               executionRoute,
             })
-            const requests = yield* dynamic.requests
+            const requests = yield* fixture.requests
             const parts = requests[0]?.prompt.content.flatMap((message) =>
               message.role === "user" && Array.isArray(message.content) ? message.content : [],
             )
@@ -966,6 +965,7 @@ test(
               registrationKey: "oracle",
             })
             const executionRoute: ExecutionBackend.ExecutionRoutePin = {
+              version: 1 as const,
               mode: "test",
               tokenBudget: 1_000,
               main: executionModelRoute("main", main.selection),

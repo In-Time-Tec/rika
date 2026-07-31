@@ -177,7 +177,7 @@ export interface Interface {
   readonly listReadyResults: (limit?: number) => Effect.Effect<ReadonlyArray<ResultRoute>, RepositoryError>
 }
 export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/sqlite-thread-interaction-repository/Service",
+  "@rika/product/thread-interaction-repository/Service",
 ) {}
 
 interface Receipt {

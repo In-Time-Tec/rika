@@ -44,7 +44,9 @@ export interface RegistryInterface {
   readonly promote: (threadId: string, generation: number) => Effect.Effect<number>
 }
 
-export class Registry extends Context.Service<Registry, RegistryInterface>()("@rika/relay-execution/thread-host/Registry") {}
+export class Registry extends Context.Service<Registry, RegistryInterface>()(
+  "@rika/relay-execution/thread-host/Registry",
+) {}
 
 export const makeRegistry: Effect.Effect<RegistryInterface> = Effect.gen(function* () {
   const slot = yield* Ref.make(Option.none<Promoter>())

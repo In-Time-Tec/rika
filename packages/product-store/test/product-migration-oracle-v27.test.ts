@@ -4,7 +4,7 @@ import { SqlClient } from "effect/unstable/sql/SqlClient"
 import { expect, it } from "@effect/vitest"
 import { Database as NativeDatabase } from "bun:sqlite"
 import { createHash } from "node:crypto"
-import { Database } from "@rika/product-store/sqlite-thread-repository"
+import * as Database from "@rika/product-store/product-database-layer"
 import oracle from "./fixtures/product-migration-oracle-v27.fixture.json"
 
 type PreflightRecipe =
@@ -121,7 +121,7 @@ it.layer(BunServices.layer)("v27 migration and preflight oracle", (test) => {
         const filename = `${directory}/rika.db`
         const current = yield* readObjects(filename)
         const expected = oracle.prefixes.at(-1)!
-        expect(current.migrations).toEqual(expected.migrationRows)
+        expect(current.migrations.slice(0, 27)).toEqual(expected.migrationRows)
         expect(current.objects).toEqual(expected.schema)
       }),
     ),
@@ -147,7 +147,7 @@ it.layer(BunServices.layer)("v27 migration and preflight oracle", (test) => {
           if (recipeCase.outcome === "accepted") {
             expect(result._tag).toBe("Success")
             const state = yield* readObjects(filename)
-            expect(state.migrations).toHaveLength(recipeCase.expected.migrationRows!)
+            expect(state.migrations).toHaveLength(recipeCase.expected.migrationRows! + 1)
             for (const table of recipeCase.expected.tables!)
               expect(state.objects).toContainEqual(expect.objectContaining({ name: table }))
           } else {

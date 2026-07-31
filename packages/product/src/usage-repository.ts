@@ -1,4 +1,4 @@
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 
 export const projectionVersion = 3
 
@@ -85,5 +85,43 @@ export interface Interface {
   ) => Effect.Effect<CommitResult, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()("@rika/product/sqlite-usage-repository/Service") {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/usage-repository/Service") {}
 
+const emptyMaterialized: Materialized = {
+  pricedAttempts: 0,
+  unpricedAttempts: 0,
+  countedAttempts: 0,
+  uncountedAttempts: 0,
+  sourceComplete: false,
+}
+
+export const memoryLayer = Layer.succeed(
+  Service,
+  Service.of({
+    admitSource: (sourceId: string, turnId: string, threadId: string) =>
+      Effect.succeed<SourceUsage>({ sourceId, turnId, threadId, revision: 0, projectionVersion, ...emptyMaterialized }),
+    readSource: () => Effect.succeed<SourceUsage | undefined>(undefined),
+    readTurn: () => Effect.succeed<TurnUsage | undefined>(undefined),
+    readThread: () => Effect.succeed<Aggregate>({ turns: 0, revision: 0, projectionVersion, ...emptyMaterialized }),
+    readGlobal: Effect.succeed<Aggregate>({ turns: 0, revision: 0, projectionVersion, ...emptyMaterialized }),
+    loadSourceFold: () => Effect.succeed<undefined>(undefined),
+    commitSource: (sourceId: string, turnId: string, _revision: number, foldJson: string, totals: Materialized) =>
+      Effect.succeed<CommitResult>({
+        _tag: "Applied",
+        value: { sourceId, turnId, threadId: "", revision: 0, projectionVersion, foldJson, ...totals },
+      }),
+    replaceSource: (
+      sourceId: string,
+      turnId: string,
+      threadId: string,
+      _version: number,
+      _revision: number,
+      foldJson: string,
+      totals: Materialized,
+    ) =>
+      Effect.succeed<CommitResult>({
+        _tag: "Applied",
+        value: { sourceId, turnId, threadId, revision: 0, projectionVersion, foldJson, ...totals },
+      }),
+  }),
+)

@@ -1,3 +1,5 @@
+import { Service } from "@rika/product/transcript-repository"
+export { Service }
 import * as Transcript from "@rika/transcript/transcript-unit"
 import { Context, Effect, Layer, Ref, Schema } from "effect"
 import { SqlClient } from "effect/unstable/sql/SqlClient"
@@ -134,8 +136,6 @@ export interface Interface {
   readonly page: (threadId: ThreadId, options?: PageOptions) => Effect.Effect<Page, RepositoryError>
   readonly globalCostUsd: Effect.Effect<number, RepositoryError>
 }
-
-export class Service extends Context.Service<Service, Interface>()("@rika/product/transcript-repository/Service") {}
 
 const CheckpointRow = Schema.Struct({
   model_phase: Schema.Finite,

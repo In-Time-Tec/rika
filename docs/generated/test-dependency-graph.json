@@ -2675,22 +2675,6 @@
   "edges": [
     {
       "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
-      "to": "external:@batonfx/providers/anthropic",
-      "specifier": "@batonfx/providers/anthropic",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/anthropic-prompt-cache.test.ts",
       "to": "external:@effect/vitest",
       "specifier": "@effect/vitest",
       "kind": "import",
@@ -3251,14 +3235,6 @@
     },
     {
       "from": "apps/rika/test/model-provider-runtime.test.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/model-provider-runtime.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -3349,22 +3325,6 @@
       "from": "apps/rika/test/openai-credential-store.native.test.ts",
       "to": "external:effect",
       "specifier": "effect",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/openai-prompt-cache.test.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/openai-prompt-cache.test.ts",
-      "to": "external:@batonfx/providers/openai",
-      "specifier": "@batonfx/providers/openai",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -3803,14 +3763,6 @@
     },
     {
       "from": "apps/rika/test/test-model-script.test.ts",
-      "to": "external:@batonfx/core",
-      "specifier": "@batonfx/core",
-      "kind": "import",
-      "relationship": "test",
-      "production": false
-    },
-    {
-      "from": "apps/rika/test/test-model-script.test.ts",
       "to": "external:@effect/platform-bun/BunServices",
       "specifier": "@effect/platform-bun/BunServices",
       "kind": "import",
@@ -3829,6 +3781,14 @@
       "from": "apps/rika/test/test-model-script.test.ts",
       "to": "external:effect",
       "specifier": "effect",
+      "kind": "import",
+      "relationship": "test",
+      "production": false
+    },
+    {
+      "from": "apps/rika/test/test-model-script.test.ts",
+      "to": "external:effect/unstable/ai",
+      "specifier": "effect/unstable/ai",
       "kind": "import",
       "relationship": "test",
       "production": false
@@ -6626,5 +6586,8 @@
       "production": false
     }
   ],
-  "violations": []
+  "violations": [
+    "apps/rika/test/model-provider-runtime.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh",
+    "apps/rika/test/test-model-script.test.ts: unresolved internal or asset import ../src/bedrock-auth-refresh"
+  ]
 }

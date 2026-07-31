@@ -1,4 +1,4 @@
-import { Context, Effect, Schema } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { ExecutionStatus } from "@rika/coding-tools/coding-tool-catalog"
 import * as ThreadRepository from "./thread-repository"
 import { ThreadId } from "@rika/product/thread-record"
@@ -34,9 +34,7 @@ export interface Interface {
   readonly listRepairCandidates: (limit?: number) => Effect.Effect<ReadonlyArray<RepairCandidate>, RepositoryError>
 }
 
-export class Service extends Context.Service<Service, Interface>()(
-  "@rika/product/sqlite-thread-summary-repository/Service",
-) {}
+export class Service extends Context.Service<Service, Interface>()("@rika/product/thread-summary-repository/Service") {}
 
 interface Activity {
   readonly turnId: TurnId
@@ -48,3 +46,13 @@ interface Activity {
   readonly updatedAt: number
 }
 
+export const memoryLayer = Layer.succeed(
+  Service,
+  Service.of({
+    list: () => Effect.succeed<ReadonlyArray<ThreadSummary>>([]),
+    ensureTurn: () => Effect.void,
+    replaceTurn: () => Effect.void,
+    markRead: () => Effect.void,
+    listRepairCandidates: () => Effect.succeed<ReadonlyArray<RepairCandidate>>([]),
+  }),
+)

@@ -28,12 +28,6 @@ export const lazyBackendLayer = <E>(backendLayer: Layer.Layer<ExecutionBackend.S
         ).pipe(Effect.flatMap(Fiber.join), Effect.uninterruptible),
       )
       return ExecutionBackend.Service.of({
-        registerModels: (registrations) =>
-          load.pipe(
-            Effect.flatMap((backend) =>
-              backend.registerModels === undefined ? Effect.void : backend.registerModels(registrations),
-            ),
-          ),
         invokeChild: (input) => load.pipe(Effect.flatMap((backend) => backend.invokeChild(input))),
         resolveInvocationSource: (executionId) =>
           load.pipe(Effect.flatMap((backend) => backend.resolveInvocationSource(executionId))),

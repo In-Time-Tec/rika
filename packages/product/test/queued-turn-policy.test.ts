@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Thread from "@rika/product-store/sqlite-thread-repository"
-import * as Turn from "@rika/product-store/sqlite-turn-repository"
+import * as Thread from "@rika/product/thread-record"
+import * as Turn from "@rika/product/turn-record"
 import { queuedTurnPromoteMaxAgeMs, staleQueuedTurns, staleQueuedTurnsError } from "../src/queued-turn-policy"
 
 const queued = (id: string, createdAt: number): Turn.AgentExecutionTurn => ({
