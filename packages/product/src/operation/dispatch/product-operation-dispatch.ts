@@ -60,10 +60,11 @@ import { InteractiveCommand } from "../interactive/interactive-command"
 import { InteractiveEventSchema } from "../interactive/interactive-event"
 import type { InteractiveEvent, QueueChange, QueueItem } from "../interactive/interactive-event"
 import type { InteractiveSession } from "../interactive/interactive-session"
+import type { Interface } from "../contract/product-operation-service"
 
-export { Input } from "../contract/product-operation"
-export { InteractiveEventSchema, InvalidInput, OperationUnavailable, Service, unavailableLayer } from "../contract/product-operation-service"
-export type { Interface, InteractiveCommand, InteractiveEvent, InteractiveSession, QueueChange, QueueItem } from "../contract/product-operation-service"
+export { Input }
+export { InteractiveEventSchema, InvalidInput, OperationUnavailable, Service, unavailableLayer }
+export type { Interface, InteractiveCommand, InteractiveEvent, InteractiveSession, QueueChange, QueueItem }
 
 const failureKind = (cause: Cause.Cause<unknown>) => {
   const failure = Cause.squash(cause)

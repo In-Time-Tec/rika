@@ -1,6 +1,6 @@
 import * as Thread from "@rika/product/thread-record"
 import { Function } from "effect"
-import type { InteractiveEvent } from "../contract/product-operation-service"
+import type { InteractiveEvent } from "./interactive-event"
 
 export const capacity = 64
 
