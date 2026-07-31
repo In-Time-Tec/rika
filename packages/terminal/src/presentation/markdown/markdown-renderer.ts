@@ -10,7 +10,7 @@ import {
   wrapStyledChunks as wrapChunks,
   wrapStyledLine as wrapChunkLine,
   type StyledLines as Lines,
-} from "./presentation/markdown/styled-text"
+} from "./styled-text"
 import { highlightLines } from "./syntax-highlighter"
 import { colors } from "../terminal/terminal-theme"
 

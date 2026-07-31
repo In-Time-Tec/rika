@@ -5,16 +5,34 @@ import * as TranscriptUnit from "@rika/transcript/transcript-unit"
 import { Duration, Function, Schema } from "effect"
 import stringWidth from "string-width"
 import { formatTokens, plural } from "../../presentation/terminal/terminal-format"
+import * as KeysModule from "../../presentation/terminal/terminal-keymap"
 import type { Key } from "../../presentation/terminal/terminal-keymap"
 import { isPrintable } from "../../presentation/terminal/terminal-keymap"
+import * as PaletteModule from "../../presentation/terminal/command-palette"
 import { filter, type PaletteAction } from "../../presentation/terminal/command-palette"
+import * as FormatModule from "../../presentation/terminal/terminal-format"
+import * as ThemeModule from "../../presentation/terminal/terminal-theme"
+import * as TranscriptPresenterModule from "../../presentation/transcript/terminal-transcript-presentation"
+import * as ExecutionEventsModule from "../../presentation/transcript/execution-event-presentation"
+import * as SessionModule from "../../terminal-session"
 import {
   expandableRowIds,
   rows as transcriptUnits,
   unitId as transcriptUnitId,
 } from "../../presentation/transcript/terminal-transcript-presentation"
 import { ModeId, modeIds } from "@rika/configuration/behavior-mode"
-import { idle, isReady, loading, ready, readyOr, type Loadable, loadableSchemas } from "./terminal-loadable-state"
+import {
+  idle,
+  isLoading,
+  isReady,
+  loading,
+  ready,
+  readyOr,
+  type Loadable,
+  loadableSchemas,
+} from "./terminal-loadable-state"
+
+export { idle, isLoading, isReady, loading, ready, readyOr } from "./terminal-loadable-state"
 import type { Message } from "./terminal-message"
 export const Mode = ModeId
 export type Mode = typeof Mode.Type
@@ -490,6 +508,8 @@ export const Model = Schema.Struct({
   threadPreview: ThreadPreviewSchema,
 })
 export type Model = typeof Model.Type
+
+export type { Loadable } from "./terminal-loadable-state"
 
 export const replaceQueue: {
   (model: Model, queue: ReadonlyArray<QueueItem>): Model
@@ -2111,3 +2131,152 @@ export const withModeRoutes: {
   (routes: ModeRoutes): (model: Model) => Model
   (model: Model, routes: ModeRoutes): Model
 } = Function.dual(2, (model: Model, routes: ModeRoutes): Model => ({ ...model, modeRoutes: routes }))
+
+const initialModel = initial
+const updateModel = update
+const replaceQueueModel = replaceQueue
+const nextModeValue = nextMode
+const nextUsageDisplayValue = nextUsageDisplay
+const activeTimeAtValue = activeTimeAt
+const formatActivityValue = formatActivity
+const runningToolsActivityValue = runningToolsActivity
+const classifyPromptValue = classifyPrompt
+const wrappedRowCountValue = wrappedRowCount
+const readyValue = ready
+const displayInputValue = displayInput
+const expandPastedTextValue = expandPastedText
+const promptPartsValue = promptParts
+const pastedTextTokenAtValue = pastedTextTokenAt
+const resetQueueModel = resetQueue
+const applyQueueDeltaModel = applyQueueDelta
+const replaceTurnPromptModel = replaceTurnPrompt
+const canSubmitValue = canSubmit
+const inputRowsValue = inputRows
+const composerHeightValue = composerHeight
+const isNarrowValue = isNarrow
+const readyOrValue = readyOr
+const filteredThreadsValue = filteredThreads
+const filteredFilesValue = filteredFiles
+const selectedThreadMetadataValue = selectedThreadMetadata
+const boundedThreadSidebarWidthValue = boundedThreadSidebarWidth
+const threadSidebarLayoutWidthValue = threadSidebarLayoutWidth
+const fileSidebarLayoutWidthValue = fileSidebarLayoutWidth
+const contentColumnWidthValue = contentColumnWidth
+const queueContentWidthValue = queueContentWidth
+
+type ViewStateTranscriptBlock = TranscriptBlock
+type ViewStateTranscriptItem = TranscriptItem
+type ViewStatePromptPart = PromptPart
+type ViewStateComposerAttachment = ComposerAttachment
+type ViewStateThreadItem = ThreadItem
+
+export namespace ViewState {
+  export type Model = typeof Model.Type
+  export type Mode = typeof Mode.Type
+  export type Entry = typeof Entry.Type
+  export type TranscriptBlock = ViewStateTranscriptBlock
+  export type TranscriptItem = ViewStateTranscriptItem
+  export type PromptPart = ViewStatePromptPart
+  export type ComposerAttachment = ViewStateComposerAttachment
+  export type ThreadItem = ViewStateThreadItem
+  export const initial = (workspace: string, mode?: Mode): Model => initialModel(workspace, mode)
+  export const update = (model: Model, message: Message): Model => updateModel(model, message)
+  export const replaceQueue = (model: Model, queue: ReadonlyArray<QueueItem>): Model => replaceQueueModel(model, queue)
+  export const resetQueue = (
+    model: Model,
+    threadId: string,
+    revision: number,
+    queue: ReadonlyArray<QueueItem>,
+  ): Model => resetQueueModel(model, threadId, revision, queue)
+  export const applyQueueDelta = (
+    model: Model,
+    threadId: string,
+    revision: number,
+    change: QueueChange,
+    queuedCount?: number,
+  ) => applyQueueDeltaModel(model, threadId, revision, change, queuedCount)
+  export const replaceTurnPrompt = (model: Model, turnId: string, prompt: string): Model =>
+    replaceTurnPromptModel(model, turnId, prompt)
+  export const nextMode = (mode: Mode): Mode => nextModeValue(mode)
+  export const nextUsageDisplay = (display: UsageDisplay | undefined): UsageDisplay => nextUsageDisplayValue(display)
+  export const activeTimeAt = (time: Extract<UsageTime, { readonly _tag: "Available" }>, now: number) =>
+    activeTimeAtValue(time, now)
+  export const formatActivity = (activity: Activity | undefined): string | undefined => formatActivityValue(activity)
+  export const formatActivityCounter = FormatModule.formatTokens
+  export const runningToolsActivity = (model: Model): Activity => runningToolsActivityValue(model)
+  export const classifyPrompt = (input: string): PromptSubmission => classifyPromptValue(input)
+  export const wrappedRowCount = (text: string, width: number): number => wrappedRowCountValue(text, width)
+  export const ready = readyValue
+  export const canSubmit = (model: Model): boolean => canSubmitValue(model)
+  export const inputRows = (model: Model): number => inputRowsValue(model)
+  export const composerHeight = (model: Model): number => composerHeightValue(model)
+  export const isNarrow = (model: Model): boolean => isNarrowValue(model)
+  export const readyOr = readyOrValue
+  export const filteredThreads = (model: Model): ReadonlyArray<ThreadItem> => filteredThreadsValue(model)
+  export const filteredFiles = (model: Model): ReadonlyArray<string> => filteredFilesValue(model)
+  export const selectedThreadMetadata = (model: Model): ThreadItem | undefined => selectedThreadMetadataValue(model)
+  export const boundedThreadSidebarWidth = (width: number): number => boundedThreadSidebarWidthValue(width)
+  export const threadSidebarLayoutWidth = (model: Model): number => threadSidebarLayoutWidthValue(model)
+  export const fileSidebarLayoutWidth = (model: Model): number => fileSidebarLayoutWidthValue(model)
+  export const contentColumnWidth = (model: Model): number => contentColumnWidthValue(model)
+  export const queueContentWidth = (model: Model): number => queueContentWidthValue(model)
+  export const displayInput = (model: Model): string => displayInputValue(model)
+  export const expandPastedText = (input: string, pastedText: ReadonlyArray<ComposerAttachment>): string =>
+    expandPastedTextValue(input, pastedText)
+  export const promptParts = (
+    input: string,
+    pastedText?: ReadonlyArray<ComposerAttachment>,
+  ): ReadonlyArray<PromptPart> => promptPartsValue(input, pastedText)
+  export const pastedTextTokenAt = (model: Model, displayOffset: number): string | undefined =>
+    pastedTextTokenAtValue(model, displayOffset)
+}
+
+export namespace Keys {
+  export type Key = KeysModule.Key
+  export const fromOpenTui = KeysModule.fromOpenTui
+  export const isPrintable = KeysModule.isPrintable
+}
+
+export namespace Palette {
+  export type PaletteAction = PaletteModule.PaletteAction
+  export const filter = PaletteModule.filter
+  export const commands = PaletteModule.commands
+}
+
+export namespace Theme {
+  export const colors = ThemeModule.colors
+  export const spacing = ThemeModule.spacing
+}
+
+export namespace Format {
+  export const formatTokens = FormatModule.formatTokens
+  export const homeRelativePath = FormatModule.homeRelativePath
+}
+
+export namespace TranscriptPresenter {
+  export const applyTurnUnits = TranscriptPresenterModule.applyTurnUnits
+  export const applyTurnDelta = TranscriptPresenterModule.applyTurnDelta
+  export const applyRootUnits = TranscriptPresenterModule.applyRootUnits
+  export const applyChildUnits = TranscriptPresenterModule.applyChildUnits
+  export const attachChildProjections = TranscriptPresenterModule.attachChildProjections
+  export const emptyAttachments = TranscriptPresenterModule.emptyAttachments
+  export const rows = TranscriptPresenterModule.rows
+  export const unitId = TranscriptPresenterModule.unitId
+  export const expandableRowIds = TranscriptPresenterModule.expandableRowIds
+  export const pinnedRowWindow = TranscriptPresenterModule.pinnedRowWindow
+  export const resolveRowEnd = TranscriptPresenterModule.resolveRowEnd
+  export const shiftRowEnd = TranscriptPresenterModule.shiftRowEnd
+  export const relocateRowEnd = TranscriptPresenterModule.relocateRowEnd
+  export const includeRowEnd = TranscriptPresenterModule.includeRowEnd
+}
+
+export namespace ExecutionEvents {
+  export const projectUnits = ExecutionEventsModule.projectUnits
+  export const projectChildUnits = ExecutionEventsModule.projectChildUnits
+}
+
+export namespace Session {
+  export type Action = SessionModule.Action
+  export type Adapter = SessionModule.Adapter
+  export const execute = SessionModule.execute
+}
