@@ -43,5 +43,9 @@
     "@opentui/core-linux-x64-musl": "catalog:",
     "@opentui/core-win32-arm64": "catalog:",
     "@opentui/core-win32-x64": "catalog:"
+  },
+  "rika": {
+    "kind": "application",
+    "domain": "cli"
   }
 }

@@ -179,7 +179,10 @@ const filterContained = (
   })
 
 const paginatePaths = (relativePaths: ReadonlyArray<string>, options?: GlobOptions | SearchOptions): SearchResult => {
-  const pageSize = Math.max(1, options && "pageSize" in options && options.pageSize !== undefined ? options.pageSize : 50)
+  const pageSize = Math.max(
+    1,
+    options && "pageSize" in options && options.pageSize !== undefined ? options.pageSize : 50,
+  )
   const pageIndex =
     options && "pageIndex" in options && options.pageIndex !== undefined ? Math.max(0, options.pageIndex) : 0
   const start = pageIndex * pageSize
@@ -221,8 +224,8 @@ const makeService = (workspace: string) =>
       glob: (pattern, options) =>
         Effect.gen(function* () {
           const listed = yield* listFiles("glob", root, pattern)
-          const relativePaths = (yield* filterContained("glob", root, path, fileSystem, listed)).toSorted((left, right) =>
-            left.localeCompare(right),
+          const relativePaths = (yield* filterContained("glob", root, path, fileSystem, listed)).toSorted(
+            (left, right) => left.localeCompare(right),
           )
           return paginatePaths(relativePaths, options)
         }),
@@ -250,7 +253,8 @@ const makeService = (workspace: string) =>
               return emptyGrep(0, message || "invalid regular expression")
             return yield* indexError("grep", message || `rg exited with code ${result.code}`)
           }
-          if (result.code > 2) return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
+          if (result.code > 2)
+            return yield* indexError("grep", result.stderr.trim() || `rg exited with code ${result.code}`)
           const parsed: Array<GrepMatch> = []
           for (const line of result.stdout.split("\n")) {
             if (line.length === 0) continue

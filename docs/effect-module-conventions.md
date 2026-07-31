@@ -1,23 +1,5 @@
-# Effect Module Conventions
+# Effect module conventions
 
-## Services
+Effect services and schemas belong to the module that owns their domain contract. Process entrypoints are the only modules that run Effects. Pure checks, graph projections, path resolution, and query functions remain deterministic and do not run an Effect.
 
-Behavior-bearing modules export an `Interface`, a `Context.Service` class, tagged boundary errors, explicit live or adapter layers, and a test or memory layer.
-
-Service methods and named workflows use `Effect.fn("Module.method")`. Generators bind services to named variables before method calls. Package internals return Effect values and never interpret them.
-
-## Packages
-
-Package entrypoints export intentional module namespaces. Non-index modules use named exports. External clients remain behind adapters and never cross domain-facing interfaces.
-
-## CLI
-
-Argument-bearing commands use `effect/unstable/cli`. Leaf modules export command values. The root command module exports `command` and `run(argv)`. The app entrypoint alone defines and interprets `main`.
-
-## Errors
-
-Failures crossing service boundaries use `Schema.TaggedErrorClass`. Foreign exceptions are normalized at the adapter boundary. Expected rejection, domain error, defect, interruption, and foreign failure remain distinguishable.
-
-## Runtime
-
-Use Effect primitives for config, concurrency, time, randomness, streams, scopes, retries, SQL, HTTP, and WebSockets. Raw platform calls are confined to adapters when no Effect primitive exists.
+Adapters keep host APIs at named boundaries, use typed failures, and preserve interruption and scope ownership. Cross-package imports use exact manifest exports. Tests use colocated unit files and dedicated TUI or process projects for interactive and lifecycle behavior.

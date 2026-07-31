@@ -1,0 +1,8 @@
+[
+  {
+    "rule": "legacy-package-boundaries",
+    "paths": ["packages/*", "apps/rika"],
+    "removalSlice": 10,
+    "reason": "Legacy package names and broad export maps are removed after package ownership migration."
+  }
+]

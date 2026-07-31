@@ -31,5 +31,9 @@
     "@types/prismjs": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "terminal"
   }
 }

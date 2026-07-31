@@ -9,7 +9,8 @@
   "workspaces": {
     "packages": [
       "packages/*",
-      "apps/*"
+      "apps/*",
+      "tooling/*"
     ],
     "catalog": {
       "@ast-grep/cli": "0.44.0",
@@ -51,21 +52,22 @@
       "string-width": "7.2.0",
       "turbo": "2.8.13",
       "typescript": "7.0.2",
-      "vitest": "4.0.16"
+      "vitest": "4.0.16",
+      "dependency-cruiser": "18.1.0",
+      "@typescript-eslint/parser": "8.65.0"
     }
   },
   "scripts": {
     "bench": "bun run scripts/bench/run.ts",
-    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts test",
+    "ast-grep-check": "ast-grep scan --config sgconfig.yml --report-style short apps packages scripts tooling test",
     "build": "bun turbo build",
-    "check": "bun turbo run --continue build typecheck \"//#test-unit\" \"//#dependency-check\" \"//#diagnostics\" \"//#ast-grep-check\" \"//#format-check\" \"//#lint\"",
-    "dependency-check": "bun run scripts/check-dependencies.ts",
+    "check": "bun turbo run --continue build typecheck \"//#test-unit\" \"//#repository-policy\" \"//#repository-graph-check\" \"//#diagnostics\" \"//#ast-grep-check\" \"//#format-check\" \"//#lint\"",
     "dev": "bun --cwd apps/rika start",
     "diagnostics": "bun node_modules/@effect/tsgo/dist/effect-tsgo.js diagnostics --project ./tsconfig.json --format pretty --strict",
     "format": "prettier --write .",
     "format-check": "prettier --check .",
     "install-local": "bun run scripts/install-local.ts",
-    "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts",
+    "lint": "bun node_modules/oxlint/dist/cli.js apps packages scripts tooling",
     "package": "bun run scripts/package.ts",
     "npm-package": "bun run scripts/npm-package.ts",
     "release-smoke": "bun run scripts/release-smoke.ts",
@@ -74,7 +76,9 @@
     "test-tui": "bun --bun vitest run --project tui",
     "test-unit": "bun --bun vitest run --project unit",
     "typecheck": "bun turbo run typecheck",
-    "uninstall-local": "bun run scripts/uninstall-local.ts"
+    "uninstall-local": "bun run scripts/uninstall-local.ts",
+    "repository-policy": "bun --cwd tooling/repository-policy check",
+    "repository-graph-check": "bun --cwd tooling/repository-graph check"
   },
   "prettier": {
     "printWidth": 120,
@@ -112,6 +116,12 @@
     "prettier": "catalog:",
     "turbo": "catalog:",
     "typescript": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "dependency-cruiser": "catalog:",
+    "@typescript-eslint/parser": "catalog:"
+  },
+  "rika": {
+    "kind": "application",
+    "domain": "repository"
   }
 }

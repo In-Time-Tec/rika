@@ -1,0 +1,250 @@
+{
+  "schemaVersion": 1,
+  "graphKind": "package",
+  "nodes": [
+    {
+      "id": "package:@rika/app",
+      "package": "@rika/app",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/cli",
+      "package": "@rika/cli",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/config",
+      "package": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/extensions",
+      "package": "@rika/extensions",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/persistence",
+      "package": "@rika/persistence",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/repository-graph",
+      "package": "@rika/repository-graph",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/repository-policy",
+      "package": "@rika/repository-policy",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/runtime",
+      "package": "@rika/runtime",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/tools",
+      "package": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/transcript",
+      "package": "@rika/transcript",
+      "kind": "package"
+    },
+    {
+      "id": "package:@rika/tui",
+      "package": "@rika/tui",
+      "kind": "package"
+    }
+  ],
+  "edges": [
+    {
+      "from": "package:@rika/app",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/app",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/app",
+      "to": "package:@rika/persistence",
+      "specifier": "@rika/persistence",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/app",
+      "to": "package:@rika/runtime",
+      "specifier": "@rika/runtime",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/app",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/app",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/app",
+      "specifier": "@rika/app",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/persistence",
+      "specifier": "@rika/persistence",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/runtime",
+      "specifier": "@rika/runtime",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/cli",
+      "to": "package:@rika/tui",
+      "specifier": "@rika/tui",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/persistence",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/persistence",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/persistence",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/app",
+      "specifier": "@rika/app",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/extensions",
+      "specifier": "@rika/extensions",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/persistence",
+      "specifier": "@rika/persistence",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/runtime",
+      "specifier": "@rika/runtime",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/repository-graph",
+      "to": "package:@rika/tui",
+      "specifier": "@rika/tui",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/runtime",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/runtime",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/tools",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/transcript",
+      "to": "package:@rika/tools",
+      "specifier": "@rika/tools",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/tui",
+      "to": "package:@rika/config",
+      "specifier": "@rika/config",
+      "kind": "package"
+    },
+    {
+      "from": "package:@rika/tui",
+      "to": "package:@rika/transcript",
+      "specifier": "@rika/transcript",
+      "kind": "package"
+    }
+  ],
+  "violations": []
+}

@@ -24,5 +24,9 @@
     "@types/bun": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "capability",
+    "domain": "configuration"
   }
 }

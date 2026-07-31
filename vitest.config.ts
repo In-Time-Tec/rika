@@ -25,9 +25,12 @@ export default defineConfig({
           name: "unit",
           setupFiles: ["test/unit/setup-relay-polling.ts"],
           include: [
+            "packages/*/src/**/*.test.ts",
             "packages/*/test/**/*.test.ts",
+            "apps/*/src/**/*.test.ts",
             "apps/*/test/**/*.test.ts",
             "scripts/test/**/*.test.ts",
+            "tooling/*/src/**/*.test.ts",
             "test/**/*.test.ts",
           ],
           exclude: [

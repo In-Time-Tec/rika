@@ -28,5 +28,9 @@
     "@types/bun": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "rika": {
+    "kind": "adapter",
+    "domain": "relay-execution"
   }
 }
